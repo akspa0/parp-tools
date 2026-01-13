@@ -7438,6 +7438,7 @@ internal static class Program
         var clientRoot = opts["client-path"];
         var mapName = opts["map"];
         var outputDir = opts["out"];
+        var limit = TryParseInt(opts, "limit") ?? int.MaxValue;
 
         Console.WriteLine($"[vlm] Client root: {clientRoot}");
         Console.WriteLine($"[vlm] Map: {mapName}");
@@ -7458,7 +7459,7 @@ internal static class Program
         var resolver = new MinimapFileResolver(src, index);
         var exporter = new VlmDatasetExporter(new SimpleConsoleLogger<VlmDatasetExporter>());
         
-        var task = exporter.ExportMapAsync(src, resolver, mapName, outputDir, new ConsoleProgress());
+        var task = exporter.ExportMapAsync(src, resolver, mapName, outputDir, new ConsoleProgress(), limit);
         task.Wait();
         var result = task.Result;
 

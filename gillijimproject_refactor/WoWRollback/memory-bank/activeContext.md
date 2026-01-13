@@ -92,3 +92,16 @@ CK24 = [Type:8bit][ObjectID:16bit]
 ## Do NOT
 - Match CK24=0x000000 to WMOs (it's nav mesh)
 - Read PM4 tiles independently for cross-tile objects
+
+## [REFINED PLAN] VLM JSON Dataset for Unsloth (2026-01-13)
+**Objective**: Generate a VLM training dataset where each entry contains all necessary data for Unsloth training (image + rich JSON metadata).
+**Changes**:
+- **Coordinate Fix**: Corrected OBJ export to Y-up mapping (was previously swizzled).
+- **Embedded Data**:
+    - `obj_content`: Raw OBJ string data.
+    - `mtl_content`: Raw MTL string data.
+    - `alpha_maps`: Base64 encoded MCAL data.
+    - `shadow_map`: Base64 encoded MCSH data.
+    - `textures`: List of texture filenames.
+    - `layers`: Detailed texture layer info (flags, IDs).
+- **Format**: Single JSON file per tile containing `image` path and nested `terrain_data` object with above fields.

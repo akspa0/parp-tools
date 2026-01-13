@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WoWRollback.Core.Services.Archive;
 using WoWRollback.Core.Services.Minimap;
+using WoWRollback.Core.Services.Parsers;
+using WoWRollback.Core.Models.ADT;
 using WoWRollback.MinimapModule.Models;
 using WoWRollback.MinimapModule.Services;
 
@@ -41,18 +43,17 @@ public sealed class VlmDatasetExporter
         IMinimapFileResolver resolver,
         string mapName,
         string outputDir,
-        IProgress<string>? progress = null)
+        IProgress<string>? progress = null,
+        int limit = int.MaxValue)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
         _logger?.LogInformation("Starting VLM export for map: {MapName}", mapName);
 
         var imagesDir = Path.Combine(outputDir, "images");
-        var metadataDir = Path.Combine(outputDir, "metadata");
-        var meshesDir = Path.Combine(outputDir, "meshes");
+        var datasetDir = Path.Combine(outputDir, "dataset");
         
         Directory.CreateDirectory(imagesDir);
-        Directory.CreateDirectory(metadataDir);
-        Directory.CreateDirectory(meshesDir);
+        Directory.CreateDirectory(datasetDir);
 
         int tilesExported = 0;
         int tilesSkipped = 0;
@@ -63,8 +64,10 @@ public sealed class VlmDatasetExporter
         // Scan all possible tiles (0-63, 0-63)
         for (int x = 0; x < 64; x++)
         {
+            if (tilesExported >= limit) break;
             for (int y = 0; y < 64; y++)
             {
+                if (tilesExported >= limit) break;
                 tilesChecked++;
                 try
                 {
@@ -99,7 +102,8 @@ public sealed class VlmDatasetExporter
                     }
 
                     // Convert BLP to PNG
-                    var outputImagePath = Path.Combine(imagesDir, $"{mapName}_{x}_{y}.png");
+                    var imageFileName = $"{mapName}_{x}_{y}.png";
+                    var outputImagePath = Path.Combine(imagesDir, imageFileName);
                     if (!BlpConverter.ConvertToPng(blpStream, outputImagePath))
                     {
                         blpStream.Dispose();
@@ -108,27 +112,22 @@ public sealed class VlmDatasetExporter
                     }
                     blpStream.Dispose();
 
-                    // Define mesh output path
-                    var meshFileName = $"{mapName}_{x}_{y}.obj";
-                    var meshPath = Path.Combine(meshesDir, meshFileName);
-
-                    // Try to load ADT and extract metadata
-                    var sample = TryExtractAdtMetadata(source, mapName, x, y, meshPath, outputImagePath, allTextures);
+                    // Retrieve ADT metadata string for embedding
+                    var adtTileName = $"{mapName}_{x}_{y}";
+                    var sample = TryExtractAdtMetadata(source, mapName, x, y, imageFileName, allTextures);
                     
-                    // If no ADT, create minimal sample with just terrain summary
                     if (sample == null)
                     {
-                        sample = new VlmTrainingSample(
-                            $"{mapName}_{x}_{y}",
-                            new List<ChunkTextureInfo>(),
-                            new List<ObjectPlacement>(),
-                            new TerrainSummary(0, 0, false));
+                        // Fallback validation failed - skip if no ADT data found? 
+                        // Or create stub? For VLM training we likely need the ADT data.
+                        _logger?.LogWarning("No ADT data found for {Tile}", adtTileName);
+                        continue;
                     }
 
                     // Write metadata JSON
-                    var metadataPath = Path.Combine(metadataDir, $"{mapName}_{x}_{y}.json");
+                    var datasetPath = Path.Combine(datasetDir, $"{adtTileName}.json");
                     var json = JsonSerializer.Serialize(sample, JsonOptions);
-                    await File.WriteAllTextAsync(metadataPath, json);
+                    await File.WriteAllTextAsync(datasetPath, json);
 
                     tilesExported++;
 
@@ -152,7 +151,7 @@ public sealed class VlmDatasetExporter
 
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped (checked {tilesChecked}, resolved {tilesResolved})");
         _logger?.LogInformation("VLM export complete: {Exported} tiles, {Skipped} skipped, {Textures} unique textures, {Resolved} resolved from {Checked} checked",
-            tilesExported, tilesSkipped, allTextures.Count);
+            tilesExported, tilesSkipped, allTextures.Count, tilesResolved, tilesChecked);
 
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
     }
@@ -161,149 +160,200 @@ public sealed class VlmDatasetExporter
         IArchiveSource source,
         string mapName,
         int x, int y,
-        string meshOutputPath,
-        string minimapPath,
+        string imageRelativePath,
         HashSet<string> textureCollector)
     {
         // Try to load ADT from archive
         var adtPath = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}.adt";
         
-        Stream? adtStream = null;
+        byte[]? adtDataBytes = null;
         try
         {
-            if (!source.FileExists(adtPath))
-                return null;
-            adtStream = source.OpenFile(adtPath);
+            if (source.FileExists(adtPath))
+            {
+               using var stream = source.OpenFile(adtPath);
+               if (stream != null)
+               {
+                   using var ms = new MemoryStream();
+                   stream.CopyTo(ms);
+                   adtDataBytes = ms.ToArray();
+               }
+            }
         }
         catch
         {
             return null;
         }
 
-        if (adtStream == null)
+        if (adtDataBytes == null || adtDataBytes.Length == 0)
             return null;
 
         try
         {
-            using var ms = new MemoryStream();
-            adtStream.CopyTo(ms);
-            adtStream.Dispose();
-            ms.Position = 0;
+            // Parse ADT using Core parser
+            var adtData = AdtParser.Parse(adtDataBytes, mapName, x, y);
             
-            var terrain = new Warcraft.NET.Files.ADT.Terrain.Wotlk.Terrain(ms.ToArray());
-            
-            var textures = new List<ChunkTextureInfo>();
+            var textures = new List<string>();
+            var layers = new List<VlmTextureLayer>();
             var objects = new List<ObjectPlacement>();
             float heightMin = float.MaxValue;
             float heightMax = float.MinValue;
-            bool hasWater = false;
+            
+            string? alphaMapsBase64 = null;
+            string? shadowMapBase64 = null;
 
-            // Data for mesh export
+            // Collect textures
+            if (adtData.Textures != null)
+            {
+                textures.AddRange(adtData.Textures);
+                foreach (var t in adtData.Textures)
+                    textureCollector.Add(t);
+            }
+
+            // Data for mesh generation
             var heights = new float[256][];
             var chunkPositions = new (float x, float y, float z)[256];
             var holes = new int[256];
 
-            // Extract chunk-level texture info
-            if (terrain.Chunks != null)
+            // ---------------------------------------------------------
+            // 1. Process Chunks (MCNK) to build mesh data and layer info
+            // ---------------------------------------------------------
+            using (var alphaMs = new MemoryStream())
+            using (var shadowMs = new MemoryStream())
             {
-                foreach (var chunk in terrain.Chunks)
+                foreach (var chunk in adtData.Chunks)
                 {
-                    if (chunk?.Header == null) continue;
-
-                    var chunkX = (int)chunk.Header.MapIndexX;
-                    var chunkY = (int)chunk.Header.MapIndexY;
-
-                    // Extract texture layers
-                    var layers = new List<string>();
-                    if (chunk.TextureLayers?.Layers != null && terrain.Textures?.Filenames != null)
+                    int gridIndex = chunk.IndexY * 16 + chunk.IndexX;
+                    
+                    // Extract Layers
+                    if (chunk.Layers != null)
                     {
-                        foreach (var layer in chunk.TextureLayers.Layers)
+                        foreach (var layer in chunk.Layers)
                         {
-                            if (layer.TextureID < terrain.Textures.Filenames.Count)
-                            {
-                                var texPath = terrain.Textures.Filenames[(int)layer.TextureID];
-                                layers.Add(texPath);
-                                textureCollector.Add(texPath);
-                            }
+                            layers.Add(new VlmTextureLayer(
+                                (uint)layer.TextureId,
+                                layer.Flags,
+                                (uint)layer.AlphaOffset,
+                                (uint)layer.EffectId
+                            ));
                         }
                     }
 
-                    textures.Add(new ChunkTextureInfo(new[] { chunkX, chunkY }, layers.ToArray()));
-
-                    // Extract height bounds
-                    if (chunk.Heightmap?.Vertices != null)
+                    // Collect Heightmap Data for Mesh
+                    if (chunk.Heights != null && chunk.Heights.Length > 0)
                     {
-                        foreach (var vertex in chunk.Heightmap.Vertices)
+                        foreach (var h in chunk.Heights)
                         {
-                            var absoluteHeight = chunk.Header.MapTilePosition.Z + vertex;
-                            if (absoluteHeight < heightMin) heightMin = absoluteHeight;
-                            if (absoluteHeight > heightMax) heightMax = absoluteHeight;
+                            if (h < heightMin) heightMin = h;
+                            if (h > heightMax) heightMax = h;
+                        }
+                        
+                        if (gridIndex >= 0 && gridIndex < 256)
+                        {
+                            heights[gridIndex] = chunk.Heights;
+                            // AdtChunk stores PositionZ as base height, PositionX/Y as coords.
+                            // TerrainMeshExporter expects (X, Y, Z) where Z is height?
+                            // No, TerrainMeshExporter expects "chunkPositions" as (X, Y, Z).
+                            // In WoW: X/Y are horizontal, Z is vertical.
+                            // AdtParser stores PositionX, PositionY, PositionZ (base height).
+                            chunkPositions[gridIndex] = (chunk.PositionX, chunk.PositionY, chunk.PositionZ);
+                            holes[gridIndex] = chunk.Holes;
                         }
                     }
-
-                    // Check for water
-                    if (chunk.Header.LiquidSize > 8)
+                    
+                    // Collect Alpha Maps (MCAL)
+                    if (chunk.AlphaMap != null)
                     {
-                        hasWater = true;
+                         alphaMs.Write(BitConverter.GetBytes(gridIndex));
+                         alphaMs.Write(BitConverter.GetBytes(chunk.AlphaMap.Length));
+                         alphaMs.Write(chunk.AlphaMap);
                     }
-
-                    // Populate arrays for mesh exporter
-                    int gridIndex = chunkY * 16 + chunkX;
-                    if (gridIndex >= 0 && gridIndex < 256)
+                    
+                    // Collect Shadows (MCSH)
+                    if (chunk.ShadowMap != null)
                     {
-                        heights[gridIndex] = chunk.Heightmap?.Vertices ?? new float[145];
-                        chunkPositions[gridIndex] = (chunk.Header.MapTilePosition.X, chunk.Header.MapTilePosition.Y, chunk.Header.MapTilePosition.Z);
-                        holes[gridIndex] = (int)chunk.Header.LowResHoles;
+                         shadowMs.Write(BitConverter.GetBytes(gridIndex));
+                         shadowMs.Write(BitConverter.GetBytes(chunk.ShadowMap.Length));
+                         shadowMs.Write(chunk.ShadowMap);
                     }
+                }
+                
+                if (alphaMs.Length > 0)
+                    alphaMapsBase64 = Convert.ToBase64String(alphaMs.ToArray());
+                    
+                if (shadowMs.Length > 0)
+                    shadowMapBase64 = Convert.ToBase64String(shadowMs.ToArray());
+            }
+
+            // ---------------------------------------------------------
+            // 2. Generate Mesh (OBJ/MTL) Content
+            // ---------------------------------------------------------
+            string materialName = $"{mapName}_{x}_{y}";
+            var (objContent, mtlContent) = TerrainMeshExporter.GenerateObjStrings(
+                heights, 
+                chunkPositions, 
+                holes, 
+                materialName, 
+                $"images/{imageRelativePath}"); 
+
+            // ---------------------------------------------------------
+            // 3. Extract Objects
+            // ---------------------------------------------------------
+            if (adtData.M2Objects != null)
+            {
+                foreach (var m2 in adtData.M2Objects)
+                {
+                    // Convert rotation to Euler degrees? Or keep as radians?
+                    // ObjectPlacement usually expects degrees.
+                    // AdtParser gives Euler radians (if direct read from MDDF) or degrees?
+                    // MDDF stores (X,Y,Z) in degrees or radians? 
+                    // Usually WoW stores Euler angles in degrees in MDDF? No, likely Radians.
+                    // Let's assume radians for now and convert if needed. 
+                    // Actually, let's keep raw values. VLM can learn whatever distribution.
+                    
+                    objects.Add(new ObjectPlacement(
+                        Path.GetFileNameWithoutExtension(m2.ModelName), 
+                        m2.UniqueId,
+                        m2.Position.X, m2.Position.Y, m2.Position.Z,
+                        m2.Rotation.X, m2.Rotation.Y, m2.Rotation.Z,
+                        m2.Scale,
+                        "m2"));
                 }
             }
 
-
-
-            // Export mesh
-            try 
+            if (adtData.WmoObjects != null)
             {
-               TerrainMeshExporter.ExportToObj(heights, chunkPositions, holes, meshOutputPath, minimapPath);
-            }
-            catch (Exception ex)
-            {
-               _logger?.LogWarning(ex, "Failed to export mesh for {Map}_{X}_{Y}", mapName, x, y);
-            }
-
-            // Extract object placements
-            if (terrain.Models?.Filenames != null && terrain.ModelPlacementInfo?.MDDFEntries != null)
-            {
-                foreach (var m2 in terrain.ModelPlacementInfo.MDDFEntries)
+                foreach (var wmo in adtData.WmoObjects)
                 {
-                    var name = m2.NameId < terrain.Models.Filenames.Count
-                        ? Path.GetFileNameWithoutExtension(terrain.Models.Filenames[(int)m2.NameId])
-                        : $"m2_{m2.NameId}";
-                    objects.Add(new ObjectPlacement(name, m2.Position.X, m2.Position.Y, m2.Position.Z, "m2"));
-                }
-            }
-
-            if (terrain.WorldModelObjects?.Filenames != null && terrain.WorldModelObjectPlacementInfo?.MODFEntries != null)
-            {
-                foreach (var wmo in terrain.WorldModelObjectPlacementInfo.MODFEntries)
-                {
-                    var name = wmo.NameId < terrain.WorldModelObjects.Filenames.Count
-                        ? Path.GetFileNameWithoutExtension(terrain.WorldModelObjects.Filenames[(int)wmo.NameId])
-                        : $"wmo_{wmo.NameId}";
-                    objects.Add(new ObjectPlacement(name, wmo.Position.X, wmo.Position.Y, wmo.Position.Z, "wmo"));
+                    objects.Add(new ObjectPlacement(
+                        Path.GetFileNameWithoutExtension(wmo.WmoName), 
+                        wmo.UniqueId,
+                        wmo.Position.X, wmo.Position.Y, wmo.Position.Z,
+                        wmo.Rotation.X, wmo.Rotation.Y, wmo.Rotation.Z,
+                        wmo.Scale,
+                        "wmo"));
                 }
             }
 
             if (heightMin == float.MaxValue) heightMin = 0;
             if (heightMax == float.MinValue) heightMax = 0;
 
-            string relativeMeshPath = $"meshes/{Path.GetFileName(meshOutputPath)}";
-
+            // Construct Final Sample
             return new VlmTrainingSample(
-                $"{mapName}_{x}_{y}",
-                textures,
-                objects,
-                new TerrainSummary(heightMin, heightMax, hasWater),
-                relativeMeshPath);
+                $"images/{imageRelativePath}",
+                new VlmTerrainData(
+                    $"{mapName}_{x}_{y}",
+                    objContent,
+                    mtlContent,
+                    alphaMapsBase64,
+                    shadowMapBase64,
+                    textures,
+                    layers,
+                    objects,
+                    heightMin,
+                    heightMax
+                )
+            );
         }
         catch (Exception ex)
         {

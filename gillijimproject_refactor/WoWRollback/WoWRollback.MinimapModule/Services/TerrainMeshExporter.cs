@@ -18,18 +18,20 @@ public static class TerrainMeshExporter
     private const float UNIT_SIZE_HALF = UNIT_SIZE / 2f;
 
     /// <summary>
-    /// Export ADT heightmap data to OBJ format with minimap texture.
+    /// Exports ADT terrain data to OBJ mesh format for VLM training data.
+    /// Returns the OBJ and MTL content as strings.
     /// </summary>
     /// <param name="heights">145 height values per chunk (9x9 outer + 8x8 inner interleaved)</param>
     /// <param name="chunkPositions">256 chunk base positions (X, Y, Z)</param>
     /// <param name="holes">256 hole masks</param>
-    /// <param name="outputPath">Output OBJ file path</param>
+    /// <param name="materialName">Name of the material (used for MTL linking)</param>
     /// <param name="minimapPath">Optional minimap texture path for MTL</param>
-    public static void ExportToObj(
+    /// <returns>Tuple of (ObjContent, MtlContent)</returns>
+    public static (string ObjContent, string MtlContent) GenerateObjStrings(
         float[][] heights,
         (float x, float y, float z)[] chunkPositions,
         int[] holes,
-        string outputPath,
+        string materialName,
         string? minimapPath = null)
     {
         if (heights.Length != 256 || chunkPositions.Length != 256)
@@ -40,13 +42,13 @@ public static class TerrainMeshExporter
         var chunkStartIndices = new List<int>();
 
         float minX = float.MaxValue, maxX = float.MinValue;
-        float minZ = float.MaxValue, maxZ = float.MinValue;
+        float minZ = float.MaxValue, maxZ = float.MinValue; // Z in OBJ corresponds to -Y in WoW
 
         // First pass: collect all vertices
         for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
         {
             var chunkHeights = heights[chunkIdx];
-            var chunkPos = chunkPositions[chunkIdx];
+            var chunkPosSaved = chunkPositions[chunkIdx];
             chunkStartIndices.Add(positions.Count);
 
             if (chunkHeights == null || chunkHeights.Length != 145)
@@ -57,6 +59,17 @@ public static class TerrainMeshExporter
                 continue;
             }
 
+            // Un-swizzle the "YUp" vector from Warcraft.NET back to WoW coordinates (Z-up)
+            // Warcraft.NET ReadVector3(YUp): X=InX, Y=InZ, Z=-InY
+            // So:
+            // WoW_X = Saved.X
+            // WoW_Z = Saved.Y
+            // WoW_Y = -Saved.Z
+            
+            float baseWowX = chunkPosSaved.x;
+            float baseWowY = -chunkPosSaved.z;
+            float baseWowZ = chunkPosSaved.y;
+
             int idx = 0;
             for (int row = 0; row < 17; row++)
             {
@@ -65,17 +78,30 @@ public static class TerrainMeshExporter
 
                 for (int col = 0; col < colCount; col++)
                 {
-                    float vx = chunkPos.y - (col * UNIT_SIZE);
-                    if (isShort) vx -= UNIT_SIZE_HALF;
-                    float vy = chunkHeights[idx] + chunkPos.z;
-                    float vz = chunkPos.x - (row * UNIT_SIZE_HALF);
+                    // Calculate WoW coordinates relative to chunk base
+                    // Standard WoW ADT: X is North, Y is West. As you traverse rows/cols, you subtract from the base position.
+                    
+                    float currWowX = baseWowX - (row * UNIT_SIZE_HALF);
+                    float currWowY = baseWowY - (col * UNIT_SIZE);
+                    if (isShort) currWowY -= UNIT_SIZE_HALF;
+                    
+                    float currWowZ = baseWowZ + chunkHeights[idx];
 
-                    positions.Add((vx, vy, vz));
+                    // Convert to OBJ (Y-up)
+                    // X_obj = -Y_wow (East is +X)
+                    // Y_obj = Z_wow (Up)
+                    // Z_obj = -X_wow (South is +Z)
+                    
+                    float ox = -currWowY;
+                    float oy = currWowZ;
+                    float oz = -currWowX;
 
-                    if (vx < minX) minX = vx;
-                    if (vx > maxX) maxX = vx;
-                    if (vz < minZ) minZ = vz;
-                    if (vz > maxZ) maxZ = vz;
+                    positions.Add((ox, oy, oz));
+
+                    if (ox < minX) minX = ox;
+                    if (ox > maxX) maxX = ox;
+                    if (oz < minZ) minZ = oz;
+                    if (oz > maxZ) maxZ = oz;
 
                     idx++;
                 }
@@ -89,21 +115,37 @@ public static class TerrainMeshExporter
 
         foreach (var p in positions)
         {
+            // UV mapping - might need flipping depending on texture
             float u = Math.Clamp((p.x - minX) / spanX, eps, 1f - eps);
-            float v = Math.Clamp((maxZ - p.z) / spanZ, eps, 1f - eps);
+            float v = Math.Clamp((maxZ - p.z) / spanZ, eps, 1f - eps); // Invert V
             uvs.Add((u, v));
         }
 
-        // Write MTL file
-        var mtlPath = Path.ChangeExtension(outputPath, ".mtl");
-        var mtlName = Path.GetFileNameWithoutExtension(outputPath);
-        WriteMtlFile(mtlPath, mtlName, minimapPath);
+        // Generate MTL content
+        string mtlContent = GenerateMtlContent(materialName, minimapPath);
 
-        // Write OBJ file
-        WriteObjFile(outputPath, mtlPath, positions, uvs, chunkStartIndices, holes);
+        // Generate OBJ content
+        string objContent = GenerateObjContent(materialName, positions, uvs, chunkStartIndices, holes);
+
+        return (objContent, mtlContent);
+    }
+    
+    // Kept for backward compatibility if needed, or redirect to new method
+    public static void ExportToObj(
+        float[][] heights,
+        (float x, float y, float z)[] chunkPositions,
+        int[] holes,
+        string outputPath,
+        string? minimapPath = null)
+    {
+         var materialName = Path.GetFileNameWithoutExtension(outputPath);
+         var (obj, mtl) = GenerateObjStrings(heights, chunkPositions, holes, materialName, minimapPath);
+         
+         File.WriteAllText(outputPath, obj);
+         File.WriteAllText(Path.ChangeExtension(outputPath, ".mtl"), mtl);
     }
 
-    private static void WriteMtlFile(string mtlPath, string materialName, string? texturePath)
+    private static string GenerateMtlContent(string materialName, string? texturePath)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# ADT Terrain Material");
@@ -118,48 +160,37 @@ public static class TerrainMeshExporter
             // For now, assuming texture is in ../images relative to meshes/, so use relative path
             // specific to the VLM structure: ../images/filename.png
             
-            // However, MTL parsing can be tricky. Standardizing on just filename if in same dir, 
-            // or relative path if verified.
-            // The original used Path.GetFileName(texturePath).
-            // Let's stick to simple filename for now, or maybe relative path from active context:
-            // Output structure:
-            // images/map_x_y.png
-            // meshes/map_x_y.obj
-            // So relative path is ../images/map_x_y.png
-            
             string mtlRef = $"../images/{Path.GetFileName(texturePath)}";
             sb.AppendLine($"map_Kd {mtlRef}");
         }
         
-        File.WriteAllText(mtlPath, sb.ToString());
+        return sb.ToString();
     }
 
-    private static void WriteObjFile(
-        string objPath,
-        string mtlPath,
+    private static string GenerateObjContent(
+        string materialName,
         List<(float x, float y, float z)> positions,
         List<(float u, float v)> uvs,
         List<int> chunkStartIndices,
         int[] holes)
     {
-        using var fs = new FileStream(objPath, FileMode.Create, FileAccess.Write);
-        using var writer = new StreamWriter(fs);
+        var sb = new StringBuilder();
 
-        writer.WriteLine("# ADT Terrain Mesh");
-        writer.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
-        writer.WriteLine($"usemtl {Path.GetFileNameWithoutExtension(mtlPath)}");
+        sb.AppendLine("# ADT Terrain Mesh");
+        sb.AppendLine($"mtllib {materialName}.mtl");
+        sb.AppendLine($"usemtl {materialName}");
 
         // Write vertices (z, x, y order for correct orientation - same as original)
         foreach (var p in positions)
         {
-            writer.WriteLine(string.Format(CultureInfo.InvariantCulture, 
-                "v {0:F6} {1:F6} {2:F6}", p.z, p.x, p.y));
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, 
+                "v {0:F6} {1:F6} {2:F6}", p.x, p.y, p.z));
         }
 
         // Write UVs
         foreach (var uv in uvs)
         {
-            writer.WriteLine(string.Format(CultureInfo.InvariantCulture, 
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, 
                 "vt {0:F6} {1:F6}", uv.u, uv.v));
         }
 
@@ -172,11 +203,6 @@ public static class TerrainMeshExporter
             for (int j = 9, xx = 0, yy = 0; j < 145; j++, xx++)
             {
                 if (xx >= 8) { xx = 0; yy++; }
-
-                // Check low-res holes (4x4 grid mapped to 8x8)
-                // Note: The original used a specific bit shifting logic.
-                // Holes are 16 bits for low-res (high res is 64 bits but WotLK usually meant low res holes in this context unless updated)
-                // 1 << ((xx / 2) + (yy / 2) * 4)
                 
                 int holeBit = 1 << ((xx / 2) + (yy / 2) * 4);
                 bool isHole = (holeMask & holeBit) != 0;
@@ -193,15 +219,17 @@ public static class TerrainMeshExporter
                     if (a <= positions.Count && b > 0 && c <= positions.Count &&
                         d > 0 && e <= positions.Count)
                     {
-                        writer.WriteLine($"f {a}/{a} {b}/{b} {c}/{c}");
-                        writer.WriteLine($"f {a}/{a} {d}/{d} {b}/{b}");
-                        writer.WriteLine($"f {a}/{a} {e}/{e} {d}/{d}");
-                        writer.WriteLine($"f {a}/{a} {c}/{c} {e}/{e}");
+                        sb.AppendLine($"f {a}/{a} {b}/{b} {c}/{c}");
+                        sb.AppendLine($"f {a}/{a} {d}/{d} {b}/{b}");
+                        sb.AppendLine($"f {a}/{a} {e}/{e} {d}/{d}");
+                        sb.AppendLine($"f {a}/{a} {c}/{c} {e}/{e}");
                     }
                 }
 
                 if (((j + 1) % 17) == 0) j += 9;
             }
         }
+        
+        return sb.ToString();
     }
 }
