@@ -25,7 +25,8 @@ public class VlmDatasetExporter
         string outputDir,
         IProgress<string>? progress = null,
         int limit = int.MaxValue,
-        string? listfilePath = null)
+        string? listfilePath = null,
+        bool generateDepth = false)
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
 
@@ -41,6 +42,10 @@ public class VlmDatasetExporter
         Directory.CreateDirectory(masksDir);
         Directory.CreateDirectory(liquidsDir);
         Directory.CreateDirectory(datasetDir);
+        
+        var depthsDir = Path.Combine(outputDir, "depths");
+        if (generateDepth)
+            Directory.CreateDirectory(depthsDir);
 
         // Load WDT
         var wdtPath = Path.Combine(clientPath, "World", "Maps", mapName, $"{mapName}.wdt");
@@ -154,8 +159,54 @@ public class VlmDatasetExporter
         var textureDb = new { count = allTextures.Count, textures = allTextures.ToList() };
         await File.WriteAllTextAsync(textureDbPath, JsonSerializer.Serialize(textureDb, _jsonOptions));
 
+        // Generate depth maps if requested
+        if (generateDepth && tilesExported > 0)
+        {
+            progress?.Report("Generating depth maps with DepthAnything3...");
+            var depthService = new DepthMapService();
+            var depthCount = await depthService.GenerateDepthMapsAsync(imagesDir, depthsDir, progress);
+            
+            // Update JSON files with depth paths
+            if (depthCount > 0)
+            {
+                await UpdateJsonWithDepthPaths(datasetDir, progress);
+            }
+        }
+
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
+    }
+
+    private async Task UpdateJsonWithDepthPaths(string datasetDir, IProgress<string>? progress)
+    {
+        var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
+        int updated = 0;
+        
+        foreach (var jsonPath in jsonFiles)
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(jsonPath);
+                var sample = JsonSerializer.Deserialize<VlmTrainingSample>(json);
+                if (sample == null) continue;
+                
+                var baseName = Path.GetFileNameWithoutExtension(jsonPath);
+                var depthRelPath = $"depths/{baseName}_depth.png";
+                
+                // Check if depth file exists
+                var depthAbsPath = Path.Combine(Path.GetDirectoryName(datasetDir)!, depthRelPath);
+                if (File.Exists(depthAbsPath))
+                {
+                    var updatedSample = sample with { DepthPath = depthRelPath };
+                    var updatedJson = JsonSerializer.Serialize(updatedSample, _jsonOptions);
+                    await File.WriteAllTextAsync(jsonPath, updatedJson);
+                    updated++;
+                }
+            }
+            catch { /* Skip failed files */ }
+        }
+        
+        progress?.Report($"Updated {updated} JSON files with depth paths");
     }
 
     private string? FindMinimapTile(string clientPath, string mapName, int x, int y)

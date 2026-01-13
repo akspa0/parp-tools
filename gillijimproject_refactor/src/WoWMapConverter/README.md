@@ -116,6 +116,17 @@ vlm_dataset/
 - Object placements (MDDF/MODF)
 - Compatible with DepthAnything3 for depth map correlation
 
+**DepthAnything3 Setup (Optional):**
+```bash
+# Windows (run from Anaconda Prompt)
+cd src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3
+setup_da3.bat
+
+# Linux/WSL
+./setup_da3.sh
+```
+Then use `--depth` flag to enable depth map generation.
+
 ## Usage
 
 ```bash

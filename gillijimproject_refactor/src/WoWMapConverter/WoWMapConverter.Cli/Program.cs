@@ -834,7 +834,7 @@ public static class Program
 
         try
         {
-            var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath);
+            var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath, generateDepth);
             
             Console.WriteLine();
             Console.WriteLine($"Export complete:");
