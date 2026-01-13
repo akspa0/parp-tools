@@ -48,9 +48,11 @@ public sealed class VlmDatasetExporter
 
         var imagesDir = Path.Combine(outputDir, "images");
         var metadataDir = Path.Combine(outputDir, "metadata");
+        var meshesDir = Path.Combine(outputDir, "meshes");
         
         Directory.CreateDirectory(imagesDir);
         Directory.CreateDirectory(metadataDir);
+        Directory.CreateDirectory(meshesDir);
 
         int tilesExported = 0;
         int tilesSkipped = 0;
@@ -106,8 +108,12 @@ public sealed class VlmDatasetExporter
                     }
                     blpStream.Dispose();
 
+                    // Define mesh output path
+                    var meshFileName = $"{mapName}_{x}_{y}.obj";
+                    var meshPath = Path.Combine(meshesDir, meshFileName);
+
                     // Try to load ADT and extract metadata
-                    var sample = TryExtractAdtMetadata(source, mapName, x, y, allTextures);
+                    var sample = TryExtractAdtMetadata(source, mapName, x, y, meshPath, outputImagePath, allTextures);
                     
                     // If no ADT, create minimal sample with just terrain summary
                     if (sample == null)
@@ -155,6 +161,8 @@ public sealed class VlmDatasetExporter
         IArchiveSource source,
         string mapName,
         int x, int y,
+        string meshOutputPath,
+        string minimapPath,
         HashSet<string> textureCollector)
     {
         // Try to load ADT from archive
@@ -189,6 +197,11 @@ public sealed class VlmDatasetExporter
             float heightMin = float.MaxValue;
             float heightMax = float.MinValue;
             bool hasWater = false;
+
+            // Data for mesh export
+            var heights = new float[256][];
+            var chunkPositions = new (float x, float y, float z)[256];
+            var holes = new int[256];
 
             // Extract chunk-level texture info
             if (terrain.Chunks != null)
@@ -233,7 +246,28 @@ public sealed class VlmDatasetExporter
                     {
                         hasWater = true;
                     }
+
+                    // Populate arrays for mesh exporter
+                    int gridIndex = chunkY * 16 + chunkX;
+                    if (gridIndex >= 0 && gridIndex < 256)
+                    {
+                        heights[gridIndex] = chunk.Heightmap?.Vertices ?? new float[145];
+                        chunkPositions[gridIndex] = (chunk.Header.MapTilePosition.X, chunk.Header.MapTilePosition.Y, chunk.Header.MapTilePosition.Z);
+                        holes[gridIndex] = (int)chunk.Header.LowResHoles;
+                    }
                 }
+            }
+
+
+
+            // Export mesh
+            try 
+            {
+               TerrainMeshExporter.ExportToObj(heights, chunkPositions, holes, meshOutputPath, minimapPath);
+            }
+            catch (Exception ex)
+            {
+               _logger?.LogWarning(ex, "Failed to export mesh for {Map}_{X}_{Y}", mapName, x, y);
             }
 
             // Extract object placements
@@ -262,11 +296,14 @@ public sealed class VlmDatasetExporter
             if (heightMin == float.MaxValue) heightMin = 0;
             if (heightMax == float.MinValue) heightMax = 0;
 
+            string relativeMeshPath = $"meshes/{Path.GetFileName(meshOutputPath)}";
+
             return new VlmTrainingSample(
                 $"{mapName}_{x}_{y}",
                 textures,
                 objects,
-                new TerrainSummary(heightMin, heightMax, hasWater));
+                new TerrainSummary(heightMin, heightMax, hasWater),
+                relativeMeshPath);
         }
         catch (Exception ex)
         {

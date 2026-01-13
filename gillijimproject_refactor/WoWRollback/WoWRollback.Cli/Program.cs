@@ -38,6 +38,9 @@ using WoWRollback.Cli.Commands;
 
 namespace WoWRollback.Cli;
 
+using WoWRollback.MinimapModule;
+using Microsoft.Extensions.Logging;
+
 internal static class Program
 {
     private static readonly Dictionary<(string Version, string Map), string?> AlphaWdtCache = new(new TupleComparer());
@@ -222,6 +225,8 @@ internal static class Program
                     return CsvToJsonCommand(opts);
                 case "pm4-pipeline-v2":
                     return RunPm4PipelineV2(opts);
+                case "vlm-export":
+                    return RunVlmExport(opts);
                 default:
                     Console.Error.WriteLine($"Unknown command: {cmd}");
                     PrintHelp();
@@ -7423,5 +7428,63 @@ internal static class Program
         }
 
         return result.FailedTiles == 0 ? 0 : 1;
+    }
+    private static int RunVlmExport(Dictionary<string, string> opts)
+    {
+        Require(opts, "client-path");
+        Require(opts, "map");
+        Require(opts, "out");
+        
+        var clientRoot = opts["client-path"];
+        var mapName = opts["map"];
+        var outputDir = opts["out"];
+
+        Console.WriteLine($"[vlm] Client root: {clientRoot}");
+        Console.WriteLine($"[vlm] Map: {mapName}");
+        Console.WriteLine($"[vlm] Output: {outputDir}");
+
+        EnsureStormLibOnPath();
+        var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
+        using var src = new PrioritizedArchiveSource(clientRoot, mpqs);
+
+        // Load md5translate if present for robust minimap finding
+        Md5TranslateIndex? index = null;
+        if (Md5TranslateResolver.TryLoad(src, out var loaded, out var usedPath))
+        {
+             index = loaded;
+             Console.WriteLine($"[vlm] md5translate loaded: {usedPath}");
+        }
+
+        var resolver = new MinimapFileResolver(src, index);
+        var exporter = new VlmDatasetExporter(new SimpleConsoleLogger<VlmDatasetExporter>());
+        
+        var task = exporter.ExportMapAsync(src, resolver, mapName, outputDir, new ConsoleProgress());
+        task.Wait();
+        var result = task.Result;
+
+        Console.WriteLine($"[vlm] Export complete.");
+        Console.WriteLine($"[vlm] Tiles Exported: {result.TilesExported}");
+        Console.WriteLine($"[vlm] Tiles Skipped: {result.TilesSkipped}");
+        Console.WriteLine($"[vlm] Output Dir: {result.OutputDirectory}");
+
+        return 0;
+    }
+
+    private class SimpleConsoleLogger<T> : ILogger<T>
+    {
+        public IDisposable BeginScope<TState>(TState state) => null!;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel >= LogLevel.Information)
+            {
+                Console.WriteLine($"[{logLevel.ToString().Substring(0,4)}] {formatter(state, exception)}");
+            }
+        }
+    }
+
+    private class ConsoleProgress : IProgress<string>
+    {
+        public void Report(string value) => Console.WriteLine($"[prog] {value}");
     }
 }

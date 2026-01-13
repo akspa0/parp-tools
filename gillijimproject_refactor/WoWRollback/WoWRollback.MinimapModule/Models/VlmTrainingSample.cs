@@ -9,7 +9,8 @@ public record VlmTrainingSample(
     [property: JsonPropertyName("adt_tile")] string AdtTile,
     [property: JsonPropertyName("textures")] List<ChunkTextureInfo> Textures,
     [property: JsonPropertyName("objects")] List<ObjectPlacement> Objects,
-    [property: JsonPropertyName("terrain")] TerrainSummary Terrain);
+    [property: JsonPropertyName("terrain")] TerrainSummary Terrain,
+    [property: JsonPropertyName("mesh_path")] string? MeshPath = null);
 
 /// <summary>
 /// Per-chunk texture layer info (256 chunks per ADT).

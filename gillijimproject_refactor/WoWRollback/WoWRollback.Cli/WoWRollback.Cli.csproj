@@ -21,4 +21,7 @@
       <Link>StormLib.dll</Link>
     </None>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WoWRollback.MinimapModule\WoWRollback.MinimapModule.csproj" />
+  </ItemGroup>
 </Project>
