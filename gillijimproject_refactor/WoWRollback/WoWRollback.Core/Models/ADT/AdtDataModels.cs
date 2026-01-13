@@ -41,6 +41,7 @@ public record AdtTextureLayer
 public record AdtM2Placement
 {
     public string ModelName { get; init; } = "";
+    public uint NameId { get; init; }      // Raw MDDF nameId for fallback
     public uint UniqueId { get; init; }
     public Vector3 Position { get; init; }
     public Vector3 Rotation { get; init; } // Euler angles in radians
@@ -50,6 +51,7 @@ public record AdtM2Placement
 public record AdtWmoPlacement
 {
     public string WmoName { get; init; } = "";
+    public uint NameId { get; init; }      // Raw MODF nameId for fallback
     public uint UniqueId { get; init; }
     public Vector3 Position { get; init; }
     public Vector3 Rotation { get; init; }

@@ -434,7 +434,7 @@ public sealed class VlmDatasetExporter
             }
 
             // ---------------------------------------------------------
-            // 2. Generate Mesh (OBJ/MTL) Content
+            // 2. Generate Mesh (OBJ/MTL) Content (Legacy, optional)
             // ---------------------------------------------------------
             string materialName = $"{mapName}_{x}_{y}";
             var (objContent, mtlContent) = TerrainMeshExporter.GenerateObjStrings(
@@ -445,22 +445,59 @@ public sealed class VlmDatasetExporter
                 $"images/{imageRelativePath}"); 
 
             // ---------------------------------------------------------
-            // 3. Extract Objects
+            // 3. Build Compact Height Data
+            // ---------------------------------------------------------
+            var compactHeights = new List<VlmChunkHeights>();
+            var chunkLayersList = new List<VlmChunkLayers>();
+            var chunkPosFlat = new float[256 * 3];
+            var holesFlat = new int[256];
+            
+            foreach (var chunk in adtData.Chunks)
+            {
+                int gridIndex = chunk.IndexY * 16 + chunk.IndexX;
+                if (gridIndex < 0 || gridIndex >= 256) continue;
+                
+                // Heights
+                if (chunk.Heights != null && chunk.Heights.Length > 0)
+                {
+                    compactHeights.Add(new VlmChunkHeights(gridIndex, chunk.Heights));
+                }
+                
+                // Positions
+                chunkPosFlat[gridIndex * 3 + 0] = chunk.PositionX;
+                chunkPosFlat[gridIndex * 3 + 1] = chunk.PositionY;
+                chunkPosFlat[gridIndex * 3 + 2] = chunk.PositionZ;
+                
+                // Holes
+                holesFlat[gridIndex] = chunk.Holes;
+                
+                // Per-chunk layers with MCAL
+                if (chunk.Layers != null && chunk.Layers.Count > 0)
+                {
+                    var layerArr = chunk.Layers.Select(l => new VlmTextureLayer(
+                        (uint)l.TextureId, l.Flags, (uint)l.AlphaOffset, (uint)l.EffectId
+                    )).ToArray();
+                    
+                    string? mcalB64 = null;
+                    if (chunk.AlphaMap != null && chunk.AlphaMap.Length > 0)
+                    {
+                        mcalB64 = Convert.ToBase64String(chunk.AlphaMap);
+                    }
+                    
+                    chunkLayersList.Add(new VlmChunkLayers(gridIndex, layerArr, mcalB64));
+                }
+            }
+
+            // ---------------------------------------------------------
+            // 4. Extract Objects
             // ---------------------------------------------------------
             if (adtData.M2Objects != null)
             {
                 foreach (var m2 in adtData.M2Objects)
                 {
-                    // Convert rotation to Euler degrees? Or keep as radians?
-                    // ObjectPlacement usually expects degrees.
-                    // AdtParser gives Euler radians (if direct read from MDDF) or degrees?
-                    // MDDF stores (X,Y,Z) in degrees or radians? 
-                    // Usually WoW stores Euler angles in degrees in MDDF? No, likely Radians.
-                    // Let's assume radians for now and convert if needed. 
-                    // Actually, let's keep raw values. VLM can learn whatever distribution.
-                    
                     objects.Add(new ObjectPlacement(
                         Path.GetFileNameWithoutExtension(m2.ModelName), 
+                        m2.NameId,
                         m2.UniqueId,
                         m2.Position.X, m2.Position.Y, m2.Position.Z,
                         m2.Rotation.X, m2.Rotation.Y, m2.Rotation.Z,
@@ -475,6 +512,7 @@ public sealed class VlmDatasetExporter
                 {
                     objects.Add(new ObjectPlacement(
                         Path.GetFileNameWithoutExtension(wmo.WmoName), 
+                        wmo.NameId,
                         wmo.UniqueId,
                         wmo.Position.X, wmo.Position.Y, wmo.Position.Z,
                         wmo.Rotation.X, wmo.Rotation.Y, wmo.Rotation.Z,
@@ -486,18 +524,22 @@ public sealed class VlmDatasetExporter
             if (heightMin == float.MaxValue) heightMin = 0;
             if (heightMax == float.MinValue) heightMax = 0;
 
-            // Construct Final Sample
+            // Construct Final Sample with enhanced structure
             return new VlmTrainingSample(
                 $"images/{imageRelativePath}",
                 new VlmTerrainData(
                     $"{mapName}_{x}_{y}",
+                    compactHeights.Count > 0 ? compactHeights.ToArray() : null,
+                    chunkPosFlat,
+                    holesFlat,
                     objContent,
                     mtlContent,
                     alphaMapsBase64,
                     shadowMapBase64,
                     layerMaskPaths,
                     textures,
-                    layers,
+                    null, // TexturesExtracted - TODO: implement tileset extraction
+                    chunkLayersList.Count > 0 ? chunkLayersList.ToArray() : null,
                     objects,
                     wdlHeights,
                     heightMin,

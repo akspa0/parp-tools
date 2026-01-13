@@ -181,12 +181,10 @@ public class AdtParser
         _pos = headerStart + 60;
         var holes = ReadInt32();
         
-        // Liquid size check?
-        _pos = headerStart + 8 * 4; // Skip to offsetMCLQ
-        // offsets usually relative to MCNK start.
-        
-        // Now parse sub-chunks. They start after the 128 bytes header.
-        var subChunkStart = headerStart + 128;
+        // Alpha MCNK header is ~100 bytes, v18+ is 128 bytes
+        // Sub-chunks start after header
+        int headerSize = version < 18 ? 100 : 128;
+        var subChunkStart = headerStart + headerSize;
         var mcnkEnd = headerStart + size;
         
         var chunk = new AdtChunk
@@ -320,6 +318,7 @@ public class AdtParser
             
             list.Add(new AdtM2Placement {
                 ModelName = name,
+                NameId = nameId,
                 UniqueId = uniqId,
                 Position = pos,
                 Rotation = rot,
@@ -380,6 +379,7 @@ public class AdtParser
 
             list.Add(new AdtWmoPlacement {
                 WmoName = name,
+                NameId = nameId,
                 UniqueId = uniqId,
                 Position = pos,
                 Rotation = rot,

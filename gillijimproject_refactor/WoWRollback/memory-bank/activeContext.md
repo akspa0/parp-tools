@@ -1,53 +1,59 @@
 # WoWRollback Active Context
 
-## Current Focus: VLM Dataset Export (Jan 2026)
+## Current Focus: VLM Export Migration to WoWMapConverter (Jan 2026)
 
 ### Session Summary (2026-01-13)
 
-**Goal**: Enhance VLM export with Object Name Resolution, WDL Heightmaps, Alpha 0.5.3 Support, and Flat File Inputs.
+**Decision**: Migrate VLM export from `WoWRollback.MinimapModule` to `WoWMapConverter.Core`.
 
-**Status**: COMPLETE ✅
+**Reason**: Custom `AdtParser` in WoWRollback fails for Alpha 0.5.3 MCNK sub-chunks (heights/layers null). `WoWMapConverter.Core` has tested Alpha parsing in `Formats/Alpha/`.
 
-**What Works**:
-- VLM Export exports minimap PNGs ✓
-- ADT terrain meshes (OBJ/MTL) ✓
-- Alpha masks (PNG texture distribution) ✓
-- WDL low-res heightmaps (`wdl_heights`) ✓
-- Object placements with **full name resolution** via Community Listfile ✓
-- Alpha 0.5.3 monolithic WDT parsing ✓
-- Flat file input support ✓
+**Status**: PLAN APPROVED - Ready for implementation in next session.
 
-**New Features Added (This Session)**:
-- `ListfileService.cs` - Loads community listfile for FileDataID → Filename resolution.
-- `WdlParser.cs` - Parses WDL `MAOF`/`MARE` chunks for global heightmaps.
-- `AdtParser.cs` - Updated with:
-    - `Func<uint, string?>` name resolver parameter.
-    - Version-aware MCNK parsing (Alpha coordinate calculation).
-- `VlmDatasetExporter.cs` - Updated with:
-    - `--listfile` argument support.
-    - Monolithic WDT detection and ADT extraction via `MAIN` chunk.
-    - WDL data integration.
-- Documentation updated: `VLM_Terrain_Tool_Usage.md`, `WoWRollback.Cli/README.md`, `WoWMapConverter/README.md`.
+---
 
-**VLM Output Now Includes**:
-- JSON metadata files created with full placement data ✓
-- CSV fallback for cached placements ✓
+## [NEXT SESSION] VLM Migration Plan
 
-**What's Still Broken**:
-- Terrain data is always `null` in JSON
-- MpqAdtExtractor finds MPQ but terrain extraction returns null
+### Files to Create in `WoWMapConverter.Core`
 
-**New Code Added (PM4Module)**:
-- `MpqAdtExtractor.ExtractPlacements()` - MDDF/MODF parsing ✓
-- `MpqAdtExtractor.ExtractTerrain()` - MTEX/MCNK/MCVT parsing (not returning data)
-- `AlphaWdtExtractor.cs` - Alpha 0.5.3 WDT format support (NEW)
-- `AdtDataService.cs` - Unified extraction API (NEW)
-- Data models: `M2Placement`, `WmoPlacement`, `TileTerrainData`, `ChunkTerrainData`
+1. **`VLM/VlmDataModels.cs`** - Port from `WoWRollback.MinimapModule.Models.VlmTrainingSample`
+2. **`VLM/VlmDatasetExporter.cs`** - Main export logic using Core services
+3. **`VLM/AlphaMapGenerator.cs`** - Port from WoWRollback
 
-**VLM Output Now Includes**:
-```json
-{
-  "tile_id": "Azeroth_32_48",
+### Files to Modify
+
+1. **`Services/AdtMeshExporter.cs`** - Add `GenerateObjStrings()` for in-memory OBJ/MTL
+2. **`WoWMapConverter.Cli/Program.cs`** - Add `vlm-export` command
+
+### Key Integration Points
+
+| WoWRollback                  | → WoWMapConverter.Core           |
+|------------------------------|----------------------------------|
+| `PrioritizedArchiveSource`   | `AlphaMpqReader`                 |
+| `AdtParser.Parse()`          | `Formats/Alpha/AdtAlpha.Parse()` |
+| `TerrainMeshExporter`        | `Services/AdtMeshExporter`       |
+| `ListfileService`            | `Services/ListfileService`       |
+
+### Existing WoWMapConverter Services (Already Implemented)
+- `AdtMeshExporter.cs` - OBJ/MTL terrain export
+- `BlpService.cs` - BLP → PNG texture extraction
+- `ListfileService.cs` - FileDataID resolution
+- `MinimapService.cs` - Minimap tile extraction
+- `AlphaMpqReader.cs` - Alpha archive access
+
+### CLI Command
+```bash
+vlm-export --client <path> --map <name> --out <dir> [--listfile <csv>] [--limit N]
+```
+
+---
+
+## What Was Attempted (This Session)
+
+- Added `NameId` fallback field to `ObjectPlacement` ✓
+- Fixed MMID/MWID offset-based name resolution ✓
+- Fixed Alpha MCNK header size (100 vs 128 bytes) ✗ (still fails)
+- Root cause: Need to use WoWMapConverter's proven Alpha parsing
   "placements": [
     { "type": "M2", "uniqueId": 12345, "posX": ..., "rotX": ..., "scale": ... },
     { "type": "WMO", "uniqueId": 67890, "doodadSet": 0, ... }
