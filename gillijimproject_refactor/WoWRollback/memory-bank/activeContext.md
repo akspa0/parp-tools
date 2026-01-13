@@ -1,68 +1,72 @@
 # WoWRollback Active Context
 
-## Current Focus: VLM Dataset Tool Migration (Jan 2026)
+## Current Focus: VLM ADT Interchange Format (Jan 2026)
 
-### Session Update (2026-01-13 12:34 EST)
+### Session Update (2026-01-13 15:44 EST)
 
-**Status**: APPROVED → IMPLEMENTING
+**Status**: MAJOR MILESTONE ACHIEVED ✓
 
-**Decision**: Migrate VLM export from `WoWRollback.MinimapModule` to `WoWMapConverter.Core`.
-
-**Plan**: Comprehensive bidirectional VLM dataset tool:
-- **Export**: ADT → JSON + images (shadows, alphas, liquids, depth maps)
-- **Decode**: JSON → ADT (for VLM output → game/editor)
+**Per-layer alpha extraction now working!** First time in multiple attempts to build this tooling.
 
 ---
 
-## VLM Tool Data Export
+## VLM Tool - ADT Interchange Format
 
-| Data | Storage | Notes |
-|------|---------|-------|
-| Heights | JSON array | 256 chunks × 145 floats |
-| Positions | JSON array | 768 floats (256×3) |
-| Holes | JSON array | 256 ints |
-| Shadows (MCSH) | PNG per chunk | 64×64 grayscale |
-| Alpha (MCAL) | PNG per layer | Noggit-style: RLE/4-bit/big |
-| Layers (MCLY) | JSON per chunk | texture_id, flags, effect_id |
-| Textures (MTEX) | String list | All unique paths |
-| Liquids (MH2O/MCLQ) | JSON + PNG | Type, heights, mask |
-| Objects (MDDF/MODF) | JSON array | M2/WMO placements |
-| Depth map | PNG | DepthAnything3 from minimap |
+**Goal**: Liberate artwork from proprietary ADT format for:
+- Artist preservation (20+ years of WoW modding artwork)
+- AI/LLM QLoRA training for world generation
+- Cross-game asset interchange
+- Pre-Alpha restoration from magazine photos
+
+### Implemented ✓
+
+| Data | Storage | Status |
+|------|---------|--------|
+| Heights (MCVT) | JSON 145 floats/chunk | ✓ via McnkAlpha.McvtData |
+| Normals (MCNR) | Accessor ready | ✓ McnkAlpha.McnrData |
+| Shadows (MCSH) | PNG 64×64/chunk | ✓ |
+| Alpha (MCAL) | PNG per layer (l1,l2,l3) | ✓ **NEW** |
+| Layers (MCLY) | tex_id, flags, effect_id | ✓ **NEW** |
+| Holes | int per chunk | ✓ McnkAlpha.Holes |
+| Textures (MTEX) | String list | ✓ |
+| Objects (MDDF/MODF) | JSON placements | ✓ |
+
+### In Progress
+
+| Data | Storage | Status |
+|------|---------|--------|
+| Tile stitching | 1024×1024 PNG | Next |
+| Liquids (MH2O/MCLQ) | JSON + PNG | TODO |
+| Depth maps | DepthAnything3 | Ready, needs setup |
 
 ---
 
-## Files to Create in WoWMapConverter.Core
+## Key Files Updated
 
-| File | Purpose |
+| File | Changes |
 |------|---------|
-| `VLM/VlmDataModels.cs` | All record types |
-| `VLM/VlmDatasetExporter.cs` | Main export logic |
-| `VLM/VlmAdtDecoder.cs` | JSON → ADT reconstruction |
-| `VLM/AlphaMapService.cs` | Noggit-style MCAL read/write |
-| `VLM/ShadowMapService.cs` | MCSH → PNG |
-| `VLM/LiquidService.cs` | MH2O/MCLQ extraction |
+| `McnkAlpha.cs` | Added public accessors for all chunk data |
+| `VlmDatasetExporter.cs` | Refactored to use McnkAlpha accessors |
+| | Per-layer MCAL extraction with MCLY parsing |
 
 ---
 
-## CLI Commands
+## Output Structure
 
-```bash
-vlm-export --client <path> --map <name> --out <dir> [--depth] [--limit N]
-vlm-decode --input <tile.json> --output <tile.adt>
+```
+vlm_output/
+├── images/         # Minimap PNGs
+├── shadows/        # MCSH per-chunk (256 per tile)
+├── masks/          # MCAL per-layer (_l1, _l2, _l3)
+├── dataset/        # JSON with all metadata
+└── texture_database.json
 ```
 
 ---
 
-## Previous Focus: PM4 → ADT Pipeline (Dec 2025)
+## Vision
 
-## CK24 Structure
-```
-CK24 = [Type:8bit][ObjectID:16bit]
-- 0x00XXXX = Nav mesh (SKIP)
-- 0x40XXXX = Has pathfinding data
-- 0x42XXXX / 0x43XXXX = WMO-type objects
-```
-
-## Do NOT
-- Match CK24=0x000000 to WMOs (it's nav mesh)
-- Read PM4 tiles independently for cross-tile objects
+This is the foundation for:
+1. **ADT Interchange**: Artists extract their work from proprietary format
+2. **AI World Building**: Train LLM/VLM on terrain-to-minimap correlation
+3. **Pre-Alpha Restoration**: Reconstruct lost content from magazine photos

@@ -29,6 +29,22 @@ public class McnkAlpha : Mcnk
     private readonly Mcal _mcal;
     private readonly Chunk _mclq;
 
+    // Public accessors for VLM export and lossless chunk extraction
+    public int AdtNumber => _adtNumber;
+    public McnkAlphaHeader Header => _mcnkAlphaHeader;
+    public int IndexX => _mcnkAlphaHeader.IndexX;
+    public int IndexY => _mcnkAlphaHeader.IndexY;
+    public int NLayers => _mcnkAlphaHeader.NLayers;
+    public int Holes => _mcnkAlphaHeader.Holes;
+    public byte[] McvtData => _mcvt.Data;
+    public byte[] McnrData => _mcnrAlpha.Data;
+    public byte[] MclyData => _mcly.Data;
+    public byte[] McalData => _mcal.Data;
+    public byte[] McshData => _mcsh.Data;
+    public byte[] MclqData => _mclq.Data;
+    public int McalSize => _mcnkAlphaHeader.McalSize;
+    public int McshSize => _mcnkAlphaHeader.McshSize;
+
 
     public McnkAlpha(FileStream adtFile, int offsetInFile, int headerSize, int adtNum) : base(adtFile, offsetInFile)
     {
