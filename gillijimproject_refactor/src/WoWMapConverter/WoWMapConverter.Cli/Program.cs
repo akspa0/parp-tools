@@ -1,6 +1,7 @@
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Dbc;
 using WoWMapConverter.Core.Services;
+using WoWMapConverter.Core.VLM;
 
 namespace WoWMapConverter.Cli;
 
@@ -30,6 +31,8 @@ public static class Program
             "convert-m2-to-mdx" => RunConvertM2ToMdx(args.Skip(1).ToArray()),
             "pm4-export" => RunPm4Export(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
+            "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
+            "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
             "batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
@@ -761,6 +764,155 @@ public static class Program
         return await RunConvertAsync(args);
     }
 
+    private static async Task<int> RunVlmExportAsync(string[] args)
+    {
+        string? clientPath = null;
+        string? mapName = null;
+        string? outputDir = null;
+        string? listfilePath = null;
+        int limit = int.MaxValue;
+        bool generateDepth = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--client":
+                case "-c":
+                    if (i + 1 < args.Length) clientPath = args[++i];
+                    break;
+                case "--map":
+                case "-m":
+                    if (i + 1 < args.Length) mapName = args[++i];
+                    break;
+                case "--out":
+                case "-o":
+                    if (i + 1 < args.Length) outputDir = args[++i];
+                    break;
+                case "--listfile":
+                case "-l":
+                    if (i + 1 < args.Length) listfilePath = args[++i];
+                    break;
+                case "--limit":
+                case "-n":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int n))
+                        limit = n;
+                    break;
+                case "--depth":
+                case "-d":
+                    generateDepth = true;
+                    break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(clientPath) || string.IsNullOrEmpty(mapName) || string.IsNullOrEmpty(outputDir))
+        {
+            Console.WriteLine("VLM Export - Generate training dataset from Alpha ADT files");
+            Console.WriteLine();
+            Console.WriteLine("Usage: vlm-export --client <path> --map <name> --out <dir> [options]");
+            Console.WriteLine();
+            Console.WriteLine("Required:");
+            Console.WriteLine("  --client, -c <path>   Path to Alpha 0.5.3 client Data folder");
+            Console.WriteLine("  --map, -m <name>      Map name (e.g., 'development')");
+            Console.WriteLine("  --out, -o <dir>       Output directory for dataset");
+            Console.WriteLine();
+            Console.WriteLine("Optional:");
+            Console.WriteLine("  --listfile, -l <csv>  Path to listfile for name resolution");
+            Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
+            Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
+            return 1;
+        }
+
+        Console.WriteLine($"VLM Export: {mapName}");
+        Console.WriteLine($"  Client: {clientPath}");
+        Console.WriteLine($"  Output: {outputDir}");
+        if (limit < int.MaxValue) Console.WriteLine($"  Limit: {limit} tiles");
+        Console.WriteLine();
+
+        var exporter = new VlmDatasetExporter();
+        var progress = new Progress<string>(msg => Console.WriteLine(msg));
+
+        try
+        {
+            var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath);
+            
+            Console.WriteLine();
+            Console.WriteLine($"Export complete:");
+            Console.WriteLine($"  Tiles exported: {result.TilesExported}");
+            Console.WriteLine($"  Tiles skipped: {result.TilesSkipped}");
+            Console.WriteLine($"  Unique textures: {result.UniqueTextures}");
+            Console.WriteLine($"  Output: {result.OutputDirectory}");
+            
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static async Task<int> RunVlmDecodeAsync(string[] args)
+    {
+        string? inputPath = null;
+        string? outputPath = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--input":
+                case "-i":
+                    if (i + 1 < args.Length) inputPath = args[++i];
+                    break;
+                case "--output":
+                case "-o":
+                    if (i + 1 < args.Length) outputPath = args[++i];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("VLM Decode - Reconstruct ADT from VLM JSON output");
+            Console.WriteLine();
+            Console.WriteLine("Usage: vlm-decode --input <json> --output <adt>");
+            Console.WriteLine();
+            Console.WriteLine("Required:");
+            Console.WriteLine("  --input, -i <json>    VLM dataset JSON file");
+            Console.WriteLine("  --output, -o <adt>    Output ADT file path");
+            return 1;
+        }
+
+        outputPath ??= Path.ChangeExtension(inputPath, ".adt");
+
+        Console.WriteLine($"VLM Decode: {Path.GetFileName(inputPath)} → {Path.GetFileName(outputPath)}");
+
+        var decoder = new VlmAdtDecoder();
+
+        try
+        {
+            var success = await decoder.DecodeAsync(inputPath, outputPath);
+            
+            if (success)
+            {
+                Console.WriteLine($"Decoded successfully: {outputPath}");
+                return 0;
+            }
+            else
+            {
+                Console.WriteLine("Decode failed - invalid input data");
+                return 1;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+
     private static void ShowUsage()
     {
         Console.WriteLine("WoW Map Converter v3 - Bidirectional Alpha ↔ LK 3.3.5 Conversion");
@@ -774,6 +926,8 @@ public static class Program
         Console.WriteLine("  wowmapconverter convert-m2-to-mdx <m2> [options]        Convert M2 → MDX");
         Console.WriteLine("  wowmapconverter pm4-export <pm4> [options]              Export PM4 to OBJ");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
+        Console.WriteLine("  wowmapconverter vlm-export [options]                    Export VLM training dataset");
+        Console.WriteLine("  wowmapconverter vlm-decode [options]                    Decode VLM JSON to ADT");
         Console.WriteLine("  wowmapconverter batch --input-dir <dir> [options]       Batch convert directory");
         Console.WriteLine();
         Console.WriteLine("Alpha → LK Conversion Options:");

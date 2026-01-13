@@ -79,13 +79,42 @@ WoWMapConverter/
 - **All versions**: DBC (Classic-WotLK) and DB2 (Cata+)
 - **Crosswalks**: AreaTable, Map, AreaTrigger, etc.
 
-### VLM Dataset Export (via WoWRollback)
-- **Terrain-Minimap Correlation**: Exports datasets for VLM training (map image → 3D mesh + textures).
-- **Alpha Masks**: PNG visualizations of texture layer distribution.
-- **WDL Heightmaps**: Low-resolution global terrain context.
-- **Object Names**: Resolved via Community Listfile (FileDataID → Filename).
-- **Alpha 0.5.3 Support**: Reads monolithic WDT directly.
-- See [VLM Terrain Tool Usage](../docs/VLM_Terrain_Tool_Usage.md) for details.
+### VLM Dataset Export (Native)
+Export ADT terrain data for Vision-Language Model training. Bidirectional: JSON ↔ ADT.
+
+**Export:**
+```bash
+dotnet run --project WoWMapConverter.Cli -- vlm-export \
+  --client /path/to/alpha/Data \
+  --map development \
+  --out ./vlm_dataset \
+  --limit 10
+```
+
+**Decode (round-trip):**
+```bash
+dotnet run --project WoWMapConverter.Cli -- vlm-decode \
+  --input ./vlm_dataset/dataset/development_31_31.json \
+  --output ./reconstructed.adt
+```
+
+**Output Structure:**
+```
+vlm_dataset/
+├── images/           # Minimap PNGs
+├── shadows/          # MCSH per-chunk (64×64)
+├── masks/            # MCAL layer alphas
+├── liquids/          # MH2O/MCLQ data
+├── dataset/          # Structured JSON
+└── texture_database.json
+```
+
+**Data Exported:**
+- Heights (145 × 256 chunks), positions, holes
+- Shadow maps (MCSH), alpha masks (MCAL)
+- Texture layers (MCLY), liquids (MH2O/MCLQ)
+- Object placements (MDDF/MODF)
+- Compatible with DepthAnything3 for depth map correlation
 
 ## Usage
 
