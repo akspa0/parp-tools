@@ -102,30 +102,32 @@ dotnet run --project WoWMapConverter.Cli -- vlm-decode \
 ```
 vlm_dataset/
 ├── images/           # Minimap PNGs
-├── shadows/          # MCSH per-chunk (64×64)
-├── masks/            # MCAL layer alphas
-├── liquids/          # MH2O/MCLQ data
+├── shadows/          # MCSH per-chunk (64×64) and stitched (1024×1024)
+├── masks/            # MCAL layer alphas (per chapter and stitched)
+├── liquids/          # MH2O/MCLQ stitched heights and masks
+├── tilesets/         # Unique tileset textures (PNG)
+├── stitched/         # Stitched shadow and alpha maps (1024×1024)
+├── depths/           # Depth maps (requires setup)
 ├── dataset/          # Structured JSON
 └── texture_database.json
 ```
 
 **Data Exported:**
-- Heights (145 × 256 chunks), positions, holes
+- Heights, positions, holes, normals
 - Shadow maps (MCSH), alpha masks (MCAL)
 - Texture layers (MCLY), liquids (MH2O/MCLQ)
 - Object placements (MDDF/MODF)
 - Compatible with DepthAnything3 for depth map correlation
 
 **DepthAnything3 Setup (Optional):**
-```bash
-# Windows (run from Anaconda Prompt)
+To enable depth map generation, you must set up the `da3` Conda environment:
+```powershell
+# Windows (PowerShell)
 cd src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3
-setup_da3.bat
-
-# Linux/WSL
-./setup_da3.sh
+./setup_da3.ps1
 ```
-Then use `--depth` flag to enable depth map generation.
+Then use the `--depth` flag when running the export command.
+If you see `EnvironmentNameNotFound`, ensure you have run the setup script successfully.
 
 ## Usage
 

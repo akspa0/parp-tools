@@ -28,6 +28,12 @@ public record VlmTerrainData(
     // Alpha Masks - paths to per-layer PNGs
     [property: JsonPropertyName("alpha_masks")] string[]? AlphaMasks,
     
+    // Liquid Stitched Maps
+    [property: JsonPropertyName("liquid_mask")] string? LiquidMaskPath,
+    [property: JsonPropertyName("liquid_height")] string? LiquidHeightPath,
+    [property: JsonPropertyName("liquid_min")] float LiquidMinHeight,
+    [property: JsonPropertyName("liquid_max")] float LiquidMaxHeight,
+    
     // Textures
     [property: JsonPropertyName("textures")] List<string> Textures,
     

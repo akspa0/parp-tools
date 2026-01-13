@@ -22,4 +22,10 @@
     <EmbeddedResource Include="Resources\area_crosswalk.csv" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="VLM\DepthAnything3\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

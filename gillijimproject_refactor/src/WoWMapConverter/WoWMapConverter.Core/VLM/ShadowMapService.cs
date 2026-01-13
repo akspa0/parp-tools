@@ -39,6 +39,19 @@ public static class ShadowMapService
             }
         }
         
+        // Edge Clamping: Replicate 1-pixel border to remove grid artifacts (white lines)
+        // This addresses the issue where chunk edges default to 'Lit' (255) causing a visible grid.
+        for (int y = 0; y < 64; y++)
+        {
+            shadow[y * 64 + 0] = shadow[y * 64 + 1];           // Fix Left
+            shadow[y * 64 + 63] = shadow[y * 64 + 62];         // Fix Right
+        }
+        for (int x = 0; x < 64; x++)
+        {
+            shadow[0 * 64 + x] = shadow[1 * 64 + x];           // Fix Top
+            shadow[63 * 64 + x] = shadow[62 * 64 + x];         // Fix Bottom
+        }
+        
         return shadow;
     }
 

@@ -157,14 +157,14 @@ public class VlmDatasetExporter
                     var imageFileName = $"{tileName}.png";
                     var outputImagePath = Path.Combine(imagesDir, imageFileName);
                     
-                    if (ConvertMinimapToPng(minimapPath, outputImagePath))
+                    if (ConvertBlpToPng(minimapPath, outputImagePath))
                     {
                         imageRelPath = $"images/{imageFileName}";
                     }
                 }
 
                 // Extract terrain data using AdtAlpha's methods
-                var sample = ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName,
+                var sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
                     shadowsDir, masksDir, mdnmNames, monmNames, allTextures);
 
                 if (sample == null)
@@ -197,6 +197,125 @@ public class VlmDatasetExporter
         var textureDbPath = Path.Combine(outputDir, "texture_database.json");
         var textureDb = new { count = allTextures.Count, textures = allTextures.ToList() };
         await File.WriteAllTextAsync(textureDbPath, JsonSerializer.Serialize(textureDb, _jsonOptions));
+
+        // Stitch chunk data into tile-level images
+        if (tilesExported > 0)
+        {
+            progress?.Report("Stitching tile images...");
+            var stitchedDir = Path.Combine(outputDir, "stitched");
+            // liquidsDir already declared/created at start
+            Directory.CreateDirectory(stitchedDir);
+            
+            var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
+            int stitchedCount = 0;
+            foreach (var jsonPath in jsonFiles)
+            {
+                var tileName = Path.GetFileNameWithoutExtension(jsonPath);
+                try
+                {
+                    // Stitch Shadows & Alpha
+                    var (shadowPath, alphaPaths) = await TileStitchingService.StitchTileAsync(
+                        shadowsDir, masksDir, tileName, stitchedDir);
+
+                    // Load JSON to update with stitched paths
+                    var json = await File.ReadAllTextAsync(jsonPath);
+                    var sample = JsonSerializer.Deserialize<VlmTrainingSample>(json);
+                    
+                    if (sample != null && sample.TerrainData != null)
+                    {
+                        // Stitch Liquids
+                        string? lHeightPath = null;
+                        string? lMaskPath = null;
+                        float lMin = 0f, lMax = 0f;
+
+                        if (sample.TerrainData.Liquids != null)
+                        {
+                            var liquidsList = sample.TerrainData.Liquids.ToList();
+                            
+                            // Heights
+                            var (liqImg, min, max) = TileStitchingService.StitchLiquidHeights(liquidsList, tileName);
+                            if (liqImg.Length > 0)
+                            {
+                                lHeightPath = $"liquids/{tileName}_liq_height.png";
+                                await File.WriteAllBytesAsync(Path.Combine(outputDir, lHeightPath), liqImg);
+                                lMin = min;
+                                lMax = max;
+                            }
+
+                            // Mask
+                            var liqMask = TileStitchingService.StitchLiquidMask(liquidsList, tileName);
+                            if (liqMask.Length > 0)
+                            {
+                                lMaskPath = $"liquids/{tileName}_liq_mask.png";
+                                await File.WriteAllBytesAsync(Path.Combine(outputDir, lMaskPath), liqMask);
+                            }
+                        }
+
+                        // Update Terrain Data
+                        var updatedTerrain = sample.TerrainData with
+                        {
+                            ShadowMaps = shadowPath != null ? new[] { Path.GetRelativePath(outputDir, shadowPath).Replace("\\", "/") } : null,
+                            AlphaMasks = alphaPaths.Select(p => Path.GetRelativePath(outputDir, p).Replace("\\", "/")).ToArray(),
+                            LiquidHeightPath = lHeightPath,
+                            LiquidMaskPath = lMaskPath,
+                            LiquidMinHeight = lMin,
+                            LiquidMaxHeight = lMax
+                        };
+
+                        var updatedSample = sample with { TerrainData = updatedTerrain };
+                        await File.WriteAllTextAsync(jsonPath, JsonSerializer.Serialize(updatedSample, _jsonOptions));
+                        stitchedCount++;
+                    }
+                }
+                catch { }
+            }
+            progress?.Report($"Stitched images and updated JSON for {stitchedCount} tiles");
+
+            // Export Tileset Textures
+            progress?.Report($"Exporting {allTextures.Count} unique tileset textures...");
+            var tilesetsDir = Path.Combine(outputDir, "tilesets");
+            Directory.CreateDirectory(tilesetsDir);
+            
+            int textureCount = 0;
+            foreach (var texture in allTextures)
+            {
+                var texName = Path.GetFileName(texture); // e.g. "grass.blp"
+                var pngName = Path.ChangeExtension(texName, ".png");
+                var pngPath = Path.Combine(tilesetsDir, pngName);
+                
+                if (!File.Exists(pngPath))
+                {
+                    // Try to find the BLP in client
+                    // 'texture' might be full path or relative. 
+                    // Usually it is relative like "Textures\Grass.blp"
+                    
+                    // Try common locations
+                    var candidates = new[]
+                    {
+                        Path.Combine(dataPath, texture),
+                        Path.Combine(dataPath, "pickles", texture) // Just in case
+                    };
+                    
+                    bool converted = false;
+                    foreach (var path in candidates)
+                    {
+                         if (ConvertBlpToPng(path, pngPath))
+                         {
+                             converted = true;
+                             break;
+                         }
+                         // Also try .MPQ suffix
+                         if (ConvertBlpToPng(path + ".MPQ", pngPath))
+                         {
+                             converted = true;
+                             break;
+                         }
+                    }
+                    if (converted) textureCount++;
+                }
+            }
+            progress?.Report($"Exported {textureCount} textures");
+        }
 
         if (generateDepth && tilesExported > 0)
         {
@@ -245,9 +364,9 @@ public class VlmDatasetExporter
         progress?.Report($"Updated {updated} JSON files with depth paths");
     }
 
-    private VlmTerrainData? ExtractFromAdtAlpha(
+    private async Task<VlmTerrainData?> ExtractFromAdtAlpha(
         AdtAlpha adt, string wdtPath, int adtOffset, int tileIndex, string tileName,
-        string shadowsDir, string masksDir,
+        string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
         HashSet<string> textureCollector)
     {
@@ -256,6 +375,7 @@ public class VlmDatasetExporter
         var holes = new int[256];
         var textures = new List<string>();
         var chunkLayers = new List<VlmChunkLayers>();
+        var liquids = new List<VlmLiquidData>();
         var objects = new List<VlmObjectPlacement>();
         var shadowPaths = new List<string>();
         var alphaPaths = new List<string>();
@@ -394,6 +514,29 @@ public class VlmDatasetExporter
                         layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId));
                     }
                     chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray()));
+
+                    // Extract Liquid Data (MCLQ - Legacy)
+                    var mclqData = mcnk.MclqData;
+                    if (mclqData != null && mclqData.Length > 0)
+                    {
+                        var liquid = LiquidService.ExtractMCLQ(mclqData, chunkIndex);
+                        if (liquid != null)
+                        {
+                            // Save heightmap PNG if exists
+                            if (liquid.Heights != null)
+                            {
+                                var liquidsDir = Path.Combine(outputDir, "liquids");
+                                Directory.CreateDirectory(liquidsDir);
+                                
+                                var heightPng = LiquidService.GenerateHeightPng(liquid.Heights, liquid.MinHeight, liquid.MaxHeight);
+                                var heightPath = Path.Combine(liquidsDir, $"{tileName}_c{chunkIndex}_liq_h.png");
+                                await File.WriteAllBytesAsync(heightPath, heightPng);
+                                
+                                // Update liquid record with mask path (optional, currently using convention)
+                            }
+                            liquids.Add(liquid);
+                        }
+                    }
                 }
                 catch { }
             }
@@ -454,9 +597,13 @@ public class VlmDatasetExporter
             holes,
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
+            null, // LiquidMaskPath
+            null, // LiquidHeightPath
+            0f,   // LiquidMinHeight
+            0f,   // LiquidMaxHeight
             textures,
             chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
-            null,
+            liquids.Count > 0 ? liquids.ToArray() : null,
             objects,
             heightMin == float.MaxValue ? 0 : heightMin,
             heightMax == float.MinValue ? 0 : heightMax
@@ -469,7 +616,9 @@ public class VlmDatasetExporter
         {
             $"textures/minimap/{mapName.ToLower()}/map{x:D2}_{y:D2}.blp",
             $"Textures/Minimap/{mapName}/map{x:D2}_{y:D2}.blp",
-            $"textures/Minimap/{mapName}/map{x:D2}_{y:D2}.blp"
+            $"textures/Minimap/{mapName}/map{x:D2}_{y:D2}.blp",
+            $"World/Minimaps/{mapName}/map{x:D2}_{y:D2}.blp", // Release style
+            $"World/Minimaps/{mapName}/map{x}_{y}.blp"        // Alternate release style
         };
 
         foreach (var pattern in patterns)
@@ -484,18 +633,23 @@ public class VlmDatasetExporter
         return null;
     }
 
-    private bool ConvertMinimapToPng(string blpPath, string pngPath)
+    private bool ConvertBlpToPng(string blpPath, string pngPath)
     {
         try
         {
             byte[]? blpData;
+            // Check for MPQ pseudo-path
             if (blpPath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
             {
                 blpData = AlphaMpqReader.ReadFromMpq(blpPath);
             }
-            else
+            else if (File.Exists(blpPath))
             {
                 blpData = File.ReadAllBytes(blpPath);
+            }
+            else
+            {
+                return false;
             }
 
             if (blpData == null || blpData.Length == 0)

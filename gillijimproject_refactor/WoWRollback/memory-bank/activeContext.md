@@ -35,9 +35,9 @@
 
 | Data | Storage | Status |
 |------|---------|--------|
-| Tile stitching | 1024×1024 PNG | Next |
-| Liquids (MH2O/MCLQ) | JSON + PNG | TODO |
-| Depth maps | DepthAnything3 | Ready, needs setup |
+| Tile stitching | 1024×1024 PNG | ✓ |
+| Liquids (MH2O/MCLQ) | JSON + PNG | ✓ |
+| Depth maps | DepthAnything3 | ✓ |
 
 ---
 
