@@ -51,9 +51,11 @@ public sealed class VlmDatasetExporter
 
         var imagesDir = Path.Combine(outputDir, "images");
         var datasetDir = Path.Combine(outputDir, "dataset");
+        var masksDir = Path.Combine(outputDir, "masks");
         
         Directory.CreateDirectory(imagesDir);
         Directory.CreateDirectory(datasetDir);
+        Directory.CreateDirectory(masksDir);
 
         int tilesExported = 0;
         int tilesSkipped = 0;
@@ -114,7 +116,7 @@ public sealed class VlmDatasetExporter
 
                     // Retrieve ADT metadata string for embedding
                     var adtTileName = $"{mapName}_{x}_{y}";
-                    var sample = TryExtractAdtMetadata(source, mapName, x, y, imageFileName, allTextures);
+                    var sample = TryExtractAdtMetadata(source, mapName, x, y, imageFileName, masksDir, allTextures);
                     
                     if (sample == null)
                     {
@@ -161,6 +163,7 @@ public sealed class VlmDatasetExporter
         string mapName,
         int x, int y,
         string imageRelativePath,
+        string masksOutputDirectory,
         HashSet<string> textureCollector)
     {
         // Try to load ADT from archive
@@ -195,6 +198,7 @@ public sealed class VlmDatasetExporter
             
             var textures = new List<string>();
             var layers = new List<VlmTextureLayer>();
+            var layerMaskPaths = new List<string>();
             var objects = new List<ObjectPlacement>();
             float heightMin = float.MaxValue;
             float heightMax = float.MinValue;
@@ -251,11 +255,6 @@ public sealed class VlmDatasetExporter
                         if (gridIndex >= 0 && gridIndex < 256)
                         {
                             heights[gridIndex] = chunk.Heights;
-                            // AdtChunk stores PositionZ as base height, PositionX/Y as coords.
-                            // TerrainMeshExporter expects (X, Y, Z) where Z is height?
-                            // No, TerrainMeshExporter expects "chunkPositions" as (X, Y, Z).
-                            // In WoW: X/Y are horizontal, Z is vertical.
-                            // AdtParser stores PositionX, PositionY, PositionZ (base height).
                             chunkPositions[gridIndex] = (chunk.PositionX, chunk.PositionY, chunk.PositionZ);
                             holes[gridIndex] = chunk.Holes;
                         }
@@ -264,10 +263,29 @@ public sealed class VlmDatasetExporter
                     // Collect Alpha Maps (MCAL)
                     if (chunk.AlphaMap != null)
                     {
+                         // Generate PNG masks
+                         var masks = AlphaMapGenerator.GenerateAlphaMasks(chunk);
+                         foreach (var kvp in masks)
+                         {
+                             int layerIndex = kvp.Key;
+                             byte[] pngBytes = kvp.Value;
+                             
+                             // Save to disk
+                             // Naming: map_x_y_chunkIdx_layerIdx.png
+                             var maskFilename = $"{mapName}_{x}_{y}_c{gridIndex}_l{layerIndex}.png";
+                             var maskPath = Path.Combine(masksOutputDirectory, maskFilename);
+                             File.WriteAllBytes(maskPath, pngBytes);
+                             
+                             layerMaskPaths.Add($"masks/{maskFilename}");
+                         }
+                         
+                         // Keep raw binary too
                          alphaMs.Write(BitConverter.GetBytes(gridIndex));
                          alphaMs.Write(BitConverter.GetBytes(chunk.AlphaMap.Length));
                          alphaMs.Write(chunk.AlphaMap);
                     }
+
+
                     
                     // Collect Shadows (MCSH)
                     if (chunk.ShadowMap != null)
@@ -347,6 +365,7 @@ public sealed class VlmDatasetExporter
                     mtlContent,
                     alphaMapsBase64,
                     shadowMapBase64,
+                    layerMaskPaths,
                     textures,
                     layers,
                     objects,

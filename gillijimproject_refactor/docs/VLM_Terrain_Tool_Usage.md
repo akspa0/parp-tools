@@ -1,10 +1,6 @@
 # VLM Terrain Data Export Tool
 
-This tool exports terrain data from WoW client archives for Vision-Language Model (VLM) training.
-It generates a dataset containing:
-- **Minimap Images**: PNG format.
-- **Metadata**: JSON format describing textures, objects, and terrain height ranges.
-- **Terrain Meshes**: OBJ/MTL format representing the terrain geometry.
+This tool exports terrain data from WoW client archives for Vision-Language Model (VLM) training. It generates a rich dataset correlating visual minimaps, geometric terrain meshes, and "decompiled" texture distribution masks.
 
 ## Usage
 
@@ -24,34 +20,60 @@ dotnet run --project WoWRollback/WoWRollback.Cli/WoWRollback.Cli.csproj -- vlm-e
 
 ### Output Structure
 
-The output directory will contain:
+The output directory will organize the data for Unsloth ingestion as follows:
 
 ```
 <OUTPUT_DIR>/
 ├── images/
-│   ├── <map>_<x>_<y>.png       # Minimap tile
+│   ├── <map>_<x>_<y>.png              # Minimap tile (Visual context)
 │   └── ...
-├── meshes/
-│   ├── <map>_<x>_<y>.obj       # Terrain mesh
-│   ├── <map>_<x>_<y>.mtl       # Material file
+├── masks/
+│   ├── <map>_<x>_<y>_c<idx>_l<id>.png # Alpha masks (Visual texture distribution)
 │   └── ...
-└── metadata/
-    ├── <map>_<x>_<y>.json      # Metadata (includes "mesh_path")
-    └── ...
+├── dataset/
+│   ├── <map>_<x>_<y>.json             # Rich metadata for Unsloth training
+│   └── ...
+└── texture_database.json              # List of all unique texture paths found
 ```
 
-### Example
+### JSON Dataset Schema (Unsloth Ready)
 
-To export the **Development** map from a 3.3.5 client to `C:\VLM_Dataset`:
+Each `dataset/*.json` file contains a training sample linking visual, geometric, and semantic data:
 
-```bash
-dotnet run --project WoWRollback/WoWRollback.Cli/WoWRollback.Cli.csproj -- vlm-export --client-path "C:\Games\WoW335" --map Development --out "C:\VLM_Dataset"
+```json
+{
+  "image": "images/Azeroth_32_48.png",
+  "terrain_data": {
+    "adt_tile": "Azeroth_32_48",
+    "obj_content": "v 1.0 2.0 3.0 ...",   // Raw OBJ mesh string
+    "mtl_content": "newmtl ...",         // Raw MTL material string
+    "layer_masks": [                     // Paths to PNG alpha masks
+      "masks/Azeroth_32_48_c0_l1.png",
+      "masks/Azeroth_32_48_c0_l2.png"
+    ],
+    "alpha_maps": "...",                 // Base64 raw MCAL (Binary fallback)
+    "shadow_map": "...",                 // Base64 raw MCSH
+    "textures": [                        // Texture filenames
+      "Tileset\\Expansion05\\Tundra\\TundraRock.blp",
+      "Tileset\\Expansion05\\Tundra\\TundraGrass.blp"
+    ],
+    "layers": [                          // Logical layer definitions
+      { "texture_id": 1, "flags": 256, "alpha_offset": 4096, "effect_id": 0 }
+    ],
+    "objects": [                         // Object placements (M2/WMO)
+      { "name": "Tree01", "x": 100.0, "y": 200.0, "z": 50.0, "rot_x": 0, "category": "m2" }
+    ],
+    "height_min": 100.0,
+    "height_max": 250.0
+  }
+}
 ```
 
-## Features
+## VLM Integration Strategy
 
-- **Terrain Mesh Export**: Converts ADT heightmaps into OBJ files.
-  - Handles **holes** (low-res) correctly using WotLK/ADTPreFabTool logic.
-  - Generates UVs matching the minimap tile.
-- **Metadata Integration**: The generated `metadata/*.json` files include a `mesh_path` field pointing to the corresponding OBJ file.
-- **Minimap Resolution**: Automatically resolves minimap textures using `Md5Translate` logic if available, or standard path conventions.
+This dataset is designed to teach a VLM to "read" terrain:
+1.  **Visual Input**: The model sees the **Minimap** (`image`).
+2.  **Geometric Ground Truth**: The **Mesh** (`obj_content`) provides the physical shape corresponding to that visual.
+3.  **Textural Ground Truth**: The **Alpha Masks** (`layer_masks`) teach the model *where* specific textures (like grass, rock, snow) are painted, effectively "decompiling" the artist's brush strokes from the final rendered terrain.
+
+By training on this triplet (Map Image -> Mesh + Texture Masks), the model learns to infer 3D structure and material composition solely from 2D map images.

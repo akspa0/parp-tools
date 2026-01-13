@@ -1,12 +1,33 @@
 # Active Context
 
-## Current Focus: Verification of WMO Fixes (Jan 10, 2026)
+## Current Focus: VLM Terrain Data Export (Jan 13, 2026)
 
 ### Status Summary
-WMO conversion issues (Corrupt Groups, Upside Down Textures) have been addressed with **Adaptive MOGP Header Skipping** and **UV Pass-Through logic**. Pending final verification in Noggit by user.
-Next focus: Final integration tests and potential cleaning of any remaining artifacts.
+Successfully implemented a robust VLM dataset exporter that correlates terrain meshes, minimaps, and "decompiled" texture data.
+- **Custom ADT Parsing**: Ported full ADT parsing to `WoWRollback.Core`, removing `Warcraft.NET` dependency.
+- **Visual Data extraction**: Implemented `AlphaMapGenerator` to convert MCAL alpha maps into per-layer PNG masks, allowing the VLM to "see" texture distribution.
+- **Mesh Export**: Integrated `TerrainMeshExporter` to generate aligned OBJ/MTL data.
+
+### Session Jan 13, 2026 - VLM Terrain Data Export
+
+#### Completed ✅
+1.  **Custom ADT Parser (`WoWRollback.Core`)**:
+    - Implemented `AdtParser.cs` to handle `MVER`, `MHDR`, `MCIN`, `MTEX`, `MMDX`, `MDDF`, `MODF`, and `MCNK` chunks.
+    - Created lightweight `AdtData` models to replace external library types.
+2.  **Visual Texture Decompilation**:
+    - Created `AlphaMapGenerator`: Converts raw `MCAL` (alpha map) data into grayscale PNG images.
+    - Captures "pressure/opacity" data per texture layer, critical for VLM correlation.
+3.  **VlmDatasetExporter Improvements**:
+    - Updated to use the new `AdtParser`.
+    - Exports rich JSON dataset:
+        - `obj_content` / `mtl_content` (Mesh)
+        - `layer_masks` (List of PNG paths for MCAL)
+        - `textures` (List of BLP paths)
+        - `objects` (WMO/M2 placements)
+    - Verified build of `vlm-export` CLI command.
 
 ### Session Jan 10, 2026 - WMO Debugging & Fixes
+
 
 #### Completed ✅
 1.  **Resolved Corrupt Groups**: Identified that `ParseMogp` was unconditionally skipping 128 bytes for MOGP header (matching Client RAM logic), but `Ironforge.wmo` on disk likely uses 68-byte headers. Implemented **Adaptive Skipping** (peeking for `MOPY/MOVI/MOVT` magic) to handle both formats correctly.

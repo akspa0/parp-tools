@@ -5,6 +5,7 @@ Command-line interface for the WoWRollback toolkit. Provides:
 - analyze-map-adts (analyze loose ADTs, generate viewer)
 - alpha-to-lk (Alpha WDT → LK ADTs with burial, holes, MCSH, AreaIDs)
 - lk-to-alpha (patch existing LK ADTs with same terrain logic)
+- vlm-export (export terrain datasets for VLM training)
 - serve-viewer (Kestrel-based static server)
 - probe-archive / probe-minimap (diagnostics)
 

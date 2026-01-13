@@ -16,6 +16,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("mtl_content")] string MtlContent,
     [property: JsonPropertyName("alpha_maps")] string? AlphaMaps,     // Base64 MCAL
     [property: JsonPropertyName("shadow_map")] string? ShadowMap,     // Base64 MCSH
+    [property: JsonPropertyName("layer_masks")] List<string> LayerMasks, // Paths to alpha mask images
     [property: JsonPropertyName("textures")] List<string> Textures,   // Unique texture files
     [property: JsonPropertyName("layers")] List<VlmTextureLayer> Layers, // Texture layer definitions
     [property: JsonPropertyName("objects")] List<ObjectPlacement> Objects,
