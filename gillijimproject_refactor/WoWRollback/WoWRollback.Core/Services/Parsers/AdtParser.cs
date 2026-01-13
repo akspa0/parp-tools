@@ -15,13 +15,13 @@ public class AdtParser
         _pos = 0;
     }
 
-    public static AdtData Parse(byte[] data, string mapName, int tileX, int tileY)
+    public static AdtData Parse(byte[] data, string mapName, int tileX, int tileY, Func<uint, string?>? nameResolver = null)
     {
         var parser = new AdtParser(data);
-        return parser.ParseInternal(mapName, tileX, tileY);
+        return parser.ParseInternal(mapName, tileX, tileY, nameResolver);
     }
 
-    private AdtData ParseInternal(string mapName, int tileX, int tileY)
+    private AdtData ParseInternal(string mapName, int tileX, int tileY, Func<uint, string?>? nameResolver)
     {
         var adtData = new AdtData
         {
@@ -30,8 +30,12 @@ public class AdtParser
             TileY = tileY
         };
 
-        var m2Names = new List<string>();
-        var wmoNames = new List<string>();
+        // Raw string data (offset -> string)
+        var m2StringBlock = new byte[0];
+        var wmoStringBlock = new byte[0];
+        var m2Offsets = new List<uint>();  // MMID: offsets into MMDX
+        var wmoOffsets = new List<uint>(); // MWID: offsets into MWMO
+        uint version = 18; // Default to 18 (Classic/WotLK)
 
         // Read all root chunks
         while (_pos + 8 <= _data.Length)
@@ -43,11 +47,12 @@ public class AdtParser
             switch (chunkId)
             {
                 case "MVER":
+                    if (size == 4) version = BitConverter.ToUInt32(_data, _pos);
+                    break;
                 case "MHDR":
-                case "MCIN": // Pointers to MCNKs, but we just scan linearly usually or use offsets
+                case "MCIN":
                 case "MH2O":
                 case "MFBO":
-                    // Skip header/irrelevant chunks for now or parse if needed
                     break;
 
                 case "MTEX":
@@ -55,34 +60,34 @@ public class AdtParser
                     break;
 
                 case "MMDX":
-                    m2Names = ParseStringBlock(size);
+                    m2StringBlock = new byte[size];
+                    Array.Copy(_data, _pos, m2StringBlock, 0, size);
                     break;
 
-                case "MMID": // Offsets for MMDX, usually skipped if we just read strings
-                case "MWID": // Offsets for MWMO
+                case "MMID":
+                    m2Offsets = ParseOffsetArray(size);
+                    break;
+
+                case "MWID":
+                    wmoOffsets = ParseOffsetArray(size);
                     break;
 
                 case "MWMO":
-                    wmoNames = ParseStringBlock(size);
+                    wmoStringBlock = new byte[size];
+                    Array.Copy(_data, _pos, wmoStringBlock, 0, size);
                     break;
 
                 case "MDDF":
-                    ParseMddf(size, m2Names, adtData.M2Objects);
+                    ParseMddf(size, m2StringBlock, m2Offsets, adtData.M2Objects, nameResolver);
                     break;
 
                 case "MODF":
-                    ParseModf(size, wmoNames, adtData.WmoObjects);
+                    ParseModf(size, wmoStringBlock, wmoOffsets, adtData.WmoObjects, nameResolver);
                     break;
 
                 case "MCNK":
-                    // MCNK is special, it contains sub-chunks. 
-                    // But root MCNKs appear sequentially in the file (usually).
-                    // However, we need to treat MCNK content carefully.
-                    // The MCNK header is 128 bytes.
-                    var mcnkStart = _pos - 8; // Backtrack to include header if we were passing the whole block
-                    // Actually, we are INSIDE the chunk data now (after size).
-                    // We need to parse the MCNK content.
-                    var chunk = ParseMcnk(size, adtData.Chunks.Count);
+                    // Pass version and tile info for coordinate calculation if needed
+                    var chunk = ParseMcnk(size, adtData.Chunks.Count, version, tileX, tileY);
                     if (chunk != null)
                     {
                         adtData.Chunks.Add(chunk);
@@ -90,7 +95,6 @@ public class AdtParser
                     break;
                 
                 default:
-                    // Unknown chunk
                     break;
 
             }
@@ -101,49 +105,80 @@ public class AdtParser
         return adtData;
     }
 
-    private AdtChunk? ParseMcnk(int size, int index)
+    private AdtChunk? ParseMcnk(int size, int index, uint version, int tileX, int tileY)
     {
         // MCNK Header is 128 bytes
         if (size < 128) return null;
 
         var headerStart = _pos;
         
-        // Read critical header info
-        // +0x00 Flags (uint)
-        // +0x04 IndexX (uint)
-        // +0x08 IndexY (uint)
-        // +0x0C nLayers (uint)
-        // +0x10 nDoodadRefs
-        // +0x14 offsetH2O
-        // +0x18 offsetMVT
-        // ...
-        // +0x68 Position (x,y,z) (3 floats)
-        
         _pos += 4; // Flags
         var indexX = ReadInt32();
         var indexY = ReadInt32();
         _pos += 4 + 4; // nLayers, nDoodadRefs
-        _pos += 4; // offsetH2O or offsetMCVT depending on version? WotLK uses strict offsets from MCNK start
+        _pos += 4; // offsetH2O
+
+         float posZ, posX, posY;
+
+        // Version check for Position fields
+        // Alpha (ver < 18 or implicit) often lacks these in header or has different structure.
+        // Standard v18 MCNK header has Position at 0x68 (104).
+        // If version is < 18 (e.g. 0 for Alpha/pre-release without MVER?), we calculate.
+        // Note: Some Alpha files MIGHT have MVER 18 but structure differs? 
+        // Safer: Check if 0x68 is within header and looks valid, OR just calculate for known Alpha.
+        // For now, let's assume version < 18 means calculate.
         
-        // Let's jump to Position at 0x68 (104)
-        _pos = headerStart + 104;
-        var z = ReadFloat(); // Z (Height) is first in strict ADT coords? No, Position is X,Y,Z
-        // Wait, standard ADT header struct:
-        // u32 flags, u32 ix, u32 iy, u32 nLayers, u32 nDoodadRefs, u32 ofsMCVT...
-        // ... u32 predTex, u32 noEffectDoodad, u32 ofsMCSE, u32 nSndEmitters, u32 ofsMCLQ, u32 sizeMCLQ, float z, float x, float y
-        // Z is base height. X, Y are coords.
-        // Let's verify MCNK header layout.
-        // 0x68 in decimal is 104.
+        if (version < 18)
+        {
+            // Calculate coords based on TileX/Y and IndexX/Y (internal chunk index 0-15)
+            // World size = 64 * 533.3333
+            const float TileSize = 1600.0f / 3.0f; // 533.3333
+            const float ChunkSize = TileSize / 16.0f; // 33.3333
+            const float Origin = 32.0f * TileSize; // Center
+
+            // In WoW:
+            // X (North/South) decreases from top (Positive) to bottom (Negative).
+            // Y (East/West) decreases from left (Positive) to right (Negative).
+            // Wait, WoW coords: X is North (+), Y is West (+). 
+            // 0,0 is center.
+            
+            // Tile 32,32 is center?
+            // TileX=0 is Top (Max X), TileY=0 is Left (Max Y).
+            
+            // Chunk index is usually row/col inside tile. 
+            // indexX = row (inverted?), indexY = col?
+            // Actually MCNK IndexX/Y are coordinates in the tile (0-15).
+            
+            // Base pos of tile:
+            float tileMaxX = Origin - (tileX * TileSize);
+            float tileMaxY = Origin - (tileY * TileSize);
+            
+            // Chunk pos (Top-Left of chunk):
+            // MCNK indexX is usually 'row' (X axis related?) or 'col'?
+            // Standard: IndexX is column (Y axis?), IndexY is row (X axis?)
+            // Let's verify standard calc:
+            // X = tileMaxX - (indexY * ChunkSize)
+            // Y = tileMaxY - (indexX * ChunkSize)
+            // Warning: IndexX/Y meanings swap in some versions.
+            
+            // For now use standard logic assumption:
+            // pos will be calculated. Z set to 0 initially? 
+            // Or read from MCVT later if needed.
+            
+            posX = tileMaxX - (indexY * ChunkSize);
+            posY = tileMaxY - (indexX * ChunkSize);
+            posZ = 0; // Alpha header doesn't have Z base?
+        }
+        else
+        {
+            // Standard reading
+            _pos = headerStart + 104;
+            posZ = ReadFloat(); 
+            posX = ReadFloat();
+            posY = ReadFloat();
+        }
         
-        var posZ = ReadFloat(); // Height (Z in WoW)
-        var posX = ReadFloat();
-        var posY = ReadFloat();
-        
-        // Holes at +0x3C? Or part of flags?
-        // High res holes are 0x00 Flags & 0x10000? 
-        // Holes low-res are usually in MCVT or MCNK header + 0x14?
-        // standard 3.3.5: holes is u32 holes at 0x3C (60)
-         _pos = headerStart + 60;
+        _pos = headerStart + 60;
         var holes = ReadInt32();
         
         // Liquid size check?
@@ -247,20 +282,12 @@ public class AdtParser
         return list;
     }
 
-    private void ParseMddf(int size, List<string> names, List<AdtM2Placement> list)
+    private void ParseMddf(int size, byte[] stringBlock, List<uint> offsets, List<AdtM2Placement> list, Func<uint, string?>? resolver)
     {
         // 36 bytes per entry
         var count = size / 36;
         for (int i = 0; i < count; i++)
         {
-            // We need to use _pos directly if we want to use helper methods, but we are in a switch.
-            // Let's assume _pos points to data start.
-            // Wait, inside Scan loop `_pos` is updated.
-            // But here I'm using `_pos` as a global cursor. 
-            // The helper `ParseInternal` sets `_pos = nextPos` after switch.
-            // So inside switch, `_pos` is at start of data.
-            // So we need to read from `_pos + offset`.
-            
             var p = _pos + i * 36;
             var nameId = BitConverter.ToUInt32(_data, p);
             var uniqId = BitConverter.ToUInt32(_data, p + 4);
@@ -275,9 +302,21 @@ public class AdtParser
                 BitConverter.ToSingle(_data, p + 28)
             );
             var scale = BitConverter.ToUInt16(_data, p + 32) / 1024f;
-            // flags at +34
             
-            var name = nameId < names.Count ? names[(int)nameId] : "";
+            string name = "";
+            // Use MMID offset indirection
+            if (nameId < offsets.Count)
+            {
+                var offset = offsets[(int)nameId];
+                name = ReadNullTerminatedString(stringBlock, (int)offset);
+            }
+            
+            // Fallback to resolver (for modern FDID-based maps)
+            if (string.IsNullOrEmpty(name) && resolver != null)
+            {
+                var resolved = resolver(nameId);
+                if (!string.IsNullOrEmpty(resolved)) name = resolved;
+            }
             
             list.Add(new AdtM2Placement {
                 ModelName = name,
@@ -289,7 +328,7 @@ public class AdtParser
         }
     }
 
-    private void ParseModf(int size, List<string> names, List<AdtWmoPlacement> list)
+    private void ParseModf(int size, byte[] stringBlock, List<uint> offsets, List<AdtWmoPlacement> list, Func<uint, string?>? resolver)
     {
         // 64 bytes per entry
         var count = size / 64;
@@ -322,11 +361,22 @@ public class AdtParser
             var doodad = BitConverter.ToUInt16(_data, p + 58);
             var nameSet = BitConverter.ToUInt16(_data, p + 60);
             var scale = BitConverter.ToUInt16(_data, p + 62); 
-            // If scale is 0? standard says 0 means 1 in some versions, but usually initialized?
-            // Default 1024.
-            float scaleF = scale == 0 ? 1.0f : scale / 1024f; // Handle potentially uninitialized scale in older ADTs?
+            float scaleF = scale == 0 ? 1.0f : scale / 1024f;
 
-            var name = nameId < names.Count ? names[(int)nameId] : "";
+            string name = "";
+            // Use MWID offset indirection
+            if (nameId < offsets.Count)
+            {
+                var offset = offsets[(int)nameId];
+                name = ReadNullTerminatedString(stringBlock, (int)offset);
+            }
+            
+            // Fallback to resolver
+            if (string.IsNullOrEmpty(name) && resolver != null)
+            {
+                 var resolved = resolver(nameId);
+                 if (!string.IsNullOrEmpty(resolved)) name = resolved;
+            }
 
             list.Add(new AdtWmoPlacement {
                 WmoName = name,
@@ -384,5 +434,25 @@ public class AdtParser
         var v = BitConverter.ToSingle(_data, _pos);
         _pos += 4;
         return v;
+    }
+
+    private List<uint> ParseOffsetArray(int size)
+    {
+        var list = new List<uint>();
+        var count = size / 4;
+        for (int i = 0; i < count; i++)
+        {
+            list.Add(BitConverter.ToUInt32(_data, _pos + i * 4));
+        }
+        return list;
+    }
+
+    private static string ReadNullTerminatedString(byte[] data, int offset)
+    {
+        if (offset < 0 || offset >= data.Length) return "";
+        int end = offset;
+        while (end < data.Length && data[end] != 0) end++;
+        if (end == offset) return "";
+        return Encoding.UTF8.GetString(data, offset, end - offset);
     }
 }

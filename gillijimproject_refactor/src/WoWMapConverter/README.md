@@ -79,6 +79,14 @@ WoWMapConverter/
 - **All versions**: DBC (Classic-WotLK) and DB2 (Cata+)
 - **Crosswalks**: AreaTable, Map, AreaTrigger, etc.
 
+### VLM Dataset Export (via WoWRollback)
+- **Terrain-Minimap Correlation**: Exports datasets for VLM training (map image → 3D mesh + textures).
+- **Alpha Masks**: PNG visualizations of texture layer distribution.
+- **WDL Heightmaps**: Low-resolution global terrain context.
+- **Object Names**: Resolved via Community Listfile (FileDataID → Filename).
+- **Alpha 0.5.3 Support**: Reads monolithic WDT directly.
+- See [VLM Terrain Tool Usage](../docs/VLM_Terrain_Tool_Usage.md) for details.
+
 ## Usage
 
 ```bash

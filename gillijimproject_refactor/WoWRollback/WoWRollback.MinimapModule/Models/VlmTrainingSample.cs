@@ -20,6 +20,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("textures")] List<string> Textures,   // Unique texture files
     [property: JsonPropertyName("layers")] List<VlmTextureLayer> Layers, // Texture layer definitions
     [property: JsonPropertyName("objects")] List<ObjectPlacement> Objects,
+    [property: JsonPropertyName("wdl_heights")] short[]? WdlHeights,     // 17x17 low-res heightmap flattened
     [property: JsonPropertyName("height_min")] float HeightMin,
     [property: JsonPropertyName("height_max")] float HeightMax
 );

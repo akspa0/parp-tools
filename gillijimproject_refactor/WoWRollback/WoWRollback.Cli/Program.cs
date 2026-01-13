@@ -7439,10 +7439,13 @@ internal static class Program
         var mapName = opts["map"];
         var outputDir = opts["out"];
         var limit = TryParseInt(opts, "limit") ?? int.MaxValue;
+        var listfile = GetOption(opts, "listfile"); // Optional listfile path
 
         Console.WriteLine($"[vlm] Client root: {clientRoot}");
         Console.WriteLine($"[vlm] Map: {mapName}");
         Console.WriteLine($"[vlm] Output: {outputDir}");
+        if (!string.IsNullOrEmpty(listfile))
+            Console.WriteLine($"[vlm] Listfile: {listfile}");
 
         EnsureStormLibOnPath();
         var mpqs = ArchiveLocator.LocateMpqs(clientRoot);
@@ -7459,7 +7462,7 @@ internal static class Program
         var resolver = new MinimapFileResolver(src, index);
         var exporter = new VlmDatasetExporter(new SimpleConsoleLogger<VlmDatasetExporter>());
         
-        var task = exporter.ExportMapAsync(src, resolver, mapName, outputDir, new ConsoleProgress(), limit);
+        var task = exporter.ExportMapAsync(src, resolver, mapName, outputDir, new ConsoleProgress(), limit, listfile);
         task.Wait();
         var result = task.Result;
 

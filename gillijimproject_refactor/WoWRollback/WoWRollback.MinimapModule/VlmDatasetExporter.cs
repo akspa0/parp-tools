@@ -44,11 +44,21 @@ public sealed class VlmDatasetExporter
         string mapName,
         string outputDir,
         IProgress<string>? progress = null,
-        int limit = int.MaxValue)
+        int limit = int.MaxValue,
+        string? listfilePath = null) // Added listfile path argument
     {
         progress?.Report($"Starting VLM export for map: {mapName}");
         _logger?.LogInformation("Starting VLM export for map: {MapName}", mapName);
-
+        
+        // Initialize Listfile Service if provided
+        ListfileService? listfileService = null;
+        if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
+        {
+             listfileService = new ListfileService(_logger as ILogger<ListfileService>); // Logger cast might need care or ignore
+             listfileService.Load(listfilePath);
+        }
+        Func<uint, string?>? nameResolver = listfileService != null ? listfileService.Resolve : null;
+        
         var imagesDir = Path.Combine(outputDir, "images");
         var datasetDir = Path.Combine(outputDir, "dataset");
         var masksDir = Path.Combine(outputDir, "masks");
@@ -56,6 +66,77 @@ public sealed class VlmDatasetExporter
         Directory.CreateDirectory(imagesDir);
         Directory.CreateDirectory(datasetDir);
         Directory.CreateDirectory(masksDir);
+
+        // Load WDL if present (Global heightmap)
+        WdlParser.WdlData? wdlData = null;
+        try 
+        {
+            // WDL is usually at World\Maps\{mapName}\{mapName}.wdl
+            var wdlPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
+            if (source.FileExists(wdlPath))
+            {
+                using var wdlStream = source.OpenFile(wdlPath);
+                if (wdlStream != null)
+                {
+                    using var ms = new MemoryStream();
+                    wdlStream.CopyTo(ms);
+                    wdlData = WdlParser.Parse(ms.ToArray());
+                    _logger?.LogInformation("Loaded WDL data for {MapName}", mapName);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to load WDL for {MapName}", mapName);
+        }
+
+        // Check for Alpha Monolithic WDT
+        // If present, we need to extract ADT stats from it.
+        byte[]? wdtDataBytes = null;
+        int[]? wdtAllOffsets = null; // 4096 offsets
+        try
+        {
+            var wdtPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            if (source.FileExists(wdtPath))
+            {
+                using var wdtStream = source.OpenFile(wdtPath);
+                if (wdtStream != null)
+                {
+                    using var ms = new MemoryStream();
+                    wdtStream.CopyTo(ms);
+                    wdtDataBytes = ms.ToArray();
+                    
+                    // Parse MAIN chunk to get offsets
+                    // WDT structure: MVER, MPHD, MAIN...
+                    // Loop chunks to find MAIN
+                    int pos = 0;
+                    while (pos + 8 <= wdtDataBytes.Length)
+                    {
+                         var tag = System.Text.Encoding.ASCII.GetString(wdtDataBytes, pos, 4);
+                         var size = BitConverter.ToInt32(wdtDataBytes, pos + 4);
+                         var tagRev = new string(tag.Reverse().ToArray());
+                         
+                         if (tagRev == "MAIN")
+                         {
+                             // Parse offsets (64x64 grid, 16 bytes per entry, first 4 bytes is offset)
+                             wdtAllOffsets = new int[4096];
+                             for (int i = 0; i < 4096; i++)
+                             {
+                                 int entryPos = pos + 8 + i * 16;
+                                 if (entryPos + 4 <= wdtDataBytes.Length)
+                                     wdtAllOffsets[i] = BitConverter.ToInt32(wdtDataBytes, entryPos);
+                             }
+                             break;
+                         }
+                         pos += 8 + size;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to load WDT for {MapName}", mapName);
+        }
 
         int tilesExported = 0;
         int tilesSkipped = 0;
@@ -116,7 +197,7 @@ public sealed class VlmDatasetExporter
 
                     // Retrieve ADT metadata string for embedding
                     var adtTileName = $"{mapName}_{x}_{y}";
-                    var sample = TryExtractAdtMetadata(source, mapName, x, y, imageFileName, masksDir, allTextures);
+                    var sample = TryExtractAdtMetadata(source, mapName, x, y, imageFileName, masksDir, wdtDataBytes, wdtAllOffsets, wdlData, allTextures, nameResolver);
                     
                     if (sample == null)
                     {
@@ -164,12 +245,17 @@ public sealed class VlmDatasetExporter
         int x, int y,
         string imageRelativePath,
         string masksOutputDirectory,
-        HashSet<string> textureCollector)
+        byte[]? wdtData,
+        int[]? wdtOffsets,
+        WdlParser.WdlData? wdlData,
+        HashSet<string> textureCollector,
+        Func<uint, string?>? nameResolver)
     {
-        // Try to load ADT from archive
-        var adtPath = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}.adt";
-        
+        // Try to load ADT from archive OR from WDT
         byte[]? adtDataBytes = null;
+        var adtPath = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}.adt";
+
+        // 1. Try separate ADT file (LK+)
         try
         {
             if (source.FileExists(adtPath))
@@ -183,18 +269,40 @@ public sealed class VlmDatasetExporter
                }
             }
         }
-        catch
-        {
-            return null;
-        }
+        catch { /* ignore */ }
 
+        // 2. If no ADT, try extraction from WDT (Alpha/Monolithic)
+        if ((adtDataBytes == null || adtDataBytes.Length == 0) && wdtData != null && wdtOffsets != null)
+        {
+            int tileIdx = y * 64 + x;
+            if (tileIdx < wdtOffsets.Length)
+            {
+                int offset = wdtOffsets[tileIdx];
+                if (offset > 0 && offset < wdtData.Length)
+                {
+                    // How much to read? Until next offset or end?
+                    // Alpha chunks are contiguous?
+                    // MCNKs usually follow. We need to parse until we hit something else or end?
+                    // Actually we can just pass the slice from offset to end, and Parse will stop when chunks end or become invalid?
+                    // Or we assume it ends at next tile's offset?
+                    // Ideally we pass everything from offset.
+                    
+                    // Simple heuristic: Copy from offset to end. AdtParser will stop when it sees garbage or EOF.
+                    // However, we might read into next tile. AdtParser stops if ReadChunkId fails/invalid.
+                    int length = wdtData.Length - offset;
+                    adtDataBytes = new byte[length];
+                    Array.Copy(wdtData, offset, adtDataBytes, 0, length);
+                }
+            }
+        }
+        
         if (adtDataBytes == null || adtDataBytes.Length == 0)
             return null;
 
         try
         {
             // Parse ADT using Core parser
-            var adtData = AdtParser.Parse(adtDataBytes, mapName, x, y);
+            var adtData = AdtParser.Parse(adtDataBytes, mapName, x, y, nameResolver);
             
             var textures = new List<string>();
             var layers = new List<VlmTextureLayer>();
@@ -202,6 +310,28 @@ public sealed class VlmDatasetExporter
             var objects = new List<ObjectPlacement>();
             float heightMin = float.MaxValue;
             float heightMax = float.MinValue;
+            
+            // Extract WDL heights if available
+            short[]? wdlHeights = null;
+            if (wdlData != null)
+            {
+                var tileIndex = y * 64 + x;
+                if (tileIndex >= 0 && tileIndex < wdlData.Tiles.Length)
+                {
+                    var wdlTile = wdlData.Tiles[tileIndex];
+                    if (wdlTile != null && wdlTile.HasData)
+                    {
+                        wdlHeights = new short[17 * 17];
+                        for (int r = 0; r < 17; r++)
+                        {
+                            for (int c = 0; c < 17; c++)
+                            {
+                                 wdlHeights[r * 17 + c] = wdlTile.Height17[r, c];
+                            }
+                        }
+                    }
+                }
+            }
             
             string? alphaMapsBase64 = null;
             string? shadowMapBase64 = null;
@@ -369,6 +499,7 @@ public sealed class VlmDatasetExporter
                     textures,
                     layers,
                     objects,
+                    wdlHeights,
                     heightMin,
                     heightMax
                 )

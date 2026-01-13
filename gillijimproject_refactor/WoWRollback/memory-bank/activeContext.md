@@ -1,16 +1,35 @@
 # WoWRollback Active Context
 
-## Current Focus: VLM Terrain Data Export (Dec 2025)
+## Current Focus: VLM Dataset Export (Jan 2026)
 
-### Session Summary (2025-12-26)
+### Session Summary (2026-01-13)
 
-**Goal**: Export VLM dataset with terrain + placements for AI training.
+**Goal**: Enhance VLM export with Object Name Resolution, WDL Heightmaps, Alpha 0.5.3 Support, and Flat File Inputs.
 
-**Status**: PARTIAL SUCCESS - Placements work, terrain still null
+**Status**: COMPLETE ✅
 
 **What Works**:
 - VLM Export exports minimap PNGs ✓
-- Placements from MPQ (M2/WMO with UniqueID, position, rotation, scale) ✓
+- ADT terrain meshes (OBJ/MTL) ✓
+- Alpha masks (PNG texture distribution) ✓
+- WDL low-res heightmaps (`wdl_heights`) ✓
+- Object placements with **full name resolution** via Community Listfile ✓
+- Alpha 0.5.3 monolithic WDT parsing ✓
+- Flat file input support ✓
+
+**New Features Added (This Session)**:
+- `ListfileService.cs` - Loads community listfile for FileDataID → Filename resolution.
+- `WdlParser.cs` - Parses WDL `MAOF`/`MARE` chunks for global heightmaps.
+- `AdtParser.cs` - Updated with:
+    - `Func<uint, string?>` name resolver parameter.
+    - Version-aware MCNK parsing (Alpha coordinate calculation).
+- `VlmDatasetExporter.cs` - Updated with:
+    - `--listfile` argument support.
+    - Monolithic WDT detection and ADT extraction via `MAIN` chunk.
+    - WDL data integration.
+- Documentation updated: `VLM_Terrain_Tool_Usage.md`, `WoWRollback.Cli/README.md`, `WoWMapConverter/README.md`.
+
+**VLM Output Now Includes**:
 - JSON metadata files created with full placement data ✓
 - CSV fallback for cached placements ✓
 

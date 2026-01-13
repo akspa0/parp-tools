@@ -57,6 +57,30 @@ dotnet run --project . -- analyze-map-adts \
 dotnet run --project . -- serve-viewer --viewer-dir analysis_output\viewer --port 8080
 ```
 
+### VLM Export (Vision-Language Model Dataset)
+Export rich terrain datasets for VLM training, correlating minimaps with terrain meshes, textures, and objects.
+```powershell
+dotnet run --project . -- vlm-export \
+  --client-path "C:\WoW335" \
+  --map "Azeroth" \
+  --out "./vlm_dataset" \
+  --listfile "test_data/community-listfile-withcapitals.csv" \
+  --limit 100
+```
+**Arguments**:
+- `--client-path`: WoW client root (supports MPQ, CASC, or flat file directories).
+- `--map`: Map name (e.g., `Azeroth`, `Kalimdor`, `Development`).
+- `--out`: Output directory for dataset.
+- `--listfile`: (Optional) Path to community listfile CSV for FileDataID resolution.
+- `--limit`: (Optional) Max tiles to export.
+
+**Features**:
+- Supports **Alpha 0.5.3** monolithic WDTs (auto-detects and extracts embedded ADT data).
+- Supports **Flat Files** (loose mod directories, custom creations).
+- Includes **WDL** low-resolution global heightmaps (`wdl_heights`).
+- Generates **Alpha Masks** (PNG visualizations of texture distribution).
+- Extracts **Object Placements** (M2/WMO names, positions, rotations, scale).
+
 ## Notes
 - Neighbor-aware MCNK holes clearing uses pre-scan of buried placement refs and clears holes in self+8-neighbors.
 ## Development Map Repair Pipeline

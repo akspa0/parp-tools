@@ -17,6 +17,26 @@ dotnet run --project WoWRollback/WoWRollback.Cli/WoWRollback.Cli.csproj -- vlm-e
 - `--client-path`: Path to the WoW client root directory (containing `Data` folder). Supports MPQ (1.12.1, 3.3.5) and CASC (modern) formats (via `ArchiveLocator`).
 - `--map`: The internal name of the map to export (e.g., `Azeroth`, `Kalimdor`, `Development`).
 - `--out`: Directory where the exported dataset will be saved.
+- `--listfile`: (Optional) Path to a community listfile (CSV) to resolve FileDataIDs to filenames.
+
+### 3. Usage Examples
+
+#### Standard Export (Retail/Classic)
+```bash
+dotnet run --project WoWRollback/WoWRollback.Cli -- vlm-export \
+  --client-path "C:/WoW/Retail" \
+  --map "Azeroth" \
+  --out "./output_vlm" \
+  --listfile "J:/wowDev/parp-tools/test_data/community-listfile-withcapitals.csv"
+```
+
+#### Alpha 0.5.3 Export
+The tool automatically detects monolithic WDT files (e.g., `Azeroth.wdt`) used in Alpha clients.
+- Point `--client-path` to your Alpha client folder.
+- If no `.adt` files are found, the tool parses the `.wdt` to extract terrain data.
+
+#### Flat File Input
+You can point `--client-path` to any custom folder containing loose files. The tool handles non-MPQ/CASC directories natively.
 
 ### Output Structure
 
@@ -63,6 +83,7 @@ Each `dataset/*.json` file contains a training sample linking visual, geometric,
     "objects": [                         // Object placements (M2/WMO)
       { "name": "Tree01", "x": 100.0, "y": 200.0, "z": 50.0, "rot_x": 0, "category": "m2" }
     ],
+    "wdl_heights": [10, 12, 11, ...],    // (Optional) 17x17 Low-res global heightmap
     "height_min": 100.0,
     "height_max": 250.0
   }
