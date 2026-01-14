@@ -25,6 +25,9 @@ public record VlmTerrainData(
     // Shadow Maps - paths to per-chunk PNGs
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,
     
+    // Shadow Maps - raw bit data (64 bytes per chunk = 512 bits = 64x8 shadow map)
+    [property: JsonPropertyName("shadow_bits")] VlmChunkShadowBits[]? ShadowBits,
+    
     // Alpha Masks - paths to per-layer PNGs
     [property: JsonPropertyName("alpha_masks")] string[]? AlphaMasks,
     
@@ -60,6 +63,15 @@ public record VlmChunkHeights(
 );
 
 /// <summary>
+/// Raw shadow map bit data for a single MCNK chunk (64 bytes = 512 bits).
+/// Encoded as Base64 for JSON serialization.
+/// </summary>
+public record VlmChunkShadowBits(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("bits")] string BitsBase64  // 64 bytes -> Base64
+);
+
+/// <summary>
 /// Per-chunk texture layer data (MCLY).
 /// </summary>
 public record VlmChunkLayers(
@@ -75,7 +87,9 @@ public record VlmTextureLayer(
     [property: JsonPropertyName("flags")] uint Flags,
     [property: JsonPropertyName("alpha_off")] uint AlphaOffset,
     [property: JsonPropertyName("effect_id")] uint EffectId,
-    [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null
+    [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null,
+    // Raw alpha mask data (64 bytes = 64x64 / 8 for 1-bit, or 4096 bytes for 8-bit)
+    [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null
 );
 
 /// <summary>

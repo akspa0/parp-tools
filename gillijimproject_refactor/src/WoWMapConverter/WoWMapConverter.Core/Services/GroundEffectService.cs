@@ -127,11 +127,24 @@ public class GroundEffectService
 
     private void ProcessDoodadRows(DbcReader dbc)
     {
+        // Alpha 0.5.3 schema: ID(0), DoodadIdTag(1), Doodadpath(2)
+        // Later versions: ID(0), Doodadpath(1), Flags(2)...
+        // We try field 2 first (Alpha), fall back to field 1 (later versions)
         foreach (var row in dbc.Rows)
         {
-            uint id = dbc.GetUInt(dbc.Rows.IndexOf(row), 0);
-            string model = dbc.GetString(dbc.Rows.IndexOf(row), 1);
-            if (!string.IsNullOrEmpty(model)) _doodadModels[id] = model;
+            int rowIndex = dbc.Rows.IndexOf(row);
+            uint id = dbc.GetUInt(rowIndex, 0);
+            
+            // Try field 2 first (Alpha schema has path at field 2)
+            string model = dbc.GetString(rowIndex, 2);
+            if (string.IsNullOrEmpty(model) || !model.Contains('.'))
+            {
+                // Fall back to field 1 (later client schema)
+                model = dbc.GetString(rowIndex, 1);
+            }
+            
+            if (!string.IsNullOrEmpty(model) && model.Length > 4) 
+                _doodadModels[id] = model;
         }
     }
 

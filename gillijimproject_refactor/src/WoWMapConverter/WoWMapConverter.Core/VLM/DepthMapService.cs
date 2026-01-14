@@ -56,12 +56,22 @@ public class DepthMapService
         progress?.Report("Starting DepthAnything3 depth map generation...");
 
         // Locate python executable in venv
+        // First try relative to script (output dir), then try source directory
         var scriptDir = Path.GetDirectoryName(_scriptPath);
-        var venvPython = Path.Combine(scriptDir ?? ".", ".venv", "Scripts", "python.exe"); // Windows default
+        var venvSubPath = OperatingSystem.IsWindows() ? Path.Combine(".venv", "Scripts", "python.exe") : Path.Combine(".venv", "bin", "python");
         
-        if (!OperatingSystem.IsWindows())
+        var venvPython = Path.Combine(scriptDir ?? ".", venvSubPath);
+        
+        // Fallback: check source directory (venv is created there by setup script)
+        if (!File.Exists(venvPython))
         {
-            venvPython = Path.Combine(scriptDir ?? ".", ".venv", "bin", "python"); // Linux/Mac
+            // Try to find the source DepthAnything3 directory
+            var sourceDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "WoWMapConverter.Core", "VLM", "DepthAnything3"));
+            var sourceVenv = Path.Combine(sourceDir, venvSubPath);
+            if (File.Exists(sourceVenv))
+            {
+                venvPython = sourceVenv;
+            }
         }
 
         string pythonExe = _pythonPath;

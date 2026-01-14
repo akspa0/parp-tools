@@ -411,6 +411,7 @@ public class VlmDatasetExporter
         var liquids = new List<VlmLiquidData>();
         var objects = new List<VlmObjectPlacement>();
         var shadowPaths = new List<string>();
+        var shadowBits = new List<VlmChunkShadowBits>();
         var alphaPaths = new List<string>();
         
         float heightMin = float.MaxValue;
@@ -503,6 +504,10 @@ public class VlmDatasetExporter
                             var shadowFileName = $"{tileName}_c{chunkIndex}.png";
                             File.WriteAllBytes(Path.Combine(shadowsDir, shadowFileName), shadowPng);
                             shadowPaths.Add($"shadows/{shadowFileName}");
+                            
+                            // Store raw shadow bits (first 64 bytes = 512 bits of shadow data)
+                            var rawShadowBytes = mcshBuf.Length >= 64 ? mcshBuf.Take(64).ToArray() : mcshBuf;
+                            shadowBits.Add(new VlmChunkShadowBits(chunkIndex, Convert.ToBase64String(rawShadowBytes)));
                         }
                         catch { }
                     }
@@ -510,6 +515,10 @@ public class VlmDatasetExporter
                     // Extract alpha layers from McalData + MclyData
                     var mcalBuf = mcnk.McalData;
                     var mclyBuf = mcnk.MclyData;
+                    
+                    // Collect raw alpha data per layer for storage
+                    var layerAlphaBits = new Dictionary<int, string>(); // layer index -> Base64
+                    
                     if (mcalBuf.Length > 0 && nLayers > 1)
                     {
                         try
@@ -529,8 +538,17 @@ public class VlmDatasetExporter
                                 File.WriteAllBytes(Path.Combine(masksDir, alphaFileName), alphaPng);
                                 alphaPaths.Add($"masks/{alphaFileName}");
                                 
+                                // Store raw alpha bits (8-bit = 64x64 = 4096 bytes, or compressed = varies)
+                                int alphaSize = isCompressed ? 4096 : 2048;
+                                if (alphaOffset + alphaSize <= mcalBuf.Length)
+                                {
+                                    var rawAlpha = new byte[alphaSize];
+                                    Array.Copy(mcalBuf, alphaOffset, rawAlpha, 0, alphaSize);
+                                    layerAlphaBits[layer] = Convert.ToBase64String(rawAlpha);
+                                }
+                                
                                 // Advance offset (2048 for uncompressed 4-bit, varies for compressed)
-                                alphaOffset += isCompressed ? 4096 : 2048; // Approximate
+                                alphaOffset += alphaSize;
                             }
                         }
                         catch { }
@@ -550,8 +568,11 @@ public class VlmDatasetExporter
                         {
                             groundEffects = groundEffectService.GetDoodadsEffect(effectId);
                         }
+                        
+                        // Get raw alpha bits if available (only for layers > 0)
+                        string? alphaBitsBase64 = layerAlphaBits.TryGetValue(layer, out var bits) ? bits : null;
 
-                        layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId, groundEffects));
+                        layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId, groundEffects, alphaBitsBase64));
                     }
                     chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray()));
 
@@ -636,6 +657,7 @@ public class VlmDatasetExporter
             chunkPositions,
             holes,
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
+            shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
             null, // LiquidMaskPath
             null, // LiquidHeightPath

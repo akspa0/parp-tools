@@ -11,6 +11,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\..\..\lib\WoWTools.Minimaps\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
+    <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
   </ItemGroup>
 
   <ItemGroup>
