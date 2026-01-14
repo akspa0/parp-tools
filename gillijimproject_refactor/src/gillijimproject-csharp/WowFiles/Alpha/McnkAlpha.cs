@@ -44,6 +44,7 @@ public class McnkAlpha : Mcnk
     public byte[] MclqData => _mclq.Data;
     public int McalSize => _mcnkAlphaHeader.McalSize;
     public int McshSize => _mcnkAlphaHeader.McshSize;
+    public byte[] MccvData => Array.Empty<byte>();  // MCCV not present in Alpha - added in later versions
 
 
     public McnkAlpha(FileStream adtFile, int offsetInFile, int headerSize, int adtNum) : base(adtFile, offsetInFile)

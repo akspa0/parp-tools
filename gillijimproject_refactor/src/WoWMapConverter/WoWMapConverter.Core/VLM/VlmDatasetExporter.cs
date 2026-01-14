@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using WoWMapConverter.Core.Services;
 using GillijimProject.WowFiles.Alpha;
@@ -73,6 +74,10 @@ public class VlmDatasetExporter
         string? wdtPath = null;
         byte[]? wdtData = null;
         
+        // Initialize MPQ Service early so we can search archives for WDT
+        using var mpqService = new MpqArchiveService();
+        mpqService.LoadArchives(searchPaths);
+        
         foreach (var tryPath in wdtPaths)
         {
             // Try flat file first
@@ -83,7 +88,7 @@ public class VlmDatasetExporter
                 break;
             }
             
-            // Try per-asset MPQ (file.wdt.MPQ)
+            // Try per-asset MPQ (file.wdt.MPQ) - Alpha 0.5.3 style
             wdtData = AlphaMpqReader.ReadWithMpqFallback(tryPath);
             if (wdtData != null)
             {
@@ -94,6 +99,23 @@ public class VlmDatasetExporter
                 break;
             }
         }
+        
+        // Fallback: Try reading from large MPQ archives (3.3.5+, world.mpq, etc.)
+        if (wdtPath == null)
+        {
+            var wdtInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
+            if (mpqService.FileExists(wdtInternalPath))
+            {
+                wdtData = mpqService.ReadFile(wdtInternalPath);
+                if (wdtData != null)
+                {
+                    var tempWdt = Path.Combine(outputDir, $"{mapName}.wdt");
+                    await File.WriteAllBytesAsync(tempWdt, wdtData);
+                    wdtPath = tempWdt;
+                    progress?.Report($"Found WDT in MPQ archive: {wdtInternalPath}");
+                }
+            }
+        }
 
         if (wdtPath == null)
         {
@@ -101,13 +123,11 @@ public class VlmDatasetExporter
             progress?.Report($"Searched paths:");
             foreach (var p in wdtPaths)
                 progress?.Report($"  - {p} (and {p}.MPQ)");
-            progress?.Report("If your WDT is inside a larger MPQ archive (terrain.mpq, misc.mpq), extract it first.");
+            progress?.Report($"Also searched in loaded MPQ archives for: World\\Maps\\{mapName}\\{mapName}.wdt");
+            progress?.Report("Ensure MPQ archives (world.mpq, terrain.mpq, etc.) are in the Data folder.");
             return new VlmExportResult(0, 0, 0, outputDir);
         }
 
-        // Initialize MPQ Service
-        using var mpqService = new MpqArchiveService();
-        mpqService.LoadArchives(searchPaths);
         
 
 
@@ -208,12 +228,30 @@ public class VlmDatasetExporter
         var monmNames = wdt.GetMonmFileNames();
         
         progress?.Report($"Found {existingTiles.Count} tiles in WDT");
+        
+        // Detect WDT format using file size:
+        // - Alpha 0.5.3 WDT: Large file (contains embedded ADT data, typically several MB)
+        // - LK 3.3.5+ WDT: Small file (~32KB, only tile existence flags, ADTs are separate files)
+        long wdtFileSize = new FileInfo(wdtPath).Length;
+        bool isAlphaFormat = wdtFileSize > 100_000; // Alpha WDTs are typically > 1MB
+        if (!isAlphaFormat)
+        {
+            progress?.Report($"Detected LK format WDT ({wdtFileSize:N0} bytes - separate ADT files in MPQ)");
+        }
+        else
+        {
+            progress?.Report($"Detected Alpha format WDT ({wdtFileSize:N0} bytes - embedded ADT data)");
+        }
 
         int tilesExported = 0;
         int tilesSkipped = 0;
-        var allTextures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var allTextures = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var tileIndex in existingTiles.Take(limit))
+        // Parallel tile processing with configurable degree of parallelism
+        var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
+        var tilesToProcess = existingTiles.Take(limit).ToList();
+        
+        await Parallel.ForEachAsync(tilesToProcess, parallelOptions, async (tileIndex, ct) =>
         {
             int x = tileIndex % 64;
             int y = tileIndex / 64;
@@ -221,30 +259,11 @@ public class VlmDatasetExporter
 
             try
             {
-                int adtOffset = tileIndex < adtOffsets.Count ? adtOffsets[tileIndex] : 0;
-                if (adtOffset <= 0)
-                {
-                    tilesSkipped++;
-                    continue;
-                }
-
-                // Parse ADT using AdtAlpha (proven parser)
-                AdtAlpha adtAlpha;
-                try
-                {
-                    adtAlpha = new AdtAlpha(wdtPath, adtOffset, tileIndex);
-                }
-                catch (Exception ex)
-                {
-                    progress?.Report($"Failed to parse ADT {tileName}: {ex.Message}");
-                    tilesSkipped++;
-                    continue;
-                }
-
-                // Try to find minimap
-                var minimapPath = FindMinimapTile(searchPaths, mpqService, md5Index, mapDirectory, x, y);
+                VlmTerrainData? sample = null;
                 string? imageRelPath = null;
                 
+                // Try to find minimap (common to both formats)
+                var minimapPath = FindMinimapTile(searchPaths, mpqService, md5Index, mapDirectory, x, y);
                 if (minimapPath != null)
                 {
                     var imageFileName = $"{tileName}.png";
@@ -258,15 +277,55 @@ public class VlmDatasetExporter
 
                 // Lookup WDL tile
                 var wdlTile = wdlData?.Tiles[tileIndex];
+                
+                if (isAlphaFormat)
+                {
+                    // Alpha format: ADT data is embedded in WDT at offset
+                    int adtOffset = tileIndex < adtOffsets.Count ? adtOffsets[tileIndex] : 0;
+                    if (adtOffset <= 0)
+                    {
+                        Interlocked.Increment(ref tilesSkipped);
+                        return;
+                    }
 
-                // Extract terrain data using AdtAlpha's methods
-                var sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                    shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile);
+                    // Parse ADT using AdtAlpha (proven parser)
+                    AdtAlpha adtAlpha;
+                    try
+                    {
+                        adtAlpha = new AdtAlpha(wdtPath, adtOffset, tileIndex);
+                    }
+                    catch (Exception ex)
+                    {
+                        progress?.Report($"Failed to parse ADT {tileName}: {ex.Message}");
+                        Interlocked.Increment(ref tilesSkipped);
+                        return;
+                    }
+
+                    // Extract terrain data using AdtAlpha's methods
+                    sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
+                        shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile);
+                }
+                else
+                {
+                    // LK format: Read ADT from MPQ as separate file
+                    var adtMpqPath = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}.adt";
+                    var adtBytes = mpqService.ReadFile(adtMpqPath);
+                    
+                    if (adtBytes == null || adtBytes.Length == 0)
+                    {
+                        Interlocked.Increment(ref tilesSkipped);
+                        return;
+                    }
+
+                    // Extract terrain data using LK ADT parsing
+                    sample = await ExtractFromLkAdt(adtBytes, tileIndex, tileName, outputDir,
+                        shadowsDir, masksDir, allTextures, mpqService, groundEffectService, wdlTile);
+                }
 
                 if (sample == null)
                 {
-                    tilesSkipped++;
-                    continue;
+                    Interlocked.Increment(ref tilesSkipped);
+                    return;
                 }
 
                 var finalSample = new VlmTrainingSample(
@@ -279,19 +338,20 @@ public class VlmDatasetExporter
                 var json = JsonSerializer.Serialize(finalSample, _jsonOptions);
                 await File.WriteAllTextAsync(jsonPath, json);
 
-                tilesExported++;
-                if (tilesExported % 10 == 0)
-                    progress?.Report($"Exported {tilesExported} tiles...");
+                Interlocked.Increment(ref tilesExported);
+                var currentCount = tilesExported;
+                if (currentCount % 50 == 0)
+                    progress?.Report($"Exported {currentCount} tiles...");
             }
             catch (Exception ex)
             {
                 progress?.Report($"Error processing {tileName}: {ex.Message}");
-                tilesSkipped++;
+                Interlocked.Increment(ref tilesSkipped);
             }
-        }
+        });
 
         var textureDbPath = Path.Combine(outputDir, "texture_database.json");
-        var textureDb = new { count = allTextures.Count, textures = allTextures.ToList() };
+        var textureDb = new { count = allTextures.Count, textures = allTextures.Keys.ToList() };
         await File.WriteAllTextAsync(textureDbPath, JsonSerializer.Serialize(textureDb, _jsonOptions));
 
         // Stitch chunk data into tile-level images
@@ -373,7 +433,7 @@ public class VlmDatasetExporter
             Directory.CreateDirectory(tilesetsDir);
             
             int textureCount = 0;
-            foreach (var texture in allTextures)
+            foreach (var texture in allTextures.Keys)
             {
                 var texName = Path.GetFileName(texture); // e.g. "grass.blp"
                 var pngName = Path.ChangeExtension(texName, ".png");
@@ -473,7 +533,7 @@ public class VlmDatasetExporter
         AdtAlpha adt, string wdtPath, int adtOffset, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
-        HashSet<string> textureCollector, GroundEffectService? groundEffectService = null,
+        ConcurrentDictionary<string, byte> textureCollector, GroundEffectService? groundEffectService = null,
         WdlParser.WdlTile? wdlTile = null)
     {
         var heights = new List<VlmChunkHeights>();
@@ -513,7 +573,7 @@ public class VlmDatasetExporter
         if (mtexNames != null)
         {
             textures.AddRange(mtexNames);
-            foreach (var t in mtexNames) textureCollector.Add(t);
+            foreach (var t in mtexNames) textureCollector.TryAdd(t, 0);
         }
 
         // Process MCNKs by reading directly with McnkAlpha
@@ -707,7 +767,15 @@ public class VlmDatasetExporter
                     uint areaId = (uint)mcnk.Header.Unknown3;  // Unknown3 is area ID in Alpha
                     uint chunkFlags = (uint)mcnk.Header.Flags;
                     
-                    chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray(), chunkShadowPath, normalsArray, areaId, chunkFlags));
+                    // Extract MCCV vertex colors (if present - not in Alpha, added in later versions)
+                    byte[]? mccvColors = null;
+                    var mccvBuf = mcnk.MccvData;
+                    if (mccvBuf != null && mccvBuf.Length > 0)
+                    {
+                        mccvColors = mccvBuf;
+                    }
+                    
+                    chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray(), chunkShadowPath, normalsArray, mccvColors, areaId, chunkFlags));
 
                     // Extract Liquid Data (MCLQ - Legacy)
                     var mclqData = mcnk.MclqData;
@@ -813,6 +881,217 @@ public class VlmDatasetExporter
             heightMin == float.MaxValue ? 0 : heightMin,
             heightMax == float.MinValue ? 0 : heightMax
         );
+    }
+
+    /// <summary>
+    /// Extract terrain data from LK ADT bytes (3.3.5+ format).
+    /// </summary>
+    private async Task<VlmTerrainData?> ExtractFromLkAdt(
+        byte[] adtBytes, int tileIndex, string tileName,
+        string outputDir, string shadowsDir, string masksDir,
+        ConcurrentDictionary<string, byte> textureCollector, MpqArchiveService mpqService,
+        GroundEffectService? groundEffectService = null, WdlParser.WdlTile? wdlTile = null)
+    {
+        var heights = new List<VlmChunkHeights>();
+        var chunkPositions = new float[256 * 3];
+        var holes = new int[256];
+        var textures = new List<string>();
+        var chunkLayers = new List<VlmChunkLayers>();
+        var liquids = new List<VlmLiquidData>();
+        var objects = new List<VlmObjectPlacement>();
+        
+        float heightMin = float.MaxValue;
+        float heightMax = float.MinValue;
+
+        // Prepare WDL data if available
+        VlmWdlData? wdlHeights = null;
+        if (wdlTile != null && wdlTile.HasData)
+        {
+            var h17 = new short[17 * 17];
+            for (int r = 0; r < 17; r++)
+                for (int c = 0; c < 17; c++)
+                    h17[r * 17 + c] = wdlTile.Height17[r, c];
+
+            var h16 = new short[16 * 16];
+            for (int r = 0; r < 16; r++)
+                for (int c = 0; c < 16; c++)
+                    h16[r * 16 + c] = wdlTile.Height16[r, c];
+
+            wdlHeights = new VlmWdlData(h17, h16);
+        }
+
+        try
+        {
+            // Find MHDR to get chunk offsets
+            int mhdrOffset = FindLkChunk(adtBytes, "MHDR");
+            if (mhdrOffset < 0)
+            {
+                Console.WriteLine($"[LK ADT] MHDR not found in {tileName}");
+                return null;
+            }
+
+            int mhdrDataStart = mhdrOffset + 8;
+            int mcinRelOffset = BitConverter.ToInt32(adtBytes, mhdrDataStart); // MCIN offset relative to MHDR data
+
+            if (mcinRelOffset <= 0)
+            {
+                Console.WriteLine($"[LK ADT] Invalid MCIN offset in {tileName}");
+                return null;
+            }
+
+            int mcinOffset = mhdrDataStart + mcinRelOffset;
+            
+            // Read MCIN to get MCNK offsets
+            var mcnkOffsets = new int[256];
+            int mcinDataStart = mcinOffset + 8; // skip chunk header
+            for (int i = 0; i < 256 && mcinDataStart + i * 16 + 4 <= adtBytes.Length; i++)
+            {
+                mcnkOffsets[i] = BitConverter.ToInt32(adtBytes, mcinDataStart + i * 16);
+            }
+
+            // Extract textures from MTEX
+            int mtexOffset = FindLkChunk(adtBytes, "MTEX");
+            if (mtexOffset >= 0)
+            {
+                int mtexSize = BitConverter.ToInt32(adtBytes, mtexOffset + 4);
+                int pos = mtexOffset + 8;
+                int end = pos + mtexSize;
+                while (pos < end)
+                {
+                    int nul = Array.IndexOf(adtBytes, (byte)0, pos, end - pos);
+                    if (nul == -1) nul = end;
+                    int len = nul - pos;
+                    if (len > 0)
+                    {
+                        var texName = System.Text.Encoding.UTF8.GetString(adtBytes, pos, len);
+                        textures.Add(texName);
+                        textureCollector.TryAdd(texName, 0);
+                    }
+                    pos = nul + 1;
+                }
+            }
+
+            // Process each MCNK chunk
+            for (int chunkIndex = 0; chunkIndex < 256; chunkIndex++)
+            {
+                int mcnkOffset = mcnkOffsets[chunkIndex];
+                if (mcnkOffset <= 0 || mcnkOffset + 128 > adtBytes.Length)
+                    continue;
+
+                try
+                {
+                    // Read MCNK header (128 bytes in LK)
+                    int headerStart = mcnkOffset + 8; // skip MCNK fourcc + size
+                    
+                    // Get position from header
+                    float baseX = BitConverter.ToSingle(adtBytes, headerStart + 12); // offsetX
+                    float baseY = BitConverter.ToSingle(adtBytes, headerStart + 16); // offsetY
+                    float baseZ = BitConverter.ToSingle(adtBytes, headerStart + 20); // offsetZ
+                    
+                    chunkPositions[chunkIndex * 3] = baseX;
+                    chunkPositions[chunkIndex * 3 + 1] = baseY;
+                    chunkPositions[chunkIndex * 3 + 2] = baseZ;
+                    
+                    // Get holes from header
+                    int holesValue = BitConverter.ToInt32(adtBytes, headerStart + 60); // holes field
+                    holes[chunkIndex] = holesValue;
+
+                    // Find MCVT subchunk (heights)
+                    int mcvtRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 24);
+                    if (mcvtRelOffset > 0)
+                    {
+                        int mcvtAbs = headerStart + mcvtRelOffset + 8; // skip subchunk header
+                        if (mcvtAbs + 145 * 4 <= adtBytes.Length)
+                        {
+                            var chunkHeights = new float[145];
+                            for (int h = 0; h < 145; h++)
+                            {
+                                chunkHeights[h] = baseZ + BitConverter.ToSingle(adtBytes, mcvtAbs + h * 4);
+                                if (chunkHeights[h] < heightMin) heightMin = chunkHeights[h];
+                                if (chunkHeights[h] > heightMax) heightMax = chunkHeights[h];
+                            }
+                            heights.Add(new VlmChunkHeights(chunkIndex, chunkHeights));
+                        }
+                    }
+
+                    // Find MCNR subchunk (normals)
+                    int mcnrRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 28);
+                    sbyte[]? normalsArray = null;
+                    if (mcnrRelOffset > 0)
+                    {
+                        int mcnrAbs = headerStart + mcnrRelOffset + 8; // skip subchunk header
+                        if (mcnrAbs + 145 * 3 <= adtBytes.Length)
+                        {
+                            normalsArray = new sbyte[145 * 3];
+                            for (int n = 0; n < 145 * 3; n++)
+                                normalsArray[n] = (sbyte)adtBytes[mcnrAbs + n];
+                        }
+                    }
+
+                    // Create chunk layer entry with normals
+                    chunkLayers.Add(new VlmChunkLayers(
+                        chunkIndex, 
+                        Array.Empty<VlmTextureLayer>(), 
+                        null, // shadow path
+                        normalsArray,
+                        null, // mccv colors 
+                        0, // area id
+                        0  // flags
+                    ));
+                }
+                catch { /* Skip problematic chunks */ }
+            }
+
+            return new VlmTerrainData(
+                tileName,
+                heights.ToArray(),
+                chunkPositions,
+                holes,
+                null, // shadowPaths
+                null, // shadowBits
+                null, // alphaPaths
+                null, // LiquidMaskPath
+                null, // LiquidHeightPath
+                0f,   // LiquidMinHeight
+                0f,   // LiquidMaxHeight
+                textures,
+                chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
+                liquids.Count > 0 ? liquids.ToArray() : null,
+                objects,
+                wdlHeights,
+                heightMin == float.MaxValue ? 0 : heightMin,
+                heightMax == float.MinValue ? 0 : heightMax
+            );
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[LK ADT] Error parsing {tileName}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Find a chunk in LK ADT format (reversed FourCC).
+    /// </summary>
+    private static int FindLkChunk(byte[] bytes, string fourCC)
+    {
+        // LK uses reversed FourCC on disk
+        string reversed = new string(fourCC.Reverse().ToArray());
+        
+        for (int i = 0; i + 8 <= bytes.Length;)
+        {
+            string fcc = System.Text.Encoding.ASCII.GetString(bytes, i, 4);
+            int size = BitConverter.ToInt32(bytes, i + 4);
+            
+            if (fcc == reversed)
+                return i;
+
+            int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (next <= i) break;
+            i = next;
+        }
+
+        return -1;
     }
 
     private string? FindMinimapTile(IEnumerable<string> searchPaths, MpqArchiveService mpqService, Md5TranslateIndex? index, string mapName, int x, int y)

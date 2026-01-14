@@ -465,3 +465,9 @@ gillijimproject_refactor/PM4_to_ADT/*
 # .venv
 .venv/*
 gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3/.venv/*
+
+# unsloth
+*unsloth_compiled_cache/*
+*unsloth*
+*.gguf
+

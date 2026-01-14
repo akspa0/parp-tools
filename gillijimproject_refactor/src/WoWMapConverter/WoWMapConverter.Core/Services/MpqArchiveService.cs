@@ -66,18 +66,98 @@ public class MpqArchiveService : IDisposable
 
     public void LoadArchives(IEnumerable<string> searchPaths)
     {
+        var pathsToSearch = new HashSet<string>();
+        
         foreach (var path in searchPaths)
         {
             if (Directory.Exists(path))
+                pathsToSearch.Add(path);
+            
+            // Also check Data subfolder (WoW client structure)
+            var dataSubdir = Path.Combine(path, "Data");
+            if (Directory.Exists(dataSubdir))
             {
-                var mpqFiles = Directory.GetFiles(path, "*.mpq");
-                foreach (var mpq in mpqFiles) OpenArchive(mpq);
+                pathsToSearch.Add(dataSubdir);
                 
-                var mpqFilesUpper = Directory.GetFiles(path, "*.MPQ");
-                foreach (var mpq in mpqFilesUpper) OpenArchive(mpq);
+                // Check for locale folders (3.3.5+: Data/enUS, Data/deDE, etc.)
+                foreach (var localeDir in Directory.GetDirectories(dataSubdir))
+                {
+                    var localeName = Path.GetFileName(localeDir);
+                    // Common WoW locale codes
+                    if (localeName.Length == 4 && char.IsLetter(localeName[0]) && char.IsLetter(localeName[1]) &&
+                        char.IsUpper(localeName[2]) && char.IsUpper(localeName[3]))
+                    {
+                        pathsToSearch.Add(localeDir);
+                    }
+                }
             }
         }
+        
+        Console.WriteLine($"[MpqService] Searching for MPQ archives in {pathsToSearch.Count} paths:");
+        foreach (var p in pathsToSearch)
+            Console.WriteLine($"  - {p}");
+        
+        // Collect all MPQ files
+        var allMpqFiles = new List<string>();
+        foreach (var path in pathsToSearch)
+        {
+            var mpqFiles = Directory.GetFiles(path, "*.mpq", SearchOption.TopDirectoryOnly);
+            allMpqFiles.AddRange(mpqFiles);
+            
+            var mpqFilesUpper = Directory.GetFiles(path, "*.MPQ", SearchOption.TopDirectoryOnly);
+            allMpqFiles.AddRange(mpqFilesUpper);
+        }
+        
+        // Remove duplicates
+        allMpqFiles = allMpqFiles.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        
+        // Sort by priority: base mpqs first (low priority), patch mpqs last (high priority)
+        // StormLib searches from highest priority -> lowest, so we load patches LAST
+        // Order: common, expansion, lichking, locale, then patches (patch, patch-2, patch-3, etc.)
+        allMpqFiles = allMpqFiles
+            .OrderBy(f => GetMpqPriority(Path.GetFileName(f)))
+            .ToList();
+        
+        Console.WriteLine($"[MpqService] Loading {allMpqFiles.Count} archives in priority order:");
+        uint priority = 1;
+        foreach (var mpq in allMpqFiles)
+        {
+            OpenArchive(mpq, priority++);
+        }
         Console.WriteLine($"Initialized MpqArchiveService with {_archives.Count} archives.");
+    }
+    
+    private static int GetMpqPriority(string filename)
+    {
+        var lower = filename.ToLowerInvariant();
+        
+        // Patches get highest priority (loaded last = searched first)
+        if (lower.StartsWith("patch"))
+        {
+            // patch.mpq = 1000, patch-2.mpq = 1002, patch-3.mpq = 1003, etc.
+            if (lower == "patch.mpq") return 1000;
+            if (lower.StartsWith("patch-"))
+            {
+                var numPart = lower.Replace("patch-", "").Replace(".mpq", "");
+                if (int.TryParse(numPart, out int num))
+                    return 1000 + num;
+            }
+            return 1099; // Other patch files
+        }
+        
+        // Locale-specific (enUS, etc.) - medium-high priority
+        if (lower.Contains("enus") || lower.Contains("engb") || lower.Contains("dede") || lower.Contains("locale"))
+            return 500;
+        
+        // Expansion packs - medium priority
+        if (lower.StartsWith("expansion") || lower.StartsWith("lichking"))
+            return 300;
+        
+        // Base game files - lowest priority
+        if (lower == "common.mpq" || lower == "common-2.mpq")
+            return 100;
+        
+        return 200; // Everything else
     }
     
     public void AddListFile(string listFilePath)
@@ -91,12 +171,12 @@ public class MpqArchiveService : IDisposable
         Console.WriteLine($"[MpqService] Added listfile to {count}/{_archives.Count} archives.");
     }
 
-    private void OpenArchive(string path)
+    private void OpenArchive(string path, uint priority = 0)
     {
-        if (SFileOpenArchive(path, SFILE_OPEN_HARD_DISK_FILE, MPQ_OPEN_READ_ONLY, out var hMpq))
+        if (SFileOpenArchive(path, priority, MPQ_OPEN_READ_ONLY, out var hMpq))
         {
             _archives.Add(hMpq);
-            Console.WriteLine($"Opened archive: {Path.GetFileName(path)} (Handle: {hMpq})");
+            Console.WriteLine($"  [{priority:D3}] {Path.GetFileName(path)}");
         }
     }
     public bool FileExists(string virtualPath)

@@ -91,6 +91,7 @@ public record VlmChunkLayers(
     // Per-chunk paths for reconstruction
     [property: JsonPropertyName("shadow_path")] string? ShadowPath = null,
     [property: JsonPropertyName("normals")] sbyte[]? Normals = null,  // MCNR 448 bytes (145 * 3 + 13 padding)
+    [property: JsonPropertyName("mccv_colors")] byte[]? MccvColors = null,  // MCCV vertex colors (145 * 4 RGBA = 580 bytes)
     [property: JsonPropertyName("area_id")] uint AreaId = 0,
     [property: JsonPropertyName("flags")] uint Flags = 0
 );
