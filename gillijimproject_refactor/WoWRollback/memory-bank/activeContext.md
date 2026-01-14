@@ -38,6 +38,7 @@
 | Tile stitching | 1024×1024 PNG | ✓ |
 | Liquids (MH2O/MCLQ) | JSON + PNG | ✓ |
 | Depth maps | DepthAnything3 | ✓ |
+| Ground Effects | DBC Decoding | ✓ |
 
 ---
 

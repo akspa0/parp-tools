@@ -1,30 +1,34 @@
 # DepthAnything3 Setup Script for VLM Dataset Tool (Windows PowerShell)
-# Requires: conda or miniconda
+# Requires: python 3.10+ installed and in PATH
 
-$ENV_NAME = "da3"
+$VENV_DIR = Join-Path $PSScriptRoot ".venv"
 
-Write-Host "=== DepthAnything3 Setup for VLM Dataset Tool ===" -ForegroundColor Cyan
+Write-Host "=== DepthAnything3 Setup for VLM Dataset Tool (venv) ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Check for conda
+# Check for python
 try {
-    $condaPath = (Get-Command conda -ErrorAction Stop).Source
-    Write-Host "Found conda: $condaPath" -ForegroundColor Green
+    $pythonVersion = python --version 2>&1
+    Write-Host "Found python: $pythonVersion" -ForegroundColor Green
 } catch {
-    Write-Host "Error: conda not found. Please install Miniconda or Anaconda first." -ForegroundColor Red
-    Write-Host "  https://docs.conda.io/en/latest/miniconda.html"
+    Write-Host "Error: python not found. Please install Python 3.10+ and add it to PATH." -ForegroundColor Red
     exit 1
 }
 
-# Create conda environment
-Write-Host "Creating conda environment: $ENV_NAME"
-conda create -n $ENV_NAME python=3.10 -y
+# Create venv if not exists
+if (-not (Test-Path $VENV_DIR)) {
+    Write-Host "Creating virtual environment in $VENV_DIR..."
+    python -m venv $VENV_DIR
+} else {
+    Write-Host "Virtual environment already exists in $VENV_DIR"
+}
 
-# Activate environment
-Write-Host "Activating environment..."
-conda activate $ENV_NAME
+# Activate venv for this session
+$env:VIRTUAL_ENV = $VENV_DIR
+$env:Path = "$VENV_DIR\Scripts;$env:Path"
 
-# Install PyTorch with CUDA
+# Install PyTorch (CPU version is fine for small batches, but CUDA preferred if available)
+# Using generic torch install which will pick up CUDA if available or CPU otherwise
 Write-Host "Installing PyTorch..."
 pip install "torch>=2" torchvision xformers addict
 
@@ -45,5 +49,4 @@ python -c "from depth_anything_3.api import DepthAnything3; DepthAnything3.from_
 
 Write-Host ""
 Write-Host "=== Setup Complete ===" -ForegroundColor Green
-Write-Host "To use: conda activate $ENV_NAME"
-Write-Host "Model: DA3MONO-LARGE (monocular depth estimation)"
+Write-Host "Environment created at: $VENV_DIR"

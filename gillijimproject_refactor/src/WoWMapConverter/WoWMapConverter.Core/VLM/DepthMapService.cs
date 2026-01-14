@@ -55,27 +55,30 @@ public class DepthMapService
 
         progress?.Report("Starting DepthAnything3 depth map generation...");
 
-        // Build command - use conda run if specified
-        string command;
-        string arguments;
-
-        if (OperatingSystem.IsWindows())
+        // Locate python executable in venv
+        var scriptDir = Path.GetDirectoryName(_scriptPath);
+        var venvPython = Path.Combine(scriptDir ?? ".", ".venv", "Scripts", "python.exe"); // Windows default
+        
+        if (!OperatingSystem.IsWindows())
         {
-            // Windows: use conda run
-            command = "cmd.exe";
-            arguments = $"/c conda activate {_condaEnv} && python \"{_scriptPath}\" --input \"{inputDir}\" --output \"{outputDir}\"";
+            venvPython = Path.Combine(scriptDir ?? ".", ".venv", "bin", "python"); // Linux/Mac
+        }
+
+        string pythonExe = _pythonPath;
+        if (File.Exists(venvPython))
+        {
+            pythonExe = venvPython;
+            progress?.Report($"Using venv python: {pythonExe}");
         }
         else
         {
-            // Linux/WSL: use conda run
-            command = "bash";
-            arguments = $"-c \"source $(conda info --base)/etc/profile.d/conda.sh && conda activate {_condaEnv} && python \\\"{_scriptPath}\\\" --input \\\"{inputDir}\\\" --output \\\"{outputDir}\\\"\"";
+            progress?.Report($"Using system python: {pythonExe} (venv not found at {venvPython})");
         }
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = command,
-            Arguments = arguments,
+            FileName = pythonExe,
+            Arguments = $"\"{_scriptPath}\" --input \"{inputDir}\" --output \"{outputDir}\"",
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

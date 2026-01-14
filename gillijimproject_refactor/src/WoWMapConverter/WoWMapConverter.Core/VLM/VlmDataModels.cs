@@ -74,7 +74,8 @@ public record VlmTextureLayer(
     [property: JsonPropertyName("tex_id")] uint TextureId,
     [property: JsonPropertyName("flags")] uint Flags,
     [property: JsonPropertyName("alpha_off")] uint AlphaOffset,
-    [property: JsonPropertyName("effect_id")] uint EffectId
+    [property: JsonPropertyName("effect_id")] uint EffectId,
+    [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null
 );
 
 /// <summary>

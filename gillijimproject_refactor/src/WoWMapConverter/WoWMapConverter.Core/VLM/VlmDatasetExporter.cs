@@ -53,6 +53,13 @@ public class VlmDatasetExporter
         {
             dataPath = Path.Combine(clientPath, "Data");
             progress?.Report($"Using Data subfolder: {dataPath}");
+            progress?.Report($"Using Data subfolder: {dataPath}");
+        }
+
+        var searchPaths = new List<string> { dataPath };
+        if (!string.Equals(clientPath, dataPath, StringComparison.OrdinalIgnoreCase))
+        {
+            searchPaths.Add(clientPath);
         }
 
         // Try multiple WDT locations
@@ -97,6 +104,32 @@ public class VlmDatasetExporter
             progress?.Report("If your WDT is inside a larger MPQ archive (terrain.mpq, misc.mpq), extract it first.");
             return new VlmExportResult(0, 0, 0, outputDir);
         }
+
+        // Initialize MPQ Service
+        using var mpqService = new MpqArchiveService();
+        mpqService.LoadArchives(searchPaths);
+
+        // Initialize MapDbcService to check for strict directory names
+        var mapDbcService = new MapDbcService();
+        mapDbcService.Load(searchPaths, mpqService);
+        
+        string mapDirectory = mapDbcService.ResolveDirectory(mapName) ?? mapName;
+        if (!string.Equals(mapDirectory, mapName, StringComparison.Ordinal))
+        {
+            Console.WriteLine($"Resolved map '{mapName}' to directory '{mapDirectory}' via Map.dbc");
+        }
+
+        // Initialize MD5 Translate Service (Legacy)
+        Md5TranslateIndex? md5Index = null;
+        if (Md5TranslateResolver.TryLoad(searchPaths, mpqService, out var loadedIndex))
+        {
+            md5Index = loadedIndex;
+            Console.WriteLine($"Loaded MD5 Translate Index with {md5Index?.HashToPlain.Count} entries.");
+        }
+
+        // Initialize GroundEffectService
+        var groundEffectService = new GroundEffectService();
+        groundEffectService.Load(searchPaths, mpqService);  // Pass mpqService to GroundEffectService (need update)
 
         WdtAlpha wdt;
         try
@@ -149,7 +182,7 @@ public class VlmDatasetExporter
                 }
 
                 // Try to find minimap
-                var minimapPath = FindMinimapTile(dataPath, mapName, x, y);
+                var minimapPath = FindMinimapTile(searchPaths, mpqService, md5Index, mapDirectory, x, y);
                 string? imageRelPath = null;
                 
                 if (minimapPath != null)
@@ -157,7 +190,7 @@ public class VlmDatasetExporter
                     var imageFileName = $"{tileName}.png";
                     var outputImagePath = Path.Combine(imagesDir, imageFileName);
                     
-                    if (ConvertBlpToPng(minimapPath, outputImagePath))
+                    if (ConvertBlpToPng(minimapPath, outputImagePath, mpqService))
                     {
                         imageRelPath = $"images/{imageFileName}";
                     }
@@ -165,7 +198,7 @@ public class VlmDatasetExporter
 
                 // Extract terrain data using AdtAlpha's methods
                 var sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                    shadowsDir, masksDir, mdnmNames, monmNames, allTextures);
+                    shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService);
 
                 if (sample == null)
                 {
@@ -368,7 +401,7 @@ public class VlmDatasetExporter
         AdtAlpha adt, string wdtPath, int adtOffset, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
-        HashSet<string> textureCollector)
+        HashSet<string> textureCollector, GroundEffectService? groundEffectService = null)
     {
         var heights = new List<VlmChunkHeights>();
         var chunkPositions = new float[256 * 3];
@@ -511,7 +544,14 @@ public class VlmDatasetExporter
                         uint flags = BitConverter.ToUInt32(mclyBuf, layer * 16 + 4);
                         uint alphaoffs = BitConverter.ToUInt32(mclyBuf, layer * 16 + 8);
                         uint effectId = BitConverter.ToUInt32(mclyBuf, layer * 16 + 12);
-                        layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId));
+                        
+                        string[]? groundEffects = null;
+                        if (effectId > 0 && groundEffectService != null)
+                        {
+                            groundEffects = groundEffectService.GetDoodadsEffect(effectId);
+                        }
+
+                        layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId, groundEffects));
                     }
                     chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray()));
 
@@ -610,36 +650,123 @@ public class VlmDatasetExporter
         );
     }
 
-    private string? FindMinimapTile(string clientPath, string mapName, int x, int y)
+    private string? FindMinimapTile(IEnumerable<string> searchPaths, MpqArchiveService mpqService, Md5TranslateIndex? index, string mapName, int x, int y)
     {
-        var patterns = new[]
+        // Generate all possible plain-name candidates for this tile
+        // matching legacy MinimapFileResolver.EnumeratePlainCandidates
+        var candidates = new List<string>();
+        
+        var x2 = x.ToString("D2");
+        var y2 = y.ToString("D2");
+        
+        // 1. Standard full paths
+        candidates.Add($"textures/minimap/{mapName}/{mapName}_{x2}_{y2}.blp");
+        candidates.Add($"textures/minimap/{mapName}/map{x2}_{y2}.blp");
+        
+        // 2. Short paths (often used in md5translate)
+        candidates.Add($"{mapName}/map{x2}_{y2}.blp");
+        
+        // 3. Space variants (0.6.0 bug)
+        var mapNameSpace = InsertSpaceBeforeCapitals(mapName);
+        if (mapNameSpace != mapName)
         {
-            $"textures/minimap/{mapName.ToLower()}/map{x:D2}_{y:D2}.blp",
-            $"Textures/Minimap/{mapName}/map{x:D2}_{y:D2}.blp",
-            $"textures/Minimap/{mapName}/map{x:D2}_{y:D2}.blp",
-            $"World/Minimaps/{mapName}/map{x:D2}_{y:D2}.blp", // Release style
-            $"World/Minimaps/{mapName}/map{x}_{y}.blp"        // Alternate release style
-        };
-
-        foreach (var pattern in patterns)
-        {
-            var fullPath = Path.Combine(clientPath, pattern);
-            if (File.Exists(fullPath)) return fullPath;
-            
-            var mpqPath = fullPath + ".MPQ";
-            if (File.Exists(mpqPath)) return mpqPath;
+            candidates.Add($"textures/minimap/{mapNameSpace}/{mapNameSpace}_{x2}_{y2}.blp");
+            candidates.Add($"textures/minimap/{mapNameSpace}/map{x2}_{y2}.blp");
+            candidates.Add($"{mapNameSpace}/map{x2}_{y2}.blp");
         }
 
+        // 4. Other Legacy/Release variants
+        candidates.Add($"World/Minimaps/{mapName}/map{x2}_{y2}.blp");
+        candidates.Add($"World/Minimaps/{mapName}/map{x}_{y}.blp");
+        candidates.Add($"Textures/Minimap/{mapName}_{x2}_{y2}.blp");
+        candidates.Add($"Textures/Minimap/{mapName}_{x}_{y}.blp");
+
+        // PRIORITY 1: Check MD5 Index for ANY candidate
+        if (index != null)
+        {
+            foreach (var candidate in candidates)
+            {
+                // Normalize for lookup (legacy uses internal normalization, but our dict is case-insensitive too)
+                var lookupKey = candidate.Replace('\\', '/').TrimStart('/');
+                
+                if (index.PlainToHash.TryGetValue(lookupKey, out var hashed))
+                {
+                    // Found a mapping!
+                    // The 'hashed' value is the filename in the MPQ.
+                    var mpqKey = hashed.Replace("/", "\\");
+                    if (mpqService.FileExists(mpqKey))
+                    {
+                        Console.WriteLine($"[Match] Translated '{candidate}' -> '{hashed}' (Found in MPQ)");
+                        return $"MPQ:{mpqKey}";
+                    }
+                    
+                    // Also check disk
+                    foreach (var bp in searchPaths)
+                    {
+                         var hp = Path.Combine(bp, hashed);
+                         if (File.Exists(hp)) return hp;
+                    }
+                    
+                    Console.WriteLine($"[Mapping Found] '{candidate}' -> '{hashed}' but file missing.");
+                }
+            }
+        }
+
+        // PRIORITY 2: Check standard candidates on Disk/MPQ (Loose or Plain)
+        foreach (var candidate in candidates)
+        {
+             foreach (var basePath in searchPaths)
+             {
+                 var fullPath = Path.Combine(basePath, candidate);
+                 if (File.Exists(fullPath)) 
+                 {
+                     Console.WriteLine($"Found minimap on disk: {fullPath}");
+                     return fullPath;
+                 }
+                 if (File.Exists(fullPath + ".MPQ"))
+                 {
+                     return fullPath + ".MPQ";
+                 }
+             }
+             
+             // Check MPQ by plain name (fallback)
+             var mpqPlainKey = candidate.Replace("/", "\\");
+             if (mpqService.FileExists(mpqPlainKey))
+             {
+                 Console.WriteLine($"Found minimap in Archive (Plain): {mpqPlainKey}");
+                 return $"MPQ:{mpqPlainKey}";
+             }
+        }
+
+        Console.WriteLine($"Minimap not found for {mapName} {x}_{y}");
         return null;
     }
 
-    private bool ConvertBlpToPng(string blpPath, string pngPath)
+    private static string InsertSpaceBeforeCapitals(string input)
+    {
+        if (string.IsNullOrEmpty(input) || input.Length < 2) return input;
+        var sb = new System.Text.StringBuilder();
+        sb.Append(input[0]);
+        for (int i = 1; i < input.Length; i++)
+        {
+            if (char.IsUpper(input[i]) && !char.IsUpper(input[i - 1])) sb.Append(' ');
+            sb.Append(input[i]);
+        }
+        return sb.ToString();
+    }
+
+    private bool ConvertBlpToPng(string blpPath, string pngPath, MpqArchiveService? mpqService = null)
     {
         try
         {
-            byte[]? blpData;
-            // Check for MPQ pseudo-path
-            if (blpPath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
+            byte[]? blpData = null;
+            
+            if (blpPath.StartsWith("MPQ:"))
+            {
+                var key = blpPath.Substring(4);
+                blpData = mpqService?.ReadFile(key);
+            }
+            else if (blpPath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
             {
                 blpData = AlphaMpqReader.ReadFromMpq(blpPath);
             }
@@ -647,13 +774,12 @@ public class VlmDatasetExporter
             {
                 blpData = File.ReadAllBytes(blpPath);
             }
-            else
-            {
-                return false;
-            }
 
             if (blpData == null || blpData.Length == 0)
+            {
+                Console.WriteLine($"Empty BLP data: {blpPath}");
                 return false;
+            }
 
             using var ms = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(ms);
@@ -661,8 +787,9 @@ public class VlmDatasetExporter
             bmp.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
             return true;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"Error converting {blpPath}: {ex.Message}");
             return false;
         }
     }
