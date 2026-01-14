@@ -33,11 +33,10 @@ public class MpqArchiveService : IDisposable
         IntPtr hMpq,
         [MarshalAs(UnmanagedType.LPStr)] string szFileName,
         uint dwSearchScope,
-        out IntPtr phFile);
+        ref IntPtr phFile);
     
     [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
     private static extern uint SFileGetFileSize(IntPtr hFile, out uint fileSizeHigh);
-    
     [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
     private static extern bool SFileReadFile(
         IntPtr hFile,
@@ -48,6 +47,16 @@ public class MpqArchiveService : IDisposable
     
     [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
     private static extern bool SFileCloseFile(IntPtr hFile);
+    
+    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    private static extern bool SFileExtractFile(
+        IntPtr hMpq,
+        [MarshalAs(UnmanagedType.LPStr)] string szToExtract,
+        [MarshalAs(UnmanagedType.LPStr)] string szExtracted,
+        uint dwSearchScope);
+    
+    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    private static extern bool SFileAddListFile(IntPtr hMpq, [MarshalAs(UnmanagedType.LPStr)] string szListFile);
     
     // Archive open flags
     private const uint SFILE_OPEN_HARD_DISK_FILE = 2;
@@ -62,47 +71,40 @@ public class MpqArchiveService : IDisposable
             if (Directory.Exists(path))
             {
                 var mpqFiles = Directory.GetFiles(path, "*.mpq");
-                foreach (var mpq in mpqFiles)
-                {
-                    OpenArchive(mpq);
-                }
+                foreach (var mpq in mpqFiles) OpenArchive(mpq);
                 
-                // Also check uppercase
                 var mpqFilesUpper = Directory.GetFiles(path, "*.MPQ");
-                foreach (var mpq in mpqFilesUpper)
-                {
-                    OpenArchive(mpq);
-                }
+                foreach (var mpq in mpqFilesUpper) OpenArchive(mpq);
             }
         }
         Console.WriteLine($"Initialized MpqArchiveService with {_archives.Count} archives.");
     }
+    
+    public void AddListFile(string listFilePath)
+    {
+        if (!File.Exists(listFilePath)) return;
+        int count = 0;
+        foreach (var hMpq in _archives)
+        {
+            if (SFileAddListFile(hMpq, listFilePath)) count++;
+        }
+        Console.WriteLine($"[MpqService] Added listfile to {count}/{_archives.Count} archives.");
+    }
 
     private void OpenArchive(string path)
     {
-        // Avoid duplicate loading
-        // (Primitive check, stormlib handles multiples fine but let's be safe)
-        
         if (SFileOpenArchive(path, SFILE_OPEN_HARD_DISK_FILE, MPQ_OPEN_READ_ONLY, out var hMpq))
         {
             _archives.Add(hMpq);
-            Console.WriteLine($"Opened archive: {Path.GetFileName(path)}");
-        }
-        else
-        {
-            // var err = Marshal.GetLastWin32Error();
-            // Console.WriteLine($"Failed to open archive {path}: {err}");
+            Console.WriteLine($"Opened archive: {Path.GetFileName(path)} (Handle: {hMpq})");
         }
     }
-
     public bool FileExists(string virtualPath)
     {
-        // SFileHasFile is not exposed in our P/Invoke set, 
-        // so we try to open it.
-        
         foreach (var hMpq in _archives)
         {
-            if (SFileOpenFileEx(hMpq, virtualPath, 0, out var hFile))
+            IntPtr hFile = IntPtr.Zero;
+            if (SFileOpenFileEx(hMpq, virtualPath, 0, ref hFile))
             {
                 SFileCloseFile(hFile);
                 return true;
@@ -115,33 +117,52 @@ public class MpqArchiveService : IDisposable
     {
         foreach (var hMpq in _archives)
         {
-            if (SFileOpenFileEx(hMpq, virtualPath, 0, out var hFile))
+            // Fallback: SFileOpenFileEx keeps returning 0 handle on some systems/versions of StormLib
+            // So we try SFileExtractFile as a robust fallback.
+            
+            IntPtr hFile = IntPtr.Zero;
+            bool opened = SFileOpenFileEx(hMpq, virtualPath, 0, ref hFile);
+            
+            if (opened)
             {
-                try
+               Console.WriteLine($"[MpqService] DEBUG: Opened '{virtualPath}' in {hMpq}. Handle: {hFile}");
+               if (hFile != IntPtr.Zero)
+               {
+               try
                 {
                     uint sizeHigh = 0;
                     var size = SFileGetFileSize(hFile, out sizeHigh);
-                    if (size == 0 || size == uint.MaxValue) continue;
-
-                    var buffer = new byte[size];
-                    var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-                    try
+                    if (size > 0 && size != uint.MaxValue) 
                     {
-                        if (SFileReadFile(hFile, handle.AddrOfPinnedObject(), size, out var bytesRead, IntPtr.Zero))
+                        Console.WriteLine($"[MpqService] Reading '{virtualPath}' from dictionary/archive {hMpq} (Size: {size})");
+                        var buffer = new byte[size];
+                        var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+                        try
                         {
-                            if (bytesRead != size) Array.Resize(ref buffer, (int)bytesRead);
-                            return buffer;
+                            if (SFileReadFile(hFile, handle.AddrOfPinnedObject(), size, out var bytesRead, IntPtr.Zero))
+                            {
+                                Console.WriteLine($"[MpqService] SFileReadFile success. Read: {bytesRead} / {size}");
+                                if (bytesRead != size) Array.Resize(ref buffer, (int)bytesRead);
+                                return buffer;
+                            }
+                        }
+                        finally
+                        {
+                            handle.Free();
                         }
                     }
-                    finally
+                    else
                     {
-                        handle.Free();
+                         Console.WriteLine($"[MpqService] File '{virtualPath}' invalid size: {size}. hFile: {hFile}");
                     }
                 }
                 finally
                 {
                     SFileCloseFile(hFile);
                 }
+            }
+
+
             }
         }
         return null;

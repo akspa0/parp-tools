@@ -130,4 +130,21 @@ public class ListfileService
     /// Get total paths loaded from LK listfile.
     /// </summary>
     public int LkPathCount => _lkPaths.Count;
+    /// <summary>
+    /// Export all known paths to a flat text file (for use with StormLib).
+    /// </summary>
+    public void ExportToFile(string outputPath)
+    {
+        using var writer = new StreamWriter(outputPath);
+        // Prioritize community listfile
+        foreach (var path in _pathLookup.Values)
+        {
+            writer.WriteLine(path);
+        }
+        // Add LK paths (might contain duplicates, StormLib handles it)
+        foreach (var path in _lkPaths)
+        {
+             writer.WriteLine(path);
+        }
+    }
 }

@@ -108,6 +108,8 @@ public class VlmDatasetExporter
         // Initialize MPQ Service
         using var mpqService = new MpqArchiveService();
         mpqService.LoadArchives(searchPaths);
+        
+
 
         // Initialize MapDbcService to check for strict directory names
         var mapDbcService = new MapDbcService();
@@ -147,25 +149,52 @@ public class VlmDatasetExporter
         try
         {
             string wdlPath = Path.ChangeExtension(wdtPath, ".wdl");
+            
+            // 1. Try flat file next to WDT
             if (File.Exists(wdlPath))
             {
                 var wdlBytes = await File.ReadAllBytesAsync(wdlPath);
                 wdlData = WdlParser.Parse(wdlBytes);
                 progress?.Report($"Loaded WDL data from {wdlPath}");
             }
+            // 2. Try WDL.MPQ (Alpha 0.5.3 style) across search paths
             else
             {
-                // Try MPQ
-                var wdlMpqPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
-                if (mpqService.FileExists(wdlMpqPath))
-                {
-                    var wdlBytes = mpqService.ReadFile(wdlMpqPath);
-                    if (wdlBytes != null)
+                 bool loaded = false;
+                 // Try to find .wdl.MPQ in all search paths
+                 foreach (var path in searchPaths)
+                 {
+                     var wdlMpqDiscovered = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl.MPQ");
+                     if (!File.Exists(wdlMpqDiscovered)) 
+                        wdlMpqDiscovered = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl.mpq");
+                        
+                     if (File.Exists(wdlMpqDiscovered))
+                     {
+                         var wdlBytes = AlphaMpqReader.ReadFromMpq(wdlMpqDiscovered);
+                         if (wdlBytes != null)
+                         {
+                             wdlData = WdlParser.Parse(wdlBytes);
+                             progress?.Report($"Loaded WDL from Alpha MPQ: {wdlMpqDiscovered}");
+                             loaded = true;
+                             break;
+                         }
+                     }
+                 }
+
+                 // 3. Try standard MPQ path (Modern/Legacy)
+                 if (!loaded)
+                 {
+                    var wdlInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
+                    if (mpqService.FileExists(wdlInternalPath))
                     {
-                        wdlData = WdlParser.Parse(wdlBytes);
-                        progress?.Report($"Loaded WDL data from MPQ: {wdlMpqPath}");
+                        var wdlBytes = mpqService.ReadFile(wdlInternalPath);
+                        if (wdlBytes != null)
+                        {
+                            wdlData = WdlParser.Parse(wdlBytes);
+                            progress?.Report($"Loaded WDL data from MPQ internal: {wdlInternalPath}");
+                        }
                     }
-                }
+                 }
             }
         }
         catch (Exception ex)
@@ -359,8 +388,7 @@ public class VlmDatasetExporter
                     // Try common locations
                     var candidates = new[]
                     {
-                        Path.Combine(dataPath, texture),
-                        Path.Combine(dataPath, "pickles", texture) // Just in case
+                        Path.Combine(dataPath, texture)
                     };
                     
                     bool converted = false;
@@ -371,29 +399,11 @@ public class VlmDatasetExporter
                              converted = true;
                              break;
                          }
-                         // Also try .MPQ suffix
-                         if (ConvertBlpToPng(path + ".MPQ", pngPath))
-                         {
-                             converted = true;
-                             break;
-                         }
                     }
                     if (converted) textureCount++;
                 }
             }
             progress?.Report($"Exported {textureCount} textures");
-        }
-
-        if (generateDepth && tilesExported > 0)
-        {
-            progress?.Report("Generating depth maps with DepthAnything3...");
-            var depthService = new DepthMapService();
-            var depthCount = await depthService.GenerateDepthMapsAsync(imagesDir, depthsDir, progress);
-            
-            if (depthCount > 0)
-            {
-                await UpdateJsonWithDepthPaths(datasetDir, progress);
-            }
         }
 
         // Stitch full world map images
@@ -411,22 +421,10 @@ public class VlmDatasetExporter
                 progress?.Report($"Created full minimap: {minimapOutput}");
             }
 
-            // Stitch depth maps if they exist
-            if (Directory.Exists(depthsDir) && Directory.GetFiles(depthsDir, "*_depth.png").Length > 0)
-            {
-                var depthOutput = Path.Combine(stitchedDir, $"{mapName}_full_depth.png");
-                var depthBounds = TileStitchingService.StitchFullMapDepths(depthsDir, mapName, 256, depthOutput);
-                if (depthBounds.HasValue)
-                {
-                    progress?.Report($"Created full depth map: {depthOutput}");
-                }
-            }
-
             // Stitch shadow maps (1024 resolution - these are per-tile shadow quilts)
             var shadowsRoot = Path.Combine(datasetDir, "shadows");
             if (Directory.Exists(shadowsRoot) && Directory.GetFiles(shadowsRoot, "*.png").Length > 0)
             {
-                // Create shadow tile quilts first if needed, then stitch
                 var shadowOutput = Path.Combine(stitchedDir, $"{mapName}_full_shadows.png");
                 var shadowBounds = TileStitchingService.StitchFullMap(shadowsRoot, mapName, 1024, shadowOutput);
                 if (shadowBounds.HasValue)
