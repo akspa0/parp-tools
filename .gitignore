@@ -463,5 +463,5 @@ gillijimproject_refactor/PM4_to_ADT/*
 *WoWRollback/WMOv14/WMO2Q3\WmoBspConverter/references/*
 
 # .venv
-*.venv/*
-
+.venv/*
+gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3/.venv/*
