@@ -254,6 +254,49 @@ All commands registered via `ConsoleCommandRegister` in category `DEBUG` or `GAM
 **MDL Exporter**: `007b3a7a` - Warcraft 3 model export header writer (unreachable)
 - **God Mode**: Logic exists but command stripped
 
+### MDL vs MDX Support (Ghidra Verified)
+Analysis of `PickAlternateFilename` (approx `0078bbXX`) confirms that **MDL and MDX support is shared**.
+- The client uses a single logic path to handle legacy models.
+- The function receives a `type` parameter:
+    - If `1`: Packs `.mdl` extension.
+    - If `0`: Packs `.mdx` extension.
+- This implies the client treats them as interchangeable legacy formats, likely loaded by the same internal WC3-era loader.
+- **Reference**: `GlueCamera.mdl` and Spell effects (`.mdx`) coexist, but use the same underlying model engine distinct from the M2 engine (which doesn't exist yet/is latent).
+
+### Hidden Writers (Dead Code)
+The binary contains an extensive library for writing **MDL files** (Warcraft III text model format).
+
+> [!IMPORTANT]
+> **Format Confirmation**: This is **Warcraft III MDL/MDX**.
+> Evidence:
+> - Keywords: `Geoset`, `Bone`, `Helper`, `RibbonEmitter` (WC3 specific).
+> - Paths: `ENGINE\Source\MDLFile\Geoset.cpp`
+> - This confirms the 0.5.3 engine shares the full model pipeline with Warcraft III.
+
+#### MDL Writer Ecosystem
+The client implements a full "MDL Serializer" spanning `00780000` - `007b0000`. Key functions:
+
+| Function | Address | Description |
+|:---|:---|:---|
+| `MDLFileBinaryWrite` | `0078bea0` | Writes binary data to disk via `IWriteFile`. |
+| `MDLFileWrite` | `0078b300` | Wrapper for MDL serialization. |
+| `IWriteGeosetSection` | `007a9680` | Writes mesh geometry. |
+| `IWriteBoneSection` | `007a6980` | Writes skeletal hierarchy. |
+| `IWriteMaterial` | `007ae9a0` | Writes materials. |
+
+#### MDL/MDX Loader
+Complementing the writer is the Loader subsystem (`0044xxxx` range), enabling full Read/Write capability (essentially a Model Converter).
+
+#### Other Writers
+- **ProfileWriteFile** (`007bf3b0`): Profiling data.
+- **CCommand_Save** (`00405530`): Network opcode `0x146` (Save Player).
+- **SaveFog** (`004301f0`): Runtime state saver (memory).
+
+> [!NOTE]
+> No writers were found for **WMO**, **ADT**, **BLP**, or **M2**.
+
+
+
 ---
 
 ## WotLK 3.3.5a - Debug Features
