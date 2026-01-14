@@ -142,6 +142,37 @@ public class VlmDatasetExporter
             return new VlmExportResult(0, 0, 0, outputDir);
         }
 
+        // Load WDL if available
+        WdlParser.WdlData? wdlData = null;
+        try
+        {
+            string wdlPath = Path.ChangeExtension(wdtPath, ".wdl");
+            if (File.Exists(wdlPath))
+            {
+                var wdlBytes = await File.ReadAllBytesAsync(wdlPath);
+                wdlData = WdlParser.Parse(wdlBytes);
+                progress?.Report($"Loaded WDL data from {wdlPath}");
+            }
+            else
+            {
+                // Try MPQ
+                var wdlMpqPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
+                if (mpqService.FileExists(wdlMpqPath))
+                {
+                    var wdlBytes = mpqService.ReadFile(wdlMpqPath);
+                    if (wdlBytes != null)
+                    {
+                        wdlData = WdlParser.Parse(wdlBytes);
+                        progress?.Report($"Loaded WDL data from MPQ: {wdlMpqPath}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] Failed to load WDL: {ex.Message}");
+        }
+
         var existingTiles = wdt.GetExistingAdtsNumbers();
         var adtOffsets = wdt.GetAdtOffsetsInMain();
         var mdnmNames = wdt.GetMdnmFileNames();
@@ -196,9 +227,12 @@ public class VlmDatasetExporter
                     }
                 }
 
+                // Lookup WDL tile
+                var wdlTile = wdlData?.Tiles[tileIndex];
+
                 // Extract terrain data using AdtAlpha's methods
                 var sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                    shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService);
+                    shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile);
 
                 if (sample == null)
                 {
@@ -362,6 +396,46 @@ public class VlmDatasetExporter
             }
         }
 
+        // Stitch full world map images
+        if (tilesExported > 0)
+        {
+            progress?.Report("Stitching full world map images...");
+            var stitchedDir = Path.Combine(outputDir, "stitched");
+            Directory.CreateDirectory(stitchedDir);
+            
+            // Stitch minimaps (256 resolution typical for minimaps)
+            var minimapOutput = Path.Combine(stitchedDir, $"{mapName}_full_minimap.png");
+            var minimapBounds = TileStitchingService.StitchFullMap(imagesDir, mapName, 256, minimapOutput);
+            if (minimapBounds.HasValue)
+            {
+                progress?.Report($"Created full minimap: {minimapOutput}");
+            }
+
+            // Stitch depth maps if they exist
+            if (Directory.Exists(depthsDir) && Directory.GetFiles(depthsDir, "*_depth.png").Length > 0)
+            {
+                var depthOutput = Path.Combine(stitchedDir, $"{mapName}_full_depth.png");
+                var depthBounds = TileStitchingService.StitchFullMapDepths(depthsDir, mapName, 256, depthOutput);
+                if (depthBounds.HasValue)
+                {
+                    progress?.Report($"Created full depth map: {depthOutput}");
+                }
+            }
+
+            // Stitch shadow maps (1024 resolution - these are per-tile shadow quilts)
+            var shadowsRoot = Path.Combine(datasetDir, "shadows");
+            if (Directory.Exists(shadowsRoot) && Directory.GetFiles(shadowsRoot, "*.png").Length > 0)
+            {
+                // Create shadow tile quilts first if needed, then stitch
+                var shadowOutput = Path.Combine(stitchedDir, $"{mapName}_full_shadows.png");
+                var shadowBounds = TileStitchingService.StitchFullMap(shadowsRoot, mapName, 1024, shadowOutput);
+                if (shadowBounds.HasValue)
+                {
+                    progress?.Report($"Created full shadow map: {shadowOutput}");
+                }
+            }
+        }
+
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
         return new VlmExportResult(tilesExported, tilesSkipped, allTextures.Count, outputDir);
     }
@@ -401,9 +475,28 @@ public class VlmDatasetExporter
         AdtAlpha adt, string wdtPath, int adtOffset, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
-        HashSet<string> textureCollector, GroundEffectService? groundEffectService = null)
+        HashSet<string> textureCollector, GroundEffectService? groundEffectService = null,
+        WdlParser.WdlTile? wdlTile = null)
     {
         var heights = new List<VlmChunkHeights>();
+
+        // Prepare WDL data if available
+        VlmWdlData? wdlHeights = null;
+        if (wdlTile != null && wdlTile.HasData)
+        {
+            // Flatten arrays
+            var h17 = new short[17 * 17];
+            for (int r = 0; r < 17; r++)
+                for (int c = 0; c < 17; c++)
+                    h17[r * 17 + c] = wdlTile.Height17[r, c];
+
+            var h16 = new short[16 * 16];
+            for (int r = 0; r < 16; r++)
+                for (int c = 0; c < 16; c++)
+                    h16[r * 16 + c] = wdlTile.Height16[r, c];
+
+            wdlHeights = new VlmWdlData(h17, h16);
+        }
         var chunkPositions = new float[256 * 3];
         var holes = new int[256];
         var textures = new List<string>();
@@ -459,6 +552,7 @@ public class VlmDatasetExporter
                 
                 try
                 {
+                    // Use off directly - MCIN stores absolute offsets in Alpha WDT
                     var mcnk = new McnkAlpha(fs, off, 0, tileIndex);
                     
                     // Use public accessors instead of manual header parsing
@@ -554,27 +648,68 @@ public class VlmDatasetExporter
                         catch { }
                     }
                     
-                    // Store layer info for this chunk
+                    // Store layer info for this chunk with resolved texture paths
                     var layerList = new List<VlmTextureLayer>();
-                    for (int layer = 0; layer < nLayers && layer < 4 && layer * 16 + 15 < mclyBuf.Length; layer++)
+                    
+                    // Try to parse MCLY if it has data
+                    if (mclyBuf.Length >= 16)
                     {
-                        uint textureId = BitConverter.ToUInt32(mclyBuf, layer * 16);
-                        uint flags = BitConverter.ToUInt32(mclyBuf, layer * 16 + 4);
-                        uint alphaoffs = BitConverter.ToUInt32(mclyBuf, layer * 16 + 8);
-                        uint effectId = BitConverter.ToUInt32(mclyBuf, layer * 16 + 12);
-                        
-                        string[]? groundEffects = null;
-                        if (effectId > 0 && groundEffectService != null)
+                        for (int layer = 0; layer < nLayers && layer < 4 && layer * 16 + 15 < mclyBuf.Length; layer++)
                         {
-                            groundEffects = groundEffectService.GetDoodadsEffect(effectId);
-                        }
-                        
-                        // Get raw alpha bits if available (only for layers > 0)
-                        string? alphaBitsBase64 = layerAlphaBits.TryGetValue(layer, out var bits) ? bits : null;
+                            uint textureId = BitConverter.ToUInt32(mclyBuf, layer * 16);
+                            uint flags = BitConverter.ToUInt32(mclyBuf, layer * 16 + 4);
+                            uint alphaoffs = BitConverter.ToUInt32(mclyBuf, layer * 16 + 8);
+                            uint effectId = BitConverter.ToUInt32(mclyBuf, layer * 16 + 12);
+                            
+                            // Resolve texture path from MTEX index
+                            string? texturePath = textureId < textures.Count ? textures[(int)textureId] : null;
+                            
+                            string[]? groundEffects = null;
+                            if (effectId > 0 && groundEffectService != null)
+                            {
+                                groundEffects = groundEffectService.GetDoodadsEffect(effectId);
+                            }
+                            
+                            // Get raw alpha bits if available (only for layers > 0)
+                            string? alphaBitsBase64 = layerAlphaBits.TryGetValue(layer, out var bits) ? bits : null;
+                            
+                            // Alpha path for this layer (layer > 0)
+                            string? alphaPath = layer > 0 ? $"masks/{tileName}_c{chunkIndex}_l{layer}.png" : null;
 
-                        layerList.Add(new VlmTextureLayer(textureId, flags, alphaoffs, effectId, groundEffects, alphaBitsBase64));
+                            layerList.Add(new VlmTextureLayer(textureId, texturePath, flags, alphaoffs, effectId, groundEffects, alphaBitsBase64, alphaPath));
+                        }
                     }
-                    chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray()));
+                    
+                    // Fallback: if no layers parsed but we have textures, create layers from nLayers count
+                    if (layerList.Count == 0 && nLayers > 0 && textures.Count > 0)
+                    {
+                        for (int layer = 0; layer < nLayers && layer < 4 && layer < textures.Count; layer++)
+                        {
+                            string? alphaPath = layer > 0 ? $"masks/{tileName}_c{chunkIndex}_l{layer}.png" : null;
+                            layerList.Add(new VlmTextureLayer((uint)layer, textures[layer], 0, 0, 0, null, null, alphaPath));
+                        }
+                    }
+                    
+                    // Shadow path for this chunk
+                    string? chunkShadowPath = $"shadows/{tileName}_c{chunkIndex}.png";
+                    if (!File.Exists(Path.Combine(shadowsDir, $"{tileName}_c{chunkIndex}.png"))) 
+                        chunkShadowPath = null;
+                    
+                    // Extract normals (MCNR - 448 bytes)
+                    sbyte[]? normalsArray = null;
+                    var mcnrBuf = mcnk.McnrData;
+                    if (mcnrBuf != null && mcnrBuf.Length > 0)
+                    {
+                        normalsArray = new sbyte[mcnrBuf.Length];
+                        for (int n = 0; n < mcnrBuf.Length; n++)
+                            normalsArray[n] = (sbyte)mcnrBuf[n];
+                    }
+                    
+                    // Get area_id and flags from MCNK header
+                    uint areaId = (uint)mcnk.Header.Unknown3;  // Unknown3 is area ID in Alpha
+                    uint chunkFlags = (uint)mcnk.Header.Flags;
+                    
+                    chunkLayers.Add(new VlmChunkLayers(chunkIndex, layerList.ToArray(), chunkShadowPath, normalsArray, areaId, chunkFlags));
 
                     // Extract Liquid Data (MCLQ - Legacy)
                     var mclqData = mcnk.MclqData;
@@ -583,6 +718,8 @@ public class VlmDatasetExporter
                         var liquid = LiquidService.ExtractMCLQ(mclqData, chunkIndex);
                         if (liquid != null)
                         {
+                            string? maskPath = null;
+                            
                             // Save heightmap PNG if exists
                             if (liquid.Heights != null)
                             {
@@ -590,12 +727,19 @@ public class VlmDatasetExporter
                                 Directory.CreateDirectory(liquidsDir);
                                 
                                 var heightPng = LiquidService.GenerateHeightPng(liquid.Heights, liquid.MinHeight, liquid.MaxHeight);
-                                var heightPath = Path.Combine(liquidsDir, $"{tileName}_c{chunkIndex}_liq_h.png");
+                                var heightFileName = $"{tileName}_c{chunkIndex}_liq_h.png";
+                                var heightPath = Path.Combine(liquidsDir, heightFileName);
                                 await File.WriteAllBytesAsync(heightPath, heightPng);
                                 
-                                // Update liquid record with mask path (optional, currently using convention)
+                                // Set the mask path for JSON
+                                maskPath = $"liquids/{heightFileName}";
                             }
-                            liquids.Add(liquid);
+                            
+                            // Create updated liquid record with mask path
+                            var liquidWithPath = new VlmLiquidData(
+                                liquid.ChunkIndex, liquid.LiquidType, liquid.MinHeight, liquid.MaxHeight,
+                                maskPath, liquid.Heights);
+                            liquids.Add(liquidWithPath);
                         }
                     }
                 }
@@ -667,6 +811,7 @@ public class VlmDatasetExporter
             chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
             liquids.Count > 0 ? liquids.ToArray() : null,
             objects,
+            wdlHeights, // WDL Data
             heightMin == float.MaxValue ? 0 : heightMin,
             heightMax == float.MinValue ? 0 : heightMax
         );

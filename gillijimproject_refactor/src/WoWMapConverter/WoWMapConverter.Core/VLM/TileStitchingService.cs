@@ -268,4 +268,188 @@ public static class TileStitchingService
         tileImage.SaveAsPng(ms);
         return ms.ToArray();
     }
+
+    /// <summary>
+    /// Stitch all tile images into a full world map (up to 64×64 tiles).
+    /// Automatically crops to the bounding box of existing tiles.
+    /// </summary>
+    /// <param name="imagesDir">Directory containing tile images (named Azeroth_XX_YY.png or mapXX_YY.png)</param>
+    /// <param name="mapName">Map name prefix (e.g., "Azeroth")</param>
+    /// <param name="tileRes">Resolution of each tile image (typically 256 or 512 for minimaps)</param>
+    /// <param name="outputPath">Path to save the stitched map image</param>
+    /// <returns>Bounds of the stitched map (minX, minY, maxX, maxY) or null if no tiles found</returns>
+    public static (int minX, int minY, int maxX, int maxY)? StitchFullMap(
+        string imagesDir, 
+        string mapName, 
+        int tileRes, 
+        string outputPath)
+    {
+        // Find bounds of all tiles
+        int minX = 64, minY = 64, maxX = -1, maxY = -1;
+        var tileFiles = new Dictionary<(int x, int y), string>();
+
+        // Scan for tile files - support multiple naming conventions
+        for (int x = 0; x < 64; x++)
+        {
+            for (int y = 0; y < 64; y++)
+            {
+                var x2 = x.ToString("D2");
+                var y2 = y.ToString("D2");
+                
+                // Try different naming patterns
+                var candidates = new[]
+                {
+                    Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}.png"),
+                    Path.Combine(imagesDir, $"map{x2}_{y2}.png"),
+                    Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}_minimap.png"),
+                };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        tileFiles[(x, y)] = candidate;
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (tileFiles.Count == 0)
+            return null;
+
+        // Calculate canvas size based on bounds
+        int tileCountX = maxX - minX + 1;
+        int tileCountY = maxY - minY + 1;
+        int canvasWidth = tileCountX * tileRes;
+        int canvasHeight = tileCountY * tileRes;
+
+        Console.WriteLine($"Stitching {tileFiles.Count} tiles into {canvasWidth}x{canvasHeight} map ({minX},{minY} to {maxX},{maxY})");
+
+        using var canvas = new Image<Rgba32>(canvasWidth, canvasHeight);
+        
+        int progress = 0;
+        foreach (var kvp in tileFiles)
+        {
+            var (tx, ty) = kvp.Key;
+            var tilePath = kvp.Value;
+            
+            int px = (tx - minX) * tileRes;
+            int py = (ty - minY) * tileRes;
+
+            try
+            {
+                using var tileImage = Image.Load<Rgba32>(tilePath);
+                
+                // Resize if needed
+                if (tileImage.Width != tileRes || tileImage.Height != tileRes)
+                {
+                    tileImage.Mutate(ctx => ctx.Resize(tileRes, tileRes));
+                }
+
+                // Copy tile to canvas
+                canvas.Mutate(ctx => ctx.DrawImage(tileImage, new Point(px, py), 1f));
+                progress++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Failed to load tile {tilePath}: {ex.Message}");
+            }
+        }
+
+        Console.WriteLine($"Stitched {progress} tiles, saving to {outputPath}...");
+        canvas.SaveAsPng(outputPath);
+        
+        return (minX, minY, maxX, maxY);
+    }
+
+    /// <summary>
+    /// Stitch depth maps into a full world depth map.
+    /// </summary>
+    public static (int minX, int minY, int maxX, int maxY)? StitchFullMapDepths(
+        string depthsDir,
+        string mapName,
+        int tileRes,
+        string outputPath)
+    {
+        // Find depth tiles with _depth suffix
+        int minX = 64, minY = 64, maxX = -1, maxY = -1;
+        var tileFiles = new Dictionary<(int x, int y), string>();
+
+        for (int x = 0; x < 64; x++)
+        {
+            for (int y = 0; y < 64; y++)
+            {
+                var x2 = x.ToString("D2");
+                var y2 = y.ToString("D2");
+                
+                var candidates = new[]
+                {
+                    Path.Combine(depthsDir, $"{mapName}_{x2}_{y2}_depth.png"),
+                    Path.Combine(depthsDir, $"{mapName}_{x2}_{y2}_minimap_depth.png"),
+                };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        tileFiles[(x, y)] = candidate;
+                        if (x < minX) minX = x;
+                        if (y < minY) minY = y;
+                        if (x > maxX) maxX = x;
+                        if (y > maxY) maxY = y;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (tileFiles.Count == 0)
+            return null;
+
+        int tileCountX = maxX - minX + 1;
+        int tileCountY = maxY - minY + 1;
+        int canvasWidth = tileCountX * tileRes;
+        int canvasHeight = tileCountY * tileRes;
+
+        Console.WriteLine($"Stitching {tileFiles.Count} depth tiles into {canvasWidth}x{canvasHeight} depth map");
+
+        using var canvas = new Image<L16>(canvasWidth, canvasHeight);
+        
+        foreach (var kvp in tileFiles)
+        {
+            var (tx, ty) = kvp.Key;
+            var tilePath = kvp.Value;
+            
+            int px = (tx - minX) * tileRes;
+            int py = (ty - minY) * tileRes;
+
+            try
+            {
+                using var tileImage = Image.Load<L16>(tilePath);
+                
+                if (tileImage.Width != tileRes || tileImage.Height != tileRes)
+                {
+                    tileImage.Mutate(ctx => ctx.Resize(tileRes, tileRes));
+                }
+
+                // Manual copy for L16
+                for (int y = 0; y < tileRes && y < tileImage.Height; y++)
+                {
+                    for (int x = 0; x < tileRes && x < tileImage.Width; x++)
+                    {
+                        canvas[px + x, py + y] = tileImage[x, y];
+                    }
+                }
+            }
+            catch { }
+        }
+
+        canvas.SaveAsPng(outputPath);
+        return (minX, minY, maxX, maxY);
+    }
 }

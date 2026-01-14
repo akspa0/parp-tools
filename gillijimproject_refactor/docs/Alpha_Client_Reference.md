@@ -30,7 +30,15 @@
 | .m2 | M2 Model | ❌ | ❌ | ✅ | |
 | .mdx | WC3 Model | ✅ | ✅ | ✅ | Legacy support |
 | .blp | Texture | BLP2 | BLP2 | BLP2 | Not BLP1 |
+| .tga | Texture/Screenshot | ✅ | ✅ | ✅ | Input & Output |
 | .wdl | Low-res World | ✅ | ✅ | ✅ | |
+
+## Client Output Formats
+The Alpha client writes the following files to disk:
+*   **.tga**: Screenshots (`Screenshots/WoWScrnShot_Date.tga`). Uncompressed or RLE.
+*   **.txt**: Debug logs (`Errors.txt`), Audio dumps (`SndEAXChunkInfo`), Config (`Config.wtf`).
+*   **.wdb**: Client cache (Item, Quest, NPC data).
+*   **.jpg/.png**: **NOT SUPPORTED**. The client does not write or read these formats.
 
 ## Database & Cache
 
@@ -304,3 +312,37 @@ Both 0.5.3 and 0.5.5 use **XML/Lua** UI, not hardcoded. The `GlueXML.toc` and Lu
 - **v14**: Embedded lightmaps (MOLM/MOLD)
 - **v16**: Hybrid (v17 root + v14 batch style)
 - **v17**: Modern standard
+
+# Part 5: Texture Limitations (Ghidra Verified)
+
+## Texture Resolution & Formats
+Analysis of `PumpBlpTextureAsync` (`00471a70`) and `CreateBlpTexture` (`004717f0`) reveals the true limitations of the 0.5.3 client.
+
+### Resolution Limits
+**There is NO hardcoded resolution limit (e.g. 256x256) in the client code.**
+
+The client dynamically queries the hardware capabilities via `GxCaps`:
+1.  **Hardware Query**: `RequestImageDimensions` (`00471a70` calls it) checks the requested texture size against `GxCaps.m_maxTextureSize`.
+2.  **Auto-Downscaling**: If the texture exceeds the hardware limit, the client uses a **Box Filter** algorithm to downscale the texture in memory until it fits.
+    *   *Logic*: `while (width > max || height > max) { width >>= 1; height >>= 1; bestMip++; }`
+    *   *Implication*: You can feed the client 2048x2048 textures. If standard 2003 hardware (e.g. Voodoo3/TNT2) limit is 256, it will display at 256. If modern hardware (limit 16384) runs it, it displays at 2048.
+
+### Texture Format Support
+The 0.5.3 client supports two primary image formats:
+
+#### 1. BLP (Blizzard texture)
+*   **Version**: **BLP2** (Magic `0x32504C42`).
+*   **Compression**: DXT1, DXT3, DXT5.
+*   **Uncompressed**: ARGB8888, ARGB1555, ARGB4444, RGB565.
+*   **Mipmaps**: Used if present, auto-generated via Box Filter if missing.
+
+#### 2. TGA (Truevision Targa)
+*   **Usage**: Supported for textures (e.g. valid `MTEX` path) and Screenshots.
+*   **Format**: Uncompressed or RLE.
+*   **Priority**: Checked *before* BLP in some loading routines, or explicitly if extension matches.
+*   *Note*: No support for BMP, PNG, or JPEG.
+
+### Verified String References
+*   `"Textures\UnitSelectTexture.blp"`
+*   `"Interface\SpellShadow\Spell-Shadow-Unacceptable.blp"`
+*   `"UpdateBlpTextureAsync(): GxTex_Lock loading: %s\n"`

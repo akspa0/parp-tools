@@ -461,3 +461,7 @@ gillijimproject_refactor/old_outputs/*
 gillijimproject_refactor/WdtInspector_outputs/*
 gillijimproject_refactor/PM4_to_ADT/*
 *WoWRollback/WMOv14/WMO2Q3\WmoBspConverter/references/*
+
+# .venv
+*.venv/*
+

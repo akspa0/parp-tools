@@ -49,9 +49,20 @@ public record VlmTerrainData(
     // Objects (MDDF/MODF)
     [property: JsonPropertyName("objects")] List<VlmObjectPlacement> Objects,
     
+    // WDL Low-Res Heightmap
+    [property: JsonPropertyName("wdl_heights")] VlmWdlData? WdlHeights,
+    
     // Stats
     [property: JsonPropertyName("height_min")] float HeightMin,
     [property: JsonPropertyName("height_max")] float HeightMax
+);
+
+/// <summary>
+/// WDL low-resolution heightmap data (17x17 + 16x16 shorts).
+/// </summary>
+public record VlmWdlData(
+    [property: JsonPropertyName("outer_17")] short[] Height17, // Flattened 17x17 = 289
+    [property: JsonPropertyName("inner_16")] short[] Height16  // Flattened 16x16 = 256
 );
 
 /// <summary>
@@ -72,24 +83,32 @@ public record VlmChunkShadowBits(
 );
 
 /// <summary>
-/// Per-chunk texture layer data (MCLY).
+/// Per-chunk texture layer data (MCLY) with all data for terrain reconstruction.
 /// </summary>
 public record VlmChunkLayers(
     [property: JsonPropertyName("idx")] int ChunkIndex,
-    [property: JsonPropertyName("layers")] VlmTextureLayer[] Layers
+    [property: JsonPropertyName("layers")] VlmTextureLayer[] Layers,
+    // Per-chunk paths for reconstruction
+    [property: JsonPropertyName("shadow_path")] string? ShadowPath = null,
+    [property: JsonPropertyName("normals")] sbyte[]? Normals = null,  // MCNR 448 bytes (145 * 3 + 13 padding)
+    [property: JsonPropertyName("area_id")] uint AreaId = 0,
+    [property: JsonPropertyName("flags")] uint Flags = 0
 );
 
 /// <summary>
-/// Single texture layer definition (from MCLY).
+/// Single texture layer definition (from MCLY) with full texture path for reconstruction.
 /// </summary>
 public record VlmTextureLayer(
     [property: JsonPropertyName("tex_id")] uint TextureId,
+    [property: JsonPropertyName("texture_path")] string? TexturePath,  // Actual path from MTEX
     [property: JsonPropertyName("flags")] uint Flags,
     [property: JsonPropertyName("alpha_off")] uint AlphaOffset,
     [property: JsonPropertyName("effect_id")] uint EffectId,
     [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null,
     // Raw alpha mask data (64 bytes = 64x64 / 8 for 1-bit, or 4096 bytes for 8-bit)
-    [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null
+    [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null,
+    // Path to exported alpha PNG for this layer
+    [property: JsonPropertyName("alpha_path")] string? AlphaPath = null
 );
 
 /// <summary>
