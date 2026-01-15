@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using WoWMapConverter.Core.Services;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
@@ -654,9 +657,13 @@ public class VlmDatasetExporter
                     chunkPositions[chunkIndex * 3 + 2] = posZ;
                     holes[chunkIndex] = mcnk.Holes;
                     
-                    // Extract shadow from McshData (512 bytes = 64x64 bits)
+                    // Extract shadow from McshData (64x64 bits = 512 bytes raw, but check McshSize from header)
                     var mcshBuf = mcnk.McshData;
-                    if (mcshBuf.Length >= 512)
+                    int mcshSize = mcnk.McshSize;
+                    
+                    // MCSH needs at least 64 bytes (512 bits minimum for partial shadow)
+                    // Full shadow is 512 bytes (64 rows × 8 bytes/row)
+                    if (mcshBuf.Length > 0 && mcshSize > 0)
                     {
                         try
                         {
@@ -666,11 +673,14 @@ public class VlmDatasetExporter
                             File.WriteAllBytes(Path.Combine(shadowsDir, shadowFileName), shadowPng);
                             shadowPaths.Add($"shadows/{shadowFileName}");
                             
-                            // Store raw shadow bits (first 64 bytes = 512 bits of shadow data)
+                            // Store raw shadow bits
                             var rawShadowBytes = mcshBuf.Length >= 64 ? mcshBuf.Take(64).ToArray() : mcshBuf;
                             shadowBits.Add(new VlmChunkShadowBits(chunkIndex, Convert.ToBase64String(rawShadowBytes)));
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[MCSH] Error processing shadow for {tileName}_c{chunkIndex}: {ex.Message}");
+                        }
                     }
                     
                     // Extract alpha layers from McalData + MclyData
@@ -870,11 +880,14 @@ public class VlmDatasetExporter
         if (heights.Count == 0)
             return null;
 
+        var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
+        
         return new VlmTerrainData(
             tileName,
             heights.ToArray(),
             chunkPositions,
             holes,
+            heightmapPath,  // HeightmapPath
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
@@ -888,8 +901,7 @@ public class VlmDatasetExporter
             objects,
             wdlHeights, // WDL Data
             heightMin == float.MaxValue ? 0 : heightMin,
-            heightMax == float.MinValue ? 0 : heightMax,
-            await GenerateHeightmap(heights, tileName, outputDir)
+            heightMax == float.MinValue ? 0 : heightMax
         );
     }
 
@@ -909,6 +921,8 @@ public class VlmDatasetExporter
         var chunkLayers = new List<VlmChunkLayers>();
         var liquids = new List<VlmLiquidData>();
         var objects = new List<VlmObjectPlacement>();
+        var shadowPaths = new List<string>();
+        var shadowBits = new List<VlmChunkShadowBits>();
         
         float heightMin = float.MaxValue;
         float heightMax = float.MinValue;
@@ -1038,11 +1052,50 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // Create chunk layer entry with normals
+                    // Find MCSH subchunk (shadow map - 64x64 bits = 512 bytes)
+                    string? chunkShadowPath = null;
+                    int mcshRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 36); // MCSH offset in header
+                    if (mcshRelOffset > 0)
+                    {
+                        int mcshAbs = headerStart + mcshRelOffset;
+                        // Verify it's actually MCSH chunk
+                        if (mcshAbs + 8 <= adtBytes.Length)
+                        {
+                            string mcshFourCC = System.Text.Encoding.ASCII.GetString(adtBytes, mcshAbs, 4);
+                            if (mcshFourCC == "HSMC") // Reversed on disk
+                            {
+                                int mcshSize = BitConverter.ToInt32(adtBytes, mcshAbs + 4);
+                                int mcshDataStart = mcshAbs + 8;
+                                
+                                if (mcshSize >= 512 && mcshDataStart + 512 <= adtBytes.Length)
+                                {
+                                    try
+                                    {
+                                        var mcshBuf = new byte[512];
+                                        Array.Copy(adtBytes, mcshDataStart, mcshBuf, 0, 512);
+                                        
+                                        var shadow = ShadowMapService.ReadShadow(mcshBuf);
+                                        var shadowPng = ShadowMapService.ToPng(shadow);
+                                        var shadowFileName = $"{tileName}_c{chunkIndex}.png";
+                                        File.WriteAllBytes(Path.Combine(shadowsDir, shadowFileName), shadowPng);
+                                        shadowPaths.Add($"shadows/{shadowFileName}");
+                                        chunkShadowPath = $"shadows/{shadowFileName}";
+                                        
+                                        // Store raw shadow bits (first 64 bytes = 512 bits)
+                                        var rawShadowBytes = mcshBuf.Take(64).ToArray();
+                                        shadowBits.Add(new VlmChunkShadowBits(chunkIndex, Convert.ToBase64String(rawShadowBytes)));
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                    }
+
+                    // Create chunk layer entry with normals and shadow path
                     chunkLayers.Add(new VlmChunkLayers(
                         chunkIndex, 
                         Array.Empty<VlmTextureLayer>(), 
-                        null, // shadow path
+                        chunkShadowPath,
                         normalsArray,
                         null, // mccv colors 
                         0, // area id
@@ -1052,13 +1105,16 @@ public class VlmDatasetExporter
                 catch { /* Skip problematic chunks */ }
             }
 
+            var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
+            
             return new VlmTerrainData(
                 tileName,
                 heights.ToArray(),
                 chunkPositions,
                 holes,
-                null, // shadowPaths
-                null, // shadowBits
+                heightmapPath,  // HeightmapPath
+                shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
+                shadowBits.Count > 0 ? shadowBits.ToArray() : null,
                 null, // alphaPaths
                 null, // LiquidMaskPath
                 null, // LiquidHeightPath
@@ -1070,8 +1126,7 @@ public class VlmDatasetExporter
                 objects,
                 wdlHeights,
                 heightMin == float.MaxValue ? 0 : heightMin,
-                heightMax == float.MinValue ? 0 : heightMax,
-                await GenerateHeightmap(heights, tileName, outputDir)
+                heightMax == float.MinValue ? 0 : heightMax
             );
         }
         catch (Exception ex)

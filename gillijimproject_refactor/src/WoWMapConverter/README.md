@@ -129,6 +129,62 @@ cd src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3
 Then use the `--depth` flag when running the export command.
 If you see `EnvironmentNameNotFound`, ensure you have run the setup script successfully.
 
+### Minimap Regeneration (vlm-bake)
+
+Regenerate high-resolution minimap tiles from VLM dataset JSON files using WoW's weighted blend algorithm.
+
+**Basic Usage:**
+```bash
+dotnet run --project WoWMapConverter.Cli -- vlm-bake -d ./vlm_dataset
+```
+
+**Options:**
+| Option | Description |
+|--------|-------------|
+| `-d, --dataset` | Path to VLM dataset root (required) |
+| `-t, --tile` | Specific tile to bake (e.g., `development_31_31`) |
+| `-o, --output` | Output directory (default: `<dataset>/baked`) |
+| `--shadows` | Apply shadow mask overlay |
+| `--export-layers` | Export individual texture layers |
+
+**With Layer Export (for ViT training):**
+```bash
+dotnet run --project WoWMapConverter.Cli -- vlm-bake -d ./vlm_dataset --export-layers
+```
+
+**Output Structure:**
+```
+vlm_dataset/
+├── baked/
+│   ├── Map_X_Y_composite_noshadow.png   # Final composite without shadows
+│   ├── Map_X_Y_composite_shadowed.png   # Final composite with shadows applied
+│   └── Map_X_Y_layers/                  # Per-layer exports (ground truth data)
+│       ├── raw/                         # Raw textures (no blending)
+│       ├── weighted/                    # Texture × weight (alpha = weight)
+│       ├── cumulative/                  # Progressive blend up to layer N (no shadow)
+│       ├── shadowed/                    # Progressive blend + shadows applied
+│       └── shadow_masks/                # Full tile shadow mask
+```
+
+**Layer Export Types (for ViT/ML Training):**
+| Type | Description | Use Case |
+|------|-------------|----------|
+| **raw** | Original texture, no alpha | Texture classification |
+| **weighted** | RGB × weight, Alpha = weight | Per-layer contribution |
+| **cumulative** | Progressive composite (layers 0..N) | Blending progression |
+| **shadowed** | Cumulative + shadow overlay | Final appearance learning |
+| **shadow_masks** | Full tile shadow mask | Shadow prediction |
+
+**Blending Algorithm:**
+Uses WoW's weighted blend from `adt.fragment.shader`:
+- Layer 0 weight = `1.0 - sum(layer1..N alphas)`
+- Layer N weight = `alpha[N]`
+- Final color = `sum(layer[i].rgb × weight[i])`
+
+**Shadow Convention:**
+- White (255) = transparent/no shadow
+- Black (0) = opaque/full shadow
+
 ## Usage
 
 ```bash

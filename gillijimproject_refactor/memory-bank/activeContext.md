@@ -1,16 +1,40 @@
 # Active Context
 
-## Current Focus: VLM Terrain Data Export (Jan 13, 2026)
+## Current Focus: Minimap Regeneration & AI Terrain Tools (Jan 15, 2026)
 
 ### Status Summary
-Successfully implemented a robust VLM dataset exporter, configured Unsloth training on Windows, and established a manual GGUF export pipeline.
-- **VLM Pipeline Complete**: End-to-end workflow from WOW client -> VLM Training -> GGUF Model.
-- **GGUF Export**: Created manual merge/convert/quantize pipeline to bypass Unsloth/Windows issues.
-- **Documentation**: Comprehensive VLM Training Guide created.
+Complete minimap texture regeneration pipeline with WoW-accurate blending, AI heightmap inference with smoothing, and comprehensive documentation.
 
-### Session Jan 14, 2026 - Image-to-Height & Texture Pipeline
+### Session Jan 14-15, 2026 - Minimap Baking & AI Smoothing
 
 #### Completed ✅
+1.  **MinimapBakeService.cs - WoW Weighted Blend Algorithm**:
+    - Fixed texture layer compositing to match WoW's `adt.fragment.shader` blending:
+      - Layer 0 weight = `1.0 - sum(layer1..N alphas)`
+      - Layer N weight = `alpha[N]`
+      - Final color = weighted sum normalized
+    - Added shadow overlay/debake functionality with configurable intensity.
+    - Added `--export-layers` flag to export individual texture layers for debugging.
+
+2.  **img2mesh.py - Heightmap Smoothing**:
+    - Added post-processing smoothing to reduce AI-generated heightmap noise.
+    - Smoothing methods: `gaussian`, `laplacian`, `bilateral`, `median`.
+    - Added `--output-dir` option (default: `test_output/rebaked_minimaps`).
+    - Updated argparse CLI with full options.
+
+3.  **Ghidra Analysis - WoW Lighting Defaults**:
+    - Analyzed `CGxLight` constructor in WoWClient.exe:
+      - Default direction: `(0, 0, 1)` Z-up
+      - Directional color: `RGB(255, 255, 255)` pure white
+      - Ambient color: `RGB(0, 0, 0)` black
+      - Intensities: `1.0` for both ambient and directional
+    - Terrain lighting is data-driven from `Light.dbc` entries.
+
+4.  **Documentation Updated**:
+    - `scripts/README.md`: Comprehensive docs for all AI terrain tools.
+    - `img2mesh.py` docstring: Updated with all new options and examples.
+
+#### Previous Session (Jan 14) ✅
 1.  **Tiny ViT Regressor (`train_tiny_regressor.py`)**:
     - Trained a lightweight Vision Transformer (ViT) to predict 145-float height arrays from 64x64 minimap crops.
     - Achieved in-memory RAM caching and normalization for fast training (~1hr per epoch on consumer GPU).
@@ -23,10 +47,6 @@ Successfully implemented a robust VLM dataset exporter, configured Unsloth train
     - **MinimapBakeService.cs**: Implemented a C# service for 4096x4096px high-res minimap reconstruction.
     - Composites 256x256 texture layers with per-chunk alpha masks using `SixLabors.ImageSharp`.
     - Integrated `vlm-bake` command into `WoWMapConverter.Cli`.
-
-#### In Progress 🚧
-- Super-Resolution Baking: Debugging C# build errors (likely missing `SixLabors.ImageSharp` dependency).
-- Tiny ViT Training: Evaluating results via `img2mesh.py` once weights are finalized.
 
 ### Session Jan 14, 2026 - (Earlier) VLM Training & GGUF Export
 

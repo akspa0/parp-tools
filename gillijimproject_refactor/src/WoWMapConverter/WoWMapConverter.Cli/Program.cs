@@ -1,3 +1,5 @@
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Dbc;
 using WoWMapConverter.Core.Services;
@@ -919,6 +921,12 @@ public static class Program
         string? datasetDir = null;
         string? inputPath = null;
         string? outputPath = null;
+        string? minimapPath = null;
+        bool withShadows = true;
+        bool debakeShadows = false;
+        bool exportLayers = false;
+        bool invertAlpha = true;  // Default true for correct layer blending
+        float shadowIntensity = 0.5f;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -936,6 +944,33 @@ public static class Program
                 case "-o":
                     if (i + 1 < args.Length) outputPath = args[++i];
                     break;
+                case "--minimap":
+                case "-m":
+                    if (i + 1 < args.Length) minimapPath = args[++i];
+                    break;
+                case "--shadows":
+                    withShadows = true;
+                    break;
+                case "--no-shadows":
+                    withShadows = false;
+                    break;
+                case "--debake":
+                    debakeShadows = true;
+                    break;
+                case "--export-layers":
+                case "-l":
+                    exportLayers = true;
+                    break;
+                case "--invert-alpha":
+                    invertAlpha = true;
+                    break;
+                case "--no-invert-alpha":
+                    invertAlpha = false;
+                    break;
+                case "--shadow-intensity":
+                    if (i + 1 < args.Length && float.TryParse(args[++i], out var intensity))
+                        shadowIntensity = Math.Clamp(intensity, 0f, 1f);
+                    break;
             }
         }
 
@@ -946,9 +981,25 @@ public static class Program
             Console.WriteLine("Usage: vlm-bake --dataset <dir> [--input <json>] [--output <png>]");
             Console.WriteLine();
             Console.WriteLine("Options:");
-            Console.WriteLine("  --dataset, -d <dir>   Path to the VLM dataset root (containing tilesets and masks)");
-            Console.WriteLine("  --input, -i <json>    Specific VLM dataset JSON file (default: all in dataset/dataset folder)");
-            Console.WriteLine("  --output, -o <png>    Output PNG path (for single input) or output directory");
+            Console.WriteLine("  --dataset, -d <dir>       Path to the VLM dataset root (containing tilesets and masks)");
+            Console.WriteLine("  --input, -i <json>        Specific VLM dataset JSON file (default: all in dataset/dataset folder)");
+            Console.WriteLine("  --output, -o <png>        Output PNG path (for single input) or output directory");
+            Console.WriteLine();
+            Console.WriteLine("Shadow Options:");
+            Console.WriteLine("  --shadows                 Apply shadow maps to output (default)");
+            Console.WriteLine("  --no-shadows              Disable shadow map application");
+            Console.WriteLine("  --shadow-intensity <0-1>  Shadow darkness (default: 0.5)");
+            Console.WriteLine("  --debake                  Remove shadows from existing minimap (requires --minimap)");
+            Console.WriteLine("  --minimap, -m <png>       Source minimap for debaking shadows");
+            Console.WriteLine();
+            Console.WriteLine("Layer Options:");
+            Console.WriteLine("  --export-layers, -l       Export individual texture layers as separate PNGs");
+            Console.WriteLine("  --no-invert-alpha         Disable alpha inversion (default: inverted for correct blending)");
+            Console.WriteLine();
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  vlm-bake -d ./vlm_output -i dataset/Azeroth_0_0.json --shadows");
+            Console.WriteLine("  vlm-bake -d ./vlm_output -i dataset/Azeroth_0_0.json --export-layers");
+            Console.WriteLine("  vlm-bake -d ./vlm_output --debake -m minimap.png -i tile.json -o clean.png");
             return 1;
         }
 
@@ -960,8 +1011,12 @@ public static class Program
 
         Console.WriteLine($"VLM Bake: High-Resolution Reconstruction");
         Console.WriteLine($"  Dataset: {datasetDir}");
+        Console.WriteLine($"  Shadows: {(withShadows ? "enabled" : "disabled")} (intensity: {shadowIntensity:F2})");
+        if (invertAlpha) Console.WriteLine($"  Alpha: INVERTED");
+        if (debakeShadows) Console.WriteLine($"  Mode: De-bake (remove shadows)");
+        if (exportLayers) Console.WriteLine($"  Mode: Export individual layers");
 
-        var baker = new MinimapBakeService(datasetDir!);
+        var baker = new MinimapBakeService(datasetDir!) { ShadowIntensity = shadowIntensity, InvertAlpha = invertAlpha };
         var filesToProcess = new List<string>();
 
         if (!string.IsNullOrEmpty(inputPath))
@@ -993,7 +1048,31 @@ public static class Program
                 Console.Write($"  Processing {Path.GetFileName(file)}... ");
                 var timer = System.Diagnostics.Stopwatch.StartNew();
                 
-                using var image = await baker.BakeTileAsync(file);
+                Image<Rgba32> image;
+                string extraInfo = "";
+                
+                if (exportLayers)
+                {
+                    // Export individual layers + composite
+                    var (composite, layerCount, stats) = await baker.BakeTileWithLayersAsync(file, outputBase);
+                    image = composite;
+                    extraInfo = $" [{stats}]";
+                }
+                else if (debakeShadows && !string.IsNullOrEmpty(minimapPath))
+                {
+                    // De-bake: remove shadows from existing minimap
+                    image = await baker.DebakeShadowsFromMinimapAsync(minimapPath, file);
+                }
+                else if (withShadows)
+                {
+                    // Bake with shadows
+                    image = await baker.BakeTileWithShadowsAsync(file, applyShadows: true);
+                }
+                else
+                {
+                    // Bake without shadows
+                    image = await baker.BakeTileAsync(file);
+                }
                 
                 var outName = Path.GetFileNameWithoutExtension(file) + "_highres.png";
                 var outPath = Path.IsPathRooted(outputPath) && filesToProcess.Count == 1 
@@ -1001,9 +1080,10 @@ public static class Program
                     : Path.Combine(outputBase, outName);
 
                 await image.SaveAsPngAsync(outPath);
+                image.Dispose();
                 
                 timer.Stop();
-                Console.WriteLine($"done ({timer.ElapsedMilliseconds}ms)");
+                Console.WriteLine($"done ({timer.ElapsedMilliseconds}ms){extraInfo}");
             }
             catch (Exception ex)
             {
