@@ -20,11 +20,15 @@ import torch.nn.functional as F
 import numpy as np
 from pathlib import Path
 from PIL import Image
+from datetime import datetime
 
 # Model path - check local repo first, then external location
 MODEL_PATH = Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\wow_height_regressor_v3")
 if not MODEL_PATH.exists():
     MODEL_PATH = Path(r"j:\vlm_output\wow_height_regressor_v3")
+
+# Default output directory for inference results
+DEFAULT_OUTPUT_ROOT = Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_output\model_outputs")
 
 
 class ConvBlock(nn.Module):
@@ -334,12 +338,151 @@ def heights_to_mesh(heights, output_path, tile_size=533.33333, smooth=False):
     print(f"Wrote {len(vertices)} vertices, {len(faces)} faces to {output_path}")
 
 
+def create_vlm_dataset_json(heights, normals, tile_name, output_dir):
+    """
+    Create a VLM-compatible dataset JSON from predicted heights/normals.
+    This JSON can be used with MinimapBakeService to regenerate minimaps.
+    
+    Returns the dataset dict for further processing.
+    """
+    # Build chunk heights array
+    chunk_heights = []
+    for chunk_idx in range(256):
+        chunk_heights.append({
+            "idx": chunk_idx,
+            "h": heights[chunk_idx].tolist()
+        })
+    
+    # Build chunk layers with normals (if available)
+    chunk_layers = []
+    for chunk_idx in range(256):
+        layer_data = {
+            "idx": chunk_idx,
+            "layers": [],  # Would need texture info from original dataset
+            "area_id": 0,
+            "flags": 0,
+        }
+        
+        # Add normals if predicted
+        if normals is not None:
+            # Convert normalized floats back to signed bytes
+            chunk_normals = normals[chunk_idx]  # [145, 3]
+            normals_sbytes = []
+            for v in range(145):
+                for c in range(3):
+                    val = int(chunk_normals[v, c] * 127)
+                    val = max(-127, min(127, val))
+                    normals_sbytes.append(val)
+            layer_data["normals"] = normals_sbytes
+        
+        chunk_layers.append(layer_data)
+    
+    # Calculate chunk positions (16x16 grid)
+    chunk_size = 533.33333 / 16  # ~33.33333
+    chunk_positions = []
+    for chunk_y in range(16):
+        for chunk_x in range(16):
+            x = chunk_x * chunk_size + chunk_size / 2
+            y = chunk_y * chunk_size + chunk_size / 2
+            chunk_idx = chunk_y * 16 + chunk_x
+            z = float(np.mean(heights[chunk_idx]))  # Average height
+            chunk_positions.extend([x, y, z])
+    
+    # Build terrain data structure matching VlmTerrainData
+    terrain_data = {
+        "adt_tile": tile_name,
+        "heights": chunk_heights,
+        "chunk_positions": chunk_positions,
+        "holes": [0] * 256,  # No holes in predicted data
+        "height_min": float(heights.min()),
+        "height_max": float(heights.max()),
+        "chunk_layers": chunk_layers,
+        "textures": [],  # Would need from original
+        "objects": [],
+    }
+    
+    # Full sample structure
+    dataset = {
+        "image": f"{tile_name}_minimap.png",
+        "terrain_data": terrain_data,
+    }
+    
+    # Save JSON
+    json_path = output_dir / f"{tile_name}.json"
+    with open(json_path, 'w') as f:
+        json.dump(dataset, f, indent=2)
+    
+    print(f"Wrote VLM dataset JSON: {json_path}")
+    return dataset
+
+
+def save_heightmap_image(heights, output_path):
+    """Save heights as a 16-bit grayscale PNG for visualization."""
+    # Reshape to 16x16 grid, take center height per chunk
+    heights_grid = heights.reshape(16, 16, 145)
+    
+    # Create a higher-res heightmap by interpolating
+    # For now, just use the 9x9 outer vertices per chunk
+    full_height = 16 * 9  # 144 pixels
+    heightmap = np.zeros((full_height, full_height), dtype=np.float32)
+    
+    for cy in range(16):
+        for cx in range(16):
+            chunk_h = heights_grid[cy, cx]
+            # Extract 9x9 outer grid (first 81 vertices)
+            outer = chunk_h[:81].reshape(9, 9)
+            heightmap[cy*9:(cy+1)*9, cx*9:(cx+1)*9] = outer
+    
+    # Normalize to 0-65535 for 16-bit PNG
+    h_min, h_max = heightmap.min(), heightmap.max()
+    if h_max > h_min:
+        heightmap_norm = (heightmap - h_min) / (h_max - h_min) * 65535
+    else:
+        heightmap_norm = np.zeros_like(heightmap)
+    
+    heightmap_16bit = heightmap_norm.astype(np.uint16)
+    
+    # Save using PIL
+    img = Image.fromarray(heightmap_16bit, mode='I;16')
+    img.save(output_path)
+    print(f"Wrote heightmap image: {output_path}")
+
+
+def save_normalmap_image(normals, output_path):
+    """Save normals as RGB normal map image."""
+    if normals is None:
+        return
+    
+    # Reshape to 16x16 grid
+    normals_grid = normals.reshape(16, 16, 145, 3)
+    
+    # Create normal map using 9x9 outer vertices per chunk
+    full_size = 16 * 9  # 144 pixels
+    normalmap = np.zeros((full_size, full_size, 3), dtype=np.float32)
+    
+    for cy in range(16):
+        for cx in range(16):
+            chunk_n = normals_grid[cy, cx]
+            # Extract 9x9 outer grid (first 81 vertices)
+            outer = chunk_n[:81].reshape(9, 9, 3)
+            normalmap[cy*9:(cy+1)*9, cx*9:(cx+1)*9] = outer
+    
+    # Convert from [-1, 1] to [0, 255]
+    normalmap_uint8 = ((normalmap + 1.0) / 2.0 * 255).astype(np.uint8)
+    
+    # Save as RGB
+    img = Image.fromarray(normalmap_uint8, mode='RGB')
+    img.save(output_path)
+    print(f"Wrote normal map image: {output_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Convert minimap to full ADT mesh (V3)")
-    parser.add_argument("image", help="Input minimap image (4096×4096 or any size)")
-    parser.add_argument("--output", "-o", help="Output OBJ file", default=None)
+    parser.add_argument("image", help="Input minimap image (256×256 or any size)")
+    parser.add_argument("--output", "-o", help="Output directory (default: creates folder next to image)")
     parser.add_argument("--smooth", action="store_true", help="Apply smoothing")
     parser.add_argument("--model", help="Model directory", default=str(MODEL_PATH))
+    parser.add_argument("--json-only", action="store_true", help="Only output JSON, no OBJ")
     
     args = parser.parse_args()
     
@@ -348,26 +491,77 @@ def main():
         print(f"Error: Image not found: {image_path}")
         return
     
-    output_path = args.output
-    if output_path is None:
-        output_path = image_path.with_suffix(".obj")
+    # Create output directory with timestamp
+    tile_name = image_path.stem
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    if args.output:
+        output_dir = Path(args.output)
+    else:
+        # Default: test_output/model_outputs/<timestamp>_<tile_name>/
+        output_dir = DEFAULT_OUTPUT_ROOT / f"{timestamp}_{tile_name}"
+    
+    output_dir.mkdir(parents=True, exist_ok=True)
     
     model_path = Path(args.model)
     
-    print(f"Loading model from {model_path}...")
+    print(f"=" * 60)
+    print(f"WoW Minimap to Mesh V3")
+    print(f"=" * 60)
+    print(f"Input: {image_path}")
+    print(f"Output: {output_dir}")
+    print(f"Model: {model_path}")
+    print()
+    
+    print(f"Loading model...")
     model, stats, device = load_model(model_path)
     
-    print(f"Predicting heights from {image_path}...")
+    print(f"Predicting heights and normals...")
     heights, normals = predict_heights(model, image_path, stats, device)
     
     print(f"Height range: [{heights.min():.2f}, {heights.max():.2f}]")
     if normals is not None:
-        print(f"Normals predicted: {normals.shape}")
+        print(f"Normals shape: {normals.shape}")
     
-    print(f"Generating mesh...")
-    heights_to_mesh(heights, output_path, smooth=args.smooth)
+    # Copy input image to output
+    import shutil
+    minimap_copy = output_dir / f"{tile_name}_minimap.png"
+    shutil.copy(image_path, minimap_copy)
+    print(f"Copied input minimap: {minimap_copy}")
     
-    print(f"Done! Output: {output_path}")
+    # Generate VLM dataset JSON
+    print(f"\nGenerating VLM dataset JSON...")
+    dataset = create_vlm_dataset_json(heights, normals, tile_name, output_dir)
+    
+    # Generate heightmap image
+    print(f"Generating heightmap image...")
+    heightmap_path = output_dir / f"{tile_name}_heightmap.png"
+    save_heightmap_image(heights, heightmap_path)
+    
+    # Generate normal map image
+    if normals is not None:
+        print(f"Generating normal map image...")
+        normalmap_path = output_dir / f"{tile_name}_normalmap.png"
+        save_normalmap_image(normals, normalmap_path)
+    
+    # Generate OBJ mesh
+    if not args.json_only:
+        print(f"\nGenerating OBJ mesh...")
+        obj_path = output_dir / f"{tile_name}.obj"
+        heights_to_mesh(heights, obj_path, smooth=args.smooth)
+    
+    # Summary
+    print(f"\n" + "=" * 60)
+    print(f"Output files in {output_dir}:")
+    print(f"  - {tile_name}.json          (VLM dataset for minimap regeneration)")
+    print(f"  - {tile_name}_minimap.png   (input minimap copy)")
+    print(f"  - {tile_name}_heightmap.png (16-bit heightmap)")
+    if normals is not None:
+        print(f"  - {tile_name}_normalmap.png (RGB normal map)")
+    if not args.json_only:
+        print(f"  - {tile_name}.obj           (3D mesh)")
+    print(f"=" * 60)
+    print(f"\nTo regenerate minimap from this data, use MinimapBakeService with the JSON.")
 
 
 if __name__ == "__main__":

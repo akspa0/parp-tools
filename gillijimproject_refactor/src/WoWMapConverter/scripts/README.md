@@ -275,29 +275,57 @@ python img2mesh.py path/to/minimap_chunk.png J:\specific\path\output.obj
 - `<input_name>.mtl`: Material file referencing the input image as texture
 
 ### `img2mesh_v3.py` (V3 - Full ADT Resolution - Recommended)
-**Purpose**: Inference for V3 model. Outputs full ADT heightmap (37,120 vertices) from a single minimap tile.
+**Purpose**: Inference for V3 model. Outputs full ADT heightmap (37,120 vertices) from a single minimap tile, plus a VLM-compatible dataset JSON for minimap regeneration.
 
 **Usage**:
 ```bash
-# Full tile inference (recommended)
+# Full tile inference - creates output folder with all files
 python img2mesh_v3.py path/to/minimap_tile.png
 
 # With smoothing
 python img2mesh_v3.py path/to/minimap_tile.png --smooth
 
-# Custom output
-python img2mesh_v3.py path/to/minimap_tile.png --output terrain.obj
+# Custom output directory
+python img2mesh_v3.py path/to/minimap_tile.png --output ./my_output
+
+# JSON only (no OBJ mesh)
+python img2mesh_v3.py path/to/minimap_tile.png --json-only
 ```
 
 **Options**:
 | Option | Description |
 |--------|-------------|
-| `--output`, `-o` | Output OBJ file path |
-| `--smooth` | Apply Gaussian smoothing |
+| `--output`, `-o` | Output directory (default: `<input>_output/`) |
+| `--smooth` | Apply Gaussian smoothing to mesh |
 | `--model` | Custom model directory |
+| `--json-only` | Only output JSON and images, skip OBJ generation |
 
-**Output**: 
-- `<input_name>.obj`: Full ADT mesh with 256 chunks × 145 vertices = 37,120 vertices
+**Output Folder Structure**:
+```
+<tile_name>_output/
+├── <tile_name>.json           # VLM dataset JSON (for minimap regeneration)
+├── <tile_name>_minimap.png    # Copy of input minimap
+├── <tile_name>_heightmap.png  # 16-bit grayscale heightmap (144×144)
+├── <tile_name>_normalmap.png  # RGB normal map (144×144)
+└── <tile_name>.obj            # 3D mesh (37,120 vertices)
+```
+
+**VLM Dataset JSON Format**:
+The output JSON is compatible with `MinimapBakeService` for minimap regeneration:
+```json
+{
+  "image": "tile_name_minimap.png",
+  "terrain_data": {
+    "adt_tile": "tile_name",
+    "heights": [{"idx": 0, "h": [145 floats]}, ...],  // 256 chunks
+    "chunk_positions": [x,y,z, ...],  // 256×3 floats
+    "holes": [0, 0, ...],  // 256 bitmasks
+    "chunk_layers": [{"idx": 0, "normals": [...], ...}, ...],
+    "height_min": float,
+    "height_max": float
+  }
+}
+```
 
 ---
 
