@@ -55,6 +55,7 @@ LEARNING_RATE = 1e-4
 NUM_EPOCHS = 50
 SMOOTHNESS_WEIGHT = 0.05
 GRADIENT_WEIGHT = 0.1  # Weight for gradient matching loss
+NORMAL_WEIGHT = 0.2  # Weight for normal prediction loss
 
 
 class ConvBlock(nn.Module):
@@ -156,12 +157,14 @@ class HeightmapUNetLite(nn.Module):
     """
     U-Net for 256×256 native WoW minimap input.
     Outputs 256 chunks × 145 heights = 37,120 values.
+    Optionally also outputs 256 × 145 × 3 normals.
     
     Input: 256×256×3 RGB minimap (native WoW resolution)
-    Output: [B, 256, 145] heights
+    Output: heights [B, 256, 145], normals [B, 256, 145, 3] (optional)
     """
-    def __init__(self):
+    def __init__(self, predict_normals=True):
         super().__init__()
+        self.predict_normals = predict_normals
         
         # Encoder for 256×256 input
         # 256 -> 128 -> 64 -> 32 -> 16 -> 8
@@ -178,9 +181,6 @@ class HeightmapUNetLite(nn.Module):
         
         # Decoder
         self.dec1 = ConvBlock(1024 + 512, 512)  # 16
-        self.dec2 = ConvBlock(512 + 512, 512)   # 32
-        self.dec3 = ConvBlock(512 + 256, 256)   # 64
-        self.dec4 = ConvBlock(256 + 128, 128)   # 128
         
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         
@@ -193,6 +193,17 @@ class HeightmapUNetLite(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 145, 1),  # 145 heights per chunk
         )
+        
+        # Normal projection: 16×16 spatial -> 145*3 = 435 normal components per chunk
+        if predict_normals:
+            self.normal_proj = nn.Sequential(
+                nn.Conv2d(512, 512, 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(512, 256, 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 145 * 3, 1),  # 145 normals × 3 components
+                nn.Tanh(),  # Normals are in [-1, 1] range
+            )
         
     def forward(self, x):
         # Ensure input is 256×256
@@ -220,6 +231,13 @@ class HeightmapUNetLite(nn.Module):
         B = heights.shape[0]
         heights = heights.permute(0, 2, 3, 1)  # [B, 16, 16, 145]
         heights = heights.reshape(B, 256, 145)  # [B, 256, 145]
+        
+        if self.predict_normals:
+            # Project to normals
+            normals = self.normal_proj(d1)  # [B, 435, 16, 16]
+            normals = normals.permute(0, 2, 3, 1)  # [B, 16, 16, 435]
+            normals = normals.reshape(B, 256, 145, 3)  # [B, 256, 145, 3]
+            return heights, normals
         
         return heights
 
@@ -307,6 +325,7 @@ class WoWTileDataset(Dataset):
                     # Extract all chunk heights
                     td = data.get("terrain_data", {})
                     heights_list = td.get("heights", [])
+                    chunk_layers = td.get("chunk_layers", [])
                     
                     if len(heights_list) < 256:
                         continue  # Need all chunks
@@ -326,9 +345,28 @@ class WoWTileDataset(Dataset):
                     if valid_chunks < 200:  # Need most chunks
                         continue
                     
+                    # Build normals array [256, 145, 3] from chunk_layers
+                    # Normals are stored as signed bytes (sbyte) in range [-127, 127]
+                    tile_normals = np.zeros((256, 145, 3), dtype=np.float32)
+                    has_normals = False
+                    
+                    for layer in chunk_layers:
+                        idx = layer.get("idx", -1)
+                        normals_raw = layer.get("normals", None)
+                        
+                        if normals_raw is not None and 0 <= idx < 256:
+                            # Normals are 145*3 = 435 signed bytes
+                            if len(normals_raw) >= 435:
+                                for v in range(145):
+                                    for c in range(3):
+                                        # Convert signed byte to normalized float [-1, 1]
+                                        tile_normals[idx, v, c] = normals_raw[v * 3 + c] / 127.0
+                                has_normals = True
+                    
                     self.samples.append({
                         "img_path": img_path,
                         "heights": tile_heights,
+                        "normals": tile_normals if has_normals else None,
                         "tile_name": tile_name,
                     })
                     self.all_heights.append(tile_heights.flatten())
@@ -380,6 +418,13 @@ class WoWTileDataset(Dataset):
         heights = self.normalize_heights(sample["heights"])
         heights_tensor = torch.from_numpy(heights)  # [256, 145]
         
+        # Get normals if available (already normalized to [-1, 1])
+        normals = sample.get("normals", None)
+        if normals is not None:
+            normals_tensor = torch.from_numpy(normals.astype(np.float32))  # [256, 145, 3]
+        else:
+            normals_tensor = torch.zeros(256, 145, 3)  # Placeholder
+        
         # Data augmentation
         if self.augment and random.random() > 0.5:
             # Horizontal flip
@@ -388,10 +433,17 @@ class WoWTileDataset(Dataset):
             h_2d = heights_tensor.reshape(16, 16, 145)
             h_2d = torch.flip(h_2d, dims=[1])
             heights_tensor = h_2d.reshape(256, 145)
+            # Flip normals too
+            n_2d = normals_tensor.reshape(16, 16, 145, 3)
+            n_2d = torch.flip(n_2d, dims=[1])
+            # Also flip X component of normals for horizontal flip
+            n_2d[:, :, :, 0] = -n_2d[:, :, :, 0]
+            normals_tensor = n_2d.reshape(256, 145, 3)
         
         return {
             "pixel_values": img_tensor,
             "labels": heights_tensor,
+            "normals": normals_tensor,
         }
 
 
@@ -454,22 +506,26 @@ def train():
         for batch in pbar:
             pixel_values = batch["pixel_values"].to(device)
             labels = batch["labels"].to(device)
+            target_normals = batch["normals"].to(device)
             
             optimizer.zero_grad()
             
-            outputs = model(pixel_values)
+            pred_heights, pred_normals = model(pixel_values)
             
-            # MSE loss
-            loss_mse = mse_loss(outputs, labels)
+            # MSE loss for heights
+            loss_mse = mse_loss(pred_heights, labels)
             
             # Smoothness loss
-            loss_smooth = compute_smoothness_loss_2d(outputs)
+            loss_smooth = compute_smoothness_loss_2d(pred_heights)
             
             # Gradient loss
-            loss_grad = compute_gradient_loss(outputs, labels)
+            loss_grad = compute_gradient_loss(pred_heights, labels)
+            
+            # Normal prediction loss (cosine similarity would be ideal, but MSE works)
+            loss_normal = mse_loss(pred_normals, target_normals)
             
             # Combined loss
-            loss = loss_mse + SMOOTHNESS_WEIGHT * loss_smooth + GRADIENT_WEIGHT * loss_grad
+            loss = loss_mse + SMOOTHNESS_WEIGHT * loss_smooth + GRADIENT_WEIGHT * loss_grad + NORMAL_WEIGHT * loss_normal
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -490,9 +546,12 @@ def train():
             for batch in val_loader:
                 pixel_values = batch["pixel_values"].to(device)
                 labels = batch["labels"].to(device)
+                target_normals = batch["normals"].to(device)
                 
-                outputs = model(pixel_values)
-                loss = mse_loss(outputs, labels)
+                pred_heights, pred_normals = model(pixel_values)
+                loss_h = mse_loss(pred_heights, labels)
+                loss_n = mse_loss(pred_normals, target_normals)
+                loss = loss_h + NORMAL_WEIGHT * loss_n
                 val_loss += loss.item()
         
         train_loss /= len(train_loader)
@@ -521,7 +580,9 @@ def train():
         "global_mean": dataset.global_mean,
         "global_std": dataset.global_std,
         "output_shape": [256, 145],
-        "input_size": 1024,
+        "output_normals_shape": [256, 145, 3],
+        "input_size": 256,
+        "predict_normals": True,
     }
     with open(OUTPUT_DIR / "normalization_stats.json", 'w') as f:
         json.dump(stats, f, indent=2)
