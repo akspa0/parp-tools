@@ -33,10 +33,10 @@ import random
 
 # Configuration
 DATASET_ROOTS = [
-    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalidar"),
-    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth5"),
-    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalimdor"),
-    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalimdor_v2"),
+    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalidar_v2"),
+    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v7"),
+    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_DeadminesInstance_v2"),
+    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalimdor_v4"),
 ]
 OUTPUT_DIR = Path(r"j:\vlm_output\wow_height_regressor_v3")
 NUM_CHUNKS = 256  # 16×16 chunks per ADT
