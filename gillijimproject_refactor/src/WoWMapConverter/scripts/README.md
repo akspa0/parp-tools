@@ -198,16 +198,21 @@ python train_height_regressor_v2.py
 | ViT architecture | U-Net CNN for spatial coherence |
 | No 2D smoothness loss | 2D smoothness loss respecting WoW's chunk grid |
 | No gradient matching | Gradient matching preserving terrain slopes |
+| No boundary continuity | **Boundary continuity loss** for seamless chunk edges |
+| 3-channel input | **5-channel input** (RGB + Shadow + Alpha) |
+| No position context | **Chunk position embedding** for absolute height context |
 
 **Model Architecture**:
 ```
-Input:  256×256×3 RGB minimap (native WoW resolution)
+Input:  256×256×5 (RGB + Shadow + Alpha)
+        + Chunk Positions [256, 3] → Position Embedding [64]
         ↓
      U-Net Encoder (5 levels: 256→128→64→32→16→8)
         ↓
      Bottleneck (1024 channels @ 8×8)
         ↓
      Decoder (back to 16×16 = 256 chunk positions)
+        + Position Embedding injection
         ↓
 Output: Heights [256, 145] = 37,120 vertex heights
         Normals [256, 145, 3] = 111,360 normal components
@@ -215,13 +220,39 @@ Output: Heights [256, 145] = 37,120 vertex heights
 
 **Loss Function**:
 ```
-loss = MSE(heights) + 0.05 * smoothness + 0.1 * gradient + 0.2 * MSE(normals)
+loss = MSE(heights) + 0.1 * smoothness + 0.1 * gradient + 0.5 * boundary + 0.2 * MSE(normals)
 ```
+- **boundary**: Enforces adjacent chunks share edge heights (critical for seamless terrain)
+- **holes_mask**: Excludes hole regions from loss calculation
 
 **Usage**:
 ```bash
+# Basic training
 python train_height_regressor_v3.py
+
+# Resume from checkpoint
+python train_height_regressor_v3.py --resume checkpoint_epoch50.pt
+
+# Custom epochs and batch size
+python train_height_regressor_v3.py --epochs 200 --batch-size 4
+
+# All options
+python train_height_regressor_v3.py --resume best_model.pt --epochs 150 --batch-size 2 --lr 5e-5 --output ./my_model
 ```
+
+**CLI Options**:
+| Option | Description |
+|--------|-------------|
+| `--resume`, `-r` | Resume from checkpoint file |
+| `--epochs`, `-e` | Number of epochs (default: 100) |
+| `--batch-size`, `-b` | Batch size (default: 2) |
+| `--lr` | Learning rate (default: 1e-4) |
+| `--output`, `-o` | Output directory |
+
+**Checkpoints**:
+- `best_model.pt` - Saved whenever validation loss improves
+- `checkpoint_epoch{N}.pt` - Saved every 10 epochs
+- `emergency_checkpoint.pt` - Saved on Ctrl+C or error (resume with `--resume`)
 
 **Output**: Model saved to `j:\vlm_output\wow_height_regressor_v3`.
 
@@ -229,6 +260,8 @@ python train_height_regressor_v3.py
 - Native 256×256 minimap images (or stitched tiles that get resized)
 - Complete tile JSON with all 256 chunks of height data
 - Normals data in `chunk_layers[].normals` (optional but recommended)
+- Shadow maps in `stitched/<tile>_shadow.png` (optional, improves accuracy)
+- Alpha masks in `stitched/<tile>_alpha_l0.png` (optional, improves accuracy)
 
 ---
 
