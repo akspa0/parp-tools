@@ -650,6 +650,7 @@ def train(resume_from=None, epochs=None):
             model.eval()
             val_loss = 0.0
             val_height_var = 0.0
+            val_count = 0
             with torch.no_grad():
                 with torch.amp.autocast('cuda', enabled=use_amp):
                     for batch in val_loader:
@@ -659,19 +660,30 @@ def train(resume_from=None, epochs=None):
                         
                         pred_heights, _ = model(pixel_values)
                         
+                        # Skip if predictions contain NaN
+                        if torch.isnan(pred_heights).any():
+                            continue
+                        
                         mask = holes_mask.unsqueeze(-1).expand_as(pred_heights)
                         l1 = (torch.abs(pred_heights - labels) * mask).sum() / (mask.sum() + 1e-6)
-                        loss_grad = gradient_loss(pred_heights, labels)
+                        
+                        try:
+                            loss_grad = gradient_loss(pred_heights, labels)
+                            if torch.isnan(loss_grad):
+                                loss_grad = torch.tensor(0.0, device=device)
+                        except:
+                            loss_grad = torch.tensor(0.0, device=device)
                         
                         loss = L1_WEIGHT * l1 + GRADIENT_WEIGHT * loss_grad
-                        val_loss += loss.item()
                         
-                        # Track height variance to detect mean collapse
-                        val_height_var += pred_heights.var().item()
+                        if not torch.isnan(loss) and not torch.isinf(loss):
+                            val_loss += loss.item()
+                            val_height_var += pred_heights.var().item()
+                            val_count += 1
             
             train_loss /= len(train_loader)
-            val_loss /= max(len(val_loader), 1)
-            val_height_var /= max(len(val_loader), 1)
+            val_loss /= max(val_count, 1)
+            val_height_var /= max(val_count, 1)
             
             current_lr = optimizer.param_groups[0]['lr']
             print(f"Epoch {epoch+1}: Train={train_loss:.4f}, Val={val_loss:.4f}, HeightVar={val_height_var:.4f}, LR={current_lr:.2e}")
