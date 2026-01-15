@@ -40,28 +40,69 @@ Extract and describe the terrain data including:
 Output the terrain analysis as structured JSON."""
 
 
+def clean_texture_name(path: str) -> str:
+    """Match C# logic: Extract filename and change extension to .png."""
+    # C# VlmDatasetExporter uses: Path.GetFileName(texture) -> Path.ChangeExtension(..., ".png")
+    # This means 'Textures/Grass/Dirt.blp' -> 'Dirt.png'
+    stem = Path(path).stem
+    return f"tilesets/{stem}.png"
+
 def create_response(terrain_data: dict) -> str:
-    """Create the assistant response with terrain data."""
-    # Create a simplified but complete terrain summary
-    summary = {
+    """Create the assistant response with COMPLETE terrain data."""
+    
+    # Process textures to point to local PNGs
+    raw_textures = terrain_data.get("textures") or []
+    processed_textures = [clean_texture_name(t) for t in raw_textures]
+    
+    # Process chunk_layers to update texture_path references
+    chunk_layers = terrain_data.get("chunk_layers") or []
+    for layer_obj in chunk_layers:
+        if isinstance(layer_obj, dict) and "layers" in layer_obj:
+            for layer in layer_obj.get("layers", []):
+                if isinstance(layer, dict) and layer.get("texture_path"):
+                    layer["texture_path"] = clean_texture_name(layer["texture_path"])
+
+    # Build COMPLETE terrain response - includes ALL exported data
+    response = {
         "tile": terrain_data.get("adt_tile", ""),
-        "height_range": {
-            "min": terrain_data.get("height_min", 0),
-            "max": terrain_data.get("height_max", 0)
-        },
-        "chunk_count": len(terrain_data.get("heights", [])) if terrain_data.get("heights") else 0,
-        "texture_count": len(terrain_data.get("textures", [])),
-        "textures": terrain_data.get("textures", []),
-        "object_count": len(terrain_data.get("objects", [])),
-        "liquid_count": len(terrain_data.get("liquids", [])) if terrain_data.get("liquids") else 0,
-        "heights": terrain_data.get("heights", []),
-        "chunk_positions": terrain_data.get("chunk_positions", []),
-        "holes": terrain_data.get("holes", []),
-        "objects": terrain_data.get("objects", []),
-        "liquids": terrain_data.get("liquids", []),
-        "wdl_heights": terrain_data.get("wdl_heights", None)
+        
+        # Height data (256 chunks × 145 heights each)
+        "heights": terrain_data.get("heights") or [],
+        "chunk_positions": terrain_data.get("chunk_positions") or [],
+        "holes": terrain_data.get("holes") or [],
+        
+        # Height statistics
+        "height_min": terrain_data.get("height_min", 0),
+        "height_max": terrain_data.get("height_max", 0),
+        
+        # Texture data
+        "textures": processed_textures,
+        
+        # Per-chunk layer data (MCLY with normals, alpha, flags)
+        "chunk_layers": chunk_layers,
+        
+        # Shadow data
+        "shadow_maps": terrain_data.get("shadow_maps") or [],
+        "shadow_bits": terrain_data.get("shadow_bits") or [],
+        
+        # Alpha masks
+        "alpha_masks": terrain_data.get("alpha_masks") or [],
+        
+        # Liquid data
+        "liquids": terrain_data.get("liquids") or [],
+        "liquid_mask": terrain_data.get("liquid_mask"),
+        "liquid_height": terrain_data.get("liquid_height"),
+        "liquid_min": terrain_data.get("liquid_min", 0),
+        "liquid_max": terrain_data.get("liquid_max", 0),
+        
+        # Object placements (M2/WMO)
+        "objects": terrain_data.get("objects") or [],
+        
+        # WDL low-res heightmap
+        "wdl_heights": terrain_data.get("wdl_heights"),
     }
-    return json.dumps(summary, separators=(',', ':'))
+    
+    return json.dumps(response, separators=(',', ':'))
 
 
 def convert_sample(json_path: Path, images_dir: Path, output_mode: str = "path") -> Optional[dict]:
