@@ -256,6 +256,66 @@ python train_height_regressor_v3.py --resume best_model.pt --epochs 150 --batch-
 
 **Output**: Model saved to `j:\vlm_output\wow_height_regressor_v3`.
 
+### E. Training: `train_height_regressor_v4_dpt.py` (V4-DPT - State-of-the-Art)
+**Purpose**: Uses Hugging Face DPT (Dense Prediction Transformer) pretrained on depth estimation - the same task as terrain height prediction.
+
+**Key Advantages**:
+| Feature | Description |
+|---------|-------------|
+| **Pretrained Backbone** | DPT-Large trained on NYU/KITTI depth datasets |
+| **Architecture** | Vision Transformer with global receptive field |
+| **Transfer Learning** | Fine-tunes depth estimation model on WoW terrain |
+| **Multi-Loss** | L1 + Gradient + SSIM + Edge + Scale-Invariant |
+
+**Usage**:
+```bash
+# Train from scratch
+python train_height_regressor_v4_dpt.py
+
+# Resume from checkpoint
+python train_height_regressor_v4_dpt.py --resume "J:\vlm_output\wow_height_regressor_v4_dpt\best_model.pt"
+```
+
+**Output**: Model saved to `j:\vlm_output\wow_height_regressor_v4_dpt`.
+
+---
+
+### Understanding Training Output
+
+When training any model, you'll see metrics like:
+```
+Epoch 4: Train=1.9030, Val=0.3705, HeightVar=0.0044, LR=9.46e-06
+  -> Saved best model (val_loss=0.3705)
+```
+
+| Metric | What It Means | Goal |
+|--------|---------------|------|
+| **loss** | Total combined loss for current batch | Lower is better (→0) |
+| **grad** | Gradient matching loss (terrain shape) | Lower = better shape learning |
+| **l1** | L1 loss (absolute height error) | Lower = more accurate heights |
+| **Train** | Average loss over all training batches | Lower is better |
+| **Val** | Validation loss (on unseen data) | **Primary metric** - lower is better |
+| **HeightVar** | Variance of predicted heights | Should be >0 (not collapsed to mean) |
+| **LR** | Learning rate | Decreases over time (cosine schedule) |
+
+**What to Watch For**:
+- ✅ **Val trending down** → Model is learning
+- ✅ **HeightVar > 0.001** → Model predicts terrain variation (not flat)
+- ✅ **"Saved best model"** → Improvement detected
+- ⚠️ **Val = nan** → Gradient explosion (restart from checkpoint)
+- ⚠️ **HeightVar → 0** → Model collapsing to mean prediction
+- ⚠️ **Val not improving for 50 epochs** → Early stopping triggers
+
+**Typical Training Progression**:
+| Phase | Epochs | Val Loss | Notes |
+|-------|--------|----------|-------|
+| Early | 1-10 | 0.3-0.5 | Rapid improvement |
+| Middle | 10-50 | 0.2-0.3 | Gradual refinement |
+| Late | 50-100+ | 0.1-0.2 | Fine-tuning |
+| Converged | - | <0.15 | Good model |
+
+---
+
 **Requirements for V3 training:**
 - Native 256×256 minimap images (or stitched tiles that get resized)
 - Complete tile JSON with all 256 chunks of height data
