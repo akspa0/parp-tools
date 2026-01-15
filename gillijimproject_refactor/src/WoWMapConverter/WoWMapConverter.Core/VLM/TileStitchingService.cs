@@ -282,7 +282,8 @@ public static class TileStitchingService
         string imagesDir, 
         string mapName, 
         int tileRes, 
-        string outputPath)
+        string outputPath,
+        string? suffix = null)
     {
         // Find bounds of all tiles
         int minX = 64, minY = 64, maxX = -1, maxY = -1;
@@ -297,12 +298,21 @@ public static class TileStitchingService
                 var y2 = y.ToString("D2");
                 
                 // Try different naming patterns
-                var candidates = new[]
+                string[] candidates;
+                if (!string.IsNullOrEmpty(suffix))
                 {
-                    Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}.png"),
-                    Path.Combine(imagesDir, $"map{x2}_{y2}.png"),
-                    Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}_minimap.png"),
-                };
+                    // Exact match with suffix
+                    candidates = new[] { Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}{suffix}") };
+                }
+                else
+                {
+                    candidates = new[]
+                    {
+                        Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}.png"),
+                        Path.Combine(imagesDir, $"map{x2}_{y2}.png"),
+                        Path.Combine(imagesDir, $"{mapName}_{x2}_{y2}_minimap.png"),
+                    };
+                }
 
                 foreach (var candidate in candidates)
                 {
@@ -327,6 +337,16 @@ public static class TileStitchingService
         int tileCountY = maxY - minY + 1;
         int canvasWidth = tileCountX * tileRes;
         int canvasHeight = tileCountY * tileRes;
+
+        // Safety check: PNG has practical limits and large images consume huge memory
+        // 16384 is a safe limit that most viewers/tools can handle
+        const int MaxDimension = 16384;
+        if (canvasWidth > MaxDimension || canvasHeight > MaxDimension)
+        {
+            Console.WriteLine($"WARNING: Full map would be {canvasWidth}x{canvasHeight} pixels - exceeds {MaxDimension}px limit. Skipping stitch.");
+            Console.WriteLine($"  Reduce tile count or resolution. Found {tileCountX}x{tileCountY} tiles at {tileRes}px each.");
+            return null;
+        }
 
         Console.WriteLine($"Stitching {tileFiles.Count} tiles into {canvasWidth}x{canvasHeight} map ({minX},{minY} to {maxX},{maxY})");
 

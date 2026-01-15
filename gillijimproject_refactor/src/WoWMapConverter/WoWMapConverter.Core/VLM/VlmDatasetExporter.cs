@@ -481,15 +481,24 @@ public class VlmDatasetExporter
                 progress?.Report($"Created full minimap: {minimapOutput}");
             }
 
-            // Stitch shadow maps (1024 resolution - these are per-tile shadow quilts)
-            var shadowsRoot = Path.Combine(datasetDir, "shadows");
-            if (Directory.Exists(shadowsRoot) && Directory.GetFiles(shadowsRoot, "*.png").Length > 0)
+            // Stitch shadow maps (1024 resolution)
+            var shadowOutput = Path.Combine(stitchedDir, $"{mapName}_full_shadows.png");
+            var shadowBounds = TileStitchingService.StitchFullMap(
+                stitchedDir, mapName, 1024, shadowOutput, "_shadow.png");
+            if (shadowBounds.HasValue)
             {
-                var shadowOutput = Path.Combine(stitchedDir, $"{mapName}_full_shadows.png");
-                var shadowBounds = TileStitchingService.StitchFullMap(shadowsRoot, mapName, 1024, shadowOutput);
-                if (shadowBounds.HasValue)
+                progress?.Report($"Created full shadow map: {shadowOutput}");
+            }
+
+            // Stitch alpha masks (Layers 1-4)
+            for (int l = 1; l <= 4; l++)
+            {
+                var alphaOutput = Path.Combine(stitchedDir, $"{mapName}_full_alpha_l{l}.png");
+                var alphaBounds = TileStitchingService.StitchFullMap(
+                    stitchedDir, mapName, 1024, alphaOutput, $"_alpha_l{l}.png");
+                if (alphaBounds.HasValue)
                 {
-                    progress?.Report($"Created full shadow map: {shadowOutput}");
+                    progress?.Report($"Created full alpha map L{l}: {alphaOutput}");
                 }
             }
         }
