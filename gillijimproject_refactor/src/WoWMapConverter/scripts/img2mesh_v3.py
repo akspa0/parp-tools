@@ -45,12 +45,13 @@ class ConvBlock(nn.Module):
 
 class HeightmapUNetLite(nn.Module):
     """U-Net for 256×256 native WoW minimap input. Outputs heights and optionally normals."""
-    def __init__(self, predict_normals=True):
+    def __init__(self, predict_normals=True, in_channels=5):
         super().__init__()
         self.predict_normals = predict_normals
+        self.in_channels = in_channels
         
         # Encoder for 256×256 input
-        self.enc1 = ConvBlock(3, 64)      # 256
+        self.enc1 = ConvBlock(in_channels, 64)  # 256 - accepts variable input channels
         self.enc2 = ConvBlock(64, 128)    # 128
         self.enc3 = ConvBlock(128, 256)   # 64
         self.enc4 = ConvBlock(256, 512)   # 32
@@ -63,8 +64,17 @@ class HeightmapUNetLite(nn.Module):
         
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         
+        # Chunk position embedding
+        self.pos_embed = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 64),
+            nn.ReLU(inplace=True),
+        )
+        
+        # Height projection: 512 (decoder) + 64 (position) = 576 channels
         self.height_proj = nn.Sequential(
-            nn.Conv2d(512, 512, 3, padding=1),
+            nn.Conv2d(512 + 64, 512, 3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 256, 3, padding=1),
             nn.ReLU(inplace=True),
@@ -82,7 +92,9 @@ class HeightmapUNetLite(nn.Module):
                 nn.Tanh(),
             )
         
-    def forward(self, x):
+    def forward(self, x, chunk_positions=None):
+        B = x.shape[0]
+        
         # Ensure 256×256 input
         if x.shape[2] != 256 or x.shape[3] != 256:
             x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=True)
@@ -95,11 +107,18 @@ class HeightmapUNetLite(nn.Module):
         
         b = self.bottleneck(self.pool(e5))  # 8
         
-        d1 = self.dec1(torch.cat([self.up(b), e5], dim=1))  # 16
+        d1 = self.dec1(torch.cat([self.up(b), e5], dim=1))  # [B, 512, 16, 16]
         
-        heights = self.height_proj(d1)  # [B, 145, 16, 16]
+        # Embed chunk positions
+        if chunk_positions is not None:
+            pos_flat = chunk_positions.reshape(B * 256, 3)
+            pos_embed = self.pos_embed(pos_flat).reshape(B, 16, 16, 64).permute(0, 3, 1, 2)
+        else:
+            pos_embed = torch.zeros(B, 64, 16, 16, device=x.device)
         
-        B = heights.shape[0]
+        d1_with_pos = torch.cat([d1, pos_embed], dim=1)  # [B, 576, 16, 16]
+        
+        heights = self.height_proj(d1_with_pos)  # [B, 145, 16, 16]
         heights = heights.permute(0, 2, 3, 1).reshape(B, 256, 145)
         
         if self.predict_normals:
@@ -122,11 +141,12 @@ def load_model(model_path):
     with open(stats_path, 'r') as f:
         stats = json.load(f)
     
-    # Check if model predicts normals
+    # Check model configuration from stats
     predict_normals = stats.get("predict_normals", True)
+    in_channels = stats.get("in_channels", 5)  # Default to 5 for new models
     
     # Load model
-    model = HeightmapUNetLite(predict_normals=predict_normals)
+    model = HeightmapUNetLite(predict_normals=predict_normals, in_channels=in_channels)
     
     checkpoint_path = model_path / "best_model.pt"
     if not checkpoint_path.exists():
@@ -158,12 +178,22 @@ def predict_heights(model, image_path, stats, device):
     
     # Convert to tensor
     img_np = np.array(img, dtype=np.float32) / 255.0
-    img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)  # [1, 3, H, W]
-    img_tensor = img_tensor.to(device)
+    img_tensor = torch.from_numpy(img_np).permute(2, 0, 1)  # [3, H, W]
     
-    # Predict
+    # Check if model expects 5 channels (RGB + Shadow + Alpha)
+    in_channels = stats.get("in_channels", 3)
+    if in_channels == 5:
+        # Add placeholder shadow and alpha channels (zeros)
+        # In production, these would come from the dataset
+        shadow_tensor = torch.zeros(1, 256, 256)
+        alpha_tensor = torch.zeros(1, 256, 256)
+        img_tensor = torch.cat([img_tensor, shadow_tensor, alpha_tensor], dim=0)  # [5, H, W]
+    
+    img_tensor = img_tensor.unsqueeze(0).to(device)  # [1, C, H, W]
+    
+    # Predict (no chunk positions during inference - use zeros)
     with torch.no_grad():
-        output = model(img_tensor)
+        output = model(img_tensor, chunk_positions=None)
     
     # Handle model returning heights only or heights + normals
     if isinstance(output, tuple):

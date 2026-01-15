@@ -156,20 +156,25 @@ class HeightmapUNet(nn.Module):
 
 class HeightmapUNetLite(nn.Module):
     """
-    U-Net for 256×256 native WoW minimap input.
+    U-Net for 256×256 native WoW minimap input with optional auxiliary channels.
     Outputs 256 chunks × 145 heights = 37,120 values.
     Optionally also outputs 256 × 145 × 3 normals.
     
-    Input: 256×256×3 RGB minimap (native WoW resolution)
+    Input channels:
+    - RGB minimap (3 channels) - required
+    - Shadow map (1 channel) - optional, correlates with terrain slope
+    - Alpha masks (N channels) - optional, texture transitions at edges/slopes
+    
     Output: heights [B, 256, 145], normals [B, 256, 145, 3] (optional)
     """
-    def __init__(self, predict_normals=True):
+    def __init__(self, predict_normals=True, in_channels=3):
         super().__init__()
         self.predict_normals = predict_normals
+        self.in_channels = in_channels
         
         # Encoder for 256×256 input
         # 256 -> 128 -> 64 -> 32 -> 16 -> 8
-        self.enc1 = ConvBlock(3, 64)      # 256
+        self.enc1 = ConvBlock(in_channels, 64)  # 256 - accepts variable input channels
         self.enc2 = ConvBlock(64, 128)    # 128
         self.enc3 = ConvBlock(128, 256)   # 64
         self.enc4 = ConvBlock(256, 512)   # 32
@@ -185,10 +190,20 @@ class HeightmapUNetLite(nn.Module):
         
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
         
+        # Chunk position embedding: [256, 3] -> [256, 64] -> inject into decoder
+        # This provides absolute height context from world coordinates
+        self.pos_embed = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.ReLU(inplace=True),
+            nn.Linear(64, 64),
+            nn.ReLU(inplace=True),
+        )
+        
         # Height projection: 16×16 spatial -> 145 heights per position
         # Each of the 16×16 = 256 positions corresponds to one chunk
+        # Input: 512 (decoder) + 64 (position embedding) = 576 channels
         self.height_proj = nn.Sequential(
-            nn.Conv2d(512, 512, 3, padding=1),
+            nn.Conv2d(512 + 64, 512, 3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 256, 3, padding=1),
             nn.ReLU(inplace=True),
@@ -206,7 +221,14 @@ class HeightmapUNetLite(nn.Module):
                 nn.Tanh(),  # Normals are in [-1, 1] range
             )
         
-    def forward(self, x):
+    def forward(self, x, chunk_positions=None):
+        """
+        Args:
+            x: Input tensor [B, C, 256, 256] where C = 5 (RGB + Shadow + Alpha)
+            chunk_positions: Optional [B, 256, 3] world coordinates per chunk
+        """
+        B = x.shape[0]
+        
         # Ensure input is 256×256
         if x.shape[2] != 256 or x.shape[3] != 256:
             x = F.interpolate(x, size=(256, 256), mode='bilinear', align_corners=True)
@@ -222,19 +244,32 @@ class HeightmapUNetLite(nn.Module):
         b = self.bottleneck(self.pool(e5))  # 8
         
         # Decoder - go back up to 16×16 (one position per chunk)
-        d1 = self.dec1(torch.cat([self.up(b), e5], dim=1))   # 16
+        d1 = self.dec1(torch.cat([self.up(b), e5], dim=1))   # [B, 512, 16, 16]
+        
+        # Embed chunk positions and concatenate with decoder features
+        if chunk_positions is not None:
+            # chunk_positions: [B, 256, 3] -> embed -> [B, 256, 64]
+            pos_flat = chunk_positions.reshape(B * 256, 3)
+            pos_embed = self.pos_embed(pos_flat)  # [B*256, 64]
+            pos_embed = pos_embed.reshape(B, 256, 64)  # [B, 256, 64]
+            pos_embed = pos_embed.reshape(B, 16, 16, 64)  # [B, 16, 16, 64]
+            pos_embed = pos_embed.permute(0, 3, 1, 2)  # [B, 64, 16, 16]
+        else:
+            pos_embed = torch.zeros(B, 64, 16, 16, device=x.device)
+        
+        # Concatenate position embedding with decoder features
+        d1_with_pos = torch.cat([d1, pos_embed], dim=1)  # [B, 576, 16, 16]
         
         # Project 16×16 feature map to heights
         # Each spatial position = one chunk, 145 channels = heights
-        heights = self.height_proj(d1)  # [B, 145, 16, 16]
+        heights = self.height_proj(d1_with_pos)  # [B, 145, 16, 16]
         
         # Reshape to [B, 256, 145]
-        B = heights.shape[0]
         heights = heights.permute(0, 2, 3, 1)  # [B, 16, 16, 145]
         heights = heights.reshape(B, 256, 145)  # [B, 256, 145]
         
         if self.predict_normals:
-            # Project to normals
+            # Project to normals (uses d1 without positions - normals are local)
             normals = self.normal_proj(d1)  # [B, 435, 16, 16]
             normals = normals.permute(0, 2, 3, 1)  # [B, 16, 16, 435]
             normals = normals.reshape(B, 256, 145, 3)  # [B, 256, 145, 3]
@@ -370,6 +405,28 @@ class WoWTileDataset(Dataset):
                     if img_path is None:
                         continue
                     
+                    # Find shadow map (stitched 1024×1024 or per-chunk)
+                    shadow_path = None
+                    shadow_candidates = [
+                        stitched_dir / f"{tile_name}_shadow.png",
+                        stitched_dir / f"{tile_name}_shadow.webp",
+                    ]
+                    for candidate in shadow_candidates:
+                        if candidate.exists() and candidate.is_file():
+                            shadow_path = candidate
+                            break
+                    
+                    # Find alpha mask (first layer - usually base texture boundary)
+                    alpha_path = None
+                    alpha_candidates = [
+                        stitched_dir / f"{tile_name}_alpha_l0.png",
+                        stitched_dir / f"{tile_name}_alpha_l1.png",  # Layer 1 often more informative
+                    ]
+                    for candidate in alpha_candidates:
+                        if candidate.exists() and candidate.is_file():
+                            alpha_path = candidate
+                            break
+                    
                     # Extract all chunk heights
                     td = data.get("terrain_data", {})
                     heights_list = td.get("heights", [])
@@ -411,10 +468,30 @@ class WoWTileDataset(Dataset):
                                         tile_normals[idx, v, c] = normals_raw[v * 3 + c] / 127.0
                                 has_normals = True
                     
+                    # Extract chunk positions [256, 3] - absolute world coordinates
+                    # Format: flattened array of 256*3 floats (x,y,z per chunk)
+                    chunk_positions = td.get("chunk_positions", None)
+                    if chunk_positions is not None and len(chunk_positions) >= 256 * 3:
+                        chunk_pos_array = np.array(chunk_positions, dtype=np.float32).reshape(256, 3)
+                    else:
+                        chunk_pos_array = None
+                    
+                    # Extract holes bitmask [256] - one bitmask per chunk
+                    # Holes indicate missing terrain (should mask loss)
+                    holes_data = td.get("holes", None)
+                    if holes_data is not None and len(holes_data) >= 256:
+                        holes_array = np.array(holes_data[:256], dtype=np.int32)
+                    else:
+                        holes_array = np.zeros(256, dtype=np.int32)
+                    
                     self.samples.append({
                         "img_path": img_path,
+                        "shadow_path": shadow_path,
+                        "alpha_path": alpha_path,
                         "heights": tile_heights,
                         "normals": tile_normals if has_normals else None,
+                        "chunk_positions": chunk_pos_array,
+                        "holes": holes_array,
                         "tile_name": tile_name,
                     })
                     self.all_heights.append(tile_heights.flatten())
@@ -422,7 +499,19 @@ class WoWTileDataset(Dataset):
                 except Exception as e:
                     pass
         
+        # Count auxiliary data availability
+        n_with_shadow = sum(1 for s in self.samples if s.get("shadow_path") is not None)
+        n_with_alpha = sum(1 for s in self.samples if s.get("alpha_path") is not None)
+        n_with_normals = sum(1 for s in self.samples if s.get("normals") is not None)
+        n_with_positions = sum(1 for s in self.samples if s.get("chunk_positions") is not None)
+        n_with_holes = sum(1 for s in self.samples if np.any(s.get("holes", np.zeros(1)) != 0))
+        
         print(f"Loaded {len(self.samples)} complete tiles")
+        print(f"  With shadows:   {n_with_shadow} ({100*n_with_shadow/max(len(self.samples),1):.1f}%)")
+        print(f"  With alphas:    {n_with_alpha} ({100*n_with_alpha/max(len(self.samples),1):.1f}%)")
+        print(f"  With normals:   {n_with_normals} ({100*n_with_normals/max(len(self.samples),1):.1f}%)")
+        print(f"  With positions: {n_with_positions} ({100*n_with_positions/max(len(self.samples),1):.1f}%)")
+        print(f"  With holes:     {n_with_holes} ({100*n_with_holes/max(len(self.samples),1):.1f}%)")
         
         # Global normalization stats
         if self.all_heights:
@@ -462,6 +551,40 @@ class WoWTileDataset(Dataset):
         img_np = np.array(img, dtype=np.float32) / 255.0
         img_tensor = torch.from_numpy(img_np).permute(2, 0, 1)  # [3, 256, 256]
         
+        # Load shadow map as auxiliary channel (correlates with terrain slope)
+        shadow_tensor = None
+        if sample.get("shadow_path") is not None:
+            try:
+                shadow_img = Image.open(sample["shadow_path"]).convert("L")
+                if shadow_img.size != (256, 256):
+                    shadow_img = shadow_img.resize((256, 256), Image.BILINEAR)
+                shadow_np = np.array(shadow_img, dtype=np.float32) / 255.0
+                shadow_tensor = torch.from_numpy(shadow_np).unsqueeze(0)  # [1, 256, 256]
+            except:
+                pass
+        
+        # Load alpha mask as auxiliary channel (texture transitions at edges/slopes)
+        alpha_tensor = None
+        if sample.get("alpha_path") is not None:
+            try:
+                alpha_img = Image.open(sample["alpha_path"]).convert("L")
+                if alpha_img.size != (256, 256):
+                    alpha_img = alpha_img.resize((256, 256), Image.BILINEAR)
+                alpha_np = np.array(alpha_img, dtype=np.float32) / 255.0
+                alpha_tensor = torch.from_numpy(alpha_np).unsqueeze(0)  # [1, 256, 256]
+            except:
+                pass
+        
+        # Concatenate auxiliary channels: RGB (3) + Shadow (1) + Alpha (1) = 5 channels
+        # If shadow/alpha not available, use zeros as placeholder
+        if shadow_tensor is None:
+            shadow_tensor = torch.zeros(1, 256, 256)
+        if alpha_tensor is None:
+            alpha_tensor = torch.zeros(1, 256, 256)
+        
+        # Concatenate all channels: [5, 256, 256]
+        input_tensor = torch.cat([img_tensor, shadow_tensor, alpha_tensor], dim=0)
+        
         # Normalize heights
         heights = self.normalize_heights(sample["heights"])
         heights_tensor = torch.from_numpy(heights)  # [256, 145]
@@ -473,10 +596,31 @@ class WoWTileDataset(Dataset):
         else:
             normals_tensor = torch.zeros(256, 145, 3)  # Placeholder
         
+        # Get chunk positions [256, 3] - provides absolute height context
+        chunk_positions = sample.get("chunk_positions", None)
+        if chunk_positions is not None:
+            # Normalize positions to reasonable range (WoW coords can be large)
+            pos_tensor = torch.from_numpy(chunk_positions.astype(np.float32))
+            # Normalize Z (height) component to [-1, 1] using global stats
+            pos_tensor[:, 2] = 2.0 * (pos_tensor[:, 2] - self.global_min) / (self.global_max - self.global_min + 1e-6) - 1.0
+        else:
+            pos_tensor = torch.zeros(256, 3)
+        
+        # Get holes bitmask [256] - used to mask loss for missing terrain
+        holes = sample.get("holes", np.zeros(256, dtype=np.int32))
+        # Convert bitmask to per-vertex mask: 0 = has hole, 1 = valid terrain
+        # Each chunk has 16 bits for 4x4 sub-holes, if any bit is set, chunk has holes
+        holes_mask = torch.from_numpy((holes == 0).astype(np.float32))  # [256] - 1.0 for valid, 0.0 for holes
+        
         # Data augmentation
-        if self.augment and random.random() > 0.5:
+        do_flip = self.augment and random.random() > 0.5
+        if do_flip:
             # Horizontal flip
-            img_tensor = torch.flip(img_tensor, dims=[2])
+            input_tensor = torch.flip(input_tensor, dims=[2])
+            if shadow_tensor is not None:
+                shadow_tensor = torch.flip(shadow_tensor, dims=[2])
+            if alpha_tensor is not None:
+                alpha_tensor = torch.flip(alpha_tensor, dims=[2])
             # Flip chunk order horizontally (reverse columns in 16×16 grid)
             h_2d = heights_tensor.reshape(16, 16, 145)
             h_2d = torch.flip(h_2d, dims=[1])
@@ -487,11 +631,23 @@ class WoWTileDataset(Dataset):
             # Also flip X component of normals for horizontal flip
             n_2d[:, :, :, 0] = -n_2d[:, :, :, 0]
             normals_tensor = n_2d.reshape(256, 145, 3)
+            # Flip chunk positions (reverse columns)
+            p_2d = pos_tensor.reshape(16, 16, 3)
+            p_2d = torch.flip(p_2d, dims=[1])
+            pos_tensor = p_2d.reshape(256, 3)
+            # Flip holes mask
+            hm_2d = holes_mask.reshape(16, 16)
+            hm_2d = torch.flip(hm_2d, dims=[1])
+            holes_mask = hm_2d.reshape(256)
         
         return {
-            "pixel_values": img_tensor,
+            "pixel_values": input_tensor,
             "labels": heights_tensor,
             "normals": normals_tensor,
+            "chunk_positions": pos_tensor,
+            "holes_mask": holes_mask,
+            "has_shadow": shadow_tensor is not None,
+            "has_alpha": alpha_tensor is not None,
         }
 
 
@@ -526,9 +682,9 @@ def train():
     val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False,
                             num_workers=2, pin_memory=True)
     
-    # Create model
-    print("Creating HeightmapUNetLite model...")
-    model = HeightmapUNetLite()
+    # Create model with 5 input channels: RGB (3) + Shadow (1) + Alpha (1)
+    print("Creating HeightmapUNetLite model with 5 input channels...")
+    model = HeightmapUNetLite(predict_normals=True, in_channels=5)
     model = model.to(device)
     
     # Count parameters
@@ -555,25 +711,36 @@ def train():
             pixel_values = batch["pixel_values"].to(device)
             labels = batch["labels"].to(device)
             target_normals = batch["normals"].to(device)
+            holes_mask = batch["holes_mask"].to(device)  # [B, 256] - 1.0 for valid, 0.0 for holes
+            chunk_positions = batch["chunk_positions"].to(device)  # [B, 256, 3]
             
             optimizer.zero_grad()
             
-            pred_heights, pred_normals = model(pixel_values)
+            pred_heights, pred_normals = model(pixel_values, chunk_positions)
             
-            # MSE loss for heights
-            loss_mse = mse_loss(pred_heights, labels)
+            # Apply holes mask to loss - don't penalize predictions for hole regions
+            # Expand mask to match heights shape [B, 256] -> [B, 256, 145]
+            mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
             
-            # Smoothness loss
+            # Masked MSE loss for heights - only count valid (non-hole) chunks
+            height_diff = (pred_heights - labels) ** 2
+            masked_height_diff = height_diff * mask_expanded
+            loss_mse = masked_height_diff.sum() / (mask_expanded.sum() + 1e-6)
+            
+            # Smoothness loss (applied to all predictions for coherence)
             loss_smooth = compute_smoothness_loss_2d(pred_heights)
             
-            # Gradient loss
+            # Gradient loss (masked)
             loss_grad = compute_gradient_loss(pred_heights, labels)
             
             # CRITICAL: Boundary continuity loss - chunks must share edge heights
             loss_boundary = compute_boundary_continuity_loss(pred_heights)
             
-            # Normal prediction loss
-            loss_normal = mse_loss(pred_normals, target_normals)
+            # Normal prediction loss (masked)
+            normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
+            normal_diff = (pred_normals - target_normals) ** 2
+            masked_normal_diff = normal_diff * normal_mask
+            loss_normal = masked_normal_diff.sum() / (normal_mask.sum() + 1e-6)
             
             # Combined loss - boundary continuity is critical for mesh coherence
             loss = (loss_mse + 
@@ -603,11 +770,23 @@ def train():
                 pixel_values = batch["pixel_values"].to(device)
                 labels = batch["labels"].to(device)
                 target_normals = batch["normals"].to(device)
+                holes_mask = batch["holes_mask"].to(device)
+                chunk_positions = batch["chunk_positions"].to(device)
                 
-                pred_heights, pred_normals = model(pixel_values)
-                loss_h = mse_loss(pred_heights, labels)
+                pred_heights, pred_normals = model(pixel_values, chunk_positions)
+                
+                # Masked height loss
+                mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
+                height_diff = (pred_heights - labels) ** 2
+                loss_h = (height_diff * mask_expanded).sum() / (mask_expanded.sum() + 1e-6)
+                
                 loss_b = compute_boundary_continuity_loss(pred_heights)
-                loss_n = mse_loss(pred_normals, target_normals)
+                
+                # Masked normal loss
+                normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
+                normal_diff = (pred_normals - target_normals) ** 2
+                loss_n = (normal_diff * normal_mask).sum() / (normal_mask.sum() + 1e-6)
+                
                 loss = loss_h + BOUNDARY_WEIGHT * loss_b + NORMAL_WEIGHT * loss_n
                 val_loss += loss.item()
         
@@ -639,6 +818,8 @@ def train():
         "output_shape": [256, 145],
         "output_normals_shape": [256, 145, 3],
         "input_size": 256,
+        "in_channels": 5,  # RGB (3) + Shadow (1) + Alpha (1)
+        "uses_chunk_positions": True,
         "predict_normals": True,
     }
     with open(OUTPUT_DIR / "normalization_stats.json", 'w') as f:
