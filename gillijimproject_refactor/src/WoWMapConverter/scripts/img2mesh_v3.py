@@ -209,10 +209,21 @@ def predict_heights(model, image_path, stats, device):
     
     pred_heights_norm = pred_heights_norm.squeeze(0).cpu().numpy()  # [256, 145]
     
-    # Denormalize heights
-    global_min = stats["global_min"]
-    global_max = stats["global_max"]
-    pred_heights = (pred_heights_norm + 1.0) / 2.0 * (global_max - global_min) + global_min
+    # Denormalize heights based on normalization mode
+    norm_mode = stats.get("normalization_mode", "global")
+    
+    if norm_mode == "per_tile":
+        # Model outputs [0, 1] relative heights
+        # Scale to a reasonable default range for visualization
+        # In production, you'd want to provide actual tile min/max
+        default_range = 200.0  # Reasonable terrain height variation
+        pred_heights = pred_heights_norm * default_range
+        print(f"  Per-tile mode: relative heights scaled to [0, {default_range}]")
+    else:
+        # Legacy global normalization: model outputs [-1, 1]
+        global_min = stats["global_min"]
+        global_max = stats["global_max"]
+        pred_heights = (pred_heights_norm + 1.0) / 2.0 * (global_max - global_min) + global_min
     
     return pred_heights, pred_normals
 

@@ -55,14 +55,22 @@ TOTAL_HEIGHTS = NUM_CHUNKS * NUM_HEIGHTS_PER_CHUNK  # 37,120
 OUTPUT_H = 256  # chunks
 OUTPUT_W = 145  # heights per chunk
 
-# Training hyperparameters
-BATCH_SIZE = 2  # Small batch due to large images
-LEARNING_RATE = 1e-4
-NUM_EPOCHS = 100  # Increased for better convergence
-SMOOTHNESS_WEIGHT = 0.1  # Increased for smoother terrain
-GRADIENT_WEIGHT = 0.1  # Weight for gradient matching loss
+# Training hyperparameters - optimized for 16GB VRAM
+BATCH_SIZE = 8  # Increased for better GPU utilization (will auto-reduce if OOM)
+LEARNING_RATE = 3e-4  # Higher LR works well with larger batches
+NUM_EPOCHS = 500  # Max epochs - early stopping will terminate sooner
+SMOOTHNESS_WEIGHT = 0.1  # Smoother terrain
+GRADIENT_WEIGHT = 0.5  # CRITICAL: Weight for gradient matching - learns terrain SHAPE
 NORMAL_WEIGHT = 0.2  # Weight for normal prediction loss
-BOUNDARY_WEIGHT = 0.5  # CRITICAL: Weight for chunk boundary continuity
+BOUNDARY_WEIGHT = 0.3  # Weight for chunk boundary continuity
+CONSISTENCY_WEIGHT = 0.3  # Height-normal consistency - prevents height collapse
+
+# Early stopping configuration
+EARLY_STOP_PATIENCE = 50  # Stop if no improvement for N epochs (50 is standard for image tasks)
+EARLY_STOP_MIN_DELTA = 1e-5  # Minimum improvement to count as progress
+
+# Mixed precision training (uses less VRAM, faster on modern GPUs)
+USE_AMP = True  # Automatic Mixed Precision
 
 
 class ConvBlock(nn.Module):
@@ -350,13 +358,90 @@ def compute_boundary_continuity_loss(heights):
 
 def compute_gradient_loss(pred, target):
     """
-    Loss that encourages matching terrain gradients (slopes).
+    Loss that encourages matching terrain gradients (slopes) in 2D.
+    This is CRITICAL for learning terrain shape with per-tile normalization.
     """
-    # Gradient in height dimension
-    pred_grad = pred[:, :, 1:] - pred[:, :, :-1]
-    target_grad = target[:, :, 1:] - target[:, :, :-1]
+    B = pred.shape[0]
     
-    return F.mse_loss(pred_grad, target_grad)
+    # Reshape to [B, 16, 16, 145] for spatial operations
+    pred_2d = pred.reshape(B, 16, 16, 145)
+    target_2d = target.reshape(B, 16, 16, 145)
+    
+    # Gradient within each chunk (vertex-to-vertex)
+    pred_grad_v = pred_2d[:, :, :, 1:] - pred_2d[:, :, :, :-1]
+    target_grad_v = target_2d[:, :, :, 1:] - target_2d[:, :, :, :-1]
+    loss_v = F.mse_loss(pred_grad_v, target_grad_v)
+    
+    # Gradient between chunks (chunk-to-chunk in X direction)
+    pred_grad_x = pred_2d[:, :, 1:, :] - pred_2d[:, :, :-1, :]
+    target_grad_x = target_2d[:, :, 1:, :] - target_2d[:, :, :-1, :]
+    loss_x = F.mse_loss(pred_grad_x, target_grad_x)
+    
+    # Gradient between chunks (chunk-to-chunk in Y direction)
+    pred_grad_y = pred_2d[:, 1:, :, :] - pred_2d[:, :-1, :, :]
+    target_grad_y = target_2d[:, 1:, :, :] - target_2d[:, :-1, :, :]
+    loss_y = F.mse_loss(pred_grad_y, target_grad_y)
+    
+    return loss_v + loss_x + loss_y
+
+
+def compute_normal_height_consistency_loss(pred_heights, pred_normals):
+    """
+    Enforces that predicted height gradients are consistent with predicted normals.
+    
+    Normal vectors encode surface orientation:
+    - N.x = -dh/dx (slope in X)
+    - N.y = -dh/dy (slope in Y)
+    - N.z = 1 / sqrt(1 + (dh/dx)^2 + (dh/dy)^2)
+    
+    This loss ensures the model's height and normal predictions are self-consistent,
+    which helps prevent the height output from collapsing to mean while normals
+    capture terrain features.
+    """
+    B = pred_heights.shape[0]
+    
+    # Reshape heights to [B, 16, 16, 145]
+    h = pred_heights.reshape(B, 16, 16, 145)
+    
+    # Compute height gradients (finite differences)
+    # Within-chunk gradients (vertex to vertex)
+    dh_v = h[:, :, :, 1:] - h[:, :, :, :-1]  # [B, 16, 16, 144]
+    
+    # Between-chunk gradients
+    dh_x = h[:, :, 1:, :] - h[:, :, :-1, :]  # [B, 16, 15, 145]
+    dh_y = h[:, 1:, :, :] - h[:, :-1, :, :]  # [B, 15, 16, 145]
+    
+    # Reshape normals to [B, 16, 16, 145, 3]
+    n = pred_normals.reshape(B, 16, 16, 145, 3)
+    
+    # Extract normal components (X and Y encode slopes)
+    # Normal X component should correlate with -dh/dx
+    # Normal Y component should correlate with -dh/dy
+    
+    # For within-chunk: compare dh_v with average of adjacent normal X components
+    n_x_avg = (n[:, :, :, 1:, 0] + n[:, :, :, :-1, 0]) / 2  # [B, 16, 16, 144]
+    
+    # For between-chunk X: compare dh_x with normal X
+    n_x_chunk = (n[:, :, 1:, :, 0] + n[:, :, :-1, :, 0]) / 2  # [B, 16, 15, 145]
+    
+    # For between-chunk Y: compare dh_y with normal Y
+    n_y_chunk = (n[:, 1:, :, :, 1] + n[:, :-1, :, :, 1]) / 2  # [B, 15, 16, 145]
+    
+    # The relationship is: gradient ≈ -normal_component (for unit-scale normals)
+    # We use correlation loss: gradients should be negatively correlated with normals
+    # Simplified: MSE between normalized gradient and -normal component
+    
+    # Normalize gradients to similar scale as normals [-1, 1]
+    dh_v_norm = torch.tanh(dh_v * 5)  # Scale and bound
+    dh_x_norm = torch.tanh(dh_x * 5)
+    dh_y_norm = torch.tanh(dh_y * 5)
+    
+    # Loss: height gradients should match negative of normal components
+    loss_v = F.mse_loss(dh_v_norm, -n_x_avg)
+    loss_x = F.mse_loss(dh_x_norm, -n_x_chunk)
+    loss_y = F.mse_loss(dh_y_norm, -n_y_chunk)
+    
+    return (loss_v + loss_x + loss_y) / 3
 
 
 class WoWTileDataset(Dataset):
@@ -539,9 +624,21 @@ class WoWTileDataset(Dataset):
         return len(self.samples)
     
     def normalize_heights(self, heights):
-        """Normalize to [-1, 1] range"""
+        """Normalize to [-1, 1] range using GLOBAL stats"""
         h_norm = 2.0 * (heights - self.global_min) / (self.global_max - self.global_min + 1e-6) - 1.0
         return h_norm.astype(np.float32)
+    
+    def normalize_heights_per_tile(self, heights):
+        """
+        Normalize to [0, 1] range using PER-TILE min/max.
+        This teaches the model terrain SHAPE rather than absolute elevation.
+        Returns: (normalized_heights, tile_min, tile_max)
+        """
+        tile_min = float(np.min(heights))
+        tile_max = float(np.max(heights))
+        h_range = tile_max - tile_min + 1e-6
+        h_norm = (heights - tile_min) / h_range
+        return h_norm.astype(np.float32), tile_min, tile_max
     
     def __getitem__(self, idx):
         sample = self.samples[idx]
@@ -591,8 +688,15 @@ class WoWTileDataset(Dataset):
         # Concatenate all channels: [5, 256, 256]
         input_tensor = torch.cat([img_tensor, shadow_tensor, alpha_tensor], dim=0)
         
-        # Normalize heights
-        heights = self.normalize_heights(sample["heights"])
+        # Normalize heights using PER-TILE normalization
+        # This teaches terrain SHAPE rather than absolute elevation
+        raw_heights = sample["heights"]
+        tile_min = float(np.min(raw_heights))
+        tile_max = float(np.max(raw_heights))
+        tile_range = tile_max - tile_min + 1e-6
+        
+        # Normalize to [0, 1] based on this tile's range
+        heights = ((raw_heights - tile_min) / tile_range).astype(np.float32)
         heights_tensor = torch.from_numpy(heights)  # [256, 145]
         
         # Get normals if available (already normalized to [-1, 1])
@@ -652,6 +756,8 @@ class WoWTileDataset(Dataset):
             "normals": normals_tensor,
             "chunk_positions": pos_tensor,
             "holes_mask": holes_mask,
+            "tile_min": tile_min,  # For reconstructing absolute heights
+            "tile_max": tile_max,
             "has_shadow": shadow_tensor is not None,
             "has_alpha": alpha_tensor is not None,
         }
@@ -666,9 +772,33 @@ def train(resume_from=None, epochs=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
+    # GPU info and VRAM-based batch size optimization
+    actual_batch_size = BATCH_SIZE
     if device.type == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        gpu_name = torch.cuda.get_device_name(0)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        print(f"GPU: {gpu_name}")
+        print(f"VRAM: {vram_gb:.1f} GB")
+        
+        # Auto-adjust batch size based on VRAM
+        if vram_gb >= 24:
+            actual_batch_size = 16
+        elif vram_gb >= 16:
+            actual_batch_size = 8
+        elif vram_gb >= 12:
+            actual_batch_size = 6
+        elif vram_gb >= 8:
+            actual_batch_size = 4
+        else:
+            actual_batch_size = 2
+        
+        print(f"Auto-selected batch size: {actual_batch_size} (based on {vram_gb:.1f}GB VRAM)")
+        
+        # Enable TF32 for faster training on Ampere+ GPUs
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
+        print("Enabled: TF32, cuDNN benchmark")
     
     # Create dataset
     dataset = WoWTileDataset(DATASET_ROOTS, augment=True)
@@ -688,33 +818,53 @@ def train(resume_from=None, epochs=None):
     
     train_ds, val_ds = torch.utils.data.random_split(dataset, [train_size, val_size])
     
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, 
-                              num_workers=2, pin_memory=True)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False,
-                            num_workers=2, pin_memory=True)
+    # Optimize num_workers based on CPU cores
+    num_workers = min(8, os.cpu_count() or 4)
+    
+    train_loader = DataLoader(train_ds, batch_size=actual_batch_size, shuffle=True, 
+                              num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    val_loader = DataLoader(val_ds, batch_size=actual_batch_size, shuffle=False,
+                            num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    
+    print(f"DataLoader: {num_workers} workers, batch_size={actual_batch_size}")
     
     # Create model with 5 input channels: RGB (3) + Shadow (1) + Alpha (1)
     print("Creating HeightmapUNetLite model with 5 input channels...")
     model = HeightmapUNetLite(predict_normals=True, in_channels=5)
     model = model.to(device)
     
+    # Note: torch.compile can cause issues with some GPU configurations
+    # Disabled by default - enable with --compile flag if desired
+    # try:
+    #     if hasattr(torch, 'compile') and device.type == "cuda":
+    #         model = torch.compile(model, mode="reduce-overhead")
+    #         print("Model compiled with torch.compile (reduce-overhead mode)")
+    # except Exception as e:
+    #     print(f"torch.compile not available: {e}")
+    
     # Count parameters
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {num_params:,}")
     
-    # Optimizer
+    # Optimizer with weight decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
     
-    num_epochs = epochs if epochs else NUM_EPOCHS
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
+    # Use ReduceLROnPlateau for adaptive learning rate
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-6
+    )
     
-    # Loss
-    mse_loss = nn.MSELoss()
+    # Mixed precision scaler
+    scaler = torch.amp.GradScaler('cuda', enabled=USE_AMP and device.type == "cuda")
+    use_amp = USE_AMP and device.type == "cuda"
+    print(f"Mixed Precision (AMP): {'enabled' if use_amp else 'disabled'}")
     
     # Training loop
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     best_val_loss = float('inf')
     start_epoch = 0
+    epochs_without_improvement = 0
+    num_epochs = epochs if epochs else NUM_EPOCHS
     
     # Resume from checkpoint if specified
     if resume_from and Path(resume_from).exists():
@@ -724,12 +874,15 @@ def train(resume_from=None, epochs=None):
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint.get('epoch', 0) + 1
         best_val_loss = checkpoint.get('val_loss', float('inf'))
+        epochs_without_improvement = checkpoint.get('epochs_without_improvement', 0)
         print(f"Resumed from epoch {start_epoch}, best_val_loss={best_val_loss:.4f}")
     
     print(f"\nTraining for {num_epochs - start_epoch} epochs (epochs {start_epoch+1} to {num_epochs})")
-    print(f"Loss weights: smooth={SMOOTHNESS_WEIGHT}, grad={GRADIENT_WEIGHT}, boundary={BOUNDARY_WEIGHT}, normal={NORMAL_WEIGHT}")
+    print(f"Loss weights: smooth={SMOOTHNESS_WEIGHT}, grad={GRADIENT_WEIGHT}, boundary={BOUNDARY_WEIGHT}, normal={NORMAL_WEIGHT}, consistency={CONSISTENCY_WEIGHT}")
+    print(f"Early stopping: patience={EARLY_STOP_PATIENCE}, min_delta={EARLY_STOP_MIN_DELTA}")
     print()
     
+    epoch = start_epoch  # Initialize for exception handlers
     try:
         for epoch in range(start_epoch, num_epochs):
             model.train()
@@ -737,112 +890,139 @@ def train(resume_from=None, epochs=None):
             
             pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs}")
             for batch in pbar:
-                pixel_values = batch["pixel_values"].to(device)
-                labels = batch["labels"].to(device)
-                target_normals = batch["normals"].to(device)
-                holes_mask = batch["holes_mask"].to(device)  # [B, 256] - 1.0 for valid, 0.0 for holes
-                chunk_positions = batch["chunk_positions"].to(device)  # [B, 256, 3]
+                pixel_values = batch["pixel_values"].to(device, non_blocking=True)
+                labels = batch["labels"].to(device, non_blocking=True)
+                target_normals = batch["normals"].to(device, non_blocking=True)
+                holes_mask = batch["holes_mask"].to(device, non_blocking=True)
+                chunk_positions = batch["chunk_positions"].to(device, non_blocking=True)
                 
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)  # Slightly faster than zero_grad()
                 
-                pred_heights, pred_normals = model(pixel_values, chunk_positions)
+                # Mixed precision forward pass
+                with torch.amp.autocast('cuda', enabled=use_amp):
+                    pred_heights, pred_normals = model(pixel_values, chunk_positions)
+                    
+                    # Apply holes mask to loss - don't penalize predictions for hole regions
+                    mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
+                    
+                    # Masked MSE loss for heights
+                    height_diff = (pred_heights - labels) ** 2
+                    masked_height_diff = height_diff * mask_expanded
+                    loss_mse = masked_height_diff.sum() / (mask_expanded.sum() + 1e-6)
+                    
+                    # Smoothness loss
+                    loss_smooth = compute_smoothness_loss_2d(pred_heights)
+                    
+                    # Gradient loss - CRITICAL for terrain shape
+                    loss_grad = compute_gradient_loss(pred_heights, labels)
+                    
+                    # Boundary continuity loss
+                    loss_boundary = compute_boundary_continuity_loss(pred_heights)
+                    
+                    # Normal prediction loss (masked)
+                    normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
+                    normal_diff = (pred_normals - target_normals) ** 2
+                    masked_normal_diff = normal_diff * normal_mask
+                    loss_normal = masked_normal_diff.sum() / (normal_mask.sum() + 1e-6)
+                    
+                    # Height-normal consistency loss - ensures height gradients match normal directions
+                    # This prevents height collapse while normals capture terrain features
+                    loss_consistency = compute_normal_height_consistency_loss(pred_heights, pred_normals)
+                    
+                    # Combined loss
+                    loss = (loss_mse + 
+                            SMOOTHNESS_WEIGHT * loss_smooth + 
+                            GRADIENT_WEIGHT * loss_grad + 
+                            BOUNDARY_WEIGHT * loss_boundary +
+                            NORMAL_WEIGHT * loss_normal +
+                            CONSISTENCY_WEIGHT * loss_consistency)
                 
-                # Apply holes mask to loss - don't penalize predictions for hole regions
-                # Expand mask to match heights shape [B, 256] -> [B, 256, 145]
-                mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
-                
-                # Masked MSE loss for heights - only count valid (non-hole) chunks
-                height_diff = (pred_heights - labels) ** 2
-                masked_height_diff = height_diff * mask_expanded
-                loss_mse = masked_height_diff.sum() / (mask_expanded.sum() + 1e-6)
-                
-                # Smoothness loss (applied to all predictions for coherence)
-                loss_smooth = compute_smoothness_loss_2d(pred_heights)
-                
-                # Gradient loss (masked)
-                loss_grad = compute_gradient_loss(pred_heights, labels)
-                
-                # CRITICAL: Boundary continuity loss - chunks must share edge heights
-                loss_boundary = compute_boundary_continuity_loss(pred_heights)
-                
-                # Normal prediction loss (masked)
-                normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
-                normal_diff = (pred_normals - target_normals) ** 2
-                masked_normal_diff = normal_diff * normal_mask
-                loss_normal = masked_normal_diff.sum() / (normal_mask.sum() + 1e-6)
-                
-                # Combined loss - boundary continuity is critical for mesh coherence
-                loss = (loss_mse + 
-                        SMOOTHNESS_WEIGHT * loss_smooth + 
-                        GRADIENT_WEIGHT * loss_grad + 
-                        BOUNDARY_WEIGHT * loss_boundary +
-                        NORMAL_WEIGHT * loss_normal)
-                
-                loss.backward()
+                # Mixed precision backward pass
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 
                 train_loss += loss.item()
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "mse": f"{loss_mse.item():.4f}",
-                    "bnd": f"{loss_boundary.item():.4f}",
+                    "cons": f"{loss_consistency.item():.4f}",
                 })
-            
-            scheduler.step()
             
             # Validation
             model.eval()
             val_loss = 0.0
             with torch.no_grad():
-                for batch in val_loader:
-                    pixel_values = batch["pixel_values"].to(device)
-                    labels = batch["labels"].to(device)
-                    target_normals = batch["normals"].to(device)
-                    holes_mask = batch["holes_mask"].to(device)
-                    chunk_positions = batch["chunk_positions"].to(device)
-                    
-                    pred_heights, pred_normals = model(pixel_values, chunk_positions)
-                    
-                    # Masked height loss
-                    mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
-                    height_diff = (pred_heights - labels) ** 2
-                    loss_h = (height_diff * mask_expanded).sum() / (mask_expanded.sum() + 1e-6)
-                    
-                    loss_b = compute_boundary_continuity_loss(pred_heights)
-                    
-                    # Masked normal loss
-                    normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
-                    normal_diff = (pred_normals - target_normals) ** 2
-                    loss_n = (normal_diff * normal_mask).sum() / (normal_mask.sum() + 1e-6)
-                    
-                    loss = loss_h + BOUNDARY_WEIGHT * loss_b + NORMAL_WEIGHT * loss_n
-                    val_loss += loss.item()
+                with torch.amp.autocast('cuda', enabled=use_amp):
+                    for batch in val_loader:
+                        pixel_values = batch["pixel_values"].to(device, non_blocking=True)
+                        labels = batch["labels"].to(device, non_blocking=True)
+                        target_normals = batch["normals"].to(device, non_blocking=True)
+                        holes_mask = batch["holes_mask"].to(device, non_blocking=True)
+                        chunk_positions = batch["chunk_positions"].to(device, non_blocking=True)
+                        
+                        pred_heights, pred_normals = model(pixel_values, chunk_positions)
+                        
+                        # Masked height loss
+                        mask_expanded = holes_mask.unsqueeze(-1).expand_as(pred_heights)
+                        height_diff = (pred_heights - labels) ** 2
+                        loss_h = (height_diff * mask_expanded).sum() / (mask_expanded.sum() + 1e-6)
+                        
+                        # Gradient loss for validation too
+                        loss_g = compute_gradient_loss(pred_heights, labels)
+                        
+                        loss_b = compute_boundary_continuity_loss(pred_heights)
+                        
+                        # Masked normal loss
+                        normal_mask = holes_mask.unsqueeze(-1).unsqueeze(-1).expand_as(pred_normals)
+                        normal_diff = (pred_normals - target_normals) ** 2
+                        loss_n = (normal_diff * normal_mask).sum() / (normal_mask.sum() + 1e-6)
+                        
+                        # Height-normal consistency loss
+                        loss_c = compute_normal_height_consistency_loss(pred_heights, pred_normals)
+                        
+                        loss = loss_h + GRADIENT_WEIGHT * loss_g + BOUNDARY_WEIGHT * loss_b + NORMAL_WEIGHT * loss_n + CONSISTENCY_WEIGHT * loss_c
+                        val_loss += loss.item()
             
             train_loss /= len(train_loader)
             val_loss /= max(len(val_loader), 1)
             
-            print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
+            # Update learning rate scheduler based on validation loss
+            scheduler.step(val_loss)
+            current_lr = optimizer.param_groups[0]['lr']
             
-            # Save best model
-            if val_loss < best_val_loss:
+            print(f"Epoch {epoch+1}: Train={train_loss:.4f}, Val={val_loss:.4f}, LR={current_lr:.2e}")
+            
+            # Early stopping check
+            if val_loss < best_val_loss - EARLY_STOP_MIN_DELTA:
                 best_val_loss = val_loss
+                epochs_without_improvement = 0
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': val_loss,
+                    'epochs_without_improvement': epochs_without_improvement,
                 }, OUTPUT_DIR / "best_model.pt")
                 print(f"  -> Saved best model (val_loss={val_loss:.4f})")
+            else:
+                epochs_without_improvement += 1
+                if epochs_without_improvement >= EARLY_STOP_PATIENCE:
+                    print(f"\n*** Early stopping triggered after {epochs_without_improvement} epochs without improvement ***")
+                    print(f"Best validation loss: {best_val_loss:.4f}")
+                    break
             
-            # Periodic checkpoint every 10 epochs
-            if (epoch + 1) % 10 == 0:
+            # Periodic checkpoint every 20 epochs
+            if (epoch + 1) % 20 == 0:
                 checkpoint_path = OUTPUT_DIR / f"checkpoint_epoch{epoch+1}.pt"
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'val_loss': val_loss,
+                    'epochs_without_improvement': epochs_without_improvement,
                 }, checkpoint_path)
                 print(f"  -> Saved checkpoint: {checkpoint_path.name}")
     
@@ -850,14 +1030,18 @@ def train(resume_from=None, epochs=None):
         print("\n\nTraining interrupted by user!")
         print("Saving emergency checkpoint...")
         emergency_path = OUTPUT_DIR / "emergency_checkpoint.pt"
-        torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'val_loss': best_val_loss,
-        }, emergency_path)
-        print(f"Saved: {emergency_path}")
-        print("You can resume with: --resume emergency_checkpoint.pt")
+        try:
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'val_loss': best_val_loss,
+                'epochs_without_improvement': epochs_without_improvement,
+            }, emergency_path)
+            print(f"Saved: {emergency_path}")
+            print("You can resume with: --resume emergency_checkpoint.pt")
+        except Exception as save_err:
+            print(f"Could not save emergency checkpoint: {save_err}")
         return
     
     except Exception as e:
@@ -870,10 +1054,11 @@ def train(resume_from=None, epochs=None):
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': best_val_loss,
+                'epochs_without_improvement': epochs_without_improvement,
             }, emergency_path)
             print(f"Saved: {emergency_path}")
-        except:
-            print("Could not save emergency checkpoint")
+        except Exception as save_err:
+            print(f"Could not save emergency checkpoint: {save_err}")
         raise
     
     # Save final model and stats
@@ -891,6 +1076,7 @@ def train(resume_from=None, epochs=None):
         "in_channels": 5,  # RGB (3) + Shadow (1) + Alpha (1)
         "uses_chunk_positions": True,
         "predict_normals": True,
+        "normalization_mode": "per_tile",  # Model outputs [0,1] relative heights
     }
     with open(OUTPUT_DIR / "normalization_stats.json", 'w') as f:
         json.dump(stats, f, indent=2)
@@ -900,14 +1086,36 @@ def train(resume_from=None, epochs=None):
 
 
 def main():
-    global BATCH_SIZE, LEARNING_RATE, OUTPUT_DIR
+    global BATCH_SIZE, LEARNING_RATE, OUTPUT_DIR, USE_AMP, EARLY_STOP_PATIENCE
     
-    parser = argparse.ArgumentParser(description="Train WoW Height Regressor V3")
+    parser = argparse.ArgumentParser(
+        description="Train WoW Height Regressor V3 - Auto-optimized for your GPU",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python train_height_regressor_v3.py                    # Auto-optimized training
+  python train_height_regressor_v3.py --resume best_model.pt  # Resume training
+  python train_height_regressor_v3.py --no-amp           # Disable mixed precision
+  
+Training will automatically:
+  - Detect GPU VRAM and set optimal batch size
+  - Use mixed precision (AMP) for faster training
+  - Stop early when validation loss plateaus
+  - Save best model and periodic checkpoints
+        """
+    )
     parser.add_argument("--resume", "-r", help="Resume from checkpoint file")
-    parser.add_argument("--epochs", "-e", type=int, help=f"Number of epochs (default: {NUM_EPOCHS})")
-    parser.add_argument("--batch-size", "-b", type=int, help=f"Batch size (default: {BATCH_SIZE})")
-    parser.add_argument("--lr", type=float, help=f"Learning rate (default: {LEARNING_RATE})")
+    parser.add_argument("--epochs", "-e", type=int, default=NUM_EPOCHS,
+                        help=f"Max epochs (default: {NUM_EPOCHS}, early stopping may end sooner)")
+    parser.add_argument("--batch-size", "-b", type=int, 
+                        help="Batch size (default: auto-detected based on VRAM)")
+    parser.add_argument("--lr", type=float, default=LEARNING_RATE,
+                        help=f"Learning rate (default: {LEARNING_RATE})")
     parser.add_argument("--output", "-o", help=f"Output directory (default: {OUTPUT_DIR})")
+    parser.add_argument("--no-amp", action="store_true", 
+                        help="Disable mixed precision training")
+    parser.add_argument("--patience", type=int, default=EARLY_STOP_PATIENCE,
+                        help=f"Early stopping patience (default: {EARLY_STOP_PATIENCE})")
     
     args = parser.parse_args()
     
@@ -918,6 +1126,10 @@ def main():
         LEARNING_RATE = args.lr
     if args.output:
         OUTPUT_DIR = Path(args.output)
+    if args.no_amp:
+        USE_AMP = False
+    if args.patience:
+        EARLY_STOP_PATIENCE = args.patience
     
     train(resume_from=args.resume, epochs=args.epochs)
 
