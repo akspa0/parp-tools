@@ -900,6 +900,8 @@ def train(resume_from=None, epochs=None):
 
 
 def main():
+    global BATCH_SIZE, LEARNING_RATE, OUTPUT_DIR
+    
     parser = argparse.ArgumentParser(description="Train WoW Height Regressor V3")
     parser.add_argument("--resume", "-r", help="Resume from checkpoint file")
     parser.add_argument("--epochs", "-e", type=int, help=f"Number of epochs (default: {NUM_EPOCHS})")
@@ -910,7 +912,6 @@ def main():
     args = parser.parse_args()
     
     # Override globals if specified
-    global BATCH_SIZE, LEARNING_RATE, OUTPUT_DIR
     if args.batch_size:
         BATCH_SIZE = args.batch_size
     if args.lr:
