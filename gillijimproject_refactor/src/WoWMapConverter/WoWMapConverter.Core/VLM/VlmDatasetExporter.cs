@@ -888,7 +888,8 @@ public class VlmDatasetExporter
             objects,
             wdlHeights, // WDL Data
             heightMin == float.MaxValue ? 0 : heightMin,
-            heightMax == float.MinValue ? 0 : heightMax
+            heightMax == float.MinValue ? 0 : heightMax,
+            await GenerateHeightmap(heights, tileName, outputDir)
         );
     }
 
@@ -1069,7 +1070,8 @@ public class VlmDatasetExporter
                 objects,
                 wdlHeights,
                 heightMin == float.MaxValue ? 0 : heightMin,
-                heightMax == float.MinValue ? 0 : heightMax
+                heightMax == float.MinValue ? 0 : heightMax,
+                await GenerateHeightmap(heights, tileName, outputDir)
             );
         }
         catch (Exception ex)
@@ -1206,6 +1208,60 @@ public class VlmDatasetExporter
             sb.Append(input[i]);
         }
         return sb.ToString();
+    }
+
+    private async Task<string?> GenerateHeightmap(List<VlmChunkHeights> chunkHeights, string tileName, string outputDir)
+    {
+        if (chunkHeights == null || chunkHeights.Count == 0) return null;
+
+        const int Width = 256;
+        const int Height = 256;
+        const float MinZ = -2000f;
+        const float MaxZ = 2000f;
+        const float Range = MaxZ - MinZ;
+
+        using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(129, 129);
+        var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
+        
+        for (int row = 0; row < 129; row++) 
+        {
+            for (int col = 0; col < 129; col++) 
+            {
+                int chunkX = Math.Min(col / 8, 15);
+                int chunkY = Math.Min(row / 8, 15);
+                int chunkIdx = chunkY * 16 + chunkX;
+                
+                int localX = col - (chunkX * 8); 
+                int localY = row - (chunkY * 8);
+                
+                if (heightsDict.TryGetValue(chunkIdx, out var hData) && hData != null) 
+                {
+                    // Access Outer Grid (Stride 17: 9 outer + 8 inner)
+                    int arrayIdx = localY * 17 + localX;
+                    
+                    if (arrayIdx < hData.Length) 
+                    {
+                        float z = hData[arrayIdx];
+                        float norm = (z - MinZ) / Range;
+                        if (norm < 0) norm = 0;
+                        if (norm > 1) norm = 1;
+                        
+                        ushort val = (ushort)(norm * 65535);
+                        rawMap[col, row] = new SixLabors.ImageSharp.PixelFormats.L16(val);
+                    }
+                }
+            }
+        }
+        
+        rawMap.Mutate(x => x.Resize(Width, Height, SixLabors.ImageSharp.Processing.KnownResamplers.Bicubic));
+        
+        var filename = $"{tileName}_heightmap.png";
+        var imagesDir = Path.Combine(outputDir, "images"); // Ensure images dir exists
+        Directory.CreateDirectory(imagesDir);
+        var path = Path.Combine(imagesDir, filename);
+        await rawMap.SaveAsPngAsync(path);
+        
+        return $"images/{filename}";
     }
 
     private bool ConvertBlpToPng(string blpPath, string pngPath, MpqArchiveService? mpqService = null)

@@ -21,6 +21,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("heights")] VlmChunkHeights[]? Heights,
     [property: JsonPropertyName("chunk_positions")] float[]? ChunkPositions,  // 256 × 3 (x,y,z)
     [property: JsonPropertyName("holes")] int[]? Holes,                       // 256 hole bitmasks
+    [property: JsonPropertyName("heightmap")] string? HeightmapPath,          // Path to 16-bit PNG heightmap
     
     // Shadow Maps - paths to per-chunk PNGs
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,

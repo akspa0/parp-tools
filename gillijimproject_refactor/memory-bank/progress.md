@@ -13,6 +13,12 @@
 - **BlpResizer**: ✅ Production-ready, CASC extraction works
 - **AlphaWdtInspector**: ✅ Diagnostics CLI functional
 - **DBCTool.V2**: ✅ Crosswalk CSV generation works
+- **vlm-export**: ✅ Extracts ADT/WDT to JSON dataset + Stitched Atlases
+- **train_local.py**: ✅ Unsloth Qwen2-VL training script (Windows compatible)
+- **export_gguf.py**: ✅ Manual GGUF export (Merge -> Convert -> Quantize)
+- **train_tiny_regressor.py**:  [/] Tiny ViT Image-to-Height training (In Progress)
+- **terrain_librarian.py**: ✅ Canonical geometry/alpha prefab detection
+- **MinimapBakeService.cs**: 🚧 C# Super-Resolution baker (Build Errors)
 
 ### Data Generation
 - **WDL→ADT**: ✅ Generates terrain from WDL heights
@@ -43,6 +49,36 @@
 ### Split ADT Merging - ABANDONED
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
+ 
+## Session Jan 14, 2026 - Image-to-Height & Texture Pipeline ✅
+  
+### Image-to-Height Regression
+- **Tiny ViT Model**: Configured `ViTForImageClassification` for 145-float regression.
+- **Dataset Generation**: `generate_height_regression_dataset.py` creates 4,096 samples from VLM exports.
+- **Inference**: `img2mesh.py` generates 3D OBJ meshes with UV textures from minimap crops.
+- **Status**: Training is currently running (~35% complete).
+
+### Terrain Prefab Analysis
+- **Canonical Hashing**: Rotation/Mirror invariant hashing for geometry chunks.
+- **Seed-and-Grow**: Algorithm for detecting large multi-chunk patterns (Macro-Prefabs).
+- **Library**: `prefab_instances.json` created for the world.
+
+### C# Texture Pipeline (Pivot)
+- **MinimapBakeService.cs**: New C# service for high-res compositing.
+- **CLI Integration**: Added `vlm-bake` command.
+- **Status**: Code implemented; awaiting dependency resolution for `SixLabors.ImageSharp`.
+
+## Session Jan 14, 2026 - (Earlier) VLM Training & GGUF
+ 
+### VLM Pipeline Complete ✅
+Full end-to-end pipeline established for training AI on WoW terrain:
+1. **Extraction**: `vlm-export` generates rich JSON + Images (Minimap/Shadows/Alpha).
+2. **Curation**: `vlm_curate.py` formats data for Qwen2-VL.
+3. **Training**: `train_local.py` finetunes model (Unsloth 4-bit LoRA).
+4. **Export**: `export_gguf.py` converts trained adapters to `q4_k_m.gguf` for Inference.
+ 
+### Documentation
+- `docs/VLM_Training_Guide.md` - Complete guide to the pipeline.
 
 ## Session Jan 3-4, 2026 - WMO v14→v17 Conversion Fixes
 

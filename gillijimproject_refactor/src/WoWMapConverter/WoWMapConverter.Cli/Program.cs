@@ -33,6 +33,7 @@ public static class Program
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
+            "vlm-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
             "batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
@@ -913,6 +914,106 @@ public static class Program
     }
 
 
+    private static async Task<int> RunVlmBakeAsync(string[] args)
+    {
+        string? datasetDir = null;
+        string? inputPath = null;
+        string? outputPath = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--dataset":
+                case "-d":
+                    if (i + 1 < args.Length) datasetDir = args[++i];
+                    break;
+                case "--input":
+                case "-i":
+                    if (i + 1 < args.Length) inputPath = args[++i];
+                    break;
+                case "--output":
+                case "-o":
+                    if (i + 1 < args.Length) outputPath = args[++i];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(datasetDir) && string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("VLM Bake - Reconstruct high-resolution minimap tiles");
+            Console.WriteLine();
+            Console.WriteLine("Usage: vlm-bake --dataset <dir> [--input <json>] [--output <png>]");
+            Console.WriteLine();
+            Console.WriteLine("Options:");
+            Console.WriteLine("  --dataset, -d <dir>   Path to the VLM dataset root (containing tilesets and masks)");
+            Console.WriteLine("  --input, -i <json>    Specific VLM dataset JSON file (default: all in dataset/dataset folder)");
+            Console.WriteLine("  --output, -o <png>    Output PNG path (for single input) or output directory");
+            return 1;
+        }
+
+        // If datasetDir is null, infer it from inputPath
+        if (string.IsNullOrEmpty(datasetDir) && !string.IsNullOrEmpty(inputPath))
+        {
+            datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
+        }
+
+        Console.WriteLine($"VLM Bake: High-Resolution Reconstruction");
+        Console.WriteLine($"  Dataset: {datasetDir}");
+
+        var baker = new MinimapBakeService(datasetDir!);
+        var filesToProcess = new List<string>();
+
+        if (!string.IsNullOrEmpty(inputPath))
+        {
+            filesToProcess.Add(inputPath);
+        }
+        else
+        {
+            var datasetFolder = Path.Combine(datasetDir!, "dataset");
+            if (Directory.Exists(datasetFolder))
+            {
+                filesToProcess.AddRange(Directory.EnumerateFiles(datasetFolder, "*.json"));
+            }
+        }
+
+        if (filesToProcess.Count == 0)
+        {
+            Console.WriteLine("Error: No JSON files found to process.");
+            return 1;
+        }
+
+        var outputBase = outputPath ?? Path.Combine(datasetDir!, "reconstructed_minimaps");
+        Directory.CreateDirectory(outputBase);
+
+        foreach (var file in filesToProcess)
+        {
+            try
+            {
+                Console.Write($"  Processing {Path.GetFileName(file)}... ");
+                var timer = System.Diagnostics.Stopwatch.StartNew();
+                
+                using var image = await baker.BakeTileAsync(file);
+                
+                var outName = Path.GetFileNameWithoutExtension(file) + "_highres.png";
+                var outPath = Path.IsPathRooted(outputPath) && filesToProcess.Count == 1 
+                    ? outputPath 
+                    : Path.Combine(outputBase, outName);
+
+                await image.SaveAsPngAsync(outPath);
+                
+                timer.Stop();
+                Console.WriteLine($"done ({timer.ElapsedMilliseconds}ms)");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"failed: {ex.Message}");
+            }
+        }
+
+        return 0;
+    }
+
     private static void ShowUsage()
     {
         Console.WriteLine("WoW Map Converter v3 - Bidirectional Alpha ↔ LK 3.3.5 Conversion");
@@ -928,6 +1029,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter vlm-export [options]                    Export VLM training dataset");
         Console.WriteLine("  wowmapconverter vlm-decode [options]                    Decode VLM JSON to ADT");
+        Console.WriteLine("  wowmapconverter vlm-bake [options]                       Bake high-resolution minimap");
         Console.WriteLine("  wowmapconverter batch --input-dir <dir> [options]       Batch convert directory");
         Console.WriteLine();
         Console.WriteLine("Alpha → LK Conversion Options:");

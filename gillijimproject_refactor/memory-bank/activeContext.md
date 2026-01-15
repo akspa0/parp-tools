@@ -3,10 +3,47 @@
 ## Current Focus: VLM Terrain Data Export (Jan 13, 2026)
 
 ### Status Summary
-Successfully implemented a robust VLM dataset exporter that correlates terrain meshes, minimaps, and "decompiled" texture data.
-- **Custom ADT Parsing**: Ported full ADT parsing to `WoWRollback.Core`, removing `Warcraft.NET` dependency.
-- **Visual Data extraction**: Implemented `AlphaMapGenerator` to convert MCAL alpha maps into per-layer PNG masks, allowing the VLM to "see" texture distribution.
-- **Mesh Export**: Integrated `TerrainMeshExporter` to generate aligned OBJ/MTL data.
+Successfully implemented a robust VLM dataset exporter, configured Unsloth training on Windows, and established a manual GGUF export pipeline.
+- **VLM Pipeline Complete**: End-to-end workflow from WOW client -> VLM Training -> GGUF Model.
+- **GGUF Export**: Created manual merge/convert/quantize pipeline to bypass Unsloth/Windows issues.
+- **Documentation**: Comprehensive VLM Training Guide created.
+
+### Session Jan 14, 2026 - Image-to-Height & Texture Pipeline
+
+#### Completed ✅
+1.  **Tiny ViT Regressor (`train_tiny_regressor.py`)**:
+    - Trained a lightweight Vision Transformer (ViT) to predict 145-float height arrays from 64x64 minimap crops.
+    - Achieved in-memory RAM caching and normalization for fast training (~1hr per epoch on consumer GPU).
+    - **Status**: Training is **Complete**. Model saved to `j:\vlm_output\wow_tiny_vit_regressor`.
+2.  **Terrain Prefab Analysis (`terrain_librarian.py`)**:
+    - Developed a tool to detect recurring geometry and alpha patterns (Prefabs).
+    - Implemented a "Seed-and-Grow" algorithm to find multi-chunk macro prefabs.
+    - Exported `prefab_instances.json` mapping all patterns to the global world grid.
+3.  **C# Texture Pipeline Integration**:
+    - **MinimapBakeService.cs**: Implemented a C# service for 4096x4096px high-res minimap reconstruction.
+    - Composites 256x256 texture layers with per-chunk alpha masks using `SixLabors.ImageSharp`.
+    - Integrated `vlm-bake` command into `WoWMapConverter.Cli`.
+
+#### In Progress 🚧
+- Super-Resolution Baking: Debugging C# build errors (likely missing `SixLabors.ImageSharp` dependency).
+- Tiny ViT Training: Evaluating results via `img2mesh.py` once weights are finalized.
+
+### Session Jan 14, 2026 - (Earlier) VLM Training & GGUF Export
+
+#### Completed ✅
+1.  **VLM Training Setup (`train_local.py`)**:
+    - Configured Unsloth `SFTTrainer` for Qwen2-VL-8B.
+    - Implemented custom `UnslothVisionDataCollator` and dataset loading.
+    - Resolved VLM detection issues by passing `processing_class`.
+2.  **GGUF Export Pipeline (`export_gguf.py`)**:
+    - **Manual Pipeline**: Merges LoRA adapters -> Exports to F16 GGUF -> Quantizes to Q4_K_M.
+    - **Robustness**: Explicitly handles PEFT model wrapping for merging.
+    - **Dependencies**: Forces `gguf` library install from Git to match conversion script.
+3.  **Dataset Enhancements**:
+    - **Atlas Stitching**: `TileStitchingService` now stitches Shadow and Alpha maps into full-world atlases.
+    - **Large Map Safety**: Added checks to skip stitching for maps > 16k pixels to prevent crashes.
+4.  **Documentation**:
+    - Created `docs/VLM_Training_Guide.md` detailing the entire workflow.
 
 ### Session Jan 13, 2026 - VLM Terrain Data Export
 
@@ -52,10 +89,10 @@ Successfully implemented a robust VLM dataset exporter that correlates terrain m
 
 
 ### Next Steps (Priority Order)
-1. **Deep dive into v14 WMO format** - Compare parsing with client code
-2. **Study MirrorMachine exporter** - Reference implementation
-3. **Investigate portal/group relationships** - May be causing drop-outs
-4. Test with simpler WMOs to isolate the issue
+1. **Fix C# Build Errors**: Resolve dependencies for `MinimapBakeService` in `WoWMapConverter.Core`.
+2. **Evaluate Tiny ViT Results**: Run `img2mesh.py` on diverse terrain to check height prediction accuracy.
+3. **High-Res De-Baking**: Subtract known layers from minimaps to isolate unknown textures.
+4. **Macro-Prefab Gallery**: Finalize visualization of detected 2x2 and 4x4 terrain patterns.
 
 ### Additional Modules to Integrate
 
