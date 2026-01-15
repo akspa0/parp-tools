@@ -4,6 +4,137 @@ This directory contains a suite of tools for analyzing WoW ADT terrain data, tra
 
 ---
 
+## Quick Start: Complete Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    0.5.3 CLIENT → DATASET → OUTPUTS                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────────────┐│
+│  │ 0.5.3 Client │ ──► │ VLM Dataset  │ ──► │ Outputs:                     ││
+│  │ (MPQ files)  │     │ (JSON+Images)│     │  • Rebaked Minimaps          ││
+│  └──────────────┘     └──────────────┘     │  • Stitched World Maps       ││
+│         │                    │             │  • AI Training Data          ││
+│         │                    │             │  • 3D Mesh Reconstruction    ││
+│         ▼                    ▼             └──────────────────────────────┘│
+│    vlm-export           vlm-bake                                           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Step 1: Extract VLM Dataset from 0.5.3 Client
+
+```bash
+cd src/WoWMapConverter/WoWMapConverter.Cli
+
+# Export a single map (e.g., Kalidar)
+dotnet run -- vlm-export --client "H:\053-client\" --map Kalidar --out "test_data/vlm-datasets/053_Kalidar"
+
+# Export Azeroth (Eastern Kingdoms)
+dotnet run -- vlm-export --client "H:\053-client\" --map Azeroth --out "test_data/vlm-datasets/053_azeroth"
+
+# Export Kalimdor
+dotnet run -- vlm-export --client "H:\053-client\" --map Kalimdor --out "test_data/vlm-datasets/053_kalimdor"
+```
+
+**What gets exported:**
+| Data | Format | Description |
+|------|--------|-------------|
+| Heights | JSON (145 floats × 256 chunks) | Full ADT vertex heights (MCVT) |
+| Normals | JSON (435 bytes × 256 chunks) | Vertex normals (MCNR) |
+| Shadows | PNG (64×64 per chunk) | Shadow maps (MCSH) |
+| Alpha Masks | PNG (64×64 per layer) | Texture blend masks (MCAL) |
+| Textures | List of paths | Referenced textures (MTEX) |
+| Minimaps | PNG (256×256) | Original minimap tiles |
+| Stitched | PNG/WebP (1024×1024) | Composited full-tile images |
+
+### Step 2: Rebake Minimaps from Dataset
+
+```bash
+# Bake all tiles in a dataset
+dotnet run -- vlm-bake -d "test_data/vlm-datasets/053_Kalidar"
+
+# Export individual layers for AI training
+dotnet run -- vlm-bake -d "test_data/vlm-datasets/053_Kalidar" --export-layers
+
+# Bake without shadows
+dotnet run -- vlm-bake -d "test_data/vlm-datasets/053_Kalidar" --no-shadows
+```
+
+### Step 3: Train AI Models (Optional)
+
+```bash
+cd src/WoWMapConverter/scripts
+
+# Train height+normals regression model (V3 - recommended)
+python train_height_regressor_v3.py
+```
+
+### Step 4: Generate 3D Meshes from Minimaps
+
+```bash
+# From trained model
+python img2mesh_v3.py path/to/minimap_tile.png
+
+# Output: terrain.obj with 37,120 vertices
+```
+
+---
+
+## Dataset Structure
+
+After running `vlm-export`, you get:
+
+```
+vlm-datasets/053_MapName/
+├── MapName_X_Y.json          # Per-tile terrain data
+├── stitched/                 # Composited minimap tiles
+│   ├── MapName_X_Y.png       # 1024×1024 stitched minimap
+│   └── ...
+├── shadows/                  # Per-chunk shadow maps
+│   ├── MapName_X_Y_c0.png    # Chunk 0 shadow (64×64)
+│   └── ...
+├── alphas/                   # Per-layer alpha masks
+│   ├── MapName_X_Y_c0_l0.png # Chunk 0, Layer 0 alpha
+│   └── ...
+├── liquids/                  # Liquid height/mask maps
+└── baked/                    # Regenerated minimaps (after vlm-bake)
+    ├── MapName_X_Y.png       # Final composite
+    └── MapName_X_Y_layers/   # Individual layers (if --export-layers)
+```
+
+### JSON Tile Format
+
+Each `MapName_X_Y.json` contains:
+
+```json
+{
+  "terrain_data": {
+    "adt_tile": "MapName_X_Y",
+    "heights": [
+      {"idx": 0, "h": [145 floats...]},
+      {"idx": 1, "h": [145 floats...]},
+      ...  // 256 chunks total
+    ],
+    "chunk_layers": [
+      {
+        "idx": 0,
+        "normals": [435 signed bytes...],  // 145 vertices × 3 components
+        "layers": [
+          {"tex_id": 0, "texture_path": "path/to/texture.blp", "flags": 0}
+        ]
+      }
+    ],
+    "textures": ["texture1.blp", "texture2.blp", ...],
+    "height_min": -100.0,
+    "height_max": 500.0
+  }
+}
+```
+
+---
+
 ## 1. Topography & Analysis
 
 ### `terrain_librarian.py`
@@ -57,16 +188,35 @@ python train_height_regressor_v2.py
 **Output**: Model saved to `j:\vlm_output\wow_height_regressor_v2`.
 
 ### D. Training: `train_height_regressor_v3.py` (V3 - Full ADT Resolution - Recommended)
-**Purpose**: Improved ViT regressor with fixes for smooth terrain output.
+**Purpose**: U-Net model that predicts full ADT terrain geometry from minimap images.
 
 **Key Improvements over V2**:
 | Issue in V2 | Fix in V3 |
 |-------------|-----------|
-| Chunk-level input | Full tile input (1024×1024 downsampled minimap) |
-| Chunk-level output | Full tile output (256 chunks × 145 heights = 37,120 vertices) |
-| No spatial coherence | U-Net architecture for spatial coherence |
-| No 2D smoothness loss | 2D smoothness loss respecting WoW's chunk grid structure |
+| Chunk-level input (64×64) | Full tile input (256×256 native minimap) |
+| Heights only (145 values) | Heights + Normals (37,120 + 111,360 values) |
+| ViT architecture | U-Net CNN for spatial coherence |
+| No 2D smoothness loss | 2D smoothness loss respecting WoW's chunk grid |
 | No gradient matching | Gradient matching preserving terrain slopes |
+
+**Model Architecture**:
+```
+Input:  256×256×3 RGB minimap (native WoW resolution)
+        ↓
+     U-Net Encoder (5 levels: 256→128→64→32→16→8)
+        ↓
+     Bottleneck (1024 channels @ 8×8)
+        ↓
+     Decoder (back to 16×16 = 256 chunk positions)
+        ↓
+Output: Heights [256, 145] = 37,120 vertex heights
+        Normals [256, 145, 3] = 111,360 normal components
+```
+
+**Loss Function**:
+```
+loss = MSE(heights) + 0.05 * smoothness + 0.1 * gradient + 0.2 * MSE(normals)
+```
 
 **Usage**:
 ```bash
@@ -76,8 +226,9 @@ python train_height_regressor_v3.py
 **Output**: Model saved to `j:\vlm_output\wow_height_regressor_v3`.
 
 **Requirements for V3 training:**
-- Stitched minimap images (4096×4096 tiles)
-- Complete tile JSON with all 256 chunks of height data.
+- Native 256×256 minimap images (or stitched tiles that get resized)
+- Complete tile JSON with all 256 chunks of height data
+- Normals data in `chunk_layers[].normals` (optional but recommended)
 
 ---
 
@@ -215,7 +366,48 @@ vlm_dataset/
 
 ---
 
-## 5. Lighting Reference (from Ghidra Analysis)
+## 5. Full Map Stitching
+
+The VLM export automatically generates stitched world maps from individual tiles.
+
+### Automatic Outputs
+
+During `vlm-export`, the following stitched images are generated:
+
+```
+vlm-datasets/053_MapName/
+└── stitched/
+    ├── MapName_full_minimap.webp       # Complete world map (all tiles)
+    ├── MapName_full_minimap_75pct.webp # 75% scale version
+    ├── MapName_full_minimap_50pct.webp # 50% scale version
+    ├── MapName_full_shadow.webp        # Stitched shadow maps
+    ├── MapName_full_alpha_l0.webp      # Stitched alpha layer 0
+    ├── MapName_full_alpha_l1.webp      # Stitched alpha layer 1
+    └── ...
+```
+
+### Smart Scaling
+
+Large maps automatically scale down to fit within practical limits:
+- **Maximum dimension**: 16384 pixels
+- **Scale factors**: Rounded to 25%, 33%, 50%, or 75%
+- **Format**: WebP at 99% quality (handles large images better than PNG)
+
+Example output for a 18×38 tile map:
+```
+Auto-scaling: 18x38 tiles at 1024px would be 18432x38912
+  -> Scaling to 33% (338px tiles) = 6084x12844
+```
+
+### Per-Tile Stitching
+
+Each ADT tile also gets a stitched 1024×1024 image combining all 256 chunks:
+- **Shadows**: `MapName_X_Y_shadow.png` (64×64 chunks → 1024×1024)
+- **Alphas**: `MapName_X_Y_alpha_l0.png` per layer
+
+---
+
+## 6. Lighting Reference (from Ghidra Analysis)
 
 WoW's default light settings (from `CGxLight` constructor in WoWClient.exe):
 
@@ -238,11 +430,59 @@ Actual terrain lighting is data-driven from `Light.dbc` entries, which define ti
 
 ---
 
+## 7. WoW Terrain Data Reference
+
+### ADT Structure (Alpha 0.5.3)
+
+Each ADT file contains 256 MCNK chunks arranged in a 16×16 grid.
+
+| Chunk | Size | Description |
+|-------|------|-------------|
+| **MCVT** | 580 bytes | 145 floats - vertex heights |
+| **MCNR** | 448 bytes | 145×3 signed bytes - vertex normals + 13 padding |
+| **MCSH** | 512 bytes | 64×64 bits - shadow map (8 bytes × 64 rows) |
+| **MCAL** | variable | Alpha maps for texture blending |
+| **MCLY** | 16 bytes/layer | Texture layer definitions |
+
+### Vertex Layout (145 per chunk)
+
+WoW uses an interleaved 9+8 pattern:
+```
+Row 0: 9 outer vertices (corners)
+Row 1: 8 inner vertices (centers)
+Row 2: 9 outer vertices
+...
+Row 16: 9 outer vertices
+
+Total: 9×9 outer (81) + 8×8 inner (64) = 145 vertices
+```
+
+### Height Data
+
+- **MCVT**: 145 floats, relative to chunk base height
+- **Range**: Typically -500 to +2000 in world units
+- **Resolution**: ~2.08 yards per vertex (533.33 / 256 yards per chunk)
+
+### Normal Data
+
+- **MCNR**: 145×3 signed bytes (X, Y, Z components)
+- **Range**: -127 to +127, normalized to unit vectors
+- **Alpha format**: Non-interleaved (81 outer, then 64 inner)
+- **LK+ format**: Interleaved (9-8-9-8 pattern)
+
+### Shadow Data
+
+- **MCSH**: 64×64 bitmap (512 bytes = 4096 bits)
+- **1 bit per pixel**: 0 = lit, 1 = shadowed
+- **Baked from**: Sun position + terrain geometry
+
+---
+
 ## Dependencies
 
 **Python** (for AI tools):
 ```bash
-pip install torch transformers pillow numpy scipy scikit-image
+pip install torch transformers pillow numpy scipy scikit-image tqdm
 ```
 
 **C#** (for minimap baking):
