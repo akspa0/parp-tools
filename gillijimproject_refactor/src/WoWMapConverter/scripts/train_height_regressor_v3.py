@@ -33,7 +33,7 @@ import random
 
 # Configuration
 DATASET_ROOTS = [
-    Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalidar_v2"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_shadowfang_v1"),
     Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v7"),
     Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_DeadminesInstance_v2"),
     Path(r"j:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalimdor_v4"),
@@ -52,10 +52,11 @@ OUTPUT_W = 145  # heights per chunk
 # Training hyperparameters
 BATCH_SIZE = 2  # Small batch due to large images
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 50
-SMOOTHNESS_WEIGHT = 0.05
+NUM_EPOCHS = 100  # Increased for better convergence
+SMOOTHNESS_WEIGHT = 0.1  # Increased for smoother terrain
 GRADIENT_WEIGHT = 0.1  # Weight for gradient matching loss
 NORMAL_WEIGHT = 0.2  # Weight for normal prediction loss
+BOUNDARY_WEIGHT = 0.5  # CRITICAL: Weight for chunk boundary continuity
 
 
 class ConvBlock(nn.Module):
@@ -256,11 +257,54 @@ def compute_smoothness_loss_2d(heights):
     intra_chunk = torch.mean((h[:, :, :, 1:] - h[:, :, :, :-1]) ** 2)
     
     # Smoothness between adjacent chunks (edge continuity)
-    # Compare last vertices of chunk[i] with first vertices of chunk[i+1]
     inter_chunk_h = torch.mean((h[:, :, 1:, :] - h[:, :, :-1, :]) ** 2)
     inter_chunk_v = torch.mean((h[:, 1:, :, :] - h[:, :-1, :, :]) ** 2)
     
     return intra_chunk + 0.5 * (inter_chunk_h + inter_chunk_v)
+
+
+def compute_boundary_continuity_loss(heights):
+    """
+    CRITICAL: Enforce that adjacent chunks share the same edge heights.
+    
+    WoW's 145 vertex layout per chunk (9+8 interleaved pattern):
+    - Row 0: vertices 0-8 (9 outer vertices) - TOP EDGE
+    - Row 1: vertices 9-16 (8 inner vertices)
+    - Row 2: vertices 17-25 (9 outer vertices)
+    - ...
+    - Row 16: vertices 136-144 (9 outer vertices) - BOTTOM EDGE
+    
+    For horizontal adjacency (chunk to the right):
+    - Right edge of chunk A = vertices at positions 8, 16, 25, 33, 42, 50, 59, 67, 76, 84, 93, 101, 110, 118, 127, 135, 144
+    - Left edge of chunk B = vertices at positions 0, 9, 17, 26, 34, 43, 51, 60, 68, 77, 85, 94, 102, 111, 119, 128, 136
+    
+    For vertical adjacency (chunk below):
+    - Bottom edge of chunk A = vertices 136-144 (last 9 outer vertices)
+    - Top edge of chunk B = vertices 0-8 (first 9 outer vertices)
+    """
+    B = heights.shape[0]
+    h = heights.reshape(B, 16, 16, 145)
+    
+    # Vertical boundary: bottom edge of row i must match top edge of row i+1
+    # Bottom edge = vertices 136-144 (indices in the 145-array)
+    # Top edge = vertices 0-8
+    bottom_edge = h[:, :-1, :, 136:145]  # [B, 15, 16, 9]
+    top_edge = h[:, 1:, :, 0:9]          # [B, 15, 16, 9]
+    vertical_loss = F.mse_loss(bottom_edge, top_edge)
+    
+    # Horizontal boundary: right edge of col j must match left edge of col j+1
+    # Right edge vertices (every 17th starting from 8, then every 17th for outer, 16th for inner)
+    # Simplified: extract column 8 of each row (rightmost outer vertex per row)
+    # For the 9+8 pattern, outer rows are at indices: 0, 17, 34, 51, 68, 85, 102, 119, 136
+    # The rightmost vertex of each outer row is at: 8, 25, 42, 59, 76, 93, 110, 127, 144
+    right_edge_indices = torch.tensor([8, 25, 42, 59, 76, 93, 110, 127, 144], device=heights.device)
+    left_edge_indices = torch.tensor([0, 17, 34, 51, 68, 85, 102, 119, 136], device=heights.device)
+    
+    right_edge = h[:, :, :-1, :][:, :, :, right_edge_indices]  # [B, 16, 15, 9]
+    left_edge = h[:, :, 1:, :][:, :, :, left_edge_indices]     # [B, 16, 15, 9]
+    horizontal_loss = F.mse_loss(right_edge, left_edge)
+    
+    return vertical_loss + horizontal_loss
 
 
 def compute_gradient_loss(pred, target):
@@ -309,13 +353,17 @@ class WoWTileDataset(Dataset):
                     # Try multiple image locations
                     img_candidates = [
                         stitched_dir / f"{tile_name}_minimap.png",
+                        stitched_dir / f"{tile_name}.png",
                         images_dir / f"{tile_name}.png",
-                        root / data.get("image", ""),
                     ]
+                    # Add image path from JSON if present
+                    img_from_json = data.get("image", "")
+                    if img_from_json:
+                        img_candidates.append(root / img_from_json)
                     
                     img_path = None
                     for candidate in img_candidates:
-                        if candidate.exists():
+                        if candidate.exists() and candidate.is_file():
                             img_path = candidate
                             break
                     
@@ -521,11 +569,18 @@ def train():
             # Gradient loss
             loss_grad = compute_gradient_loss(pred_heights, labels)
             
-            # Normal prediction loss (cosine similarity would be ideal, but MSE works)
+            # CRITICAL: Boundary continuity loss - chunks must share edge heights
+            loss_boundary = compute_boundary_continuity_loss(pred_heights)
+            
+            # Normal prediction loss
             loss_normal = mse_loss(pred_normals, target_normals)
             
-            # Combined loss
-            loss = loss_mse + SMOOTHNESS_WEIGHT * loss_smooth + GRADIENT_WEIGHT * loss_grad + NORMAL_WEIGHT * loss_normal
+            # Combined loss - boundary continuity is critical for mesh coherence
+            loss = (loss_mse + 
+                    SMOOTHNESS_WEIGHT * loss_smooth + 
+                    GRADIENT_WEIGHT * loss_grad + 
+                    BOUNDARY_WEIGHT * loss_boundary +
+                    NORMAL_WEIGHT * loss_normal)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -535,6 +590,7 @@ def train():
             pbar.set_postfix({
                 "loss": f"{loss.item():.4f}",
                 "mse": f"{loss_mse.item():.4f}",
+                "bnd": f"{loss_boundary.item():.4f}",
             })
         
         scheduler.step()
@@ -550,8 +606,9 @@ def train():
                 
                 pred_heights, pred_normals = model(pixel_values)
                 loss_h = mse_loss(pred_heights, labels)
+                loss_b = compute_boundary_continuity_loss(pred_heights)
                 loss_n = mse_loss(pred_normals, target_normals)
-                loss = loss_h + NORMAL_WEIGHT * loss_n
+                loss = loss_h + BOUNDARY_WEIGHT * loss_b + NORMAL_WEIGHT * loss_n
                 val_loss += loss.item()
         
         train_loss /= len(train_loader)

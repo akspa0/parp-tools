@@ -21,8 +21,10 @@ import numpy as np
 from pathlib import Path
 from PIL import Image
 
-# Model path
-MODEL_PATH = Path(r"j:\vlm_output\wow_height_regressor_v3")
+# Model path - check local repo first, then external location
+MODEL_PATH = Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\wow_height_regressor_v3")
+if not MODEL_PATH.exists():
+    MODEL_PATH = Path(r"j:\vlm_output\wow_height_regressor_v3")
 
 
 class ConvBlock(nn.Module):
@@ -42,9 +44,10 @@ class ConvBlock(nn.Module):
 
 
 class HeightmapUNetLite(nn.Module):
-    """U-Net for 256×256 native WoW minimap input."""
-    def __init__(self):
+    """U-Net for 256×256 native WoW minimap input. Outputs heights and optionally normals."""
+    def __init__(self, predict_normals=True):
         super().__init__()
+        self.predict_normals = predict_normals
         
         # Encoder for 256×256 input
         self.enc1 = ConvBlock(3, 64)      # 256
@@ -68,6 +71,17 @@ class HeightmapUNetLite(nn.Module):
             nn.Conv2d(256, 145, 1),
         )
         
+        # Normal projection (matches training script)
+        if predict_normals:
+            self.normal_proj = nn.Sequential(
+                nn.Conv2d(512, 512, 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(512, 256, 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(256, 145 * 3, 1),
+                nn.Tanh(),
+            )
+        
     def forward(self, x):
         # Ensure 256×256 input
         if x.shape[2] != 256 or x.shape[3] != 256:
@@ -88,6 +102,11 @@ class HeightmapUNetLite(nn.Module):
         B = heights.shape[0]
         heights = heights.permute(0, 2, 3, 1).reshape(B, 256, 145)
         
+        if self.predict_normals:
+            normals = self.normal_proj(d1)  # [B, 435, 16, 16]
+            normals = normals.permute(0, 2, 3, 1).reshape(B, 256, 145, 3)
+            return heights, normals
+        
         return heights
 
 
@@ -103,15 +122,18 @@ def load_model(model_path):
     with open(stats_path, 'r') as f:
         stats = json.load(f)
     
+    # Check if model predicts normals
+    predict_normals = stats.get("predict_normals", True)
+    
     # Load model
-    model = HeightmapUNetLite()
+    model = HeightmapUNetLite(predict_normals=predict_normals)
     
     checkpoint_path = model_path / "best_model.pt"
     if not checkpoint_path.exists():
         checkpoint_path = model_path / "final_model.pt"
     
     if checkpoint_path.exists():
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
@@ -126,7 +148,7 @@ def load_model(model_path):
 
 
 def predict_heights(model, image_path, stats, device):
-    """Predict full ADT heights from minimap image."""
+    """Predict full ADT heights (and normals) from minimap image."""
     # Load image
     img = Image.open(image_path).convert("RGB")
     
@@ -141,16 +163,24 @@ def predict_heights(model, image_path, stats, device):
     
     # Predict
     with torch.no_grad():
-        pred_norm = model(img_tensor)  # [1, 256, 145]
+        output = model(img_tensor)
     
-    pred_norm = pred_norm.squeeze(0).cpu().numpy()  # [256, 145]
+    # Handle model returning heights only or heights + normals
+    if isinstance(output, tuple):
+        pred_heights_norm, pred_normals = output
+        pred_normals = pred_normals.squeeze(0).cpu().numpy()  # [256, 145, 3]
+    else:
+        pred_heights_norm = output
+        pred_normals = None
     
-    # Denormalize
+    pred_heights_norm = pred_heights_norm.squeeze(0).cpu().numpy()  # [256, 145]
+    
+    # Denormalize heights
     global_min = stats["global_min"]
     global_max = stats["global_max"]
-    pred_heights = (pred_norm + 1.0) / 2.0 * (global_max - global_min) + global_min
+    pred_heights = (pred_heights_norm + 1.0) / 2.0 * (global_max - global_min) + global_min
     
-    return pred_heights
+    return pred_heights, pred_normals
 
 
 def heights_to_mesh(heights, output_path, tile_size=533.33333, smooth=False):
@@ -298,9 +328,11 @@ def main():
     model, stats, device = load_model(model_path)
     
     print(f"Predicting heights from {image_path}...")
-    heights = predict_heights(model, image_path, stats, device)
+    heights, normals = predict_heights(model, image_path, stats, device)
     
     print(f"Height range: [{heights.min():.2f}, {heights.max():.2f}]")
+    if normals is not None:
+        print(f"Normals predicted: {normals.shape}")
     
     print(f"Generating mesh...")
     heights_to_mesh(heights, output_path, smooth=args.smooth)
