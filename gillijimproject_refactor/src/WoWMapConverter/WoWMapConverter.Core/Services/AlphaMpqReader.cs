@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Linq;
 
 namespace WoWMapConverter.Core.Services;
 
@@ -26,6 +27,11 @@ public static class AlphaMpqReader
     /// Returns null if the archive can't be read.
     /// </summary>
     public static byte[]? ReadFromMpq(string mpqPath)
+    {
+        return ReadFromMpq(mpqPath, Enumerable.Empty<string>());
+    }
+
+    public static byte[]? ReadFromMpq(string mpqPath, IEnumerable<string> internalNames)
     {
         if (!File.Exists(mpqPath))
         {
@@ -59,24 +65,36 @@ public static class AlphaMpqReader
             // Read and decrypt block table
             fs.Position = headerOffset + header.BlockTableOffset;
             var blockTable = ReadBlockTable(reader, header.BlockTableEntries);
-            
-            // Find the largest block (the actual data, not the MD5)
-            BlockEntry? largestBlock = null;
-            foreach (var block in blockTable)
-            {
-                if (block.FileSize > 0 && (largestBlock == null || block.FileSize > largestBlock.FileSize))
-                    largestBlock = block;
-            }
-            
-            if (largestBlock == null)
+
+            // Read and decrypt hash table (listfile-less MPQs still use it)
+            fs.Position = headerOffset + header.HashTableOffset;
+            var hashTable = ReadHashTable(reader, header.HashTableEntries);
+
+            // Prefer hash lookup when internal name is known, fallback to first valid/large block
+            var primaryBlock = TryGetPrimaryBlock(blockTable, hashTable, internalNames);
+
+            if (primaryBlock == null)
             {
                 Console.WriteLine($"[WARN] No valid blocks in MPQ: {mpqPath}");
                 return null;
             }
-            
+
             // Read and decompress the file data
-            fs.Position = headerOffset + largestBlock.BlockOffset;
-            return ReadFileData(reader, largestBlock, header.SectorSize);
+            fs.Position = headerOffset + primaryBlock.BlockOffset;
+            var primaryData = ReadFileData(reader, primaryBlock, header.SectorSize);
+            if (IsLikelyWdtOrWdl(primaryData))
+                return primaryData;
+
+            var magicBlock = FindBlockByMagic(reader, headerOffset, header.SectorSize, blockTable);
+            if (magicBlock != null)
+            {
+                fs.Position = headerOffset + magicBlock.BlockOffset;
+                var magicData = ReadFileData(reader, magicBlock, header.SectorSize);
+                if (IsLikelyWdtOrWdl(magicData))
+                    return magicData;
+            }
+
+            return primaryData;
         }
         catch (Exception ex)
         {
@@ -101,12 +119,26 @@ public static class AlphaMpqReader
         // Try MPQ version (e.g., castle01.wmo -> castle01.wmo.MPQ)
         var mpqPath = filePath + ".MPQ";
         if (File.Exists(mpqPath))
-            return ReadFromMpq(mpqPath);
+        {
+            Console.WriteLine($"[AlphaMpqReader] Found MPQ: {mpqPath}");
+            var candidates = BuildInternalNameCandidates(filePath).ToList();
+            Console.WriteLine($"[AlphaMpqReader] Internal name candidates: {string.Join(", ", candidates)}");
+            var data = ReadFromMpq(mpqPath, candidates);
+            Console.WriteLine($"[AlphaMpqReader] ReadFromMpq result: {(data != null ? $"{data.Length} bytes" : "null")}");
+            return data;
+        }
         
         // Try lowercase mpq extension
         mpqPath = filePath + ".mpq";
         if (File.Exists(mpqPath))
-            return ReadFromMpq(mpqPath);
+        {
+            Console.WriteLine($"[AlphaMpqReader] Found MPQ (lowercase): {mpqPath}");
+            var candidates = BuildInternalNameCandidates(filePath).ToList();
+            Console.WriteLine($"[AlphaMpqReader] Internal name candidates: {string.Join(", ", candidates)}");
+            var data = ReadFromMpq(mpqPath, candidates);
+            Console.WriteLine($"[AlphaMpqReader] ReadFromMpq result: {(data != null ? $"{data.Length} bytes" : "null")}");
+            return data;
+        }
         
         return null;
     }
@@ -185,6 +217,141 @@ public static class AlphaMpqReader
         }
         
         return entries;
+    }
+
+    private static HashEntry[] ReadHashTable(BinaryReader reader, uint entryCount)
+    {
+        var encryptedData = new uint[entryCount * 4];
+        for (int i = 0; i < encryptedData.Length; i++)
+            encryptedData[i] = reader.ReadUInt32();
+
+        uint key = HashString("(hash table)", HASH_FILE_KEY);
+        DecryptBlock(encryptedData, key);
+
+        var entries = new HashEntry[entryCount];
+        for (uint i = 0; i < entryCount; i++)
+        {
+            entries[i] = new HashEntry
+            {
+                Name1 = encryptedData[i * 4 + 0],
+                Name2 = encryptedData[i * 4 + 1],
+                Locale = (ushort)(encryptedData[i * 4 + 2] & 0xFFFF),
+                Platform = (ushort)((encryptedData[i * 4 + 2] >> 16) & 0xFFFF),
+                BlockIndex = encryptedData[i * 4 + 3]
+            };
+        }
+
+        return entries;
+    }
+
+    private static BlockEntry? TryGetPrimaryBlock(BlockEntry[] blockTable, HashEntry[] hashTable, IEnumerable<string> internalNames)
+    {
+        const uint HashEntryDeleted = 0xFFFFFFFE;
+        const uint HashEntryEmpty = 0xFFFFFFFF;
+
+        foreach (var candidate in internalNames)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            var normalized = candidate.Replace('/', '\\');
+            var hashIndex = HashString(normalized, HASH_TABLE_INDEX) % (uint)hashTable.Length;
+            var nameA = HashString(normalized, HASH_NAME_A);
+            var nameB = HashString(normalized, HASH_NAME_B);
+
+            for (uint i = 0; i < hashTable.Length; i++)
+            {
+                var entry = hashTable[(hashIndex + i) % hashTable.Length];
+                if (entry.BlockIndex == HashEntryEmpty)
+                    break;
+
+                if (entry.BlockIndex == HashEntryDeleted)
+                    continue;
+
+                if (entry.Name1 == nameA && entry.Name2 == nameB && entry.BlockIndex < blockTable.Length)
+                {
+                    var block = blockTable[entry.BlockIndex];
+                    if (block.FileSize > 0)
+                        return block;
+                }
+            }
+        }
+
+        foreach (var entry in hashTable)
+        {
+            if (entry.BlockIndex == HashEntryEmpty || entry.BlockIndex == HashEntryDeleted)
+                continue;
+
+            if (entry.BlockIndex < blockTable.Length)
+            {
+                var block = blockTable[entry.BlockIndex];
+                if (block.FileSize > 0)
+                    return block;
+            }
+        }
+
+        BlockEntry? largestBlock = null;
+        foreach (var block in blockTable)
+        {
+            if (block.FileSize > 0 && (largestBlock == null || block.FileSize > largestBlock.FileSize))
+                largestBlock = block;
+        }
+
+        return largestBlock;
+    }
+
+    private static BlockEntry? FindBlockByMagic(BinaryReader reader, long headerOffset, uint sectorSize, BlockEntry[] blockTable)
+    {
+        foreach (var block in blockTable)
+        {
+            if (block.FileSize == 0) continue;
+            reader.BaseStream.Position = headerOffset + block.BlockOffset;
+            var data = ReadFileData(reader, block, sectorSize);
+            if (IsLikelyWdtOrWdl(data))
+                return block;
+        }
+
+        return null;
+    }
+
+    private static bool IsLikelyWdtOrWdl(byte[]? data)
+    {
+        if (data == null || data.Length < 8) return false;
+
+        // WDT/WDL start with MVER chunk
+        return data[0] == (byte)'M' && data[1] == (byte)'V' && data[2] == (byte)'E' && data[3] == (byte)'R';
+    }
+
+    private static IEnumerable<string> BuildInternalNameCandidates(string filePath)
+    {
+        var fileName = Path.GetFileName(filePath);
+        if (string.IsNullOrEmpty(fileName))
+            yield break;
+
+        yield return fileName;
+
+        var markers = new[] { "World", "Maps" };
+        var parts = filePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var idx = Array.FindIndex(parts, part => string.Equals(part, markers[0], StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0 && idx + 2 < parts.Length && string.Equals(parts[idx + 1], markers[1], StringComparison.OrdinalIgnoreCase))
+        {
+            var relative = string.Join('\\', parts.Skip(idx));
+            yield return relative;
+
+            var mapName = parts.ElementAtOrDefault(idx + 2);
+            if (!string.IsNullOrWhiteSpace(mapName))
+            {
+                yield return $"{mapName}\\{fileName}";
+                yield return $"World\\Maps\\{mapName}\\{fileName}";
+            }
+        }
+        else
+        {
+            var mapName = Path.GetFileNameWithoutExtension(fileName);
+            if (!string.IsNullOrWhiteSpace(mapName))
+            {
+                yield return $"{mapName}\\{fileName}";
+                yield return $"World\\Maps\\{mapName}\\{fileName}";
+            }
+        }
     }
     
     private static byte[]? ReadFileData(BinaryReader reader, BlockEntry block, uint sectorSize)
@@ -370,5 +537,14 @@ public static class AlphaMpqReader
         public uint BlockSize;
         public uint FileSize;
         public uint Flags;
+    }
+
+    private class HashEntry
+    {
+        public uint Name1;
+        public uint Name2;
+        public ushort Locale;
+        public ushort Platform;
+        public uint BlockIndex;
     }
 }
