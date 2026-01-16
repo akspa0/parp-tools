@@ -22,6 +22,8 @@ public record VlmTerrainData(
     [property: JsonPropertyName("chunk_positions")] float[]? ChunkPositions,  // 256 × 3 (x,y,z)
     [property: JsonPropertyName("holes")] int[]? Holes,                       // 256 hole bitmasks
     [property: JsonPropertyName("heightmap")] string? HeightmapPath,          // Path to 16-bit PNG heightmap
+    [property: JsonPropertyName("heightmap_local")] string? HeightmapLocalPath,
+    [property: JsonPropertyName("heightmap_global")] string? HeightmapGlobalPath,
     
     // Shadow Maps - paths to per-chunk PNGs
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,
@@ -55,7 +57,9 @@ public record VlmTerrainData(
     
     // Stats
     [property: JsonPropertyName("height_min")] float HeightMin,
-    [property: JsonPropertyName("height_max")] float HeightMax
+    [property: JsonPropertyName("height_max")] float HeightMax,
+    [property: JsonPropertyName("height_global_min")] float HeightGlobalMin,
+    [property: JsonPropertyName("height_global_max")] float HeightGlobalMax
 );
 
 /// <summary>

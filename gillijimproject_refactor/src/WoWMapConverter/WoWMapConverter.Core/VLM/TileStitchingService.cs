@@ -1,6 +1,5 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using Image = SixLabors.ImageSharp.Image;
@@ -274,14 +273,14 @@ public static class TileStitchingService
     /// <summary>
     /// Stitch all tile images into a full world map (up to 64×64 tiles).
     /// Automatically crops to the bounding box of existing tiles.
-    /// Generates multiple scale versions (100%, 75%, 50%) for large maps.
+    /// Generates a 50% scaled version under a resized/ folder.
     /// </summary>
     /// <param name="imagesDir">Directory containing tile images (named Azeroth_XX_YY.png or mapXX_YY.png)</param>
     /// <param name="mapName">Map name prefix (e.g., "Azeroth")</param>
     /// <param name="tileRes">Resolution of each tile image (typically 256 or 512 for minimaps)</param>
     /// <param name="outputPath">Path to save the stitched map image</param>
     /// <param name="suffix">Optional suffix for tile filenames</param>
-    /// <param name="generateScaledVersions">If true, also generates 75% and 50% scaled versions</param>
+    /// <param name="generateScaledVersions">If true, also generates 50% scaled version</param>
     /// <returns>Bounds of the stitched map (minX, minY, maxX, maxY) or null if no tiles found</returns>
     public static (int minX, int minY, int maxX, int maxY)? StitchFullMap(
         string imagesDir, 
@@ -408,29 +407,20 @@ public static class TileStitchingService
         // Save full resolution version
         SaveStitchedImage(canvas, outputPath, canvasWidth, canvasHeight);
         
-        // Generate scaled versions for large maps (useful for previews/sharing)
+        // Generate scaled version (50%) under resized/
         if (generateScaledVersions && (canvasWidth > 2048 || canvasHeight > 2048))
         {
             var dir = Path.GetDirectoryName(outputPath) ?? ".";
             var name = Path.GetFileNameWithoutExtension(outputPath);
+            var resizedDir = Path.Combine(dir, "resized");
+            Directory.CreateDirectory(resizedDir);
             
-            // 75% scale
-            int w75 = (int)(canvasWidth * 0.75);
-            int h75 = (int)(canvasHeight * 0.75);
-            using (var scaled75 = canvas.Clone(ctx => ctx.Resize(w75, h75)))
-            {
-                var path75 = Path.Combine(dir, $"{name}_75pct.webp");
-                scaled75.SaveAsWebp(path75, new WebpEncoder { Quality = 95 });
-                Console.WriteLine($"  -> Saved 75% scale ({w75}x{h75}): {path75}");
-            }
-            
-            // 50% scale
             int w50 = canvasWidth / 2;
             int h50 = canvasHeight / 2;
             using (var scaled50 = canvas.Clone(ctx => ctx.Resize(w50, h50)))
             {
-                var path50 = Path.Combine(dir, $"{name}_50pct.webp");
-                scaled50.SaveAsWebp(path50, new WebpEncoder { Quality = 95 });
+                var path50 = Path.Combine(resizedDir, $"{name}_50pct.png");
+                scaled50.SaveAsPng(path50);
                 Console.WriteLine($"  -> Saved 50% scale ({w50}x{h50}): {path50}");
             }
         }
@@ -439,26 +429,15 @@ public static class TileStitchingService
     }
     
     /// <summary>
-    /// Save a stitched image with automatic format selection based on size.
+    /// Save a stitched image as PNG.
     /// </summary>
     private static void SaveStitchedImage<TPixel>(Image<TPixel> image, string outputPath, int width, int height)
         where TPixel : unmanaged, IPixel<TPixel>
     {
         var ext = Path.GetExtension(outputPath).ToLowerInvariant();
-        if (ext == ".webp")
-        {
-            image.SaveAsWebp(outputPath, new WebpEncoder { Quality = 95 });
-        }
-        else if (ext == ".jpg" || ext == ".jpeg")
+        if (ext == ".jpg" || ext == ".jpeg")
         {
             image.SaveAsJpeg(outputPath, new JpegEncoder { Quality = 99 });
-        }
-        else if (width > 8192 || height > 8192)
-        {
-            // Switch to WebP automatically for large images
-            var webpPath = Path.ChangeExtension(outputPath, ".webp");
-            Console.WriteLine($"Image too large for PNG ({width}x{height}), saving as WebP: {webpPath}");
-            image.SaveAsWebp(webpPath, new WebpEncoder { Quality = 95 });
         }
         else
         {
@@ -559,28 +538,16 @@ public static class TileStitchingService
     }
 
     /// <summary>
-    /// Helper to save an image with automatic format selection based on size.
-    /// Large images (>8192px) automatically use WebP to avoid PNG limits.
+    /// Helper to save an image as PNG/JPEG.
     /// </summary>
     public static void SaveWithAutoFormat<TPixel>(Image<TPixel> image, string outputPath, int quality = 95) 
         where TPixel : unmanaged, IPixel<TPixel>
     {
         var ext = Path.GetExtension(outputPath).ToLowerInvariant();
         
-        if (ext == ".webp")
-        {
-            image.SaveAsWebp(outputPath, new WebpEncoder { Quality = quality });
-        }
-        else if (ext == ".jpg" || ext == ".jpeg")
+        if (ext == ".jpg" || ext == ".jpeg")
         {
             image.SaveAsJpeg(outputPath, new JpegEncoder { Quality = quality > 95 ? 99 : quality });
-        }
-        else if (image.Width > 8192 || image.Height > 8192)
-        {
-            // Auto-switch to WebP for large images
-            var webpPath = Path.ChangeExtension(outputPath, ".webp");
-            Console.WriteLine($"Image {image.Width}x{image.Height} too large for PNG, saving as: {webpPath}");
-            image.SaveAsWebp(webpPath, new WebpEncoder { Quality = quality });
         }
         else
         {

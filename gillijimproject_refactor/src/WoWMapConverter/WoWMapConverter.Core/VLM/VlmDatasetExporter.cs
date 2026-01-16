@@ -469,6 +469,13 @@ public class VlmDatasetExporter
             progress?.Report($"Exported {textureCount} textures");
         }
 
+        // Generate global heightmaps for each tile (per-map min/max)
+        if (tilesExported > 0)
+        {
+            progress?.Report("Generating global-normalized heightmaps...");
+            await GenerateGlobalHeightmapsAsync(datasetDir, outputDir, progress);
+        }
+
         // Stitch full world map images
         if (tilesExported > 0)
         {
@@ -505,12 +512,19 @@ public class VlmDatasetExporter
                 }
             }
             
-            // Stitch heightmaps into full world map (WebP, max 16384x16384)
-            var heightmapOutput = Path.Combine(stitchedDir, $"{mapName}_full_heightmap.webp");
-            var heightmapBounds = StitchHeightmapsToWebP(imagesDir, mapName, heightmapOutput, 16384, progress);
+            // Stitch heightmaps into full world map (PNG)
+            var heightmapOutput = Path.Combine(stitchedDir, $"{mapName}_full_heightmap.png");
+            var heightmapBounds = StitchHeightmapsToPng(imagesDir, mapName, heightmapOutput, progress, "_heightmap");
             if (heightmapBounds.HasValue)
             {
                 progress?.Report($"Created full heightmap: {heightmapOutput} ({heightmapBounds.Value.width}x{heightmapBounds.Value.height})");
+            }
+
+            var heightmapGlobalOutput = Path.Combine(stitchedDir, $"{mapName}_full_heightmap_global.png");
+            var heightmapGlobalBounds = StitchHeightmapsToPng(imagesDir, mapName, heightmapGlobalOutput, progress, "_heightmap_global");
+            if (heightmapGlobalBounds.HasValue)
+            {
+                progress?.Report($"Created full global heightmap: {heightmapGlobalOutput} ({heightmapGlobalBounds.Value.width}x{heightmapGlobalBounds.Value.height})");
             }
         }
 
@@ -896,6 +910,8 @@ public class VlmDatasetExporter
             chunkPositions,
             holes,
             heightmapPath,  // HeightmapPath
+            heightmapPath,
+            null,
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
@@ -909,7 +925,9 @@ public class VlmDatasetExporter
             objects,
             wdlHeights, // WDL Data
             heightMin == float.MaxValue ? 0 : heightMin,
-            heightMax == float.MinValue ? 0 : heightMax
+            heightMax == float.MinValue ? 0 : heightMax,
+            0,
+            0
         );
     }
 
@@ -1121,6 +1139,8 @@ public class VlmDatasetExporter
                 chunkPositions,
                 holes,
                 heightmapPath,  // HeightmapPath
+                heightmapPath,
+                null,
                 shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
                 shadowBits.Count > 0 ? shadowBits.ToArray() : null,
                 null, // alphaPaths
@@ -1134,7 +1154,9 @@ public class VlmDatasetExporter
                 objects,
                 wdlHeights,
                 heightMin == float.MaxValue ? 0 : heightMin,
-                heightMax == float.MinValue ? 0 : heightMax
+                heightMax == float.MinValue ? 0 : heightMax,
+                0,
+                0
             );
         }
         catch (Exception ex)
@@ -1279,40 +1301,58 @@ public class VlmDatasetExporter
 
         const int Size = 256;
         var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
-        
-        // First pass: collect all heights to find per-tile min/max
-        float minZ = float.MaxValue, maxZ = float.MinValue;
+        var (minZ, maxZ) = GetHeightRange(heightsDict);
+        var mapBytes = RenderHeightmapImage(heightsDict, minZ, maxZ, Size);
+
+        var filename = $"{tileName}_heightmap.png";
+        var imagesDir = Path.Combine(outputDir, "images");
+        Directory.CreateDirectory(imagesDir);
+        var path = Path.Combine(imagesDir, filename);
+        await File.WriteAllBytesAsync(path, mapBytes);
+
+        return $"images/{filename}";
+    }
+
+    private (float min, float max) GetHeightRange(Dictionary<int, float[]> heightsDict)
+    {
+        float minZ = float.MaxValue;
+        float maxZ = float.MinValue;
         foreach (var kvp in heightsDict)
         {
-            if (kvp.Value != null)
+            if (kvp.Value == null) continue;
+            foreach (var h in kvp.Value)
             {
-                foreach (var h in kvp.Value)
-                {
-                    if (!float.IsNaN(h) && !float.IsInfinity(h))
-                    {
-                        if (h < minZ) minZ = h;
-                        if (h > maxZ) maxZ = h;
-                    }
-                }
+                if (float.IsNaN(h) || float.IsInfinity(h)) continue;
+                if (h < minZ) minZ = h;
+                if (h > maxZ) maxZ = h;
             }
         }
-        
-        if (minZ >= maxZ) { minZ = 0; maxZ = 1; }
-        float range = maxZ - minZ;
 
-        using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(Size, Size);
-        
+        if (minZ >= maxZ)
+        {
+            minZ = 0;
+            maxZ = 1;
+        }
+
+        return (minZ, maxZ);
+    }
+
+    private byte[] RenderHeightmapImage(Dictionary<int, float[]> heightsDict, float minZ, float maxZ, int size)
+    {
+        float range = maxZ - minZ;
+        using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(size, size);
+
         // Alpha MCVT format: 81 outer (9x9) then 64 inner (8x8) per chunk
         for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
         {
             if (!heightsDict.TryGetValue(chunkIdx, out var hData) || hData == null || hData.Length < 145)
                 continue;
-            
+
             int chunkY = chunkIdx / 16;
             int chunkX = chunkIdx % 16;
             int baseX = chunkX * 16;
             int baseY = chunkY * 16;
-            
+
             // Place 9x9 outer vertices at even positions
             for (int oy = 0; oy < 9; oy++)
             {
@@ -1320,7 +1360,7 @@ public class VlmDatasetExporter
                 {
                     int px = baseX + ox * 2;
                     int py = baseY + oy * 2;
-                    if (px < Size && py < Size)
+                    if (px < size && py < size)
                     {
                         float z = hData[oy * 9 + ox];
                         float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
@@ -1328,7 +1368,7 @@ public class VlmDatasetExporter
                     }
                 }
             }
-            
+
             // Place 8x8 inner vertices at odd positions
             for (int iy = 0; iy < 8; iy++)
             {
@@ -1336,7 +1376,7 @@ public class VlmDatasetExporter
                 {
                     int px = baseX + ix * 2 + 1;
                     int py = baseY + iy * 2 + 1;
-                    if (px < Size && py < Size)
+                    if (px < size && py < size)
                     {
                         float z = hData[81 + iy * 8 + ix];
                         float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
@@ -1345,11 +1385,11 @@ public class VlmDatasetExporter
                 }
             }
         }
-        
+
         // Fill gaps with nearest neighbor interpolation
-        for (int y = 0; y < Size; y++)
+        for (int y = 0; y < size; y++)
         {
-            for (int x = 0; x < Size; x++)
+            for (int x = 0; x < size; x++)
             {
                 if (rawMap[x, y].PackedValue == 0)
                 {
@@ -1362,7 +1402,7 @@ public class VlmDatasetExporter
                         {
                             if (dy == 0 && dx == 0) continue;
                             int nx = x + dx, ny = y + dy;
-                            if (nx >= 0 && nx < Size && ny >= 0 && ny < Size)
+                            if (nx >= 0 && nx < size && ny >= 0 && ny < size)
                             {
                                 var val = rawMap[nx, ny].PackedValue;
                                 if (val > 0)
@@ -1382,14 +1422,90 @@ public class VlmDatasetExporter
                 }
             }
         }
-        
-        var filename = $"{tileName}_heightmap.png";
-        var imagesDir = Path.Combine(outputDir, "images");
-        Directory.CreateDirectory(imagesDir);
-        var path = Path.Combine(imagesDir, filename);
-        await rawMap.SaveAsPngAsync(path);
-        
-        return $"images/{filename}";
+
+        using var ms = new MemoryStream();
+        rawMap.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)
+    {
+        var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
+        if (jsonFiles.Length == 0) return;
+
+        float globalMin = float.MaxValue;
+        float globalMax = float.MinValue;
+
+        foreach (var jsonPath in jsonFiles)
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(jsonPath);
+                var sample = JsonSerializer.Deserialize<VlmTrainingSample>(json);
+                var heights = sample?.TerrainData?.Heights;
+                if (heights == null || heights.Length == 0) continue;
+
+                foreach (var chunk in heights)
+                {
+                    if (chunk.Heights == null) continue;
+                    foreach (var h in chunk.Heights)
+                    {
+                        if (float.IsNaN(h) || float.IsInfinity(h)) continue;
+                        if (h < globalMin) globalMin = h;
+                        if (h > globalMax) globalMax = h;
+                    }
+                }
+            }
+            catch
+            {
+                // Skip malformed tiles
+            }
+        }
+
+        if (globalMin >= globalMax)
+        {
+            globalMin = 0;
+            globalMax = 1;
+        }
+
+        foreach (var jsonPath in jsonFiles)
+        {
+            try
+            {
+                var json = await File.ReadAllTextAsync(jsonPath);
+                var sample = JsonSerializer.Deserialize<VlmTrainingSample>(json);
+                if (sample?.TerrainData?.Heights == null) continue;
+
+                var heightsDict = sample.TerrainData.Heights
+                    .Where(h => h.Heights != null)
+                    .ToDictionary(h => h.ChunkIndex, h => h.Heights!);
+                if (heightsDict.Count == 0) continue;
+
+                var mapBytes = RenderHeightmapImage(heightsDict, globalMin, globalMax, 256);
+                var filename = $"{sample.TerrainData.AdtTile}_heightmap_global.png";
+                var imagesDir = Path.Combine(outputDir, "images");
+                Directory.CreateDirectory(imagesDir);
+                var path = Path.Combine(imagesDir, filename);
+                await File.WriteAllBytesAsync(path, mapBytes);
+
+                var heightmapGlobalPath = $"images/{filename}";
+                var updatedTerrain = sample.TerrainData with
+                {
+                    HeightmapLocalPath = sample.TerrainData.HeightmapLocalPath ?? sample.TerrainData.HeightmapPath,
+                    HeightmapGlobalPath = heightmapGlobalPath,
+                    HeightGlobalMin = globalMin,
+                    HeightGlobalMax = globalMax
+                };
+                var updatedSample = sample with { TerrainData = updatedTerrain };
+                await File.WriteAllTextAsync(jsonPath, JsonSerializer.Serialize(updatedSample, _jsonOptions));
+            }
+            catch
+            {
+                // Skip malformed tiles
+            }
+        }
+
+        progress?.Report($"Global heightmaps generated with range {globalMin} to {globalMax}");
     }
 
     private bool ConvertBlpToPng(string blpPath, string pngPath, MpqArchiveService? mpqService = null)
@@ -1431,13 +1547,13 @@ public class VlmDatasetExporter
         }
     }
     
-    private (int minX, int minY, int maxX, int maxY, int width, int height)? StitchHeightmapsToWebP(
-        string imagesDir, string mapName, string outputPath, int maxSize, IProgress<string>? progress)
+    private (int minX, int minY, int maxX, int maxY, int width, int height)? StitchHeightmapsToPng(
+        string imagesDir, string mapName, string outputPath, IProgress<string>? progress, string tileSuffix)
     {
         try
         {
             // Find all heightmap tiles
-            var pattern = $"{mapName}_*_*_heightmap.png";
+            var pattern = $"{mapName}_*_*{tileSuffix}.png";
             var files = Directory.GetFiles(imagesDir, pattern);
             if (files.Length == 0) return null;
             
@@ -1446,7 +1562,7 @@ public class VlmDatasetExporter
             foreach (var file in files)
             {
                 var name = Path.GetFileNameWithoutExtension(file);
-                var parts = name.Replace($"{mapName}_", "").Replace("_heightmap", "").Split('_');
+                var parts = name.Replace($"{mapName}_", "").Replace(tileSuffix, "").Split('_');
                 if (parts.Length >= 2 && int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y))
                 {
                     tiles.Add((x, y, file));
@@ -1464,21 +1580,11 @@ public class VlmDatasetExporter
             int tilesHigh = maxY - minY + 1;
             
             // Each tile is 256x256
-            int fullWidth = tilesWide * 256;
-            int fullHeight = tilesHigh * 256;
+            int outputWidth = tilesWide * 256;
+            int outputHeight = tilesHigh * 256;
+            int tileSize = 256;
             
-            // Calculate scale to fit within maxSize
-            float scale = 1.0f;
-            if (fullWidth > maxSize || fullHeight > maxSize)
-            {
-                scale = Math.Min((float)maxSize / fullWidth, (float)maxSize / fullHeight);
-            }
-            
-            int outputWidth = (int)(fullWidth * scale);
-            int outputHeight = (int)(fullHeight * scale);
-            int tileSize = (int)(256 * scale);
-            
-            progress?.Report($"Stitching {tiles.Count} heightmaps into {outputWidth}x{outputHeight} WebP...");
+            progress?.Report($"Stitching {tiles.Count} heightmaps into {outputWidth}x{outputHeight} PNG...");
             
             using var canvas = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(outputWidth, outputHeight);
             
@@ -1487,29 +1593,34 @@ public class VlmDatasetExporter
                 try
                 {
                     using var tile = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.L16>(path);
-                    
-                    // Resize tile if needed
-                    if (scale < 1.0f)
+                    if (tile.Width != tileSize || tile.Height != tileSize)
                     {
                         tile.Mutate(ctx => ctx.Resize(tileSize, tileSize));
                     }
                     
-                    int destX = (x - minX) * tileSize;
-                    int destY = (y - minY) * tileSize;
-                    
-                    canvas.Mutate(ctx => ctx.DrawImage(tile, new SixLabors.ImageSharp.Point(destX, destY), 1.0f));
+                    // Copy tile to canvas
+                    canvas.Mutate(ctx => ctx.DrawImage(tile, new SixLabors.ImageSharp.Point((x - minX) * tileSize, (y - minY) * tileSize), 1f));
                 }
-                catch { /* Skip failed tiles */ }
+                catch (Exception ex)
+                {
+                    progress?.Report($"Warning: Failed to load heightmap {path}: {ex.Message}");
+                }
             }
             
-            // Save as WebP
-            var encoder = new SixLabors.ImageSharp.Formats.Webp.WebpEncoder
+            canvas.SaveAsPng(outputPath);
+
+            if (outputWidth > 2048 || outputHeight > 2048)
             {
-                Quality = 95,
-                FileFormat = SixLabors.ImageSharp.Formats.Webp.WebpFileFormatType.Lossless
-            };
-            canvas.Save(outputPath, encoder);
-            
+                var dir = Path.GetDirectoryName(outputPath) ?? ".";
+                var name = Path.GetFileNameWithoutExtension(outputPath);
+                var resizedDir = Path.Combine(dir, "resized");
+                Directory.CreateDirectory(resizedDir);
+                int w50 = outputWidth / 2;
+                int h50 = outputHeight / 2;
+                using var scaled50 = canvas.Clone(ctx => ctx.Resize(w50, h50));
+                var path50 = Path.Combine(resizedDir, $"{name}_50pct.png");
+                scaled50.SaveAsPng(path50);
+            }
             return (minX, minY, maxX, maxY, outputWidth, outputHeight);
         }
         catch (Exception ex)
