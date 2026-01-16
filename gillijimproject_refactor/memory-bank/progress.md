@@ -50,6 +50,32 @@
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
  
+## Session Jan 15, 2026 - V4-DPT Training (Hugging Face Transformers) 🔄
+
+### V4-DPT Training Script
+Created `train_height_regressor_v4_dpt.py` using Hugging Face DPT (Dense Prediction Transformer):
+
+| Component | Status |
+|-----------|--------|
+| DPT model integration | ✅ `Intel/dpt-large` pretrained on depth estimation |
+| Dataset loading | ✅ Fixed to match V3 `terrain_data.heights[].h` format |
+| Multi-loss function | ✅ L1 + Gradient + SSIM + Edge + Scale-Invariant |
+| NaN protection (train) | ✅ Skip bad batches, clamp loss, tight grad clipping |
+| NaN protection (val) | ✅ Skip NaN predictions |
+| Inference script | ✅ `img2mesh_v4_dpt.py` |
+| Documentation | ✅ README.md updated with metrics explanation |
+
+### Training Metrics
+- **Best model**: Epoch 4, val_loss=0.3705
+- **HeightVar**: ~0.004 (terrain variance preserved)
+- **Training status**: In progress with NaN protection
+
+### Key Fixes
+1. **NaN explosion**: Lowered LR (5e-5 → 1e-5), reduced gradient weight (5.0 → 2.0)
+2. **Gradient clipping**: Tightened from 1.0 → 0.5
+3. **Loss clamping**: Added `torch.clamp(loss, 0, 100)`
+4. **Validation NaN**: Added skip for NaN predictions
+
 ## Session Jan 14, 2026 - Image-to-Height & Texture Pipeline ✅
   
 ### Image-to-Height Regression

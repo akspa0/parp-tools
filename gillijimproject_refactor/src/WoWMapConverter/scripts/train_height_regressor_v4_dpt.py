@@ -43,18 +43,19 @@ OUTPUT_DIR = Path(r"J:\vlm_output\wow_height_regressor_v4_dpt")
 
 # Training hyperparameters
 BATCH_SIZE = 2  # DPT is memory-intensive
-LEARNING_RATE = 1e-5  # Much lower LR to prevent gradient explosion
+LEARNING_RATE = 1e-6  # Even lower LR for stability
 NUM_EPOCHS = 500
 EARLY_STOP_PATIENCE = 50
 
-# Loss weights - TERRAIN SHAPE IS PRIMARY
+# Loss weights - MINIMAL for stability testing
 L1_WEIGHT = 1.0
-GRADIENT_WEIGHT = 2.0  # Reduced to prevent NaN
-SSIM_WEIGHT = 1.0
-EDGE_WEIGHT = 2.0
-SCALE_INV_WEIGHT = 1.0  # Scale-invariant loss (common in depth estimation)
+GRADIENT_WEIGHT = 0.0  # DISABLED - causes explosion
+SSIM_WEIGHT = 0.0  # DISABLED
+EDGE_WEIGHT = 0.0  # DISABLED
+SCALE_INV_WEIGHT = 0.0  # DISABLED
+VARIANCE_WEIGHT = 0.0  # DISABLED - causes explosion
 
-USE_AMP = True
+USE_AMP = False  # DISABLED - can cause NaN with fp16
 
 # DPT model to use - pretrained on depth estimation
 DPT_MODEL_NAME = "Intel/dpt-large"  # or "Intel/dpt-hybrid-midas" for faster
@@ -196,14 +197,14 @@ class TerrainDPT(nn.Module):
         # Get the image processor for proper preprocessing
         self.processor = DPTImageProcessor.from_pretrained(model_name)
         
-        # Freeze early layers, fine-tune later layers
-        # This is a common transfer learning strategy
+        # FREEZE backbone - only train neck/head to prevent gradient explosion
+        # This is critical for stable fine-tuning of large pretrained models
         for name, param in self.dpt.named_parameters():
             if 'neck' in name or 'head' in name:
                 param.requires_grad = True
             else:
-                # Freeze backbone initially, can unfreeze later
-                param.requires_grad = True  # Fine-tune everything
+                # Freeze backbone - prevents NaN explosion
+                param.requires_grad = False
         
         # Additional head for WoW-specific output shape adaptation
         # DPT outputs at input resolution, we need 256x145 for WoW ADT
@@ -323,6 +324,12 @@ class WoWTileDataset(Dataset):
                             valid_chunks += 1
                     
                     if valid_chunks < 200:
+                        continue
+                    
+                    # Filter out flat terrain (low height variance)
+                    height_variance = tile_heights.var()
+                    self.variance_stats.append(height_variance)
+                    if height_variance < 100.0:  # Increased threshold - skip flat tiles
                         continue
                     
                     # Find image
@@ -549,7 +556,7 @@ def train(resume_from=None, epochs=None):
         print(f"Resumed from epoch {start_epoch}")
     
     print(f"\nTraining for up to {num_epochs - start_epoch} epochs")
-    print(f"Loss weights: L1={L1_WEIGHT}, Gradient={GRADIENT_WEIGHT}, SSIM={SSIM_WEIGHT}, Edge={EDGE_WEIGHT}")
+    print(f"Loss weights: L1={L1_WEIGHT}, Gradient={GRADIENT_WEIGHT}, Variance={VARIANCE_WEIGHT}, SSIM={SSIM_WEIGHT}, Edge={EDGE_WEIGHT}")
     print(f"Early stopping patience: {EARLY_STOP_PATIENCE}")
     print()
     
@@ -616,12 +623,20 @@ def train(resume_from=None, epochs=None):
                     else:
                         loss_normal = torch.tensor(0.0, device=device)
                     
-                    # Total loss - focus on L1 + gradient for stability
+                    # Variance loss - penalize flat predictions (mean collapse prevention)
+                    # We want predicted variance to match target variance
+                    pred_var = pred_heights.var()
+                    target_var = labels.var()
+                    # Penalize if predicted variance is too low relative to target
+                    loss_var = torch.relu(target_var - pred_var) / (target_var + 1e-6)
+                    
+                    # Total loss - focus on L1 + gradient + variance for stability
                     loss = (L1_WEIGHT * l1 +
                             SCALE_INV_WEIGHT * loss_si +
                             GRADIENT_WEIGHT * loss_grad +
                             SSIM_WEIGHT * loss_ssim +
                             EDGE_WEIGHT * loss_edge +
+                            VARIANCE_WEIGHT * loss_var +
                             0.5 * loss_normal)
                     
                     # Clamp loss to prevent explosion
@@ -641,7 +656,7 @@ def train(resume_from=None, epochs=None):
                 pbar.set_postfix({
                     "loss": f"{loss.item():.4f}",
                     "grad": f"{loss_grad.item():.4f}",
-                    "l1": f"{l1.item():.4f}",
+                    "var": f"{loss_var.item():.4f}",
                 })
             
             scheduler.step()
@@ -686,10 +701,13 @@ def train(resume_from=None, epochs=None):
             val_height_var /= max(val_count, 1)
             
             current_lr = optimizer.param_groups[0]['lr']
-            print(f"Epoch {epoch+1}: Train={train_loss:.4f}, Val={val_loss:.4f}, HeightVar={val_height_var:.4f}, LR={current_lr:.2e}")
+            print(f"Epoch {epoch+1}: Train={train_loss:.4f}, Val={val_loss:.4f}, HeightVar={val_height_var:.4f}, LR={current_lr:.2e}, ValCount={val_count}")
             
-            # Early stopping
-            if val_loss < best_val_loss - 1e-5:
+            # Early stopping - only save if we have valid validation results
+            if val_count == 0:
+                print("  ⚠️ WARNING: All validation batches failed - skipping save")
+                epochs_without_improvement += 1
+            elif val_loss < best_val_loss - 1e-5:
                 best_val_loss = val_loss
                 epochs_without_improvement = 0
                 torch.save({

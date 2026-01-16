@@ -130,24 +130,74 @@ def heights_to_vlm_json(heights, normals, tile_name, stats):
 
 
 def save_heightmap_image(heights, output_path):
-    """Save heights as 16-bit grayscale PNG"""
-    h_min, h_max = heights.min(), heights.max()
-    if h_max - h_min < 1e-6:
-        normalized = np.full_like(heights, 0.5)
-    else:
-        normalized = (heights - h_min) / (h_max - h_min)
+    """Save heights as 16-bit grayscale PNG on a proper square grid.
     
-    heightmap_2d = heights.reshape(256, 145)
-    heightmap_16bit = (normalized.reshape(256, 145) * 65535).astype(np.uint16)
+    Heights are [256, 145] where 256 = 16x16 chunks, each with 145 vertices.
+    The 145 vertices are: 9x9 outer grid (81) + 8x8 inner grid (64).
+    We reconstruct this onto a 129x129 grid (16 chunks * 8 + 1 edge vertices).
+    """
+    grid_size = 129  # 16 chunks * 8 vertices per chunk + 1 for edge
+    heightmap_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
+    weight_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
+    
+    for chunk_idx in range(256):
+        chunk_y = chunk_idx // 16
+        chunk_x = chunk_idx % 16
+        chunk_heights = heights[chunk_idx]
+        
+        base_x = chunk_x * 8
+        base_y = chunk_y * 8
+        
+        for i in range(81):
+            row, col = i // 9, i % 9
+            gx = base_x + col
+            gy = base_y + row
+            if gx < grid_size and gy < grid_size:
+                heightmap_grid[gy, gx] += chunk_heights[i]
+                weight_grid[gy, gx] += 1.0
+    
+    weight_grid[weight_grid == 0] = 1.0
+    heightmap_grid /= weight_grid
+    
+    h_min, h_max = heightmap_grid.min(), heightmap_grid.max()
+    if h_max - h_min < 1e-6:
+        normalized = np.full_like(heightmap_grid, 0.5)
+    else:
+        normalized = (heightmap_grid - h_min) / (h_max - h_min)
+    
+    heightmap_16bit = (normalized * 65535).astype(np.uint16)
     
     img = Image.fromarray(heightmap_16bit, mode='I;16')
     img.save(output_path)
 
 
 def save_normalmap_image(normals, output_path):
-    """Save normals as RGB image"""
-    normals_2d = normals.reshape(256, 145, 3)
-    normals_rgb = ((normals_2d + 1) / 2 * 255).astype(np.uint8)
+    """Save normals as RGB image on a proper square grid."""
+    grid_size = 129
+    normalmap_grid = np.zeros((grid_size, grid_size, 3), dtype=np.float32)
+    weight_grid = np.zeros((grid_size, grid_size), dtype=np.float32)
+    
+    for chunk_idx in range(256):
+        chunk_y = chunk_idx // 16
+        chunk_x = chunk_idx % 16
+        chunk_normals = normals[chunk_idx]
+        
+        base_x = chunk_x * 8
+        base_y = chunk_y * 8
+        
+        for i in range(81):
+            row, col = i // 9, i % 9
+            gx = base_x + col
+            gy = base_y + row
+            if gx < grid_size and gy < grid_size:
+                normalmap_grid[gy, gx] += chunk_normals[i]
+                weight_grid[gy, gx] += 1.0
+    
+    weight_grid[weight_grid == 0] = 1.0
+    for c in range(3):
+        normalmap_grid[:, :, c] /= weight_grid
+    
+    normals_rgb = ((normalmap_grid + 1) / 2 * 255).astype(np.uint8)
     
     img = Image.fromarray(normals_rgb, mode='RGB')
     img.save(output_path)

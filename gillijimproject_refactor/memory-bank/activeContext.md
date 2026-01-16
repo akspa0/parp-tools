@@ -1,11 +1,41 @@
 # Active Context
 
-## Current Focus: Minimap Regeneration & AI Terrain Tools (Jan 15, 2026)
+## Current Focus: AI Terrain Height Prediction (Jan 15, 2026)
 
 ### Status Summary
-Complete minimap texture regeneration pipeline with WoW-accurate blending, AI heightmap inference with smoothing, and comprehensive documentation.
+V4-DPT training script using Hugging Face DPT (Dense Prediction Transformer) for terrain height prediction. Training resumed from checkpoint with NaN protection fixes.
 
-### Session Jan 14-15, 2026 - Minimap Baking & AI Smoothing
+### Session Jan 15, 2026 - V4-DPT Training Script
+
+#### Completed ✅
+1. **train_height_regressor_v4_dpt.py** - DPT-based terrain height regressor:
+   - Uses `Intel/dpt-large` pretrained on depth estimation (same task as height prediction)
+   - Multi-loss: L1 + Gradient + SSIM + Edge + Scale-Invariant
+   - Fixed NaN explosion with protection in both training and validation loops
+   - Lower learning rate (1e-5) and tighter gradient clipping (0.5)
+   - Resume from checkpoint support
+
+2. **img2mesh_v4_dpt.py** - Inference script for DPT model:
+   - Loads trained DPT model
+   - Outputs VLM-compatible JSON, heightmap PNG, normal map PNG, OBJ mesh
+
+3. **Dataset Loading Fix**:
+   - Fixed to match V3 `terrain_data.heights[].h` JSON structure
+   - Pre-computes heights/normals arrays during loading
+   - Supports 1690 tiles from 4 datasets
+
+4. **README.md Documentation**:
+   - Added V4-DPT training section
+   - Added "Understanding Training Output" section explaining metrics
+   - Typical training progression table
+
+#### Training Status 🔄
+- **Best model**: Epoch 4, val_loss=0.3705
+- **HeightVar**: ~0.004 (not collapsed to mean)
+- **NaN protection**: Working - skips bad batches
+- **Resume command**: `python train_height_regressor_v4_dpt.py --resume "J:\vlm_output\wow_height_regressor_v4_dpt\best_model.pt"`
+
+### Session Jan 14-15, 2026 - Minimap Baking & AI Smoothing (Previous)
 
 #### Completed ✅
 1.  **MinimapBakeService.cs - WoW Weighted Blend Algorithm**:
