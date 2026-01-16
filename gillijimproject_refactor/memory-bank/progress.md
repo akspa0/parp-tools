@@ -50,7 +50,44 @@
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
  
-## Session Jan 16, 2026 - Alpha MCVT Format Fix & Heightmap Stitching ✅
+## Session Jan 16, 2026 (Late) - Global Normalization Fix ✅
+
+### Critical Bug: Per-Tile Normalization Seams
+**Problem**: Each tile normalized to its own min/max caused visible brightness discontinuities at tile boundaries when stitched.
+**Root Cause**: `VlmDatasetExporter.GenerateHeightmap` calculated per-tile min/max instead of global.
+
+### Solution: `regenerate_heightmaps_global.py` ✅
+New Python script that generates **BOTH** heightmap types:
+1. **Global normalized** (`*_heightmap.png`) - For ML training, seamless stitching
+2. **Per-tile normalized** (`*_heightmap_local.png`) - Reveals hidden terrain details
+
+**Algorithm**:
+1. Pass 1: Scan all tile JSONs to find global height range
+2. Pass 2: Regenerate all heightmaps using global range
+3. Pass 3: Stitch both types into full-map PNGs
+
+**Azeroth v10 Results**:
+- Global range: -524.58 to 896.78 (1421.36 units)
+- 685 tiles processed
+- Stitched output: 16384 × 15872 px
+- **No more tile seams!**
+
+### Dataset Exports Completed
+| Map | Tiles | Output |
+|-----|-------|--------|
+| Azeroth | 685 | `053_azeroth_v10/` |
+| Kalidar | 56 | `053_kalidar_v1/` |
+| RazorfenKraulInstance | 6 | `053_razorfen_v1/` |
+
+### Pending Exports
+- Kalimdor → `053_kalimdor_v6/`
+- DeadminesInstance → `053_deadmines_v1/`
+
+### Files Created/Updated
+- `scripts/regenerate_heightmaps_global.py` - New dual-mode heightmap generator
+- `scripts/stitch_heightmaps.py` - PNG stitching utility
+
+## Session Jan 16, 2026 (Earlier) - Alpha MCVT Format Fix ✅
 
 ### Critical Discovery: Alpha MCVT Format
 **Alpha ADT uses a DIFFERENT MCVT layout than later WoW versions:**
@@ -64,16 +101,6 @@
 | Wrong MCVT indexing | Changed from interleaved to Alpha format (81 outer + 64 inner) |
 | Fixed normalization | Changed from hardcoded -2000/2000 to per-tile min/max |
 | Heightmap quality | Now 100% accurate terrain representation |
-
-### New Feature: Whole-Map Heightmap Stitching ✅
-- `StitchHeightmapsToWebP()` stitches all tile heightmaps into single image
-- Format: Lossless WebP (16-bit grayscale)
-- Max size: 16384×16384 (auto-scales to fit)
-- Output: `stitched/{mapName}_full_heightmap.webp`
-
-### Exports Running
-- **Azeroth v10**: 685 tiles → `053_azeroth_v10/`
-- **Kalimdor v5**: 951 tiles → `053_kalimdor_v5/`
 
 ### Files Updated
 - `VlmDatasetExporter.cs` - Fixed GenerateHeightmap + added StitchHeightmapsToWebP

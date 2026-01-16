@@ -1,33 +1,48 @@
 # Active Context
 
-## Current Focus: Terrain Restoration Pipeline (Jan 16, 2026)
+## Current Focus: VLM Dataset Generation for V6 Training (Jan 16, 2026)
 
 ### Status Summary
-**MAJOR FIX**: Heightmap generation now 100% accurate using correct Alpha MCVT format. Exporting fresh datasets with proper per-tile normalization. Added whole-map heightmap stitching.
+**CRITICAL FIX**: Per-tile normalization was causing visible seams when tiles were stitched. Created `regenerate_heightmaps_global.py` to generate BOTH per-tile (shows hidden details) AND global (proper training data) heightmaps.
 
-### Session Jan 16, 2026 - Alpha MCVT Format Fix & Heightmap Stitching
+### Session Jan 16, 2026 (Late) - Global Normalization Fix
 
-#### Critical Discovery: Alpha vs Standard MCVT Format ✅
-**Alpha ADT MCVT uses a DIFFERENT layout than later WoW versions:**
-- **Alpha MCVT**: 81 outer vertices (9×9) FIRST, then 64 inner vertices (8×8)
-- **Standard MCVT**: Interleaved pattern (9 outer, 8 inner, 9 outer, 8 inner...)
-- This was causing diagonal artifacts in all previous heightmap renders
+#### Root Cause: Per-Tile Normalization Seams ✅
+**Problem**: Each tile was normalized to its own min/max, causing brightness discontinuities at tile boundaries when stitched.
+**Solution**: Created Python script that:
+1. **Pass 1**: Scans ALL tile JSONs to find global height range (e.g., Azeroth: -524.58 to 896.78)
+2. **Pass 2**: Regenerates heightmaps using that single global range
+3. **Pass 3**: Stitches into seamless full-map PNG
 
-#### Bugs Fixed in VlmDatasetExporter.GenerateHeightmap ✅
-1. **Wrong MCVT indexing**: Was using interleaved format, now uses Alpha format (81 outer + 64 inner)
-2. **Fixed normalization range**: Was using hardcoded -2000 to 2000, now uses per-tile min/max
-3. **Result**: Heightmaps now show correct terrain features with full dynamic range
+#### New Script: `regenerate_heightmaps_global.py` ✅
+Generates **BOTH** heightmap types:
+- `*_heightmap.png` - Global normalization (for ML training, seamless)
+- `*_heightmap_local.png` - Per-tile normalization (reveals hidden terrain details)
 
-#### New Feature: Whole-Map Heightmap Stitching ✅
-- Added `StitchHeightmapsToWebP()` method to VlmDatasetExporter
-- Stitches all tile heightmaps into single whole-map image
-- **Format**: Lossless WebP (16-bit grayscale preserved)
-- **Max size**: 16384×16384 (auto-scales larger maps to fit)
-- **Output**: `stitched/{mapName}_full_heightmap.webp`
+**Usage**:
+```bash
+python regenerate_heightmaps_global.py <dataset_dir> [--no-stitch] [--max-size 16384]
+```
 
-#### Exports Currently Running
-- **Azeroth v10**: 685 tiles (in stitching phase)
-- **Kalimdor v5**: 951 tiles (in stitching phase)
+**Outputs**:
+- `images/*_heightmap.png` - Per-tile global normalized
+- `images/*_heightmap_local.png` - Per-tile local normalized  
+- `stitched/*_full_heightmap_global.png` - Stitched global
+- `stitched/*_full_heightmap_local.png` - Stitched local
+- `global_height_bounds.json` - Height range metadata
+
+#### Dataset Exports In Progress
+| Map | Status | Tiles | Output |
+|-----|--------|-------|--------|
+| Azeroth | ✅ Done | 685 | `053_azeroth_v10/` |
+| Kalimdor | 🔧 Pending | ~951 | `053_kalimdor_v6/` |
+| Kalidar | ✅ Done | 56 | `053_kalidar_v1/` |
+| DeadminesInstance | 🔧 Pending | ? | `053_deadmines_v1/` |
+| RazorfenKraulInstance | ✅ Done | 6 | `053_razorfen_v1/` |
+
+**Client Path**: `H:\053-client\`
+
+### Session Jan 16, 2026 (Earlier) - Alpha MCVT Format Fix
 
 #### Key Files Updated
 - `VlmDatasetExporter.cs` - Fixed GenerateHeightmap + added StitchHeightmapsToWebP
