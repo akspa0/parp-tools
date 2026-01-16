@@ -3,11 +3,11 @@
 WoW Height Regressor V5 - Multi-Channel Input
 
 Uses minimap (RGB) + normalmap (RGB) as 6-channel input to predict
-129x129 heightmap output. This approach leverages:
+256x256 heightmap output. This approach leverages:
 - Minimap: texture/biome context
 - Normalmap: surface orientation (directly correlates with height gradients)
 
-Output: 129x129 heightmap (smooth, continuous grid)
+Output: 256x256 heightmap (full resolution using all MCVT vertices)
 """
 
 import os
@@ -43,15 +43,15 @@ EARLY_STOP_PATIENCE = 50
 
 # Image sizes
 INPUT_SIZE = 256  # Resize inputs to this
-OUTPUT_SIZE = 129  # Native heightmap grid size
+OUTPUT_SIZE = 256  # Full resolution heightmap (all MCVT vertices)
 
 
 class MultiChannelUNet(nn.Module):
     """
-    U-Net style encoder-decoder for 6-channel input -> 129x129 heightmap.
+    U-Net style encoder-decoder for 6-channel input -> 256x256 heightmap.
     
     Input: [B, 6, 256, 256] (minimap RGB + normalmap RGB)
-    Output: [B, 1, 129, 129] (heightmap)
+    Output: [B, 1, 256, 256] (heightmap)
     """
     
     def __init__(self):
@@ -111,11 +111,12 @@ class MultiChannelUNet(nn.Module):
         d2 = self.dec2(torch.cat([self.up2(d3), e2], dim=1))  # 128
         d1 = self.dec1(torch.cat([self.up1(d2), e1], dim=1))  # 256
         
-        # Final output
-        out = self.final(d1)  # [B, 1, 256, 256]
+        # Final output [B, 1, 256, 256]
+        out = self.final(d1)
         
-        # Resize to 129x129
-        out = F.interpolate(out, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode='bilinear', align_corners=True)
+        # Resize to OUTPUT_SIZE (256x256 - native resolution)
+        if out.shape[2] != OUTPUT_SIZE or out.shape[3] != OUTPUT_SIZE:
+            out = F.interpolate(out, size=(OUTPUT_SIZE, OUTPUT_SIZE), mode='bilinear', align_corners=True)
         
         return out
 

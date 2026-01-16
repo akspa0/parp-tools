@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Render proper normal maps from VLM dataset JSON files.
+Render high-resolution normal maps from VLM dataset JSON files.
 
-The JSON contains per-chunk normals data that we need to reconstruct
-into a continuous 129x129 grid (16 chunks * 8 + 1 edge).
+Creates 256x256 normalmaps using ALL 145 MCNR normals per chunk:
+- Outer normals (9 per row) at even pixel positions
+- Inner normals (8 per row) at odd pixel positions
+- 16 pixels per chunk = 256 pixels per tile
 """
 
 import json
@@ -13,8 +15,12 @@ from PIL import Image
 import argparse
 
 
+# Maximum native resolution using all MCNR normals
+GRID_SIZE = 256  # 16 chunks * 16 pixels per chunk
+
+
 def render_normalmap(json_path: Path, output_path: Path):
-    """Render a normal map from JSON terrain data."""
+    """Render a 256x256 normalmap from JSON terrain data using all normals."""
     with open(json_path, 'r') as f:
         data = json.load(f)
     
@@ -25,10 +31,9 @@ def render_normalmap(json_path: Path, output_path: Path):
         print(f"  No chunk_layers in {json_path.name}")
         return False
     
-    # Build 129x129 grid (16 chunks * 8 vertices + 1 edge)
-    grid_size = 129
-    normalmap = np.zeros((grid_size, grid_size, 3), dtype=np.float32)
-    weight_map = np.zeros((grid_size, grid_size), dtype=np.float32)
+    # Build 256x256 grid
+    normalmap = np.zeros((GRID_SIZE, GRID_SIZE, 3), dtype=np.float32)
+    weight_map = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.float32)
     
     for layer in chunk_layers:
         idx = layer.get("idx", -1)
@@ -39,35 +44,83 @@ def render_normalmap(json_path: Path, output_path: Path):
         
         chunk_y = idx // 16
         chunk_x = idx % 16
-        base_x = chunk_x * 8
-        base_y = chunk_y * 8
+        # Each chunk is 16 pixels (2 pixels per unit square)
+        base_x = chunk_x * 16
+        base_y = chunk_y * 16
         
-        # Each chunk has 145 vertices: 9x9 outer (81) + 8x8 inner (64)
-        # We only use the 9x9 outer grid for the continuous map
-        if len(normals_raw) < 243:  # 81 * 3
+        # ALPHA ADT MCNR FORMAT: 81 outer (9x9) THEN 64 inner (8x8) - NOT interleaved!
+        # This matches the Alpha MCVT format.
+        # NOTE: Some exports have 448 bytes (with padding), some have 435 (145*3)
+        if len(normals_raw) < 435:  # 145 * 3
             continue
+        normals_raw = normals_raw[:435]  # Truncate padding if present
         
-        for i in range(81):
-            row = i // 9
-            col = i % 9
-            gx = base_x + col
-            gy = base_y + row
-            
-            if gx < grid_size and gy < grid_size:
-                # Normals are stored as signed bytes [-127, 127], normalize to [-1, 1]
-                nx = normals_raw[i * 3 + 0] / 127.0
-                ny = normals_raw[i * 3 + 1] / 127.0
-                nz = normals_raw[i * 3 + 2] / 127.0
+        # First 81 normals: 9x9 outer grid (row-major)
+        for oy in range(9):
+            for ox in range(9):
+                px = base_x + ox * 2
+                py = base_y + oy * 2
+                n_idx = oy * 9 + ox
                 
-                normalmap[gy, gx, 0] += nx
-                normalmap[gy, gx, 1] += ny
-                normalmap[gy, gx, 2] += nz
-                weight_map[gy, gx] += 1.0
+                if px < GRID_SIZE and py < GRID_SIZE:
+                    nx = normals_raw[n_idx * 3 + 0] / 127.0
+                    ny = normals_raw[n_idx * 3 + 1] / 127.0
+                    nz = normals_raw[n_idx * 3 + 2] / 127.0
+                    
+                    normalmap[py, px, 0] += nx
+                    normalmap[py, px, 1] += ny
+                    normalmap[py, px, 2] += nz
+                    weight_map[py, px] += 1.0
+        
+        # Next 64 normals: 8x8 inner grid (row-major)
+        for iy in range(8):
+            for ix in range(8):
+                px = base_x + ix * 2 + 1
+                py = base_y + iy * 2 + 1
+                n_idx = 81 + iy * 8 + ix
+                
+                if px < GRID_SIZE and py < GRID_SIZE:
+                    nx = normals_raw[n_idx * 3 + 0] / 127.0
+                    ny = normals_raw[n_idx * 3 + 1] / 127.0
+                    nz = normals_raw[n_idx * 3 + 2] / 127.0
+                    
+                    normalmap[py, px, 0] += nx
+                    normalmap[py, px, 1] += ny
+                    normalmap[py, px, 2] += nz
+                    weight_map[py, px] += 1.0
     
-    # Average overlapping vertices
+    # Average overlapping normals (chunk edges)
     weight_map[weight_map == 0] = 1.0
     for c in range(3):
         normalmap[:, :, c] /= weight_map
+    
+    # Fill gaps using bilinear interpolation (8-neighbor weighted)
+    valid_mask = (weight_map >= 0.5).astype(np.float32)
+    filled = normalmap.copy()
+    
+    for _ in range(3):
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                if valid_mask[y, x] < 0.5:
+                    neighbors = []
+                    weights = []
+                    for dy in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            if dy == 0 and dx == 0:
+                                continue
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < GRID_SIZE and 0 <= nx < GRID_SIZE:
+                                if valid_mask[ny, nx] >= 0.5 or np.any(filled[ny, nx] != 0):
+                                    dist = np.sqrt(dy*dy + dx*dx)
+                                    neighbors.append(filled[ny, nx])
+                                    weights.append(1.0 / dist)
+                    if neighbors:
+                        weights = np.array(weights)
+                        weights /= weights.sum()
+                        filled[y, x] = np.sum([n * w for n, w in zip(neighbors, weights)], axis=0)
+        normalmap = filled.copy()
+    
+    normalmap = filled
     
     # Normalize vectors
     lengths = np.sqrt(np.sum(normalmap ** 2, axis=2, keepdims=True))

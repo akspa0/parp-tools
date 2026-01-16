@@ -36,6 +36,8 @@ public static class Program
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "vlm-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
+            "vlm-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
+            "vlm-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
             "batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
@@ -1091,6 +1093,246 @@ public static class Program
             }
         }
 
+        return 0;
+    }
+
+    private static async Task<int> RunVlmBakeHeightmapAsync(string[] args)
+    {
+        string? datasetDir = null;
+        string? inputPath = null;
+        string? outputPath = null;
+        bool fullRes = false;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--dataset":
+                case "-d":
+                    datasetDir = args[++i];
+                    break;
+                case "--input":
+                case "-i":
+                    inputPath = args[++i];
+                    break;
+                case "--output":
+                case "-o":
+                    outputPath = args[++i];
+                    break;
+                case "--full-res":
+                    fullRes = true;
+                    break;
+                case "--help":
+                case "-h":
+                    Console.WriteLine("VLM Bake Heightmap - Generate heightmaps from VLM JSON data");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: vlm-bake-heightmap --dataset <dir> [--input <json>] [--output <dir>]");
+                    Console.WriteLine();
+                    Console.WriteLine("Options:");
+                    Console.WriteLine("  --dataset, -d <dir>   VLM dataset root directory");
+                    Console.WriteLine("  --input, -i <json>    Specific JSON file (or process all if omitted)");
+                    Console.WriteLine("  --output, -o <dir>    Output directory (default: dataset/heightmaps)");
+                    Console.WriteLine("  --full-res            Generate 4096x4096 instead of 256x256");
+                    return 0;
+            }
+        }
+
+        if (string.IsNullOrEmpty(datasetDir) && string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("Error: Specify --dataset or --input");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(datasetDir) && !string.IsNullOrEmpty(inputPath))
+        {
+            datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
+        }
+
+        Console.WriteLine($"VLM Bake Heightmap");
+        Console.WriteLine($"  Dataset: {datasetDir}");
+        Console.WriteLine($"  Resolution: {(fullRes ? "4096x4096" : "256x256")}");
+
+        var baker = new HeightmapBakeService(datasetDir!);
+        var outputBase = outputPath ?? Path.Combine(datasetDir!, "heightmaps");
+
+        // If no specific input, use map-wide export (scans for global bounds first)
+        if (string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("  Mode: MAP-WIDE (global height bounds)");
+            var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
+            await baker.ExportMapHeightmapsAsync(datasetDir!, outputBase, progress);
+            return 0;
+        }
+
+        // Single tile mode (per-tile bounds - not recommended)
+        Console.WriteLine("  Mode: SINGLE TILE (per-tile bounds)");
+        Directory.CreateDirectory(outputBase);
+
+        try
+        {
+            var tileName = Path.GetFileNameWithoutExtension(inputPath);
+            Console.Write($"  {tileName}... ");
+
+            if (fullRes)
+            {
+                var (heightmap, min, max) = await baker.BakeHeightmap4096Async(inputPath);
+                var outPath = Path.Combine(outputBase, $"{tileName}_heightmap_4096.png");
+                await heightmap.SaveAsPngAsync(outPath);
+                heightmap.Dispose();
+                Console.WriteLine($"OK [{min:F1} to {max:F1}]");
+            }
+            else
+            {
+                await baker.ExportWithMetadataAsync(inputPath, outputBase);
+                Console.WriteLine("OK");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"FAILED: {ex.Message}");
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static async Task<int> RunVlmSynthAsync(string[] args)
+    {
+        string? datasetDir = null;
+        string? inputPath = null;
+        string? outputPath = null;
+        int resolution = 256;
+        bool withVariations = false;
+        float hillshade = 0.4f;
+        float ao = 0.2f;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--dataset":
+                case "-d":
+                    datasetDir = args[++i];
+                    break;
+                case "--input":
+                case "-i":
+                    inputPath = args[++i];
+                    break;
+                case "--output":
+                case "-o":
+                    outputPath = args[++i];
+                    break;
+                case "--resolution":
+                case "-r":
+                    resolution = int.Parse(args[++i]);
+                    break;
+                case "--variations":
+                    withVariations = true;
+                    break;
+                case "--hillshade":
+                    hillshade = float.Parse(args[++i]);
+                    break;
+                case "--ao":
+                    ao = float.Parse(args[++i]);
+                    break;
+                case "--help":
+                case "-h":
+                    Console.WriteLine("VLM Synth - Generate synthesized training pairs");
+                    Console.WriteLine();
+                    Console.WriteLine("Creates perfectly matched minimap/heightmap pairs where the minimap");
+                    Console.WriteLine("is deformed based on the heightmap (hillshading, ambient occlusion).");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: vlm-synth --dataset <dir> [--input <json>] [--output <dir>]");
+                    Console.WriteLine();
+                    Console.WriteLine("Options:");
+                    Console.WriteLine("  --dataset, -d <dir>     VLM dataset root directory");
+                    Console.WriteLine("  --input, -i <json>      Specific JSON file (or process all)");
+                    Console.WriteLine("  --output, -o <dir>      Output directory (default: synthesized/)");
+                    Console.WriteLine("  --resolution, -r <n>    Output resolution (default: 256)");
+                    Console.WriteLine("  --variations            Generate 4 lighting variations per tile");
+                    Console.WriteLine("  --hillshade <0-1>       Hillshade strength (default: 0.4)");
+                    Console.WriteLine("  --ao <0-1>              Ambient occlusion strength (default: 0.2)");
+                    return 0;
+            }
+        }
+
+        if (string.IsNullOrEmpty(datasetDir) && string.IsNullOrEmpty(inputPath))
+        {
+            Console.WriteLine("Error: Specify --dataset or --input");
+            return 1;
+        }
+
+        if (string.IsNullOrEmpty(datasetDir) && !string.IsNullOrEmpty(inputPath))
+        {
+            datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
+        }
+
+        Console.WriteLine($"VLM Synthesized Training Pair Generator");
+        Console.WriteLine($"  Dataset: {datasetDir}");
+        Console.WriteLine($"  Resolution: {resolution}x{resolution}");
+        Console.WriteLine($"  Hillshade: {hillshade:F2}, AO: {ao:F2}");
+        if (withVariations) Console.WriteLine($"  Mode: 4 lighting variations per tile");
+
+        var synth = new SynthesizedTrainingService(datasetDir!)
+        {
+            HillshadeStrength = hillshade,
+            AmbientOcclusion = ao
+        };
+
+        var filesToProcess = new List<string>();
+
+        if (!string.IsNullOrEmpty(inputPath))
+        {
+            filesToProcess.Add(inputPath);
+        }
+        else
+        {
+            var datasetFolder = Path.Combine(datasetDir!, "dataset");
+            if (Directory.Exists(datasetFolder))
+            {
+                filesToProcess.AddRange(Directory.EnumerateFiles(datasetFolder, "*.json"));
+            }
+        }
+
+        if (filesToProcess.Count == 0)
+        {
+            Console.WriteLine("Error: No JSON files found.");
+            return 1;
+        }
+
+        var outputBase = outputPath ?? Path.Combine(datasetDir!, "synthesized");
+        Directory.CreateDirectory(outputBase);
+
+        int processed = 0;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        foreach (var file in filesToProcess)
+        {
+            try
+            {
+                var tileName = Path.GetFileNameWithoutExtension(file);
+                Console.Write($"  {tileName}... ");
+
+                if (withVariations)
+                {
+                    await synth.ExportWithVariationsAsync(file, outputBase, resolution);
+                    Console.WriteLine("OK (4 variations)");
+                }
+                else
+                {
+                    await synth.ExportPairAsync(file, outputBase, resolution);
+                    Console.WriteLine("OK");
+                }
+                processed++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FAILED: {ex.Message}");
+            }
+        }
+
+        sw.Stop();
+        Console.WriteLine($"Processed {processed}/{filesToProcess.Count} tiles in {sw.Elapsed.TotalSeconds:F1}s");
         return 0;
     }
 

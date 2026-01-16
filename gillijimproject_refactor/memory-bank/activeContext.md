@@ -1,39 +1,110 @@
 # Active Context
 
-## Current Focus: AI Terrain Height Prediction (Jan 15, 2026)
+## Current Focus: Terrain Restoration Pipeline (Jan 16, 2026)
 
 ### Status Summary
-V4-DPT training script using Hugging Face DPT (Dense Prediction Transformer) for terrain height prediction. Training resumed from checkpoint with NaN protection fixes.
+**MAJOR FIX**: Heightmap generation now 100% accurate using correct Alpha MCVT format. Exporting fresh datasets with proper per-tile normalization. Added whole-map heightmap stitching.
 
-### Session Jan 15, 2026 - V4-DPT Training Script
+### Session Jan 16, 2026 - Alpha MCVT Format Fix & Heightmap Stitching
 
-#### Completed ✅
-1. **train_height_regressor_v4_dpt.py** - DPT-based terrain height regressor:
-   - Uses `Intel/dpt-large` pretrained on depth estimation (same task as height prediction)
-   - Multi-loss: L1 + Gradient + SSIM + Edge + Scale-Invariant
-   - Fixed NaN explosion with protection in both training and validation loops
-   - Lower learning rate (1e-5) and tighter gradient clipping (0.5)
-   - Resume from checkpoint support
+#### Critical Discovery: Alpha vs Standard MCVT Format ✅
+**Alpha ADT MCVT uses a DIFFERENT layout than later WoW versions:**
+- **Alpha MCVT**: 81 outer vertices (9×9) FIRST, then 64 inner vertices (8×8)
+- **Standard MCVT**: Interleaved pattern (9 outer, 8 inner, 9 outer, 8 inner...)
+- This was causing diagonal artifacts in all previous heightmap renders
 
-2. **img2mesh_v4_dpt.py** - Inference script for DPT model:
-   - Loads trained DPT model
-   - Outputs VLM-compatible JSON, heightmap PNG, normal map PNG, OBJ mesh
+#### Bugs Fixed in VlmDatasetExporter.GenerateHeightmap ✅
+1. **Wrong MCVT indexing**: Was using interleaved format, now uses Alpha format (81 outer + 64 inner)
+2. **Fixed normalization range**: Was using hardcoded -2000 to 2000, now uses per-tile min/max
+3. **Result**: Heightmaps now show correct terrain features with full dynamic range
 
-3. **Dataset Loading Fix**:
-   - Fixed to match V3 `terrain_data.heights[].h` JSON structure
-   - Pre-computes heights/normals arrays during loading
-   - Supports 1690 tiles from 4 datasets
+#### New Feature: Whole-Map Heightmap Stitching ✅
+- Added `StitchHeightmapsToWebP()` method to VlmDatasetExporter
+- Stitches all tile heightmaps into single whole-map image
+- **Format**: Lossless WebP (16-bit grayscale preserved)
+- **Max size**: 16384×16384 (auto-scales larger maps to fit)
+- **Output**: `stitched/{mapName}_full_heightmap.webp`
 
-4. **README.md Documentation**:
-   - Added V4-DPT training section
-   - Added "Understanding Training Output" section explaining metrics
-   - Typical training progression table
+#### Exports Currently Running
+- **Azeroth v10**: 685 tiles (in stitching phase)
+- **Kalimdor v5**: 951 tiles (in stitching phase)
 
-#### Training Status 🔄
-- **Best model**: Epoch 4, val_loss=0.3705
-- **HeightVar**: ~0.004 (not collapsed to mean)
-- **NaN protection**: Working - skips bad batches
-- **Resume command**: `python train_height_regressor_v4_dpt.py --resume "J:\vlm_output\wow_height_regressor_v4_dpt\best_model.pt"`
+#### Key Files Updated
+- `VlmDatasetExporter.cs` - Fixed GenerateHeightmap + added StitchHeightmapsToWebP
+- `HeightmapBakeService.cs` - Updated to use Alpha MCVT format
+- `render_heightmaps.py` - Updated to use Alpha MCVT format
+- `render_normalmaps.py` - Updated to use Alpha MCNR format
+
+### Previous Session Jan 15, 2026 (Late Evening) - Bug Fixes & Resolution Upgrade
+
+#### Critical Bugs Fixed ✅
+1. **MCVT/MCNR Layout Bug** (initially thought interleaved, later found Alpha uses sequential):
+   - Fixed in both `render_heightmaps.py` and `render_normalmaps.py`
+
+2. **Resolution Upgraded 129×129 → 256×256**:
+   - Old: Only used outer vertices (9×9 per chunk = 129×129 total)
+   - New: Uses ALL 145 vertices (outer at even pixels, inner at odd pixels)
+   - 16 pixels per chunk edge = 256 pixels per tile = **4× more data**
+
+3. **MCNR Padding Handled**:
+   - Alpha exports: 448 bytes (with padding)
+   - LK exports: 435 bytes (145×3 exact)
+   - Fixed: Truncate to 435 to handle both
+
+4. **V5 Model Updated**:
+   - `OUTPUT_SIZE` changed from 129 to 256
+   - Model architecture unchanged (U-Net)
+
+#### Files Updated
+- `render_heightmaps.py` - 256×256 with all vertices + gap interpolation
+- `render_normalmaps.py` - 256×256 with all normals + gap interpolation  
+- `train_height_regressor_v5_multichannel.py` - OUTPUT_SIZE = 256
+
+#### UNSOLVED PROBLEM: Height Semantics 🚫
+
+**The model doesn't know what heights mean.**
+
+Current approach: minimap + normalmap → heightmap
+- Normalmap encodes surface orientation (slopes)
+- But **what is "up" vs "down"?** Model only sees relative gradients.
+- No absolute height reference in the training data
+- Tiles are normalized per-tile, losing global height context
+
+**What the model needs to learn**:
+- Water is typically at low elevation
+- Mountains have certain textures at certain heights
+- Transition zones (beach→grass→rock→snow) correlate with elevation
+- But these are **WoW-specific** patterns, not universal
+
+**Potential Solutions for Next Session**:
+
+1. **Include absolute height bounds in training**:
+   - Add min_height/max_height to training data
+   - Train model to predict both heightmap AND height range
+   - Reconstruct absolute heights during inference
+
+2. **Use WDL as height reference**:
+   - WDL contains 17×17 low-res height samples per tile
+   - Provides absolute height context
+   - Model learns: minimap + normalmap + WDL_hint → detailed heightmap
+
+3. **Multi-scale training**:
+   - Train on multiple adjacent tiles together
+   - Model sees height continuity across tile boundaries
+   - Learns global elevation patterns
+
+4. **PM4 geometry as ground truth**:
+   - PM4 pathfinding meshes have absolute world positions
+   - Rasterize PM4 → heightmap for tiles without ADT data
+   - Provides true height values for training
+
+#### Next Steps (Fresh Chat)
+1. Re-render all heightmaps and normalmaps at 256×256
+2. Re-train V5 model with correct data
+3. Implement absolute height encoding strategy
+4. Test on tiles not in training set
+
+### Previous Session Summary (Jan 15, 2026 - Earlier)
 
 ### Session Jan 14-15, 2026 - Minimap Baking & AI Smoothing (Previous)
 

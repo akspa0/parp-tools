@@ -96,22 +96,30 @@ def save_heightmap_image(heightmap: np.ndarray, output_path: Path):
     img_preview.save(preview_path)
 
 
-def generate_obj_mesh(heightmap: np.ndarray, output_path: Path, scale: float = 1.0):
-    """Generate OBJ mesh from 129x129 heightmap."""
+def generate_obj_mesh(heightmap: np.ndarray, output_path: Path, texture_path: Path = None, scale: float = 1.0):
+    """Generate OBJ mesh from 129x129 heightmap with optional texture."""
     h, w = heightmap.shape
     vertices = []
+    uvs = []
     faces = []
     
-    # Generate vertices
+    # Generate vertices and UVs
     for y in range(h):
         for x in range(w):
             # Scale to WoW coordinates (roughly)
             wx = (x - w/2) * scale
             wy = (y - h/2) * scale
-            wz = heightmap[y, x] * scale * 20  # Scale height (reduced from 100)
+            wz = heightmap[y, x] * scale * 20  # Scale height
             vertices.append((wx, wz, wy))  # Y-up in OBJ
+            
+            # UV coordinates with half-pixel inset to prevent edge sampling artifacts
+            # This prevents seams at tile boundaries by keeping UVs within texel centers
+            half_pixel = 0.5 / 256  # Assuming 256x256 texture
+            u = half_pixel + (x / (w - 1)) * (1.0 - 2 * half_pixel)
+            v = half_pixel + (1.0 - (y / (h - 1))) * (1.0 - 2 * half_pixel)  # Flip V
+            uvs.append((u, v))
     
-    # Generate faces (quads as triangles)
+    # Generate faces (quads as triangles) - reversed winding for correct normals
     for y in range(h - 1):
         for x in range(w - 1):
             # Vertex indices (1-based for OBJ)
@@ -120,9 +128,32 @@ def generate_obj_mesh(heightmap: np.ndarray, output_path: Path, scale: float = 1
             v2 = (y + 1) * w + (x + 1) + 1
             v3 = (y + 1) * w + x + 1
             
-            # Two triangles per quad
-            faces.append((v0, v1, v2))
-            faces.append((v0, v2, v3))
+            # Two triangles per quad - reversed winding order (CCW -> CW)
+            faces.append((v0, v3, v2))
+            faces.append((v0, v2, v1))
+    
+    # Write MTL file if texture provided
+    mtl_name = None
+    if texture_path and texture_path.exists():
+        mtl_path = output_path.with_suffix('.mtl')
+        mtl_name = output_path.stem + "_mat"
+        
+        # Copy texture to output directory
+        tex_dest = output_path.parent / texture_path.name
+        if not tex_dest.exists():
+            Image.open(texture_path).save(tex_dest)
+        
+        with open(mtl_path, 'w') as f:
+            f.write(f"# WoW Height Regressor V5 Material\n")
+            f.write(f"newmtl {mtl_name}\n")
+            f.write(f"Ka 1.0 1.0 1.0\n")  # Ambient
+            f.write(f"Kd 1.0 1.0 1.0\n")  # Diffuse
+            f.write(f"Ks 0.0 0.0 0.0\n")  # Specular
+            f.write(f"d 1.0\n")            # Opacity
+            f.write(f"illum 1\n")          # Illumination model
+            f.write(f"map_Kd {texture_path.name}\n")  # Diffuse texture
+        
+        print(f"  Saved material: {mtl_path.name}")
     
     # Write OBJ
     with open(output_path, 'w') as f:
@@ -130,13 +161,29 @@ def generate_obj_mesh(heightmap: np.ndarray, output_path: Path, scale: float = 1
         f.write(f"# Vertices: {len(vertices)}\n")
         f.write(f"# Faces: {len(faces)}\n\n")
         
+        # Reference MTL file
+        if mtl_name:
+            f.write(f"mtllib {output_path.stem}.mtl\n\n")
+        
+        # Vertices
         for v in vertices:
             f.write(f"v {v[0]:.6f} {v[1]:.6f} {v[2]:.6f}\n")
         
         f.write("\n")
         
+        # Texture coordinates
+        for uv in uvs:
+            f.write(f"vt {uv[0]:.6f} {uv[1]:.6f}\n")
+        
+        f.write("\n")
+        
+        # Use material
+        if mtl_name:
+            f.write(f"usemtl {mtl_name}\n")
+        
+        # Faces with texture coordinates (f v/vt v/vt v/vt)
         for face in faces:
-            f.write(f"f {face[0]} {face[1]} {face[2]}\n")
+            f.write(f"f {face[0]}/{face[0]} {face[1]}/{face[1]} {face[2]}/{face[2]}\n")
     
     print(f"  Saved mesh: {len(vertices)} vertices, {len(faces)} faces")
 
@@ -206,9 +253,9 @@ def main():
     save_heightmap_image(heightmap, heightmap_path)
     print(f"  Saved heightmap: {heightmap_path}")
     
-    # OBJ mesh
+    # OBJ mesh with minimap texture
     obj_path = output_dir / f"{tile_name}.obj"
-    generate_obj_mesh(heightmap, obj_path, scale=args.scale)
+    generate_obj_mesh(heightmap, obj_path, texture_path=minimap_path, scale=args.scale)
     
     # Copy inputs for reference
     minimap_copy = output_dir / f"{tile_name}_minimap.png"

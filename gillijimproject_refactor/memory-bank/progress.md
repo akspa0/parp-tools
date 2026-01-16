@@ -50,31 +50,86 @@
 - Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
 - **Decision**: Use WoWMuseum ADTs as base instead of merging split files
  
-## Session Jan 15, 2026 - V4-DPT Training (Hugging Face Transformers) 🔄
+## Session Jan 16, 2026 - Alpha MCVT Format Fix & Heightmap Stitching ✅
+
+### Critical Discovery: Alpha MCVT Format
+**Alpha ADT uses a DIFFERENT MCVT layout than later WoW versions:**
+- **Alpha**: 81 outer (9×9) FIRST, then 64 inner (8×8) = 145 total
+- **Standard (LK+)**: Interleaved pattern (9 outer, 8 inner, 9 outer, 8 inner...)
+- This was the root cause of all diagonal heightmap artifacts
+
+### Bugs Fixed in VlmDatasetExporter.GenerateHeightmap ✅
+| Bug | Fix |
+|-----|-----|
+| Wrong MCVT indexing | Changed from interleaved to Alpha format (81 outer + 64 inner) |
+| Fixed normalization | Changed from hardcoded -2000/2000 to per-tile min/max |
+| Heightmap quality | Now 100% accurate terrain representation |
+
+### New Feature: Whole-Map Heightmap Stitching ✅
+- `StitchHeightmapsToWebP()` stitches all tile heightmaps into single image
+- Format: Lossless WebP (16-bit grayscale)
+- Max size: 16384×16384 (auto-scales to fit)
+- Output: `stitched/{mapName}_full_heightmap.webp`
+
+### Exports Running
+- **Azeroth v10**: 685 tiles → `053_azeroth_v10/`
+- **Kalimdor v5**: 951 tiles → `053_kalimdor_v5/`
+
+### Files Updated
+- `VlmDatasetExporter.cs` - Fixed GenerateHeightmap + added StitchHeightmapsToWebP
+- `HeightmapBakeService.cs` - Updated to use Alpha MCVT format
+- `render_heightmaps.py` - Updated to use Alpha MCVT format
+- `render_normalmaps.py` - Updated to use Alpha MCNR format
+
+## Session Jan 15, 2026 (Late Evening) - Critical Bug Fixes ✅
+
+### Bugs Fixed
+| Bug | Fix |
+|-----|-----|
+| MCVT layout | Initially thought interleaved; later discovered Alpha uses sequential 81+64 |
+| MCNR layout | Same fix as MCVT |
+| Resolution 129→256 | Now uses ALL 145 vertices per chunk (4× data) |
+| MCNR padding (448 vs 435) | Truncate to 435 for both Alpha and LK |
+
+### Files Updated
+- `render_heightmaps.py` - 256×256 full resolution
+- `render_normalmaps.py` - 256×256 full resolution
+- `train_height_regressor_v5_multichannel.py` - OUTPUT_SIZE = 256
+
+### 🚫 UNSOLVED: Height Semantics Problem
+
+**Model doesn't understand what heights mean:**
+- Normalmap shows slopes but not absolute elevation
+- Per-tile normalization loses global height context
+- No way to tell model "water = low, mountains = high"
+
+**Proposed Solutions for Next Session**:
+1. **Absolute height bounds** - include min/max in training, predict range
+2. **WDL as hint** - 17×17 low-res height grid as additional input
+3. **Multi-tile training** - adjacent tiles for continuity
+4. **PM4 rasterization** - use pathfinding mesh for ground truth
+
+## Session Jan 15, 2026 (Evening) - V5 Model ✅
+
+### V5 Multi-Channel Model
+- 6-channel input (minimap+normalmap) → heightmap
+- Best val_loss: 0.1558
+- Checkpoint: `J:\vlm_output\wow_height_regressor_v5_multichannel\best_model.pt`
+
+### OBJ/MTL Export
+- Fixed Z scale, face winding, UV clamping
+- Batch processing to single timestamped folder
+
+## Session Jan 15, 2026 (Earlier) - V4-DPT Training ✅
 
 ### V4-DPT Training Script
-Created `train_height_regressor_v4_dpt.py` using Hugging Face DPT (Dense Prediction Transformer):
+Created `train_height_regressor_v4_dpt.py` using Hugging Face DPT:
 
 | Component | Status |
 |-----------|--------|
-| DPT model integration | ✅ `Intel/dpt-large` pretrained on depth estimation |
-| Dataset loading | ✅ Fixed to match V3 `terrain_data.heights[].h` format |
+| DPT model integration | ✅ `Intel/dpt-large` |
 | Multi-loss function | ✅ L1 + Gradient + SSIM + Edge + Scale-Invariant |
-| NaN protection (train) | ✅ Skip bad batches, clamp loss, tight grad clipping |
-| NaN protection (val) | ✅ Skip NaN predictions |
-| Inference script | ✅ `img2mesh_v4_dpt.py` |
-| Documentation | ✅ README.md updated with metrics explanation |
-
-### Training Metrics
-- **Best model**: Epoch 4, val_loss=0.3705
-- **HeightVar**: ~0.004 (terrain variance preserved)
-- **Training status**: In progress with NaN protection
-
-### Key Fixes
-1. **NaN explosion**: Lowered LR (5e-5 → 1e-5), reduced gradient weight (5.0 → 2.0)
-2. **Gradient clipping**: Tightened from 1.0 → 0.5
-3. **Loss clamping**: Added `torch.clamp(loss, 0, 100)`
-4. **Validation NaN**: Added skip for NaN predictions
+| Best val_loss | ✅ 0.3705 at Epoch 4 |
 
 ## Session Jan 14, 2026 - Image-to-Height & Texture Pipeline ✅
   

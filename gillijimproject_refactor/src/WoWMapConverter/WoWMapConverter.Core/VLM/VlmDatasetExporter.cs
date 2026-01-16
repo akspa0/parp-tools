@@ -504,6 +504,14 @@ public class VlmDatasetExporter
                     progress?.Report($"Created full alpha map L{l}: {alphaOutput}");
                 }
             }
+            
+            // Stitch heightmaps into full world map (WebP, max 16384x16384)
+            var heightmapOutput = Path.Combine(stitchedDir, $"{mapName}_full_heightmap.webp");
+            var heightmapBounds = StitchHeightmapsToWebP(imagesDir, mapName, heightmapOutput, 16384, progress);
+            if (heightmapBounds.HasValue)
+            {
+                progress?.Report($"Created full heightmap: {heightmapOutput} ({heightmapBounds.Value.width}x{heightmapBounds.Value.height})");
+            }
         }
 
         progress?.Report($"Export complete: {tilesExported} tiles exported, {tilesSkipped} skipped");
@@ -1269,49 +1277,114 @@ public class VlmDatasetExporter
     {
         if (chunkHeights == null || chunkHeights.Count == 0) return null;
 
-        const int Width = 256;
-        const int Height = 256;
-        const float MinZ = -2000f;
-        const float MaxZ = 2000f;
-        const float Range = MaxZ - MinZ;
-
-        using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(129, 129);
+        const int Size = 256;
         var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
         
-        for (int row = 0; row < 129; row++) 
+        // First pass: collect all heights to find per-tile min/max
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+        foreach (var kvp in heightsDict)
         {
-            for (int col = 0; col < 129; col++) 
+            if (kvp.Value != null)
             {
-                int chunkX = Math.Min(col / 8, 15);
-                int chunkY = Math.Min(row / 8, 15);
-                int chunkIdx = chunkY * 16 + chunkX;
-                
-                int localX = col - (chunkX * 8); 
-                int localY = row - (chunkY * 8);
-                
-                if (heightsDict.TryGetValue(chunkIdx, out var hData) && hData != null) 
+                foreach (var h in kvp.Value)
                 {
-                    // Access Outer Grid (Stride 17: 9 outer + 8 inner)
-                    int arrayIdx = localY * 17 + localX;
-                    
-                    if (arrayIdx < hData.Length) 
+                    if (!float.IsNaN(h) && !float.IsInfinity(h))
                     {
-                        float z = hData[arrayIdx];
-                        float norm = (z - MinZ) / Range;
-                        if (norm < 0) norm = 0;
-                        if (norm > 1) norm = 1;
-                        
-                        ushort val = (ushort)(norm * 65535);
-                        rawMap[col, row] = new SixLabors.ImageSharp.PixelFormats.L16(val);
+                        if (h < minZ) minZ = h;
+                        if (h > maxZ) maxZ = h;
                     }
                 }
             }
         }
         
-        rawMap.Mutate(x => x.Resize(Width, Height, SixLabors.ImageSharp.Processing.KnownResamplers.Bicubic));
+        if (minZ >= maxZ) { minZ = 0; maxZ = 1; }
+        float range = maxZ - minZ;
+
+        using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(Size, Size);
+        
+        // Alpha MCVT format: 81 outer (9x9) then 64 inner (8x8) per chunk
+        for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
+        {
+            if (!heightsDict.TryGetValue(chunkIdx, out var hData) || hData == null || hData.Length < 145)
+                continue;
+            
+            int chunkY = chunkIdx / 16;
+            int chunkX = chunkIdx % 16;
+            int baseX = chunkX * 16;
+            int baseY = chunkY * 16;
+            
+            // Place 9x9 outer vertices at even positions
+            for (int oy = 0; oy < 9; oy++)
+            {
+                for (int ox = 0; ox < 9; ox++)
+                {
+                    int px = baseX + ox * 2;
+                    int py = baseY + oy * 2;
+                    if (px < Size && py < Size)
+                    {
+                        float z = hData[oy * 9 + ox];
+                        float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
+                        rawMap[px, py] = new SixLabors.ImageSharp.PixelFormats.L16((ushort)(norm * 65535));
+                    }
+                }
+            }
+            
+            // Place 8x8 inner vertices at odd positions
+            for (int iy = 0; iy < 8; iy++)
+            {
+                for (int ix = 0; ix < 8; ix++)
+                {
+                    int px = baseX + ix * 2 + 1;
+                    int py = baseY + iy * 2 + 1;
+                    if (px < Size && py < Size)
+                    {
+                        float z = hData[81 + iy * 8 + ix];
+                        float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
+                        rawMap[px, py] = new SixLabors.ImageSharp.PixelFormats.L16((ushort)(norm * 65535));
+                    }
+                }
+            }
+        }
+        
+        // Fill gaps with nearest neighbor interpolation
+        for (int y = 0; y < Size; y++)
+        {
+            for (int x = 0; x < Size; x++)
+            {
+                if (rawMap[x, y].PackedValue == 0)
+                {
+                    // Find nearest non-zero neighbor
+                    ushort nearest = 0;
+                    float minDist = float.MaxValue;
+                    for (int dy = -2; dy <= 2; dy++)
+                    {
+                        for (int dx = -2; dx <= 2; dx++)
+                        {
+                            if (dy == 0 && dx == 0) continue;
+                            int nx = x + dx, ny = y + dy;
+                            if (nx >= 0 && nx < Size && ny >= 0 && ny < Size)
+                            {
+                                var val = rawMap[nx, ny].PackedValue;
+                                if (val > 0)
+                                {
+                                    float dist = dx * dx + dy * dy;
+                                    if (dist < minDist)
+                                    {
+                                        minDist = dist;
+                                        nearest = val;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (nearest > 0)
+                        rawMap[x, y] = new SixLabors.ImageSharp.PixelFormats.L16(nearest);
+                }
+            }
+        }
         
         var filename = $"{tileName}_heightmap.png";
-        var imagesDir = Path.Combine(outputDir, "images"); // Ensure images dir exists
+        var imagesDir = Path.Combine(outputDir, "images");
         Directory.CreateDirectory(imagesDir);
         var path = Path.Combine(imagesDir, filename);
         await rawMap.SaveAsPngAsync(path);
@@ -1355,6 +1428,94 @@ public class VlmDatasetExporter
         {
             Console.WriteLine($"Error converting {blpPath}: {ex.Message}");
             return false;
+        }
+    }
+    
+    private (int minX, int minY, int maxX, int maxY, int width, int height)? StitchHeightmapsToWebP(
+        string imagesDir, string mapName, string outputPath, int maxSize, IProgress<string>? progress)
+    {
+        try
+        {
+            // Find all heightmap tiles
+            var pattern = $"{mapName}_*_*_heightmap.png";
+            var files = Directory.GetFiles(imagesDir, pattern);
+            if (files.Length == 0) return null;
+            
+            // Parse tile coordinates
+            var tiles = new List<(int x, int y, string path)>();
+            foreach (var file in files)
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                var parts = name.Replace($"{mapName}_", "").Replace("_heightmap", "").Split('_');
+                if (parts.Length >= 2 && int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y))
+                {
+                    tiles.Add((x, y, file));
+                }
+            }
+            
+            if (tiles.Count == 0) return null;
+            
+            int minX = tiles.Min(t => t.x);
+            int maxX = tiles.Max(t => t.x);
+            int minY = tiles.Min(t => t.y);
+            int maxY = tiles.Max(t => t.y);
+            
+            int tilesWide = maxX - minX + 1;
+            int tilesHigh = maxY - minY + 1;
+            
+            // Each tile is 256x256
+            int fullWidth = tilesWide * 256;
+            int fullHeight = tilesHigh * 256;
+            
+            // Calculate scale to fit within maxSize
+            float scale = 1.0f;
+            if (fullWidth > maxSize || fullHeight > maxSize)
+            {
+                scale = Math.Min((float)maxSize / fullWidth, (float)maxSize / fullHeight);
+            }
+            
+            int outputWidth = (int)(fullWidth * scale);
+            int outputHeight = (int)(fullHeight * scale);
+            int tileSize = (int)(256 * scale);
+            
+            progress?.Report($"Stitching {tiles.Count} heightmaps into {outputWidth}x{outputHeight} WebP...");
+            
+            using var canvas = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(outputWidth, outputHeight);
+            
+            foreach (var (x, y, path) in tiles)
+            {
+                try
+                {
+                    using var tile = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.L16>(path);
+                    
+                    // Resize tile if needed
+                    if (scale < 1.0f)
+                    {
+                        tile.Mutate(ctx => ctx.Resize(tileSize, tileSize));
+                    }
+                    
+                    int destX = (x - minX) * tileSize;
+                    int destY = (y - minY) * tileSize;
+                    
+                    canvas.Mutate(ctx => ctx.DrawImage(tile, new SixLabors.ImageSharp.Point(destX, destY), 1.0f));
+                }
+                catch { /* Skip failed tiles */ }
+            }
+            
+            // Save as WebP
+            var encoder = new SixLabors.ImageSharp.Formats.Webp.WebpEncoder
+            {
+                Quality = 95,
+                FileFormat = SixLabors.ImageSharp.Formats.Webp.WebpFileFormatType.Lossless
+            };
+            canvas.Save(outputPath, encoder);
+            
+            return (minX, minY, maxX, maxY, outputWidth, outputHeight);
+        }
+        catch (Exception ex)
+        {
+            progress?.Report($"Error stitching heightmaps: {ex.Message}");
+            return null;
         }
     }
 }

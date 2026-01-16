@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-Render proper heightmaps from VLM dataset JSON files.
+Render high-resolution heightmaps from VLM dataset JSON files.
 
-Creates smooth 129x129 heightmaps by properly stitching chunk vertices.
+Creates 256x256 heightmaps using ALL 145 MCVT vertices per chunk:
+- Outer vertices (9 per row) at even pixel positions
+- Inner vertices (8 per row) at odd pixel positions
+- 16 pixels per chunk = 256 pixels per tile
 """
 
 import json
@@ -12,8 +15,12 @@ from PIL import Image
 import argparse
 
 
+# Maximum native resolution using all MCVT vertices
+GRID_SIZE = 256  # 16 chunks * 16 pixels per chunk
+
+
 def render_heightmap(json_path: Path, output_path: Path):
-    """Render a heightmap from JSON terrain data."""
+    """Render a 256x256 heightmap from JSON terrain data using all vertices."""
     with open(json_path, 'r') as f:
         data = json.load(f)
     
@@ -24,10 +31,9 @@ def render_heightmap(json_path: Path, output_path: Path):
         print(f"  No heights in {json_path.name}")
         return False
     
-    # Build 129x129 grid (16 chunks * 8 vertices + 1 edge)
-    grid_size = 129
-    heightmap = np.zeros((grid_size, grid_size), dtype=np.float32)
-    weight_map = np.zeros((grid_size, grid_size), dtype=np.float32)
+    # Build 256x256 grid (16 chunks * 16 pixels per chunk)
+    heightmap = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.float32)
+    weight_map = np.zeros((GRID_SIZE, GRID_SIZE), dtype=np.float32)
     
     for chunk_data in heights_data:
         idx = chunk_data.get("idx", -1)
@@ -38,27 +44,83 @@ def render_heightmap(json_path: Path, output_path: Path):
         
         chunk_y = idx // 16
         chunk_x = idx % 16
-        base_x = chunk_x * 8
-        base_y = chunk_y * 8
+        # Each chunk is 16 pixels (2 pixels per unit square)
+        base_x = chunk_x * 16
+        base_y = chunk_y * 16
         
-        # Each chunk has 145 vertices: 9x9 outer (81) + 8x8 inner (64)
-        # We only use the 9x9 outer grid for the continuous map
-        if len(h) < 81:
+        # ALPHA ADT MCVT FORMAT: 81 outer (9x9) THEN 64 inner (8x8) - NOT interleaved!
+        if len(h) < 145:
             continue
         
-        for i in range(81):
-            row = i // 9
-            col = i % 9
-            gx = base_x + col
-            gy = base_y + row
-            
-            if gx < grid_size and gy < grid_size:
-                heightmap[gy, gx] += h[i]
-                weight_map[gy, gx] += 1.0
+        # Build 17x17 grid from Alpha format
+        grid17 = np.zeros((17, 17), dtype=np.float32)
+        
+        # Place 9x9 outer at even positions
+        for oy in range(9):
+            for ox in range(9):
+                grid17[oy * 2, ox * 2] = h[oy * 9 + ox]
+        
+        # Place 8x8 inner at odd positions
+        for iy in range(8):
+            for ix in range(8):
+                grid17[iy * 2 + 1, ix * 2 + 1] = h[81 + iy * 8 + ix]
+        
+        # Interpolate edges: y even, x odd
+        for y in range(0, 17, 2):
+            for x in range(1, 16, 2):
+                grid17[y, x] = (grid17[y, x-1] + grid17[y, x+1]) / 2
+        
+        # Interpolate edges: y odd, x even
+        for y in range(1, 16, 2):
+            for x in range(0, 17, 2):
+                grid17[y, x] = (grid17[y-1, x] + grid17[y+1, x]) / 2
+        
+        # Sample 16x16 output pixels directly from grid17
+        for py in range(16):
+            for px in range(16):
+                out_x = base_x + px
+                out_y = base_y + py
+                if out_x < GRID_SIZE and out_y < GRID_SIZE:
+                    heightmap[out_y, out_x] = grid17[py, px]
+                    weight_map[out_y, out_x] = 1.0
     
-    # Average overlapping vertices
+    # Average overlapping vertices (chunk edges)
     weight_map[weight_map == 0] = 1.0
     heightmap /= weight_map
+    
+    # Fill gaps using bilinear interpolation (8-neighbor weighted)
+    # Create mask of valid pixels
+    valid_mask = (weight_map >= 0.5).astype(np.float32)
+    
+    # Use distance-weighted interpolation for gaps
+    # First, dilate the valid data to fill gaps smoothly
+    filled = heightmap.copy()
+    
+    # Multiple passes of neighbor averaging for smooth interpolation
+    for _ in range(3):
+        for y in range(GRID_SIZE):
+            for x in range(GRID_SIZE):
+                if valid_mask[y, x] < 0.5:
+                    # Bilinear: use diagonal neighbors too
+                    neighbors = []
+                    weights = []
+                    for dy in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            if dy == 0 and dx == 0:
+                                continue
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < GRID_SIZE and 0 <= nx < GRID_SIZE:
+                                if valid_mask[ny, nx] >= 0.5 or filled[ny, nx] != 0:
+                                    # Weight by inverse distance
+                                    dist = np.sqrt(dy*dy + dx*dx)
+                                    neighbors.append(filled[ny, nx])
+                                    weights.append(1.0 / dist)
+                    if neighbors:
+                        filled[y, x] = np.average(neighbors, weights=weights)
+        # Update heightmap for next pass
+        heightmap = filled.copy()
+    
+    heightmap = filled
     
     # Normalize to [0, 65535] for 16-bit PNG
     h_min, h_max = heightmap.min(), heightmap.max()
