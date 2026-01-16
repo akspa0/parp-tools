@@ -320,7 +320,7 @@ public static class AlphaMpqReader
         return data[0] == (byte)'M' && data[1] == (byte)'V' && data[2] == (byte)'E' && data[3] == (byte)'R';
     }
 
-    private static IEnumerable<string> BuildInternalNameCandidates(string filePath)
+    public static IEnumerable<string> BuildInternalNameCandidates(string filePath)
     {
         var fileName = Path.GetFileName(filePath);
         if (string.IsNullOrEmpty(fileName))

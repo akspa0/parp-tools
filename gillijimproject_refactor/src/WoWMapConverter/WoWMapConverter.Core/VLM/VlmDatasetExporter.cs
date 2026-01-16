@@ -193,7 +193,10 @@ public class VlmDatasetExporter
                         
                      if (File.Exists(wdlMpqDiscovered))
                      {
-                         var wdlBytes = AlphaMpqReader.ReadFromMpq(wdlMpqDiscovered);
+                         var wdlExpectedPath = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl");
+                         var wdlBytes = AlphaMpqReader.ReadFromMpq(
+                             wdlMpqDiscovered,
+                             AlphaMpqReader.BuildInternalNameCandidates(wdlExpectedPath));
                          if (wdlBytes != null)
                          {
                              wdlData = WdlParser.Parse(wdlBytes);

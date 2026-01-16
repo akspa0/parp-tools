@@ -54,16 +54,22 @@ HEIGHT_GLOBAL_MIN = -1000.0
 HEIGHT_GLOBAL_MAX = 3000.0
 HEIGHT_GLOBAL_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
 
+ALPHA_LAYERS = 4
+ALPHA_WEIGHT = 0.3
+REQUIRE_WDL = True
+REQUIRE_ALPHA = False
+VAL_MAP_FRACTION = 0.1
+HOLDOUT_MAPS = []  # e.g., ["Azeroth", "Kalimdor"]
 
 class MultiChannelUNetV6(nn.Module):
     """
     7-channel U-Net that predicts:
-    - 256x256 normalized heightmap
-    - height_min scalar
-    - height_max scalar
+    - 256x256 normalized heightmaps (global + local)
+    - alpha mask layers (optional auxiliary target)
+    - height bounds (tile min/max + global min/max)
     """
     
-    def __init__(self, in_channels=7, out_channels=1):
+    def __init__(self, in_channels=7, out_channels=2 + ALPHA_LAYERS):
         super().__init__()
         
         # Encoder
@@ -80,7 +86,7 @@ class MultiChannelUNetV6(nn.Module):
         self.height_bounds_fc = nn.Sequential(
             nn.Linear(1024, 256),
             nn.ReLU(inplace=True),
-            nn.Linear(256, 2),  # min, max
+            nn.Linear(256, 4),  # tile min/max, global min/max
         )
         
         # Decoder
@@ -124,7 +130,7 @@ class MultiChannelUNetV6(nn.Module):
         # Height bounds prediction from global features
         global_features = self.global_pool(b)
         global_features = global_features.view(global_features.size(0), -1)
-        height_bounds = self.height_bounds_fc(global_features)  # [batch, 2]
+        height_bounds = self.height_bounds_fc(global_features)  # [batch, 4]
         
         # Decoder path
         d4 = self.up4(b)
@@ -143,7 +149,7 @@ class MultiChannelUNetV6(nn.Module):
         d1 = torch.cat([d1, e1], dim=1)
         d1 = self.dec1(d1)
         
-        # Output heightmap (sigmoid for 0-1 range)
+        # Output heightmaps + alpha (sigmoid for 0-1 range)
         heightmap = torch.sigmoid(self.out_conv(d1))
         
         # Ensure output is exactly OUTPUT_SIZE
@@ -161,6 +167,15 @@ class WoWTileDatasetV6(Dataset):
         self.input_size = input_size
         self.augment = augment
         self.samples = []
+        self._map_to_indices = {}
+        self.stats = {
+            "total_json": 0,
+            "missing_height_bounds": 0,
+            "missing_wdl": 0,
+            "missing_alpha": 0,
+            "missing_heightmaps": 0,
+            "missing_inputs": 0,
+        }
         
         print("Loading dataset with height bounds...")
         
@@ -178,34 +193,66 @@ class WoWTileDatasetV6(Dataset):
             json_files = list(dataset_dir.glob("*.json"))
             
             for json_path in json_files:
+                self.stats["total_json"] += 1
                 tile_name = json_path.stem
                 minimap_path = images_dir / f"{tile_name}.png"
                 normalmap_path = images_dir / f"{tile_name}_normalmap.png"
-                heightmap_path = images_dir / f"{tile_name}_heightmap_v2_preview.png"
-                
-                # Check images exist
-                if not (minimap_path.exists() and normalmap_path.exists() and heightmap_path.exists()):
-                    continue
-                
-                # Load JSON to check height bounds exist
+
                 try:
                     with open(json_path, 'r') as f:
                         data = json.load(f)
                     terrain = data.get("terrain_data", {})
                     if terrain.get("height_min") is None:
+                        self.stats["missing_height_bounds"] += 1
                         continue
+
+                    wdl_data = terrain.get("wdl_heights")
+                    if REQUIRE_WDL:
+                        outer = wdl_data.get("outer_17") if isinstance(wdl_data, dict) else None
+                        if not outer or len(outer) != 289:
+                            self.stats["missing_wdl"] += 1
+                            continue
+
+                    alpha_masks = terrain.get("alpha_masks") or []
+                    if REQUIRE_ALPHA and len(alpha_masks) == 0:
+                        self.stats["missing_alpha"] += 1
+                        continue
+
+                    heightmap_global_rel = terrain.get("heightmap_global") or terrain.get("heightmap")
+                    heightmap_local_rel = terrain.get("heightmap_local") or terrain.get("heightmap")
+
+                    heightmap_global_path = (root / heightmap_global_rel) if heightmap_global_rel else None
+                    heightmap_local_path = (root / heightmap_local_rel) if heightmap_local_rel else None
                 except Exception:
                     continue
-                
+
+                if heightmap_global_path is None or heightmap_local_path is None:
+                    self.stats["missing_heightmaps"] += 1
+                    continue
+
+                # Check images exist
+                if not (minimap_path.exists() and normalmap_path.exists() and heightmap_global_path.exists() and heightmap_local_path.exists()):
+                    self.stats["missing_inputs"] += 1
+                    continue
+
                 self.samples.append({
                     "json": json_path,
                     "minimap": minimap_path,
                     "normalmap": normalmap_path,
-                    "heightmap": heightmap_path,
+                    "heightmap_global": heightmap_global_path,
+                    "heightmap_local": heightmap_local_path,
+                    "alpha_masks": alpha_masks,
                     "tile_name": tile_name,
                 })
         
+        for idx, sample in enumerate(self.samples):
+            map_name = self._extract_map_name(sample["tile_name"])
+            if map_name not in self._map_to_indices:
+                self._map_to_indices[map_name] = []
+            self._map_to_indices[map_name].append(idx)
+
         print(f"Loaded {len(self.samples)} tiles with JSON + images")
+        self._print_sanity_report()
         
         # Image transforms
         self.to_tensor = transforms.ToTensor()
@@ -213,9 +260,31 @@ class WoWTileDatasetV6(Dataset):
             mean=[0.485, 0.456, 0.406],
             std=[0.229, 0.224, 0.225]
         )
+        self.color_jitter = transforms.ColorJitter(
+            brightness=0.15,
+            contrast=0.15,
+            saturation=0.15,
+            hue=0.05
+        )
     
     def __len__(self):
         return len(self.samples)
+
+    @staticmethod
+    def _extract_map_name(tile_name: str) -> str:
+        parts = tile_name.split("_")
+        if len(parts) >= 3 and parts[-1].isdigit() and parts[-2].isdigit():
+            return "_".join(parts[:-2])
+        return tile_name
+
+    def get_map_indices(self):
+        return self._map_to_indices
+
+    def _print_sanity_report(self):
+        print("Dataset sanity report:")
+        for key, value in self.stats.items():
+            print(f"  {key}: {value}")
+        print(f"  maps: {len(self._map_to_indices)}")
     
     def _render_wdl_to_image(self, wdl_data):
         """Convert WDL 17x17 outer grid to 256x256 image."""
@@ -254,32 +323,52 @@ class WoWTileDatasetV6(Dataset):
         height_min = terrain.get("height_min", 0.0)
         height_max = terrain.get("height_max", 100.0)
         wdl_data = terrain.get("wdl_heights", None)
-        
+
+        global_min = terrain.get("height_global_min", HEIGHT_GLOBAL_MIN)
+        global_max = terrain.get("height_global_max", HEIGHT_GLOBAL_MAX)
+        global_range = global_max - global_min if global_max != global_min else HEIGHT_GLOBAL_RANGE
+
         # Normalize height bounds to global range
-        height_min_norm = (height_min - HEIGHT_GLOBAL_MIN) / HEIGHT_GLOBAL_RANGE
-        height_max_norm = (height_max - HEIGHT_GLOBAL_MIN) / HEIGHT_GLOBAL_RANGE
+        height_min_norm = (height_min - global_min) / global_range
+        height_max_norm = (height_max - global_min) / global_range
+        global_min_norm = (global_min - global_min) / global_range
+        global_max_norm = (global_max - global_min) / global_range
         
         # Clamp to 0-1
         height_min_norm = np.clip(height_min_norm, 0.0, 1.0)
         height_max_norm = np.clip(height_max_norm, 0.0, 1.0)
+        global_min_norm = np.clip(global_min_norm, 0.0, 1.0)
+        global_max_norm = np.clip(global_max_norm, 0.0, 1.0)
         
         # Load images
         minimap = Image.open(sample["minimap"]).convert("RGB")
         normalmap = Image.open(sample["normalmap"]).convert("RGB")
-        heightmap = Image.open(sample["heightmap"]).convert("L")
+        heightmap_global = Image.open(sample["heightmap_global"]).convert("L")
+        heightmap_local = Image.open(sample["heightmap_local"]).convert("L")
         
-        # Render WDL to image
+        # Render WDL to image (require if configured)
+        if REQUIRE_WDL:
+            outer = wdl_data.get("outer_17") if isinstance(wdl_data, dict) else None
+            if not outer or len(outer) != 289:
+                raise ValueError("Missing WDL outer_17 data")
+
         wdl_img = self._render_wdl_to_image(wdl_data)
         
         # Resize inputs to INPUT_SIZE
         minimap = minimap.resize((self.input_size, self.input_size), Image.BILINEAR)
         normalmap = normalmap.resize((self.input_size, self.input_size), Image.BILINEAR)
-        heightmap = heightmap.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
+        heightmap_global = heightmap_global.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
+        heightmap_local = heightmap_local.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
         
+        # Augment minimap color before tensor conversion
+        if self.augment:
+            minimap = self.color_jitter(minimap)
+
         # Convert to tensors
         minimap_t = self.to_tensor(minimap)
         normalmap_t = self.to_tensor(normalmap)
-        heightmap_t = self.to_tensor(heightmap)
+        heightmap_global_t = self.to_tensor(heightmap_global)
+        heightmap_local_t = self.to_tensor(heightmap_local)
         wdl_t = torch.tensor(wdl_img, dtype=torch.float32).unsqueeze(0)  # [1, 256, 256]
         
         # Normalize RGB inputs
@@ -289,18 +378,35 @@ class WoWTileDatasetV6(Dataset):
         # Concatenate minimap + normalmap + WDL -> 7 channels
         input_tensor = torch.cat([minimap_t, normalmap_t, wdl_t], dim=0)
         
-        # Height bounds tensor
-        height_bounds = torch.tensor([height_min_norm, height_max_norm], dtype=torch.float32)
+        # Alpha mask targets (up to ALPHA_LAYERS)
+        alpha_targets = []
+        alpha_paths = sample.get("alpha_masks") or []
+        for i in range(ALPHA_LAYERS):
+            if i < len(alpha_paths):
+                alpha_path = sample["json"].parent.parent / alpha_paths[i]
+                if alpha_path.exists():
+                    alpha_img = Image.open(alpha_path).convert("L")
+                    alpha_img = alpha_img.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
+                    alpha_targets.append(self.to_tensor(alpha_img))
+                    continue
+            alpha_targets.append(torch.zeros(1, OUTPUT_SIZE, OUTPUT_SIZE))
+
+        alpha_tensor = torch.cat(alpha_targets, dim=0) if alpha_targets else torch.zeros(ALPHA_LAYERS, OUTPUT_SIZE, OUTPUT_SIZE)
+
+        # Height bounds tensor: [tile_min, tile_max, global_min, global_max]
+        height_bounds = torch.tensor([height_min_norm, height_max_norm, global_min_norm, global_max_norm], dtype=torch.float32)
         
         # Augmentation: random horizontal flip
         if self.augment and torch.rand(1).item() > 0.5:
             input_tensor = torch.flip(input_tensor, dims=[2])
-            heightmap_t = torch.flip(heightmap_t, dims=[2])
+            heightmap_global_t = torch.flip(heightmap_global_t, dims=[2])
+            heightmap_local_t = torch.flip(heightmap_local_t, dims=[2])
+            alpha_tensor = torch.flip(alpha_tensor, dims=[2])
         
         return {
             "input": input_tensor,          # [7, 256, 256]
-            "target": heightmap_t,          # [1, 256, 256]
-            "height_bounds": height_bounds, # [2] - normalized min/max
+            "target": torch.cat([heightmap_global_t, heightmap_local_t, alpha_tensor], dim=0),  # [2+ALPHA, 256, 256]
+            "height_bounds": height_bounds, # [4] - normalized min/max
             "tile_name": sample["tile_name"],
         }
 
@@ -308,12 +414,26 @@ class WoWTileDatasetV6(Dataset):
 def combined_loss(pred_heightmap, pred_bounds, target_heightmap, target_bounds):
     """
     Combined loss:
-    - L1 loss on heightmap
+    - L1 loss on heightmaps (global + local)
+    - L1 loss on alpha masks (aux)
     - MSE loss on height bounds
     - Gradient loss for sharp features
     """
-    # Heightmap L1 loss
-    heightmap_loss = F.l1_loss(pred_heightmap, target_heightmap)
+    # Heightmap L1 loss (global + local)
+    if pred_heightmap.shape[1] >= 2:
+        global_loss = F.l1_loss(pred_heightmap[:, 0:1], target_heightmap[:, 0:1])
+        local_loss = F.l1_loss(pred_heightmap[:, 1:2], target_heightmap[:, 1:2])
+        heightmap_loss = 0.3 * global_loss + 0.7 * local_loss
+    else:
+        global_loss = F.l1_loss(pred_heightmap, target_heightmap)
+        local_loss = global_loss
+        heightmap_loss = global_loss
+
+    alpha_loss = torch.tensor(0.0, device=pred_heightmap.device)
+    if pred_heightmap.shape[1] > 2:
+        pred_alpha = pred_heightmap[:, 2:2 + ALPHA_LAYERS]
+        tgt_alpha = target_heightmap[:, 2:2 + ALPHA_LAYERS]
+        alpha_loss = F.l1_loss(pred_alpha, tgt_alpha)
     
     # Height bounds MSE loss (weighted higher - these are critical)
     bounds_loss = F.mse_loss(pred_bounds, target_bounds) * 10.0
@@ -328,10 +448,13 @@ def combined_loss(pred_heightmap, pred_bounds, target_heightmap, target_bounds):
     target_dx, target_dy = gradient(target_heightmap)
     gradient_loss = F.l1_loss(pred_dx, target_dx) + F.l1_loss(pred_dy, target_dy)
     
-    total = heightmap_loss + bounds_loss + gradient_loss * 0.5
+    total = heightmap_loss + bounds_loss + gradient_loss * 0.5 + alpha_loss * ALPHA_WEIGHT
     
     return total, {
         "heightmap": heightmap_loss.item(),
+        "height_global": global_loss.item(),
+        "height_local": local_loss.item(),
+        "alpha": alpha_loss.item(),
         "bounds": bounds_loss.item() / 10.0,  # Report unweighted
         "gradient": gradient_loss.item(),
     }
@@ -355,21 +478,34 @@ def train(resume_from=None, epochs=None):
         print("ERROR: No samples found!")
         return
     
-    # Split 90/10 train/val
-    train_size = int(0.9 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
-    )
-    
+    map_indices = full_dataset.get_map_indices()
+    all_maps = sorted(map_indices.keys())
+    if HOLDOUT_MAPS:
+        val_maps = [m for m in all_maps if m in HOLDOUT_MAPS]
+    else:
+        rng = np.random.default_rng(42)
+        val_count = max(1, int(len(all_maps) * VAL_MAP_FRACTION))
+        val_maps = rng.choice(all_maps, size=val_count, replace=False).tolist()
+
+    train_indices = []
+    val_indices = []
+    for map_name, indices in map_indices.items():
+        if map_name in val_maps:
+            val_indices.extend(indices)
+        else:
+            train_indices.extend(indices)
+
+    train_dataset = torch.utils.data.Subset(full_dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(full_dataset, val_indices)
+
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    
+
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
+    print(f"Val maps ({len(val_maps)}): {', '.join(val_maps)}")
     
     # Create model
-    model = MultiChannelUNetV6(in_channels=7, out_channels=1).to(device)
+    model = MultiChannelUNetV6(in_channels=7, out_channels=2 + ALPHA_LAYERS).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
     
@@ -408,8 +544,14 @@ def train(resume_from=None, epochs=None):
             optimizer.step()
             
             train_losses.append(loss.item())
-            pbar.set_postfix(loss=f"{loss.item():.4f}", hm=f"{loss_parts['heightmap']:.4f}", 
-                           bounds=f"{loss_parts['bounds']:.4f}")
+            pbar.set_postfix(
+                loss=f"{loss.item():.4f}",
+                hm=f"{loss_parts['heightmap']:.4f}",
+                hg=f"{loss_parts['height_global']:.4f}",
+                hl=f"{loss_parts['height_local']:.4f}",
+                bounds=f"{loss_parts['bounds']:.4f}",
+                alpha=f"{loss_parts['alpha']:.4f}"
+            )
         
         avg_train_loss = np.mean(train_losses)
         
@@ -436,8 +578,10 @@ def train(resume_from=None, epochs=None):
         # Update scheduler
         scheduler.step(avg_val_loss)
         
-        print(f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
-              f"bounds_err={avg_bounds_error:.4f}, lr={optimizer.param_groups[0]['lr']:.2e}")
+        print(
+            f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
+            f"bounds_err={avg_bounds_error:.4f}, lr={optimizer.param_groups[0]['lr']:.2e}"
+        )
         
         # Save best model
         if avg_val_loss < best_val_loss:

@@ -19,6 +19,33 @@ Generates **BOTH** heightmap types:
 - `*_heightmap.png` - Global normalization (for ML training, seamless)
 - `*_heightmap_local.png` - Per-tile normalization (reveals hidden terrain details)
 
+### V6 Training Plan (Jan 16, 2026)
+
+**Model Inputs**: minimap RGB + normalmap RGB + WDL 17x17 hint (required)
+
+**Targets**:
+- Dual heightmaps: global + local
+- Alpha mask auxiliary targets (4 layers)
+- Height bounds: tile min/max + global min/max
+
+**Loss**:
+- Height loss weighted toward local detail (0.3 global / 0.7 local)
+- Alpha aux loss weighted (0.3)
+- Bounds MSE weighted (x10)
+
+**Dataset handling**:
+- WDL required (skip tiles missing `wdl_heights.outer_17`)
+- Alpha optional unless required
+- Sanity report prints missing WDL/heightmaps/inputs counts
+
+**Generalization**:
+- Map-level train/val split (holdout maps or fraction)
+- Minimap color jitter augmentation
+
+**Inference output (planned)**:
+- Timestamped folder with dataset-style JSON + assets
+- OBJ + MTL mesh output
+
 **Usage**:
 ```bash
 python regenerate_heightmaps_global.py <dataset_dir> [--no-stitch] [--max-size 16384]
