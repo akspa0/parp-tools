@@ -30,4 +30,7 @@ The WoW ADT/WDT format uses little-endian data, but chunk signatures (FourCC) ar
 
 ## 4. Memory Bank Maintenance
 - **Update Frequently**: Update `activeContext.md` after every significant logical change or discovery.
-- **Audit Plans**: Keep a "Next Steps" section that acts as a backlog for technical debt (like this audit).
+- **Archive Automatically**: Move detailed session logs to `archive/` folder after each major session.
+- **Keep It Lean**: `activeContext.md` should only contain "what I'm doing RIGHT NOW" (~50 lines max).
+- **Progress Summary**: `progress.md` should contain only status tables, not detailed session logs.
+- **Audit Plans**: Keep a "Next Steps" section that acts as a backlog for technical debt.
