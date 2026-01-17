@@ -8,8 +8,9 @@ Key improvements over V5:
 - Model predicts BOTH normalized heightmap AND height bounds (min/max)
 - Loss combines heightmap accuracy + height range prediction
 - Enables reconstruction of TRUE world heights, not just relative gradients
+- V6.1: Added 8th channel (height bounds mask) + SSIM/edge losses
 
-Input: minimap (3ch) + normalmap (3ch) + WDL hint (1ch) = 7 channels
+Input: minimap (3ch) + normalmap (3ch) + WDL hint (1ch) + bounds hint (1ch) = 8 channels
 Output: 256x256 heightmap + height_min + height_max scalars
 """
 
@@ -29,12 +30,11 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 
-# Dataset paths
+# Dataset paths - Updated to v20 datasets
 DATASET_ROOTS = [
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_shadowfang_v1"),
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v7"),
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_DeadminesInstance_v2"),
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalimdor_v4"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v20"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalimdor_v20"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalidar_v20"),
 ]
 OUTPUT_DIR = Path(r"J:\vlm_output\wow_height_regressor_v6_absolute")
 
@@ -55,21 +55,34 @@ HEIGHT_GLOBAL_MAX = 3000.0
 HEIGHT_GLOBAL_RANGE = HEIGHT_GLOBAL_MAX - HEIGHT_GLOBAL_MIN
 
 ALPHA_LAYERS = 4
-ALPHA_WEIGHT = 0.3
-REQUIRE_WDL = True
+ALPHA_WEIGHT = 0.10  # V6 spec: 0.10
+REQUIRE_WDL = False  # Fallback to grayscale if missing
 REQUIRE_ALPHA = False
 VAL_MAP_FRACTION = 0.1
 HOLDOUT_MAPS = []  # e.g., ["Azeroth", "Kalimdor"]
 
+# V6 Loss Weights (from v6_resnet34.yaml config)
+LOSS_WEIGHTS = {
+    "heightmap_global": 0.15,
+    "heightmap_local": 0.35,
+    "alpha_masks": 0.10,
+    "bounds": 0.05,
+    "ssim": 0.05,
+    "gradient": 0.05,
+    "edge": 0.25,
+}
+
 class MultiChannelUNetV6(nn.Module):
     """
-    7-channel U-Net that predicts:
+    8-channel U-Net that predicts:
     - 256x256 normalized heightmaps (global + local)
     - alpha mask layers (optional auxiliary target)
     - height bounds (tile min/max + global min/max)
+    
+    V6.1: Added 8th channel (height bounds mask broadcast to 256x256)
     """
     
-    def __init__(self, in_channels=7, out_channels=2 + ALPHA_LAYERS):
+    def __init__(self, in_channels=8, out_channels=2 + ALPHA_LAYERS):
         super().__init__()
         
         # Encoder
@@ -375,8 +388,12 @@ class WoWTileDatasetV6(Dataset):
         minimap_t = self.normalize(minimap_t)
         normalmap_t = self.normalize(normalmap_t)
         
-        # Concatenate minimap + normalmap + WDL -> 7 channels
-        input_tensor = torch.cat([minimap_t, normalmap_t, wdl_t], dim=0)
+        # V6.1: Create 8th channel - height bounds hint (broadcast tile min to full image)
+        # This gives the model a hint about the absolute height range
+        bounds_hint = torch.full((1, self.input_size, self.input_size), height_min_norm, dtype=torch.float32)
+        
+        # Concatenate minimap + normalmap + WDL + bounds hint -> 8 channels
+        input_tensor = torch.cat([minimap_t, normalmap_t, wdl_t, bounds_hint], dim=0)
         
         # Alpha mask targets (up to ALPHA_LAYERS)
         alpha_targets = []
@@ -404,59 +421,142 @@ class WoWTileDatasetV6(Dataset):
             alpha_tensor = torch.flip(alpha_tensor, dims=[2])
         
         return {
-            "input": input_tensor,          # [7, 256, 256]
+            "input": input_tensor,          # [8, 256, 256] - V6.1: Added bounds hint channel
             "target": torch.cat([heightmap_global_t, heightmap_local_t, alpha_tensor], dim=0),  # [2+ALPHA, 256, 256]
             "height_bounds": height_bounds, # [4] - normalized min/max
             "tile_name": sample["tile_name"],
         }
 
 
+def ssim_loss(pred: torch.Tensor, target: torch.Tensor, window_size: int = 11) -> torch.Tensor:
+    """
+    Compute SSIM loss (1 - SSIM).
+    V6.1: Added for perceptual quality on heightmaps.
+    """
+    C1 = 0.01 ** 2
+    C2 = 0.03 ** 2
+    
+    # Create Gaussian window
+    def gaussian_window(size: int, sigma: float = 1.5) -> torch.Tensor:
+        coords = torch.arange(size, dtype=torch.float32) - size // 2
+        g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
+        g = g / g.sum()
+        return g
+    
+    g = gaussian_window(window_size).to(pred.device)
+    window = (g[:, None] @ g[None, :]).unsqueeze(0).unsqueeze(0)
+    window = window.expand(pred.shape[1], 1, window_size, window_size)
+    
+    mu_pred = F.conv2d(pred, window, padding=window_size//2, groups=pred.shape[1])
+    mu_target = F.conv2d(target, window, padding=window_size//2, groups=target.shape[1])
+    
+    mu_pred_sq = mu_pred ** 2
+    mu_target_sq = mu_target ** 2
+    mu_pred_target = mu_pred * mu_target
+    
+    sigma_pred_sq = F.conv2d(pred ** 2, window, padding=window_size//2, groups=pred.shape[1]) - mu_pred_sq
+    sigma_target_sq = F.conv2d(target ** 2, window, padding=window_size//2, groups=target.shape[1]) - mu_target_sq
+    sigma_pred_target = F.conv2d(pred * target, window, padding=window_size//2, groups=pred.shape[1]) - mu_pred_target
+    
+    ssim_map = ((2 * mu_pred_target + C1) * (2 * sigma_pred_target + C2)) / \
+               ((mu_pred_sq + mu_target_sq + C1) * (sigma_pred_sq + sigma_target_sq + C2))
+    
+    return 1 - ssim_map.mean()
+
+
+def edge_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """
+    Edge preservation loss using Sobel filters.
+    V6.1: Added for crisp terrain boundaries.
+    """
+    # Sobel kernels
+    sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], 
+                           dtype=torch.float32, device=pred.device)
+    sobel_y = sobel_x.T
+    
+    sobel_x = sobel_x.view(1, 1, 3, 3)
+    sobel_y = sobel_y.view(1, 1, 3, 3)
+    
+    def compute_edges(x: torch.Tensor) -> torch.Tensor:
+        # Process each channel independently and sum
+        edges = torch.zeros_like(x)
+        for c in range(x.shape[1]):
+            channel = x[:, c:c+1, :, :]
+            ex = F.conv2d(channel, sobel_x, padding=1).abs()
+            ey = F.conv2d(channel, sobel_y, padding=1).abs()
+            edges[:, c:c+1] = ex + ey
+        return edges
+    
+    pred_edges = compute_edges(pred[:, :2])  # Only heightmaps, not alpha
+    target_edges = compute_edges(target[:, :2])
+    
+    return F.l1_loss(pred_edges, target_edges)
+
+
 def combined_loss(pred_heightmap, pred_bounds, target_heightmap, target_bounds):
     """
-    Combined loss:
+    Combined loss (V6.1 - matches v6_resnet34.yaml config):
     - L1 loss on heightmaps (global + local)
     - L1 loss on alpha masks (aux)
     - MSE loss on height bounds
-    - Gradient loss for sharp features
+    - Gradient loss for smooth gradients
+    - SSIM loss for perceptual quality
+    - Edge loss for crisp boundaries (V6.1)
     """
+    device = pred_heightmap.device
+    
     # Heightmap L1 loss (global + local)
     if pred_heightmap.shape[1] >= 2:
         global_loss = F.l1_loss(pred_heightmap[:, 0:1], target_heightmap[:, 0:1])
         local_loss = F.l1_loss(pred_heightmap[:, 1:2], target_heightmap[:, 1:2])
-        heightmap_loss = 0.3 * global_loss + 0.7 * local_loss
     else:
         global_loss = F.l1_loss(pred_heightmap, target_heightmap)
         local_loss = global_loss
-        heightmap_loss = global_loss
 
-    alpha_loss = torch.tensor(0.0, device=pred_heightmap.device)
+    alpha_loss = torch.tensor(0.0, device=device)
     if pred_heightmap.shape[1] > 2:
         pred_alpha = pred_heightmap[:, 2:2 + ALPHA_LAYERS]
         tgt_alpha = target_heightmap[:, 2:2 + ALPHA_LAYERS]
         alpha_loss = F.l1_loss(pred_alpha, tgt_alpha)
     
-    # Height bounds MSE loss (weighted higher - these are critical)
-    bounds_loss = F.mse_loss(pred_bounds, target_bounds) * 10.0
+    # Height bounds MSE loss
+    bounds_loss = F.mse_loss(pred_bounds, target_bounds)
     
-    # Gradient loss for edge preservation
+    # Gradient loss for smooth transitions
     def gradient(x):
         dx = x[:, :, :, 1:] - x[:, :, :, :-1]
         dy = x[:, :, 1:, :] - x[:, :, :-1, :]
         return dx, dy
     
-    pred_dx, pred_dy = gradient(pred_heightmap)
-    target_dx, target_dy = gradient(target_heightmap)
+    pred_dx, pred_dy = gradient(pred_heightmap[:, :2])
+    target_dx, target_dy = gradient(target_heightmap[:, :2])
     gradient_loss = F.l1_loss(pred_dx, target_dx) + F.l1_loss(pred_dy, target_dy)
     
-    total = heightmap_loss + bounds_loss + gradient_loss * 0.5 + alpha_loss * ALPHA_WEIGHT
+    # SSIM loss on heightmaps (V6.1)
+    ssim = ssim_loss(pred_heightmap[:, :2], target_heightmap[:, :2])
+    
+    # Edge loss on heightmaps (V6.1)
+    edge = edge_loss(pred_heightmap, target_heightmap)
+    
+    # Combine with V6 spec weights
+    total = (
+        LOSS_WEIGHTS["heightmap_global"] * global_loss +
+        LOSS_WEIGHTS["heightmap_local"] * local_loss +
+        LOSS_WEIGHTS["alpha_masks"] * alpha_loss +
+        LOSS_WEIGHTS["bounds"] * bounds_loss +
+        LOSS_WEIGHTS["gradient"] * gradient_loss +
+        LOSS_WEIGHTS["ssim"] * ssim +
+        LOSS_WEIGHTS["edge"] * edge
+    )
     
     return total, {
-        "heightmap": heightmap_loss.item(),
-        "height_global": global_loss.item(),
-        "height_local": local_loss.item(),
+        "heightmap_global": global_loss.item(),
+        "heightmap_local": local_loss.item(),
         "alpha": alpha_loss.item(),
-        "bounds": bounds_loss.item() / 10.0,  # Report unweighted
+        "bounds": bounds_loss.item(),
         "gradient": gradient_loss.item(),
+        "ssim": ssim.item(),
+        "edge": edge.item(),
     }
 
 
