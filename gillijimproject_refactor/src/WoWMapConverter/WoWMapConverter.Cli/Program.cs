@@ -777,6 +777,7 @@ public static class Program
         string? listfilePath = null;
         int limit = int.MaxValue;
         bool generateDepth = false;
+        bool batchAll = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -807,48 +808,87 @@ public static class Program
                 case "-d":
                     generateDepth = true;
                     break;
+                case "--batch-all":
+                    batchAll = true;
+                    break;
             }
         }
 
-        if (string.IsNullOrEmpty(clientPath) || string.IsNullOrEmpty(mapName) || string.IsNullOrEmpty(outputDir))
+        if (string.IsNullOrEmpty(clientPath) || string.IsNullOrEmpty(outputDir) || (!batchAll && string.IsNullOrEmpty(mapName)))
         {
             Console.WriteLine("VLM Export - Generate training dataset from Alpha ADT files");
             Console.WriteLine();
             Console.WriteLine("Usage: vlm-export --client <path> --map <name> --out <dir> [options]");
+            Console.WriteLine("Batch: vlm-export --client <path> --batch-all --out <root_dir>");
             Console.WriteLine();
             Console.WriteLine("Required:");
             Console.WriteLine("  --client, -c <path>   Path to Alpha 0.5.3 client Data folder");
-            Console.WriteLine("  --map, -m <name>      Map name (e.g., 'development')");
-            Console.WriteLine("  --out, -o <dir>       Output directory for dataset");
+            Console.WriteLine("  --map, -m <name>      Map name (e.g., 'development') OR use --batch-all");
+            Console.WriteLine("  --out, -o <dir>       Output directory for dataset (Root dir for batch)");
             Console.WriteLine();
             Console.WriteLine("Optional:");
+            Console.WriteLine("  --batch-all           Automatically export 8 standard maps (Azeroth, Kalimdor, etc)");
             Console.WriteLine("  --listfile, -l <csv>  Path to listfile for name resolution");
             Console.WriteLine("  --limit, -n <N>       Export only first N tiles");
             Console.WriteLine("  --depth, -d           Generate depth maps (requires DepthAnything3)");
             return 1;
         }
 
-        Console.WriteLine($"VLM Export: {mapName}");
-        Console.WriteLine($"  Client: {clientPath}");
-        Console.WriteLine($"  Output: {outputDir}");
-        if (limit < int.MaxValue) Console.WriteLine($"  Limit: {limit} tiles");
-        Console.WriteLine();
-
         var exporter = new VlmDatasetExporter();
         var progress = new Progress<string>(msg => Console.WriteLine(msg));
 
         try
         {
-            var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath, generateDepth);
-            
-            Console.WriteLine();
-            Console.WriteLine($"Export complete:");
-            Console.WriteLine($"  Tiles exported: {result.TilesExported}");
-            Console.WriteLine($"  Tiles skipped: {result.TilesSkipped}");
-            Console.WriteLine($"  Unique textures: {result.UniqueTextures}");
-            Console.WriteLine($"  Output: {result.OutputDirectory}");
-            
-            return 0;
+            if (batchAll)
+            {
+                var maps = new[] 
+                { 
+                    "Azeroth", "Kalimdor", "Kalidar", 
+                    "DeadminesInstance", "RazorfenKraulInstance", "Shadowfang",
+                    "PVPZone01", "PVPZone02" 
+                };
+
+                Console.WriteLine("VLM BATCH EXPORT");
+                Console.WriteLine($"Exporting {maps.Length} maps to {outputDir}...");
+                Console.WriteLine(new string('=', 60));
+
+                foreach (var map in maps)
+                {
+                    var mapOutputDir = Path.Combine(outputDir, $"053_{map}_v30");
+                    Console.WriteLine($"\n[BATCH] Processing {map} -> {mapOutputDir}");
+                    
+                    try 
+                    {
+                        var res = await exporter.ExportMapAsync(clientPath, map, mapOutputDir, progress, limit, listfilePath, generateDepth);
+                        Console.WriteLine($"[BATCH] {map} Complete: {res.TilesExported} tiles.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[BATCH] {map} FAILED: {ex.Message}");
+                    }
+                }
+                
+                Console.WriteLine("\nBatch Export Complete.");
+                return 0;
+            }
+            else
+            {
+                // Single Map Mode
+                Console.WriteLine($"VLM Export: {mapName}");
+                Console.WriteLine($"  Client: {clientPath}");
+                Console.WriteLine($"  Output: {outputDir}");
+                
+                var result = await exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit, listfilePath, generateDepth);
+                
+                Console.WriteLine();
+                Console.WriteLine($"Export complete:");
+                Console.WriteLine($"  Tiles exported: {result.TilesExported}");
+                Console.WriteLine($"  Tiles skipped: {result.TilesSkipped}");
+                Console.WriteLine($"  Unique textures: {result.UniqueTextures}");
+                Console.WriteLine($"  Output: {result.OutputDirectory}");
+                
+                return 0;
+            }
         }
         catch (Exception ex)
         {

@@ -24,6 +24,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("heightmap")] string? HeightmapPath,          // Path to 16-bit PNG heightmap
     [property: JsonPropertyName("heightmap_local")] string? HeightmapLocalPath,
     [property: JsonPropertyName("heightmap_global")] string? HeightmapGlobalPath,
+    [property: JsonPropertyName("normalmap")] string? NormalmapPath,
     
     // Shadow Maps - paths to per-chunk PNGs
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,

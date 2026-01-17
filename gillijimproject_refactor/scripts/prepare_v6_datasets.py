@@ -409,14 +409,16 @@ def validate_dataset(dataset_root: Path, verbose: bool = True) -> DatasetStats:
 # Fix Dataset Issues
 # ============================================================================
 
-def render_all_normalmaps(dataset_root: Path, force: bool = False) -> int:
-    """Render normalmaps for all tiles in a dataset."""
+def render_all_normalmaps(dataset_root: Path, force: bool = False) -> dict:
+    """Render normalmaps for all tiles in a dataset. Returns stats dict."""
     images_dir = dataset_root / "images"
     dataset_dir = dataset_root / "dataset"
     
     json_files = list(dataset_dir.glob("*.json"))
-    rendered = 0
+    rendered_mcnr = 0
+    rendered_fallback = 0
     skipped = 0
+    failed = 0
     
     print(f"\nRendering normalmaps for {dataset_root.name}...")
     
@@ -428,13 +430,33 @@ def render_all_normalmaps(dataset_root: Path, force: bool = False) -> int:
             skipped += 1
             continue
         
+        # Check if MCNR data exists before rendering
+        try:
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+            td = data.get("terrain_data", {})
+            chunk_layers = td.get("chunk_layers", [])
+            has_mcnr = any(layer.get("normals") for layer in chunk_layers if isinstance(layer, dict))
+        except:
+            has_mcnr = False
+        
         if render_normalmap_from_json(json_path, output_path):
-            rendered += 1
+            if has_mcnr:
+                rendered_mcnr += 1
+            else:
+                rendered_fallback += 1
+                # Delete fallback-generated normalmaps - they're not ground truth
+                output_path.unlink()
+                print(f"  ⚠️ Skipped {tile_name} - only has fallback normals (not ground truth)")
         else:
-            print(f"  Failed: {tile_name}")
+            failed += 1
     
-    print(f"  Rendered: {rendered}, Skipped (existing): {skipped}")
-    return rendered
+    print(f"  Rendered (MCNR): {rendered_mcnr}")
+    print(f"  Skipped (existing): {skipped}")
+    print(f"  Skipped (fallback only): {rendered_fallback}")
+    print(f"  Failed: {failed}")
+    
+    return {"mcnr": rendered_mcnr, "fallback": rendered_fallback, "skipped": skipped, "failed": failed}
 
 
 def fix_wdl_json(json_path: Path) -> bool:

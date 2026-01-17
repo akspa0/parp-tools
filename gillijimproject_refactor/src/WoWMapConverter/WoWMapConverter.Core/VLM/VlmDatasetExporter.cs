@@ -907,14 +907,18 @@ public class VlmDatasetExporter
 
         var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
         
+        // Generate Normal Map (V7 Feature)
+        var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
+        
         return new VlmTerrainData(
             tileName,
             heights.ToArray(),
             chunkPositions,
             holes,
-            heightmapPath,  // HeightmapPath
+            heightmapPath,
             heightmapPath,
             null,
+            normalmapPath, // NormalMapPath
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
@@ -1136,6 +1140,9 @@ public class VlmDatasetExporter
 
             var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
             
+            // Generate Normal Map (V7)
+            var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
+
             return new VlmTerrainData(
                 tileName,
                 heights.ToArray(),
@@ -1144,6 +1151,7 @@ public class VlmDatasetExporter
                 heightmapPath,  // HeightmapPath
                 heightmapPath,
                 null,
+                normalmapPath,
                 shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
                 shadowBits.Count > 0 ? shadowBits.ToArray() : null,
                 null, // alphaPaths
@@ -1302,7 +1310,7 @@ public class VlmDatasetExporter
     {
         if (chunkHeights == null || chunkHeights.Count == 0) return null;
 
-        const int Size = 256;
+        const int Size = 512;
         var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
         var (minZ, maxZ) = GetHeightRange(heightsDict);
         var mapBytes = RenderHeightmapImage(heightsDict, minZ, maxZ, Size);
@@ -1343,92 +1351,222 @@ public class VlmDatasetExporter
     private byte[] RenderHeightmapImage(Dictionary<int, float[]> heightsDict, float minZ, float maxZ, int size)
     {
         float range = maxZ - minZ;
+        if (range < 0.001f) range = 1.0f;
+
         using var rawMap = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.L16>(size, size);
 
-        // Alpha MCVT format: 81 outer (9x9) then 64 inner (8x8) per chunk
-        for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
+        // Helper for Barycentric Interpolation on ADT grid (4 triangles per square)
+        float SampleHeight(float[] hData, float lx, float ly)
         {
-            if (!heightsDict.TryGetValue(chunkIdx, out var hData) || hData == null || hData.Length < 145)
-                continue;
-
-            int chunkY = chunkIdx / 16;
-            int chunkX = chunkIdx % 16;
-            int baseX = chunkX * 16;
-            int baseY = chunkY * 16;
-
-            // Place 9x9 outer vertices at even positions
-            for (int oy = 0; oy < 9; oy++)
-            {
-                for (int ox = 0; ox < 9; ox++)
-                {
-                    int px = baseX + ox * 2;
-                    int py = baseY + oy * 2;
-                    if (px < size && py < size)
-                    {
-                        float z = hData[oy * 9 + ox];
-                        float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
-                        rawMap[px, py] = new SixLabors.ImageSharp.PixelFormats.L16((ushort)(norm * 65535));
-                    }
-                }
-            }
-
-            // Place 8x8 inner vertices at odd positions
-            for (int iy = 0; iy < 8; iy++)
-            {
-                for (int ix = 0; ix < 8; ix++)
-                {
-                    int px = baseX + ix * 2 + 1;
-                    int py = baseY + iy * 2 + 1;
-                    if (px < size && py < size)
-                    {
-                        float z = hData[81 + iy * 8 + ix];
-                        float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
-                        rawMap[px, py] = new SixLabors.ImageSharp.PixelFormats.L16((ushort)(norm * 65535));
-                    }
-                }
-            }
+             // lx, ly in [0, 1] within chunk
+             float gx = lx * 8;
+             float gy = ly * 8;
+             
+             int ix = Math.Clamp((int)gx, 0, 7);
+             int iy = Math.Clamp((int)gy, 0, 7);
+             
+             float dx = gx - ix;
+             float dy = gy - iy;
+             
+             // Vertices
+             float vTL = hData[iy * 9 + ix];
+             float vTR = hData[iy * 9 + ix + 1];
+             float vBL = hData[(iy + 1) * 9 + ix];
+             float vBR = hData[(iy + 1) * 9 + ix + 1];
+             float vC = hData[81 + iy * 8 + ix]; // Inner center
+             
+             // Determine triangle quadrant
+             if (dy < dx && dy < 1.0f - dx) // Top (North) -> TL, TR, C
+             {
+                 return vTL * (1 - dx - dy) + vTR * (dx - dy) + vC * (2 * dy);
+             }
+             else if (dy > dx && dy > 1.0f - dx) // Bottom (South) -> BL, BR, C
+             {
+                 return vBL * (dy - dx) + vBR * (dx + dy - 1) + vC * 2 * (1 - dy);
+             }
+             else if (dx < dy && dx < 1.0f - dy) // Left (West) -> TL, BL, C
+             {
+                 return vTL * (1 - dx - dy) + vBL * (dy - dx) + vC * (2 * dx);
+             }
+             else // Right (East) -> TR, BR, C
+             {
+                 return vTR * (dx - dy) + vBR * (dy + dx - 1) + vC * 2 * (1 - dx);
+             }
         }
 
-        // Fill gaps with nearest neighbor interpolation
         for (int y = 0; y < size; y++)
         {
+            float v = y / (float)(size - 1);
+            float cy = v * 16;
+            int cIy = Math.Clamp((int)cy, 0, 15);
+
             for (int x = 0; x < size; x++)
             {
-                if (rawMap[x, y].PackedValue == 0)
+                float u = x / (float)(size - 1);
+                float cx = u * 16;
+                int cIx = Math.Clamp((int)cx, 0, 15);
+
+                int chunkIndex = cIy * 16 + cIx;
+
+                if (!heightsDict.TryGetValue(chunkIndex, out var hData) || hData == null || hData.Length < 145)
                 {
-                    // Find nearest non-zero neighbor
-                    ushort nearest = 0;
-                    float minDist = float.MaxValue;
-                    for (int dy = -2; dy <= 2; dy++)
-                    {
-                        for (int dx = -2; dx <= 2; dx++)
-                        {
-                            if (dy == 0 && dx == 0) continue;
-                            int nx = x + dx, ny = y + dy;
-                            if (nx >= 0 && nx < size && ny >= 0 && ny < size)
-                            {
-                                var val = rawMap[nx, ny].PackedValue;
-                                if (val > 0)
-                                {
-                                    float dist = dx * dx + dy * dy;
-                                    if (dist < minDist)
-                                    {
-                                        minDist = dist;
-                                        nearest = val;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (nearest > 0)
-                        rawMap[x, y] = new SixLabors.ImageSharp.PixelFormats.L16(nearest);
+                    rawMap[x, y] = new SixLabors.ImageSharp.PixelFormats.L16(0);
+                    continue;
                 }
+
+                float lx = Math.Clamp(cx - cIx, 0f, 1f);
+                float ly = Math.Clamp(cy - cIy, 0f, 1f);
+                float z = SampleHeight(hData, lx, ly);
+                float norm = Math.Clamp((z - minZ) / range, 0f, 1f);
+                rawMap[x, y] = new SixLabors.ImageSharp.PixelFormats.L16((ushort)(norm * 65535));
             }
         }
 
         using var ms = new MemoryStream();
         rawMap.SaveAsPng(ms);
         return ms.ToArray();
+    }
+
+    private async Task<string?> GenerateNormalmap(List<VlmChunkLayers> chunkLayers, string tileName, string outputDir)
+    {
+        if (chunkLayers == null || chunkLayers.Count == 0) return null;
+
+        const int Size = 512;
+        var normalsDict = chunkLayers
+            .Where(c => c.Normals != null && c.Normals.Length >= 145 * 3)
+            .ToDictionary(k => k.ChunkIndex, v => v.Normals!);
+
+        if (normalsDict.Count == 0) return null;
+
+        var mapBytes = RenderNormalmapImage(normalsDict, Size);
+
+        var filename = $"{tileName}_normal.png";
+        var imagesDir = Path.Combine(outputDir, "images");
+        Directory.CreateDirectory(imagesDir);
+        var path = Path.Combine(imagesDir, filename);
+        await File.WriteAllBytesAsync(path, mapBytes);
+
+        return $"images/{filename}";
+    }
+
+    private byte[] RenderNormalmapImage(Dictionary<int, sbyte[]> normalsDict, int size)
+    {
+        using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(size, size);
+
+        // Helper for Barycentric Interpolation of Normals
+        // Returns Vector3 (x,y,z) normalized
+             (float x, float y, float z) SampleNormal(sbyte[] nData, float lx, float ly)
+        {
+             float gx = lx * 8;
+             float gy = ly * 8;
+             
+             int ix = Math.Clamp((int)gx, 0, 7);
+             int iy = Math.Clamp((int)gy, 0, 7);
+             
+             float dx = Math.Clamp(gx - ix, 0f, 1f);
+             float dy = Math.Clamp(gy - iy, 0f, 1f);
+             
+             // Helper to unpack normal at index
+             // MCNR format: sbyte X, Y, Z. (145 * 3 bytes)
+             (float nx, float ny, float nz) GetN(int index)
+             {
+                 int baseIdx = index * 3;
+                 return (nData[baseIdx] / 127.0f, nData[baseIdx + 1] / 127.0f, nData[baseIdx + 2] / 127.0f);
+             }
+
+             // Vertices
+             var vTL = GetN(iy * 9 + ix);
+             var vTR = GetN(iy * 9 + ix + 1);
+             var vBL = GetN((iy + 1) * 9 + ix);
+             var vBR = GetN((iy + 1) * 9 + ix + 1);
+             var vC = GetN(81 + iy * 8 + ix); // Inner center
+             
+             (float x, float y, float z) nRes;
+
+             if (dy < dx && dy < 1.0f - dx) // Top (North)
+             {
+                 float wTL = 1 - dx - dy; float wTR = dx - dy; float wC = 2 * dy;
+                 nRes = (
+                    vTL.nx * wTL + vTR.nx * wTR + vC.nx * wC,
+                    vTL.ny * wTL + vTR.ny * wTR + vC.ny * wC,
+                    vTL.nz * wTL + vTR.nz * wTR + vC.nz * wC
+                 );
+             }
+             else if (dy > dx && dy > 1.0f - dx) // Bottom (South)
+             {
+                 float wBL = dy - dx; float wBR = dx + dy - 1; float wC = 2 * (1 - dy);
+                 nRes = (
+                    vBL.nx * wBL + vBR.nx * wBR + vC.nx * wC,
+                    vBL.ny * wBL + vBR.ny * wBR + vC.ny * wC,
+                    vBL.nz * wBL + vBR.nz * wBR + vC.nz * wC
+                 );
+             }
+             else if (dx < dy && dx < 1.0f - dy) // Left (West)
+             {
+                 float wTL = 1 - dx - dy; float wBL = dy - dx; float wC = 2 * dx;
+                 nRes = (
+                    vTL.nx * wTL + vBL.nx * wBL + vC.nx * wC,
+                    vTL.ny * wTL + vBL.ny * wBL + vC.ny * wC,
+                    vTL.nz * wTL + vBL.nz * wBL + vC.nz * wC
+                 );
+             }
+             else // Right (East)
+             {
+                 float wTR = dx - dy; float wBR = dy + dx - 1; float wC = 2 * (1 - dx);
+                 nRes = (
+                    vTR.nx * wTR + vBR.nx * wBR + vC.nx * wC,
+                    vTR.ny * wTR + vBR.ny * wBR + vC.ny * wC,
+                    vTR.nz * wTR + vBR.nz * wBR + vC.nz * wC
+                 );
+             }
+             
+             // Normalize result
+             float mag = (float)Math.Sqrt(nRes.x * nRes.x + nRes.y * nRes.y + nRes.z * nRes.z);
+             if (mag > 1e-6f)
+                return (nRes.x / mag, nRes.y / mag, nRes.z / mag);
+             return (0, 1, 0); // Default up
+        }
+
+        for (int y = 0; y < size; y++)
+        {
+            float v = y / (float)(size - 1);
+            float cy = v * 16;
+            int cIy = Math.Clamp((int)cy, 0, 15);
+
+            for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)(size - 1);
+                float cx = u * 16;
+                int cIx = Math.Clamp((int)cx, 0, 15);
+
+                int chunkIndex = cIy * 16 + cIx;
+
+                if (!normalsDict.TryGetValue(chunkIndex, out var nData))
+                {
+                    // Default normal 128,128,255
+                    image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(128, 128, 255);
+                    continue;
+                }
+
+                float lx = Math.Clamp(cx - cIx, 0f, 1f);
+                float ly = Math.Clamp(cy - cIy, 0f, 1f);
+                var (nx, ny, nz) = SampleNormal(nData, lx, ly);
+                
+                // Pack to RGB [0, 255]
+                // [-1, 1] -> [0, 1] -> [0, 255]
+                byte r = (byte)((nx * 0.5f + 0.5f) * 255);
+                byte g = (byte)((ny * 0.5f + 0.5f) * 255);
+                byte b = (byte)((nz * 0.5f + 0.5f) * 255);
+                
+                image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(r, g, b);
+            }
+        }
+
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
+
+
     }
 
     private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)
@@ -1484,7 +1622,7 @@ public class VlmDatasetExporter
                     .ToDictionary(h => h.ChunkIndex, h => h.Heights!);
                 if (heightsDict.Count == 0) continue;
 
-                var mapBytes = RenderHeightmapImage(heightsDict, globalMin, globalMax, 256);
+                var mapBytes = RenderHeightmapImage(heightsDict, globalMin, globalMax, 512);
                 var filename = $"{sample.TerrainData.AdtTile}_heightmap_global.png";
                 var imagesDir = Path.Combine(outputDir, "images");
                 Directory.CreateDirectory(imagesDir);
@@ -1540,7 +1678,25 @@ public class VlmDatasetExporter
             using var ms = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(ms);
             using var bmp = blp.GetBitmap(0);
-            bmp.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+
+            // Upscale to 512x512 to match V7 dataset standard
+            if (bmp.Width != 512 || bmp.Height != 512)
+            {
+                var resized = new System.Drawing.Bitmap(512, 512);
+                using (var g = System.Drawing.Graphics.FromImage(resized))
+                {
+                    // Use NearestNeighbor for crisp, honest upscaling (avoids "mushy" text/edges)
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; // Aligns pixels correctly
+                    g.DrawImage(bmp, 0, 0, 512, 512);
+                }
+                resized.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+                resized.Dispose();
+            }
+            else
+            {
+                bmp.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
+            }
             return true;
         }
         catch (Exception ex)

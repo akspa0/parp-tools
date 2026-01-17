@@ -30,11 +30,49 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 
-# Dataset paths - Updated to v20 datasets
+
+def load_heightmap_16bit(path: Path, target_size: int = 256) -> torch.Tensor:
+    """
+    Load a 16-bit grayscale heightmap PNG and normalize to [0, 1] range.
+    
+    The heightmaps are stored as I;16 (16-bit integer) PNGs with values 0-65535.
+    Using .convert('L') corrupts them by truncating to 8-bit.
+    """
+    img = Image.open(path)
+    
+    # Handle different modes
+    if img.mode == 'I;16':
+        # 16-bit integer mode - convert via numpy
+        arr = np.array(img, dtype=np.float32) / 65535.0
+    elif img.mode == 'I':
+        # 32-bit integer mode
+        arr = np.array(img, dtype=np.float32)
+        arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8)
+    elif img.mode == 'L':
+        # Already 8-bit (legacy format)
+        arr = np.array(img, dtype=np.float32) / 255.0
+    else:
+        # Fallback: convert to grayscale
+        img = img.convert('L')
+        arr = np.array(img, dtype=np.float32) / 255.0
+    
+    # Resize if needed
+    if arr.shape[0] != target_size or arr.shape[1] != target_size:
+        from scipy.ndimage import zoom
+        scale = target_size / arr.shape[0]
+        arr = zoom(arr, scale, order=1)
+    
+    return torch.from_numpy(arr).unsqueeze(0)  # [1, H, W]
+
+# Dataset paths - All v20 datasets (1,790+ complete tiles)
 DATASET_ROOTS = [
     Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v20"),
     Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalimdor_v20"),
     Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_kalidar_v20"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_DeadminesInstance_v20"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_PVPZone02_v20"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Shadowfang_v20"),
+    # PVPZone01_v20 and RazorfenKraulInstance_v20 excluded - no minimaps in original data
 ]
 OUTPUT_DIR = Path(r"J:\vlm_output\wow_height_regressor_v6_absolute")
 
@@ -243,15 +281,18 @@ class WoWTileDatasetV6(Dataset):
                     self.stats["missing_heightmaps"] += 1
                     continue
 
-                # Check images exist
-                if not (minimap_path.exists() and normalmap_path.exists() and heightmap_global_path.exists() and heightmap_local_path.exists()):
+                # Check images exist - normalmap is optional
+                if not (minimap_path.exists() and heightmap_global_path.exists() and heightmap_local_path.exists()):
                     self.stats["missing_inputs"] += 1
                     continue
+                
+                # Normalmap is optional - fallback to gray if missing
+                normalmap_actual = normalmap_path if normalmap_path.exists() else None
 
                 self.samples.append({
                     "json": json_path,
                     "minimap": minimap_path,
-                    "normalmap": normalmap_path,
+                    "normalmap": normalmap_actual,  # None = use fallback
                     "heightmap_global": heightmap_global_path,
                     "heightmap_local": heightmap_local_path,
                     "alpha_masks": alpha_masks,
@@ -355,9 +396,16 @@ class WoWTileDatasetV6(Dataset):
         
         # Load images
         minimap = Image.open(sample["minimap"]).convert("RGB")
-        normalmap = Image.open(sample["normalmap"]).convert("RGB")
-        heightmap_global = Image.open(sample["heightmap_global"]).convert("L")
-        heightmap_local = Image.open(sample["heightmap_local"]).convert("L")
+        
+        # Normalmap - use gray fallback if not available (v20 datasets)
+        if sample["normalmap"] is not None:
+            normalmap = Image.open(sample["normalmap"]).convert("RGB")
+        else:
+            # Gray fallback (0.5, 0.5, 0.5) = neutral normal
+            normalmap = Image.new("RGB", (self.input_size, self.input_size), color=(128, 128, 128))
+        
+        heightmap_global_t = load_heightmap_16bit(sample["heightmap_global"], OUTPUT_SIZE)
+        heightmap_local_t = load_heightmap_16bit(sample["heightmap_local"], OUTPUT_SIZE)
         
         # Render WDL to image (require if configured)
         if REQUIRE_WDL:
@@ -370,18 +418,14 @@ class WoWTileDatasetV6(Dataset):
         # Resize inputs to INPUT_SIZE
         minimap = minimap.resize((self.input_size, self.input_size), Image.BILINEAR)
         normalmap = normalmap.resize((self.input_size, self.input_size), Image.BILINEAR)
-        heightmap_global = heightmap_global.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
-        heightmap_local = heightmap_local.resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.BILINEAR)
         
         # Augment minimap color before tensor conversion
         if self.augment:
             minimap = self.color_jitter(minimap)
 
-        # Convert to tensors
+        # Convert to tensors (heightmaps already tensors from load_heightmap_16bit)
         minimap_t = self.to_tensor(minimap)
         normalmap_t = self.to_tensor(normalmap)
-        heightmap_global_t = self.to_tensor(heightmap_global)
-        heightmap_local_t = self.to_tensor(heightmap_local)
         wdl_t = torch.tensor(wdl_img, dtype=torch.float32).unsqueeze(0)  # [1, 256, 256]
         
         # Normalize RGB inputs
@@ -604,8 +648,8 @@ def train(resume_from=None, epochs=None):
     print(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
     print(f"Val maps ({len(val_maps)}): {', '.join(val_maps)}")
     
-    # Create model
-    model = MultiChannelUNetV6(in_channels=7, out_channels=2 + ALPHA_LAYERS).to(device)
+    # Create model - 8 input channels: RGB(3) + normalmap(3) + WDL(1) + bounds_hint(1)
+    model = MultiChannelUNetV6(in_channels=8, out_channels=2 + ALPHA_LAYERS).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
     
@@ -646,9 +690,8 @@ def train(resume_from=None, epochs=None):
             train_losses.append(loss.item())
             pbar.set_postfix(
                 loss=f"{loss.item():.4f}",
-                hm=f"{loss_parts['heightmap']:.4f}",
-                hg=f"{loss_parts['height_global']:.4f}",
-                hl=f"{loss_parts['height_local']:.4f}",
+                hg=f"{loss_parts['heightmap_global']:.4f}",
+                hl=f"{loss_parts['heightmap_local']:.4f}",
                 bounds=f"{loss_parts['bounds']:.4f}",
                 alpha=f"{loss_parts['alpha']:.4f}"
             )
@@ -658,7 +701,7 @@ def train(resume_from=None, epochs=None):
         # Validation
         model.eval()
         val_losses = []
-        val_bounds_errors = []
+        val_loss_parts = {k: [] for k in ["heightmap_global", "heightmap_local", "alpha", "bounds", "ssim", "edge", "gradient"]}
         
         with torch.no_grad():
             for batch in val_loader:
@@ -670,18 +713,21 @@ def train(resume_from=None, epochs=None):
                 loss, loss_parts = combined_loss(pred_heightmap, pred_bounds, targets, target_bounds)
                 
                 val_losses.append(loss.item())
-                val_bounds_errors.append(loss_parts['bounds'])
+                for k, v in loss_parts.items():
+                    val_loss_parts[k].append(v)
         
         avg_val_loss = np.mean(val_losses)
-        avg_bounds_error = np.mean(val_bounds_errors)
+        avg_val_parts = {k: np.mean(v) for k, v in val_loss_parts.items()}
         
         # Update scheduler
         scheduler.step(avg_val_loss)
         
-        print(
-            f"Epoch {epoch+1}: train_loss={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
-            f"bounds_err={avg_bounds_error:.4f}, lr={optimizer.param_groups[0]['lr']:.2e}"
-        )
+        # Detailed epoch summary
+        print(f"\nEpoch {epoch+1}/{num_epochs}:")
+        print(f"  Train Loss: {avg_train_loss:.4f}  |  Val Loss: {avg_val_loss:.4f}  |  LR: {optimizer.param_groups[0]['lr']:.2e}")
+        print(f"  Losses: hg={avg_val_parts['heightmap_global']:.4f} hl={avg_val_parts['heightmap_local']:.4f} "
+              f"alpha={avg_val_parts['alpha']:.4f} bounds={avg_val_parts['bounds']:.4f} "
+              f"ssim={avg_val_parts['ssim']:.4f} edge={avg_val_parts['edge']:.4f} grad={avg_val_parts['gradient']:.4f}")
         
         # Save best model
         if avg_val_loss < best_val_loss:
