@@ -21,6 +21,10 @@ public class VlmDatasetExporter
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
+    
+    // Cache for model bounding boxes: modelPath -> (boundsMin, boundsMax)
+    private readonly ConcurrentDictionary<string, (float[] Min, float[] Max)?> _modelBoundsCache = new();
+    private MpqArchiveService? _mpqService;
 
     public async Task<VlmExportResult> ExportMapAsync(
         string clientPath,
@@ -309,7 +313,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using AdtAlpha's methods
                     sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile);
+                        shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile, clientPath);
                 }
                 else
                 {
@@ -571,7 +575,7 @@ public class VlmDatasetExporter
         string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
         ConcurrentDictionary<string, byte> textureCollector, GroundEffectService? groundEffectService = null,
-        WdlParser.WdlTile? wdlTile = null)
+        WdlParser.WdlTile? wdlTile = null, string? clientPath = null)
     {
         var heights = new List<VlmChunkHeights>();
 
@@ -878,8 +882,25 @@ public class VlmDatasetExporter
                 float rz = BitConverter.ToSingle(mddfRaw, i + 28);
                 ushort scale = BitConverter.ToUInt16(mddfRaw, i + 32);
                 
-                string name = nameId < mdnmNames.Count ? Path.GetFileNameWithoutExtension(mdnmNames[(int)nameId]) : "";
-                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "m2"));
+                // Get full model path and extract bounds from MDX file
+                string fullPath = nameId < mdnmNames.Count ? mdnmNames[(int)nameId] : "";
+                string name = Path.GetFileNameWithoutExtension(fullPath);
+                
+                // Extract bounding box from MDX via AlphaMpqReader
+                float[]? boundsMin = null;
+                float[]? boundsMax = null;
+                if (!string.IsNullOrEmpty(clientPath) && !string.IsNullOrEmpty(fullPath))
+                {
+                    var modelMpqPath = Path.Combine(clientPath, "Data", fullPath + ".MPQ");
+                    var bounds = GetMdxBounds(modelMpqPath);
+                    if (bounds != null)
+                    {
+                        boundsMin = bounds.Value.Min;
+                        boundsMax = bounds.Value.Max;
+                    }
+                }
+                
+                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "m2", boundsMin, boundsMax));
             }
             
             var modfRaw = adt.GetModfRaw();
@@ -896,8 +917,25 @@ public class VlmDatasetExporter
                 float rz = BitConverter.ToSingle(modfRaw, i + 28);
                 ushort scale = BitConverter.ToUInt16(modfRaw, i + 60);
                 
-                string name = nameId < monmNames.Count ? Path.GetFileNameWithoutExtension(monmNames[(int)nameId]) : "";
-                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "wmo"));
+                // Get full model path and extract bounds from WMO file
+                string fullPath = nameId < monmNames.Count ? monmNames[(int)nameId] : "";
+                string name = Path.GetFileNameWithoutExtension(fullPath);
+                
+                // Extract bounding box from WMO via AlphaMpqReader
+                float[]? boundsMin = null;
+                float[]? boundsMax = null;
+                if (!string.IsNullOrEmpty(clientPath) && !string.IsNullOrEmpty(fullPath))
+                {
+                    var modelMpqPath = Path.Combine(clientPath, "Data", fullPath + ".MPQ");
+                    var bounds = GetWmoBounds(modelMpqPath);
+                    if (bounds != null)
+                    {
+                        boundsMin = bounds.Value.Min;
+                        boundsMax = bounds.Value.Max;
+                    }
+                }
+                
+                objects.Add(new VlmObjectPlacement(name, nameId, uniqueId, px, py, pz, rx, ry, rz, scale / 1024f, "wmo", boundsMin, boundsMax));
             }
         }
         catch { }
@@ -1787,5 +1825,214 @@ public class VlmDatasetExporter
             progress?.Report($"Error stitching heightmaps: {ex.Message}");
             return null;
         }
+    }
+    
+    /// <summary>
+    /// Get model bounding box from MDX or WMO file.
+    /// </summary>
+    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, MpqArchiveService mpqService)
+    {
+        if (string.IsNullOrEmpty(modelPath)) return null;
+        
+        // Check cache first
+        if (_modelBoundsCache.TryGetValue(modelPath.ToLowerInvariant(), out var cached))
+            return cached;
+        
+        try
+        {
+            // Try to read from MPQ
+            var data = mpqService.ReadFile(modelPath);
+            if (data == null || data.Length < 100) 
+            {
+                _modelBoundsCache[modelPath.ToLowerInvariant()] = null;
+                return null;
+            }
+            
+            float[] boundsMin = null!;
+            float[] boundsMax = null!;
+            
+            // Check if MDX or WMO by extension/signature
+            var ext = Path.GetExtension(modelPath).ToLowerInvariant();
+            bool isWmo = ext == ".wmo";
+            
+            if (isWmo)
+            {
+                // WMO: Read MOHD chunk for bounding box
+                // MOHD is typically after MVER, starts around offset 20-40
+                // Format: ... boundingBox1 (3 floats), boundingBox2 (3 floats) at offset 28 in MOHD data
+                int mohdOffset = FindChunkOffset(data, "MOHD");
+                if (mohdOffset >= 0 && mohdOffset + 8 + 52 <= data.Length)
+                {
+                    int dataStart = mohdOffset + 8; // Skip chunk ID + size
+                    // boundingBox1 starts at offset 28 from MOHD data
+                    boundsMin = new float[3];
+                    boundsMax = new float[3];
+                    boundsMin[0] = BitConverter.ToSingle(data, dataStart + 28);
+                    boundsMin[1] = BitConverter.ToSingle(data, dataStart + 32);
+                    boundsMin[2] = BitConverter.ToSingle(data, dataStart + 36);
+                    boundsMax[0] = BitConverter.ToSingle(data, dataStart + 40);
+                    boundsMax[1] = BitConverter.ToSingle(data, dataStart + 44);
+                    boundsMax[2] = BitConverter.ToSingle(data, dataStart + 48);
+                }
+            }
+            else
+            {
+                // MDX/M2: Read header for bounding box
+                // MDX header has bounding box around offset 60-84 (depends on version)
+                // Try reading at common offset for Alpha MDX
+                if (data.Length >= 88)
+                {
+                    // Alpha MDX: Header starts with "MDLX" or similar
+                    // Bounding box is typically at a fixed offset in header
+                    // For simplicity, search for reasonable float values
+                    int bbOffset = 64; // Common offset for Alpha MDX bounding box
+                    if (data.Length >= bbOffset + 24)
+                    {
+                        boundsMin = new float[3];
+                        boundsMax = new float[3];
+                        boundsMin[0] = BitConverter.ToSingle(data, bbOffset);
+                        boundsMin[1] = BitConverter.ToSingle(data, bbOffset + 4);
+                        boundsMin[2] = BitConverter.ToSingle(data, bbOffset + 8);
+                        boundsMax[0] = BitConverter.ToSingle(data, bbOffset + 12);
+                        boundsMax[1] = BitConverter.ToSingle(data, bbOffset + 16);
+                        boundsMax[2] = BitConverter.ToSingle(data, bbOffset + 20);
+                        
+                        // Sanity check: bounds should be reasonable (not NaN or huge)
+                        if (float.IsNaN(boundsMin[0]) || float.IsNaN(boundsMax[0]) ||
+                            Math.Abs(boundsMin[0]) > 10000 || Math.Abs(boundsMax[0]) > 10000)
+                        {
+                            boundsMin = null!;
+                            boundsMax = null!;
+                        }
+                    }
+                }
+            }
+            
+            if (boundsMin != null && boundsMax != null)
+            {
+                var result = (boundsMin, boundsMax);
+                _modelBoundsCache[modelPath.ToLowerInvariant()] = result;
+                return result;
+            }
+        }
+        catch { }
+        
+        _modelBoundsCache[modelPath.ToLowerInvariant()] = null;
+        return null;
+    }
+    
+    private int FindChunkOffset(byte[] data, string chunkId)
+    {
+        if (data.Length < 8) return -1;
+        byte[] searchBytes = System.Text.Encoding.ASCII.GetBytes(chunkId);
+        for (int i = 0; i <= data.Length - 8; i++)
+        {
+            if (data[i] == searchBytes[0] && data[i+1] == searchBytes[1] &&
+                data[i+2] == searchBytes[2] && data[i+3] == searchBytes[3])
+                return i;
+        }
+        return -1;
+    }
+    
+    /// <summary>
+    /// Extract bounding box from MDX file via AlphaMpqReader (per-asset MPQ).
+    /// </summary>
+    private (float[] Min, float[] Max)? GetMdxBounds(string mdxMpqPath)
+    {
+        if (!File.Exists(mdxMpqPath)) return null;
+        
+        // Check cache
+        var key = mdxMpqPath.ToLowerInvariant();
+        if (_modelBoundsCache.TryGetValue(key, out var cached))
+            return cached;
+        
+        try
+        {
+            var data = AlphaMpqReader.ReadFromMpq(mdxMpqPath);
+            if (data == null || data.Length < 100)
+            {
+                _modelBoundsCache[key] = null;
+                return null;
+            }
+            
+            // MDX header: bounding box typically at offset 64-88
+            // Format: 6 floats (min xyz, max xyz)
+            int bbOffset = 64;
+            if (data.Length >= bbOffset + 24)
+            {
+                var boundsMin = new float[3];
+                var boundsMax = new float[3];
+                boundsMin[0] = BitConverter.ToSingle(data, bbOffset);
+                boundsMin[1] = BitConverter.ToSingle(data, bbOffset + 4);
+                boundsMin[2] = BitConverter.ToSingle(data, bbOffset + 8);
+                boundsMax[0] = BitConverter.ToSingle(data, bbOffset + 12);
+                boundsMax[1] = BitConverter.ToSingle(data, bbOffset + 16);
+                boundsMax[2] = BitConverter.ToSingle(data, bbOffset + 20);
+                
+                // Sanity check
+                if (!float.IsNaN(boundsMin[0]) && !float.IsNaN(boundsMax[0]) &&
+                    Math.Abs(boundsMin[0]) < 10000 && Math.Abs(boundsMax[0]) < 10000)
+                {
+                    var result = (boundsMin, boundsMax);
+                    _modelBoundsCache[key] = result;
+                    return result;
+                }
+            }
+        }
+        catch { }
+        
+        _modelBoundsCache[key] = null;
+        return null;
+    }
+    
+    /// <summary>
+    /// Extract bounding box from WMO file via AlphaMpqReader (per-asset MPQ).
+    /// </summary>
+    private (float[] Min, float[] Max)? GetWmoBounds(string wmoMpqPath)
+    {
+        if (!File.Exists(wmoMpqPath)) return null;
+        
+        // Check cache
+        var key = wmoMpqPath.ToLowerInvariant();
+        if (_modelBoundsCache.TryGetValue(key, out var cached))
+            return cached;
+        
+        try
+        {
+            var data = AlphaMpqReader.ReadFromMpq(wmoMpqPath);
+            if (data == null || data.Length < 100)
+            {
+                _modelBoundsCache[key] = null;
+                return null;
+            }
+            
+            // WMO: Find MOHD chunk, bounding box at offset 28 from chunk data start
+            int mohdOffset = FindChunkOffset(data, "MOHD");
+            if (mohdOffset >= 0 && mohdOffset + 8 + 52 <= data.Length)
+            {
+                int dataStart = mohdOffset + 8; // Skip chunk ID + size
+                var boundsMin = new float[3];
+                var boundsMax = new float[3];
+                boundsMin[0] = BitConverter.ToSingle(data, dataStart + 28);
+                boundsMin[1] = BitConverter.ToSingle(data, dataStart + 32);
+                boundsMin[2] = BitConverter.ToSingle(data, dataStart + 36);
+                boundsMax[0] = BitConverter.ToSingle(data, dataStart + 40);
+                boundsMax[1] = BitConverter.ToSingle(data, dataStart + 44);
+                boundsMax[2] = BitConverter.ToSingle(data, dataStart + 48);
+                
+                // Sanity check
+                if (!float.IsNaN(boundsMin[0]) && !float.IsNaN(boundsMax[0]) &&
+                    Math.Abs(boundsMin[0]) < 100000 && Math.Abs(boundsMax[0]) < 100000)
+                {
+                    var result = (boundsMin, boundsMax);
+                    _modelBoundsCache[key] = result;
+                    return result;
+                }
+            }
+        }
+        catch { }
+        
+        _modelBoundsCache[key] = null;
+        return null;
     }
 }

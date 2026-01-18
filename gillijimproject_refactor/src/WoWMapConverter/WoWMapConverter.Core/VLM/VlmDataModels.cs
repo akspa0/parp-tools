@@ -131,7 +131,7 @@ public record VlmLiquidData(
 );
 
 /// <summary>
-/// Object placement from MDDF/MODF.
+/// Object placement from MDDF/MODF with bounding box data.
 /// </summary>
 public record VlmObjectPlacement(
     [property: JsonPropertyName("name")] string Name,
@@ -144,7 +144,9 @@ public record VlmObjectPlacement(
     [property: JsonPropertyName("rot_y")] float RotY,
     [property: JsonPropertyName("rot_z")] float RotZ,
     [property: JsonPropertyName("scale")] float Scale,
-    [property: JsonPropertyName("category")] string Category  // "wmo" or "m2"
+    [property: JsonPropertyName("category")] string Category,  // "wmo" or "m2"
+    [property: JsonPropertyName("bounds_min")] float[]? BoundsMin = null,  // [x, y, z] local min
+    [property: JsonPropertyName("bounds_max")] float[]? BoundsMax = null   // [x, y, z] local max
 );
 
 /// <summary>

@@ -45,15 +45,11 @@
 
 ## Current Status Summary
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| VLM Dataset Generation | ✅ Active | V6 training with dual heightmaps |
-| Global Normalization Fix | ✅ Complete | No more tile seams |
-| Alpha MCVT Format | ✅ Fixed | 81 outer + 64 inner vertices |
-| Heightmap Resolution | ✅ Upgraded | 256×256 (4× data) |
-| Kalimdor v6 Export | 🔧 In Progress | ~951 tiles pending |
-| Deadmines v1 Export | 🔧 Pending | Tile count unknown |
-| V6 Model Training | ⏳ Next | Dual heightmaps + WDL hints |
+| V7 Training | ⚠️ Plateau | Val loss ~0.106, patience 21/25, possible data limit |
+| V8 Spec | ✅ Complete | Includes BiRefNet/LayerD matting strategy |
+| Multi-Version ADT | 🔧 Planned | 0.5.3, 3.x, 4.x support in V8 spec |
+| Native Resolution | ✅ Set | 145×145 (native ADT) for V8 accuracy |
+| Brush Analysis | 🔧 Research | Using BiRefNet for pattern segmentation (V9+) |
 
 ## Key Files
 

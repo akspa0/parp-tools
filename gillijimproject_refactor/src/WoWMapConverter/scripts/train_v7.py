@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """
-WoW Height Regressor V7 - High-Resolution & Texture Independence
+WoW Height Regressor V7.1 - High-Resolution with Object Footprints
 
-Key Improvements:
-- Resolution: 512x512 (Upscaled from ADT 145x145 via Barycentric in Exporter)
-- Texture Independence: Minimap RGB is BLURRED to remove high-frequency texture noise.
-- Geometry Priority: Relies heavily on Normal Maps (generated from ADT geometry) and WDL.
-- Architecture: 5-level UNet (ResNet-style) for 512x512 support.
+Key Features:
+- Resolution: 512x512 (Barycentric interpolation from ADT 145-point grid)
+- 11-Channel Input: Minimap, Normals, WDL, H_Min, H_Max, Water, Objects
+- Object Footprint Mask: Uses actual MDX/WMO bounding boxes for flat terrain under buildings
 
-Input: 8 channels
-- 0-2: Minimap RGB (Blurred)
-- 3-5: Normal Map RGB (High Quality)
-- 6:   WDL Height (Upscaled)
-- 7:   Height Bounds Hint (Global Min mask)
+Input Channels (11):
+- 0-2: Minimap RGB (Blurred for texture independence)
+- 3-5: Normal Map RGB (from MCNR geometry)
+- 6:   WDL Height (Low-res global elevation)
+- 7:   H_Min Mask (Tile minimum altitude)
+- 8:   H_Max Mask (Tile maximum altitude)
+- 9:   Water Mask (Flat-water zones)
+- 10:  Object Footprint (Buildings = flat terrain)
 
 Output:
-- Heightmap (512x512)
-- Height Bounds (Scalar prediction)
+- Heightmap (512x512, 2 channels: global and local)
+- Alpha Layers (4 channels)
+- Height Bounds (4-value prediction)
 """
 
 import os
@@ -37,15 +40,21 @@ from tqdm import tqdm
 
 # Configuration
 DATASET_ROOTS = [
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_zeroth_v30"), # Placeholder for new dataset
-    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_azeroth_v20"), # Fallback
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Azeroth_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalimdor_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Kalidar_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_DeadminesInstance_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_Shadowfang_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_PVPZone01_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_PVPZone02_v30"),
+    Path(r"J:\wowDev\parp-tools\gillijimproject_refactor\test_data\vlm-datasets\053_RazorfenKraulInstance_v30"),
 ]
-OUTPUT_DIR = Path(r"J:\vlm_output\wow_height_regressor_v7")
+OUTPUT_DIR = Path(r"./vlm_output")
 
 BATCH_SIZE = 4 
 LEARNING_RATE = 1e-4
 NUM_EPOCHS = 500
-EARLY_STOP_PATIENCE = 50
+EARLY_STOP_PATIENCE = 25
 
 INPUT_SIZE = 512
 OUTPUT_SIZE = 512
@@ -73,7 +82,7 @@ class MultiChannelUNetV7(nn.Module):
     """
     5-level U-Net for 512x512 inputs.
     """
-    def __init__(self, in_channels=9, out_channels=2 + ALPHA_LAYERS):
+    def __init__(self, in_channels=11, out_channels=2 + ALPHA_LAYERS):
         super().__init__()
         
         # Encoder (512 -> 256 -> 128 -> 64 -> 32 -> 16)
@@ -307,19 +316,66 @@ class WoWTileDatasetV7(Dataset):
         g_min_n = np.clip((g_min - g_min) / g_range, 0, 1)
         g_max_n = np.clip((g_max - g_min) / g_range, 0, 1)
         
-        bounds_hint = torch.full((1, self.input_size, self.input_size), h_min_n, dtype=torch.float32)
+        # Channel 7: H_Min Mask (constant per tile)
+        h_min_mask = torch.full((1, self.input_size, self.input_size), h_min_n, dtype=torch.float32)
         
-        # Water Mask (Channel 8)
+        # Channel 8: H_Max Mask (constant per tile)
+        h_max_mask = torch.full((1, self.input_size, self.input_size), h_max_n, dtype=torch.float32)
+        
+        # Channel 9: Water Mask
         liquid_mask = torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
         if sample.get("liquid_mask"):
             l_path = sample["json"].parent.parent / sample["liquid_mask"]
             if l_path.exists():
                 l_img = Image.open(l_path).convert("L").resize((self.input_size, self.input_size), Image.NEAREST)
                 l_t = self.to_tensor(l_img)
-                # Convert to binary 0/1 (0=No Water, 1=Water) - Input is usually white=water
                 liquid_mask = (l_t > 0.1).float()
+        
+        # Channel 10: Object Footprint Mask (render squares from objects list)
+        object_mask = torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
+        objects = terrain.get("objects")
+        if objects:
+            obj_img = np.zeros((self.input_size, self.input_size), dtype=np.float32)
+            tile_size = 533.33333  # World units per tile
+            for obj in objects:
+                # obj = {pos_x, pos_y, pos_z, scale, ...}
+                px = obj.get("pos_x", 0)
+                py = obj.get("pos_y", 0)
+                scale = obj.get("scale", 1.0)
                 
-        input_tensor = torch.cat([minimap_t, normalmap_t, wdl_t, bounds_hint, liquid_mask], dim=0)
+                # Use actual bounding box if available, otherwise fallback to scale
+                bounds_min = obj.get("bounds_min")
+                bounds_max = obj.get("bounds_max")
+                
+                if bounds_min and bounds_max and len(bounds_min) >= 2 and len(bounds_max) >= 2:
+                    # Calculate footprint from actual bounding box (in world units)
+                    half_width = abs(bounds_max[0] - bounds_min[0]) * 0.5 * scale
+                    half_depth = abs(bounds_max[1] - bounds_min[1]) * 0.5 * scale
+                    # Convert to pixels (1 tile = 533.33 units = 512 pixels)
+                    pixels_per_unit = self.input_size / tile_size
+                    radius_x = max(1, int(half_width * pixels_per_unit))
+                    radius_y = max(1, int(half_depth * pixels_per_unit))
+                else:
+                    # Fallback: use scale * 5 pixels
+                    radius_x = radius_y = max(1, int(5 * scale))
+                
+                # Normalize to tile coordinates
+                if abs(px) < 2 and abs(py) < 2:  # Already normalized
+                    nx = int((px + 1) * 0.5 * self.input_size)
+                    ny = int((py + 1) * 0.5 * self.input_size)
+                else:
+                    # Assume coords are within tile bounds
+                    nx = int((px / tile_size) * self.input_size) % self.input_size
+                    ny = int((py / tile_size) * self.input_size) % self.input_size
+                
+                # Draw rectangular footprint
+                x1, y1 = max(0, nx - radius_x), max(0, ny - radius_y)
+                x2, y2 = min(self.input_size, nx + radius_x), min(self.input_size, ny + radius_y)
+                obj_img[y1:y2, x1:x2] = 1.0
+                
+            object_mask = torch.from_numpy(obj_img).unsqueeze(0)
+                
+        input_tensor = torch.cat([minimap_t, normalmap_t, wdl_t, h_min_mask, h_max_mask, liquid_mask, object_mask], dim=0)
         
         # Target
         hm_g_t = load_heightmap_16bit(sample["heightmap_global"], OUTPUT_SIZE)
@@ -495,8 +551,21 @@ def train(resume_from=None, epochs=None):
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=10)
     
+    # Mixed Precision Training - DISABLED due to NaN instability with SSIM/edge loss
+    # scaler = torch.cuda.amp.GradScaler() if device.type == 'cuda' else None
+    scaler = None  # Disabled
+    use_amp = False
+    print(f"Mixed Precision Training: DISABLED (stability mode)")
+    
+    # Gradient clipping to prevent exploding gradients
+    MAX_GRAD_NORM = 1.0
+    
+    # Training history for analysis
+    training_history = {"epochs": [], "train_loss": [], "val_loss": [], "components": []}
+    
     start_epoch = 0
     best_loss = float('inf')
+    patience_counter = 0
     
     if resume_from and Path(resume_from).exists():
         ckpt = torch.load(resume_from, map_location=device)
@@ -508,6 +577,7 @@ def train(resume_from=None, epochs=None):
     for epoch in range(start_epoch, epochs or NUM_EPOCHS):
         model.train()
         t_losses = []
+        epoch_parts = {}  # Track per-component losses
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
         
         for batch in pbar:
@@ -516,12 +586,32 @@ def train(resume_from=None, epochs=None):
             bounds = batch["height_bounds"].to(device)
             
             optimizer.zero_grad()
-            out, out_bounds = model(inputs)
-            loss, parts = combined_loss(out, out_bounds, targets, bounds)
-            loss.backward()
-            optimizer.step()
+            
+            # Mixed precision forward pass
+            if use_amp:
+                with torch.cuda.amp.autocast():
+                    out, out_bounds = model(inputs)
+                    loss, parts = combined_loss(out, out_bounds, targets, bounds)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                out, out_bounds = model(inputs)
+                loss, parts = combined_loss(out, out_bounds, targets, bounds)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), MAX_GRAD_NORM)
+                optimizer.step()
+            
             t_losses.append(loss.item())
+            for k, v in parts.items():
+                epoch_parts[k] = epoch_parts.get(k, 0) + v
             pbar.set_postfix(loss=f"{loss.item():.4f}")
+            
+        # Average component losses
+        for k in epoch_parts:
+            epoch_parts[k] /= len(train_loader)
             
         # Validation
         model.eval()
@@ -531,28 +621,58 @@ def train(resume_from=None, epochs=None):
                 inputs = batch["input"].to(device)
                 targets = batch["target"].to(device)
                 bounds = batch["height_bounds"].to(device)
-                out, out_bounds = model(inputs)
-                loss, _ = combined_loss(out, out_bounds, targets, bounds)
+                if use_amp:
+                    with torch.cuda.amp.autocast():
+                        out, out_bounds = model(inputs)
+                        loss, _ = combined_loss(out, out_bounds, targets, bounds)
+                else:
+                    out, out_bounds = model(inputs)
+                    loss, _ = combined_loss(out, out_bounds, targets, bounds)
                 v_losses.append(loss.item())
                 
+        avg_t_loss = np.mean(t_losses)
         avg_v_loss = np.mean(v_losses)
-        print(f"Epoch {epoch+1} Val Loss: {avg_v_loss:.4f}")
+        current_lr = optimizer.param_groups[0]['lr']
+        
+        # Log all losses
+        print(f"\nEpoch {epoch+1}/{epochs or NUM_EPOCHS}")
+        print(f"  Train: {avg_t_loss:.4f} | Val: {avg_v_loss:.4f} | Best: {best_loss:.4f}")
+        print(f"  HM_G: {epoch_parts.get('heightmap_global',0):.4f} | HM_L: {epoch_parts.get('heightmap_local',0):.4f} | Edge: {epoch_parts.get('edge',0):.4f}")
+        print(f"  LR: {current_lr:.2e} | Patience: {patience_counter}/{EARLY_STOP_PATIENCE}")
+        
+        # Save to history
+        training_history["epochs"].append(epoch + 1)
+        training_history["train_loss"].append(avg_t_loss)
+        training_history["val_loss"].append(avg_v_loss)
+        training_history["components"].append(epoch_parts)
+        
+        # Save history after each epoch
+        import json
+        with open(OUTPUT_DIR / "training_log.json", "w") as f:
+            json.dump(training_history, f, indent=2)
+        
         scheduler.step(avg_v_loss)
         
-                
         if avg_v_loss < best_loss:
             best_loss = avg_v_loss
+            patience_counter = 0
             ckpt_path = OUTPUT_DIR / "best.pt"
             torch.save({'epoch': epoch, 'model_state_dict': model.state_dict(), 'val_loss': best_loss}, ckpt_path)
-            print("Saved Best")
+            print("  ✓ Saved Best Model")
             
             # Save visual preview
             try:
-                # Use first batch of validation for consistency
                 preview_batch = next(iter(val_loader))
                 save_training_preview(model, preview_batch, epoch, OUTPUT_DIR / "previews", device)
             except Exception as e:
-                print(f"Failed to save preview: {e}")
+                print(f"  Failed to save preview: {e}")
+        else:
+            patience_counter += 1
+            if patience_counter >= EARLY_STOP_PATIENCE:
+                print(f"\n⛔ Early stopping: No improvement for {EARLY_STOP_PATIENCE} epochs")
+                break
+    
+    print(f"\n✓ Training complete. Best Val Loss: {best_loss:.4f}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

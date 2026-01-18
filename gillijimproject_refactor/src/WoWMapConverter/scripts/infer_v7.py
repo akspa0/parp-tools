@@ -50,7 +50,7 @@ class V7InferenceEngine:
         print(f"Loading V7 Model from {model_path} on {self.device}...")
         
         # Load weights to check strict architecture
-        checkpoint = torch.load(model_path, map_location=self.device)
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         state_dict = checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint
         
         # Determine Input Channels from first conv layer weight shape
@@ -105,11 +105,15 @@ class V7InferenceEngine:
         g_max = terrain.get("height_global_max", HEIGHT_GLOBAL_MAX)
         g_range = g_max - g_min
         
-        # Normalize bounds hint
+        # Channel 7: H_Min Mask
         h_min_n = np.clip((h_min - g_min) / g_range, 0, 1)
-        bounds_hint = torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), h_min_n, dtype=torch.float32)
+        h_min_mask = torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), h_min_n, dtype=torch.float32)
+        
+        # Channel 8: H_Max Mask
+        h_max_n = np.clip((h_max - g_min) / g_range, 0, 1)
+        h_max_mask = torch.full((1, OUTPUT_SIZE, OUTPUT_SIZE), h_max_n, dtype=torch.float32)
 
-        # Liquid Mask (Channel 8)
+        # Channel 9: Liquid Mask
         liquid_mask = torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
         l_path_str = terrain.get("liquid_mask")
         if l_path_str:
@@ -119,7 +123,44 @@ class V7InferenceEngine:
                 l_t = self.to_tensor(l_img)
                 liquid_mask = (l_t > 0.1).float()
         
-        input_tensor = torch.cat([mm_t, nm_t, wdl_t, bounds_hint, liquid_mask], dim=0).unsqueeze(0) # [1, C, H, W]
+        # Channel 10: Object Footprint Mask
+        object_mask = torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
+        objects = terrain.get("objects")
+        if objects:
+            obj_img = np.zeros((OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
+            tile_size = 533.33333
+            for obj in objects:
+                px = obj.get("pos_x", 0)
+                py = obj.get("pos_y", 0)
+                scale = obj.get("scale", 1.0)
+                
+                # Use actual bounding box if available, otherwise fallback to scale
+                bounds_min = obj.get("bounds_min")
+                bounds_max = obj.get("bounds_max")
+                
+                if bounds_min and bounds_max and len(bounds_min) >= 2 and len(bounds_max) >= 2:
+                    half_width = abs(bounds_max[0] - bounds_min[0]) * 0.5 * scale
+                    half_depth = abs(bounds_max[1] - bounds_min[1]) * 0.5 * scale
+                    pixels_per_unit = OUTPUT_SIZE / tile_size
+                    radius_x = max(1, int(half_width * pixels_per_unit))
+                    radius_y = max(1, int(half_depth * pixels_per_unit))
+                else:
+                    radius_x = radius_y = max(1, int(5 * scale))
+                
+                if abs(px) < 2 and abs(py) < 2:
+                    nx = int((px + 1) * 0.5 * OUTPUT_SIZE)
+                    ny = int((py + 1) * 0.5 * OUTPUT_SIZE)
+                else:
+                    nx = int((px / tile_size) * OUTPUT_SIZE) % OUTPUT_SIZE
+                    ny = int((py / tile_size) * OUTPUT_SIZE) % OUTPUT_SIZE
+                
+                x1, y1 = max(0, nx - radius_x), max(0, ny - radius_y)
+                x2, y2 = min(OUTPUT_SIZE, nx + radius_x), min(OUTPUT_SIZE, ny + radius_y)
+                obj_img[y1:y2, x1:x2] = 1.0
+                
+            object_mask = torch.from_numpy(obj_img).unsqueeze(0)
+        
+        input_tensor = torch.cat([mm_t, nm_t, wdl_t, h_min_mask, h_max_mask, liquid_mask, object_mask], dim=0).unsqueeze(0) # [1, 11, H, W]
         
         # True bounds for denormalization reference
         true_bounds = {"h_min": h_min, "h_max": h_max, "g_min": g_min, "g_max": g_max}

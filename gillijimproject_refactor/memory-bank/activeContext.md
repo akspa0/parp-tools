@@ -1,69 +1,84 @@
 # Active Context
 
-## Current Focus: V6.1 Training Pipeline (Jan 16, 2026)
+## Current Focus: V8 Planning (Jan 17, 2026)
 
 ### Status Summary
 
-**V6.1 IMPLEMENTATION COMPLETE**: Training script updated with all V6 spec requirements:
-- ✅ 8-channel input (added bounds hint channel)
-- ✅ SSIM loss for perceptual quality
-- ✅ Edge loss using Sobel filters
-- ✅ Loss weights matching `v6_resnet34.yaml` config
-- ✅ WDL fallback mode for missing data
-- ✅ Dataset validation script (`scripts/prepare_v6_datasets.py`)
+**V7.1 TRAINING**: Running but showing plateau behavior (val loss ~0.106, patience 21/25).
+- ⚠️ Possible data limitations - not enough variable input signals
+- Model may be overfitting or lacking discriminative features
 
-**Next Phase**: Object rendering to address minimap-heightmap mismatch.
+**V8 SPECIFICATION COMPLETE**: Full technical specification written.
+- See: `docs/V8_UNIVERSAL_MINIMAP_TRANSLATOR.md`
 
-### Key Documents
+### V8 Key Design Decisions
 
-- **Full V6.1 Spec**: `memory-bank/planning/V6_TRAINING_PIPELINE.md`
-- **Object Rendering Plan**: `memory-bank/planning/OBJECT_RENDERING_PLAN.md`
-- **Training Script**: `src/WoWMapConverter/scripts/train_height_regressor_v6_absolute.py`
-- **Dataset Prep**: `scripts/prepare_v6_datasets.py`
+| Decision | Value | Rationale |
+|----------|-------|-----------|
+| Input Channels | **15** | RGB MCCV (3ch) instead of luminance (1ch) |
+| Texture Embeddings | **16-dim** | Better texture differentiation |
+| Object Embeddings | **128-dim** | Sufficient for instance segmentation |
+| Texture Output | **20 ch** | 4 alpha + 16 embedding (4 per layer) |
+| **Heightmap Resolution** | **145×145** | Native ADT, avoids upsampling artifacts from V7 |
+| **Segmentation Models** | **BiRefNet/LayerD** | Efficient multi-layer matting & brush detection (~200M params) |
+| PM4 Integration | **Deferred to V10** | Focus on minimap-based detection first |
+
+### Technical Strategy: "Neural Cartography"
+- **Layer-Aware Matting**: Using `layerd-birefnet` iterative decomposition to separate 4 texture layers.
+- **Edge Refinement**: Using `BEN2` CGM concepts to sharpen texture blending boundaries.
+- **Brush Archeology**: Using `BiRefNet` to extract and categorize designer brush patterns (V9 precursor).
+- **Efficiency**: All models targeted for consumer hardware (8-12GB VRAM), avoiding expensive "GIANT" foundation models where possible.
+- **Funding Framing**: Reconstructing lost Worlds as a demonstration of "Neural Cartography" capabilities.
+
+### V8 Training Data Priority
+
+| Version | Maps | Reason |
+|---------|------|--------|
+| 0.5.3 Alpha | Azeroth, Kalimdor | Base training, original terrain |
+| 3.3.5 WotLK | Northrend + updated EK/Kali | MCCV vertex colors |
+| 4.3.4 Cata | LostIsles, MaelstromZone, Deepholm | Dev map tile sources |
 
 ---
 
-## V6.1 Training Configuration
+## Key Documents
 
-### Model Architecture
-- **Backbone**: Custom 8-channel U-Net
-- **Input**: minimap(3) + normalmap(3) + WDL(1) + bounds_hint(1) = 8 channels
-- **Output**: heightmap_global(1) + heightmap_local(1) + alpha(4) + bounds(4)
+| Document | Purpose |
+|----------|---------|
+| `docs/V8_UNIVERSAL_MINIMAP_TRANSLATOR.md` | Full V8 specification |
+| `docs/V7_HEIGHT_REGRESSOR.md` | V7 training documentation |
+| `src/WoWMapConverter/scripts/train_v7.py` | Current training script |
 
-### Loss Weights
-```python
-LOSS_WEIGHTS = {
-    "heightmap_global": 0.15,
-    "heightmap_local": 0.35,
-    "alpha_masks": 0.10,
-    "bounds": 0.05,
-    "ssim": 0.05,
-    "gradient": 0.05,
-    "edge": 0.25,
-}
+---
+
+## Alpha Mask Insight (Critical for V8)
+
+> Alpha masks are composed of **preset brush patterns** - collections of low-resolution data
+> that artists used to create complex non-repeating effects. This is WoW's "cheat code" for
+> encoding texture transformations into terrain painting.
+
+The V8 texture prediction head needs to implicitly learn these brush patterns.
+
+---
+
+## Next Phase: V8 Implementation
+
+1. **C# Infrastructure** - TilesetExporter, ObjectLibraryBuilder, MultiVersionAdtParser
+2. **Python Infrastructure** - TextureLibrary (FAISS), ObjectLibrary, WoWTileDatasetV8 (15ch)
+3. **Multi-Client Batch Export** - Process 0.5.3, 3.3.5, 4.3.4 in sequence
+
+---
+
+## Scripts Usage
+
+```bash
+# Current V7 training (running)
+python src/WoWMapConverter/scripts/train_v7.py
+
+# Future V8 (not yet implemented)
+dotnet run -- vlm-batch-export --config clients.json --v8-options
+python scripts/train_v8.py --dataset vlm-datasets
 ```
 
-### Dataset Validation (Azeroth v11)
-- **Total tiles**: 685
-- **Complete for V6**: 678/685 (98.9%)
-- **Height range**: [-524.6, 896.8]
-
----
-
-## Object Rendering Plan (Next Phase)
-
-### Problem
-Minimaps show objects (trees, buildings) but heightmaps are terrain-only → loss mismatch.
-
-### Solution
-1. Extract bounding boxes from WMO/M2 meshes (C#)
-2. Render object silhouette masks (Python)
-3. Add as 9th input channel + loss weighting
-
-### Files to Modify
-- `VlmDatasetExporter.cs` - Add bbox extraction
-- `render_object_masks.py` - New script
-- `train_height_regressor_v6_absolute.py` - 9-channel support
 
 ---
 
