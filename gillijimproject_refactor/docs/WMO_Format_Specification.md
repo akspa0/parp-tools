@@ -13,6 +13,13 @@
 | Alpha 0.6.0 | v16 | Hybrid: v17 root headers, v14 group features |
 | WotLK 3.3.5a | v17 | Standard modern format |
 
+> [!NOTE]
+> **Ghidra Analysis (WoW 4.0.0.11927)**: Key WMO classes decompiled:
+> - `CMapObj` - Main WMO handler (parsing, rendering)
+> - `CMapObjDef` - WMO placement/instance
+> - `CMapObjGroup` - Individual group rendering
+> - DBC: `DBFilesClient\WMOAreaTable.dbc` - WMO area definitions
+
 ---
 
 # Part 1: Root File Structure

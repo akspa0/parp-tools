@@ -42,7 +42,30 @@ MVER → MPHD → MAIN → MWMO → MODF
 - Root: `MapName.wdt`
 - Tiles: `MapName_XX_YY.adt` (where XX, YY are 0-63)
 
----
+### MPHD Chunk (WDT Header)
+
+> [!IMPORTANT]
+> Ghidra analysis of WoW 4.0.0.11927 confirmed these flags control ADT parsing behavior.
+
+```c
+struct MPHD {
+  uint32_t flags;        // 0x00
+  uint32_t lgtFileDataId; // 0x04 (Legion+)
+  uint32_t occFileDataId; // 0x08 (Legion+)
+  // ... more fields in newer versions
+};
+```
+
+| Flag | Value | Description | Ghidra Reference |
+|:---|:---|:---|:---|
+| `wdt_uses_global_map_obj` | 0x0001 | WMO only (no terrain) | - |
+| `adt_has_mccv` | 0x0002 | ADT has MCCV (vertex colors) | - |
+| **`adt_has_big_alpha`** | **0x0004** | **4096-byte alpha maps (8-bit)** | `0x00674640` |
+| `adt_has_doodad_ref_sort` | 0x0008 | Sorted doodad refs | - |
+| `adt_has_mclv` | 0x0010 | ADT has MCLV | - |
+| `adt_has_upside_down_ground` | 0x0020 | Inverted ground | - |
+| `unk_0x0040` | 0x0040 | Unknown | - |
+| **`adt_has_height_texturing`** | **0x0080** | Combined with 0x0004 for texturing | `0x00674720` |
 
 # Part 2: ADT (Area Data Tile)
 
@@ -151,6 +174,72 @@ Fixed offsets with explicit padding:
 | +716 | 435 | MCNR (normals) |
 | +1151 | 13 | **Padding** |
 | +1164 | Var | MCLY (layers) |
+
+## MCAL Alpha Map Formats
+
+> [!IMPORTANT]
+> Decompiled from WoW 4.0.0.11927 `CMapChunk::UnpackAlphaBits()` at `0x00674b70`.
+
+### Format Selection Logic
+
+| MCLY Flag | WDT MPHD Flag | Format | Size |
+|:---|:---|:---|:---|
+| - | - | Uncompressed 4-bit | 2048 bytes |
+| - | 0x4 or 0x80 | Uncompressed 8-bit | 4096 bytes |
+| 0x200 | 0x4 or 0x80 | **RLE Compressed** | Variable |
+
+### MCLY Layer Flags (Ghidra: `0x00674640`)
+
+| Flag | Value | Description |
+|:---|:---|:---|
+| `animation_x` | 0x001 | Texture animation |
+| `animation_y` | 0x002 | |
+| `animation_45deg` | 0x004 | |
+| `animation_90deg` | 0x008 | |
+| `animation_speed` | 0x010 | |
+| `animation_faster` | 0x020 | |
+| `animation_fastest` | 0x040 | |
+| `animation_mask` | 0x07F | All animation flags |
+| `overbright` | 0x080 | 2x brightness |
+| `use_alpha_map` | 0x100 | Layer has alpha |
+| **`alpha_map_compressed`** | **0x200** | **RLE compressed alpha** |
+| `use_cube_map_reflection` | 0x400 | Cubemap reflection |
+
+### RLE Decompression Algorithm
+
+**Decompiled from `FUN_00673230`:**
+
+```c
+// Control byte: bit 7 = mode, bits 0-6 = count
+// Mode 1 (0x80+): FILL - repeat next byte 'count' times
+// Mode 0 (0x00-0x7F): COPY - copy 'count' bytes directly
+
+int RLE_Decompress(byte* src, byte* dest, int maxSize) {
+    int iRead = 0, iWrite = 0;
+    
+    while (iWrite < maxSize) {
+        byte ctrl = src[iRead++];
+        
+        if (ctrl & 0x80) {  // FILL mode
+            byte value = src[iRead++];
+            int count = ctrl & 0x7F;
+            memset(&dest[iWrite], value, count);
+            iWrite += count;
+        } else {  // COPY mode
+            for (int i = 0; i < ctrl; i++)
+                dest[iWrite++] = src[iRead++];
+        }
+    }
+    return iRead;
+}
+```
+
+### MCNK Flag 0x8000 (Shadow Multiply)
+
+When set, alpha values are multiplied by `178/256 ≈ 0.695` at positions with shadow:
+```c
+if (hasShadow) alpha = (alpha * 0xB2) >> 8;  // Ghidra: 0x00674720
+```
 
 ---
 
