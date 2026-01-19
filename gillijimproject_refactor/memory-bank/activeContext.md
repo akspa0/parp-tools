@@ -1,15 +1,16 @@
 # Active Context
 
-## Current Focus: V8 Planning (Jan 17, 2026)
+## Current Focus: V8 Implementation (Jan 18, 2026)
 
 ### Status Summary
 
-**V7.1 TRAINING**: Running but showing plateau behavior (val loss ~0.106, patience 21/25).
-- ⚠️ Possible data limitations - not enough variable input signals
-- Model may be overfitting or lacking discriminative features
+**V8 RECONSTRUCTION BRANCH**: Core infrastructure implemented.
+- **Binary Format Integrated**: `.bin` files (Heights/Normals/Shadows/Alpha) now used for training.
+- **Split ADT Support**: `ExtractFromLkAdt` updated to handle WotLK/Cata split files.
+- **Shadow Map Fix**: Corrected truncation bug (64 -> 512 bytes).
+- **Python Pipeline**: `train_v8.py` and `v8_utils.py` updated to consume `.bin` files directly.
 
-**V8 SPECIFICATION COMPLETE**: Full technical specification written.
-- See: `docs/V8_UNIVERSAL_MINIMAP_TRANSLATOR.md`
+**Next Steps**: Validation run of `vlm-batch` and initial V8 training loop.
 
 ### V8 Key Design Decisions
 
@@ -60,11 +61,10 @@ The V8 texture prediction head needs to implicitly learn these brush patterns.
 
 ---
 
-## Next Phase: V8 Implementation
+1. **C# Infrastructure** - [x] `vlm-batch` Exporter, [x] Binary `.bin` Writer, [x] Split ADT Support.
+2. **Python Infrastructure** - [x] `load_adt_bin` loader, [x] `train_v8.py` binary integration.
+3. **Multi-Client Batch Export** - [ ] Validation run.
 
-1. **C# Infrastructure** - TilesetExporter, ObjectLibraryBuilder, MultiVersionAdtParser
-2. **Python Infrastructure** - TextureLibrary (FAISS), ObjectLibrary, WoWTileDatasetV8 (15ch)
-3. **Multi-Client Batch Export** - Process 0.5.3, 3.3.5, 4.3.4 in sequence
 
 ---
 
@@ -75,8 +75,9 @@ The V8 texture prediction head needs to implicitly learn these brush patterns.
 python src/WoWMapConverter/scripts/train_v7.py
 
 # Future V8 (not yet implemented)
-dotnet run -- vlm-batch-export --config clients.json --v8-options
-python scripts/train_v8.py --dataset vlm-datasets
+# V8 Training
+dotnet run -- vlm-batch --config v8_config.json
+python scripts/train_v8.py --dataset vlm_output/v8_dataset
 ```
 
 

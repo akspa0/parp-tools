@@ -25,6 +25,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("heightmap_local")] string? HeightmapLocalPath,
     [property: JsonPropertyName("heightmap_global")] string? HeightmapGlobalPath,
     [property: JsonPropertyName("normalmap")] string? NormalmapPath,
+    [property: JsonPropertyName("mccv_map")] string? MccvMapPath,
     
     // Shadow Maps - paths to per-chunk PNGs
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,
@@ -115,7 +116,10 @@ public record VlmTextureLayer(
     // Raw alpha mask data (64 bytes = 64x64 / 8 for 1-bit, or 4096 bytes for 8-bit)
     [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null,
     // Path to exported alpha PNG for this layer
-    [property: JsonPropertyName("alpha_path")] string? AlphaPath = null
+    [property: JsonPropertyName("alpha_path")] string? AlphaPath = null,
+    
+    // Raw alpha bytes (Not serialized to JSON, used for .bin export)
+    [property: JsonIgnore] byte[]? AlphaData = null
 );
 
 /// <summary>

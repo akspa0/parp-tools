@@ -1,4 +1,5 @@
 using SixLabors.ImageSharp;
+using System.Text.Json;
 using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Dbc;
@@ -39,11 +40,62 @@ public static class Program
             "vlm-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
             "vlm-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
-            "batch" => await RunBatchAsync(args.Skip(1).ToArray()),
+            "batch" or "vlm-batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
         };
     }
 
+    private static async Task<int> RunBatchAsync(string[] args)
+    {
+        string? configPath = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--config":
+                case "-c":
+                    if (i + 1 < args.Length) configPath = args[++i];
+                    break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(configPath))
+        {
+            Console.WriteLine("VLM Batch Export");
+            Console.WriteLine("Usage: wowmapconverter vlm-batch --config <config.json>");
+            return 1;
+        }
+
+        if (!File.Exists(configPath))
+        {
+            Console.WriteLine($"Error: Config file not found: {configPath}");
+            return 1;
+        }
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(configPath);
+            var config = System.Text.Json.JsonSerializer.Deserialize<VlmBatchExportConfig>(json);
+            
+            if (config == null)
+            {
+                Console.WriteLine("Error: Invalid config JSON");
+                return 1;
+            }
+
+            var exporter = new VlmDatasetExporter();
+            var progress = new Progress<string>(msg => Console.WriteLine(msg));
+            
+            await exporter.ExportBatchAsync(config, progress);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
     private static async Task<int> RunConvertAsync(string[] args)
     {
         string? inputPath = null;
@@ -756,12 +808,6 @@ public static class Program
         return 0;
     }
 
-    private static async Task<int> RunBatchAsync(string[] args)
-    {
-        Console.WriteLine("Batch command - not yet implemented");
-        await Task.CompletedTask;
-        return 0;
-    }
 
     private static async Task<int> RunDefaultConvertAsync(string[] args)
     {

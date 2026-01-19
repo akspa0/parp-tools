@@ -25,6 +25,8 @@
 - **MCCV Painting**: ✅ `MccvPainter.cs` generates vertex colors from minimap PNGs
 - **PM4 MODF Reconstruction**: ✅ 1101 entries in `pm4-adt-test12/modf_reconstruction/`
 - **VLM Datasets**: ✅ Azeroth v10 (685 tiles), Kalidar v1 (56 tiles), Razorfen v1 (6 tiles)
+- **V8 Binary Export**: ✅ `.bin` format implemented with Heights/Normals/Shadows/Alpha.
+- **Split ADT Support**: ✅ `_tex0` / `_obj0` reading implemented for Cata support.
 
 ## ⚠️ Partial / Broken
 
@@ -45,11 +47,12 @@
 
 ## Current Status Summary
 
-| V7 Training | ⚠️ Plateau | Val loss ~0.106, patience 21/25, possible data limit |
-| V8 Spec | ✅ Complete | Includes BiRefNet/LayerD matting strategy |
+| V7 Inference | 🔧 Refining | Adding smoothing, Z-scaling, and downscaling |
+| V8 Spec | ✅ Complete | Transitioning to `reconstruction` branch |
+| V8 Training | ✅ Initial Run | 0.5.3 Azeroth (685 tiles), best loss 0.3178 |
 | Multi-Version ADT | 🔧 Planned | 0.5.3, 3.x, 4.x support in V8 spec |
 | Native Resolution | ✅ Set | 145×145 (native ADT) for V8 accuracy |
-| Brush Analysis | 🔧 Research | Using BiRefNet for pattern segmentation (V9+) |
+| Digital Archeology | 🚀 Initiated | Reconstructing lost data from minimap/WDL/PM4 |
 
 ## Key Files
 

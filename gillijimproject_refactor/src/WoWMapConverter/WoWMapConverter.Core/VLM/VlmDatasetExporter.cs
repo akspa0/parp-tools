@@ -26,6 +26,19 @@ public class VlmDatasetExporter
     private readonly ConcurrentDictionary<string, (float[] Min, float[] Max)?> _modelBoundsCache = new();
     private MpqArchiveService? _mpqService;
 
+    public async Task ExportBatchAsync(VlmBatchExportConfig config, IProgress<string>? progress = null)
+    {
+        foreach (var client in config.Clients)
+        {
+            progress?.Report($"Processing Client: {client.ClientPath} ({client.ClientVersion})");
+            foreach (var map in client.Maps)
+            {
+                var mapOut = Path.Combine(client.OutputRoot, map);
+                await ExportMapAsync(client.ClientPath, map, mapOut, progress, generateDepth: client.GenerateDepth);
+            }
+        }
+    }
+
     public async Task<VlmExportResult> ExportMapAsync(
         string clientPath,
         string mapName,
@@ -317,9 +330,28 @@ public class VlmDatasetExporter
                 }
                 else
                 {
-                    // LK format: Read ADT from MPQ as separate file
-                    var adtMpqPath = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}.adt";
-                    var adtBytes = mpqService.ReadFile(adtMpqPath);
+                    // LK/Cata format: Read ADT from MPQ
+                    // Check for Split ADT files (Cataclysm+)
+                    var adtBase = $"World\\Maps\\{mapName}\\{mapName}_{x}_{y}";
+                    var rootAdtPath = $"{adtBase}.adt";
+                    var texAdtPath = $"{adtBase}_tex0.adt";
+                    var objAdtPath = $"{adtBase}_obj0.adt";
+
+                    var adtBytes = mpqService.ReadFile(rootAdtPath);
+                    byte[]? texBytes = null;
+                    byte[]? objBytes = null;
+
+                    if (mpqService.FileExists(texAdtPath))
+                    {
+                        texBytes = mpqService.ReadFile(texAdtPath);
+                        progress?.Report($"[Split ADT] Found tex0 for {tileName}");
+                    }
+
+                    if (mpqService.FileExists(objAdtPath))
+                    {
+                        objBytes = mpqService.ReadFile(objAdtPath);
+                         progress?.Report($"[Split ADT] Found obj0 for {tileName}");
+                    }
                     
                     if (adtBytes == null || adtBytes.Length == 0)
                     {
@@ -327,8 +359,8 @@ public class VlmDatasetExporter
                         return;
                     }
 
-                    // Extract terrain data using LK ADT parsing
-                    sample = await ExtractFromLkAdt(adtBytes, tileIndex, tileName, outputDir,
+                    // Extract terrain data using LK/Modern ADT parsing
+                    sample = await ExtractFromLkAdt(adtBytes, texBytes, objBytes, tileIndex, tileName, outputDir,
                         shadowsDir, masksDir, allTextures, mpqService, groundEffectService, wdlTile);
                 }
 
@@ -347,6 +379,8 @@ public class VlmDatasetExporter
                 var jsonPath = Path.Combine(datasetDir, $"{tileName}.json");
                 var json = JsonSerializer.Serialize(finalSample, _jsonOptions);
                 await File.WriteAllTextAsync(jsonPath, json);
+
+                await WriteBinaryTile(sample, datasetDir);
 
                 Interlocked.Increment(ref tilesExported);
                 var currentCount = tilesExported;
@@ -945,8 +979,8 @@ public class VlmDatasetExporter
 
         var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
         
-        // Generate Normal Map (V7 Feature)
         var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
+        var mccvMapPath = await GenerateMccvMap(chunkLayers, tileName, outputDir);
         
         return new VlmTerrainData(
             tileName,
@@ -957,6 +991,7 @@ public class VlmDatasetExporter
             heightmapPath,
             null,
             normalmapPath, // NormalMapPath
+            mccvMapPath,
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
@@ -977,10 +1012,11 @@ public class VlmDatasetExporter
     }
 
     /// <summary>
-    /// Extract terrain data from LK ADT bytes (3.3.5+ format).
+    /// Extract terrain data from LK/Modern ADT bytes.
+    /// Supports Split ADTs (_tex0, _obj0) via optional buffers.
     /// </summary>
     private async Task<VlmTerrainData?> ExtractFromLkAdt(
-        byte[] adtBytes, int tileIndex, string tileName,
+        byte[] adtBytes, byte[]? texBytes, byte[]? objBytes, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         ConcurrentDictionary<string, byte> textureCollector, MpqArchiveService mpqService,
         GroundEffectService? groundEffectService = null, WdlParser.WdlTile? wdlTile = null)
@@ -1026,7 +1062,10 @@ public class VlmDatasetExporter
             }
 
             int mhdrDataStart = mhdrOffset + 8;
-            int mcinRelOffset = BitConverter.ToInt32(adtBytes, mhdrDataStart); // MCIN offset relative to MHDR data
+            int mhdrFlags = BitConverter.ToInt32(adtBytes, mhdrDataStart);
+            bool useBigAlphamaps = (mhdrFlags & 4) != 0; // 0x4 = 4096 byte alpha
+
+            int mcinRelOffset = BitConverter.ToInt32(adtBytes, mhdrDataStart + 4); // MCIN offset (0x04)
 
             if (mcinRelOffset <= 0)
             {
@@ -1043,27 +1082,38 @@ public class VlmDatasetExporter
             {
                 mcnkOffsets[i] = BitConverter.ToInt32(adtBytes, mcinDataStart + i * 16);
             }
-
+            
+            // Determine source for Texture Data (MTEX/MCNK tex chunks)
+            // If texBytes provided (Split ADT), use that. Otherwise use main ADT.
+            byte[] texSource = texBytes ?? adtBytes;
+            
             // Extract textures from MTEX
-            int mtexOffset = FindLkChunk(adtBytes, "MTEX");
+            int mtexOffset = FindLkChunk(texSource, "MTEX");
             if (mtexOffset >= 0)
             {
-                int mtexSize = BitConverter.ToInt32(adtBytes, mtexOffset + 4);
+                int mtexSize = BitConverter.ToInt32(texSource, mtexOffset + 4);
                 int pos = mtexOffset + 8;
                 int end = pos + mtexSize;
                 while (pos < end)
                 {
-                    int nul = Array.IndexOf(adtBytes, (byte)0, pos, end - pos);
+                    int nul = Array.IndexOf(texSource, (byte)0, pos, end - pos);
                     if (nul == -1) nul = end;
                     int len = nul - pos;
                     if (len > 0)
                     {
-                        var texName = System.Text.Encoding.UTF8.GetString(adtBytes, pos, len);
+                        var texName = System.Text.Encoding.UTF8.GetString(texSource, pos, len);
                         textures.Add(texName);
                         textureCollector.TryAdd(texName, 0);
                     }
                     pos = nul + 1;
                 }
+            }
+            
+            // Determine offsets for Split ADT chunks if needed
+            int[]? texMcnkOffsets = null;
+            if (texBytes != null)
+            {
+                texMcnkOffsets = GetMcnkOffsets(texBytes); // Needs helper
             }
 
             // Process each MCNK chunk
@@ -1075,33 +1125,54 @@ public class VlmDatasetExporter
 
                 try
                 {
-                    // Read MCNK header (128 bytes in LK)
-                    int headerStart = mcnkOffset + 8; // skip MCNK fourcc + size
+                    // Read MCNK header and switch contexts if needed
+                    int headerStart = mcnkOffset + 8;
                     
-                    // Get position from header
-                    float baseX = BitConverter.ToSingle(adtBytes, headerStart + 12); // offsetX
-                    float baseY = BitConverter.ToSingle(adtBytes, headerStart + 16); // offsetY
-                    float baseZ = BitConverter.ToSingle(adtBytes, headerStart + 20); // offsetZ
+                    // Contexts for offsets
+                    byte[] texContext = adtBytes;
+                    int texHeaderStart = headerStart;
                     
-                    chunkPositions[chunkIndex * 3] = baseX;
-                    chunkPositions[chunkIndex * 3 + 1] = baseY;
-                    chunkPositions[chunkIndex * 3 + 2] = baseZ;
+                    if (texBytes != null && texMcnkOffsets != null)
+                    {
+                        texContext = texBytes;
+                        int texOff = texMcnkOffsets[chunkIndex];
+                        if (texOff > 0)
+                        {
+                            texHeaderStart = texOff + 8;
+                        }
+                    }
+
+                    // READ Header Flags
+                    int mcnkFlags = BitConverter.ToInt32(adtBytes, headerStart); // 0x00
+                    bool doNotFixAlphaMap = (mcnkFlags & 0x8000) != 0; // 0x8000 = do_not_fix_alpha_map
+
+                    // Position (0x68 in MCNK header)
+                    // Z, X, Y -> but verify order. Usually Z is first in ADT coords?
+                    // Typically: Z, X, Y.
+                    float posZ = BitConverter.ToSingle(adtBytes, headerStart + 0x68);
+                    float posX = BitConverter.ToSingle(adtBytes, headerStart + 0x6C);
+                    float posY = BitConverter.ToSingle(adtBytes, headerStart + 0x70);
                     
-                    // Get holes from header
-                    int holesValue = BitConverter.ToInt32(adtBytes, headerStart + 60); // holes field
+                    chunkPositions[chunkIndex * 3] = posX;
+                    chunkPositions[chunkIndex * 3 + 1] = posY;
+                    chunkPositions[chunkIndex * 3 + 2] = posZ;
+                    
+                    // Holes (0x3C = 60)
+                    int holesValue = BitConverter.ToInt32(adtBytes, headerStart + 60);
                     holes[chunkIndex] = holesValue;
 
-                    // Find MCVT subchunk (heights)
-                    int mcvtRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 24);
+                    // MCVT (Heights): 0x10 -> +16
+                    int mcvtRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x10);
                     if (mcvtRelOffset > 0)
                     {
-                        int mcvtAbs = headerStart + mcvtRelOffset + 8; // skip subchunk header
+                        int mcvtAbs = headerStart + mcvtRelOffset + 8;
                         if (mcvtAbs + 145 * 4 <= adtBytes.Length)
                         {
                             var chunkHeights = new float[145];
                             for (int h = 0; h < 145; h++)
                             {
-                                chunkHeights[h] = baseZ + BitConverter.ToSingle(adtBytes, mcvtAbs + h * 4);
+                                // Heights are relative to posZ
+                                chunkHeights[h] = posZ + BitConverter.ToSingle(adtBytes, mcvtAbs + h * 4);
                                 if (chunkHeights[h] < heightMin) heightMin = chunkHeights[h];
                                 if (chunkHeights[h] > heightMax) heightMax = chunkHeights[h];
                             }
@@ -1109,12 +1180,12 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // Find MCNR subchunk (normals)
-                    int mcnrRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 28);
+                    // MCNR (Normals): 0x14 -> +20
+                    int mcnrRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x14);
                     sbyte[]? normalsArray = null;
                     if (mcnrRelOffset > 0)
                     {
-                        int mcnrAbs = headerStart + mcnrRelOffset + 8; // skip subchunk header
+                        int mcnrAbs = headerStart + mcnrRelOffset + 8;
                         if (mcnrAbs + 145 * 3 <= adtBytes.Length)
                         {
                             normalsArray = new sbyte[145 * 3];
@@ -1123,27 +1194,32 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // Find MCSH subchunk (shadow map - 64x64 bits = 512 bytes)
+                    // MCSH (Shadows): 0x28 -> +40 (texContext)
                     string? chunkShadowPath = null;
-                    int mcshRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 36); // MCSH offset in header
+                    int mcshRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x2C); // 0x2C: ofsShadow
+                    // Wait, wiki says 0x28 is ofsShadow?
+                    // Let's check offsets carefully.
+                    // 0x10 MCVT, 0x14 MCNR, 0x18 MCLY, 0x1C MCRF, 0x20 MCAL, 0x24 sizeAlpha, 0x28 ofsShadow, 0x2C sizeShadow
+                    // My previous thought was +36? 
+                    // Let's use 0x28 (40).
+                    mcshRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x28);
+                    
                     if (mcshRelOffset > 0)
                     {
-                        int mcshAbs = headerStart + mcshRelOffset;
-                        // Verify it's actually MCSH chunk
-                        if (mcshAbs + 8 <= adtBytes.Length)
+                        int mcshAbs = texHeaderStart + mcshRelOffset;
+                        if (mcshAbs + 8 <= texContext.Length)
                         {
-                            string mcshFourCC = System.Text.Encoding.ASCII.GetString(adtBytes, mcshAbs, 4);
-                            if (mcshFourCC == "HSMC") // Reversed on disk
+                            string mcshFourCC = System.Text.Encoding.ASCII.GetString(texContext, mcshAbs, 4);
+                            if (mcshFourCC == "HSMC")
                             {
-                                int mcshSize = BitConverter.ToInt32(adtBytes, mcshAbs + 4);
+                                int mcshSize = BitConverter.ToInt32(texContext, mcshAbs + 4);
                                 int mcshDataStart = mcshAbs + 8;
-                                
-                                if (mcshSize >= 512 && mcshDataStart + 512 <= adtBytes.Length)
+                                if (mcshSize >= 512 && mcshDataStart + 512 <= texContext.Length)
                                 {
                                     try
                                     {
                                         var mcshBuf = new byte[512];
-                                        Array.Copy(adtBytes, mcshDataStart, mcshBuf, 0, 512);
+                                        Array.Copy(texContext, mcshDataStart, mcshBuf, 0, 512);
                                         
                                         var shadow = ShadowMapService.ReadShadow(mcshBuf);
                                         var shadowPng = ShadowMapService.ToPng(shadow);
@@ -1152,8 +1228,7 @@ public class VlmDatasetExporter
                                         shadowPaths.Add($"shadows/{shadowFileName}");
                                         chunkShadowPath = $"shadows/{shadowFileName}";
                                         
-                                        // Store raw shadow bits (first 64 bytes = 512 bits)
-                                        var rawShadowBytes = mcshBuf.Take(64).ToArray();
+                                        var rawShadowBytes = mcshBuf.Take(512).ToArray();
                                         shadowBits.Add(new VlmChunkShadowBits(chunkIndex, Convert.ToBase64String(rawShadowBytes)));
                                     }
                                     catch { }
@@ -1162,41 +1237,161 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // Create chunk layer entry with normals and shadow path
+                    // MCCV (Vertex Colors): 0x50 -> +80? Or check flags?
+                    // Usually present if MCNK 0x20 flag set.
+                    // Subchunk usually at the end.
+                    // We'll rely on flags or try to find "MCCV" in the chunk data if needed? No, too slow.
+                    // If we use 0x50, let's verify.
+                    // For now, let's skip MCCV unless confident. Or try to find it via subchunk scan?
+                    // Standard approach: Check MCNK flag 0x20. If set, MCCV follows MCAL?
+                    // Or check 0x58?
+                    // Actually, let's look for MCCV by searching reversed "MCCV" in the chunk area.
+                    // Only search within the localized chunk data to be safe.
+                    // Chunk size is not in MCNK header directly? No, it's in MCIN.
+                    // We know the chunk ends at next MCNK offset.
+                    
+                    byte[]? mccvColors = null;
+                    if ((mcnkFlags & 0x20) != 0) // MCCV flag
+                    {
+                        // Search for MCCV in the chunk data range
+                        // Limit search?
+                        // Just search in texContext (where layers are) starting from texHeaderStart.
+                        // MCCV must be in texContext for Split ADT.
+                        
+                        // We can use FindLkChunk logic but scoped.
+                        // Scan from headerStart to next chunk? We don't know exact size here easily without parsing.
+                        // Let's scan forward from standard offsets.
+                        // It's robust enough to scan for VCCM (reversed MCCV).
+                        
+                        int mccvAbs = -1;
+                        int limit = 16384; // Chunk shouldn't be bigger than 16KB usually.
+                        for(int k = texHeaderStart; k < texContext.Length && k < texHeaderStart + limit; k++) {
+                            if (texContext[k] == 'V' && texContext[k+1] == 'C' && texContext[k+2] == 'C' && texContext[k+3] == 'M') {
+                                mccvAbs = k;
+                                break;
+                            }
+                        }
+                        
+                        if (mccvAbs >= 0) {
+                            // Found MCCV
+                            if (mccvAbs + 145 * 4 + 8 <= texContext.Length) {
+                                mccvColors = new byte[145 * 4];
+                                Array.Copy(texContext, mccvAbs + 8, mccvColors, 0, 145 * 4);
+                            }
+                        }
+                    }
+
+                    // MCLY (0x18 -> +24) and MCAL (0x20 -> +32)
+                    int mclyRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x1C); // 0x1C MCLY
+                    int mcalRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x20); // 0x20 MCAL?
+                    // Offsets check:
+                    // 0x10 MCVT, 0x14 MCNR, 0x18 MCLY -> Wait.
+                    // 0x10=16. 0x14=20. 0x18=24.
+                    // So MCLY IS AT 0x18 (+24).
+                    mclyRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x18);
+                    mcalRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x20); // 0x20 = 32. MCAL.
+                    
+                    var layerList = new List<VlmTextureLayer>();
+                    if (mclyRelOffset > 0 && mcalRelOffset > 0)
+                    {
+                        int mclyAbs = texHeaderStart + mclyRelOffset + 8;
+                        int mcalAbs = texHeaderStart + mcalRelOffset + 8; 
+                        
+                        int nLayers = BitConverter.ToInt32(texContext, texHeaderStart + 0x08); // 0x08 = nLayers
+                        if (nLayers <= 0) nLayers = 0; if (nLayers > 4) nLayers = 4;
+                        
+                        for (int l = 0; l < nLayers; l++)
+                        {
+                            if (mclyAbs + (l + 1) * 16 > texContext.Length) break;
+                            
+                            uint tId = BitConverter.ToUInt32(texContext, mclyAbs + l * 16);
+                            uint flags = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 4);
+                            uint aOff = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 8);
+                            uint eff = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 12);
+                            
+                            string? texturePath = tId < textures.Count ? textures[(int)tId] : null;
+                            string[]? effects = (eff > 0 && groundEffectService != null) ? groundEffectService.GetDoodadsEffect(eff) : null;
+                            
+                            string? alphaBase64 = null;
+                            string? alphaPath = null;
+                            byte[]? alphaBytes = null;
+                            
+                            if (l > 0)
+                            {
+                                try {
+                                    // Use AlphaMapService logic
+                                    // Provide absolute offset to alpha data start for this layer
+                                    int layerAlphaStart = mcalAbs + (int)aOff;
+                                    
+                                    // Validation
+                                    if (layerAlphaStart < texContext.Length)
+                                    {
+                                         var alpha = AlphaMapService.ReadAlpha(texContext, layerAlphaStart, flags, useBigAlphamaps, doNotFixAlphaMap);
+                                         if (alpha != null && alpha.Length == 64*64)
+                                         {
+                                             alphaBytes = alpha;
+                                             // Also save PNG/Base64 for debug?
+                                             // Saving PNG for visual debug
+                                             var png = AlphaMapService.ToPng(alpha);
+                                             var aName = $"{tileName}_c{chunkIndex}_l{l}.png";
+                                             File.WriteAllBytes(Path.Combine(masksDir, aName), png);
+                                             alphaPath = $"masks/{aName}";
+                                         }
+                                    }
+                                } catch {}
+                            }
+                            
+                            layerList.Add(new VlmTextureLayer(tId, texturePath, flags, aOff, eff, effects, alphaBase64, alphaPath, alphaBytes));
+                        }
+                    }
+
                     chunkLayers.Add(new VlmChunkLayers(
                         chunkIndex, 
-                        Array.Empty<VlmTextureLayer>(), 
+                        layerList.ToArray(), 
                         chunkShadowPath,
                         normalsArray,
-                        null, // mccv colors 
-                        0, // area id
-                        0  // flags
+                        mccvColors,
+                        (uint)holesValue,
+                        0
                     ));
                 }
-                catch { /* Skip problematic chunks */ }
+                catch { }
+            }
+            
+            // Helper method for offsets
+            int[]? GetMcnkOffsets(byte[] d) {
+                try {
+                    int h = FindLkChunk(d, "MHDR"); 
+                    if (h < 0) return null;
+                    int cin = BitConverter.ToInt32(d, h + 8 + BitConverter.ToInt32(d, h + 8 + 4)); // MHDR data + 4 -> MCIN offset
+                    if (cin <= 0) return null;
+                    var o = new int[256];
+                    for(int i=0; i<256; i++) o[i] = BitConverter.ToInt32(d, h + 8 + cin + 8 + i*16);
+                    return o;
+                } catch { return null; }
             }
 
             var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir);
-            
-            // Generate Normal Map (V7)
             var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
+            var mccvMapPath = await GenerateMccvMap(chunkLayers, tileName, outputDir);
 
             return new VlmTerrainData(
                 tileName,
                 heights.ToArray(),
                 chunkPositions,
                 holes,
-                heightmapPath,  // HeightmapPath
+                heightmapPath,
                 heightmapPath,
                 null,
                 normalmapPath,
+                mccvMapPath,
                 shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
                 shadowBits.Count > 0 ? shadowBits.ToArray() : null,
-                null, // alphaPaths
-                null, // LiquidMaskPath
-                null, // LiquidHeightPath
-                0f,   // LiquidMinHeight
-                0f,   // LiquidMaxHeight
+                null,
+                null,
+                null,
+                0f,
+                0f,
                 textures,
                 chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
                 liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1204,8 +1399,8 @@ public class VlmDatasetExporter
                 wdlHeights,
                 heightMin == float.MaxValue ? 0 : heightMin,
                 heightMax == float.MinValue ? 0 : heightMax,
-                0,
-                0
+                heightMin == float.MaxValue ? 0 : heightMin,
+                heightMax == float.MinValue ? 0 : heightMax
             );
         }
         catch (Exception ex)
@@ -1348,7 +1543,7 @@ public class VlmDatasetExporter
     {
         if (chunkHeights == null || chunkHeights.Count == 0) return null;
 
-        const int Size = 512;
+        const int Size = 145;
         var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
         var (minZ, maxZ) = GetHeightRange(heightsDict);
         var mapBytes = RenderHeightmapImage(heightsDict, minZ, maxZ, Size);
@@ -1469,7 +1664,7 @@ public class VlmDatasetExporter
     {
         if (chunkLayers == null || chunkLayers.Count == 0) return null;
 
-        const int Size = 512;
+        const int Size = 145;
         var normalsDict = chunkLayers
             .Where(c => c.Normals != null && c.Normals.Length >= 145 * 3)
             .ToDictionary(k => k.ChunkIndex, v => v.Normals!);
@@ -1605,6 +1800,113 @@ public class VlmDatasetExporter
         return ms.ToArray();
 
 
+    }
+
+    private async Task<string?> GenerateMccvMap(List<VlmChunkLayers> chunkLayers, string tileName, string outputDir)
+    {
+        if (chunkLayers == null || chunkLayers.Count == 0) return null;
+
+        const int Size = 145;
+        var mccvDict = chunkLayers
+            .Where(c => c.MccvColors != null && c.MccvColors.Length >= 145 * 4)
+            .ToDictionary(k => k.ChunkIndex, v => v.MccvColors!);
+
+        if (mccvDict.Count == 0) return null;
+
+        var mapBytes = RenderMccvImage(mccvDict, Size);
+
+        var filename = $"{tileName}_mccv.png";
+        var imagesDir = Path.Combine(outputDir, "images");
+        Directory.CreateDirectory(imagesDir);
+        var path = Path.Combine(imagesDir, filename);
+        await File.WriteAllBytesAsync(path, mapBytes);
+
+        return $"images/{filename}";
+    }
+
+    private byte[] RenderMccvImage(Dictionary<int, byte[]> mccvDict, int size)
+    {
+        using var image = new SixLabors.ImageSharp.Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(size, size);
+
+        (float r, float g, float b, float a) SampleColor(byte[] cData, float lx, float ly)
+        {
+             float gx = lx * 8;
+             float gy = ly * 8;
+             
+             int ix = Math.Clamp((int)gx, 0, 7);
+             int iy = Math.Clamp((int)gy, 0, 7);
+             
+             float dx = Math.Clamp(gx - ix, 0f, 1f);
+             float dy = Math.Clamp(gy - iy, 0f, 1f);
+             
+             (float r, float g, float b, float a) GetC(int index)
+             {
+                 int baseIdx = index * 4;
+                 return (cData[baseIdx] / 255.0f, cData[baseIdx + 1] / 255.0f, cData[baseIdx + 2] / 255.0f, cData[baseIdx + 3] / 255.0f);
+             }
+
+             var vTL = GetC(iy * 9 + ix);
+             var vTR = GetC(iy * 9 + ix + 1);
+             var vBL = GetC((iy + 1) * 9 + ix);
+             var vBR = GetC((iy + 1) * 9 + ix + 1);
+             var vC = GetC(81 + iy * 8 + ix); 
+             
+             (float r, float g, float b, float a) res;
+
+             if (dy < dx && dy < 1.0f - dx) // Top 
+             {
+                 float wTL = 1 - dx - dy; float wTR = dx - dy; float wC = 2 * dy;
+                 res = (vTL.r * wTL + vTR.r * wTR + vC.r * wC, vTL.g * wTL + vTR.g * wTR + vC.g * wC, vTL.b * wTL + vTR.b * wTR + vC.b * wC, vTL.a * wTL + vTR.a * wTR + vC.a * wC);
+             }
+             else if (dy > dx && dy > 1.0f - dx) // Bottom
+             {
+                 float wBL = dy - dx; float wBR = dx + dy - 1; float wC = 2 * (1 - dy);
+                 res = (vBL.r * wBL + vBR.r * wBR + vC.r * wC, vBL.g * wBL + vBR.g * wBR + vC.g * wC, vBL.b * wBL + vBR.b * wBR + vC.b * wC, vBL.a * wBL + vBR.a * wBR + vC.a * wC);
+             }
+             else if (dx < dy && dx < 1.0f - dy) // Left
+             {
+                 float wTL = 1 - dx - dy; float wBL = dy - dx; float wC = 2 * dx;
+                 res = (vTL.r * wTL + vBL.r * wBL + vC.r * wC, vTL.g * wTL + vBL.g * wBL + vC.g * wC, vTL.b * wTL + vBL.b * wBL + vC.b * wC, vTL.a * wTL + vBL.a * wBL + vC.a * wC);
+             }
+             else // Right
+             {
+                 float wTR = dx - dy; float wBR = dy + dx - 1; float wC = 2 * (1 - dx);
+                 res = (vTR.r * wTR + vBR.r * wBR + vC.r * wC, vTR.g * wTR + vBR.g * wBR + vC.g * wC, vTR.b * wTR + vBR.b * wBR + vC.b * wC, vTR.a * wTR + vBR.a * wBR + vC.a * wC);
+             }
+             return (Math.Clamp(res.r, 0f, 1f), Math.Clamp(res.g, 0f, 1f), Math.Clamp(res.b, 0f, 1f), Math.Clamp(res.a, 0f, 1f));
+        }
+
+        for (int y = 0; y < size; y++)
+        {
+            float v = y / (float)(size - 1);
+            float cy = v * 16;
+            int cIy = Math.Clamp((int)cy, 0, 15);
+
+            for (int x = 0; x < size; x++)
+            {
+                float u = x / (float)(size - 1);
+                float cx = u * 16;
+                int cIx = Math.Clamp((int)cx, 0, 15);
+
+                int chunkIndex = cIy * 16 + cIx;
+
+                if (!mccvDict.TryGetValue(chunkIndex, out var cData))
+                {
+                    image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(127, 127, 127, 255);
+                    continue;
+                }
+
+                float lx = Math.Clamp(cx - cIx, 0f, 1f);
+                float ly = Math.Clamp(cy - cIy, 0f, 1f);
+                var (r, g, b, a) = SampleColor(cData, lx, ly);
+                
+                image[x, y] = new SixLabors.ImageSharp.PixelFormats.Rgba32(r, g, b, a);
+            }
+        }
+
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
     }
 
     private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)
@@ -2034,5 +2336,123 @@ public class VlmDatasetExporter
         
         _modelBoundsCache[key] = null;
         return null;
+    }
+
+    private async Task<string> WriteBinaryTile(VlmTerrainData data, string outputDir)
+    {
+        var binFilename = $"{data.AdtTile.Replace(".adt", "")}.bin";
+        var binPath = Path.Combine(outputDir, binFilename);
+        var relPath = binFilename; // root relative
+
+        await using var fs = new FileStream(binPath, FileMode.Create, FileAccess.Write);
+        using var bw = new BinaryWriter(fs);
+
+        // 1. Header (16 bytes)
+        bw.Write(System.Text.Encoding.ASCII.GetBytes("VLM1")); // Magic
+        bw.Write((int)1); // Version
+        bw.Write((int)0); // Flags
+        bw.Write((int)256); // NumChunks
+
+        // 2. Placeholder for Offset Table (256 * 8 bytes = 2048 bytes)
+        long offsetTablePos = fs.Position;
+        bw.Write(new byte[256 * 8]); // Fill with zeros
+
+        // 3. Write Chunk Data
+        var chunkOffsets = new (int offset, int size)[256];
+        var heightDict = data.Heights?.ToDictionary(h => h.ChunkIndex, h => h.Heights) ?? new();
+        var chunksDict = data.ChunkLayers?.ToDictionary(c => c.ChunkIndex) ?? new();
+        var shadowDict = data.ShadowBits?.ToDictionary(s => s.ChunkIndex, s => Convert.FromBase64String(s.BitsBase64)) ?? new();
+
+        for (int i = 0; i < 256; i++)
+        {
+            long chunkStart = fs.Position;
+            
+            // Heights (Required, 0-fill if missing)
+            if (heightDict.TryGetValue(i, out var h) && h.Length == 145)
+            {
+                foreach (var val in h) bw.Write(val);
+            }
+            else
+            {
+                bw.Write(new byte[145 * 4]);
+            }
+
+            // Normals
+            var layers = chunksDict.GetValueOrDefault(i);
+            if (layers?.Normals != null && layers.Normals.Length == 145 * 3)
+            {
+                 foreach (var b in layers.Normals) bw.Write(b);
+            }
+            else
+            {
+                bw.Write(new byte[145 * 3]);
+            }
+
+            // MCCV
+            if (layers?.MccvColors != null && layers.MccvColors.Length == 145 * 4)
+            {
+                bw.Write(layers.MccvColors);
+            }
+            else
+            {
+                 bw.Write(new byte[145 * 4]);
+            }
+
+            // Shadows (Packed 64 bytes)
+            if (shadowDict.TryGetValue(i, out var sBits) && sBits.Length >= 512)
+            {
+                 if (sBits.Length == 512) bw.Write(sBits);
+                 else bw.Write(sBits.Take(512).ToArray());
+            }
+            else
+            {
+                bw.Write(new byte[512]); // Empty shadow
+            }
+
+            // Alpha Layers (4 fixed slots, 4096 bytes each)
+            if (layers != null && layers.Layers != null)
+            {
+                for (int l = 0; l < 4; l++)
+                {
+                    bool wrote = false;
+                    if (l < layers.Layers.Length)
+                    {
+                        var lay = layers.Layers[l];
+                        var alpha = lay.AlphaData;
+                        
+                        // Treat layer > 0 as having alpha. Layer 0 alpha is usually implied or handled by splat map.
+                        // VLM protocol: We store 4 alpha channels. 
+                        // If alpha is present, write 4096 bytes.
+                        // If packed, expand? 
+                        // For now we assume AlphaData is populated correctly uncompressed 4096 bytes.
+                        // If null, write zeros.
+                        if (l > 0 && alpha != null && alpha.Length == 4096)
+                        {
+                            bw.Write(alpha);
+                            wrote = true;
+                        }
+                    }
+                    if (!wrote) bw.Write(new byte[4096]);
+                }
+            }
+            else
+            {
+                // Write 4 empty alpha slots (16 KB)
+                bw.Write(new byte[4096 * 4]);
+            }
+
+            long chunkEnd = fs.Position;
+            chunkOffsets[i] = ((int)chunkStart, (int)(chunkEnd - chunkStart));
+        }
+
+        // 4. Update Offset Table
+        fs.Seek(offsetTablePos, SeekOrigin.Begin);
+        for (int i = 0; i < 256; i++)
+        {
+            bw.Write(chunkOffsets[i].offset);
+            bw.Write(chunkOffsets[i].size);
+        }
+
+        return relPath;
     }
 }
