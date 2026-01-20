@@ -1,16 +1,19 @@
 # Active Context
 
-## Current Focus: V8 Implementation (Jan 18, 2026)
+## Current Focus: Multi-Version ADT Support (Jan 19, 2026)
 
 ### Status Summary
 
-**V8 RECONSTRUCTION BRANCH**: Core infrastructure implemented.
-- **Binary Format Integrated**: `.bin` files (Heights/Normals/Shadows/Alpha) now used for training.
-- **Split ADT Support**: `ExtractFromLkAdt` updated to handle WotLK/Cata split files.
-- **Shadow Map Fix**: Corrected truncation bug (64 -> 512 bytes).
-- **Python Pipeline**: `train_v8.py` and `v8_utils.py` updated to consume `.bin` files directly.
+**3.0.1/4.0.0 SUPPORT BRANCH**: Partial progress.
+- **Minimap TRS Resolution**: ✅ FIXED - Column order and coordinate padding corrected (`Md5TranslateResolver.cs`, `VlmDatasetExporter.cs`)
+- **Split ADT Support**: ✅ `ExtractFromLkAdt` updated to handle WotLK/Cata split files (`_tex0`, `_obj0`)
+- **Normal Maps (LK)**: ❌ BROKEN - Generating incorrect data, likely MCNR offset issue
+- **Heightmaps (LK)**: ❌ BROKEN - Values corrupted, likely MCVT format difference
+- **MPQ Service**: ✅ `NativeMpqService.cs` correctly loads 12+ archives with listfile support
 
-**Next Steps**: Validation run of `vlm-batch` and initial V8 training loop.
+**Known Issue**: Alpha MCVT uses 81 outer + 64 inner floats, LK MCVT may use different layout or base height offset handling.
+
+**Next Steps**: Fix heightmap/normalmap extraction for LK format ADTs.
 
 ### V8 Key Design Decisions
 

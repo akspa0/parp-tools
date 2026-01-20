@@ -47,13 +47,51 @@ public static class Md5TranslateResolver
         "Data/textures/Minimap/md5translate.trs"
     };
 
-    public static bool TryLoad(IEnumerable<string> searchPaths, MpqArchiveService mpqService, out Md5TranslateIndex? index)
+    public static bool TryLoad(IEnumerable<string> searchPaths, NativeMpqService mpqService, out Md5TranslateIndex? index, IEnumerable<string>? extraCandidates = null)
     {
         index = null;
 
         // Strategy: Load MPQ version first (baseline), then overlay loose file version (updates)
         var idx = new Md5TranslateIndex();
         var foundAny = false;
+        
+        // 0. Check Extra Candidates (Map-specific)
+        if (extraCandidates != null)
+        {
+            foreach (var candidate in extraCandidates)
+            {
+                var mpqKey = candidate.Replace("/", "\\");
+                if (mpqService.FileExists(mpqKey))
+                {
+                    Console.WriteLine($"[Md5Translate] Found map-specific index: {mpqKey}");
+                    
+                    // Infer context from path: World\Maps\{MapName}\md5translate.trs
+                    string? initialDir = null;
+                    if (mpqKey.Contains("World\\Maps\\", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var parts = mpqKey.Split('\\');
+                        // Find "Maps" and take next
+                        for (int i = 0; i < parts.Length - 1; i++)
+                        {
+                            if (string.Equals(parts[i], "Maps", StringComparison.OrdinalIgnoreCase))
+                            {
+                                initialDir = parts[i + 1];
+                                Console.WriteLine($"[Md5Translate] Inferred context: {initialDir}");
+                                break;
+                            }
+                        }
+                    }
+
+                    var data = mpqService.ReadFile(mpqKey);
+                    if (data != null)
+                    {
+                        using var ms = new MemoryStream(data);
+                        ParseStream(ms, idx, initialDir);
+                        foundAny = true;
+                    }
+                }
+            }
+        }
         
         // 1. Check MPQ (Global)
         // We check candidates against the MPQ service
@@ -66,7 +104,7 @@ public static class Md5TranslateResolver
                 if (data != null)
                 {
                     using var ms = new MemoryStream(data);
-                    ParseStream(ms, idx);
+                    ParseStream(ms, idx); // No inferred context for global files
                     foundAny = true;
                 }
             }
@@ -96,13 +134,14 @@ public static class Md5TranslateResolver
         return false;
     }
 
-    private static void ParseStream(Stream stream, Md5TranslateIndex idx)
+    private static void ParseStream(Stream stream, Md5TranslateIndex idx, string? initialDir = null)
     {
         try
         {
             using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
-            string? currentDir = null; // from lines like: "dir: Azeroth"
+            string? currentDir = initialDir != null ? idx.Normalize(initialDir).Trim('/') : null; 
             string? line;
+            int count = 0;
             while ((line = reader.ReadLine()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
@@ -116,22 +155,30 @@ public static class Md5TranslateResolver
                     if (!string.IsNullOrWhiteSpace(dirName))
                     {
                         currentDir = idx.Normalize(dirName).Trim('/');
+                        // Console.WriteLine($"[DEBUG] TRS Context Switch: {currentDir}");
                     }
                     continue;
                 }
 
-                // split on whitespace into two parts
+                // split on whitespace into two parts (tab or space)
                 var parts = trimmed.Split((char[])null!, 2, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 2)
                 {
+                    // TRS format per wowdev.wiki/TRS.md:
+                    //   block_entry := map_basename "\map" x "_" y ".blp\t" actual_filename "\n"
+                    // So parts[0] = plain name (e.g., "Azeroth\map26_29.blp")
+                    //    parts[1] = md5 hash filename (e.g., "fa32ced4...blp")
                     AddWithVariants(idx, parts[0], parts[1], currentDir);
+                    count++;
                 }
                 else if (parts.Length > 2)
                 {
-                    // best-effort: last token is destination, first is source
+                    // best-effort: first is plain, last is hash
                     AddWithVariants(idx, parts[0], parts[^1], currentDir);
+                    count++;
                 }
             }
+            Console.WriteLine($"[DEBUG] Parsed {count} entries from TRS stream.");
         }
         catch (Exception ex)
         {

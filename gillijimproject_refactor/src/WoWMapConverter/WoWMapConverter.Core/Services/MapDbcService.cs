@@ -13,7 +13,7 @@ public class MapDbcService
     
     public bool IsLoaded => _mapDirectoryLookup.Count > 0;
 
-    public void Load(IEnumerable<string> searchPaths, MpqArchiveService? mpqService)
+    public void Load(IEnumerable<string> searchPaths, NativeMpqService? mpqService)
     {
         if (IsLoaded) return;
 

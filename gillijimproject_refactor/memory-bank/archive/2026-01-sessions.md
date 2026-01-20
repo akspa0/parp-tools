@@ -1,5 +1,24 @@
 # Archived Sessions - January 2026
 
+## Session Jan 19, 2026 - Minimap TRS Path Resolution Fix ✅
+
+### Root Cause: TRS Column Order + Coordinate Padding
+**Problem**: 3.0.1/4.0.0 VLM export only finding 2/342 minimap tiles despite md5translate.trs loading 13,531 entries.
+
+**Issues Found via Ghidra RE + wowdev.wiki/TRS.md**:
+1. **Column Order Reversed**: Code assumed `<hash> <plain>` but TRS format is `<plain>\t<hash>`
+2. **Coordinate Padding Wrong**: Code used `D2` for both x,y but TRS uses `map_%d_%02d.blp` (x not padded)
+
+**Files Modified**:
+- `Md5TranslateResolver.cs` - Swapped column order in parser (lines 163-177)
+- `VlmDatasetExporter.cs` - Added correct TRS format candidates (lines 1537-1575)
+
+**Result**: 50/50 tiles now found (100% success rate)
+
+### Remaining Issues (LK/Cata ADT)
+- **Heightmaps**: ❌ Values corrupted - likely MCVT format difference from Alpha
+- **Normal Maps**: ❌ Incorrect data - likely MCNR offset issue
+
 ## Session Jan 16, 2026 (Late) - Global Normalization Fix ✅
 
 ### Root Cause: Per-Tile Normalization Seams

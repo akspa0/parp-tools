@@ -24,17 +24,15 @@ public static class AlphaMapService
     {
         var amap = new byte[AlphaSize];
 
-        if (useBigAlphamaps)
+        // Check for compression flag (0x200) regardless of MPHD setting
+        // WotLK often uses compressed alpha maps without the BigAlpha flag in MPHD
+        if ((flags & 0x200) != 0)
         {
-            // Can only compress big alpha (flag 0x200)
-            if ((flags & 0x200) != 0)
-            {
-                ReadCompressed(data, offset, amap);
-            }
-            else
-            {
-                ReadBigAlpha(data, offset, amap);
-            }
+            ReadCompressed(data, offset, amap);
+        }
+        else if (useBigAlphamaps)
+        {
+            ReadBigAlpha(data, offset, amap);
         }
         else
         {

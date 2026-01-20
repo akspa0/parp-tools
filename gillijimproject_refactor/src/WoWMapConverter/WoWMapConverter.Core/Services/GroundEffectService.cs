@@ -12,7 +12,7 @@ public class GroundEffectService
     private readonly Dictionary<uint, string> _doodadModels = new();
     private bool _loaded = false;
 
-    public void Load(IEnumerable<string> searchPaths, MpqArchiveService? mpqService = null)
+    public void Load(IEnumerable<string> searchPaths, NativeMpqService? mpqService = null)
     {
         if (_loaded) return;
 

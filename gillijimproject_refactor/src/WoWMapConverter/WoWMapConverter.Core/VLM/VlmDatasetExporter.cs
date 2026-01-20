@@ -24,7 +24,7 @@ public class VlmDatasetExporter
     
     // Cache for model bounding boxes: modelPath -> (boundsMin, boundsMax)
     private readonly ConcurrentDictionary<string, (float[] Min, float[] Max)?> _modelBoundsCache = new();
-    private MpqArchiveService? _mpqService;
+    private NativeMpqService? _mpqService;
 
     public async Task ExportBatchAsync(VlmBatchExportConfig config, IProgress<string>? progress = null)
     {
@@ -95,8 +95,14 @@ public class VlmDatasetExporter
         byte[]? wdtData = null;
         
         // Initialize MPQ Service early so we can search archives for WDT
-        using var mpqService = new MpqArchiveService();
+        using var mpqService = new NativeMpqService();
         mpqService.LoadArchives(searchPaths);
+
+        // Load community listfile for debugging
+        var listfile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_data", "community-listfile-withcapitals.csv");
+        if (File.Exists(listfile)) mpqService.LoadListfile(listfile);
+        else if (File.Exists("community-listfile-withcapitals.csv")) mpqService.LoadListfile("community-listfile-withcapitals.csv");
+        else if (File.Exists("listfile.csv")) mpqService.LoadListfile("listfile.csv");
         
         foreach (var tryPath in wdtPaths)
         {
@@ -163,24 +169,67 @@ public class VlmDatasetExporter
 
         // Initialize MD5 Translate Service (Legacy)
         Md5TranslateIndex? md5Index = null;
-        if (Md5TranslateResolver.TryLoad(searchPaths, mpqService, out var loadedIndex))
+        
+        // Also check map-specific TRS file (often found in newer clients)
+        var mapTrs = $"World\\Maps\\{mapDirectory}\\md5translate.trs";
+        var extraCandidates = new[] { mapTrs };
+
+        if (Md5TranslateResolver.TryLoad(searchPaths, mpqService, out var loadedIndex, extraCandidates))
         {
             md5Index = loadedIndex;
             Console.WriteLine($"Loaded MD5 Translate Index with {md5Index?.HashToPlain.Count} entries.");
+            
+            // md5Index loaded successfully
         }
 
         // Initialize GroundEffectService
         var groundEffectService = new GroundEffectService();
         groundEffectService.Load(searchPaths, mpqService);  // Pass mpqService to GroundEffectService (need update)
 
-        WdtAlpha wdt;
+        // Detect WDT format using file size:
+        // - Alpha 0.5.3 WDT: Large file (contains embedded ADT data, typically several MB)
+        // - LK 3.3.5+ WDT: Small file (~32KB, only tile existence flags, ADTs are separate files)
+        long wdtFileSize = new FileInfo(wdtPath).Length;
+        bool isAlphaFormat = wdtFileSize > 100_000; // Alpha WDTs are typically > 1MB
+        if (isAlphaFormat)
+        {
+            progress?.Report($"Detected Alpha format WDT ({wdtFileSize:N0} bytes - embedded ADT data)");
+        }
+        else
+        {
+            progress?.Report($"Detected LK format WDT ({wdtFileSize:N0} bytes - separate ADT files in MPQ)");
+        }
+
+        // Enumerate existing tiles based on WDT format
+        List<int> existingTiles;
+        WdtAlpha? wdt = null;
+        List<int>? adtOffsets = null;
+        List<string>? mdnmNames = null;
+        List<string>? monmNames = null;
+        
         try
         {
-            wdt = new WdtAlpha(wdtPath);
+            if (isAlphaFormat)
+            {
+                // Alpha 0.5.3: Use WdtAlpha parser (monolithic WDT with embedded ADTs)
+                wdt = new WdtAlpha(wdtPath);
+                existingTiles = wdt.GetExistingAdtsNumbers();
+                adtOffsets = wdt.GetAdtOffsetsInMain();
+                mdnmNames = wdt.GetMdnmFileNames();
+                monmNames = wdt.GetMonmFileNames();
+                progress?.Report($"[Alpha WDT] Found {existingTiles.Count} embedded tiles");
+            }
+            else
+            {
+                // LK 3.0.1+: Read MAIN chunk to enumerate tiles
+                var wdtBytes = wdtData ?? await File.ReadAllBytesAsync(wdtPath);
+                existingTiles = ReadLkWdtTiles(wdtBytes);
+                progress?.Report($"[LK WDT] Found {existingTiles.Count} tiles from MAIN chunk");
+            }
         }
         catch (Exception ex)
         {
-            progress?.Report($"Failed to parse WDT: {ex.Message}");
+            progress?.Report($"Failed to enumerate WDT tiles: {ex.Message}");
             return new VlmExportResult(0, 0, 0, outputDir);
         }
 
@@ -245,27 +294,28 @@ public class VlmDatasetExporter
             Console.WriteLine($"[Warning] Failed to load WDL: {ex.Message}");
         }
 
-        var existingTiles = wdt.GetExistingAdtsNumbers();
-        var adtOffsets = wdt.GetAdtOffsetsInMain();
-        var mdnmNames = wdt.GetMdnmFileNames();
-        var monmNames = wdt.GetMonmFileNames();
-        
         progress?.Report($"Found {existingTiles.Count} tiles in WDT");
         
-        // Detect WDT format using file size:
-        // - Alpha 0.5.3 WDT: Large file (contains embedded ADT data, typically several MB)
-        // - LK 3.3.5+ WDT: Small file (~32KB, only tile existence flags, ADTs are separate files)
-        long wdtFileSize = new FileInfo(wdtPath).Length;
-        bool isAlphaFormat = wdtFileSize > 100_000; // Alpha WDTs are typically > 1MB
+        // Extract MPHD flags from WDT for LK format (needed for useBigAlphamaps)
+        uint wdtMphdFlags = 0;
         if (!isAlphaFormat)
         {
-            progress?.Report($"Detected LK format WDT ({wdtFileSize:N0} bytes - separate ADT files in MPQ)");
+            try
+            {
+                // Read WDT and find MPHD chunk
+                var wdtBytes = wdtData ?? (wdtPath != null ? await File.ReadAllBytesAsync(wdtPath) : null);
+                if (wdtBytes != null)
+                {
+                    int mphdOffset = FindLkChunk(wdtBytes, "MPHD");
+                    if (mphdOffset >= 0 && mphdOffset + 12 < wdtBytes.Length)
+                    {
+                        wdtMphdFlags = BitConverter.ToUInt32(wdtBytes, mphdOffset + 8);
+                        progress?.Report($"WDT MPHD flags: 0x{wdtMphdFlags:X} (useBigAlphamaps={(wdtMphdFlags & 0x4) != 0})");
+                    }
+                }
+            }
+            catch { }
         }
-        else
-        {
-            progress?.Report($"Detected Alpha format WDT ({wdtFileSize:N0} bytes - embedded ADT data)");
-        }
-
         int tilesExported = 0;
         int tilesSkipped = 0;
         var allTextures = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
@@ -304,7 +354,7 @@ public class VlmDatasetExporter
                 if (isAlphaFormat)
                 {
                     // Alpha format: ADT data is embedded in WDT at offset
-                    int adtOffset = tileIndex < adtOffsets.Count ? adtOffsets[tileIndex] : 0;
+                    int adtOffset = tileIndex < adtOffsets!.Count ? adtOffsets[tileIndex] : 0;
                     if (adtOffset <= 0)
                     {
                         Interlocked.Increment(ref tilesSkipped);
@@ -326,7 +376,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using AdtAlpha's methods
                     sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, mdnmNames, monmNames, allTextures, groundEffectService, wdlTile, clientPath);
+                        shadowsDir, masksDir, mdnmNames!, monmNames!, allTextures, groundEffectService, wdlTile, clientPath);
                 }
                 else
                 {
@@ -361,7 +411,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using LK/Modern ADT parsing
                     sample = await ExtractFromLkAdt(adtBytes, texBytes, objBytes, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, allTextures, mpqService, groundEffectService, wdlTile);
+                        shadowsDir, masksDir, allTextures, mpqService, groundEffectService, wdlTile, wdtMphdFlags);
                 }
 
                 if (sample == null)
@@ -490,20 +540,28 @@ public class VlmDatasetExporter
                     // Usually it is relative like "Textures\Grass.blp"
                     
                     // Try common locations
-                    var candidates = new[]
-                    {
-                        Path.Combine(dataPath, texture)
-                    };
+                    // Try common locations
+                    var candidates = new List<string>();
+                    
+                    // Try MPQ first (most likely for tilesets)
+                    // Ensure texture has backslashes for consistency, though NativeMpq handles it
+                    candidates.Add($"MPQ:{texture}");
+                    
+                    // Also try looking on disk (Data folder)
+                    candidates.Add(Path.Combine(dataPath, texture));
+
                     
                     bool converted = false;
-                    foreach (var path in candidates)
+                     foreach (var path in candidates)
                     {
-                         if (ConvertBlpToPng(path, pngPath))
+                         // Pass mpqService so it can read MPQ: paths
+                         if (ConvertBlpToPng(path, pngPath, mpqService))
                          {
                              converted = true;
                              break;
                          }
                     }
+
                     if (converted) textureCount++;
                 }
             }
@@ -1018,8 +1076,9 @@ public class VlmDatasetExporter
     private async Task<VlmTerrainData?> ExtractFromLkAdt(
         byte[] adtBytes, byte[]? texBytes, byte[]? objBytes, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
-        ConcurrentDictionary<string, byte> textureCollector, MpqArchiveService mpqService,
-        GroundEffectService? groundEffectService = null, WdlParser.WdlTile? wdlTile = null)
+        ConcurrentDictionary<string, byte> textureCollector, NativeMpqService mpqService,
+        GroundEffectService? groundEffectService = null, WdlParser.WdlTile? wdlTile = null,
+        uint wdtMphdFlags = 0)
     {
         var heights = new List<VlmChunkHeights>();
         var chunkPositions = new float[256 * 3];
@@ -1062,8 +1121,9 @@ public class VlmDatasetExporter
             }
 
             int mhdrDataStart = mhdrOffset + 8;
-            int mhdrFlags = BitConverter.ToInt32(adtBytes, mhdrDataStart);
-            bool useBigAlphamaps = (mhdrFlags & 4) != 0; // 0x4 = 4096 byte alpha
+            // Note: mhdrFlags in ADT MHDR are chunk offsets, NOT format flags
+            // useBigAlphamaps MUST come from WDT MPHD, not ADT MHDR!
+            bool useBigAlphamaps = (wdtMphdFlags & 0x4) != 0; // WDT MPHD flag 0x4 = 4096 byte alpha
 
             int mcinRelOffset = BitConverter.ToInt32(adtBytes, mhdrDataStart + 4); // MCIN offset (0x04)
 
@@ -1161,11 +1221,13 @@ public class VlmDatasetExporter
                     int holesValue = BitConverter.ToInt32(adtBytes, headerStart + 60);
                     holes[chunkIndex] = holesValue;
 
-                    // MCVT (Heights): 0x10 -> +16
-                    int mcvtRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x10);
+                    // MCVT (Heights): Per ADT wiki, ofsHeight is at offset 0x14 in MCNK header
+                    // IMPORTANT: Per ADT wiki, offsets are relative to MCNK chunk START (not data start)
+                    int mcvtRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x14);
                     if (mcvtRelOffset > 0)
                     {
-                        int mcvtAbs = headerStart + mcvtRelOffset + 8;
+                        // mcvtRelOffset is relative to mcnkOffset (chunk start), then +8 to skip MCVT header
+                        int mcvtAbs = mcnkOffset + mcvtRelOffset + 8;
                         if (mcvtAbs + 145 * 4 <= adtBytes.Length)
                         {
                             var chunkHeights = new float[145];
@@ -1180,12 +1242,14 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // MCNR (Normals): 0x14 -> +20
-                    int mcnrRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x14);
+                    // MCNR (Normals): Per ADT wiki, ofsNormal is at offset 0x18 in MCNK header
+                    // IMPORTANT: Per ADT wiki, offsets are relative to MCNK chunk START (not data start)
+                    int mcnrRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x18);
                     sbyte[]? normalsArray = null;
                     if (mcnrRelOffset > 0)
                     {
-                        int mcnrAbs = headerStart + mcnrRelOffset + 8;
+                        // mcnrRelOffset is relative to mcnkOffset (chunk start), then +8 to skip MCNR header
+                        int mcnrAbs = mcnkOffset + mcnrRelOffset + 8;
                         if (mcnrAbs + 145 * 3 <= adtBytes.Length)
                         {
                             normalsArray = new sbyte[145 * 3];
@@ -1281,33 +1345,35 @@ public class VlmDatasetExporter
                         }
                     }
 
-                    // MCLY (0x18 -> +24) and MCAL (0x20 -> +32)
-                    int mclyRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x1C); // 0x1C MCLY
-                    int mcalRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x20); // 0x20 MCAL?
-                    // Offsets check:
-                    // 0x10 MCVT, 0x14 MCNR, 0x18 MCLY -> Wait.
-                    // 0x10=16. 0x14=20. 0x18=24.
-                    // So MCLY IS AT 0x18 (+24).
-                    mclyRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x18);
-                    mcalRelOffset = BitConverter.ToInt32(texContext, texHeaderStart + 0x20); // 0x20 = 32. MCAL.
+                    // Per wowdev.wiki: MCNK header offsets are RELATIVE TO MCNK CHUNK START (not header start)
+                    // MCNK header layout:
+                    //   0x00: flags, 0x04: indexX, 0x08: indexY, 0x0C: nLayers
+                    //   0x1C: ofsLayer (MCLY), 0x24: ofsAlpha (MCAL), 0x28: sizeAlpha
+                    
+                    // For WotLK 3.0.1, there are NO split tex0 files - MCLY/MCAL are in main ADT
+                    // Always use adtBytes and mcnkOffset for WotLK
+                    int mclyRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x1C); // ofsLayer
+                    int mcalRelOffset = BitConverter.ToInt32(adtBytes, headerStart + 0x24); // ofsAlpha
+                    int nLayers = BitConverter.ToInt32(adtBytes, headerStart + 0x0C); // nLayers at 0x0C
                     
                     var layerList = new List<VlmTextureLayer>();
-                    if (mclyRelOffset > 0 && mcalRelOffset > 0)
+                    if (mclyRelOffset > 0 && nLayers > 0)
                     {
-                        int mclyAbs = texHeaderStart + mclyRelOffset + 8;
-                        int mcalAbs = texHeaderStart + mcalRelOffset + 8; 
+                        // Offsets are relative to MCNK chunk start, not header start!
+                        int mclyAbs = mcnkOffset + mclyRelOffset;
+                        int mcalAbs = mcalRelOffset > 0 ? mcnkOffset + mcalRelOffset : 0;
                         
-                        int nLayers = BitConverter.ToInt32(texContext, texHeaderStart + 0x08); // 0x08 = nLayers
-                        if (nLayers <= 0) nLayers = 0; if (nLayers > 4) nLayers = 4;
+                        if (nLayers > 4) nLayers = 4;
                         
                         for (int l = 0; l < nLayers; l++)
                         {
-                            if (mclyAbs + (l + 1) * 16 > texContext.Length) break;
+                            if (mclyAbs + (l + 1) * 16 > adtBytes.Length) break;
                             
-                            uint tId = BitConverter.ToUInt32(texContext, mclyAbs + l * 16);
-                            uint flags = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 4);
-                            uint aOff = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 8);
-                            uint eff = BitConverter.ToUInt32(texContext, mclyAbs + l * 16 + 12);
+                            // MCLY entry: textureId (4), flags (4), alphaOffset (4), effectId (4) = 16 bytes
+                            uint tId = BitConverter.ToUInt32(adtBytes, mclyAbs + l * 16);
+                            uint flags = BitConverter.ToUInt32(adtBytes, mclyAbs + l * 16 + 4);
+                            uint aOff = BitConverter.ToUInt32(adtBytes, mclyAbs + l * 16 + 8);
+                            uint eff = BitConverter.ToUInt32(adtBytes, mclyAbs + l * 16 + 12);
                             
                             string? texturePath = tId < textures.Count ? textures[(int)tId] : null;
                             string[]? effects = (eff > 0 && groundEffectService != null) ? groundEffectService.GetDoodadsEffect(eff) : null;
@@ -1316,22 +1382,20 @@ public class VlmDatasetExporter
                             string? alphaPath = null;
                             byte[]? alphaBytes = null;
                             
-                            if (l > 0)
+                            // Layer 0 has no alpha (it's the base texture)
+                            // Layers 1-3 have alpha maps at MCAL + their offset
+                            if (l > 0 && mcalAbs > 0)
                             {
                                 try {
-                                    // Use AlphaMapService logic
-                                    // Provide absolute offset to alpha data start for this layer
+                                    // aOff is the offset within the MCAL chunk data
                                     int layerAlphaStart = mcalAbs + (int)aOff;
                                     
-                                    // Validation
-                                    if (layerAlphaStart < texContext.Length)
+                                    if (layerAlphaStart < adtBytes.Length)
                                     {
-                                         var alpha = AlphaMapService.ReadAlpha(texContext, layerAlphaStart, flags, useBigAlphamaps, doNotFixAlphaMap);
+                                         var alpha = AlphaMapService.ReadAlpha(adtBytes, layerAlphaStart, flags, useBigAlphamaps, doNotFixAlphaMap);
                                          if (alpha != null && alpha.Length == 64*64)
                                          {
                                              alphaBytes = alpha;
-                                             // Also save PNG/Base64 for debug?
-                                             // Saving PNG for visual debug
                                              var png = AlphaMapService.ToPng(alpha);
                                              var aName = $"{tileName}_c{chunkIndex}_l{l}.png";
                                              File.WriteAllBytes(Path.Combine(masksDir, aName), png);
@@ -1434,26 +1498,74 @@ public class VlmDatasetExporter
         return -1;
     }
 
-    private string? FindMinimapTile(IEnumerable<string> searchPaths, MpqArchiveService mpqService, Md5TranslateIndex? index, string mapName, int x, int y)
+    /// <summary>
+    /// Read the MAIN chunk from an LK WDT and enumerate existing tiles.
+    /// LK MAIN chunk: 64x64 grid (4096 entries), 8 bytes each.
+    /// Bytes 0-3: flags (0 = no tile, non-zero = tile exists)
+    /// Bytes 4-7: async_id (unused for enumeration)
+    /// </summary>
+    private static List<int> ReadLkWdtTiles(byte[] wdtBytes)
+    {
+        var tiles = new List<int>();
+        
+        int mainOffset = FindLkChunk(wdtBytes, "MAIN");
+        if (mainOffset < 0)
+            throw new InvalidDataException("MAIN chunk not found in LK WDT");
+        
+        int mainSize = BitConverter.ToInt32(wdtBytes, mainOffset + 4);
+        int mainDataStart = mainOffset + 8;
+        
+        // MAIN should be 64x64 * 8 bytes = 32768 bytes
+        if (mainSize < 64 * 64 * 8)
+            throw new InvalidDataException($"MAIN chunk too small: {mainSize} bytes (expected {64 * 64 * 8})");
+        
+        // Read 4096 tile entries
+        for (int i = 0; i < 64 * 64; i++)
+        {
+            int entryOffset = mainDataStart + (i * 8);
+            if (entryOffset + 8 > wdtBytes.Length)
+                break;
+            
+            uint flags = BitConverter.ToUInt32(wdtBytes, entryOffset);
+            
+            // If flags != 0, tile exists
+            if (flags != 0)
+            {
+                tiles.Add(i);
+            }
+        }
+        
+        return tiles;
+    }
+
+    private string? FindMinimapTile(IEnumerable<string> searchPaths, NativeMpqService mpqService, Md5TranslateIndex? index, string mapName, int x, int y)
     {
         // Generate all possible plain-name candidates for this tile
-        // matching legacy MinimapFileResolver.EnumeratePlainCandidates
+        // TRS format per wowdev.wiki/TRS.md: map_%d_%02d.blp (x not padded, y 2-digit padded)
         var candidates = new List<string>();
         
-        var x2 = x.ToString("D2");
-        var y2 = y.ToString("D2");
+        var x2 = x.ToString("D2");  // Zero-padded (legacy)
+        var y2 = y.ToString("D2");  // Zero-padded (legacy)
         
-        // 1. Standard full paths
+        // TRS format: x not padded, y 2-digit padded (map_26_09.blp for x=26, y=9)
+        var trsFormat = $"map{x}_{y2}.blp";
+        
+        // 1. TRS format candidates (highest priority - matches actual TRS file format)
+        candidates.Add($"{mapName}\\{trsFormat}");  // Exact TRS format with backslash
+        candidates.Add($"{mapName}/{trsFormat}");   // Forward slash variant
+        candidates.Add($"textures/minimap/{mapName}/{trsFormat}");
+        
+        // 2. Legacy formats (both coords padded)
         candidates.Add($"textures/minimap/{mapName}/{mapName}_{x2}_{y2}.blp");
         candidates.Add($"textures/minimap/{mapName}/map{x2}_{y2}.blp");
-        
-        // 2. Short paths (often used in md5translate)
         candidates.Add($"{mapName}/map{x2}_{y2}.blp");
         
         // 3. Space variants (0.6.0 bug)
         var mapNameSpace = InsertSpaceBeforeCapitals(mapName);
         if (mapNameSpace != mapName)
         {
+            candidates.Add($"{mapNameSpace}\\{trsFormat}");
+            candidates.Add($"textures/minimap/{mapNameSpace}/{trsFormat}");
             candidates.Add($"textures/minimap/{mapNameSpace}/{mapNameSpace}_{x2}_{y2}.blp");
             candidates.Add($"textures/minimap/{mapNameSpace}/map{x2}_{y2}.blp");
             candidates.Add($"{mapNameSpace}/map{x2}_{y2}.blp");
@@ -1466,18 +1578,84 @@ public class VlmDatasetExporter
         candidates.Add($"Textures/Minimap/{mapName}_{x}_{y}.blp");
 
         // PRIORITY 1: Check MD5 Index for ANY candidate
+        bool debugTile = (x == 18 && y == 10) || (x == 44 && y == 26);  // Only debug specific tiles
+        if (debugTile)
+        {
+            Console.WriteLine($"\n[DEBUG] FindMinimapTile for {mapName} {x}_{y}");
+            Console.WriteLine($"[DEBUG] Generated {candidates.Count} candidates:");
+            foreach (var c in candidates)
+                Console.WriteLine($"  - {c}");
+        }
+        
         if (index != null)
         {
+            if (debugTile)
+            {
+                Console.WriteLine($"\n[DEBUG] Checking md5Index (Total entries: {index.PlainToHash.Count})");
+                
+                // Show sample of what's actually stored in the index FOR THIS MAP
+                Console.WriteLine($"[DEBUG] Sample PlainToHash entries containing '{mapName}':");
+                int sampleCount = 0;
+                foreach (var kvp in index.PlainToHash)
+                {
+                    if (sampleCount >= 10) break;
+                    if (kvp.Key.Contains(mapName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"  KEY: '{kvp.Key}' => VAL: '{kvp.Value}'");
+                        sampleCount++;
+                    }
+                }
+                if (sampleCount == 0)
+                {
+                    Console.WriteLine($"  [WARNING] No entries found containing '{mapName}'!");
+                    // Show a few random entries to understand format
+                    Console.WriteLine($"[DEBUG] Sample PlainToHash entries (first 5):");
+                    foreach (var kvp in index.PlainToHash.Take(5))
+                    {
+                        Console.WriteLine($"  KEY: '{kvp.Key}' => VAL: '{kvp.Value}'");
+                    }
+                }
+            }
+            
             foreach (var candidate in candidates)
             {
                 // Normalize for lookup (legacy uses internal normalization, but our dict is case-insensitive too)
                 var lookupKey = candidate.Replace('\\', '/').TrimStart('/');
+                var normalizedKey = lookupKey.ToLowerInvariant();
                 
-                if (index.PlainToHash.TryGetValue(lookupKey, out var hashed))
+                if (debugTile)
+                {
+                    Console.WriteLine($"\n[DEBUG] Trying candidate: '{candidate}'");
+                    Console.WriteLine($"  Lookup key: '{lookupKey}'");
+                    Console.WriteLine($"  Normalized: '{normalizedKey}'");
+                }
+                
+                bool found = index.PlainToHash.TryGetValue(lookupKey, out var hashed);
+                if (!found)
+                {
+                    // Try lowercase as fallback (md5translate often uses lowercase)
+                    found = index.PlainToHash.TryGetValue(normalizedKey, out hashed);
+                    if (debugTile && found)
+                    {
+                        Console.WriteLine($"  Found via lowercase: YES -> '{hashed}'");
+                    }
+                }
+                else if (debugTile)
+                {
+                    Console.WriteLine($"  Found directly: YES -> '{hashed}'");
+                }
+
+                if (found)
                 {
                     // Found a mapping!
                     // The 'hashed' value is the filename in the MPQ.
                     var mpqKey = hashed.Replace("/", "\\");
+                    
+                    if (debugTile)
+                    {
+                        Console.WriteLine($"  MPQ key to check: '{mpqKey}'");
+                    }
+                    
                     if (mpqService.FileExists(mpqKey))
                     {
                         Console.WriteLine($"[Match] Translated '{candidate}' -> '{hashed}' (Found in MPQ)");
@@ -1488,10 +1666,25 @@ public class VlmDatasetExporter
                     foreach (var bp in searchPaths)
                     {
                          var hp = Path.Combine(bp, hashed);
-                         if (File.Exists(hp)) return hp;
+                         if (File.Exists(hp))
+                         {
+                             if (debugTile) Console.WriteLine($"  Found on disk: {hp}");
+                             return hp;
+                         }
                     }
                     
+                    if (debugTile)
+                    {
+                        Console.WriteLine($"  File '{mpqKey}' not found in MPQ or disk!");
+                    }
                     Console.WriteLine($"[Mapping Found] '{candidate}' -> '{hashed}' but file missing.");
+                }
+                else
+                {
+                    if (debugTile)
+                    {
+                        Console.WriteLine($"  Found: NO");
+                    }
                 }
             }
         }
@@ -1989,7 +2182,7 @@ public class VlmDatasetExporter
         progress?.Report($"Global heightmaps generated with range {globalMin} to {globalMax}");
     }
 
-    private bool ConvertBlpToPng(string blpPath, string pngPath, MpqArchiveService? mpqService = null)
+    private bool ConvertBlpToPng(string blpPath, string pngPath, NativeMpqService? mpqService = null)
     {
         try
         {
@@ -2012,31 +2205,62 @@ public class VlmDatasetExporter
             if (blpData == null || blpData.Length == 0)
             {
                 Console.WriteLine($"Empty BLP data: {blpPath}");
+                if (blpPath.StartsWith("MPQ:") && mpqService != null)
+                {
+                     string k = blpPath.Substring(4);
+                     if (mpqService.HasFile(k))
+                         Console.WriteLine($"[DEBUG] CRITICAL: File exists in MPQ but ReadFile failed! Key: {k}");
+                     else
+                         Console.WriteLine($"[DEBUG] File not found in MPQ archives: {k}");
+                }
                 return false;
             }
+
 
             using var ms = new MemoryStream(blpData);
             using var blp = new SereniaBLPLib.BlpFile(ms);
             using var bmp = blp.GetBitmap(0);
 
-            // Upscale to 512x512 to match V7 dataset standard
-            if (bmp.Width != 512 || bmp.Height != 512)
+            // V7 Dataset Standard requires 512x512 for terrain tiles, 
+            // but older dataset tools expect 256x256 for MINIMAP tiles?
+            // User says: "minimap tiles in 4.0.0 are 512x512... it breaks all the dataset tools".
+            // So we should specificially RESIZE MINIMAP TILES to 256x256 if they are 512x512.
+            
+            // NOTE: This function is used for BOTH tileset textures (which we want 512) and minimaps (which might need 256).
+            // We need a flag or logic to distinguish?
+            // "blpPath" usually contains "minimap" string if it's a minimap.
+            
+            int targetWidth = 512;
+            int targetHeight = 512;
+            
+            bool isMinimap = blpPath.Contains("minimap", StringComparison.OrdinalIgnoreCase);
+            if (isMinimap)
             {
-                var resized = new System.Drawing.Bitmap(512, 512);
+                // Force minimaps to 256x256 to allow stitching tools (which expect 256) to work.
+                targetWidth = 256;
+                targetHeight = 256;
+            }
+
+            if (bmp.Width != targetWidth || bmp.Height != targetHeight)
+            {
+                var resized = new System.Drawing.Bitmap(targetWidth, targetHeight);
                 using (var g = System.Drawing.Graphics.FromImage(resized))
                 {
-                    // Use NearestNeighbor for crisp, honest upscaling (avoids "mushy" text/edges)
-                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half; // Aligns pixels correctly
-                    g.DrawImage(bmp, 0, 0, 512, 512);
+                    // Use HighQualityBicubic for downscaling to preserve detail
+                    // Use NearestNeighbor for upscaling (if needed)
+                    g.InterpolationMode = bmp.Width > targetWidth 
+                        ? System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic 
+                        : System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                        
+                    g.DrawImage(bmp, 0, 0, targetWidth, targetHeight);
                 }
                 resized.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
-                resized.Dispose();
             }
             else
             {
                 bmp.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
             }
+            
             return true;
         }
         catch (Exception ex)
@@ -2132,7 +2356,7 @@ public class VlmDatasetExporter
     /// <summary>
     /// Get model bounding box from MDX or WMO file.
     /// </summary>
-    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, MpqArchiveService mpqService)
+    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, NativeMpqService mpqService)
     {
         if (string.IsNullOrEmpty(modelPath)) return null;
         

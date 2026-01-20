@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
 from torchvision import transforms
+from scipy.ndimage import gaussian_filter
 
 # Import architecture from train script (assumes in same dir)
 # If fails, we define strictly local fallback
@@ -185,6 +186,7 @@ class V7InferenceEngine:
         return self.to_tensor(img)
 
     def predict(self, input_tensor):
+        self.last_input_tensor = input_tensor # Store for debug
         with torch.no_grad():
             pred_heightmap, pred_bounds = self.model(input_tensor)
         return pred_heightmap.cpu().numpy(), pred_bounds.cpu().numpy()
@@ -301,7 +303,7 @@ class V7InferenceEngine:
         except Exception as e:
             print(f"Debug save failed: {e}")
 
-def run_batch_inference(model_path, dataset_root, output_dir, tile_filter=None, debug=False):
+def run_batch_inference(model_path, dataset_root, output_dir, tile_filter=None, debug=False, z_scale=1.0, smooth_sigma=0.0, out_res=512):
     engine = V7InferenceEngine(model_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -339,6 +341,21 @@ def run_batch_inference(model_path, dataset_root, output_dir, tile_filter=None, 
             g_min, g_max = HEIGHT_GLOBAL_MIN, HEIGHT_GLOBAL_MAX
             hm_world = engine.denormalize_heightmap(hm_norm, g_min, g_max)
             
+            # 1. Z-Scale
+            if abs(z_scale - 1.0) > 1e-6:
+                hm_world *= z_scale
+
+            # 2. Smoothing (Gaussian)
+            if smooth_sigma > 0:
+                hm_world = gaussian_filter(hm_world, sigma=smooth_sigma)
+
+            # 3. Resizing (Downscaling/Upscaling)
+            if out_res != OUTPUT_SIZE:
+                 # Use PIL for high-quality resize of float32 array
+                im = Image.fromarray(hm_world, mode='F')
+                im = im.resize((out_res, out_res), Image.BILINEAR)
+                hm_world = np.array(im)
+            
             # Save
             # Parse Coordinates
             parts = tile_name.split("_")
@@ -356,8 +373,9 @@ def run_batch_inference(model_path, dataset_root, output_dir, tile_filter=None, 
             hm_u16 = (hm_norm * 65535).astype(np.uint16)
             Image.fromarray(hm_u16, mode='I;16').save(output_dir / f"{tile_name}_height.png")
             
-            if debug:
-                 engine.save_debug_image(input_tensor, torch.tensor(pred_hm), output_dir / f"{tile_name}_debug.png")
+             if debug:
+                 # Pass raw input tensor for debug visualization
+                 engine.save_debug_image(engine.last_input_tensor, torch.tensor(pred_hm), output_dir / f"{tile_name}_debug.png")
             
             success_count += 1
             
@@ -374,6 +392,11 @@ if __name__ == "__main__":
     parser.add_argument("--filter", help="Optional string filter for tile names (e.g. '32_48')")
     parser.add_argument("--debug", action="store_true", help="Save debug composite images")
     
+    # V7 Refinement Args
+    parser.add_argument("--z-scale", type=float, default=1.0, help="Scale factor for output Z heights (default: 1.0)")
+    parser.add_argument("--smooth-output", type=float, default=0.0, help="Sigma for Gaussian smoothing of output (default: 0.0)")
+    parser.add_argument("--res", type=int, default=512, help="Output resolution for mesh/heightmap (default: 512)")
+
     args = parser.parse_args()
     
-    run_batch_inference(args.model, args.dataset, args.out, args.filter, args.debug)
+    run_batch_inference(args.model, args.dataset, args.out, args.filter, args.debug, args.z_scale, args.smooth_output, args.res)

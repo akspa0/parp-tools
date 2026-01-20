@@ -30,6 +30,12 @@
 
 ## ⚠️ Partial / Broken
 
+### LK/Cata ADT Processing - PARTIALLY BROKEN (Jan 19, 2026)
+- **Minimap Tile Resolution**: ✅ FIXED - TRS parsing column order was reversed
+- **Normal Maps**: ❌ BROKEN - Generating incorrect data for 3.0.1 ADTs
+- **Heightmaps**: ❌ BROKEN - Values appear corrupted/incorrect for 3.0.1 ADTs
+- **Root cause**: Likely MCVT/MCNR offset or format differences between Alpha and LK
+
 ### AdtModfInjector - BROKEN
 - **Problem**: Appends MWMO/MODF chunks to end of file
 - **Result**: Corrupted ADTs that Noggit cannot read
@@ -50,9 +56,10 @@
 | V7 Inference | 🔧 Refining | Adding smoothing, Z-scaling, and downscaling |
 | V8 Spec | ✅ Complete | Transitioning to `reconstruction` branch |
 | V8 Training | ✅ Initial Run | 0.5.3 Azeroth (685 tiles), best loss 0.3178 |
-| Multi-Version ADT | 🔧 Planned | 0.5.3, 3.x, 4.x support in V8 spec |
+| Multi-Version ADT | 🔧 WIP | 0.5.3 ✅, 3.x ⚠️ (minimap OK, heightmaps broken), 4.x untested |
 | Native Resolution | ✅ Set | 145×145 (native ADT) for V8 accuracy |
 | Digital Archeology | 🚀 Initiated | Reconstructing lost data from minimap/WDL/PM4 |
+| Minimap TRS | ✅ Fixed | Jan 19 - Column order and coordinate padding corrected |
 
 ## Key Files
 

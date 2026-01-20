@@ -55,12 +55,25 @@ public class MpqArchiveService : IDisposable
         [MarshalAs(UnmanagedType.LPStr)] string szExtracted,
         uint dwSearchScope);
     
-    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true, CharSet = CharSet.Auto)]
     private static extern bool SFileAddListFile(IntPtr hMpq, [MarshalAs(UnmanagedType.LPStr)] string szListFile);
+    
+    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true, CharSet = CharSet.Auto)]
+    private static extern bool SFileOpenPatchArchive(
+        IntPtr hMpq,
+        [MarshalAs(UnmanagedType.LPTStr)] string szPatchMpqName,
+        [MarshalAs(UnmanagedType.LPStr)] string? szPatchPathPrefix,
+        uint dwFlags);
+    
+    [DllImport(STORMLIB, CallingConvention = CallingConvention.Winapi, SetLastError = true)]
+    private static extern bool SFileHasFile(IntPtr hMpq, [MarshalAs(UnmanagedType.LPStr)] string szFileName);
     
     // Archive open flags
     private const uint SFILE_OPEN_HARD_DISK_FILE = 2;
     private const uint MPQ_OPEN_READ_ONLY = 0x00000100;
+    
+    // Track base archive for patch linking
+    private IntPtr _baseArchive = IntPtr.Zero;
     
     #endregion
 
@@ -119,12 +132,56 @@ public class MpqArchiveService : IDisposable
             .ToList();
         
         Console.WriteLine($"[MpqService] Loading {allMpqFiles.Count} archives in priority order:");
+        
+        // Separate base archives from patches
+        var baseArchives = allMpqFiles.Where(f => !Path.GetFileName(f).ToLowerInvariant().StartsWith("patch")).ToList();
+        var patchArchives = allMpqFiles.Where(f => Path.GetFileName(f).ToLowerInvariant().StartsWith("patch"))
+            .OrderBy(f => GetMpqPriority(Path.GetFileName(f)))
+            .ToList();
+        
+        // 1. Open all BASE archives independently (all will be searched)
+        Console.WriteLine($"[MpqService] Opening {baseArchives.Count} base archives:");
         uint priority = 1;
-        foreach (var mpq in allMpqFiles)
+        foreach (var mpq in baseArchives)
         {
-            OpenArchive(mpq, priority++);
+            if (OpenArchive(mpq, priority++))
+            {
+                // Track first opened archive as base for patching
+                if (_baseArchive == IntPtr.Zero && _archives.Count > 0)
+                    _baseArchive = _archives[0];
+            }
         }
-        Console.WriteLine($"Initialized MpqArchiveService with {_archives.Count} archives.");
+        
+        // 2. Link patches to the BASE archive (StormLib patch chain)
+        if (_baseArchive != IntPtr.Zero && patchArchives.Count > 0)
+        {
+            Console.WriteLine($"[MpqService] Linking {patchArchives.Count} patch archives to base:");
+            foreach (var patchPath in patchArchives)
+            {
+                var patchName = Path.GetFileName(patchPath);
+                if (SFileOpenPatchArchive(_baseArchive, patchPath, null, 0))
+                {
+                    Console.WriteLine($"  [PATCH] {patchName} -> linked to base");
+                }
+                else
+                {
+                    // Fallback: open as independent archive (so we still search it)
+                    Console.WriteLine($"  [PATCH] {patchName} -> link failed, opening independently");
+                    OpenArchive(patchPath, priority++);
+                }
+            }
+        }
+        else if (patchArchives.Count > 0)
+        {
+            // No base archive found, open patches independently
+            Console.WriteLine($"[MpqService] No base archive, opening {patchArchives.Count} patches independently:");
+            foreach (var mpq in patchArchives)
+            {
+                OpenArchive(mpq, priority++);
+            }
+        }
+        
+        Console.WriteLine($"[MpqService] Initialized with {_archives.Count} archives ({patchArchives.Count} patches linked).");
     }
     
     private static int GetMpqPriority(string filename)
@@ -171,13 +228,15 @@ public class MpqArchiveService : IDisposable
         Console.WriteLine($"[MpqService] Added listfile to {count}/{_archives.Count} archives.");
     }
 
-    private void OpenArchive(string path, uint priority = 0)
+    private bool OpenArchive(string path, uint priority = 0)
     {
         if (SFileOpenArchive(path, priority, MPQ_OPEN_READ_ONLY, out var hMpq))
         {
             _archives.Add(hMpq);
             Console.WriteLine($"  [{priority:D3}] {Path.GetFileName(path)}");
+            return true;
         }
+        return false;
     }
     public bool FileExists(string virtualPath)
     {
@@ -197,31 +256,23 @@ public class MpqArchiveService : IDisposable
     {
         foreach (var hMpq in _archives)
         {
-            // Fallback: SFileOpenFileEx keeps returning 0 handle on some systems/versions of StormLib
-            // So we try SFileExtractFile as a robust fallback.
-            
             IntPtr hFile = IntPtr.Zero;
             bool opened = SFileOpenFileEx(hMpq, virtualPath, 0, ref hFile);
             
-            if (opened)
+            if (opened && hFile != IntPtr.Zero)
             {
-               Console.WriteLine($"[MpqService] DEBUG: Opened '{virtualPath}' in {hMpq}. Handle: {hFile}");
-               if (hFile != IntPtr.Zero)
-               {
-               try
+                try
                 {
                     uint sizeHigh = 0;
                     var size = SFileGetFileSize(hFile, out sizeHigh);
                     if (size > 0 && size != uint.MaxValue) 
                     {
-                        Console.WriteLine($"[MpqService] Reading '{virtualPath}' from dictionary/archive {hMpq} (Size: {size})");
                         var buffer = new byte[size];
                         var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
                         try
                         {
                             if (SFileReadFile(hFile, handle.AddrOfPinnedObject(), size, out var bytesRead, IntPtr.Zero))
                             {
-                                Console.WriteLine($"[MpqService] SFileReadFile success. Read: {bytesRead} / {size}");
                                 if (bytesRead != size) Array.Resize(ref buffer, (int)bytesRead);
                                 return buffer;
                             }
@@ -231,18 +282,30 @@ public class MpqArchiveService : IDisposable
                             handle.Free();
                         }
                     }
-                    else
-                    {
-                         Console.WriteLine($"[MpqService] File '{virtualPath}' invalid size: {size}. hFile: {hFile}");
-                    }
                 }
                 finally
                 {
                     SFileCloseFile(hFile);
                 }
             }
-
-
+            
+            // Fallback: SFileExtractFile for when handle is 0 but file exists (patch chain issue)
+            if (opened || SFileHasFile(hMpq, virtualPath))
+            {
+                var tempPath = Path.Combine(Path.GetTempPath(), $"mpq_extract_{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    if (SFileExtractFile(hMpq, virtualPath, tempPath, 0))
+                    {
+                        var data = File.ReadAllBytes(tempPath);
+                        File.Delete(tempPath);
+                        return data;
+                    }
+                }
+                catch
+                {
+                    if (File.Exists(tempPath)) File.Delete(tempPath);
+                }
             }
         }
         return null;
