@@ -16,13 +16,15 @@ class Program
         var outputArg = new Argument<FileInfo>("output", "Output path");
         var targetOption = new Option<string>("--target", () => "mdl", "Target format (mdl, obj, m2)");
         var gamePathOption = new Option<DirectoryInfo?>("--game-path", "Path to game folder for asset resolution");
+        var singleOption = new Option<bool>("--single", "Export as single OBJ file instead of split by geoset");
 
         convertCommand.AddArgument(inputArg);
         convertCommand.AddArgument(outputArg);
         convertCommand.AddOption(targetOption);
         convertCommand.AddOption(gamePathOption);
+        convertCommand.AddOption(singleOption);
 
-        convertCommand.SetHandler(ConvertHandler, inputArg, outputArg, targetOption, gamePathOption);
+        convertCommand.SetHandler(ConvertHandler, inputArg, outputArg, targetOption, gamePathOption, singleOption);
         rootCommand.AddCommand(convertCommand);
 
         var batchCommand = new Command("batch", "Batch convert multiple models");
@@ -33,8 +35,9 @@ class Program
         batchCommand.AddArgument(outputDirArg);
         batchCommand.AddOption(targetOption);
         batchCommand.AddOption(gamePathOption);
+        batchCommand.AddOption(singleOption);
         
-        batchCommand.SetHandler(BatchHandler, inputPatternArg, outputDirArg, targetOption, gamePathOption);
+        batchCommand.SetHandler(BatchHandler, inputPatternArg, outputDirArg, targetOption, gamePathOption, singleOption);
         rootCommand.AddCommand(batchCommand);
 
         var infoCommand = new Command("info", "Display information about a model file");
@@ -45,7 +48,7 @@ class Program
         return await rootCommand.InvokeAsync(args);
     }
 
-    static void ConvertHandler(FileInfo input, FileInfo output, string target, DirectoryInfo? gamePath)
+    static void ConvertHandler(FileInfo input, FileInfo output, string target, DirectoryInfo? gamePath, bool single)
     {
         string inputExt = input.Extension.ToLower();
         string outputExt = output.Extension.ToLower();
@@ -128,13 +131,11 @@ class Program
                 if (output.Directory != null && !output.Directory.Exists)
                     output.Directory.Create();
 
-                // Check if split mode is requested or implied?
-                // For now, let's default to split=true for batch operations or specifically for OBJ target
-                // Actually, let's make it always split for OBJ to satisfy the user request.
-                // "all variants ... need to be exported as separate models"
-                
-                mdx.SaveObj(output.FullName, split: true);
-                Console.WriteLine($"Saved OBJ (Split): {output.FullName} (and associated geoset files)");
+                mdx.SaveObj(output.FullName, split: !single);
+                if (single)
+                    Console.WriteLine($"Saved OBJ (Single): {output.FullName}");
+                else
+                    Console.WriteLine($"Saved OBJ (Split): {output.FullName} (and associated geoset files)");
             }
             else if (outputExt == ".m2")
             {
@@ -152,7 +153,7 @@ class Program
         }
     }
 
-    static void BatchHandler(string pattern, DirectoryInfo outputDir, string target, DirectoryInfo? gamePath)
+    static void BatchHandler(string pattern, DirectoryInfo outputDir, string target, DirectoryInfo? gamePath, bool single)
     {
         string searchDir = Directory.GetCurrentDirectory();
         string searchPattern = pattern;
@@ -233,7 +234,7 @@ class Program
                 var outputFile = new FileInfo(finalOutputPath);
 
                 Console.WriteLine($"[{success+fail+1}/{filesToProcess.Count}] Converting {relPath}...");
-                ConvertHandler(fileInfo, outputFile, target, gamePath);
+                ConvertHandler(fileInfo, outputFile, target, gamePath, single);
                 success++;
             }
             catch (Exception ex)

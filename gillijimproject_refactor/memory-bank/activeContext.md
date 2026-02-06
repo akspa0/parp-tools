@@ -6,7 +6,7 @@
 
 **Alpha 0.5.3 MDX Parsing**: ✅ WORKING - Validated `GEOS` chunk layout (Tag-Count structure, `UVAS` optimization).
 **Texture Resolution**: ✅ WORKING - DBC-driven resolution via `DbcService` (DisplayInfo & Extra support).
-**OBJ Export**: ✅ WORKING - Multi-geoset (split) export functional; verified complex models.
+**OBJ Export**: ✅ WORKING - Split (per-geoset) and Single (combined) modes with proper MTL/texture assignment.
 **M2 Export**: 🔧 IMPLEMENTING - Phase 2 (WotLK target) in progress.
 
 ### MDX Archaeology Findings (Alpha 0.5.3)
@@ -28,6 +28,8 @@
 - [x] Implement robust `GEOS` scanner with smart padding detection.
 - [x] Integrate `DbcService` for automated texture resolution.
 - [x] Verify complex creature exports (Basilisk, Ogre, Lore).
+- [x] Implement ObjWriter with proper MTL/texture assignment per geoset.
+- [x] Add `--single` CLI option for combined OBJ output.
 - [ ] Implement M2 (v264) binary writer for 3.3.5 compatibility.
 
 ---
@@ -51,7 +53,8 @@
 |------|---------|
 | `MdxFile.cs` | Main parser/scanner - handles Alpha padding. |
 | `TextureService.cs`| Archaeology-driven texture resolution (DBC/Name fallback). |
-| `ObjWriter.cs` | Exports split-geoset bodies for variants. |
+| `ObjWriter.cs` | Exports split-geoset or single OBJ with MTL and per-geoset textures. |
+| `Program.cs` | CLI with `--target obj` and `--single` options for combined output. |
 | `MdxToM2Converter.cs`| (Upcoming) Bone/Animation mapping to WotLK v264. |
 
 ---
