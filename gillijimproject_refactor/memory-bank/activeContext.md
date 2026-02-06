@@ -1,61 +1,46 @@
 # Active Context
 
-## Current Focus: LK/4.0.0 ADT Image Generation Fix (Jan 20, 2026)
+## Current Focus: MDX-L_Tool - Alpha 0.5.3 Archaeology (Feb 6, 2026)
 
 ### Critical Status
 
-**0.5.3 Alpha ADT**: ✅ WORKING - Monolithic format, linear chunk scanning works
-**LK 3.3.5 / 4.0.0 ADT**: ⚠️ JSON DATA WORKS, IMAGE GENERATION BROKEN
+**Alpha 0.5.3 MDX Parsing**: ✅ WORKING - Validated `GEOS` chunk layout (Tag-Count structure, `UVAS` optimization).
+**Texture Resolution**: ✅ WORKING - DBC-driven resolution via `DbcService` (DisplayInfo & Extra support).
+**OBJ Export**: ✅ WORKING - Multi-geoset (split) export functional; verified complex models.
+**M2 Export**: 🔧 IMPLEMENTING - Phase 2 (WotLK target) in progress.
 
-### Why 0.5.3 Works But LK+ Doesn't
+### MDX Archaeology Findings (Alpha 0.5.3)
 
-| Aspect | 0.5.3 Alpha | LK/Cata 3.x/4.x |
-|--------|-------------|-----------------|
-| ADT Format | **Monolithic** - single file | **Split** - root + _obj0 + _tex0 |
-| MCNK Location | **Sequential** after header chunks | **MCIN indexed** - offsets stored in MCIN chunk |
-| Chunk Scanning | Linear byte scan finds MCNK | Linear scan **misses** MCNK chunks entirely |
-| Chunk IDs | Little-endian, need reversal | Same - but WoWRollback handles this |
+| Aspect | Findings | Notes |
+|--------|----------|-------|
+| **GEOS Chunk** | Tag(4), Count(4), Data(...) | Robust scanner handles Alpha null padding. |
+| **ReplaceableId** | 11+n, 1+n mapping | Resolves to `CreatureDisplayInfo` variations. |
+| **DBC Service** | CDI + Extra lookup | Maps `ModelID` to Variations and Baked Skins. |
+| **Output Path** | `mdx-l_outputs/` | Standardized artifact storage directory. |
 
-### Root Causes Found (Jan 19-20, 2026)
+### Root Causes Resolved
 
-1. **MCIN Offset Issue**: LK/Cata MCNK chunks are NOT sequential. They're located at offsets specified in the MCIN chunk (256 × 16-byte entries). Linear scanning finds MVER→MHDR→MCIN→MTEX→etc but **skips** all MCNK chunks.
+1. **Missing Mesh Data**: Validated that `UVAS` Count=1 in Version 1300 contains the raw UV data directly, skipping the `UVBS` tag used in later versions.
+2. **Missing Textures**: Resolved by implementing `DbcService` to query `CreatureDisplayInfo.csv` and `CreatureDisplayInfoExtra.csv` for variation strings and baked skins.
 
-2. **posZ Addition Bug**: My fix incorrectly added `posZ` to MCVT height values. Working code stores raw MCVT floats. This caused gradient stripe pattern in heightmap images.
+### Current Workstream
 
-### Fixes Applied
-
-- [x] Added MCIN parsing - reads 256 offset entries to locate MCNK chunks
-- [x] Added `ParseMcnkAtOffset()` helper - parses MCNK at specified offset
-- [x] Removed posZ from height calculation - matches working 0.5.3 pattern
-- [ ] **Pending test** - waiting for file lock to clear
-
-### JSON vs Image Status
-
-| Output Type | LK/4.0.0 Status | Issue |
-|-------------|-----------------|-------|
-| height_min/max | ✅ Correct in JSON | Values like -3167 to -2666 |
-| heights[] array | ✅ 256 chunks populated | All chunks have data |
-| heightmap.png | ❌ Gradient stripes | Was adding posZ - FIXED |
-| alpha masks | ⚠️ Need testing | May need MCAL parsing fix |
-| normal maps | ⚠️ Need testing | Requires VlmChunkLayers.Normals |
+- [x] Implement robust `GEOS` scanner with smart padding detection.
+- [x] Integrate `DbcService` for automated texture resolution.
+- [x] Verify complex creature exports (Basilisk, Ogre, Lore).
+- [ ] Implement M2 (v264) binary writer for 3.3.5 compatibility.
 
 ---
 
-## Architecture Differences
+## Architecture: MDX-L_Tool
 
-### 0.5.3 Alpha ADT Parsing Flow
+### Parsing Flow
 ```
-1. Linear scan: MVER → MHDR → MCIN → MTEX → MMDX → MWMO → MDDF → MODF → MCNK[0..255]
-2. Each MCNK found directly during scan
-3. Works because MCNK chunks are sequential after header chunks
-```
-
-### LK/Cata ADT Parsing Flow (CORRECTED)
-```
-1. Linear scan: MVER → MHDR → MCIN → MTEX → MMDX → ... (NO MCNK found!)
-2. Parse MCIN: 256 entries × 16 bytes = offset+size for each MCNK
-3. For each MCIN entry: Jump to offset, parse MCNK there
-4. MCNK chunks are scattered through file at MCIN-specified locations
+1. FileStream → MdxFile.Load()
+2. Chunk Scan: VERS → MODL → GEOS → BONE → ...
+3. GEOS Scanner: Identify sub-chunks (VRTX, NRMS, TVRT/UVAS)
+4. Texture Resolution: Resolve ReplaceableId via TextureService
+5. Writer Dispatch: MDL (Text) or OBJ (Geometry)
 ```
 
 ---
@@ -64,16 +49,15 @@
 
 | File | Purpose |
 |------|---------|
-| `VlmDatasetExporter.cs` | Main extraction - `ExtractFromLkAdt()` |
-| `ParseMcnkAtOffset()` | NEW helper for MCIN-based parsing |
-| `RenderHeightmapImage()` | 145×145 L16 heightmap generation |
-| `AlphaMapService.cs` | Alpha mask decompression |
+| `MdxFile.cs` | Main parser/scanner - handles Alpha padding. |
+| `TextureService.cs`| Archaeology-driven texture resolution (DBC/Name fallback). |
+| `ObjWriter.cs` | Exports split-geoset bodies for variants. |
+| `MdxToM2Converter.cs`| (Upcoming) Bone/Animation mapping to WotLK v264. |
 
 ---
 
 ## Technical Notes
 
-- **MCIN chunk**: 4096 bytes = 256 × 16 bytes (offset:4, size:4, flags:4, asyncId:4)
-- **MCNK offset**: Points to MCNK signature, NOT data start
-- **MCVT heights**: Store RAW floats, do NOT add posZ
-- **Chunk ID reversal**: LK stores as little-endian, read as "KNCM" → reverse to "MCNK"
+- **GEOS Alignment**: Always seek to the next valid 4-character TAG if a chunk appears truncated or followed by null padding.
+- **UV Scaling**: Alpha UVs are standard floats [0..1] but may requires V-flip depending on the target renderer.
+- **ReplaceableId Mapping**: ID 11+n / 1+n resolved via `CreatureDisplayInfo` variations. Fallback to `ModelNameSkin.blp`.

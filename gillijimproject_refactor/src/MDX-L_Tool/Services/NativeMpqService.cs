@@ -142,6 +142,7 @@ public class NativeMpqService : IDisposable
     public byte[]? ReadFile(string virtualPath)
     {
         var normalized = virtualPath.Replace('/', '\\');
+        // Check for specific file request first (to avoid iterating all for single file)
         for (int i = _archives.Count - 1; i >= 0; i--)
         {
             var archive = _archives[i];
@@ -149,8 +150,7 @@ public class NativeMpqService : IDisposable
             
             if (block != null)
             {
-                if (block.FileSize == 0)
-                    continue; 
+                if (block.FileSize == 0) continue; 
                 
                 var data = ReadFileFromArchive(archive, block, Path.GetFileName(normalized));
                 if (data != null && data.Length > 0)
@@ -158,6 +158,61 @@ public class NativeMpqService : IDisposable
             }
         }
         return null;
+    }
+
+    public List<string> ListFiles(string pattern = "*")
+    {
+        var allFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var archive in _archives)
+        {
+            // Try to read (listfile)
+            var listBytes = ReadFile("(listfile)"); // This might recurse, but FindFileInArchive handles it.
+            // Actually, ReadFile searches ALL archives. We should search just THIS archive for its listfile?
+            // But (listfile) is a standard name.
+            // Let's rely on the public ReadFile logic but optimized? 
+            // No, strictly speaking each archive has its own listfile.
+            
+            // To read from specific archive we need internal access.
+            // Let's add a helper or just reuse ReadFile which is fine, 
+            // BUT ReadFile returns the *first* listfile found associated with priority.
+            // We want *all* listfiles from all archives to build a complete set.
+            
+            var block = FindFileInArchive(archive, "(listfile)");
+            if (block != null)
+            {
+                var data = ReadFileFromArchive(archive, block, "(listfile)");
+                if (data != null)
+                {
+                    using var reader = new StreamReader(new MemoryStream(data));
+                    string? line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        var trimmed = line.Trim();
+                        if (trimmed.Length > 0 && DoesMatchPattern(trimmed, pattern))
+                        {
+                            allFiles.Add(trimmed);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return allFiles.ToList();
+    }
+
+    private bool DoesMatchPattern(string filename, string pattern)
+    {
+        if (pattern == "*" || pattern == "*.*") return true;
+        // Simple wildcard support
+        if (pattern.StartsWith("*") && pattern.EndsWith("*")) 
+            return filename.Contains(pattern.Trim('*'), StringComparison.OrdinalIgnoreCase);
+        if (pattern.StartsWith("*")) 
+            return filename.EndsWith(pattern.TrimStart('*'), StringComparison.OrdinalIgnoreCase);
+        if (pattern.EndsWith("*")) 
+            return filename.StartsWith(pattern.TrimEnd('*'), StringComparison.OrdinalIgnoreCase);
+            
+        return filename.Equals(pattern, StringComparison.OrdinalIgnoreCase);
     }
     
     private MpqArchive? LoadArchive(string mpqPath)

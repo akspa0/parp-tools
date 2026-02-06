@@ -13,21 +13,29 @@ namespace MdxLTool.Services;
 public class TextureService
 {
     private readonly NativeMpqService _mpqService;
+    private readonly DbcService _dbcService;
 
-    public TextureService(NativeMpqService mpqService)
+    public TextureService(NativeMpqService mpqService, DbcService dbcService)
     {
         _mpqService = mpqService;
+        _dbcService = dbcService;
     }
 
     /// <summary>
-    /// Attempts to resolve a texture path and convert it to PNG.
+    /// Attempts to resolve a texture and convert it to PNG.
     /// </summary>
-    /// <param name="texturePath">The virtual path from the MDX (e.g., "Creature\Dragon\Dragon.blp")</param>
-    /// <param name="modelRoot">Path to the directory containing the model (for local lookup)</param>
-    /// <param name="outputDir">Target directory for the converted PNG</param>
-    /// <returns>The relative path to the converted PNG, or null if failed</returns>
-    public string? ExportTexture(string texturePath, string modelRoot, string outputDir)
+    public string? ExportTexture(MdlTexture texture, string modelName, string modelPath, string modelRoot, string outputDir)
     {
+        string? texturePath = texture.Path;
+        
+        // Handle ReplaceableId
+        if (texture.ReplaceableId != 0 && string.IsNullOrWhiteSpace(texturePath))
+        {
+            texturePath = ResolveReplaceablePath(texture.ReplaceableId, modelName, modelPath);
+            if (texturePath != null)
+                Console.WriteLine($"  Resolved ReplaceableId {texture.ReplaceableId} to: \"{texturePath}\"");
+        }
+
         if (string.IsNullOrWhiteSpace(texturePath)) return null;
 
         // 1. Try local lookup (same folder as MDX)
@@ -39,18 +47,19 @@ public class TextureService
         }
 
         // 2. Try MPQ lookup
-        if (_mpqService.FileExists(texturePath))
+        var mpqNormalized = texturePath.Replace('/', '\\');
+        if (_mpqService.FileExists(mpqNormalized))
         {
-            var data = _mpqService.ReadFile(texturePath);
+            var data = _mpqService.ReadFile(mpqNormalized);
             if (data != null)
             {
                 return ConvertBlpToPng(data, fileName, outputDir);
             }
         }
 
-        // 3. Try variations (some models reference .tga or have no extension in 0.5.3?)
-        var blpPath = Path.ChangeExtension(texturePath, ".blp");
-        if (blpPath != texturePath && _mpqService.FileExists(blpPath))
+        // 3. Try variations (e.g. .blp extension)
+        var blpPath = Path.ChangeExtension(mpqNormalized, ".blp");
+        if (blpPath != mpqNormalized && _mpqService.FileExists(blpPath))
         {
             var data = _mpqService.ReadFile(blpPath);
             if (data != null)
@@ -60,6 +69,37 @@ public class TextureService
         }
 
         return null;
+    }
+
+    private string? ResolveReplaceablePath(uint replaceableId, string modelName, string modelPath)
+    {
+        // 1. Try DBC lookup
+        var variations = _dbcService.GetVariations(modelPath);
+        
+        // Mapping convention:
+        // ID 11, 12... -> Variation index 0, 1...
+        // ID 1, 2...   -> Variation index 0, 1... (for some models)
+        int index = -1;
+        if (replaceableId >= 11) index = (int)(replaceableId - 11);
+        else if (replaceableId >= 1) index = (int)(replaceableId - 1);
+
+        if (index >= 0 && index < variations.Count)
+        {
+            var varName = variations[index];
+            if (!varName.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                varName += ".blp";
+            return varName;
+        }
+
+        // 2. Fallbacks
+        switch (replaceableId)
+        {
+            case 11:
+            case 1:
+                return $"{modelName}Skin.blp";
+            default:
+                return null;
+        }
     }
 
     public string? ConvertBlpToPng(string blpPath, string outputDir)

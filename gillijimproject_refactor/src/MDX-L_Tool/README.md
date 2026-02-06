@@ -2,14 +2,6 @@
 
 **MDX-L_Tool** is a digital archaeology utility designed to parse, analyze, and convert 3D models from the **World of Warcraft Alpha 0.5.3** client. It focuses on preserving early Blizzard assets by bridging the gap between legacy formats and modern tools.
 
-## Features
-
-- **Alpha 0.5.3 Support**: Native parsing of the specific MDX (version 1300) format used in the 2003 WoW Alpha.
-- **MDX to MDL Conversion**: Export binary models to human-readable Warcraft III MDL text format.
-- **Automatic Texture Export**: Resolves BLP textures from game archives or local folders and converts them to PNG.
-- **Structural Analysis**: Detailed CLI output for model metadata, geosets, bones, and animation sequences.
-- **Pure C# MPQ Reader**: Internal service to extract assets directly from early WoW MPQ archives.
-- **Robust Parsing**: Advanced chunk-skipping logic to handle malformed or unknown data without hanging.
 
 ## Usage
 
@@ -28,12 +20,37 @@ Exports the binary model to a text-based MDL file and converts all referenced te
 dotnet run -- convert path/to/model.mdx mdx-l_outputs/model.mdl --game-path "H:\053-client"
 ```
 
+### Convert to OBJ + MTL
+Exports the model geometry and materials to Wavefront OBJ format. This is ideal for importing Alpha assets into modern 3D software.
+
+```powershell
+dotnet run -- convert path/to/model.mdx mdx-l_outputs/model.obj --game-path "H:\053-client"
+```
+
+### Batch Convert
+Process an entire directory of models at once. Supports wildcards.
+
+```powershell
+# Convert all MDX files in a folder to OBJ
+dotnet run -- batch "H:\053-client\Data\*.mdx" mdx-l_outputs/ --target obj --game-path "H:\053-client"
+```
+
 The tool will:
-1. Parse the MDX geometry and metadata.
-2. Search for referenced `.blp` files in the model's directory.
-3. If not found, search the game MPQs (if `--game-path` is provided).
-4. Convert BLPs to PNG and save them alongside the MDL.
-5. Update the MDL's texture references to point to the new `.png` files.
+1. Parse the MDX geometry and metadata (using robust Alpha 0.5.3 logic).
+2. Search for referenced `.blp` files (local first, then MPQ).
+3. Convert BLPs to PNG and save them alongside the model file.
+4. Export the geometry to `.obj` with proper material assignments.
+
+## Features
+
+- **Alpha 0.5.3 Support**: Native parsing of MDX v1300. Correctly handles:
+    - `GEOS` sub-chunk structure (`Tag` -> `Count` -> `Data`).
+    - `ReplaceableId: 11` (Creature Skin) -> Model Name mapping.
+    - 1-byte `PTYP` and direct `UVAS` streams.
+- **Batch Processing**: Convert thousands of models in a single run.
+- **MDX to MDL**: Export to human-readable text format.
+- **MDX to OBJ + MTL**: Export to industry-standard 3D format.
+- **Auto Texture Export**: Resolves and converts BLP textures to PNG.
 
 ## Supported Chunks
 - `VERS`: Format version validation.

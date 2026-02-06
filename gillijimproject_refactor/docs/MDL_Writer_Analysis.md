@@ -66,9 +66,11 @@ The theoretical analysis of the 0.5.3 model writer has been successfully validat
 Development revealed several critical nuances in the 0.5.3 MDX format that differ from research based on later versions:
 
 1.  **MODL Chunk Order**: Unlike retail WC3/WoW where Bounds come first, the 0.5.3 format places the `BoundsRadius` (float) *before* the `Min` and `Max` extent vectors. This was confirmed by matching the exact 373-byte (0x175) chunk size requirement found in Ghidra.
-2.  **GEOS Record Format**: Geosets in 0.5.3 are not fixed-size. They use a custom sub-chunk system (VRTX, NRMS, TVTX, etc.) where each sub-chunk has a count prefix. Robust parsing requires skipping unknown tags using local size offsets.
-3.  **MTLS and LAYS**: Materials in 0.5.3 do *not* use a `LAYS` tag to prefix their layer list. They contain a direct layer count followed by size-prefixed layer records.
-4.  **SEQS Format**: Sequences use a fixed 140-byte (0x8C) record size.
+2.  **GEOS Record Format**: Geosets in 0.5.3 use a strict sub-chunk structure: `Tag(4), Size(4), Count(4), Data(...)`. The `Size` field is the *total* size of the sub-chunk data (excluding Tag/Size but including Count), which is `4 + (Count * Element_Size)`. This differs from standard MDX where sub-chunks might only have a size or a count, but rarely this specific redundant structure. This applies to `VRTX`, `NRMS`, `PVTX`, `PTYP`, `PCNT`, `GNDX`, `MTGC`, `MATS`, `TVER`, and `UVBS` (inside `UVAS`).
+3.  **TEXS Record Format**: Texture entries are fixed at 268 bytes: `ReplaceableId(4)`, `Path(260)`, `Flags(4)`.
+4.  **ReplaceableId Resolution**: ID 11 corresponds to the "Creature Skin" and is resolved by the client using the model's filename (e.g., `AncientOfLore.mdx` -> `AncientOfLore.blp`).
+5.  **MTLS and LAYS**: Materials in 0.5.3 do *not* use a `LAYS` tag to prefix their layer list. They contain a direct layer count followed by size-prefixed layer records.
+6.  **SEQS Format**: Sequences use a fixed 140-byte (0x8C) record size.
 
 ### Implementation Reference
 The core logic has been ported to:

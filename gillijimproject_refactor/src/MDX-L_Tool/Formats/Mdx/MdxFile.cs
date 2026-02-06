@@ -1,4 +1,5 @@
 using System.Text;
+using MdxLTool.Formats.Obj;
 
 namespace MdxLTool.Formats.Mdx;
 
@@ -10,7 +11,12 @@ public class MdxFile
 {
     public uint Version { get; set; }
     public MdlModel Model { get; set; } = new();
-    public string ModelName => Model.Name;
+    public byte[]? RawData { get; set; }
+    public string ModelName 
+    { 
+        get => Model.Name;
+        set => Model.Name = value;
+    }
     public List<MdlSequence> Sequences { get; } = new();
     public List<uint> GlobalSequences { get; } = new();
     public List<MdlMaterial> Materials { get; } = new();
@@ -26,6 +32,12 @@ public class MdxFile
     {
         using var fs = File.OpenRead(path);
         using var br = new BinaryReader(fs);
+        return Load(br);
+    }
+
+    public static MdxFile Load(Stream stream)
+    {
+        using var br = new BinaryReader(stream, Encoding.Default, leaveOpen: true);
         return Load(br);
     }
 
@@ -48,7 +60,7 @@ public class MdxFile
             uint size = br.ReadUInt32();
             long chunkEnd = br.BaseStream.Position + size;
 
-            Console.WriteLine($"  Found chunk: {tag} ({size} bytes)");
+            // Console.WriteLine($"  Found chunk: {tag} ({size} bytes)");
             switch (tag)
             {
                 case MdxHeaders.VERS:
@@ -76,46 +88,51 @@ public class MdxFile
                     break;
 
                 case MdxHeaders.GEOS:
-                    ReadGeos(br, size, mdx.Geosets);
+                    ReadGeosets(br, size, mdx.Geosets, mdx.Version);
                     break;
 
                 case MdxHeaders.BONE:
-                    ReadBone(br, size, mdx.Bones);
-                    break;
-
-                case MdxHeaders.PIVT:
-                    ReadPivt(br, size, mdx.PivotPoints);
-                    break;
-
+                case MdxHeaders.LITE:
+                case MdxHeaders.HELP:
                 case MdxHeaders.ATCH:
-                    ReadAtch(br, size, mdx.Attachments);
-                    break;
-
+                case MdxHeaders.PIVT:
                 case MdxHeaders.CAMS:
-                    ReadCams(br, size, mdx.Cameras);
+                case MdxHeaders.EVTS:
+                case MdxHeaders.CLID:
+                    // Known chunks we don't fully parse geometry for yet
+                    br.BaseStream.Position = chunkEnd;
                     break;
 
                 default:
-                    // Unknown chunk - skip it safely
+                    Console.WriteLine($"    [WARN] Unknown chunk tag: {tag}");
+                    br.BaseStream.Position = chunkEnd;
                     break;
             }
 
-            // Ensure we're at chunk end to prevent issues with partial reads or unknown tags
-            if (br.BaseStream.Position > chunkEnd)
+            // Ensure we are at the end of the chunk
+            if (br.BaseStream.Position != chunkEnd)
             {
-                // This shouldn't happen with correct logic but good for debugging
+                br.BaseStream.Position = chunkEnd;
             }
-            br.BaseStream.Position = chunkEnd;
-        }
-
-        // Link pivots to bones
-        for (int i = 0; i < mdx.Bones.Count && i < mdx.PivotPoints.Count; i++)
-        {
-            mdx.Bones[i].Pivot = mdx.PivotPoints[i];
         }
 
         return mdx;
     }
+
+    public void SaveMdl(string path)
+    {
+        var writer = new MdlWriter();
+        using var sw = new StreamWriter(path);
+        writer.Write(this, sw);
+    }
+
+    public void SaveObj(string path, bool split = false)
+    {
+        var writer = new ObjWriter();
+        writer.Write(this, path, split);
+    }
+
+    // --- Chunk Readers ---
 
     static string ReadTag(BinaryReader br)
     {
@@ -126,106 +143,64 @@ public class MdxFile
     static string ReadFixedString(BinaryReader br, int length)
     {
         byte[] bytes = br.ReadBytes(length);
-        int end = Array.IndexOf(bytes, (byte)0);
-        if (end < 0) end = length;
-        return Encoding.ASCII.GetString(bytes, 0, end);
+        int nullIdx = Array.IndexOf(bytes, (byte)0);
+        if (nullIdx >= 0)
+            return Encoding.ASCII.GetString(bytes, 0, nullIdx);
+        return Encoding.ASCII.GetString(bytes);
     }
 
-    /// <summary>
-    /// ReadModl - based on Ghidra decompilation of ReadBinModelGlobals @ 0x007b2800
-    /// Structure: Name(0x50) + AnimFile(0x104) + Radius + MinBounds + MaxBounds + Flags(byte) + BlendTime
-    /// Total size must be exactly 0x175 (373) bytes.
-    /// </summary>
+    static uint ReadVers(BinaryReader br, uint size)
+    {
+        uint version = br.ReadUInt32();
+        Console.WriteLine($"MDX Version: {version}");
+        return version;
+    }
+
     static MdlModel ReadModl(BinaryReader br, uint size)
     {
         var model = new MdlModel();
-        
-        // Name: 0x50 (80) bytes fixed string
         model.Name = ReadFixedString(br, 0x50);
         
-        // AnimationFile: 0x104 (260) bytes fixed string  
-        model.AnimationFile = ReadFixedString(br, 0x104);
+        var bounds = new CMdlBounds();
+        bounds.Extent.Min = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+        bounds.Extent.Max = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+        model.Bounds = bounds;
         
-        // Radius (float) - comes BEFORE bounds in Alpha format!
-        float radius = br.ReadSingle();
-        
-        // MinBounds (float[3])
-        var min = ReadC3Vector(br);
-        
-        // MaxBounds (float[3])
-        var max = ReadC3Vector(br);
-        
-        model.Bounds = new CMdlBounds
-        {
-            Extent = new CAaBox { Min = min, Max = max },
-            Radius = radius
-        };
-        
-        // Flags: 1 byte
-        model.Flags = br.ReadByte();
-        
-        // BlendTime: uint32
         model.BlendTime = br.ReadUInt32();
-        
         return model;
     }
 
-    static CMdlBounds ReadBounds(BinaryReader br)
-    {
-        return new CMdlBounds
-        {
-            Extent = new CAaBox
-            {
-                Min = ReadC3Vector(br),
-                Max = ReadC3Vector(br)
-            },
-            Radius = br.ReadSingle()
-        };
-    }
-
-    static C3Vector ReadC3Vector(BinaryReader br)
-    {
-        return new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
-    }
-
-    static C2Vector ReadC2Vector(BinaryReader br)
-    {
-        return new C2Vector(br.ReadSingle(), br.ReadSingle());
-    }
-
-    /// <summary>
-    /// ReadSeqs - based on Ghidra decompilation of ReadBinSequences
-    /// Chunk format: count(uint32) + count * 0x8c sequence records
-    /// Record: Name(0x50) + TimeStart + TimeEnd + MoveSpeed + Flags + MinBounds + MaxBounds + Frequency + Radius + Replay.Start + Replay.End + BlendTime
-    /// </summary>
     static void ReadSeqs(BinaryReader br, uint size, List<MdlSequence> sequences)
     {
-        uint count = br.ReadUInt32();
+        uint count = size / 132;
         for (uint i = 0; i < count; i++)
         {
             var seq = new MdlSequence();
-            seq.Name = ReadFixedString(br, 0x50);                           // 0x00-0x4F
-            seq.Time = new CiRange { Start = br.ReadInt32(), End = br.ReadInt32() }; // 0x50-0x57
-            seq.MoveSpeed = br.ReadSingle();                                // 0x58
-            seq.Flags = br.ReadUInt32();                                    // 0x5C
-            var min = ReadC3Vector(br);                                     // 0x60-0x6B
-            var max = ReadC3Vector(br);                                     // 0x6C-0x77
-            seq.Frequency = br.ReadSingle();                                // 0x78 (Rarity in MDL)
-            float radius = br.ReadSingle();                                 // 0x7C
-            seq.Bounds = new CMdlBounds
-            {
-                Extent = new CAaBox { Min = min, Max = max },
-                Radius = radius
-            };
-            seq.Replay = new CiRange { Start = br.ReadInt32(), End = br.ReadInt32() }; // 0x80-0x87
-            seq.BlendTime = br.ReadUInt32();                                // 0x88-0x8B
+            seq.Name = ReadFixedString(br, 0x50);
+            
+            var time = new CiRange();
+            time.Start = br.ReadInt32();
+            time.End = br.ReadInt32();
+            seq.Time = time;
+            
+            seq.MoveSpeed = br.ReadSingle();
+            seq.Flags = br.ReadUInt32();
+            
+            seq.Frequency = br.ReadSingle();
+            var replay = new CiRange();
+            replay.Start = br.ReadInt32();
+            replay.End = br.ReadInt32();
+            seq.Replay = replay;
+            
+            // Extent
+            br.ReadBytes(28); 
             sequences.Add(seq);
         }
     }
 
     static void ReadGlbs(BinaryReader br, uint size, List<uint> globals)
     {
-        int count = (int)(size / 4);
+        uint count = size / 4;
         for (int i = 0; i < count; i++)
             globals.Add(br.ReadUInt32());
     }
@@ -257,6 +232,7 @@ public class MdxFile
                 layer.TransformId = br.ReadInt32();
                 layer.CoordId = br.ReadInt32();
                 layer.StaticAlpha = br.ReadSingle();
+                Console.WriteLine($"      Layer: TextureId={layer.TextureId}, BlendMode={layer.BlendMode}");
                 
                 // Skip animation tracks in layer
                 br.BaseStream.Position = layerEnd;
@@ -278,308 +254,193 @@ public class MdxFile
             tex.ReplaceableId = br.ReadUInt32();
             tex.Path = ReadFixedString(br, 0x104);
             tex.Flags = br.ReadUInt32();
+            Console.WriteLine($"  Texture {i}: Path=\"{tex.Path}\", ReplaceableId={tex.ReplaceableId}");
             textures.Add(tex);
         }
     }
 
-    static void ReadGeos(BinaryReader br, uint size, List<MdlGeoset> geosets)
+    static void ReadGeosets(BinaryReader br, uint size, List<MdlGeoset> geosets, uint version)
     {
-        uint count = br.ReadUInt32();
-        for (uint i = 0; i < count; i++)
+        long end = br.BaseStream.Position + size;
+        
+        // Debug hex dump
+        byte[] preview = br.ReadBytes(Math.Min(64, (int)size));
+        br.BaseStream.Position -= preview.Length;
+        Console.WriteLine($"      GEOS Preview (64 bytes): {BitConverter.ToString(preview)}");
+
+        // Alpha 0.5.3 seems to have a uint32 count here
+        if (size >= 4)
         {
-            uint geoSize = br.ReadUInt32();
-            long geoEnd = br.BaseStream.Position - 4 + geoSize;
-
-            var geo = new MdlGeoset();
-
-            // Read geoset sub-chunks
-            while (br.BaseStream.Position < geoEnd)
+            uint possibleCount = br.ReadUInt32();
+            if (possibleCount > 100) // Likely a size, not a count
             {
-                if (geoEnd - br.BaseStream.Position < 8) break;
-
-                string subTag = ReadTag(br);
-                int subCount = br.ReadInt32();
-                
-                switch (subTag)
-                {
-                    case MdxHeaders.VRTX:
-                        for (int k = 0; k < subCount; k++)
-                            geo.Vertices.Add(ReadC3Vector(br));
-                        break;
-
-                    case MdxHeaders.NRMS:
-                        for (int k = 0; k < subCount; k++)
-                            geo.Normals.Add(ReadC3Vector(br));
-                        break;
-
-                    case MdxHeaders.PTYP:
-                        br.BaseStream.Position += subCount * 1; // Primitive type is 1 byte
-                        break;
-
-                    case MdxHeaders.PCNT:
-                        br.BaseStream.Position += subCount * 4; // Primitive count is 4 bytes
-                        break;
-
-                    case MdxHeaders.PVTX:
-                        for (int k = 0; k < subCount; k++)
-                            geo.Indices.Add(br.ReadUInt16());
-                        break;
-
-                    case MdxHeaders.GNDX:
-                        for (int k = 0; k < subCount; k++)
-                            geo.VertexGroups.Add(br.ReadByte());
-                        break;
-
-                    case MdxHeaders.MTGC:
-                        for (int k = 0; k < subCount; k++)
-                            geo.MatrixGroups.Add(br.ReadUInt32());
-                        break;
-
-                    case MdxHeaders.MATS:
-                        for (int k = 0; k < subCount; k++)
-                            geo.MatrixIndices.Add(br.ReadUInt32());
-                        break;
-
-                    case MdxHeaders.UVAS:
-                        {
-                            // In 0.5.3, UVAS contains the UV data directly for N maps.
-                            // subCount here is the number of texture coordinate maps.
-                            int numMaps = subCount;
-                            // For 0.5.3, we expect vertex count to match VRTX count.
-                            int vertexCount = geo.Vertices.Count;
-                            for (int m = 0; m < numMaps; m++)
-                            {
-                                for (int k = 0; k < vertexCount; k++)
-                                {
-                                    if (m == 0) // Only take the first map for now
-                                        geo.TexCoords.Add(ReadC2Vector(br));
-                                    else
-                                        br.BaseStream.Position += 8;
-                                }
-                            }
-                        }
-                        break;
-
-                    case MdxHeaders.UVBS:
-                        for (int k = 0; k < subCount; k++)
-                            geo.TexCoords.Add(ReadC2Vector(br));
-                        break;
-
-                    case MdxHeaders.BIDX:
-                    case MdxHeaders.BWGT:
-                        br.BaseStream.Position += (long)subCount * 4; // 4 indices/weights per vertex
-                        break;
-
-                    case MdxHeaders.ATSQ:
-                        br.BaseStream.Position += (long)subCount * 4; // Found in 0.5.3 geosets
-                        break;
-
-                    default:
-                        // Log unknown tag for debugging without hanging
-                        Console.WriteLine($"      Skipping unknown GEOS sub-tag: {subTag} ({subCount} elements)");
-                        int elementSize = GuessElementSize(subTag);
-                        if (elementSize > 0)
-                            br.BaseStream.Position += (long)subCount * elementSize;
-                        else
-                        {
-                            br.BaseStream.Position = geoEnd;
-                            goto NextGeoset;
-                        }
-                        break;
-                }
+                br.BaseStream.Position -= 4;
             }
-
-            // Read trailing geoset data (MaterialID, SelectionGroup, Flags, Bounds)
-            if (br.BaseStream.Position + 0x1C <= geoEnd)
+            else
             {
-                geo.MaterialId = br.ReadInt32();
-                geo.SelectionGroup = br.ReadUInt32();
-                geo.Flags = br.ReadUInt32();
-                geo.Bounds = ReadBounds(br);
+                Console.WriteLine($"      GEOS Chunk contains {possibleCount} geosets (Alpha header detected)");
             }
+        }
 
-        NextGeoset:
-            geosets.Add(geo);
-            br.BaseStream.Position = geoEnd;
+        while (br.BaseStream.Position < end)
+        {
+            if (end - br.BaseStream.Position < 4) break;
+
+            uint geosetSize = br.ReadUInt32();
+            long geosetEnd = br.BaseStream.Position - 4 + geosetSize;
+            
+            var geoset = ReadGeoset(br, geosetSize - 4, version);
+            geosets.Add(geoset);
+            
+            br.BaseStream.Position = geosetEnd;
         }
     }
 
-    static void ReadBone(BinaryReader br, uint size, List<MdlBone> bones)
+    static MdlGeoset ReadGeoset(BinaryReader br, uint size, uint mdxVersion)
     {
-        uint count = br.ReadUInt32();
-        for (uint i = 0; i < count; i++)
+        var geo = new MdlGeoset();
+        long geoEnd = br.BaseStream.Position + size;
+
+        while (br.BaseStream.Position < geoEnd)
         {
-            var bone = new MdlBone();
-            ReadNode(br, bone);
-
-            // Optional geoset info after node
-            if (br.BaseStream.Position + 8 <= br.BaseStream.Length)
-            {
-                bone.GeosetId = br.ReadInt32();
-                bone.GeosetAnimId = br.ReadInt32();
-            }
-            bones.Add(bone);
-        }
-    }
-
-    static void ReadNode(BinaryReader br, MdlBone node)
-    {
-        uint nodeSize = br.ReadUInt32();
-        long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
-
-        node.Name = ReadFixedString(br, 0x50);
-        node.ObjectId = br.ReadInt32();
-        node.ParentId = br.ReadInt32();
-        node.Flags = br.ReadUInt32();
-
-        // Read animation tracks (KGTR, KGRT, KGSC)
-        while (br.BaseStream.Position < nodeEnd)
-        {
-            if (nodeEnd - br.BaseStream.Position < 8) break;
+            if (geoEnd - br.BaseStream.Position < 8) break;
 
             string tag = ReadTag(br);
-            uint keyCount = br.ReadUInt32();
-            uint interp = br.ReadUInt32();   // 0=None, 1=Linear, 2=Hermite, 3=Bezier
-            uint globalSeqId = br.ReadUInt32();
+            uint count = br.ReadUInt32();
 
-            int keySize = (interp <= 1) ? 16 : 40; // Hermite/Bezier have tangents
-            br.BaseStream.Position += keyCount * (uint)keySize;
-        }
+            Console.WriteLine($"        SubChunk: {tag}, Count: {count}, Pos: {br.BaseStream.Position}");
 
-        br.BaseStream.Position = nodeEnd;
-    }
-
-    static void ReadPivt(BinaryReader br, uint size, List<C3Vector> pivots)
-    {
-        int count = (int)(size / 12);
-        for (int i = 0; i < count; i++)
-            pivots.Add(ReadC3Vector(br));
-    }
-
-    static void ReadAtch(BinaryReader br, uint size, List<MdlAttachment> attachments)
-    {
-        uint count = br.ReadUInt32();
-        br.ReadUInt32(); // Unknown/padding
-
-        for (uint i = 0; i < count; i++)
-        {
-            uint nodeSize = br.ReadUInt32();
-            long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
-
-            var atch = new MdlAttachment();
-            atch.Name = ReadFixedString(br, 0x50);
-            atch.ObjectId = br.ReadInt32();
-            atch.ParentId = br.ReadInt32();
-            uint flags = br.ReadUInt32(); 
-
-            // Skip tracks until we reach the part of the struct after the node
-            br.BaseStream.Position = nodeEnd;
-
-            // In 0.5.3, Path and AttachmentId might follow GenObject within a larger struct
-            // but usually they are separate or following immediately.
-            // Let's check remaining space in the chunk if possible, but ATCH is a list.
-            // Based on Ghidra, ReadBinAttachment reads Path(0x104) and ID(4).
-            
-            if (br.BaseStream.Position + 0x108 <= br.BaseStream.Length)
+            switch (tag)
             {
-                 // atch.Path = ReadFixedString(br, 0x104);
-                 // atch.AttachmentId = br.ReadUInt32();
+                case "VRTX":
+                    for (int i = 0; i < count; i++)
+                        geo.Vertices.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+                    break;
+                case "NRMS":
+                    for (int i = 0; i < count; i++)
+                        geo.Normals.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+                    break;
+                case "PTYP":
+                    // Was 1 byte, but alignment suggests 4 bytes (standard uint32)
+                    // If count is 1 (triangles), we want 4 bytes.
+                    br.ReadBytes((int)count * 4); 
+                    break;
+                case "PCNT":
+                    // Primitive Counts
+                    br.ReadBytes((int)count * 4); 
+                    break;
+                case "PVTX":
+                    for (int i = 0; i < count; i++)
+                        geo.Indices.Add(br.ReadUInt16());
+                    break;
+                case "GNDX":
+                    br.ReadBytes((int)count); 
+                    break;
+                case "MTGC":
+                    br.ReadBytes((int)count * 4); 
+                    break;
+                case "MATS":
+                    if (count > 0)
+                    {
+                        geo.MaterialId = br.ReadInt32();
+                        if (count > 1) br.ReadBytes((int)(count - 1) * 4);
+                    }
+                    break;
+                case "TVER":
+                    br.ReadBytes((int)count * 4); 
+                    break;
+                case "UVAS":
+                    if (mdxVersion == 1300) // Alpha 0.5.3 Special Case
+                    {
+                        // Alpha 0.5.3 Optimization: 
+                        // If Version is 1300, UVAS block seemingly contains the data directly 
+                        // if Count is 1 (which means 1 UV set).
+                        // The data length corresponds to the number of vertices.
+                        // We must read this data to maintain alignment.
+                        int nVerts = geo.Vertices.Count;
+                        if (nVerts > 0)
+                        {
+                            for (int k = 0; k < nVerts; k++)
+                                geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
+                        }
+                    }
+                    // If not version 1300, it's a standard container and we continue to inner chunks (UVBS)
+                    break;
+                case "UVBS":
+                    for (int i = 0; i < count; i++)
+                        geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
+                    break;
+                case "BIDX":
+                    // Bone Indices (Alpha legacy?)
+                    // Determine element size based on remaining bytes in geoset
+                    long bidxRem = geoEnd - br.BaseStream.Position;
+                    if (count > 0 && bidxRem >= count)
+                    {
+                        // Check if 4 bytes per element matches remaining exactly
+                        if (bidxRem == count * 4)
+                        {
+                            br.ReadBytes((int)count * 4);
+                        }
+                        else if (bidxRem == count) // 1 byte per element
+                        {
+                            br.ReadBytes((int)count);
+                        }
+                        else
+                        {
+                            // Ambiguous. Default to 1 (safe?) or 4?
+                            // Or just Smart Seek the next tag?
+                            // If we are at end, consuming 'remaining' is safest.
+                            Console.WriteLine($"      [INFO] BIDX size heuristic: consuming {bidxRem} bytes (Count {count})");
+                            br.ReadBytes((int)bidxRem);
+                        }
+                    }
+                    break;
+
+                default:
+                    // Smart Seek for Alignment/Padding Recovery
+                    // Alpha 0.5.3 often puts padding bytes between chunks (e.g. 8 bytes after UVAS data).
+                    // Instead of aborting, we scan forward a short distance to find the next valid tag.
+                    long currentPos = br.BaseStream.Position - 8; // Start of the unknown tag
+                    long limit = Math.Min(currentPos + 64, geoEnd);
+                    
+                    // Start scan from 1 byte ahead
+                    br.BaseStream.Position = currentPos + 1; 
+                    bool recovered = false;
+                    
+                    while (br.BaseStream.Position < limit - 4)
+                    {
+                        long p = br.BaseStream.Position;
+                        byte[] tagBytes = br.ReadBytes(4);
+                        br.BaseStream.Position = p; // Rewind
+                        
+                        string possibleTag = Encoding.ASCII.GetString(tagBytes);
+                        if (IsValidGeosetTag(possibleTag))
+                        {
+                             Console.WriteLine($"      [RECOVERY] Skipped {p - currentPos} bytes. Resuming at valid tag '{possibleTag}' (Pos: {p}).");
+                             br.BaseStream.Position = p; // Align to new tag
+                             recovered = true;
+                             break;
+                        }
+                        br.BaseStream.Position = p + 1;
+                    }
+
+                    if (!recovered)
+                    {
+                        Console.WriteLine($"      [WARN] Unknown GEOS sub-tag: {tag} at {currentPos}. Scan failed.");
+                        // Restore position to continue blindly or let loop finish
+                        br.BaseStream.Position = currentPos + 8;
+                    }
+                    break;
             }
-
-            attachments.Add(atch);
         }
+
+        return geo;
     }
 
-    static void ReadCams(BinaryReader br, uint size, List<MdlCamera> cameras)
+    static bool IsValidGeosetTag(string tag)
     {
-        uint count = br.ReadUInt32();
-        br.ReadUInt32(); // Unknown/padding
-
-        for (uint i = 0; i < count; i++)
-        {
-            uint camSize = br.ReadUInt32();
-            long camEnd = br.BaseStream.Position - 4 + camSize;
-
-            var cam = new MdlCamera();
-            cam.Name = ReadFixedString(br, 0x50);
-            cam.Position = ReadC3Vector(br);
-            cam.FieldOfView = br.ReadSingle();
-            cam.FarClip = br.ReadSingle();
-            cam.NearClip = br.ReadSingle();
-            
-            cam.Target.Name = ReadFixedString(br, 0x50);
-            cam.Target.Position = ReadC3Vector(br);
-
-            // Skip tracks until camEnd
-            br.BaseStream.Position = camEnd;
-            cameras.Add(cam);
-        }
-    }
-
-    static void ReadLite(BinaryReader br, uint size, List<MdlLight> lights)
-    {
-        uint count = br.ReadUInt32();
-        for (uint i = 0; i < count; i++)
-        {
-            var light = new MdlLight();
-            uint nodeSize = br.ReadUInt32();
-            long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
-
-            ReadNode(br, light);
-
-            if (br.BaseStream.Position + 0x20 <= nodeEnd)
-            {
-                light.Type = br.ReadInt32();
-                light.AttenuationStart = br.ReadSingle();
-                light.AttenuationEnd = br.ReadSingle();
-                light.Color = ReadC3Vector(br);
-                light.Intensity = br.ReadSingle();
-                light.AmbientColor = ReadC3Vector(br);
-                light.AmbientIntensity = br.ReadSingle();
-            }
-
-            br.BaseStream.Position = nodeEnd;
-            lights.Add(light);
-        }
-    }
-
-    static void ReadHelp(BinaryReader br, uint size, List<MdlBone> helpers)
-    {
-        uint count = br.ReadUInt32();
-        for (uint i = 0; i < count; i++)
-        {
-            var helper = new MdlBone();
-            uint nodeSize = br.ReadUInt32();
-            long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
-            
-            ReadNode(br, helper);
-            br.BaseStream.Position = nodeEnd;
-            helpers.Add(helper);
-        }
-    }
-
-    static int GuessElementSize(string tag) => tag switch
-    {
-        MdxHeaders.VRTX => 12,
-        MdxHeaders.NRMS => 12,
-        MdxHeaders.UVBS => 8,
-        MdxHeaders.PTYP => 1, // Primitive Type is 1 byte in 0.5.3
-        MdxHeaders.PCNT => 4, // Primitive Count is 4 bytes in 0.5.3
-        MdxHeaders.PVTX => 2,
-        MdxHeaders.GNDX => 1,
-        MdxHeaders.MTGC => 4,
-        MdxHeaders.MATS => 4,
-        "BIDX" => 4, // 4 indices per vertex
-        "BWGT" => 4, // 4 weights per vertex
-        "ATSQ" => 4,
-        _ => 0
-    };
-
-    /// <summary>Save as MDL text format</summary>
-    public void SaveMdl(string path)
-    {
-        using var sw = new StreamWriter(path);
-        var writer = new MdlWriter();
-        writer.Write(this, sw);
+        return tag == "VRTX" || tag == "NRMS" || tag == "PTYP" || tag == "PCNT" || 
+               tag == "PVTX" || tag == "GNDX" || tag == "MTGC" || tag == "MATS" || 
+               tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX";
     }
 }
