@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\gillijimproject-csharp\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
     <ProjectReference Include="..\..\..\lib\WoWTools.Minimaps\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
@@ -17,7 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="BCnEncoder.Net" Version="2.1.0" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
   </ItemGroup>
 
   <ItemGroup>

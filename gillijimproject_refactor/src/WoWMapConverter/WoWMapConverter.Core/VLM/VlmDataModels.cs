@@ -61,7 +61,8 @@ public record VlmTerrainData(
     [property: JsonPropertyName("height_min")] float HeightMin,
     [property: JsonPropertyName("height_max")] float HeightMax,
     [property: JsonPropertyName("height_global_min")] float HeightGlobalMin,
-    [property: JsonPropertyName("height_global_max")] float HeightGlobalMax
+    [property: JsonPropertyName("height_global_max")] float HeightGlobalMax,
+    [property: JsonPropertyName("is_interleaved")] bool IsInterleaved
 );
 
 /// <summary>
