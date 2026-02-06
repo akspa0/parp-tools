@@ -1,116 +1,62 @@
 # Active Context
 
-## Current Focus: Multi-Version ADT Support (Jan 19, 2026)
+## Current Focus: LK/4.0.0 ADT Image Generation Fix (Jan 20, 2026)
 
-### Status Summary
+### Critical Status
 
-**3.0.1/4.0.0 SUPPORT BRANCH**: Partial progress.
-- **Minimap TRS Resolution**: ✅ FIXED - Column order and coordinate padding corrected (`Md5TranslateResolver.cs`, `VlmDatasetExporter.cs`)
-- **Split ADT Support**: ✅ `ExtractFromLkAdt` updated to handle WotLK/Cata split files (`_tex0`, `_obj0`)
-- **Normal Maps (LK)**: ❌ BROKEN - Generating incorrect data, likely MCNR offset issue
-- **Heightmaps (LK)**: ❌ BROKEN - Values corrupted, likely MCVT format difference
-- **MPQ Service**: ✅ `NativeMpqService.cs` correctly loads 12+ archives with listfile support
+**0.5.3 Alpha ADT**: ✅ WORKING - Monolithic format, linear chunk scanning works
+**LK 3.3.5 / 4.0.0 ADT**: ⚠️ JSON DATA WORKS, IMAGE GENERATION BROKEN
 
-**Known Issue**: Alpha MCVT uses 81 outer + 64 inner floats, LK MCVT may use different layout or base height offset handling.
+### Why 0.5.3 Works But LK+ Doesn't
 
-**Next Steps**: Fix heightmap/normalmap extraction for LK format ADTs.
+| Aspect | 0.5.3 Alpha | LK/Cata 3.x/4.x |
+|--------|-------------|-----------------|
+| ADT Format | **Monolithic** - single file | **Split** - root + _obj0 + _tex0 |
+| MCNK Location | **Sequential** after header chunks | **MCIN indexed** - offsets stored in MCIN chunk |
+| Chunk Scanning | Linear byte scan finds MCNK | Linear scan **misses** MCNK chunks entirely |
+| Chunk IDs | Little-endian, need reversal | Same - but WoWRollback handles this |
 
-### V8 Key Design Decisions
+### Root Causes Found (Jan 19-20, 2026)
 
-| Decision | Value | Rationale |
-|----------|-------|-----------|
-| Input Channels | **15** | RGB MCCV (3ch) instead of luminance (1ch) |
-| Texture Embeddings | **16-dim** | Better texture differentiation |
-| Object Embeddings | **128-dim** | Sufficient for instance segmentation |
-| Texture Output | **20 ch** | 4 alpha + 16 embedding (4 per layer) |
-| **Heightmap Resolution** | **145×145** | Native ADT, avoids upsampling artifacts from V7 |
-| **Segmentation Models** | **BiRefNet/LayerD** | Efficient multi-layer matting & brush detection (~200M params) |
-| PM4 Integration | **Deferred to V10** | Focus on minimap-based detection first |
+1. **MCIN Offset Issue**: LK/Cata MCNK chunks are NOT sequential. They're located at offsets specified in the MCIN chunk (256 × 16-byte entries). Linear scanning finds MVER→MHDR→MCIN→MTEX→etc but **skips** all MCNK chunks.
 
-### Technical Strategy: "Neural Cartography"
-- **Layer-Aware Matting**: Using `layerd-birefnet` iterative decomposition to separate 4 texture layers.
-- **Edge Refinement**: Using `BEN2` CGM concepts to sharpen texture blending boundaries.
-- **Brush Archeology**: Using `BiRefNet` to extract and categorize designer brush patterns (V9 precursor).
-- **Efficiency**: All models targeted for consumer hardware (8-12GB VRAM), avoiding expensive "GIANT" foundation models where possible.
-- **Funding Framing**: Reconstructing lost Worlds as a demonstration of "Neural Cartography" capabilities.
+2. **posZ Addition Bug**: My fix incorrectly added `posZ` to MCVT height values. Working code stores raw MCVT floats. This caused gradient stripe pattern in heightmap images.
 
-### V8 Training Data Priority
+### Fixes Applied
 
-| Version | Maps | Reason |
-|---------|------|--------|
-| 0.5.3 Alpha | Azeroth, Kalimdor | Base training, original terrain |
-| 3.3.5 WotLK | Northrend + updated EK/Kali | MCCV vertex colors |
-| 4.3.4 Cata | LostIsles, MaelstromZone, Deepholm | Dev map tile sources |
+- [x] Added MCIN parsing - reads 256 offset entries to locate MCNK chunks
+- [x] Added `ParseMcnkAtOffset()` helper - parses MCNK at specified offset
+- [x] Removed posZ from height calculation - matches working 0.5.3 pattern
+- [ ] **Pending test** - waiting for file lock to clear
+
+### JSON vs Image Status
+
+| Output Type | LK/4.0.0 Status | Issue |
+|-------------|-----------------|-------|
+| height_min/max | ✅ Correct in JSON | Values like -3167 to -2666 |
+| heights[] array | ✅ 256 chunks populated | All chunks have data |
+| heightmap.png | ❌ Gradient stripes | Was adding posZ - FIXED |
+| alpha masks | ⚠️ Need testing | May need MCAL parsing fix |
+| normal maps | ⚠️ Need testing | Requires VlmChunkLayers.Normals |
 
 ---
 
-## Key Documents
+## Architecture Differences
 
-| Document | Purpose |
-|----------|---------|
-| `docs/V8_UNIVERSAL_MINIMAP_TRANSLATOR.md` | Full V8 specification |
-| `docs/V7_HEIGHT_REGRESSOR.md` | V7 training documentation |
-| `src/WoWMapConverter/scripts/train_v7.py` | Current training script |
-
----
-
-## Alpha Mask Insight (Critical for V8)
-
-> Alpha masks are composed of **preset brush patterns** - collections of low-resolution data
-> that artists used to create complex non-repeating effects. This is WoW's "cheat code" for
-> encoding texture transformations into terrain painting.
-
-The V8 texture prediction head needs to implicitly learn these brush patterns.
-
----
-
-1. **C# Infrastructure** - [x] `vlm-batch` Exporter, [x] Binary `.bin` Writer, [x] Split ADT Support.
-2. **Python Infrastructure** - [x] `load_adt_bin` loader, [x] `train_v8.py` binary integration.
-3. **Multi-Client Batch Export** - [ ] Validation run.
-
-
----
-
-## Scripts Usage
-
-```bash
-# Current V7 training (running)
-python src/WoWMapConverter/scripts/train_v7.py
-
-# Future V8 (not yet implemented)
-# V8 Training
-dotnet run -- vlm-batch --config v8_config.json
-python scripts/train_v8.py --dataset vlm_output/v8_dataset
+### 0.5.3 Alpha ADT Parsing Flow
+```
+1. Linear scan: MVER → MHDR → MCIN → MTEX → MMDX → MWMO → MDDF → MODF → MCNK[0..255]
+2. Each MCNK found directly during scan
+3. Works because MCNK chunks are sequential after header chunks
 ```
 
-
----
-
-## Scripts Usage
-
-```bash
-# Validate dataset
-python scripts/prepare_v6_datasets.py --dataset test_data/vlm-datasets/053_azeroth_v11 --validate
-
-# Render normalmaps
-python scripts/prepare_v6_datasets.py --dataset test_data/vlm-datasets/053_azeroth_v11 --render-normalmaps
-
-# Start training
-python src/WoWMapConverter/scripts/train_height_regressor_v6_absolute.py
+### LK/Cata ADT Parsing Flow (CORRECTED)
 ```
-
----
-
-## Dataset Exports
-
-| Map | Version | Tiles | Status |
-|-----|---------|-------|--------|
-| Azeroth | v11 | 685 | ✅ Ready for V6.1 |
-| Kalimdor | v6 (pending) | ~951 | 🔧 Needs export |
-| Shadowfang | v1 | ~20 | ✅ Complete |
-| Deadmines | v2 | ~15 | ✅ Complete |
-
-**Client Path**: `H:\053-client\`
+1. Linear scan: MVER → MHDR → MCIN → MTEX → MMDX → ... (NO MCNK found!)
+2. Parse MCIN: 256 entries × 16 bytes = offset+size for each MCNK
+3. For each MCIN entry: Jump to offset, parse MCNK there
+4. MCNK chunks are scattered through file at MCIN-specified locations
+```
 
 ---
 
@@ -118,18 +64,16 @@ python src/WoWMapConverter/scripts/train_height_regressor_v6_absolute.py
 
 | File | Purpose |
 |------|---------|
-| `train_height_regressor_v6_absolute.py` | V6.1 training script |
-| `prepare_v6_datasets.py` | Dataset validation/fixing |
-| `render_normalmaps.py` | Normalmap rendering from MCNR |
-| `VlmDatasetExporter.cs` | C# dataset export |
-| `VlmTrainingSample.cs` | JSON model definitions |
+| `VlmDatasetExporter.cs` | Main extraction - `ExtractFromLkAdt()` |
+| `ParseMcnkAtOffset()` | NEW helper for MCIN-based parsing |
+| `RenderHeightmapImage()` | 145×145 L16 heightmap generation |
+| `AlphaMapService.cs` | Alpha mask decompression |
 
 ---
 
 ## Technical Notes
 
-- **Alpha MCVT format**: 81 outer (9×9) FIRST, then 64 inner (8×8)
-- **MCNR padding**: Alpha=448 bytes, LK=435 bytes (truncate to 435)
-- **WDL upsampling**: 17×17 → 256×256 bilinear interpolation
-- **Height normalization**: `(h - global_min) / (global_max - global_min)`
-
+- **MCIN chunk**: 4096 bytes = 256 × 16 bytes (offset:4, size:4, flags:4, asyncId:4)
+- **MCNK offset**: Points to MCNK signature, NOT data start
+- **MCVT heights**: Store RAW floats, do NOT add posZ
+- **Chunk ID reversal**: LK stores as little-endian, read as "KNCM" → reverse to "MCNK"

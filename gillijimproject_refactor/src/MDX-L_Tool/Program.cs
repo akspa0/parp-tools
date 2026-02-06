@@ -1,5 +1,6 @@
 using System.CommandLine;
 using MdxLTool.Formats.Mdx;
+using MdxLTool.Services;
 
 namespace MdxLTool;
 
@@ -17,14 +18,16 @@ class Program
         var inputArg = new Argument<FileInfo>("input", "Input model file (.mdx, .mdl, .m2)");
         var outputArg = new Argument<FileInfo>("output", "Output model file");
         var targetOption = new Option<string>("--target", () => "auto", "Target format: auto, mdl, mdx, wotlk");
+        var gamePathOption = new Option<DirectoryInfo>("--game-path", "Path to WoW game directory for texture extraction");
 
         var convertCommand = new Command("convert", "Convert between model formats")
         {
             inputArg,
             outputArg,
-            targetOption
+            targetOption,
+            gamePathOption
         };
-        convertCommand.SetHandler(ConvertHandler, inputArg, outputArg, targetOption);
+        convertCommand.SetHandler(ConvertHandler, inputArg, outputArg, targetOption, gamePathOption);
 
         // info command
         var infoInputArg = new Argument<FileInfo>("input", "Model file to inspect");
@@ -40,7 +43,7 @@ class Program
         return await rootCommand.InvokeAsync(args);
     }
 
-    static void ConvertHandler(FileInfo input, FileInfo output, string target)
+    static void ConvertHandler(FileInfo input, FileInfo output, string target, DirectoryInfo? gamePath)
     {
         if (!input.Exists)
         {
@@ -49,7 +52,7 @@ class Program
         }
 
         Console.WriteLine($"Converting: {input.Name} -> {output.Name}");
-        Console.WriteLine($"Target format: {target}");
+        if (gamePath != null) Console.WriteLine($"Game path: {gamePath.FullName}");
 
         var inputExt = input.Extension.ToLowerInvariant();
         var outputExt = output.Extension.ToLowerInvariant();
@@ -61,8 +64,17 @@ class Program
                 var mdx = MdxFile.Load(input.FullName);
                 Console.WriteLine($"Loaded MDX: Version {mdx.Version}, {mdx.Geosets.Count} geosets");
 
+                // Texture Export Phase
+                ExportTextures(mdx, input.DirectoryName ?? ".", output.DirectoryName ?? ".", gamePath);
+
                 if (outputExt == ".mdl")
                 {
+                    // Ensure output directory exists
+                    if (output.Directory != null && !output.Directory.Exists)
+                    {
+                        output.Directory.Create();
+                    }
+                    
                     mdx.SaveMdl(output.FullName);
                     Console.WriteLine($"Saved MDL: {output.FullName}");
                 }
@@ -87,7 +99,45 @@ class Program
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
+            Console.Error.WriteLine(ex.StackTrace);
         }
+    }
+
+    static void ExportTextures(MdxFile mdx, string modelDir, string outputDir, DirectoryInfo? gamePath)
+    {
+        using var mpqService = new NativeMpqService();
+        if (gamePath != null && gamePath.Exists)
+        {
+            Console.WriteLine("Loading game archives...");
+            mpqService.LoadArchives(new[] { gamePath.FullName });
+        }
+
+        var textureService = new TextureService(mpqService);
+        int exported = 0;
+
+        foreach (var tex in mdx.Textures)
+        {
+            if (string.IsNullOrEmpty(tex.Path) && tex.ReplaceableId == 0) continue;
+
+            // For replaceable IDs, we might want to map them to default names later,
+            // but for now let's focus on explicit paths.
+            if (!string.IsNullOrEmpty(tex.Path))
+            {
+                var relativePng = textureService.ExportTexture(tex.Path, modelDir, outputDir);
+                if (relativePng != null)
+                {
+                    Console.WriteLine($"  Exported texture: {tex.Path} -> {relativePng}");
+                    tex.Path = relativePng; // Update path for MDL reference
+                    exported++;
+                }
+                else
+                {
+                    Console.WriteLine($"  [WARN] Could not resolve texture: {tex.Path}");
+                }
+            }
+        }
+
+        if (exported > 0) Console.WriteLine($"Total textures exported: {exported}");
     }
 
     static void InfoHandler(FileInfo input)

@@ -313,11 +313,11 @@ public class MdxFile
                         break;
 
                     case MdxHeaders.PTYP:
-                        br.BaseStream.Position += subCount * 4;
+                        br.BaseStream.Position += subCount * 1; // Primitive type is 1 byte
                         break;
 
                     case MdxHeaders.PCNT:
-                        br.BaseStream.Position += subCount * 4;
+                        br.BaseStream.Position += subCount * 4; // Primitive count is 4 bytes
                         break;
 
                     case MdxHeaders.PVTX:
@@ -341,7 +341,23 @@ public class MdxFile
                         break;
 
                     case MdxHeaders.UVAS:
-                        // UVAS is just count, UVBS follows
+                        {
+                            // In 0.5.3, UVAS contains the UV data directly for N maps.
+                            // subCount here is the number of texture coordinate maps.
+                            int numMaps = subCount;
+                            // For 0.5.3, we expect vertex count to match VRTX count.
+                            int vertexCount = geo.Vertices.Count;
+                            for (int m = 0; m < numMaps; m++)
+                            {
+                                for (int k = 0; k < vertexCount; k++)
+                                {
+                                    if (m == 0) // Only take the first map for now
+                                        geo.TexCoords.Add(ReadC2Vector(br));
+                                    else
+                                        br.BaseStream.Position += 8;
+                                }
+                            }
+                        }
                         break;
 
                     case MdxHeaders.UVBS:
@@ -349,14 +365,27 @@ public class MdxFile
                             geo.TexCoords.Add(ReadC2Vector(br));
                         break;
 
+                    case MdxHeaders.BIDX:
+                    case MdxHeaders.BWGT:
+                        br.BaseStream.Position += (long)subCount * 4; // 4 indices/weights per vertex
+                        break;
+
+                    case MdxHeaders.ATSQ:
+                        br.BaseStream.Position += (long)subCount * 4; // Found in 0.5.3 geosets
+                        break;
+
                     default:
-                        // UNKNOWN TAG - This is where the hang was happening!
-                        // In 0.5.3, sub-chunks are Tag + Count + (Count * ElementSize).
-                        // We MUST skip unknown ones correctly.
-                        // Without knowing ElementSize, we can't skip precisely unless we have a list of all tags.
-                        // For safety, break the loop if we hit an unknown tag to prevent infinite hang.
-                        br.BaseStream.Position = geoEnd;
-                        goto NextGeoset;
+                        // Log unknown tag for debugging without hanging
+                        Console.WriteLine($"      Skipping unknown GEOS sub-tag: {subTag} ({subCount} elements)");
+                        int elementSize = GuessElementSize(subTag);
+                        if (elementSize > 0)
+                            br.BaseStream.Position += (long)subCount * elementSize;
+                        else
+                        {
+                            br.BaseStream.Position = geoEnd;
+                            goto NextGeoset;
+                        }
+                        break;
                 }
             }
 
@@ -520,10 +549,31 @@ public class MdxFile
         for (uint i = 0; i < count; i++)
         {
             var helper = new MdlBone();
+            uint nodeSize = br.ReadUInt32();
+            long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
+            
             ReadNode(br, helper);
+            br.BaseStream.Position = nodeEnd;
             helpers.Add(helper);
         }
     }
+
+    static int GuessElementSize(string tag) => tag switch
+    {
+        MdxHeaders.VRTX => 12,
+        MdxHeaders.NRMS => 12,
+        MdxHeaders.UVBS => 8,
+        MdxHeaders.PTYP => 1, // Primitive Type is 1 byte in 0.5.3
+        MdxHeaders.PCNT => 4, // Primitive Count is 4 bytes in 0.5.3
+        MdxHeaders.PVTX => 2,
+        MdxHeaders.GNDX => 1,
+        MdxHeaders.MTGC => 4,
+        MdxHeaders.MATS => 4,
+        "BIDX" => 4, // 4 indices per vertex
+        "BWGT" => 4, // 4 weights per vertex
+        "ATSQ" => 4,
+        _ => 0
+    };
 
     /// <summary>Save as MDL text format</summary>
     public void SaveMdl(string path)

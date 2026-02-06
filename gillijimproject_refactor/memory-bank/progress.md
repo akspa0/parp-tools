@@ -2,71 +2,63 @@
 
 ## ✅ Working
 
-### Input Parsers (Standardized)
-- **Alpha WDT/ADT**: Monolithic format, MCLQ liquids, reversed FourCC handling
-- **LK 3.3.5 ADT**: Split format (root + _obj0 + _tex0), MH2O liquids
-- **WMO v14/v17**: Both directions implemented
-- **M2/MDX**: Framework ready (needs testing)
-- **BLP**: BlpResizer complete — 7956 tilesets processed from WoW 12.x
+### Input Parsers
+- **0.5.3 Alpha WDT/ADT**: ✅ Monolithic format, sequential MCNK, works 100%
+- **WMO v14/v17**: ✅ Both directions implemented
+- **BLP**: ✅ BlpResizer complete
 
 ### Standalone Tools
-- **BlpResizer**: ✅ Production-ready, CASC extraction works
-- **AlphaWdtInspector**: ✅ Diagnostics CLI functional
-- **DBCTool.V2**: ✅ Crosswalk CSV generation works
-- **vlm-export**: ✅ Extracts ADT/WDT to JSON dataset + Stitched Atlases
-- **train_local.py**: ✅ Unsloth Qwen2-VL training script (Windows compatible)
-- **export_gguf.py**: ✅ Manual GGUF export (Merge -> Convert -> Quantize)
-- **train_tiny_regressor.py**: ✅ Tiny ViT Image-to-Height training complete
-- **terrain_librarian.py**: ✅ Canonical geometry/alpha prefab detection
-- **MinimapBakeService.cs**: 🚧 C# Super-Resolution baker (Build Errors)
+- **vlm-export**: ✅ Works for Alpha ADT
+- **BlpResizer**: ✅ Production-ready
+- **DBCTool.V2**: ✅ Crosswalk CSV generation
 
 ### Data Generation
-- **WDL→ADT**: ✅ Generates terrain from WDL heights
-- **MCCV Painting**: ✅ `MccvPainter.cs` generates vertex colors from minimap PNGs
-- **PM4 MODF Reconstruction**: ✅ 1101 entries in `pm4-adt-test12/modf_reconstruction/`
-- **VLM Datasets**: ✅ Azeroth v10 (685 tiles), Kalidar v1 (56 tiles), Razorfen v1 (6 tiles)
-- **V8 Binary Export**: ✅ `.bin` format implemented with Heights/Normals/Shadows/Alpha.
-- **Split ADT Support**: ✅ `_tex0` / `_obj0` reading implemented for Cata support.
+- **VLM Datasets (Alpha)**: ✅ Azeroth v10 (685 tiles)
+- **V8 Binary Export**: ✅ `.bin` format implemented
 
-## ⚠️ Partial / Broken
+## ⚠️ Partial / In Progress
 
-### LK/Cata ADT Processing - PARTIALLY BROKEN (Jan 19, 2026)
-- **Minimap Tile Resolution**: ✅ FIXED - TRS parsing column order was reversed
-- **Normal Maps**: ❌ BROKEN - Generating incorrect data for 3.0.1 ADTs
-- **Heightmaps**: ❌ BROKEN - Values appear corrupted/incorrect for 3.0.1 ADTs
-- **Root cause**: Likely MCVT/MCNR offset or format differences between Alpha and LK
+### LK 3.3.5 / Cata 4.0.0 ADT Processing
 
-### AdtModfInjector - BROKEN
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Minimap TRS | ✅ FIXED | Column order + coordinate padding |
+| JSON height_min/max | ✅ FIXED | MCIN-based parsing working |
+| JSON heights[] array | ✅ FIXED | 256 chunks populated |
+| Heightmap PNG | 🔧 FIX APPLIED | Removed posZ addition - untested |
+| Alpha masks | ⚠️ NEEDS TESTING | May need MCAL parsing fix |
+| Normal maps | ⚠️ NEEDS TESTING | Requires VlmChunkLayers.Normals |
+
+**Root Causes Fixed (Jan 19-20, 2026):**
+1. MCNK chunks accessed via **MCIN offsets**, not linear scanning
+2. Heights stored with `posZ` addition - should be raw MCVT values
+
+## ❌ Broken
+
+### AdtModfInjector
 - **Problem**: Appends MWMO/MODF chunks to end of file
 - **Result**: Corrupted ADTs that Noggit cannot read
-- **Root cause**: ADT chunks must be in specific order with correct MHDR/MCIN offsets
+- **DO NOT USE**
 
-### Warcraft.NET Terrain.Serialize() - BROKEN
+### Warcraft.NET Terrain.Serialize()
 - **Problem**: Corrupts MCNK data during parse→serialize roundtrip
-- **Evidence**: MCNK loses ~2,048 bytes after roundtrip
-- **Result**: Noggit crashes on load
 - **DO NOT USE** for ADT serialization
-
-### Split ADT Merging - ABANDONED
-- Custom `AdtPatcher.MergeSplitAdt()` produces corrupted output
-- **Decision**: Use WoWMuseum ADTs as base instead of merging split files
 
 ## Current Status Summary
 
-| V7 Inference | 🔧 Refining | Adding smoothing, Z-scaling, and downscaling |
-| V8 Spec | ✅ Complete | Transitioning to `reconstruction` branch |
-| V8 Training | ✅ Initial Run | 0.5.3 Azeroth (685 tiles), best loss 0.3178 |
-| Multi-Version ADT | 🔧 WIP | 0.5.3 ✅, 3.x ⚠️ (minimap OK, heightmaps broken), 4.x untested |
-| Native Resolution | ✅ Set | 145×145 (native ADT) for V8 accuracy |
-| Digital Archeology | 🚀 Initiated | Reconstructing lost data from minimap/WDL/PM4 |
-| Minimap TRS | ✅ Fixed | Jan 19 - Column order and coordinate padding corrected |
+| Component | Status | Notes |
+|-----------|--------|-------|
+| 0.5.3 Alpha Export | ✅ Working | Heightmaps, masks, everything correct |
+| LK/Cata JSON Data | ✅ Working | Heights correctly extracted via MCIN |
+| LK/Cata Image Gen | 🔧 Fix Applied | Awaiting test (file lock) |
+| V8 Training | ✅ Initial Run | 0.5.3 Azeroth, best loss 0.3178 |
 
-## Key Files
+## Key Technical Insight
 
-| File | Status |
-|------|--------|
-| `WoWRollback.PM4Module/AdtPatcher.cs` | ✅ Single source of truth for merging |
-| `WoWRollback.PM4Module/MccvPainter.cs` | ✅ Minimap→MCCV conversion |
-| `regenerate_heightmaps_global.py` | ✅ Dual-mode heightmap generator |
-| `VlmDatasetExporter.cs` | ✅ Fixed GenerateHeightmap |
-| `HeightmapBakeService.cs` | ✅ Updated to use Alpha MCVT format |
+**Why 0.5.3 works but LK+ doesn't:**
+
+0.5.3 Alpha ADTs have MCNK chunks **sequentially** after header chunks. Linear byte scanning finds them.
+
+LK/Cata ADTs store MCNK at **MCIN-specified offsets** scattered through the file. Linear scanning finds MVER→MHDR→MCIN→MTEX→...→end, completely missing MCNK chunks.
+
+**Solution:** Parse MCIN chunk (256 × 16-byte entries containing offset+size), then jump to each offset to parse MCNK.

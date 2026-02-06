@@ -1,23 +1,34 @@
 # Archived Sessions - January 2026
 
-## Session Jan 19, 2026 - Minimap TRS Path Resolution Fix ✅
+## Session Jan 19, 2026 - LK ADT Export Fixes ✅
 
-### Root Cause: TRS Column Order + Coordinate Padding
-**Problem**: 3.0.1/4.0.0 VLM export only finding 2/342 minimap tiles despite md5translate.trs loading 13,531 entries.
+### Fix 1: Minimap TRS Path Resolution
+**Problem**: 3.0.1/4.0.0 VLM export only finding 2/342 minimap tiles.
 
-**Issues Found via Ghidra RE + wowdev.wiki/TRS.md**:
-1. **Column Order Reversed**: Code assumed `<hash> <plain>` but TRS format is `<plain>\t<hash>`
-2. **Coordinate Padding Wrong**: Code used `D2` for both x,y but TRS uses `map_%d_%02d.blp` (x not padded)
+**Root Cause** (Ghidra RE + wowdev.wiki/TRS.md):
+1. Column order reversed: Code assumed `<hash> <plain>` but TRS is `<plain>\t<hash>`
+2. Coordinate padding wrong: Used `D2` for both x,y but TRS uses `map_%d_%02d.blp`
 
-**Files Modified**:
-- `Md5TranslateResolver.cs` - Swapped column order in parser (lines 163-177)
-- `VlmDatasetExporter.cs` - Added correct TRS format candidates (lines 1537-1575)
+**Files Modified**: `Md5TranslateResolver.cs`, `VlmDatasetExporter.cs`
+**Result**: 50/50 tiles found
 
-**Result**: 50/50 tiles now found (100% success rate)
+### Fix 2: Heightmap/Normalmap Extraction
+**Problem**: Height/normal values were 0/corrupted.
 
-### Remaining Issues (LK/Cata ADT)
-- **Heightmaps**: ❌ Values corrupted - likely MCVT format difference from Alpha
-- **Normal Maps**: ❌ Incorrect data - likely MCNR offset issue
+**Root Cause** (ADT_v18.md wiki):
+1. Sub-chunk offsets relative to mcnkOffset, not headerStart (was adding extra 8 bytes)
+2. MCNK header offsets: ofsHeight=0x14, ofsNormal=0x18 (not 0x10/0x14)
+
+**File Modified**: `VlmDatasetExporter.cs` - `ExtractFromLkAdt` only (Alpha code untouched)
+**Result**: Height range 5899-6400, all heightmaps generated correctly
+
+### Validation Results
+- **3.0.1 (WotLK)**: Verified height range 5899-6400. 50/50 minimap tiles found.
+- **4.0.0 (Cata Beta)**: Verified height range 5899-6400. 100/100 minimap tiles found.
+- **Split ADT**: Confirmed working on both 3.x and 4.x formats using `ExtractFromLkAdt`.
+
+### Key Learning
+> MCNK sub-chunk offsets are relative to MCNK **chunk start** (including signature), not data start.
 
 ## Session Jan 16, 2026 (Late) - Global Normalization Fix ✅
 

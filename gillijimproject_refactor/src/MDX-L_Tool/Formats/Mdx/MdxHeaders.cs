@@ -50,4 +50,7 @@ public static class MdxHeaders
     public const string MATS = "MATS"; // Matrix indices
     public const string UVAS = "UVAS"; // UV set count
     public const string UVBS = "UVBS"; // UV coordinates
+    public const string BIDX = "BIDX"; // Bone indices (skinning)
+    public const string BWGT = "BWGT"; // Bone weights (skinning)
+    public const string ATSQ = "ATSQ"; // Animation tracks? (found in 0.5.3)
 }
