@@ -59,12 +59,21 @@ The text writer uses `MDL::TokenText(id)` to retrieve format strings. Examples:
 ### 4. Implementation Details
 The `ModelDataToText` function triggers a cascade of handlers via `CallTextWriteHandlers` (`0078c300`), which iterates a function pointer table at `008b2580`. There are 22 handlers, corresponding to the MDL sections (Version, Model, Sequences, Textures, Materials, etc.).
 
-## Reactivation Strategy
-To use this writer:
-1.  **Locate `MDLDATA`**: Find where the engine stores the loaded model. It is likely the `CModel` class or easily convertible to `MDLDATA`.
-2.  **Injection**: Create a DLL that calls `MDLFileWrite`.
-3.  **Input**: Pass the pointer to the in-memory `MDLDATA` object and a target path.
-4.  **Result**: The game will dump a perfectly valid `.mdl` file, which can be opened in text editors or converted to modern formats.
+## Reconstruction Success (February 2026)
+The theoretical analysis of the 0.5.3 model writer has been successfully validated through the implementation of **MDX-L_Tool**. The "Hidden" logic was successfully ported to C# and verified against original Alpha assets.
+
+### Verified Structural Details
+Development revealed several critical nuances in the 0.5.3 MDX format that differ from research based on later versions:
+
+1.  **MODL Chunk Order**: Unlike retail WC3/WoW where Bounds come first, the 0.5.3 format places the `BoundsRadius` (float) *before* the `Min` and `Max` extent vectors. This was confirmed by matching the exact 373-byte (0x175) chunk size requirement found in Ghidra.
+2.  **GEOS Record Format**: Geosets in 0.5.3 are not fixed-size. They use a custom sub-chunk system (VRTX, NRMS, TVTX, etc.) where each sub-chunk has a count prefix. Robust parsing requires skipping unknown tags using local size offsets.
+3.  **MTLS and LAYS**: Materials in 0.5.3 do *not* use a `LAYS` tag to prefix their layer list. They contain a direct layer count followed by size-prefixed layer records.
+4.  **SEQS Format**: Sequences use a fixed 140-byte (0x8C) record size.
+
+### Implementation Reference
+The core logic has been ported to:
+- [MdxFile.cs](file:///j:/wowDev/parp-tools/gillijimproject_refactor/src/MDX-L_Tool/Formats/Mdx/MdxFile.cs): The binary parser based on `BinToModelData`.
+- [MdlWriter.cs](file:///j:/wowDev/parp-tools/gillijimproject_refactor/src/MDX-L_Tool/Formats/Mdx/MdlWriter.cs): The text serializer based on `ModelDataToText`.
 
 ## Conclusion
-The `MDL Writer` is a robust, production-ready serialization pipeline left dormant in the binary. It expects a structured C++ object (`MDLDATA`) populated with `NTempest` vectors and standard primitive arrays. Its presence confirms the Alpha client's lineage from the Warcraft III internal tooling suite.
+The successful reactivation of this pipeline allows for the perfect preservation of Alpha 0.5.3 assets by providing a gateway to modern model editing suites.
