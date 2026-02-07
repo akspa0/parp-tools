@@ -40,7 +40,17 @@ public class MpqDataSource : IDataSource
             _fileSet.Add(path);
         Console.WriteLine($"[MpqDataSource] {internalFiles.Count} files from MPQ internal listfiles.");
 
+        // 2b. If no listfile found, scan for WMO files in listfile-less MPQs
+        if (internalFiles.Count == 0)
+        {
+            Console.WriteLine("[MpqDataSource] No internal listfile found - scanning for WMO files...");
+            var wmoFiles = _mpq.ScanForWmoFiles();
+            foreach (var path in wmoFiles)
+                _fileSet.Add(path);
+        }
+
         // 3. Feed extracted entries back to MPQ service for hash resolution
+        if (internalFiles.Count > 0)
         if (internalFiles.Count > 0)
         {
             var cacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
