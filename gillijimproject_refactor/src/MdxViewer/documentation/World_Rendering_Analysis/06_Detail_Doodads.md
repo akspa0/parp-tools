@@ -1,1 +1,288 @@
-["CDetailDoodadInst::CDetailDoodadInst`](0x006a2580) (0x006a2580)\n\n### Key Fields\n\n```c\nstruct CDetailDoodadInst {\n    TSLink<CDetailDoodadGeom> lameAssLink;  // Link to geometry\n    CDetailDoodadGeom* geom[2];              // 2 geometry pointers\n    CGxBuf* gxBuf[2];                       // 2 graphics buffers\n};\n```\n\n### Detail Doodad Geometry\n\n```c\nstruct CDetailDoodadGeom {\n    C3Vector position;      // Position in world space\n    C3Vector rotation;      // Rotation (Euler angles)\n    C3Vector scale;         // Scale\n    uint modelId;           // Model ID\n    uint textureId;         // Texture ID\n};\n```\n\n## Detail Doodad Creation\n\n**Address:** [`CMapChunk::CreateDetailDoodads`](0x006a6cf0) (0x006a6cf0)\n\n### Purpose\n\nCreate detail doodads for a chunk.\n\n### Algorithm\n\n1. Check if chunk is within detail doodad distance\n2. Generate random positions for doodads\n3. Place doodads on terrain surface\n4. Create geometry and graphics buffers\n5. Link to chunk\n\n### Pseudocode\n\n```c\nvoid CreateDetailDoodads(CMapChunk* chunk) {\n    // Check if chunk is within detail doodad distance\n    float distance = Distance(chunk->position, camPos);\n    if (distance > CWorld::detailDoodadDist) {\n        return;\n    }\n    \n    // Create detail doodad instance\n    chunk->detailDoodadInst = new CDetailDoodadInst();\n    \n    // Generate random positions for doodads\n    for (int i = 0; i < MAX_DETAIL_DOODADS; i++) {\n        // Generate random position within chunk\n        float x = RandomFloat(0.0f, 1.0f);\n        float y = RandomFloat(0.0f, 1.0f);\n        \n        // Get terrain height at position\n        float z = GetTerrainHeight(chunk->position.x + x * CHUNK_SIZE, \n                                   chunk->position.y + y * CHUNK_SIZE);\n        \n        // Create doodad geometry\n        CDetailDoodadGeom* geom = new CDetailDoodadGeom();\n        geom->position.x = chunk->position.x + x * CHUNK_SIZE;\n        geom->position.y = chunk->position.y + y * CHUNK_SIZE;\n        geom->position.z = z;\n        geom->rotation.x = RandomFloat(0.0f, 360.0f);\n        geom->rotation.y = RandomFloat(0.0f, 360.0f);\n        geom->rotation.z = RandomFloat(0.0f, 360.0f);\n        geom->scale.x = RandomFloat(0.5f, 1.5f);\n        geom->scale.y = RandomFloat(0.5f, 1.5f);\n        geom->scale.z = RandomFloat(0.5f, 1.5f);\n        geom->modelId = RandomModelId();\n        geom->textureId = RandomTextureId();\n        \n        // Add to detail doodad instance\n        chunk->detailDoodadInst->geom[i] = geom;\n    }\n    \n    // Create graphics buffers\n    for (int i = 0; i < 2; i++) {\n        chunk->detailDoodadInst->gxBuf[i] = CreateGraphicsBuffer(chunk->detailDoodadInst->geom[i]);\n    }\n}\n```\n\n## Detail Doodad Rendering\n\n### Purpose\n\nRender detail doodads for a chunk.\n\n### Algorithm\n\n1. Check if detail doodads exist\n2. Set up world transform for each doodad\n3. Render doodad geometry\n4. Restore world transform\n\n### Pseudocode\n\n```c\nvoid RenderDetailDoodads(CMapChunk* chunk) {\n    // Check if detail doodads exist\n    if (chunk->detailDoodadInst == NULL) {\n        return;\n    }\n    \n    // Render each doodad\n    for (int i = 0; i < 2; i++) {\n        CDetailDoodadGeom* geom = chunk->detailDoodadInst->geom[i];\n        if (geom == NULL) {\n            continue;\n        }\n        \n        // Set up world transform\n        C44Matrix worldMatrix;\n        worldMatrix = CreateTranslationMatrix(geom->position);\n        worldMatrix = worldMatrix * CreateRotationMatrix(geom->rotation);\n        worldMatrix = worldMatrix * CreateScaleMatrix(geom->scale);\n        \n        GxXformSet(GxXform_World, &worldMatrix);\n        \n        // Render doodad\n        RenderModel(geom->modelId, geom->textureId);\n    }\n}\n```\n\n## Detail Doodad Density\n\n### Console Commands\n\n- [`ConsoleCommand_DetailDoodadAlpha`](0x00665ff0) (0x00665ff0) - Set detail doodad alpha\n- [`ConsoleCommand_DetailDoodadTest`](0x00665fb0) (0x00665fb0) - Test detail doodads\n- [`ConsoleCommand_ShowDetailDoodads`](0x00665770) (0x00665770) - Show/hide detail doodads\n\n### Density Control\n\n```c\n// Detail doodad density\nfloat detailDoodadDensity = 1.0f;  // 0.0f to 1.0f\n\n// Detail doodad distance\nfloat detailDoodadDist = 100.0f;  // Distance from camera to show detail doodads\n\n// Maximum detail doodads per chunk\nconst int MAX_DETAIL_DOODADS = 64;\n```\n\n## Implementation Guidelines\n\n### C# Detail Doodads\n\n```csharp\npublic class DetailDoodadManager\n{\n    private class DetailDoodadInst\n    {\n        public DetailDoodadGeom[] Geoms { get; set; }  // 2 geometry pointers\n        public GraphicsBuffer[] GxBufs { get; set; }  // 2 graphics buffers\n    }\n    \n    private class DetailDoodadGeom\n    {\n        public C3Vector Position { get; set; }\n        public C3Vector Rotation { get; set; }\n        public C3Vector Scale { get; set; }\n        public uint ModelId { get; set; }\n        public uint TextureId { get; set; }\n    }\n    \n    private const float DETAIL_DOODAD_DISTANCE = 100.0f;\n    private const int MAX_DETAIL_DOODADS = 64;\n    \n    public void CreateDetailDoodads(TerrainChunk chunk, C3Vector cameraPosition)\n    {\n        // Check if chunk is within detail doodad distance\n        float distance = Vector3.Distance(chunk.Position, cameraPosition);\n        if (distance > DETAIL_DOODAD_DISTANCE)\n        {\n            return;\n        }\n        \n        // Create detail doodad instance\n        DetailDoodadInst inst = new DetailDoodadInst();\n        inst.Geoms = new DetailDoodadGeom[MAX_DETAIL_DOODADS];\n        inst.GxBufs = new GraphicsBuffer[MAX_DETAIL_DOODADS];\n        \n        // Generate random positions for doodads\n        Random random = new Random(chunk.Seed);\n        \n        for (int i = 0; i < MAX_DETAIL_DOODADS; i++)\n        {\n            // Generate random position within chunk\n            float x = (float)random.NextDouble();\n            float y = (float)random.NextDouble();\n            \n            // Get terrain height at position\n            float z = GetTerrainHeight(chunk.Position.X + x * CHUNK_SIZE, \n                                       chunk.Position.Y + y * CHUNK_SIZE);\n            \n            // Create doodad geometry\n            inst.Geoms[i] = new DetailDoodadGeom\n            {\n                Position = new C3Vector(\n                    chunk.Position.X + x * CHUNK_SIZE,\n                    chunk.Position.Y + y * CHUNK_SIZE,\n                    z),\n                Rotation = new C3Vector(\n                    (float)random.NextDouble() * 360.0f,\n                    (float)random.NextDouble() * 360.0f,\n                    (float)random.NextDouble() * 360.0f),\n                Scale = new C3Vector(\n                    0.5f + (float)random.NextDouble(),\n                    0.5f + (float)random.NextDouble(),\n                    0.5f + (float)random.NextDouble()),\n                ModelId = RandomModelId(random),\n                TextureId = RandomTextureId(random)\n            };\n            \n            // Create graphics buffer\n            inst.GxBufs[i] = CreateGraphicsBuffer(inst.Geoms[i]);\n        }\n        \n        chunk.DetailDoodadInst = inst;\n    }\n    \n    public void RenderDetailDoodads(TerrainChunk chunk)\n    {\n        // Check if detail doodads exist\n        if (chunk.DetailDoodadInst == null)\n        {\n            return;\n        }\n        \n        // Render each doodad\n        for (int i = 0; i < MAX_DETAIL_DOODADS; i++)\n        {\n            DetailDoodadGeom geom = chunk.DetailDoodadInst.Geoms[i];\n            if (geom == null)\n            {\n                continue;\n            }\n            \n            // Set up world transform\n            Matrix4x4 worldMatrix = Matrix4x4.CreateTranslation(geom.Position);\n            worldMatrix *= Matrix4x4.CreateRotationX(geom.Rotation.X * (float)Math.PI / 180.0f);\n            worldMatrix *= Matrix4x4.CreateRotationY(geom.Rotation.Y * (float)Math.PI / 180.0f);\n            worldMatrix *= Matrix4x4.CreateRotationZ(geom.Rotation.Z * (float)Math.PI / 180.0f);\n            worldMatrix *= Matrix4x4.CreateScale(geom.Scale);\n            \n            // Set world transform\n            GL.UniformMatrix4(worldMatrixLocation, false, ref worldMatrix);\n            \n            // Render doodad\n            RenderModel(geom.ModelId, geom.TextureId);\n        }\n    }\n    \n    private uint RandomModelId(Random random)\n    {\n        // Return random model ID\n        return (uint)random.Next(0, 100);\n    }\n    \n    private uint RandomTextureId(Random random)\n    {\n        // Return random texture ID\n        return (uint)random.Next(0, 100);\n    }\n    \n    private GraphicsBuffer CreateGraphicsBuffer(DetailDoodadGeom geom)\n    {\n        // Create graphics buffer for doodad\n        return new GraphicsBuffer();\n    }\n    \n    private void RenderModel(uint modelId, uint textureId)\n    {\n        // Render model with texture\n        // This would involve binding the model and texture and drawing\n    }\n}\n```\n\n## References\n\n- [`CDetailDoodadInst::CDetailDoodadInst`](0x006a2580) (0x006a2580) - Detail doodad instance constructor\n- [`CMapChunk::CreateDetailDoodads`](0x006a6cf0) (0x006a6cf0) - Create detail doodads for chunk\n- [`ConsoleCommand_DetailDoodadAlpha`](0x00665ff0) (0x00665ff0) - Set detail doodad alpha\n- [`ConsoleCommand_DetailDoodadTest`](0x00665fb0) (0x00665fb0) - Test detail doodads\n- [`ConsoleCommand_ShowDetailDoodads`](0x00665770) (0x00665770) - Show/hide detail doodads"]
+# WoW Alpha 0.5.3 Detail Doodads
+
+## Overview
+
+Detail doodads are small decorative elements like grass, flowers, and rocks that are scattered across terrain chunks to add visual detail. They are rendered with reduced draw distance and use instanced rendering for efficiency.
+
+## Detail Doodad Instance
+
+**Address:** [`CDetailDoodadInst::CDetailDoodadInst`](0x006a2580) (0x006a2580)
+
+### Key Fields
+
+```c
+struct CDetailDoodadInst {
+    TSLink<CDetailDoodadGeom> lameAssLink;  // Link to geometry
+    CDetailDoodadGeom* geom[2];              // 2 geometry pointers
+    CGxBuf* gxBuf[2];                       // 2 graphics buffers
+};
+```
+
+### Detail Doodad Geometry
+
+```c
+struct CDetailDoodadGeom {
+    C3Vector position;      // Position in world space
+    C3Vector rotation;      // Rotation (Euler angles)
+    C3Vector scale;         // Scale
+    uint modelId;           // Model ID
+    uint textureId;         // Texture ID
+};
+```
+
+## Detail Doodad Creation
+
+**Address:** [`CMapChunk::CreateDetailDoodads`](0x006a6cf0) (0x006a6cf0)
+
+### Purpose
+
+Create detail doodads for a chunk.
+
+### Algorithm
+
+```c
+void CreateDetailDoodads(CMapChunk* chunk) {
+    // Check if chunk is within detail doodad distance
+    float distance = Distance(chunk->position, camPos);
+    if (distance > CWorld::detailDoodadDist) {
+        return;
+    }
+    
+    // Create detail doodad instance
+    chunk->detailDoodadInst = new CDetailDoodadInst();
+    
+    // Generate random positions for doodads
+    for (int i = 0; i < MAX_DETAIL_DOODADS; i++) {
+        // Generate random position within chunk
+        float x = RandomFloat(0.0f, 1.0f);
+        float y = RandomFloat(0.0f, 1.0f);
+        
+        // Get terrain height at position
+        float z = GetTerrainHeight(chunk->position.x + x * CHUNK_SIZE, 
+                                   chunk->position.y + y * CHUNK_SIZE);
+        
+        // Create doodad geometry
+        CDetailDoodadGeom* geom = new CDetailDoodadGeom();
+        geom->position.x = chunk->position.x + x * CHUNK_SIZE;
+        geom->position.y = chunk->position.y + y * CHUNK_SIZE;
+        geom->position.z = z;
+        geom->rotation.x = RandomFloat(0.0f, 360.0f);
+        geom->rotation.y = RandomFloat(0.0f, 360.0f);
+        geom->rotation.z = RandomFloat(0.0f, 360.0f);
+        geom->scale.x = RandomFloat(0.5f, 1.5f);
+        geom->scale.y = RandomFloat(0.5f, 1.5f);
+        geom->scale.z = RandomFloat(0.5f, 1.5f);
+        geom->modelId = RandomModelId();
+        geom->textureId = RandomTextureId();
+        
+        // Add to detail doodad instance
+        chunk->detailDoodadInst->geom[i] = geom;
+    }
+    
+    // Create graphics buffers
+    for (int i = 0; i < 2; i++) {
+        chunk->detailDoodadInst->gxBuf[i] = CreateGraphicsBuffer(chunk->detailDoodadInst->geom[i]);
+    }
+}
+```
+
+## Detail Doodad Rendering
+
+### Purpose
+
+Render detail doodads for a chunk.
+
+### Algorithm
+
+```c
+void RenderDetailDoodads(CMapChunk* chunk) {
+    // Check if detail doodads exist
+    if (chunk->detailDoodadInst == NULL) {
+        return;
+    }
+    
+    // Render each doodad
+    for (int i = 0; i < 2; i++) {
+        CDetailDoodadGeom* geom = chunk->detailDoodadInst->geom[i];
+        if (geom == NULL) {
+            continue;
+        }
+        
+        // Set up world transform
+        C44Matrix worldMatrix;
+        worldMatrix = CreateTranslationMatrix(geom->position);
+        worldMatrix = worldMatrix * CreateRotationMatrix(geom->rotation);
+        worldMatrix = worldMatrix * CreateScaleMatrix(geom->scale);
+        
+        GxXformSet(GxXform_World, &worldMatrix);
+        
+        // Render doodad
+        RenderModel(geom->modelId, geom->textureId);
+    }
+}
+```
+
+## Detail Doodad Density
+
+### Console Commands
+
+- [`ConsoleCommand_DetailDoodadAlpha`](0x00665ff0) (0x00665ff0) - Set detail doodad alpha
+- [`ConsoleCommand_DetailDoodadTest`](0x00665fb0) (0x00665fb0) - Test detail doodads
+- [`ConsoleCommand_ShowDetailDoodads`](0x00665770) (0x00665770) - Show/hide detail doodads
+
+### Density Control
+
+```c
+// Detail doodad density
+float detailDoodadDensity = 1.0f;  // 0.0f to 1.0f
+
+// Detail doodad distance
+float detailDoodadDist = 100.0f;  // Distance from camera to show detail doodads
+
+// Maximum detail doodads per chunk
+const int MAX_DETAIL_DOODADS = 64;
+```
+
+## Implementation Guidelines
+
+### C# Detail Doodads
+
+```csharp
+public class DetailDoodadManager
+{
+    private class DetailDoodadInst
+    {
+        public DetailDoodadGeom[] Geoms { get; set; }  // 2 geometry pointers
+        public GraphicsBuffer[] GxBufs { get; set; }  // 2 graphics buffers
+    }
+    
+    private class DetailDoodadGeom
+    {
+        public C3Vector Position { get; set; }
+        public C3Vector Rotation { get; set; }
+        public C3Vector Scale { get; set; }
+        public uint ModelId { get; set; }
+        public uint TextureId { get; set; }
+    }
+    
+    private const float DETAIL_DOODAD_DISTANCE = 100.0f;
+    private const int MAX_DETAIL_DOODADS = 64;
+    
+    public void CreateDetailDoodads(TerrainChunk chunk, C3Vector cameraPosition)
+    {
+        // Check if chunk is within detail doodad distance
+        float distance = Vector3.Distance(chunk.Position, cameraPosition);
+        if (distance > DETAIL_DOODAD_DISTANCE)
+        {
+            return;
+        }
+        
+        // Create detail doodad instance
+        DetailDoodadInst inst = new DetailDoodadInst();
+        inst.Geoms = new DetailDoodadGeom[MAX_DETAIL_DOODADS];
+        inst.GxBufs = new GraphicsBuffer[MAX_DETAIL_DOODADS];
+        
+        // Generate random positions for doodads
+        Random random = new Random(chunk.Seed);
+        
+        for (int i = 0; i < MAX_DETAIL_DOODADS; i++)
+        {
+            // Generate random position within chunk
+            float x = (float)random.NextDouble();
+            float y = (float)random.NextDouble();
+            
+            // Get terrain height at position
+            float z = GetTerrainHeight(chunk.Position.X + x * CHUNK_SIZE, 
+                                       chunk.Position.Y + y * CHUNK_SIZE);
+            
+            // Create doodad geometry
+            inst.Geoms[i] = new DetailDoodadGeom
+            {
+                Position = new C3Vector(
+                    chunk.Position.X + x * CHUNK_SIZE,
+                    chunk.Position.Y + y * CHUNK_SIZE,
+                    z),
+                Rotation = new C3Vector(
+                    (float)random.NextDouble() * 360.0f,
+                    (float)random.NextDouble() * 360.0f,
+                    (float)random.NextDouble() * 360.0f),
+                Scale = new C3Vector(
+                    0.5f + (float)random.NextDouble(),
+                    0.5f + (float)random.NextDouble(),
+                    0.5f + (float)random.NextDouble()),
+                ModelId = RandomModelId(random),
+                TextureId = RandomTextureId(random)
+            };
+            
+            // Create graphics buffer
+            inst.GxBufs[i] = CreateGraphicsBuffer(inst.Geoms[i]);
+        }
+        
+        chunk.DetailDoodadInst = inst;
+    }
+    
+    public void RenderDetailDoodads(TerrainChunk chunk)
+    {
+        // Check if detail doodads exist
+        if (chunk.DetailDoodadInst == null)
+        {
+            return;
+        }
+        
+        // Render each doodad
+        for (int i = 0; i < MAX_DETAIL_DOODADS; i++)
+        {
+            DetailDoodadGeom geom = chunk.DetailDoodadInst.Geoms[i];
+            if (geom == null)
+            {
+                continue;
+            }
+            
+            // Set up world transform
+            Matrix4x4 worldMatrix = Matrix4x4.CreateTranslation(geom.Position);
+            worldMatrix *= Matrix4x4.CreateRotationX(geom.Rotation.X * (float)Math.PI / 180.0f);
+            worldMatrix *= Matrix4x4.CreateRotationY(geom.Rotation.Y * (float)Math.PI / 180.0f);
+            worldMatrix *= Matrix4x4.CreateRotationZ(geom.Rotation.Z * (float)Math.PI / 180.0f);
+            worldMatrix *= Matrix4x4.CreateScale(geom.Scale);
+            
+            // Set world transform
+            GL.UniformMatrix4(worldMatrixLocation, false, ref worldMatrix);
+            
+            // Render doodad
+            RenderModel(geom.ModelId, geom.TextureId);
+        }
+    }
+    
+    private uint RandomModelId(Random random)
+    {
+        // Return random model ID
+        return (uint)random.Next(0, 100);
+    }
+    
+    private uint RandomTextureId(Random random)
+    {
+        // Return random texture ID
+        return (uint)random.Next(0, 100);
+    }
+    
+    private GraphicsBuffer CreateGraphicsBuffer(DetailDoodadGeom geom)
+    {
+        // Create graphics buffer for doodad
+        return new GraphicsBuffer();
+    }
+    
+    private void RenderModel(uint modelId, uint textureId)
+    {
+        // Render model with texture
+        // This would involve binding the model and texture and drawing
+    }
+}
+```
+
+## References
+
+- [`CDetailDoodadInst::CDetailDoodadInst`](0x006a2580) (0x006a2580) - Detail doodad instance constructor
+- [`CMapChunk::CreateDetailDoodads`](0x006a6cf0) (0x006a6cf0) - Create detail doodads for chunk
+- [`ConsoleCommand_DetailDoodadAlpha`](0x00665ff0) (0x00665ff0) - Set detail doodad alpha
+- [`ConsoleCommand_DetailDoodadTest`](0x00665fb0) (0x00665fb0) - Test detail doodads
+- [`ConsoleCommand_ShowDetailDoodads`](0x00665770) (0x00665770) - Show/hide detail doodads

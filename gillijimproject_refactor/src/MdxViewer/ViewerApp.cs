@@ -90,7 +90,7 @@ public class ViewerApp : IDisposable
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
 
-        _gl.ClearColor(0.11f, 0.20f, 0.39f, 1.0f);
+        _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Enable(EnableCap.CullFace);
@@ -126,8 +126,8 @@ public class ViewerApp : IDisposable
                     // Free-fly: mouse controls camera rotation (yaw/pitch)
                     // DEBUG: Log mouse movement to diagnose inversion
                     Console.WriteLine($"[Camera] Mouse move: dx={dx:F2}, dy={dy:F2}, Yaw={_camera.Yaw:F2}, Pitch={_camera.Pitch:F2}");
-                    _camera.Yaw -= dx * 0.5f;   // Drag left = look left (inverted for user expectation)
-                    _camera.Pitch += dy * 0.5f; // Drag up = look up (inverted for user expectation)
+                    _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
+                    _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
                     _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
                 }
             };
