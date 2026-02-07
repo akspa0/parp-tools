@@ -66,6 +66,11 @@ public class ViewerApp : IDisposable
     private TerrainManager? _terrainManager;
     private WorldScene? _worldScene;
 
+    // Object picking state
+    private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
+    private string _selectedObjectType = "";
+    private string _selectedObjectInfo = "";
+
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
 
@@ -117,6 +122,8 @@ public class ViewerApp : IDisposable
             {
                 if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse)
                     _mouseDown = true;
+                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse && _worldScene != null)
+                    PickObjectAtMouse(_lastMouseX, _lastMouseY);
             };
             mouse.MouseUp += (_, btn) =>
             {
@@ -203,14 +210,10 @@ public class ViewerApp : IDisposable
 
             // Update terrain AOI before rendering
             if (_terrainManager != null)
-            {
                 _terrainManager.UpdateAOI(_camera.Position);
-                _terrainManager.Render(view, proj, _camera.Position);
-            }
-            else
-            {
-                _renderer.Render(view, proj);
-            }
+
+            // Render the scene (WorldScene handles terrain + objects + BBs; standalone renderers handle themselves)
+            _renderer.Render(view, proj);
         }
 
         // Render ImGui overlay
@@ -227,6 +230,9 @@ public class ViewerApp : IDisposable
 
         if (_showModelInfo)
             DrawModelInfoPanel();
+
+        if (_worldScene != null)
+            DrawMinimap();
 
         DrawStatusBar();
 
@@ -636,6 +642,14 @@ public class ViewerApp : IDisposable
                         }
                         ImGui.TreePop();
                     }
+
+                    // Selected object info (from mouse picking)
+                    if (!string.IsNullOrEmpty(_selectedObjectInfo))
+                    {
+                        ImGui.Separator();
+                        ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object:");
+                        ImGui.TextWrapped(_selectedObjectInfo);
+                    }
                 }
             }
         }
@@ -656,6 +670,82 @@ public class ViewerApp : IDisposable
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawMinimap()
+    {
+        if (_worldScene == null || _terrainManager == null) return;
+
+        var io = ImGui.GetIO();
+        float mapSize = 200f; // pixel size of minimap
+        float padding = 10f;
+
+        // Position bottom-left, above status bar
+        ImGui.SetNextWindowPos(new Vector2(padding, io.DisplaySize.Y - mapSize - 34));
+        ImGui.SetNextWindowSize(new Vector2(mapSize + 16, mapSize + 36));
+
+        if (ImGui.Begin("Minimap", ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse))
+        {
+            var drawList = ImGui.GetWindowDrawList();
+            var cursorPos = ImGui.GetCursorScreenPos();
+            float cellSize = mapSize / 64f;
+
+            // Background
+            drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF1A1A1A);
+
+            // Draw existing tiles
+            var adapter = _terrainManager.Adapter;
+            foreach (int tileIdx in adapter.ExistingTiles)
+            {
+                int tx = tileIdx / 64;
+                int ty = tileIdx % 64;
+                float x = cursorPos.X + tx * cellSize;
+                float y = cursorPos.Y + ty * cellSize;
+
+                // Loaded tiles = green, unloaded = dark green
+                bool loaded = _terrainManager.IsTileLoaded(tx, ty);
+                uint color = loaded ? 0xFF00AA00 : 0xFF004400;
+                drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), color);
+            }
+
+            // Draw camera position as a bright dot
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+            float camScreenX = cursorPos.X + camTileX * cellSize;
+            float camScreenY = cursorPos.Y + camTileY * cellSize;
+
+            // Camera direction indicator
+            float yawRad = _camera.Yaw * MathF.PI / 180f;
+            float dirLen = 8f;
+            float dirX = camScreenX + MathF.Sin(yawRad) * dirLen;
+            float dirY = camScreenY - MathF.Cos(yawRad) * dirLen;
+            drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, 2f);
+            drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), 3f, 0xFFFFFFFF);
+
+            // Border
+            drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
+
+            // Click to teleport
+            if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                var mousePos = ImGui.GetMousePos();
+                float clickTileX = (mousePos.X - cursorPos.X) / cellSize;
+                float clickTileY = (mousePos.Y - cursorPos.Y) / cellSize;
+                if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
+                {
+                    float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+                    float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+                    _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
+                }
+            }
+
+            // Tile coordinate label
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 2);
+            int ctX = (int)MathF.Floor(camTileX);
+            int ctY = (int)MathF.Floor(camTileY);
+            ImGui.Text($"Tile: ({ctX},{ctY})  Loaded: {_terrainManager.LoadedTileCount}");
+        }
+        ImGui.End();
     }
 
     private void RefreshFileList()
@@ -1048,6 +1138,88 @@ public class ViewerApp : IDisposable
             _worldScene = null;
             _terrainManager = null;
         }
+    }
+
+    private void PickObjectAtMouse(float mouseX, float mouseY)
+    {
+        if (_worldScene == null) return;
+
+        var size = _window.Size;
+        float aspect = (float)size.X / Math.Max(size.Y, 1);
+        var view = _camera.GetViewMatrix();
+        var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, 5000f);
+        var vp = view * proj;
+
+        float bestDist = 30f; // max screen-space pixel distance to pick
+        int bestIdx = -1;
+        bool bestIsWmo = false;
+
+        // Check WMO placements
+        for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
+        {
+            var pos = _worldScene.ModfPlacements[i].Position;
+            if (TryProjectToScreen(pos, vp, size.X, size.Y, out float sx, out float sy))
+            {
+                float d = MathF.Sqrt((sx - mouseX) * (sx - mouseX) + (sy - mouseY) * (sy - mouseY));
+                if (d < bestDist) { bestDist = d; bestIdx = i; bestIsWmo = true; }
+            }
+        }
+
+        // Check MDX placements
+        for (int i = 0; i < _worldScene.MddfPlacements.Count; i++)
+        {
+            var pos = _worldScene.MddfPlacements[i].Position;
+            if (TryProjectToScreen(pos, vp, size.X, size.Y, out float sx, out float sy))
+            {
+                float d = MathF.Sqrt((sx - mouseX) * (sx - mouseX) + (sy - mouseY) * (sy - mouseY));
+                if (d < bestDist) { bestDist = d; bestIdx = i; bestIsWmo = false; }
+            }
+        }
+
+        if (bestIdx >= 0)
+        {
+            _selectedObjectIndex = bestIdx;
+            if (bestIsWmo)
+            {
+                var p = _worldScene.ModfPlacements[bestIdx];
+                string name = p.NameIndex < _worldScene.WmoModelNames.Count
+                    ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                _selectedObjectType = "WMO";
+                _selectedObjectInfo = $"WMO [{bestIdx}] {name}\n" +
+                    $"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                    $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
+                    $"Flags: 0x{p.Flags:X4}\n" +
+                    $"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})";
+            }
+            else
+            {
+                var p = _worldScene.MddfPlacements[bestIdx];
+                string name = p.NameIndex < _worldScene.MdxModelNames.Count
+                    ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                _selectedObjectType = "MDX";
+                _selectedObjectInfo = $"MDX [{bestIdx}] {name}\n" +
+                    $"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                    $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
+                    $"Scale: {p.Scale:F3}";
+            }
+        }
+        else
+        {
+            _selectedObjectIndex = -1;
+            _selectedObjectType = "";
+            _selectedObjectInfo = "";
+        }
+    }
+
+    private static bool TryProjectToScreen(Vector3 worldPos, Matrix4x4 viewProj, int screenW, int screenH, out float sx, out float sy)
+    {
+        var clip = Vector4.Transform(new Vector4(worldPos, 1f), viewProj);
+        if (clip.W <= 0) { sx = sy = 0; return false; }
+        float ndcX = clip.X / clip.W;
+        float ndcY = clip.Y / clip.W;
+        sx = (ndcX * 0.5f + 0.5f) * screenW;
+        sy = (1f - (ndcY * 0.5f + 0.5f)) * screenH;
+        return true;
     }
 
     private void ResetCamera()

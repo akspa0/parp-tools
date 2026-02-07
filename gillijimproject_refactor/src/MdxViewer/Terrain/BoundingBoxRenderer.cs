@@ -54,11 +54,18 @@ void main() { FragColor = vec4(uColor, 1.0); }";
         _gl.AttachShader(_shader, vs);
         _gl.AttachShader(_shader, fs);
         _gl.LinkProgram(_shader);
+        _gl.GetProgram(_shader, ProgramPropertyARB.LinkStatus, out int linkStatus);
+        if (linkStatus == 0)
+        {
+            string log = _gl.GetProgramInfoLog(_shader);
+            Console.WriteLine($"[BoundingBoxRenderer] Program link error: {log}");
+        }
         _gl.DeleteShader(vs);
         _gl.DeleteShader(fs);
 
         _uMvp = _gl.GetUniformLocation(_shader, "uMVP");
         _uColor = _gl.GetUniformLocation(_shader, "uColor");
+        Console.WriteLine($"[BoundingBoxRenderer] Init: program={_shader} uMVP={_uMvp} uColor={_uColor}");
 
         // VAO/VBO/EBO
         _vao = _gl.GenVertexArray();

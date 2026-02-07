@@ -42,7 +42,7 @@ public class WorldScene : ISceneRenderer
     public IReadOnlyList<string> WmoModelNames => _terrainManager.Adapter.WmoModelNames;
 
     // Bounding box debug rendering
-    private bool _showBoundingBoxes = true; // default ON for debugging
+    private bool _showBoundingBoxes = false;
     private BoundingBoxRenderer? _bbRenderer;
     public bool ShowBoundingBoxes { get => _showBoundingBoxes; set => _showBoundingBoxes = value; }
 
@@ -54,13 +54,10 @@ public class WorldScene : ISceneRenderer
         _assets = new WorldAssetManager(gl, dataSource, texResolver);
         _bbRenderer = new BoundingBoxRenderer(gl);
 
-        // Create terrain manager (loads terrain chunks + collects MDDF/MODF placements)
+        // Create terrain manager (uses AOI-based lazy loading — tiles load as camera moves)
         onStatus?.Invoke("Loading WDT...");
         _terrainManager = new TerrainManager(gl, wdtPath, dataSource);
-        _terrainManager.LoadAllTiles((loaded, total, name) =>
-        {
-            onStatus?.Invoke($"Loading terrain: {loaded}/{total} tiles ({name})");
-        });
+        // Initial AOI load happens on first UpdateAOI call from ViewerApp
 
         var adapter = _terrainManager.Adapter;
 
@@ -98,16 +95,22 @@ public class WorldScene : ISceneRenderer
         var wmoNames = adapter.WmoModelNames;
 
         // MDX (doodad) placements
+        // Rotation stored as (wowRotX, wowRotY, wowRotZ) in degrees
+        // Our renderer swaps X↔Y: rendererX=wowY, rendererY=wowX, rendererZ=wowZ
+        // So: rotate around rendererY (=wowX) by rotX, rendererX (=wowY) by rotY, rendererZ by rotZ
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
+            float rx = p.Rotation.X * MathF.PI / 180f; // wowRotX → around rendererY
+            float ry = p.Rotation.Y * MathF.PI / 180f; // wowRotY → around rendererX
+            float rz = p.Rotation.Z * MathF.PI / 180f; // wowRotZ → around rendererZ (heading)
             var transform = Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationZ(p.Rotation.Y * MathF.PI / 180f)
-                * Matrix4x4.CreateRotationX(p.Rotation.X * MathF.PI / 180f)
-                * Matrix4x4.CreateRotationY(p.Rotation.Z * MathF.PI / 180f)
+                * Matrix4x4.CreateRotationY(rx)
+                * Matrix4x4.CreateRotationX(ry)
+                * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             _mdxInstances.Add(new ObjectInstance { ModelKey = key, Transform = transform });
@@ -119,9 +122,12 @@ public class WorldScene : ISceneRenderer
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            var transform = Matrix4x4.CreateRotationZ(p.Rotation.Y * MathF.PI / 180f)
-                * Matrix4x4.CreateRotationX(p.Rotation.X * MathF.PI / 180f)
-                * Matrix4x4.CreateRotationY(p.Rotation.Z * MathF.PI / 180f)
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = Matrix4x4.CreateRotationY(rx)
+                * Matrix4x4.CreateRotationX(ry)
+                * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             _wmoInstances.Add(new ObjectInstance { ModelKey = key, Transform = transform });
@@ -186,11 +192,12 @@ public class WorldScene : ISceneRenderer
         // 1. Render terrain
         _terrainManager.Render(view, proj);
 
-        // Reset GL state after terrain (terrain leaves DepthFunc as Lequal)
+        // Reset GL state after terrain
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.DepthTest);
+        _gl.UseProgram(0); // unbind terrain shader
 
         if (!_objectsVisible) return;
 
@@ -220,6 +227,9 @@ public class WorldScene : ISceneRenderer
             {
                 var renderer = _assets.GetWmo(inst.ModelKey);
                 if (renderer == null) continue;
+                // Reset blend state before each model
+                _gl.Disable(EnableCap.Blend);
+                _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj);
                 wmoRendered++;
             }
@@ -234,6 +244,9 @@ public class WorldScene : ISceneRenderer
             {
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
+                // Reset blend state before each model
+                _gl.Disable(EnableCap.Blend);
+                _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj);
                 mdxRendered++;
             }
@@ -241,16 +254,31 @@ public class WorldScene : ISceneRenderer
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
 
+        // Reset GL state before bounding boxes
+        _gl.Disable(EnableCap.Blend);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.UseProgram(0);
+        _gl.BindVertexArray(0);
+
         // 4. Debug bounding boxes for all placements
         if (_showBoundingBoxes && _bbRenderer != null)
         {
+            // Disable depth test so BBs always draw on top
+            _gl.Disable(EnableCap.DepthTest);
+
             var adapter = _terrainManager.Adapter;
+            if (!_renderDiagPrinted)
+                Console.WriteLine($"[WorldScene] BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
             // MDDF markers (yellow)
             foreach (var p in adapter.MddfPlacements)
-                _bbRenderer.DrawMarker(p.Position, 2f, view, proj, new Vector3(1f, 1f, 0f));
+                _bbRenderer.DrawMarker(p.Position, 5f, view, proj, new Vector3(1f, 1f, 0f));
             // MODF markers (cyan)
             foreach (var p in adapter.ModfPlacements)
-                _bbRenderer.DrawMarker(p.Position, 5f, view, proj, new Vector3(0f, 1f, 1f));
+                _bbRenderer.DrawMarker(p.Position, 10f, view, proj, new Vector3(0f, 1f, 1f));
+
+            _gl.Enable(EnableCap.DepthTest);
         }
     }
 

@@ -87,6 +87,35 @@ public class AlphaTerrainAdapter
         }
 
         Console.WriteLine($"[TerrainAdapter] WDT loaded: {_existingTiles.Count} tiles, {MdxModelNames.Count} MDX names, {WmoModelNames.Count} WMO names, wmoBased={IsWmoBased}");
+
+        // Pre-scan all ADTs for MDDF/MODF placements (lightweight — no geometry loaded)
+        if (!IsWmoBased)
+            PreScanPlacements();
+    }
+
+    /// <summary>
+    /// Pre-scan all ADTs to collect MDDF/MODF placements without loading terrain geometry.
+    /// This allows the asset manifest to be built before any tiles are loaded.
+    /// </summary>
+    private void PreScanPlacements()
+    {
+        int scanned = 0;
+        foreach (int tileIdx in _existingTiles)
+        {
+            if (tileIdx < 0 || tileIdx >= _adtOffsets.Count || _adtOffsets[tileIdx] == 0) continue;
+            try
+            {
+                var adt = new AdtAlpha(_wdtPath, _adtOffsets[tileIdx], tileIdx);
+                CollectMddfPlacements(adt.GetMddfRaw());
+                CollectModfPlacements(adt.GetModfRaw());
+                scanned++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TerrainAdapter] PreScan error tile {tileIdx}: {ex.Message}");
+            }
+        }
+        Console.WriteLine($"[TerrainAdapter] PreScan: {scanned} tiles → {MddfPlacements.Count} MDDF, {ModfPlacements.Count} MODF placements");
     }
 
     /// <summary>
@@ -176,27 +205,21 @@ public class AlphaTerrainAdapter
             if (!_seenMddfIds.Add(uniqueId)) continue; // deduplicate
 
             // Raw floats at file offsets
-            float f0 = BitConverter.ToSingle(mddfData, off + 8);
-            float f1 = BitConverter.ToSingle(mddfData, off + 12);
-            float f2 = BitConverter.ToSingle(mddfData, off + 16);
-
-            // Diagnostic: dump first 3 raw entries before any transform
-            if (!_mddfDiagPrinted && MddfPlacements.Count < 3)
-            {
-                string name = nameIdx < MdxModelNames.Count ? Path.GetFileName(MdxModelNames[nameIdx]) : "?";
-                Console.WriteLine($"[MDDF RAW] [{MddfPlacements.Count}] off+8={f0:F2} off+12={f1:F2} off+16={f2:F2}  model={name}");
-                if (MddfPlacements.Count == 2) _mddfDiagPrinted = true;
-            }
-
-            // Raw floats: off+8, off+12 (height), off+16
-            float rawX = f0;
-            float rawZ = f1;  // height
-            float rawY = f2;
-
+            float rawX = BitConverter.ToSingle(mddfData, off + 8);
+            float rawZ = BitConverter.ToSingle(mddfData, off + 12); // height
+            float rawY = BitConverter.ToSingle(mddfData, off + 16);
             float rotX = BitConverter.ToSingle(mddfData, off + 20);
             float rotZ = BitConverter.ToSingle(mddfData, off + 24);
             float rotY = BitConverter.ToSingle(mddfData, off + 28);
             ushort scale = BitConverter.ToUInt16(mddfData, off + 32);
+
+            // Diagnostic: dump first 3 raw entries
+            if (!_mddfDiagPrinted && MddfPlacements.Count < 3)
+            {
+                string name = nameIdx < MdxModelNames.Count ? Path.GetFileName(MdxModelNames[nameIdx]) : "?";
+                Console.WriteLine($"[MDDF RAW] [{MddfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotZ:F2}, {rotY:F2}) scale={scale}  model={name}");
+                if (MddfPlacements.Count == 2) _mddfDiagPrinted = true;
+            }
 
             // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
             MddfPlacements.Add(new MddfPlacement
@@ -226,16 +249,6 @@ public class AlphaTerrainAdapter
 
             if (!_seenModfIds.Add(uniqueId)) continue; // deduplicate
 
-            // Diagnostic: dump first MODF raw entry
-            if (ModfPlacements.Count == 0)
-            {
-                float mf0 = BitConverter.ToSingle(modfData, off + 8);
-                float mf1 = BitConverter.ToSingle(modfData, off + 12);
-                float mf2 = BitConverter.ToSingle(modfData, off + 16);
-                string mname = nameIdx < WmoModelNames.Count ? Path.GetFileName(WmoModelNames[nameIdx]) : "?";
-                Console.WriteLine($"[MODF RAW] [0] off+8={mf0:F2} off+12={mf1:F2} off+16={mf2:F2}  model={mname}");
-            }
-
             // Raw floats from file
             float rawX = BitConverter.ToSingle(modfData, off + 8);
             float rawZ = BitConverter.ToSingle(modfData, off + 12); // height
@@ -243,6 +256,13 @@ public class AlphaTerrainAdapter
             float rotX = BitConverter.ToSingle(modfData, off + 20);
             float rotZ = BitConverter.ToSingle(modfData, off + 24);
             float rotY = BitConverter.ToSingle(modfData, off + 28);
+
+            // Diagnostic: dump first 3 MODF raw entries
+            if (ModfPlacements.Count < 3)
+            {
+                string mname = nameIdx < WmoModelNames.Count ? Path.GetFileName(WmoModelNames[nameIdx]) : "?";
+                Console.WriteLine($"[MODF RAW] [{ModfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotZ:F2}, {rotY:F2})  model={mname}");
+            }
             float bbMinX = BitConverter.ToSingle(modfData, off + 32);
             float bbMinZ = BitConverter.ToSingle(modfData, off + 36);
             float bbMinY = BitConverter.ToSingle(modfData, off + 40);

@@ -22,7 +22,7 @@ public class TerrainManager : ISceneRenderer
     private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
 
     // AOI: how many tiles around the camera to keep loaded
-    private const int AoiRadius = 1; // Load 3×3 tiles around camera
+    private const int AoiRadius = 2; // Load 5×5 tiles around camera (max ~25, but limited by existing tiles)
 
     // Camera tracking for AOI updates
     private int _lastCameraTileX = -1;
@@ -32,6 +32,7 @@ public class TerrainManager : ISceneRenderer
     // Stats
     public int LoadedTileCount => _loadedTiles.Count;
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
+    public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public string MapName { get; }
 
