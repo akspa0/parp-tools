@@ -22,7 +22,7 @@
 | 0 | Foundation (constants, blend, materials, render queue, frustum, shaders) | 6 | ✅ Complete |
 | 1 | MDX Animation (keyframes, bones, geoset anim, playback, UI) | 7 | ⏳ Not started |
 | 2 | Particles (emitters, physics, rendering) | 5 | ⏳ Not started |
-| 3 | Terrain (WDT/ADT loading, mesh, texture layers, lighting, AOI) | 8 | ⏳ Not started |
+| 3 | Terrain (WDT/ADT loading, mesh, texture layers, lighting, AOI) | 8 | ✅ Complete |
 | 4 | World Scene (composition, placements, fog, day/night) | 6 | ⏳ Not started |
 | 5 | Liquids (mesh, rendering, detection) | 3 | ⏳ Not started |
 | 6 | Detail Doodads (generation, rendering) | 2 | ⏳ Not started |
@@ -39,7 +39,7 @@
 ## Implementation Order (terrain-first strategy)
 
 1. ~~Phase 0 — Foundation~~ ✅
-2. **Phase 3 — Terrain rendering** ← NEXT
+2. ~~Phase 3 — Terrain rendering~~ ✅
 3. Phase 4 — World Scene (compose terrain + models + WMOs)
 4. Phase 1 — MDX Animation
 5. Phase 2 — Particles
@@ -55,3 +55,5 @@ Reference implementation first, then extend in our own direction.
 - 2026-02-06: Discovered existing Alpha parsers in gillijimproject-csharp — eliminates Phase 3 parser work
 - 2026-02-06: Updated plan: Phase 3 now only needs rendering adapter bridge, not new parsers
 - 2026-02-06: Decided terrain-first strategy: Phase 3 → Phase 4 → Phase 1 → rest
+- 2026-02-07: Phase 3 COMPLETE — 7 terrain files + ViewerApp integration, building (0 errors)
+- 2026-02-07: Added AdtAlpha.GetMcnkOffsets() public accessor for terrain adapter

@@ -22,6 +22,9 @@ public class MpqDataSource : IDataSource
     // Loose file roots to check (game folder structure)
     private readonly List<string> _looseRoots = new();
 
+    // Alpha 0.5.3: virtual path → disk path for listfile-less .ext.MPQ files (WMO, WDT, WDL)
+    private readonly Dictionary<string, string> _alphaMpqCache = new(StringComparer.OrdinalIgnoreCase);
+
     public string Name => $"Game: {Path.GetFileName(_gamePath)}";
     public bool IsLoaded => _loaded;
 
@@ -31,17 +34,21 @@ public class MpqDataSource : IDataSource
 
         Console.WriteLine($"[MpqDataSource] Loading game folder: {gamePath}");
 
-        // 1. Load MPQ archives
+        // 1. Load MPQ archives (large MPQs with listfiles)
         _mpq.LoadArchives(new[] { gamePath });
 
-        // 2. Load files from MPQ archives internal listfiles
-        var mpqFiles = _mpq.GetAllKnownFiles();
-        foreach (var file in mpqFiles)
-        {
-            if (!_fileSet.Contains(file))
-                _fileSet.Add(file);
-        }
-        Console.WriteLine($"[MpqDataSource] Added {mpqFiles.Count} MPQ internal files.");
+        // 2. Extract files from MPQ internal (listfile) entries
+        var internalFiles = _mpq.ExtractInternalListfiles();
+        foreach (var file in internalFiles)
+            _fileSet.Add(file);
+        Console.WriteLine($"[MpqDataSource] Added {internalFiles.Count} files from MPQ internal listfiles.");
+
+        // Also add any previously known files (from hash table / scanned)
+        var knownFiles = _mpq.GetAllKnownFiles();
+        foreach (var file in knownFiles)
+            _fileSet.Add(file);
+        if (knownFiles.Count > 0)
+            Console.WriteLine($"[MpqDataSource] Added {knownFiles.Count} previously known files.");
 
         // 3. Optionally load user-provided external listfile
         if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
@@ -54,8 +61,8 @@ public class MpqDataSource : IDataSource
         // 4. Scan loose files on disk
         ScanLooseFiles(gamePath);
         
-        // 5. Scan for WMO MPQ archives manually (nested MPQs with embedded WMO data)
-        ScanWmoMpqArchives(gamePath);
+        // 5. Scan for Alpha 0.5.3 listfile-less .ext.MPQ archives (WMO, WDT, WDL)
+        ScanAlphaNestedMpqArchives(gamePath);
 
         _fileList = _fileSet.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         _loaded = true;
@@ -76,13 +83,12 @@ public class MpqDataSource : IDataSource
     }
 
     /// <summary>
-    /// Scans for .wmo.mpq/.wmo.MPQ files and generates virtual paths for their embedded WMO data.
-    /// WMO files in Alpha 0.5.3 are stored as file 0 inside .wmo.MPQ archives.
-    /// Only scans valid game directories, excludes user folders like "wmos", "addons", etc.
+    /// Scans for Alpha 0.5.3 listfile-less .ext.MPQ archives (WMO, WDT, WDL).
+    /// These files wrap a single data file as file 0 inside an individual MPQ archive.
+    /// Builds a virtual path → disk path cache for fast reads.
     /// </summary>
-    private void ScanWmoMpqArchives(string gamePath)
+    private void ScanAlphaNestedMpqArchives(string gamePath)
     {
-        // Only scan in valid game data directories - exclude user-created folders
         string[] validScanRoots = new[]
         {
             Path.Combine(gamePath, "Data"),
@@ -90,51 +96,80 @@ public class MpqDataSource : IDataSource
             Path.Combine(gamePath, "World"),
         };
 
-        // User-created folders to exclude
         HashSet<string> excludeFolders = new(StringComparer.OrdinalIgnoreCase)
         {
-            "wmos", "addons", "interface", "addons", "backup", "cache", "logs"
+            "wmos", "addons", "interface", "backup", "cache", "logs"
         };
+
+        // Extensions that use listfile-less individual .ext.MPQ wrapping in Alpha 0.5.3
+        string[] nestedExts = { ".wmo.MPQ", ".wmo.mpq", ".wdt.MPQ", ".wdt.mpq", ".wdl.MPQ", ".wdl.mpq" };
+
+        var countByExt = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var root in validScanRoots)
         {
             if (!Directory.Exists(root)) continue;
 
-            // Scan for both .wmo.mpq and .wmo.MPQ
-            foreach (var ext in new[] { "*.wmo.mpq", "*.wmo.MPQ" })
+            IEnumerable<string> allMpqs;
+            try
             {
-                foreach (var wmoMpqFile in Directory.EnumerateFiles(root, ext, SearchOption.AllDirectories))
+                allMpqs = Directory.EnumerateFiles(root, "*.MPQ", SearchOption.AllDirectories)
+                    .Concat(Directory.EnumerateFiles(root, "*.mpq", SearchOption.AllDirectories))
+                    .Distinct(StringComparer.OrdinalIgnoreCase);
+            }
+            catch { continue; }
+
+            foreach (var mpqFile in allMpqs)
+            {
+                var fileName = Path.GetFileName(mpqFile);
+
+                // Check if this matches any nested extension pattern
+                string? matchedSuffix = null;
+                foreach (var suffix in nestedExts)
                 {
-                    // Check if any parent folder is in the exclude list
-                    var dir = Path.GetDirectoryName(wmoMpqFile);
-                    bool shouldExclude = false;
-                    while (!string.IsNullOrEmpty(dir))
+                    if (fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                     {
-                        var dirName = Path.GetFileName(dir);
-                        if (excludeFolders.Contains(dirName))
-                        {
-                            shouldExclude = true;
-                            break;
-                        }
-                        dir = Path.GetDirectoryName(dir);
-                    }
-                    if (shouldExclude) continue;
-
-                    // Generate virtual path like "World\wmo\test.wmo" from "test.wmo.MPQ"
-                    var relativePath = Path.GetRelativePath(root, wmoMpqFile);
-                    var virtualPath = Path.Combine(
-                        Path.GetDirectoryName(relativePath) ?? "",
-                        Path.GetFileNameWithoutExtension(relativePath)
-                    ).Replace('/', '\\');
-
-                    if (!_fileSet.Contains(virtualPath))
-                    {
-                        _fileSet.Add(virtualPath);
-                        Console.WriteLine($"[MpqDataSource] Added WMO MPQ: {virtualPath}");
+                        matchedSuffix = suffix;
+                        break;
                     }
                 }
+                if (matchedSuffix == null) continue;
+
+                // Check exclude folders
+                var dir = Path.GetDirectoryName(mpqFile);
+                bool shouldExclude = false;
+                while (!string.IsNullOrEmpty(dir) && dir.Length > root.Length)
+                {
+                    var dirName = Path.GetFileName(dir);
+                    if (excludeFolders.Contains(dirName))
+                    {
+                        shouldExclude = true;
+                        break;
+                    }
+                    dir = Path.GetDirectoryName(dir);
+                }
+                if (shouldExclude) continue;
+
+                // Generate virtual path: strip the trailing .MPQ/.mpq
+                // e.g., "World\wmo\Azeroth\test.wmo.MPQ" → "World\wmo\Azeroth\test.wmo"
+                var relativePath = Path.GetRelativePath(root, mpqFile);
+                var virtualPath = relativePath;
+                if (virtualPath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
+                    virtualPath = virtualPath[..^4];
+                virtualPath = virtualPath.Replace('/', '\\');
+
+                _fileSet.Add(virtualPath);
+                _alphaMpqCache[virtualPath] = mpqFile;
+
+                var ext = Path.GetExtension(virtualPath).ToLowerInvariant();
+                if (!countByExt.ContainsKey(ext)) countByExt[ext] = 0;
+                countByExt[ext]++;
             }
         }
+
+        Console.WriteLine($"[MpqDataSource] Alpha nested MPQ scan: {_alphaMpqCache.Count} files found");
+        foreach (var kvp in countByExt.OrderByDescending(x => x.Value))
+            Console.WriteLine($"  {kvp.Key}: {kvp.Value} files");
     }
 
     private void AddExternalListfileEntries(string listfilePath)
@@ -281,12 +316,22 @@ public class MpqDataSource : IDataSource
         if (loosePath != null)
             return File.ReadAllBytes(loosePath);
 
-        // Try reading from .wmo.mpq archives (file 0 contains the actual WMO)
-        var wmoMpqData = ReadWmoMpqFile(virtualPath);
-        if (wmoMpqData != null)
-            return wmoMpqData;
+        // Try Alpha nested .ext.MPQ cache (WMO, WDT, WDL — file 0 inside individual MPQ)
+        var normalized = virtualPath.Replace('/', '\\');
+        if (_alphaMpqCache.TryGetValue(normalized, out var alphaMpqPath))
+        {
+            var data = ReadFromAlphaMpq(alphaMpqPath, normalized);
+            if (data != null) return data;
+        }
+        // Also try original path if different
+        if (!normalized.Equals(virtualPath, StringComparison.OrdinalIgnoreCase) &&
+            _alphaMpqCache.TryGetValue(virtualPath, out var alphaMpqPath2))
+        {
+            var data = ReadFromAlphaMpq(alphaMpqPath2, virtualPath);
+            if (data != null) return data;
+        }
 
-        // Try MPQ
+        // Try standard MPQ archives (large MPQs with listfiles — MDX, BLP, etc.)
         var mpqData = _mpq.ReadFile(virtualPath);
         if (mpqData != null)
             return mpqData;
@@ -295,202 +340,21 @@ public class MpqDataSource : IDataSource
     }
 
     /// <summary>
-    /// Reads WMO data from .wmo.mpq/.wmo.MPQ archives.
-    /// The actual WMO data is stored as file 0 inside these nested MPQ archives.
+    /// Reads the primary data file from an Alpha listfile-less .ext.MPQ archive.
+    /// Uses AlphaMpqReader which has smart block selection (name hash lookup, largest block fallback,
+    /// magic byte checking) — critical for WMO MPQs that may contain multiple files.
     /// </summary>
-    private byte[]? ReadWmoMpqFile(string virtualPath)
+    private byte[]? ReadFromAlphaMpq(string mpqDiskPath, string virtualPath)
     {
-        // Convert virtual path like "World\wmo\test.wmo" to find "test.wmo.mpq"
+        // Build internal name candidates from the virtual path for hash-based lookup
+        var candidates = AlphaMpqReader.BuildInternalNameCandidates(virtualPath).ToList();
+        // Also add just the filename
         var fileName = Path.GetFileName(virtualPath);
-        var baseFileName = fileName + ".mpq";
-
-        // Only search in valid game data directories - exclude user folders
-        string[] searchRoots = new[]
-        {
-            Path.Combine(_gamePath, "Data"),
-            Path.Combine(_gamePath, "Data", "World"),
-            Path.Combine(_gamePath, "World"),
-        };
-
-        // User-created folders to exclude
-        HashSet<string> excludeFolders = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "wmos", "addons", "interface", "backup", "cache", "logs"
-        };
-
-        foreach (var root in searchRoots)
-        {
-            if (!Directory.Exists(root)) continue;
-
-            // Search for both .wmo.mpq and .wmo.MPQ
-            foreach (var ext in new[] { "*.wmo.mpq", "*.wmo.MPQ" })
-            {
-                foreach (var wmoMpqPath in Directory.EnumerateFiles(root, ext, SearchOption.AllDirectories))
-                {
-                    // Check if any parent folder is excluded
-                    var dir = Path.GetDirectoryName(wmoMpqPath);
-                    bool shouldExclude = false;
-                    while (!string.IsNullOrEmpty(dir))
-                    {
-                        var dirName = Path.GetFileName(dir);
-                        if (excludeFolders.Contains(dirName))
-                        {
-                            shouldExclude = true;
-                            break;
-                        }
-                        dir = Path.GetDirectoryName(dir);
-                    }
-                    if (shouldExclude) continue;
-
-                    if (Path.GetFileName(wmoMpqPath).Equals(baseFileName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Found the archive, try to read file 0
-                        Console.WriteLine($"[MpqDataSource] Reading WMO from: {wmoMpqPath}");
-                        return ReadFile0FromMpq(wmoMpqPath);
-                    }
-                }
-            }
-        }
-
-        Console.WriteLine($"[MpqDataSource] WMO MPQ not found for: {virtualPath}");
-        return null;
+        if (!string.IsNullOrEmpty(fileName) && !candidates.Contains(fileName, StringComparer.OrdinalIgnoreCase))
+            candidates.Insert(0, fileName);
+        return AlphaMpqReader.ReadFromMpq(mpqDiskPath, candidates);
     }
 
-    /// <summary>
-    /// Reads file 0 from an MPQ archive (where the actual WMO data is stored).
-    /// </summary>
-    private byte[]? ReadFile0FromMpq(string mpqPath)
-    {
-        try
-        {
-            using var fs = new FileStream(mpqPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            using var reader = new BinaryReader(fs);
-
-            // Read MPQ header to find hash table and block table
-            fs.Position = 0;
-            var signature = reader.ReadUInt32();
-            
-            // Check for MPQ signature (may have BOM or be at different offset)
-            long headerOffset = 0;
-            if (signature == 0x1A51504D) // 'MPQ\x1A'
-            {
-                headerOffset = 0;
-            }
-            else
-            {
-                // Search for MPQ signature
-                fs.Position = 0;
-                bool found = false;
-                while (fs.Position < fs.Length - 4)
-                {
-                    var pos = fs.Position;
-                    var sig = reader.ReadUInt32();
-                    if (sig == 0x1A51504D)
-                    {
-                        headerOffset = pos;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) return null;
-            }
-
-            // Read MPQ header
-            fs.Position = headerOffset;
-            var headerMagic = reader.ReadUInt32();
-            var headerSize = reader.ReadUInt32();
-            var archiveSize = reader.ReadUInt32();
-            var formatVersion = reader.ReadUInt16();
-            var blockSizePower = reader.ReadUInt16();
-            var hashTableOffset = reader.ReadUInt32();
-            var blockTableOffset = reader.ReadUInt32();
-            var hashTableEntries = reader.ReadUInt32();
-            var blockTableEntries = reader.ReadUInt32();
-
-            var sectorSize = 512u << blockSizePower;
-
-            // Read hash table
-            fs.Position = headerOffset + hashTableOffset;
-            var hashTable = new (uint BlockIndex, uint NameHash1, uint NameHash2, uint LocaleFlags)[hashTableEntries];
-            for (uint i = 0; i < hashTableEntries; i++)
-            {
-                hashTable[i] = (reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32());
-            }
-
-            // Read block table
-            fs.Position = headerOffset + blockTableOffset;
-            var blockTable = new (uint BlockOffset, uint BlockSize, uint FileSize, uint Flags)[blockTableEntries];
-            for (uint i = 0; i < blockTableEntries; i++)
-            {
-                blockTable[i] = (reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32(), reader.ReadUInt32());
-            }
-
-            // Find file 0 (first valid file in archive)
-            int? file0Index = null;
-            foreach (var (blockIndex, _, _, _) in hashTable)
-            {
-                if (blockIndex != 0xFFFFFFFF && blockIndex < blockTableEntries)
-                {
-                    var (_, _, _, flags) = blockTable[blockIndex];
-                    if ((flags & 0x80000000) != 0) // FLAG_EXISTS
-                    {
-                        file0Index = (int)blockIndex;
-                        break;
-                    }
-                }
-            }
-
-            if (file0Index == null) return null;
-
-            // Read file 0
-            var (fileOffset, fileBlockSize, fileSize, fileFlags) = blockTable[file0Index.Value];
-            fs.Position = headerOffset + fileOffset;
-
-            byte[] fileData;
-            if ((fileFlags & 0x00000200) != 0) // FLAG_COMPRESSED
-            {
-                // Read compressed data
-                var compressedData = reader.ReadBytes((int)fileBlockSize);
-                fileData = DecompressMpqFile(compressedData, (int)fileSize);
-            }
-            else
-            {
-                fileData = reader.ReadBytes((int)fileSize);
-            }
-
-            return fileData;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[MpqDataSource] Error reading WMO MPQ {mpqPath}: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Simple decompression for MPQ compressed files.
-    /// Handles both uncompressed and basic compression types.
-    /// </summary>
-    private byte[] DecompressMpqFile(byte[] compressed, int expectedSize)
-    {
-        if (compressed.Length == expectedSize)
-            return compressed;
-
-        // Try inflate for zlib compression (common in MPQ)
-        try
-        {
-            using var compressedStream = new MemoryStream(compressed);
-            using var deflateStream = new System.IO.Compression.DeflateStream(compressedStream, System.IO.Compression.CompressionMode.Decompress);
-            using var resultStream = new MemoryStream();
-            deflateStream.CopyTo(resultStream);
-            return resultStream.ToArray();
-        }
-        catch
-        {
-            // If deflate fails, return compressed data (might be imploded or another format)
-            return compressed;
-        }
-    }
 
     private string? TryResolveLoosePath(string virtualPath)
     {

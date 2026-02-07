@@ -115,10 +115,21 @@ public class WmoRenderer : ISceneRenderer
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        RenderWithTransform(Matrix4x4.Identity, view, proj);
+    }
+
+    /// <summary>
+    /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
+    /// </summary>
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj)
+    {
         // 1. Render WMO geometry
         _gl.UseProgram(_shaderProgram);
 
-        var model = Matrix4x4.Identity;
+        // Disable face culling — WMO interiors need both sides visible
+        _gl.Disable(EnableCap.CullFace);
+
+        var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
@@ -154,6 +165,8 @@ public class WmoRenderer : ISceneRenderer
                 inst.Renderer.RenderWithTransform(inst.Transform, view, proj);
             }
         }
+
+        _gl.Enable(EnableCap.CullFace);
     }
 
     private void InitShaders()
@@ -197,9 +210,9 @@ out vec4 FragColor;
 void main() {
     vec3 norm = normalize(vNormal);
     vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-    float diff = max(dot(norm, lightDir), 0.0);
-    float ambient = 0.35;
-    float lighting = ambient + diff * 0.65;
+    float diff = abs(dot(norm, lightDir));
+    float ambient = 0.4;
+    float lighting = ambient + diff * 0.6;
 
     vec4 texColor;
     if (uHasTexture == 1) {

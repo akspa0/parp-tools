@@ -26,21 +26,24 @@ Goal is a working reference implementation first, then extend in our own directi
 - `Rendering/Material.cs` — BlendMode, texture, color, sorting
 - `Rendering/RenderQueue.cs` — Opaque front-to-back + transparent back-to-front
 
-## Phase 3 — Terrain (NEXT SESSION)
+## Phase 3 — Terrain ✅ COMPLETE (building, 0 errors)
 
-Existing Alpha parsers already available via transitive dependency chain:
-`MdxViewer → WoWMapConverter.Core → gillijimproject-csharp`
+7 files created:
+- `Terrain/TerrainChunkData.cs` — GPU-ready data structures (heights, normals, layers, alpha maps)
+- `Terrain/AlphaTerrainAdapter.cs` — Bridge WdtAlpha/AdtAlpha/McnkAlpha → TerrainChunkData
+- `Terrain/TerrainMeshBuilder.cs` — 145 vertices → VAO/VBO/EBO per chunk (8 floats/vert: pos+norm+uv)
+- `Terrain/TerrainRenderer.cs` — Multi-pass texture layering with alpha blending, BLP texture loading
+- `Terrain/TerrainLighting.cs` — Day/night cycle, per-vertex Lambertian, linear fog
+- `Terrain/TerrainManager.cs` — AOI-based chunk loading/unloading, implements ISceneRenderer
+- Terrain shader embedded in TerrainRenderer (vertex: model/view/proj, fragment: multi-layer blend + lighting + fog)
 
-**Already parsed:** WdtAlpha, AdtAlpha, McnkAlpha (heights, normals, layers, alpha maps, shadows, liquids, placements)
+ViewerApp integration:
+- `.wdt` added to file browser filter
+- `LoadWdtTerrain()` creates TerrainManager, loads all tiles, positions camera
+- Render loop passes camera position for AOI updates and fog
+- Model Info panel shows terrain controls: day/night slider, fog sliders, tile/chunk stats
 
-**Need to build:**
-- `Terrain/AlphaTerrainAdapter.cs` — Bridge parsed data to GPU-ready buffers
-- `Terrain/TerrainMeshBuilder.cs` — 145 vertices → VAO/VBO/EBO per chunk
-- `Terrain/TerrainRenderer.cs` — Multi-pass texture layering with alpha blending
-- `Terrain/TerrainLighting.cs` — Day/night cycle, per-vertex Lambertian
-- `Terrain/TerrainManager.cs` — AOI-based chunk loading/unloading
-- Terrain shader (vertex: position/normal/texcoord, fragment: multi-layer blend + lighting + fog)
-- ViewerApp integration: "Open WDT" menu item, camera at world center
+Also added: `AdtAlpha.GetMcnkOffsets()` public accessor (was only used internally before)
 
 ## Key Decisions
 

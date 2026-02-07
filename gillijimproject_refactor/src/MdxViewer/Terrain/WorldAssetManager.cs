@@ -1,0 +1,208 @@
+using System.Numerics;
+using MdxLTool.Formats.Mdx;
+using MdxViewer.DataSources;
+using MdxViewer.Rendering;
+using Silk.NET.OpenGL;
+using WoWMapConverter.Core.Converters;
+
+namespace MdxViewer.Terrain;
+
+/// <summary>
+/// Centralized asset manager for world scene rendering.
+/// Ensures each model and texture is loaded exactly once into GPU memory,
+/// then instanced via transforms for all placements.
+/// 
+/// Ownership: WorldAssetManager owns all GPU resources (renderers, textures).
+/// WorldScene owns the instance lists (transforms) and delegates rendering here.
+/// </summary>
+public class WorldAssetManager : IDisposable
+{
+    private readonly GL _gl;
+    private readonly IDataSource? _dataSource;
+    private readonly ReplaceableTextureResolver? _texResolver;
+
+    // ── Shared caches ──────────────────────────────────────────────────
+
+    // Model path (normalized) → loaded renderer (null = load attempted but failed)
+    private readonly Dictionary<string, MdxRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
+
+    // Raw file data cache — avoids re-reading the same file from MPQ multiple times
+    private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Stats
+    public int MdxModelsLoaded => _mdxModels.Count(kv => kv.Value != null);
+    public int MdxModelsFailed => _mdxModels.Count(kv => kv.Value == null);
+    public int WmoModelsLoaded => _wmoModels.Count(kv => kv.Value != null);
+    public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
+
+    public WorldAssetManager(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null)
+    {
+        _gl = gl;
+        _dataSource = dataSource;
+        _texResolver = texResolver;
+    }
+
+    /// <summary>
+    /// Pre-register all model names referenced by the map so we know the full asset set.
+    /// Does NOT load anything yet — just prepares the manifest.
+    /// </summary>
+    public AssetManifest BuildManifest(IReadOnlyList<string> mdxNames, IReadOnlyList<string> wmoNames,
+        IReadOnlyList<MddfPlacement> mddfPlacements, IReadOnlyList<ModfPlacement> modfPlacements)
+    {
+        var manifest = new AssetManifest();
+
+        // Collect unique MDX models actually referenced by placements
+        foreach (var p in mddfPlacements)
+        {
+            if (p.NameIndex >= 0 && p.NameIndex < mdxNames.Count)
+                manifest.ReferencedMdx.Add(NormalizeKey(mdxNames[p.NameIndex]));
+        }
+
+        // Collect unique WMO models actually referenced by placements
+        foreach (var p in modfPlacements)
+        {
+            if (p.NameIndex >= 0 && p.NameIndex < wmoNames.Count)
+                manifest.ReferencedWmo.Add(NormalizeKey(wmoNames[p.NameIndex]));
+        }
+
+        Console.WriteLine($"[AssetManager] Manifest: {manifest.ReferencedMdx.Count} unique MDX, {manifest.ReferencedWmo.Count} unique WMO");
+        return manifest;
+    }
+
+    /// <summary>
+    /// Load all models in the manifest. Each model is loaded exactly once.
+    /// </summary>
+    public void LoadManifest(AssetManifest manifest)
+    {
+        int mdxOk = 0, mdxFail = 0;
+        foreach (var key in manifest.ReferencedMdx)
+        {
+            if (_mdxModels.ContainsKey(key)) continue;
+            var renderer = LoadMdxModel(key);
+            _mdxModels[key] = renderer;
+            if (renderer != null) mdxOk++; else mdxFail++;
+        }
+
+        int wmoOk = 0, wmoFail = 0;
+        foreach (var key in manifest.ReferencedWmo)
+        {
+            if (_wmoModels.ContainsKey(key)) continue;
+            var renderer = LoadWmoModel(key);
+            _wmoModels[key] = renderer;
+            if (renderer != null) wmoOk++; else wmoFail++;
+        }
+
+        Console.WriteLine($"[AssetManager] Loaded: MDX {mdxOk} ok / {mdxFail} failed, WMO {wmoOk} ok / {wmoFail} failed");
+    }
+
+    /// <summary>
+    /// Get a loaded MDX renderer by normalized key. Returns null if not loaded or failed.
+    /// </summary>
+    public MdxRenderer? GetMdx(string normalizedKey)
+    {
+        _mdxModels.TryGetValue(normalizedKey, out var r);
+        return r;
+    }
+
+    /// <summary>
+    /// Get a loaded WMO renderer by normalized key. Returns null if not loaded or failed.
+    /// </summary>
+    public WmoRenderer? GetWmo(string normalizedKey)
+    {
+        _wmoModels.TryGetValue(normalizedKey, out var r);
+        return r;
+    }
+
+    /// <summary>
+    /// Read file data from the data source, with caching to avoid duplicate MPQ reads.
+    /// </summary>
+    public byte[]? ReadFileData(string virtualPath)
+    {
+        string key = NormalizeKey(virtualPath);
+        if (_fileDataCache.TryGetValue(key, out var cached))
+            return cached;
+
+        byte[]? data = _dataSource?.ReadFile(virtualPath);
+        if (data == null)
+            data = _dataSource?.ReadFile(key);
+
+        _fileDataCache[key] = data;
+        return data;
+    }
+
+    public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
+
+    // ── Private loading ────────────────────────────────────────────────
+
+    private MdxRenderer? LoadMdxModel(string normalizedKey)
+    {
+        try
+        {
+            byte[]? data = ReadFileData(normalizedKey);
+            if (data == null || data.Length == 0) return null;
+
+            using var ms = new MemoryStream(data);
+            var mdx = MdxFile.Load(ms);
+            string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, normalizedKey);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AssetManager] MDX failed: {Path.GetFileName(normalizedKey)} — {ex.Message}");
+            return null;
+        }
+    }
+
+    private WmoRenderer? LoadWmoModel(string normalizedKey)
+    {
+        try
+        {
+            byte[]? data = ReadFileData(normalizedKey);
+            if (data == null || data.Length == 0) return null;
+
+            // WMO v14 needs to be written to temp file for the converter
+            string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
+            try
+            {
+                File.WriteAllBytes(tmpPath, data);
+                var converter = new WmoV14ToV17Converter();
+                var wmo = converter.ParseWmoV14(tmpPath);
+                string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+                return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver);
+            }
+            finally
+            {
+                try { File.Delete(tmpPath); } catch { }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AssetManager] WMO failed: {Path.GetFileName(normalizedKey)} — {ex.Message}");
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var r in _mdxModels.Values)
+            r?.Dispose();
+        _mdxModels.Clear();
+
+        foreach (var r in _wmoModels.Values)
+            r?.Dispose();
+        _wmoModels.Clear();
+
+        _fileDataCache.Clear();
+    }
+}
+
+/// <summary>
+/// Describes the set of unique assets referenced by a map.
+/// Built before loading so we know the full scope.
+/// </summary>
+public class AssetManifest
+{
+    public HashSet<string> ReferencedMdx { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> ReferencedWmo { get; } = new(StringComparer.OrdinalIgnoreCase);
+}

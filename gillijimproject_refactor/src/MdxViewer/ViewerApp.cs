@@ -4,6 +4,7 @@ using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Export;
 using MdxViewer.Rendering;
+using MdxViewer.Terrain;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -60,6 +61,10 @@ public class ViewerApp : IDisposable
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
     private bool _wantExportGlb = false;
+
+    // Terrain/World state
+    private TerrainManager? _terrainManager;
+    private WorldScene? _worldScene;
 
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
@@ -185,8 +190,19 @@ public class ViewerApp : IDisposable
             var size = _window.Size;
             float aspect = (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
-            var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, 10000f);
-            _renderer.Render(view, proj);
+            float farPlane = _terrainManager != null ? 5000f : 10000f;
+            var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, farPlane);
+
+            // Update terrain AOI before rendering
+            if (_terrainManager != null)
+            {
+                _terrainManager.UpdateAOI(_camera.Position);
+                _terrainManager.Render(view, proj, _camera.Position);
+            }
+            else
+            {
+                _renderer.Render(view, proj);
+            }
         }
 
         // Render ImGui overlay
@@ -391,7 +407,7 @@ public class ViewerApp : IDisposable
             // Extension filter
             if (ImGui.BeginCombo("Type", _extensionFilter))
             {
-                string[] filters = { ".mdx", ".wmo", ".m2", ".blp" };
+                string[] filters = { ".mdx", ".wmo", ".m2", ".blp", ".wdt" };
                 foreach (var f in filters)
                 {
                     if (ImGui.Selectable(f, _extensionFilter == f))
@@ -496,6 +512,46 @@ public class ViewerApp : IDisposable
                         if (ImGui.Checkbox(_renderer.GetSubObjectName(i), ref vis))
                             _renderer.SetSubObjectVisible(i, vis);
                     }
+                }
+
+                // Terrain-specific controls
+                if (_terrainManager != null)
+                {
+                    ImGui.Separator();
+                    ImGui.Text("Terrain Controls:");
+
+                    // Day/night cycle slider
+                    var lighting = _terrainManager.Lighting;
+                    float gameTime = lighting.GameTime;
+                    if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
+                        lighting.GameTime = gameTime;
+
+                    // Time labels
+                    string timeLabel = gameTime switch
+                    {
+                        < 0.15f => "Night",
+                        < 0.25f => "Dawn",
+                        < 0.35f => "Morning",
+                        < 0.65f => "Day",
+                        < 0.75f => "Evening",
+                        < 0.85f => "Dusk",
+                        _ => "Night"
+                    };
+                    ImGui.SameLine();
+                    ImGui.Text(timeLabel);
+
+                    // Fog controls
+                    float fogStart = lighting.FogStart;
+                    float fogEnd = lighting.FogEnd;
+                    if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
+                        lighting.FogStart = fogStart;
+                    if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
+                        lighting.FogEnd = fogEnd;
+
+                    ImGui.Separator();
+                    ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
+                    ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
+                    ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
                 }
             }
         }
@@ -679,6 +735,10 @@ public class ViewerApp : IDisposable
                     LoadWmoModel(wmo, dir);
                     break;
 
+                case ".wdt":
+                    LoadWdtTerrain(filePath);
+                    break;
+
                 default:
                     _statusMessage = $"Unsupported format: {ext}";
                     break;
@@ -730,6 +790,10 @@ public class ViewerApp : IDisposable
                     var converter = new WmoV14ToV17Converter();
                     var wmo = converter.ParseWmoV14(cachePath);
                     LoadWmoModel(wmo, CacheDir);
+                    break;
+
+                case ".wdt":
+                    LoadWdtTerrain(cachePath);
                     break;
 
                 default:
@@ -859,6 +923,48 @@ public class ViewerApp : IDisposable
         _statusMessage = $"Loaded WMO: {_loadedFileName} ({wmo.Groups.Count} groups, {totalVerts:N0} verts, {wmo.DoodadDefs.Count} doodads)";
     }
 
+    private void LoadWdtTerrain(string wdtPath)
+    {
+        _statusMessage = $"Loading world from {Path.GetFileName(wdtPath)}...";
+
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+
+        try
+        {
+            _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver);
+            _terrainManager = _worldScene.Terrain;
+            _renderer = _worldScene; // WorldScene implements ISceneRenderer
+
+            // Position camera at the center of the map
+            var startPos = _terrainManager.GetInitialCameraPosition();
+            _camera.Position = startPos;
+            _camera.Yaw = 180f;
+            _camera.Pitch = -20f;
+
+            _modelInfo = $"Type: Alpha WDT World\n" +
+                         $"Map: {_terrainManager.MapName}\n\n" +
+                         $"Tiles: {_terrainManager.LoadedTileCount}\n" +
+                         $"Chunks: {_terrainManager.LoadedChunkCount}\n\n" +
+                         $"WMO instances: {_worldScene.WmoInstanceCount} ({_worldScene.UniqueWmoModels} unique)\n" +
+                         $"MDX instances: {_worldScene.MdxInstanceCount} ({_worldScene.UniqueMdxModels} unique)\n\n" +
+                         $"Camera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
+
+            _statusMessage = $"Loaded world: {_terrainManager.MapName} ({_terrainManager.LoadedTileCount} tiles, {_worldScene.WmoInstanceCount} WMOs, {_worldScene.MdxInstanceCount} doodads)";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ViewerApp] WDT load failed: {ex}");
+            _statusMessage = $"Load failed: {ex.Message}";
+            _modelInfo = $"WDT load error:\n{ex.Message}\n\nFile: {wdtPath}\nSize: {(File.Exists(wdtPath) ? new FileInfo(wdtPath).Length : 0)} bytes";
+            _worldScene?.Dispose();
+            _worldScene = null;
+            _terrainManager = null;
+        }
+    }
+
     private void ResetCamera()
     {
         // Reset to default free-fly position facing origin
@@ -874,6 +980,9 @@ public class ViewerApp : IDisposable
 
     private void OnClose()
     {
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager = null; // owned by WorldScene
         _renderer?.Dispose();
         _dataSource?.Dispose();
         _imGui?.Dispose();
@@ -883,6 +992,9 @@ public class ViewerApp : IDisposable
 
     public void Dispose()
     {
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager = null;
         _renderer?.Dispose();
         _dataSource?.Dispose();
     }
