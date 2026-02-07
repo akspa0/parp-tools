@@ -345,13 +345,13 @@ public class ViewerApp : IDisposable
                     if (ext == ".mdx")
                     {
                         var mdx = MdxFile.Load(_loadedFilePath);
-                        GlbExporter.ExportMdx(mdx, dir, glbPath);
+                        GlbExporter.ExportMdx(mdx, dir, glbPath, _dataSource);
                     }
                     else if (ext == ".wmo")
                     {
                         var converter = new WmoV14ToV17Converter();
                         var wmo = converter.ParseWmoV14(_loadedFilePath);
-                        GlbExporter.ExportWmo(wmo, dir, glbPath);
+                        GlbExporter.ExportWmo(wmo, dir, glbPath, _dataSource);
                     }
                     _statusMessage = $"Exported: {glbPath}";
                 }

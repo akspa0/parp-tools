@@ -1,9 +1,13 @@
 using System.Numerics;
 using MdxLTool.Formats.Mdx;
+using MdxViewer.DataSources;
+using SereniaBLPLib;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Export;
@@ -19,7 +23,7 @@ public static class GlbExporter
     /// <summary>
     /// Export an MDX model to GLB with per-geoset materials.
     /// </summary>
-    public static void ExportMdx(MdxFile mdx, string modelDir, string outputPath)
+    public static void ExportMdx(MdxFile mdx, string modelDir, string outputPath, IDataSource? dataSource = null)
     {
         var scene = new SceneBuilder();
 
@@ -33,12 +37,11 @@ public static class GlbExporter
             var matBuilder = new MaterialBuilder($"mat_{i}");
             matBuilder.WithDoubleSide(true);
 
-            // Try to find texture PNG
-            string? texPng = ResolveMdxTexturePng(mdx, geoset, modelDir);
-            if (texPng != null && File.Exists(texPng))
+            // Try to resolve texture as PNG bytes (decode BLP if needed)
+            byte[]? pngBytes = ResolveMdxTexturePngBytes(mdx, geoset, modelDir, dataSource);
+            if (pngBytes != null)
             {
-                var imgBytes = File.ReadAllBytes(texPng);
-                var img = new SharpGLTF.Memory.MemoryImage(imgBytes);
+                var img = new SharpGLTF.Memory.MemoryImage(pngBytes);
                 matBuilder.WithBaseColor(img);
             }
             else
@@ -80,7 +83,7 @@ public static class GlbExporter
     /// <summary>
     /// Export a WMO (v14 parsed data) to GLB with per-group meshes and material colors.
     /// </summary>
-    public static void ExportWmo(WmoV14ToV17Converter.WmoV14Data wmo, string modelDir, string outputPath)
+    public static void ExportWmo(WmoV14ToV17Converter.WmoV14Data wmo, string modelDir, string outputPath, IDataSource? dataSource = null)
     {
         var scene = new SceneBuilder();
 
@@ -95,12 +98,10 @@ public static class GlbExporter
             // Try to load texture
             if (!string.IsNullOrEmpty(wmoMat.Texture1Name))
             {
-                string pngName = Path.ChangeExtension(Path.GetFileName(wmoMat.Texture1Name), ".png");
-                string pngPath = Path.Combine(modelDir, pngName);
-                if (File.Exists(pngPath))
+                byte[]? pngBytes = ResolveWmoTexturePngBytes(wmoMat.Texture1Name, modelDir, dataSource);
+                if (pngBytes != null)
                 {
-                    var imgBytes = File.ReadAllBytes(pngPath);
-                    var img = new SharpGLTF.Memory.MemoryImage(imgBytes);
+                    var img = new SharpGLTF.Memory.MemoryImage(pngBytes);
                     matBuilder.WithBaseColor(img);
                 }
                 else
@@ -208,7 +209,10 @@ public static class GlbExporter
         );
     }
 
-    private static string? ResolveMdxTexturePng(MdxFile mdx, MdlGeoset geoset, string modelDir)
+    /// <summary>
+    /// Resolve an MDX geoset's texture to PNG bytes, decoding BLP from MPQ if needed.
+    /// </summary>
+    private static byte[]? ResolveMdxTexturePngBytes(MdxFile mdx, MdlGeoset geoset, string modelDir, IDataSource? dataSource)
     {
         int texId = -1;
         if (geoset.MaterialId >= 0 && geoset.MaterialId < mdx.Materials.Count)
@@ -223,9 +227,95 @@ public static class GlbExporter
         var tex = mdx.Textures[texId];
         if (string.IsNullOrEmpty(tex.Path)) return null;
 
-        string pngName = Path.ChangeExtension(Path.GetFileName(tex.Path), ".png");
-        string pngPath = Path.Combine(modelDir, pngName);
-        return File.Exists(pngPath) ? pngPath : null;
+        string fileName = Path.GetFileName(tex.Path);
+
+        // 1. Try local PNG file
+        string pngPath = Path.Combine(modelDir, Path.ChangeExtension(fileName, ".png"));
+        if (File.Exists(pngPath))
+            return File.ReadAllBytes(pngPath);
+
+        // 2. Try local BLP file → decode to PNG
+        string blpPath = Path.Combine(modelDir, Path.ChangeExtension(fileName, ".blp"));
+        if (File.Exists(blpPath))
+            return BlpToPngBytes(File.ReadAllBytes(blpPath));
+
+        // 3. Try MPQ data source
+        if (dataSource != null)
+        {
+            byte[]? blpData = dataSource.ReadFile(tex.Path);
+            if (blpData != null && blpData.Length > 0)
+                return BlpToPngBytes(blpData);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolve a WMO material texture to PNG bytes, decoding BLP from MPQ if needed.
+    /// </summary>
+    private static byte[]? ResolveWmoTexturePngBytes(string textureName, string modelDir, IDataSource? dataSource)
+    {
+        string fileName = Path.GetFileName(textureName);
+
+        // 1. Try local PNG file
+        string pngPath = Path.Combine(modelDir, Path.ChangeExtension(fileName, ".png"));
+        if (File.Exists(pngPath))
+            return File.ReadAllBytes(pngPath);
+
+        // 2. Try local BLP file → decode to PNG
+        string blpPath = Path.Combine(modelDir, Path.ChangeExtension(fileName, ".blp"));
+        if (File.Exists(blpPath))
+            return BlpToPngBytes(File.ReadAllBytes(blpPath));
+
+        // 3. Try MPQ data source
+        if (dataSource != null)
+        {
+            byte[]? blpData = dataSource.ReadFile(textureName);
+            if (blpData != null && blpData.Length > 0)
+                return BlpToPngBytes(blpData);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Decode BLP texture data to PNG bytes for embedding in GLB.
+    /// </summary>
+    private static byte[]? BlpToPngBytes(byte[] blpData)
+    {
+        try
+        {
+            using var ms = new MemoryStream(blpData);
+            var blp = new BlpFile(ms);
+            var bmp = blp.GetBitmap(0);
+            int w = bmp.Width, h = bmp.Height;
+
+            // Convert System.Drawing.Bitmap BGRA → RGBA bytes
+            var rect = new System.Drawing.Rectangle(0, 0, w, h);
+            var lockBits = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            byte[] pixels = new byte[w * h * 4];
+            System.Runtime.InteropServices.Marshal.Copy(lockBits.Scan0, pixels, 0, pixels.Length);
+            bmp.UnlockBits(lockBits);
+            bmp.Dispose();
+
+            // BGRA → RGBA swap
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
+            }
+
+            // Encode as PNG using ImageSharp
+            using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, w, h);
+            using var output = new MemoryStream();
+            image.SaveAsPng(output);
+            return output.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GlbExporter] BLP→PNG decode failed: {ex.Message}");
+            return null;
+        }
     }
 
     private static List<Vector3> GenerateNormals(WmoV14ToV17Converter.WmoGroupData group)

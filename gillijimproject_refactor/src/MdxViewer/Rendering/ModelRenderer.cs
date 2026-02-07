@@ -20,7 +20,7 @@ public class MdxRenderer : ISceneRenderer
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
 
     private uint _shaderProgram;
-    private int _uModel, _uView, _uProj, _uHasTexture, _uColor;
+    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -133,6 +133,7 @@ public class MdxRenderer : ISceneRenderer
                     {
                         _gl.Enable(EnableCap.Blend);
                         _gl.DepthMask(false); // Don't write depth for blended layers
+                        _gl.Uniform1(_uAlphaTest, 1); // Enable alpha discard for blended layers
                         switch (layer.BlendMode)
                         {
                             case MdlTexOp.Transparent:
@@ -155,6 +156,7 @@ public class MdxRenderer : ISceneRenderer
                     {
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(true);
+                        _gl.Uniform1(_uAlphaTest, 0); // No alpha discard for opaque layers
                     }
 
                     if (texId >= 0 && _textures.TryGetValue(texId, out uint glTex))
@@ -233,6 +235,7 @@ in vec3 vFragPos;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
+uniform int uAlphaTest;
 uniform vec4 uColor;
 
 out vec4 FragColor;
@@ -248,13 +251,15 @@ void main() {
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (texColor.a < 0.1) discard;
+        if (uAlphaTest == 1 && texColor.a < 0.1) discard;
     } else {
         // Bright pink for missing textures (matching reference viewer)
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
 
-    FragColor = vec4(texColor.rgb * lighting, texColor.a) * uColor;
+    // Opaque layers: force alpha=1.0 to prevent depth holes
+    float outAlpha = (uAlphaTest == 0) ? 1.0 : texColor.a;
+    FragColor = vec4(texColor.rgb * lighting, outAlpha) * uColor;
 }
 ";
 
@@ -281,6 +286,7 @@ void main() {
         _uView = _gl.GetUniformLocation(_shaderProgram, "uView");
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
+        _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");

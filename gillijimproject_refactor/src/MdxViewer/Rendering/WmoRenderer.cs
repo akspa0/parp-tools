@@ -255,12 +255,11 @@ void main() {
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (texColor.a < 0.01) discard;
     } else {
         texColor = uColor;
     }
 
-    FragColor = vec4(texColor.rgb * lighting, texColor.a);
+    FragColor = vec4(texColor.rgb * lighting, 1.0);
 }
 ";
 

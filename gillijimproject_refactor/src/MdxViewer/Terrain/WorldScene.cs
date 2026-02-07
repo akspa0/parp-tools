@@ -130,7 +130,16 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
-            _mdxInstances.Add(new ObjectInstance { ModelKey = key, Transform = transform });
+            // Approximate bounding box: position ± scale * defaultRadius
+            // MDX models typically have extents of ~50-100 units
+            float radius = scale * 15f;
+            _mdxInstances.Add(new ObjectInstance
+            {
+                ModelKey = key,
+                Transform = transform,
+                BoundsMin = p.Position - new Vector3(radius, radius, 0),
+                BoundsMax = p.Position + new Vector3(radius, radius, radius * 2)
+            });
         }
 
         // WMO placements
@@ -155,7 +164,13 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
-            _wmoInstances.Add(new ObjectInstance { ModelKey = key, Transform = transform });
+            _wmoInstances.Add(new ObjectInstance
+            {
+                ModelKey = key,
+                Transform = transform,
+                BoundsMin = p.BoundsMin,
+                BoundsMax = p.BoundsMax
+            });
         }
 
         Console.WriteLine($"[WorldScene] Instances: {_mdxInstances.Count} MDX, {_wmoInstances.Count} WMO");
@@ -296,12 +311,12 @@ public class WorldScene : ISceneRenderer
             var adapter = _terrainManager.Adapter;
             if (!_renderDiagPrinted)
                 Console.WriteLine($"[WorldScene] BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
-            // MDDF markers (yellow)
-            foreach (var p in adapter.MddfPlacements)
-                _bbRenderer.DrawMarker(p.Position, 5f, view, proj, new Vector3(1f, 1f, 0f));
+            // MDDF bounding boxes (yellow)
+            foreach (var inst in _mdxInstances)
+                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
             // MODF bounding boxes (cyan) — use actual MODF bounds
-            foreach (var p in adapter.ModfPlacements)
-                _bbRenderer.DrawBoxMinMax(p.BoundsMin, p.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+            foreach (var inst in _wmoInstances)
+                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
 
             _gl.Enable(EnableCap.DepthTest);
         }
@@ -370,4 +385,6 @@ public struct ObjectInstance
 {
     public string ModelKey;
     public Matrix4x4 Transform;
+    public Vector3 BoundsMin;
+    public Vector3 BoundsMax;
 }
