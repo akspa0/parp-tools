@@ -130,7 +130,8 @@ public class ReplaceableTextureResolver
             if (variations.All(string.IsNullOrEmpty))
             {
                 string? texVar = TryGetString(row, "TextureVariation");
-                if (!string.IsNullOrEmpty(texVar))
+                // Reject malformed values (like "System.String[]")
+                if (!string.IsNullOrEmpty(texVar) && !texVar.StartsWith("System."))
                 {
                     var parts = texVar.Split('|', StringSplitOptions.None);
                     variations.Clear();

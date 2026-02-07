@@ -26,6 +26,7 @@ public class MdxFile
     public List<C3Vector> PivotPoints { get; } = new();
     public List<MdlAttachment> Attachments { get; } = new();
     public List<MdlCamera> Cameras { get; } = new();
+    public List<MdlGeosetAnimation> GeosetAnimations { get; } = new();
 
     /// <summary>Load MDX binary file</summary>
     public static MdxFile Load(string path)
@@ -91,6 +92,10 @@ public class MdxFile
                     ReadGeosets(br, size, mdx.Geosets, mdx.Version);
                     break;
 
+                case MdxHeaders.ATSQ:
+                    ReadAtsq(br, size, mdx.GeosetAnimations);
+                    break;
+
                 case MdxHeaders.BONE:
                 case MdxHeaders.LITE:
                 case MdxHeaders.HELP:
@@ -104,7 +109,6 @@ public class MdxFile
                     break;
 
                 default:
-                    Console.WriteLine($"    [WARN] Unknown chunk tag: {tag}");
                     br.BaseStream.Position = chunkEnd;
                     break;
             }
@@ -126,9 +130,11 @@ public class MdxFile
         writer.Write(this, sw);
     }
 
-    public void SaveObj(string path, bool split = false)
+    public void SaveObj(string path, bool split = false, Dictionary<int, string>? exportedTextures = null)
     {
         var writer = new ObjWriter();
+        if (exportedTextures != null)
+            writer.ExportedTextures = exportedTextures;
         writer.Write(this, path, split);
     }
 
@@ -232,8 +238,7 @@ public class MdxFile
                 layer.TransformId = br.ReadInt32();
                 layer.CoordId = br.ReadInt32();
                 layer.StaticAlpha = br.ReadSingle();
-                Console.WriteLine($"      Layer: TextureId={layer.TextureId}, BlendMode={layer.BlendMode}");
-                
+                    
                 // Skip animation tracks in layer
                 br.BaseStream.Position = layerEnd;
                 mat.Layers.Add(layer);
@@ -254,7 +259,6 @@ public class MdxFile
             tex.ReplaceableId = br.ReadUInt32();
             tex.Path = ReadFixedString(br, 0x104);
             tex.Flags = br.ReadUInt32();
-            Console.WriteLine($"  Texture {i}: Path=\"{tex.Path}\", ReplaceableId={tex.ReplaceableId}");
             textures.Add(tex);
         }
     }
@@ -263,11 +267,6 @@ public class MdxFile
     {
         long end = br.BaseStream.Position + size;
         
-        // Debug hex dump
-        byte[] preview = br.ReadBytes(Math.Min(64, (int)size));
-        br.BaseStream.Position -= preview.Length;
-        Console.WriteLine($"      GEOS Preview (64 bytes): {BitConverter.ToString(preview)}");
-
         // Alpha 0.5.3 seems to have a uint32 count here
         if (size >= 4)
         {
@@ -278,7 +277,6 @@ public class MdxFile
             }
             else
             {
-                Console.WriteLine($"      GEOS Chunk contains {possibleCount} geosets (Alpha header detected)");
             }
         }
 
@@ -296,6 +294,110 @@ public class MdxFile
         }
     }
 
+    static void ReadAtsq(BinaryReader br, uint size, List<MdlGeosetAnimation> animations)
+    {
+        long end = br.BaseStream.Position + size;
+        
+        while (br.BaseStream.Position < end)
+        {
+            if (end - br.BaseStream.Position < 8) break;
+            
+            uint animSize = br.ReadUInt32();
+            long animEnd = br.BaseStream.Position - 4 + animSize;
+            
+            var anim = ReadAtsqEntry(br, animSize - 4);
+            animations.Add(anim);
+            
+            br.BaseStream.Position = animEnd;
+        }
+    }
+
+    static MdlGeosetAnimation ReadAtsqEntry(BinaryReader br, uint size)
+    {
+        var anim = new MdlGeosetAnimation();
+        long animEnd = br.BaseStream.Position + size;
+        
+        // Read header
+        anim.GeosetId = br.ReadUInt32();
+        anim.DefaultAlpha = br.ReadSingle();
+        anim.DefaultColor = new C3Color(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+        anim.Unknown = br.ReadUInt32();
+        
+        // Read sub-chunks
+        while (br.BaseStream.Position < animEnd - 8)
+        {
+            string tag = ReadTag(br);
+            uint subSize = br.ReadUInt32();
+            long subEnd = br.BaseStream.Position + subSize;
+            
+            switch (tag)
+            {
+                case "KGAO":
+                    ReadAlphaKeys(br, anim);
+                    break;
+                case "KGAC":
+                    ReadColorKeys(br, anim);
+                    break;
+                default:
+                    br.BaseStream.Position = subEnd;
+                    break;
+            }
+            
+            if (br.BaseStream.Position != subEnd)
+                br.BaseStream.Position = subEnd;
+        }
+        
+        return anim;
+    }
+
+    static void ReadAlphaKeys(BinaryReader br, MdlGeosetAnimation anim)
+    {
+        uint keyCount = br.ReadUInt32();
+        anim.AlphaInterpolation = (MdlAnimInterpolation)br.ReadUInt32();
+        anim.AlphaGlobalSeqId = br.ReadInt32();
+        
+        for (uint i = 0; i < keyCount; i++)
+        {
+            var key = new MdlAnimKey<float>
+            {
+                Time = br.ReadInt32(),
+                Value = br.ReadSingle()
+            };
+            
+            if (anim.AlphaInterpolation >= MdlAnimInterpolation.Hermite)
+            {
+                key.TangentIn = br.ReadSingle();
+                key.TangentOut = br.ReadSingle();
+            }
+            
+            anim.AlphaKeys.Add(key);
+        }
+    }
+
+    static void ReadColorKeys(BinaryReader br, MdlGeosetAnimation anim)
+    {
+        uint keyCount = br.ReadUInt32();
+        anim.ColorInterpolation = (MdlAnimInterpolation)br.ReadUInt32();
+        anim.ColorGlobalSeqId = br.ReadInt32();
+        
+        for (uint i = 0; i < keyCount; i++)
+        {
+            var key = new MdlAnimKey<C3Color>
+            {
+                Time = br.ReadInt32(),
+                Value = new C3Color(br.ReadSingle(), br.ReadSingle(), br.ReadSingle())
+            };
+            
+            if (anim.ColorInterpolation >= MdlAnimInterpolation.Hermite)
+            {
+                key.ColorTangentIn = new C3Color(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                key.ColorTangentOut = new C3Color(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            }
+            
+            anim.ColorKeys.Add(key);
+        }
+    }
+
     static MdlGeoset ReadGeoset(BinaryReader br, uint size, uint mdxVersion)
     {
         var geo = new MdlGeoset();
@@ -308,7 +410,6 @@ public class MdxFile
             string tag = ReadTag(br);
             uint count = br.ReadUInt32();
 
-            Console.WriteLine($"        SubChunk: {tag}, Count: {count}, Pos: {br.BaseStream.Position}");
 
             switch (tag)
             {
@@ -390,8 +491,7 @@ public class MdxFile
                             // Ambiguous. Default to 1 (safe?) or 4?
                             // Or just Smart Seek the next tag?
                             // If we are at end, consuming 'remaining' is safest.
-                            Console.WriteLine($"      [INFO] BIDX size heuristic: consuming {bidxRem} bytes (Count {count})");
-                            br.ReadBytes((int)bidxRem);
+                                br.ReadBytes((int)bidxRem);
                         }
                     }
                     break;

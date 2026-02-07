@@ -131,3 +131,60 @@ public class MdlLight : MdlBone
     public C3Vector AmbientColor { get; set; }
     public float AmbientIntensity { get; set; }
 }
+
+/// <summary>Geoset animation data for alpha/color animations (ATSQ chunk)</summary>
+public class MdlGeosetAnimation
+{
+    public uint GeosetId { get; set; }
+    public float DefaultAlpha { get; set; } = 1.0f;
+    public C3Color DefaultColor { get; set; } = new C3Color(1.0f, 1.0f, 1.0f);
+    public uint Unknown { get; set; }
+    
+    // Alpha animation keys
+    public List<MdlAnimKey<float>> AlphaKeys { get; } = new();
+    public MdlAnimInterpolation AlphaInterpolation { get; set; }
+    public int AlphaGlobalSeqId { get; set; }
+    
+    // Color animation keys
+    public List<MdlAnimKey<C3Color>> ColorKeys { get; } = new();
+    public MdlAnimInterpolation ColorInterpolation { get; set; }
+    public int ColorGlobalSeqId { get; set; }
+}
+
+/// <summary>Animation keyframe for generic values</summary>
+public class MdlAnimKey<T>
+{
+    public int Time { get; set; }
+    public T Value { get; set; } = default!;
+    public float TangentIn { get; set; }
+    public float TangentOut { get; set; }
+    public C3Color ColorTangentIn { get; set; } = new C3Color();
+    public C3Color ColorTangentOut { get; set; } = new C3Color();
+}
+
+/// <summary>Interpolation type for animation tracks</summary>
+public enum MdlAnimInterpolation
+{
+    None = 0,
+    Linear = 1,
+    Hermite = 2,
+    Bezier = 3,
+    Bezier2 = 4,
+}
+
+/// <summary>RGB color (0-1 range)</summary>
+public class C3Color
+{
+    public float R { get; set; }
+    public float G { get; set; }
+    public float B { get; set; }
+
+    public C3Color() { }
+
+    public C3Color(float r, float g, float b)
+    {
+        R = r;
+        G = g;
+        B = b;
+    }
+}

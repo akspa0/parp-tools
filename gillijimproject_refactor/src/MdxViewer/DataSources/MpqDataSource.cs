@@ -118,6 +118,10 @@ public class MpqDataSource : IDataSource
             string[] dataDirs = { "World", "Creature", "Character", "Item", "Textures",
                                   "Interface", "Spells", "Environments", "Dungeons" };
 
+            // Also scan for WMO files in World/wmo subdirectories
+            // WMO files are in nested subfolders like World/wmo/<zonename>/...
+            string[] wmoScanDirs = { @"World\wmo", @"World\WMO" };
+
             bool foundAny = false;
             foreach (var subDir in dataDirs)
             {
@@ -147,8 +151,35 @@ public class MpqDataSource : IDataSource
                     Console.WriteLine($"[MpqDataSource] Scan error in {fullDir}: {ex.Message}");
                 }
 
-                Console.WriteLine($"[MpqDataSource]   Found {_fileSet.Count - before} files in {subDir}/");
-                foundAny = true;
+                int found = _fileSet.Count - before;
+                Console.WriteLine($"[MpqDataSource]   Found {found} files in {subDir}/");
+                foundAny = found > 0;
+            }
+
+            // Additional scan for WMO files in nested wmo directories
+            foreach (var wmoDir in wmoScanDirs)
+            {
+                var fullWmoDir = Path.Combine(root, wmoDir);
+                if (!Directory.Exists(fullWmoDir)) continue;
+
+                Console.WriteLine($"[MpqDataSource] Scanning WMO files: {fullWmoDir}");
+                int before = _fileSet.Count;
+
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(fullWmoDir, "*.wmo", SearchOption.AllDirectories))
+                    {
+                        var virtualPath = Path.GetRelativePath(root, file).Replace('/', '\\');
+                        _fileSet.Add(virtualPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[MpqDataSource] WMO scan error in {fullWmoDir}: {ex.Message}");
+                }
+
+                int found = _fileSet.Count - before;
+                Console.WriteLine($"[MpqDataSource]   Found {found} WMO files");
             }
 
             if (foundAny) break; // Found valid root, don't double-scan gamePath and gamePath/Data
@@ -161,6 +192,25 @@ public class MpqDataSource : IDataSource
         if (TryResolveLoosePath(virtualPath) != null)
             return true;
         return _mpq.FileExists(virtualPath);
+    }
+
+    /// <summary>Find the actual path from the file set (case-insensitive, returns correctly-cased path).</summary>
+    public string? FindInFileSet(string virtualPath)
+    {
+        string normalized = virtualPath.Replace('/', '\\').ToLowerInvariant();
+        
+        // Try exact match first
+        if (_fileSet.Contains(normalized))
+            return normalized;
+        
+        // Try normalized match
+        foreach (var file in _fileSet)
+        {
+            if (file.Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                return file;
+        }
+        
+        return null;
     }
 
     public byte[]? ReadFile(string virtualPath)

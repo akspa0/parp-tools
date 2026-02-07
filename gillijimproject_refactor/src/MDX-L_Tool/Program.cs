@@ -16,7 +16,7 @@ class Program
         var outputArg = new Argument<FileInfo>("output", "Output path");
         var targetOption = new Option<string>("--target", () => "mdl", "Target format (mdl, obj, m2)");
         var gamePathOption = new Option<DirectoryInfo?>("--game-path", "Path to game folder for asset resolution");
-        var singleOption = new Option<bool>("--single", "Export as single OBJ file instead of split by geoset");
+        var singleOption = new Option<bool>("--single", () => true, "Export as single OBJ file instead of split by geoset");
 
         convertCommand.AddArgument(inputArg);
         convertCommand.AddArgument(outputArg);
@@ -56,7 +56,6 @@ class Program
         string modelDir = input.DirectoryName ?? ".";
 
         Console.WriteLine($"Converting: {input.Name} -> {output.Name}");
-        if (gamePath != null) Console.WriteLine($"Game path: {gamePath.FullName}");
 
         try
         {
@@ -67,79 +66,62 @@ class Program
             }
             else if (gamePath != null && gamePath.Exists)
             {
-                // Attempt to load from game path (MPQ)
-                Console.WriteLine($"Local file not found. Attempting to load from game path: {input.Name}");
                 using var mpq = new NativeMpqService();
                 mpq.LoadArchives(new[] { gamePath.FullName });
 
-                // Standardize the virtual path.
                 string virtualPath = input.ToString(); 
                 if (virtualPath.Contains(gamePath.FullName))
-                {
                     virtualPath = virtualPath.Replace(gamePath.FullName, "").TrimStart('\\');
-                }
                 virtualPath = virtualPath.Replace('/', '\\').TrimStart('\\');
-                
-                // For MPQ textures, we need the virtual directory
                 modelDir = Path.GetDirectoryName(virtualPath) ?? ".";
 
                 var mdxData = mpq.ReadFile(virtualPath);
                 if (mdxData == null)
                 {
-                    Console.WriteLine($"[ERROR] Could not find virtual path \"{virtualPath}\" in archives.");
+                    Console.Error.WriteLine($"[ERROR] Could not find \"{virtualPath}\" in archives.");
                     return;
                 }
 
                 using var ms = new MemoryStream(mdxData);
                 mdx = MdxFile.Load(ms);
                 mdx.ModelName = Path.GetFileNameWithoutExtension(input.Name);
-                mdx.RawData = mdxData; // Helper property
-                Console.WriteLine($"Loaded MDX from MPQ: {virtualPath}");
+                mdx.RawData = mdxData;
             }
             else
             {
-                Console.WriteLine($"[ERROR] File not found: {input.FullName}");
+                Console.Error.WriteLine($"[ERROR] File not found: {input.FullName}");
                 return;
             }
 
-            Console.WriteLine($"Loaded MDX: Version {mdx.Version}, {mdx.Geosets.Count} geosets");
+            // Validation gate: check for usable geometry
+            int validGeosets = mdx.Geosets.Count(g => g.Vertices.Count > 0 && g.Indices.Count > 0);
+            Console.WriteLine($"Loaded: v{mdx.Version}, {mdx.Geosets.Count} geosets ({validGeosets} valid), {mdx.Textures.Count} textures");
 
-            var sb = new StringBuilder();
-            sb.AppendLine($"Texture Count: {mdx.Textures.Count}");
-            for (int i = 0; i < mdx.Textures.Count; i++)
-                 sb.AppendLine($"Texture[{i}]: {mdx.Textures[i].Path} (ID: {mdx.Textures[i].ReplaceableId})");
-            File.WriteAllText("debug_textures.txt", sb.ToString());
+            if (validGeosets == 0 && outputExt == ".obj")
+            {
+                Console.Error.WriteLine($"[SKIP] No valid geometry in {input.Name} — skipping OBJ write.");
+                return;
+            }
 
-            // Dump for inspection
-            File.WriteAllBytes("debug_dump.mdx", mdx.RawData ?? new byte[0]); // Need to expose RawData or re-read? 
-            // MdxFile might not store RawData. We can save it using SaveMdl? No.
-            // MPQ extraction provides `mdxData`.
-            
-            // Texture Export Phase
-            ExportTextures(mdx, input.FullName, modelDir, outputDir, gamePath);
+            // Ensure output directory exists
+            if (output.Directory != null && !output.Directory.Exists)
+                output.Directory.Create();
+
+            // Texture Export Phase — returns map of textureIdx -> exported PNG filename
+            var exportedTextures = ExportTextures(mdx, input.FullName, modelDir, outputDir, gamePath);
 
             if (outputExt == ".mdl")
             {
-                if (output.Directory != null && !output.Directory.Exists)
-                    output.Directory.Create();
-                
                 mdx.SaveMdl(output.FullName);
                 Console.WriteLine($"Saved MDL: {output.FullName}");
             }
             else if (outputExt == ".obj")
             {
-                if (output.Directory != null && !output.Directory.Exists)
-                    output.Directory.Create();
-
-                mdx.SaveObj(output.FullName, split: !single);
-                if (single)
-                    Console.WriteLine($"Saved OBJ (Single): {output.FullName}");
-                else
-                    Console.WriteLine($"Saved OBJ (Split): {output.FullName} (and associated geoset files)");
+                mdx.SaveObj(output.FullName, split: !single, exportedTextures: exportedTextures);
             }
             else if (outputExt == ".m2")
             {
-                Console.WriteLine("M2 writing not yet implemented (Phase 2)");
+                Console.WriteLine("M2 writing not yet implemented.");
             }
             else
             {
@@ -148,8 +130,7 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
+            Console.Error.WriteLine($"[ERROR] {input.Name}: {ex.Message}");
         }
     }
 
@@ -248,50 +229,47 @@ class Program
         Console.WriteLine($"Batch Complete. Success: {success}, Failed: {fail}");
     }
 
-    static void ExportTextures(MdxFile mdx, string modelPath, string modelDir, string outputDir, DirectoryInfo? gamePath)
+    /// <summary>
+    /// Exports textures and returns a map of texture index -> exported PNG filename.
+    /// </summary>
+    static Dictionary<int, string> ExportTextures(MdxFile mdx, string modelPath, string modelDir, string outputDir, DirectoryInfo? gamePath)
     {
+        var result = new Dictionary<int, string>();
         using var mpqService = new NativeMpqService();
         DbcService? dbcService = null;
 
         if (gamePath != null && gamePath.Exists)
         {
-            Console.WriteLine("Loading game archives for texture export...");
             mpqService.LoadArchives(new[] { gamePath.FullName });
 
-            // Initialize DBC Service if we have a game path
-            // We expect DBC CSVs to be in a specific folder relative to the tool or provided path
-            // For now, let's assume they are in DBCTool/out/0.5.3 relative to the workspace root
-            // Or we can look for them in the gamePath itself?
-            // User provided: j:\wowDev\parp-tools\gillijimproject_refactor\DBCTool\out\0.5.3
             string dbcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "DBCTool", "out", "0.5.3");
-            if (!Directory.Exists(dbcPath)) dbcPath = @".\DBCTool\out\0.5.3"; // Fallback
+            if (!Directory.Exists(dbcPath)) dbcPath = @".\DBCTool\out\0.5.3";
             
-            Console.WriteLine($"Initializing DBC Service from: {dbcPath}");
             dbcService = new DbcService(dbcPath);
-            try { dbcService.Initialize(); } catch { Console.WriteLine("[WARN] Failed to initialize DBC service."); }
+            try { dbcService.Initialize(); } catch { /* DBC optional */ }
         }
 
         var textureService = new TextureService(mpqService, dbcService ?? new DbcService(""));
-        int exported = 0;
 
-        foreach (var tex in mdx.Textures)
+        for (int i = 0; i < mdx.Textures.Count; i++)
         {
+            var tex = mdx.Textures[i];
             if (string.IsNullOrEmpty(tex.Path) && tex.ReplaceableId == 0) 
                 continue;
 
-            Console.WriteLine($"  Processing texture: Path=\"{tex.Path}\", ReplaceableId={tex.ReplaceableId}");
-            var pngPath = textureService.ExportTexture(tex, mdx.ModelName, modelPath, modelDir, outputDir);
-            if (pngPath != null)
+            var pngName = textureService.ExportTexture(tex, mdx.ModelName, modelPath, modelDir, outputDir);
+            if (pngName != null)
             {
-                Console.WriteLine($"    Exported: {pngPath}");
-                exported++;
+                result[i] = pngName;
+                Console.WriteLine($"  Texture[{i}]: {pngName}");
             }
             else
             {
-                Console.WriteLine($"    [WARN] Failed to export texture.");
+                Console.WriteLine($"  Texture[{i}]: [WARN] export failed (Path=\"{tex.Path}\", ReplaceableId={tex.ReplaceableId})");
             }
         }
-        Console.WriteLine($"Total textures exported: {exported}");
+
+        return result;
     }
 
     static void InfoHandler(FileInfo input)

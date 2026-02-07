@@ -575,8 +575,15 @@ public class ViewerApp : IDisposable
 
                 if (dbdDir != null)
                 {
-                    // Infer build version from game path
+                    // Infer build version from game path first
                     string buildAlias = InferBuildFromPath(gamePath);
+                    
+                    // If not found, search WoWDBDefs for 0.5.3
+                    if (string.IsNullOrEmpty(buildAlias))
+                    {
+                        buildAlias = FindBuildInWoWDBDefs(dbdDir);
+                    }
+                    
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
                         Console.WriteLine($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
@@ -584,7 +591,7 @@ public class ViewerApp : IDisposable
                     }
                     else
                     {
-                        Console.WriteLine("[MdxViewer] Could not infer build version from game path. DBC texture resolution unavailable.");
+                        Console.WriteLine("[MdxViewer] Could not determine build version. DBC texture resolution unavailable.");
                     }
                 }
                 else
@@ -604,10 +611,13 @@ public class ViewerApp : IDisposable
     private static string InferBuildFromPath(string path)
     {
         var p = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).ToLowerInvariant();
-        if (p.Contains("0.5.3")) return "0.5.3";
-        if (p.Contains("0.5.5")) return "0.5.5";
-        if (p.Contains("0.6.0")) return "0.6.0";
-        if (p.Contains("3.3.5")) return "3.3.5";
+        
+        // Check for version strings in path (with or without dots)
+        if (p.Contains("0.5.3") || p.Contains("053")) return "0.5.3";
+        if (p.Contains("0.5.5") || p.Contains("055")) return "0.5.5";
+        if (p.Contains("0.6.0") || p.Contains("060")) return "0.6.0";
+        if (p.Contains("3.3.5") || p.Contains("335")) return "3.3.5";
+        
         // Fallback: check for known MPQ names
         if (Directory.Exists(path))
         {
@@ -615,6 +625,30 @@ public class ViewerApp : IDisposable
                 .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
             if (mpqs.Any(m => m.Contains("patch") && m.Contains("3"))) return "3.3.5";
         }
+        
+        return "";
+    }
+
+    private static string FindBuildInWoWDBDefs(string dbdDir)
+    {
+        // Search WoWDBDefs for 0.5.3 build
+        if (!Directory.Exists(dbdDir)) return "";
+        
+        var dbdFiles = Directory.GetFiles(dbdDir, "*.dbd");
+        foreach (var file in dbdFiles)
+        {
+            var content = File.ReadAllText(file);
+            
+            // Check for 0.5.3 build strings
+            if (content.Contains("build = 0.5.3") || 
+                content.Contains("build=" + '"' + "0.5.3" + '"') ||
+                content.Contains("version = \"0.5.3\""))
+            {
+                Console.WriteLine($"[MdxViewer] Found 0.5.3 build in: {Path.GetFileName(file)}");
+                return "0.5.3";
+            }
+        }
+        
         return "";
     }
 

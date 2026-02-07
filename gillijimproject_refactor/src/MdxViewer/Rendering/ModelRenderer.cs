@@ -41,7 +41,18 @@ public class MdxRenderer : ISceneRenderer
         LoadTextures();
 
         // Log material→texture mapping for debugging
-        Console.WriteLine($"[MdxRenderer] Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}");
+        Console.WriteLine($"[MdxRenderer] Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}");
+        
+        // Log geoset animation info
+        if (_mdx.GeosetAnimations.Count > 0)
+        {
+            Console.WriteLine("[MdxRenderer] Geoset Animations:");
+            foreach (var anim in _mdx.GeosetAnimations)
+            {
+                Console.WriteLine($"  Geoset {anim.GeosetId}: AlphaKeys={anim.AlphaKeys.Count}, ColorKeys={anim.ColorKeys.Count}, DefaultAlpha={anim.DefaultAlpha:F3}");
+            }
+        }
+        
         for (int i = 0; i < _mdx.Geosets.Count; i++)
         {
             var g = _mdx.Geosets[i];
@@ -393,23 +404,87 @@ void main() {
             byte[]? blpData = null;
             string loadSource = "";
 
+            // Try to find the actual path in the file set (case-insensitive)
+            string? actualPath = null;
+            if (_dataSource is MpqDataSource mpqDS)
+            {
+                actualPath = mpqDS.FindInFileSet(texPath);
+            }
+            
             // 1. Try data source (MPQ) first
             if (_dataSource != null)
             {
-                blpData = _dataSource.ReadFile(texPath);
-                if (blpData != null)
+                // Try with actual path from file set if available
+                if (actualPath != null)
                 {
-                    loadSource = "MPQ (original path)";
+                    blpData = _dataSource.ReadFile(actualPath);
+                    if (blpData != null)
+                    {
+                        texPath = actualPath; // Use the correctly-cased path
+                        loadSource = "MPQ (file set match)";
+                    }
                 }
-                else
+                
+                // Try original path if not found yet
+                if (blpData == null)
+                {
+                    blpData = _dataSource.ReadFile(texPath);
+                    if (blpData != null)
+                    {
+                        loadSource = "MPQ (original path)";
+                    }
+                }
+                
+                // Try with normalized slashes
+                if (blpData == null)
                 {
                     var normalized = texPath.Replace('/', '\\');
                     blpData = _dataSource.ReadFile(normalized);
                     if (blpData != null)
                     {
+                        texPath = normalized;
                         loadSource = "MPQ (normalized path)";
                     }
                 }
+                
+                // Try case-insensitive: lowercase
+                if (blpData == null)
+                {
+                    var lowerPath = texPath.ToLowerInvariant();
+                    if (actualPath == null && _dataSource is MpqDataSource mpqDS2)
+                    {
+                        actualPath = mpqDS2.FindInFileSet(lowerPath);
+                    }
+                    if (actualPath != null)
+                    {
+                        blpData = _dataSource.ReadFile(actualPath);
+                        if (blpData != null)
+                        {
+                            texPath = actualPath;
+                            loadSource = "MPQ (lowercase match)";
+                        }
+                    }
+                }
+                
+                // Try case-insensitive: uppercase
+                if (blpData == null)
+                {
+                    var upperPath = texPath.ToUpperInvariant();
+                    if (actualPath == null && _dataSource is MpqDataSource mpqDS3)
+                    {
+                        actualPath = mpqDS3.FindInFileSet(upperPath);
+                    }
+                    if (actualPath != null)
+                    {
+                        blpData = _dataSource.ReadFile(actualPath);
+                        if (blpData != null)
+                        {
+                            texPath = actualPath;
+                            loadSource = "MPQ (uppercase match)";
+                        }
+                    }
+                }
+                
                 // Try case-insensitive search with just filename in model's directory
                 if (blpData == null)
                 {
@@ -419,10 +494,30 @@ void main() {
                     if (!string.IsNullOrEmpty(modelDir))
                     {
                         string altPath = Path.Combine(modelDir, Path.GetFileName(texPath));
-                        blpData = _dataSource.ReadFile(altPath);
-                        if (blpData != null)
+                        
+                        // Try case-insensitive match for the alt path
+                        if (_dataSource is MpqDataSource mpqDS4)
                         {
-                            loadSource = "MPQ (model dir)";
+                            var foundPath = mpqDS4.FindInFileSet(altPath);
+                            if (foundPath != null)
+                            {
+                                blpData = _dataSource.ReadFile(foundPath);
+                                if (blpData != null)
+                                {
+                                    texPath = foundPath;
+                                    loadSource = "MPQ (model dir match)";
+                                }
+                            }
+                        }
+                        
+                        if (blpData == null)
+                        {
+                            blpData = _dataSource.ReadFile(altPath);
+                            if (blpData != null)
+                            {
+                                texPath = altPath;
+                                loadSource = "MPQ (model dir)";
+                            }
                         }
                     }
                 }

@@ -19,6 +19,9 @@ public class NativeMpqService : IDisposable
     // Listfile support
     private readonly HashSet<ulong> _knownFileHashes = new();
     private readonly Dictionary<ulong, string> _hashToName = new();
+    
+    // Scanned file mappings for listfile-less MPQs (placeholder path -> archive path + block)
+    private readonly Dictionary<string, (string ArchivePath, uint BlockOffset)> _scannedFiles = new(StringComparer.OrdinalIgnoreCase);
 
     public void LoadListfile(string path)
     {
@@ -64,6 +67,88 @@ public class NativeMpqService : IDisposable
              if (FindFileInArchive(archive, normalized) != null) return true;
          }
          return false;
+    }
+
+    /// <summary>
+    /// Extracts internal listfile entries from loaded MPQ archives.
+    /// Looks for the standard "(listfile)" entry in each archive.
+    /// </summary>
+    /// <returns>List of file paths found in MPQ internal listfiles.</returns>
+    public List<string> ExtractInternalListfiles()
+    {
+        var allFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        foreach (var archive in _archives)
+        {
+            // Try to read the listfile entry
+            var listfileBlock = FindFileInArchive(archive, "(listfile)");
+            if (listfileBlock != null && listfileBlock.FileSize > 0)
+            {
+                var listfileData = ReadFileFromArchive(archive, listfileBlock, "(listfile)");
+                if (listfileData != null && listfileData.Length > 0)
+                {
+                    var content = Encoding.UTF8.GetString(listfileData);
+                    foreach (var line in content.Split('\n', '\r'))
+                    {
+                        var trimmed = line.Trim();
+                        if (!string.IsNullOrEmpty(trimmed))
+                        {
+                            // Normalize path separators
+                            var normalizedPath = trimmed.Replace('/', '\\').TrimStart('\\');
+                            allFiles.Add(normalizedPath);
+                        }
+                    }
+                }
+            }
+        }
+        
+        Console.WriteLine($"[NativeMpqService] Extracted {allFiles.Count} files from MPQ internal listfiles.");
+        return allFiles.ToList();
+    }
+
+    /// <summary>
+    /// Scans all blocks in loaded MPQ archives for WMO files (identified by 'MOHD' magic).
+    /// Useful for listfile-less MPQs containing Alpha WMO files.
+    /// </summary>
+    /// <returns>List of virtual paths for found WMO files.</returns>
+    public List<string> ScanForWmoFiles()
+    {
+        var foundWmos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        foreach (var archive in _archives)
+        {
+            foreach (var block in archive.BlockTable)
+            {
+                if (block.FileSize < 16) continue; // Too small for WMO header
+                
+                // Read the magic number from this block
+                try
+                {
+                    using var fs = new FileStream(archive.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    fs.Position = archive.HeaderOffset + block.BlockOffset;
+                    var magicBytes = new byte[4];
+                    if (fs.Read(magicBytes, 0, 4) != 4) continue;
+                    
+                    // Check for 'MOHD' (WMO root) magic
+                    if (magicBytes[0] == 'M' && magicBytes[1] == 'O' && magicBytes[2] == 'H' && magicBytes[3] == 'D')
+                    {
+                        // Found a WMO file - generate a placeholder path
+                        var wmoPath = $"WMO_{block.BlockOffset:X8}.wmo";
+                        foundWmos.Add(wmoPath);
+                        
+                        // Store the mapping for later reading
+                        if (!_scannedFiles.ContainsKey(wmoPath))
+                        {
+                            _scannedFiles[wmoPath] = (archive.Path, block.BlockOffset);
+                        }
+                    }
+                }
+                catch { continue; }
+            }
+        }
+        
+        Console.WriteLine($"[NativeMpqService] Scanned {foundWmos.Count} WMO files in listfile-less MPQs.");
+        return foundWmos.ToList();
     }
 
     private bool _disposed;
@@ -229,6 +314,33 @@ public class NativeMpqService : IDisposable
         }
         
         return null;
+    }
+    
+    /// <summary>
+    /// Reads a scanned file by its placeholder path (e.g., "WMO_12345678.wmo").
+    /// Used for files found in listfile-less MPQs.
+    /// </summary>
+    public byte[]? ReadScannedFile(string placeholderPath)
+    {
+        if (!_scannedFiles.TryGetValue(placeholderPath, out var info))
+            return null;
+        
+        try
+        {
+            using var fs = new FileStream(info.ArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(fs);
+            
+            // Find the archive
+            var archive = _archives.FirstOrDefault(a => a.Path == info.ArchivePath);
+            if (archive == null) return null;
+            
+            fs.Position = archive.HeaderOffset + info.BlockOffset;
+            return ReadFileData(reader, new BlockEntry { BlockOffset = info.BlockOffset, BlockSize = 0, FileSize = 0, Flags = 0 }, archive.Header.SectorSize, placeholderPath, archive.HeaderOffset + info.BlockOffset);
+        }
+        catch
+        {
+            return null;
+        }
     }
     
     private MpqArchive? LoadArchive(string mpqPath)
