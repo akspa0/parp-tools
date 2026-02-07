@@ -1,0 +1,489 @@
+src_mapId,src_areaId,src_parentId,src_isZone,src_name,match_count,matches
+0,1048576,1048576,1,Dun Morogh,1,0:1:1:map_name:active:Dun Morogh
+0,1048577,1048576,0,Anvilmar,1,0:77:1:map_name:active:Anvilmar
+0,1048578,1048576,0,Kharanos,1,0:131:1:map_name:active:Kharanos
+0,1048579,1048576,0,Coldridge Valley,1,0:132:1:map_name:active:Coldridge Valley
+0,1048580,1048576,0,Gnomeregan,2,0:133:1:map_name:active:Gnomeregan|90:721:721:global_name:active:Gnomeregan
+0,1048581,1048576,0,Gol'Bolar Quarry,1,0:134:1:map_name:active:Gol'Bolar Quarry
+0,1048582,1048576,0,Frostmane Hold,1,0:135:1:map_name:active:Frostmane Hold
+0,1048583,1048576,0,The Grizzled Den,1,0:136:1:map_name:active:The Grizzled Den
+0,1048584,1048576,0,Brewnall Village,1,0:137:1:map_name:active:Brewnall Village
+0,1048585,1048576,0,Misty Pine Refuge,1,0:138:1:map_name:active:Misty Pine Refuge
+0,1048586,1048576,0,Steelgrill's Depot,1,0:189:1:map_name:active:Steelgrill's Depot
+0,1048587,1048576,0,Iceflow Lake,1,0:211:1:map_name:active:Iceflow Lake
+0,1048588,1048576,0,Helm's Bed Lake,1,0:212:1:map_name:active:Helm's Bed Lake
+0,1114112,1114112,1,Badlands,1,0:3:3:map_name:active:Badlands
+0,1114113,1114112,0,Apocryphan's Rest,1,0:337:3:map_name:active:Apocryphan's Rest
+0,1114114,1114112,0,Angor Fortress,1,0:338:3:map_name:active:Angor Fortress
+0,1114115,1114112,0,Lethlor Ravine,1,0:339:3:map_name:active:Lethlor Ravine
+0,1114116,1114112,0,Kargath,1,0:340:3:map_name:active:Kargath
+0,1114117,1114112,0,Camp Kosh,1,0:341:3:map_name:active:Camp Kosh
+0,1114118,1114112,0,Camp Boff,1,0:342:3:map_name:active:Camp Boff
+0,1114119,1114112,0,Camp Wurg,1,0:343:3:map_name:active:Camp Wurg
+0,1114120,1114112,0,Camp Cagg,1,0:344:3:map_name:active:Camp Cagg
+0,1114121,1114112,0,Agmond's End,1,0:345:3:map_name:active:Agmond's End
+0,1114122,1114112,0,Hammertoe's Digsite,1,0:346:3:map_name:active:Hammertoe's Digsite
+0,1114123,1114112,0,Dustbelch Grotto,1,0:347:3:map_name:active:Dustbelch Grotto
+0,131072,131072,1,Blasted Lands,1,0:4:4:map_name:active:Blasted Lands
+0,131073,131072,0,Dark Portal,2,0:72:4:map_name:active:The Dark Portal|269:3706:2366:global_name:active:The Dark Portal
+0,131074,131072,0,Demonic Stronghold,0,
+0,458752,458752,1,Swamp of Sorrows,1,0:8:8:map_name:active:Swamp of Sorrows
+0,458753,458752,0,Pool of Tears,1,0:74:8:map_name:active:Pool of Tears
+0,458754,458752,0,Stonard,1,0:75:8:map_name:active:Stonard
+0,458755,458752,0,Fallow Sanctuary,1,0:76:8:map_name:active:Fallow Sanctuary
+0,458756,458752,0,Misty Valley,1,0:116:8:map_name:active:Misty Valley
+0,458757,458752,0,Mistyreed Strand,1,0:300:8:map_name:active:Misty Reed Strand
+0,393216,393216,1,Elwynn Forest,1,0:12:12:map_name:active:Elwynn Forest
+0,393218,393216,0,Northshire Valley,1,0:9:12:map_name:active:Northshire Valley
+0,393220,393216,0,Crystal Lake,1,0:18:12:map_name:active:Crystal Lake
+0,393223,393216,0,Northshire River,1,0:23:12:map_name:active:Northshire River
+0,393224,393216,0,Northshire Abbey,1,0:24:12:map_name:active:Northshire Abbey
+0,393222,393216,0,Echo Ridge Mine,1,0:34:12:map_name:active:Echo Ridge Mine
+0,393228,393216,0,Thieves Camp,1,0:53:12:map_name:active:Thieves Camp
+0,393230,393216,0,Valley of Heroes,1,0:1617:1519:map_name:active:Valley of Heroes
+0,393231,393216,0,Hero's Vigil,0,
+0,393232,393216,0,Fargodeep Mine,1,0:57:12:map_name:active:Fargodeep Mine
+0,393233,393216,0,Northshire Vineyards,1,0:59:12:map_name:active:Northshire Vineyards
+0,393235,393216,0,Thunder Falls,1,0:61:12:map_name:active:Thunder Falls
+0,393236,393216,0,Brackwell Pumpkin Patch,1,0:62:12:map_name:active:Brackwell Pumpkin Patch
+0,393237,393216,0,The Stonefield Farm,1,0:63:12:map_name:active:The Stonefield Farm
+0,393238,393216,0,The Maclure Vineyards,1,0:64:12:map_name:active:The Maclure Vineyards
+0,393239,393216,0,Stormwind City,1,0:1519:1519:map_name:active:Stormwind City
+0,393240,393216,0,Stone Cairn Lake,1,0:86:12:map_name:active:Stone Cairn Lake
+0,393242,393216,0,Eastvale Logging Camp,1,0:88:12:map_name:active:Eastvale Logging Camp
+0,393243,393216,0,Mirror Lake Orchard,1,0:89:12:map_name:active:Mirror Lake Orchard
+0,393244,393216,0,Tower of Azora,1,0:91:12:map_name:active:Tower of Azora
+0,393241,393216,0,Goldshire,1,0:87:12:map_name:active:Goldshire
+0,393229,393216,0,Jasperlode Mine,1,0:54:12:map_name:active:Jasperlode Mine
+0,393245,393216,0,Mirror Lake,1,0:92:12:map_name:active:Mirror Lake
+0,393246,393216,0,Westbrook Garrison,1,0:120:12:map_name:active:Westbrook Garrison
+0,393234,393216,0,Forest's Edge,1,0:60:12:map_name:active:Forest's Edge
+0,1376256,1376256,1,Kul Tiras,1,0:21:21:map_name:active:Kul Tiras
+0,1179648,1179648,1,Blackrock Mountain,3,0:25:25:map_name:active:Blackrock Mountain|0:254:46:map_name:active:Blackrock Mountain|0:1445:51:map_name:active:Blackrock Mountain
+0,1245184,1245184,1,Western Plaguelands,1,0:28:28:map_name:active:Western Plaguelands
+0,1245185,1245184,0,Hearthglenn,0,
+0,1245187,1245184,0,Northridge Lumber Camp,1,0:192:28:map_name:active:Northridge Lumber Camp
+0,1245188,1245184,0,Ruins of Anderhol,0,
+0,1245190,1245184,0,School of Necromancy,1,0:195:28:map_name:active:School of Necromancy
+0,1245192,1245184,0,Sorrow Hill,1,0:197:28:map_name:active:Sorrow Hill
+0,1245193,1245184,0,The Weeping Cave,1,0:198:28:map_name:active:The Weeping Cave
+0,1245194,1245184,0,Felstone Field,1,0:199:28:map_name:active:Felstone Field
+0,1245195,1245184,0,Dalson's Tears,1,0:200:28:map_name:active:Dalson's Tears
+0,1245196,1245184,0,Gahrron's Withering,1,0:201:28:map_name:active:Gahrron's Withering
+0,1245197,1245184,0,The Writhing Haunt,1,0:202:28:map_name:active:The Writhing Haunt
+0,1245198,1245184,0,Mardenholde Keep,1,0:203:28:map_name:active:Mardenholde Keep
+0,1245191,1245184,0,Uther's Tomb,1,0:196:28:map_name:active:Uther's Tomb
+0,655360,655360,1,Nine,1,0:30:30:map_name:active:Nine
+0,720896,720896,1,Stranglethorn Vale,1,0:33:33:map_name:active:Stranglethorn Vale
+0,720897,720896,0,Blackwater Cove,1,0:7:33:map_name:active:Blackwater Cove
+0,720901,720896,0,Booty Bay,1,0:35:33:map_name:active:Booty Bay
+0,720899,720896,0,Lake Nazferiti,1,0:37:33:map_name:active:Lake Nazferiti
+0,720898,720896,0,Wild Shore,1,0:43:33:map_name:active:Wild Shore
+0,720902,720896,0,Rebel Camp,1,0:99:33:map_name:active:Rebel Camp
+0,720904,720896,0,Kurzen's Compound,1,0:101:33:map_name:active:Kurzen's Compound
+0,720906,720896,0,Ruins of Zul'Mamwe,1,0:103:33:map_name:active:Ruins of Zul'Mamwe
+0,720907,720896,0,The Vile Reef,1,0:104:33:map_name:active:The Vile Reef
+0,720908,720896,0,Mosh'Ogg Ogre Mound,1,0:105:33:map_name:active:Mosh'Ogg Ogre Mound
+0,720909,720896,0,The Stockpile,1,0:106:33:map_name:active:The Stockpile
+0,720910,720896,0,Grom'gol Base Camp,1,0:117:33:map_name:active:Grom'gol Base Camp
+0,720911,720896,0,Zuuldaia Ruins,1,0:122:33:map_name:active:Zuuldaia Ruins
+0,720912,720896,0,Bal'lal Ruins,1,0:123:33:map_name:active:Bal'lal Ruins
+0,720914,720896,0,Kal'ai Ruins,1,0:125:33:map_name:active:Kal'ai Ruins
+0,720915,720896,0,Tkashi Ruins,1,0:126:33:map_name:active:Tkashi Ruins
+0,720916,720896,0,Balia'mah Ruins,1,0:127:33:map_name:active:Balia'mah Ruins
+0,720917,720896,0,Ziata'jai Ruins,1,0:128:33:map_name:active:Ziata'jai Ruins
+0,720918,720896,0,Mizjah Ruins,1,0:129:33:map_name:active:Mizjah Ruins
+0,720919,720896,0,Jaguero Isle,1,0:297:33:map_name:active:Jaguero Isle
+0,720920,720896,0,The Savage Coast,1,0:301:33:map_name:active:The Savage Coast
+0,720922,720896,0,Shell Beach,1,0:303:33:map_name:active:Shell Beach
+0,720923,720896,0,Crystalvein Mine,1,0:310:33:map_name:active:Crystalvein Mine
+0,720925,720896,0,Janeiro's Point,1,0:312:33:map_name:active:Janeiro's Point
+0,720926,720896,0,Ruins of Jubuwal,1,0:477:33:map_name:active:Ruins of Jubuwal
+0,720921,720896,0,The Crystal Shore,1,0:302:33:map_name:active:The Crystal Shore
+0,720900,720896,0,Zul Gurub,2,0:19:33:map_name:active:Zul'Gurub|309:1977:1977:global_name:active:Zul'Gurub
+0,720903,720896,0,Nesingwary's Expedition,1,0:100:33:map_name:active:Nesingwary's Expedition
+0,720905,720896,0,Ruins of Zul'Kunda,1,0:102:33:map_name:active:Ruins of Zul'Kunda
+0,720924,720896,0,Ruins of Aboraz,1,0:311:33:map_name:active:Ruins of Aboraz
+0,1310720,1310720,1,Alterac Mountains,1,0:36:36:map_name:active:Alterac Mountains
+0,1310721,1310720,0,The Foothill Caverns,1,0:277:36:map_name:active:The Foothill Caverns
+0,1310722,1310720,0,Lordamere Internment Camp,1,0:278:36:map_name:active:Lordamere Internment Camp
+0,1310723,1310720,0,Dalaran,1,571:4395:4395:global_name:active:Dalaran
+0,1310724,1310720,0,Strahnbrad,1,0:280:36:map_name:active:Strahnbrad
+0,1310725,1310720,0,Ruins of Alterac,1,0:281:36:map_name:active:Ruins of Alterac
+0,1310726,1310720,0,Crushridge Hold,1,0:282:36:map_name:active:Crushridge Hold
+0,1310727,1310720,0,Slaughter Hollow,1,0:283:36:map_name:active:Slaughter Hollow
+0,1310728,1310720,0,The Uplands,1,0:284:36:map_name:active:The Uplands
+0,983040,983040,1,Loch Modan,1,0:38:38:map_name:active:Loch Modan
+0,983041,983040,0,Ironband's Excavation Site,1,0:142:38:map_name:active:Ironband's Excavation Site
+0,983042,983040,0,Mo'grosh Stronghold,1,0:143:38:map_name:active:Mo'grosh Stronghold
+0,983043,983040,0,Thelsamar,1,0:144:38:map_name:active:Thelsamar
+0,983044,983040,0,Algaz Gate,1,0:145:38:map_name:active:Algaz Gate
+0,983045,983040,0,Stonewrought Dam,1,0:146:38:map_name:active:Stonewrought Dam
+0,983046,983040,0,The Farstrider Lodge,1,0:147:38:map_name:active:The Farstrider Lodge
+0,983047,983040,0,Silver Stream Mine,1,0:149:38:map_name:active:Silver Stream Mine
+0,983048,983040,0,The Loch,1,0:556:38:map_name:active:The Loch
+0,196608,196608,1,Westfall,1,0:40:40:map_name:active:Westfall
+0,196611,196608,0,Longshore,1,0:2:40:map_name:active:Longshore
+0,196610,196608,0,Moonbrook,1,0:20:40:map_name:active:Moonbrook
+0,196612,196608,0,Saldean's Farm,1,0:107:40:map_name:active:Saldean's Farm
+0,196613,196608,0,Sentinel Hill,1,0:108:40:map_name:active:Sentinel Hill
+0,196614,196608,0,Furlbrow's Pumpkin Farm,1,0:109:40:map_name:active:Furlbrow's Pumpkin Farm
+0,196616,196608,0,Jangolode Mine,1,0:111:40:map_name:active:Jangolode Mine
+0,196620,196608,0,Westfall Lighthouse,2,0:26:40:map_name:active:Lighthouse|0:115:40:map_name:active:Westfall Lighthouse
+0,196621,196608,0,Alexston Farmstead,1,0:219:40:map_name:active:Alexston Farmstead
+0,196618,196608,0,Gold Coast Quarry,1,0:113:40:map_name:active:Gold Coast Quarry
+0,196609,196608,0,Lighthouse,2,0:26:40:map_name:active:Lighthouse|0:115:40:map_parent_colon:active:Westfall Lighthouse
+0,524288,524288,1,Redridge Mountains,1,0:44:44:map_name:active:Redridge Mountains
+0,524290,524288,0,Lakeshire,1,0:69:44:map_name:active:Lakeshire
+0,524291,524288,0,Stonewatch,1,0:70:44:map_name:active:Stonewatch
+0,524292,524288,0,Stonewatch Falls,1,0:71:44:map_name:active:Stonewatch Falls
+0,524293,524288,0,Redridge Canyons,1,0:95:44:map_name:active:Redridge Canyons
+0,524294,524288,0,Tower of Ilgalar,1,0:96:44:map_name:active:Tower of Ilgalar
+0,524295,524288,0,Alther's Mill,1,0:97:44:map_name:active:Alther's Mill
+0,524296,524288,0,Rethban Caverns,1,0:98:44:map_name:active:Rethban Caverns
+0,524289,524288,0,Lake Everstill,1,0:68:44:map_name:active:Lake Everstill
+0,851968,851968,1,Arathi Highlands,1,0:45:45:map_name:active:Arathi Highlands
+0,851969,851968,0,Northfold Manor,1,0:313:45:map_name:active:Northfold Manor
+0,851970,851968,0,Go'Shek Farm,1,0:314:45:map_name:active:Go'Shek Farm
+0,851972,851968,0,Boulderfist Hall,1,0:316:45:map_name:active:Boulderfist Hall
+0,851974,851968,0,Drywhisker Gorge,1,0:318:45:map_name:active:Drywhisker Gorge
+0,851976,851968,0,Refuge Pointe,1,0:320:45:map_name:active:Refuge Pointe
+0,851977,851968,0,Hammerfall,1,0:321:45:map_name:active:Hammerfall
+0,851979,851968,0,O'Breen's Camp,1,0:323:45:map_name:active:O'Breen's Camp
+0,851980,851968,0,Stromgarde Keep,1,0:324:45:map_name:active:Stromgarde Keep
+0,851981,851968,0,The Tower of Arathor,1,0:325:45:map_name:active:The Tower of Arathor
+0,851982,851968,0,The Sanctum,1,0:326:45:map_name:active:The Sanctum
+0,851983,851968,0,Faldir's Cove,1,0:327:45:map_name:active:Faldir's Cove
+0,851985,851968,0,Circle of East Binding,1,0:333:45:map_name:active:Circle of East Binding
+0,851986,851968,0,Circle of West Binding,1,0:334:45:map_name:active:Circle of West Binding
+0,851987,851968,0,Circle of Inner Binding,1,0:335:45:map_name:active:Circle of Inner Binding
+0,851988,851968,0,Circle of Outer Binding,1,0:336:45:map_name:active:Circle of Outer Binding
+0,851984,851968,0,The Drowned Reef,1,0:328:45:map_name:active:The Drowned Reef
+0,851978,851968,0,Blackwater Shipwrecks,1,0:322:45:map_name:active:Blackwater Shipwrecks
+0,851971,851968,0,Dabyrie's Farmstead,1,0:315:45:map_name:active:Dabyrie's Farmstead
+0,851973,851968,0,Witherbark Village,1,0:317:45:map_name:active:Witherbark Village
+0,589824,589824,1,Burning Steppes,1,0:46:46:map_name:active:Burning Steppes
+0,589825,589824,0,Dreadmaul Rock,1,0:249:46:map_name:active:Dreadmaul Rock
+0,589827,589824,0,Flame Crest,1,0:251:46:map_name:active:Flame Crest
+0,589828,589824,0,Blackrock Stronghold,1,0:252:46:map_name:active:Blackrock Stronghold
+0,589829,589824,0,The Pillar of Ash,1,0:253:46:map_name:active:The Pillar of Ash
+0,589830,589824,0,Blackrock Spire,1,229:1583:1583:global_name:active:Blackrock Spire
+0,589831,589824,0,Altar of Storms,2,0:1441:4:map_name:active:Altar of Storms|0:255:46:map_name:active:Altar of Storms
+0,589826,589824,0,Ruins of Thaurisan,0,
+0,786432,786432,1,The Hinterlands,1,0:47:47:map_name:active:The Hinterlands
+0,786433,786432,0,The Overlook Cliffs,1,0:307:47:map_name:active:The Overlook Cliffs
+0,786434,786432,0,Aerie Peak,1,0:348:47:map_name:active:Aerie Peak
+0,786435,786432,0,Wildhammer Keep,1,0:349:47:map_name:active:Wildhammer Keep
+0,786436,786432,0,Quel'Danil Lodge,1,0:350:47:map_name:active:Quel'Danil Lodge
+0,786437,786432,0,Skulk Rock,1,0:351:47:map_name:active:Skulk Rock
+0,786438,786432,0,Zun'watha,1,0:352:47:map_name:active:Zun'watha
+0,786439,786432,0,Shadra'Alor,1,0:353:47:map_name:active:Shadra'Alor
+0,786442,786432,0,Seradane,1,0:356:47:map_name:active:Seradane
+0,786440,786432,0,Jintha'Alor,1,0:354:47:map_name:active:Jintha'Alor
+0,786441,786432,0,The Altar of Zul,1,0:355:47:map_name:active:The Altar of Zul
+0,1507328,1507328,1,Searing Gorge,1,0:51:51:map_name:active:Searing Gorge
+0,1507329,1507328,0,The Cauldron,1,0:246:51:map_name:active:The Cauldron
+0,1507330,1507328,0,Grimesilt Dig Site,1,0:247:51:map_name:active:Grimesilt Dig Site
+0,0,0,1,***On Map Dungeon***,0,
+0,1572864,1572864,1,Tirisfal Glades,1,0:85:85:map_name:active:Tirisfal Glades
+0,1572865,1572864,0,The Bulwark,2,0:813:28:map_name:active:The Bulwark|0:152:85:map_name:active:The Bulwark
+0,1572867,1572864,0,Deathknell,1,0:154:85:map_name:active:Deathknell
+0,1572868,1572864,0,Night Web's Hollow,1,0:155:85:map_name:active:Night Web's Hollow
+0,1572869,1572864,0,Solliden Farmstead,1,0:156:85:map_name:active:Solliden Farmstead
+0,1572870,1572864,0,Agamand Mills,1,0:157:85:map_name:active:Agamand Mills
+0,1572871,1572864,0,Agamand Family Crypt,1,0:158:85:map_name:active:Agamand Family Crypt
+0,1572872,1572864,0,Brill,1,0:159:85:map_name:active:Brill
+0,1572873,1572864,0,Whispering Gardens,1,0:160:85:map_name:active:Whispering Gardens
+0,1572874,1572864,0,Terrace of Repose,1,0:161:85:map_name:active:Terrace of Repose
+0,1572875,1572864,0,Brightwater Lake,1,0:162:85:map_name:active:Brightwater Lake
+0,1572876,1572864,0,Gunther's Retreat,1,0:163:85:map_name:active:Gunther's Retreat
+0,1572877,1572864,0,Garren's Haunt,1,0:164:85:map_name:active:Garren's Haunt
+0,1572878,1572864,0,Balnir Farmstead,1,0:165:85:map_name:active:Balnir Farmstead
+0,1572879,1572864,0,Cold Hearth Manor,1,0:166:85:map_name:active:Cold Hearth Manor
+0,1572880,1572864,0,Crusader Outpost,1,0:167:85:map_name:active:Crusader Outpost
+0,1572881,1572864,0,The North Coast,1,0:168:85:map_name:active:The North Coast
+0,1572883,1572864,0,Faol's Rest,1,0:173:85:map_name:active:Faol's Rest
+0,1572884,1572864,0,Scarlet Watch Post,1,0:459:85:map_name:active:Scarlet Watch Post
+0,1572882,1572864,0,Whispering Shore,1,0:169:85:map_name:active:Whispering Shore
+0,1572866,1572864,0,Ruins of Lordaeron,2,0:153:85:map_name:active:Ruins of Lordaeron|572:3968:3968:global_name:active:Ruins of Lordaeron
+0,1638400,1638400,1,Silverpine Forest,1,0:130:130:map_name:active:Silverpine Forest
+0,1638401,1638400,0,Fenris Isle,1,0:172:130:map_name:active:Fenris Isle
+0,1638402,1638400,0,Pyrewood Village,1,0:204:130:map_name:active:Pyrewood Village
+0,1638403,1638400,0,Deep Elem Mine,1,0:213:130:map_name:active:Deep Elem Mine
+0,1638405,1638400,0,Valgan's Field,1,0:227:130:map_name:active:Valgan's Field
+0,1638406,1638400,0,The Sepulcher,1,0:228:130:map_name:active:The Sepulcher
+0,1638407,1638400,0,Olsen's Farthing,1,0:229:130:map_name:active:Olsen's Farthing
+0,1638408,1638400,0,The Greymane Wall,1,0:230:130:map_name:active:The Greymane Wall
+0,1638409,1638400,0,Beren's Peril,1,0:231:130:map_name:active:Beren's Peril
+0,1638410,1638400,0,The Dawning Isles,1,0:232:130:map_name:active:The Dawning Isles
+0,1638411,1638400,0,Ambermill,1,0:233:130:map_name:active:Ambermill
+0,1638414,1638400,0,Shadowfang Keep,2,0:236:130:map_name:active:Shadowfang Keep|33:209:209:global_name:active:Shadowfang Keep
+0,1638415,1638400,0,The Decrepit Ferry,1,0:237:130:map_name:active:The Decrepit Ferry
+0,1638418,1638400,0,The Dead Field,1,0:240:130:map_name:active:The Dead Field
+0,1638419,1638400,0,North Tide's Run,1,0:305:130:map_name:active:North Tide's Run
+0,1638420,1638400,0,South Tide's Run,1,0:306:130:map_name:active:South Tide's Run
+0,1638404,1638400,0,The Skittering Dark,1,0:226:130:map_name:active:The Skittering Dark
+0,1638416,1638400,0,Malden's Orchard,1,0:238:130:map_name:active:Malden's Orchard
+0,1638417,1638400,0,The Ivar Patch,1,0:239:130:map_name:active:The Ivar Patch
+0,1638413,1638400,0,Fenris Keep,1,0:235:130:map_name:active:Fenris Keep
+0,1703936,1703936,1,Eastern Plaguelands,1,0:139:139:map_name:active:Eastern Plaguelands
+0,1835008,1835008,1,Lordamere Lake,3,0:1339:36:map_name:active:Lordamere Lake|0:1338:130:map_name:active:Lordamere Lake|0:170:170:map_name:active:Lordamere Lake
+0,1900544,1900544,1,The Great Sea,13,0:2365:11:map_name:active:The Great Sea|0:2339:33:map_name:active:The Great Sea|0:2364:40:map_name:active:The Great Sea|0:2399:85:map_name:active:The Great Sea|0:2398:130:map_name:active:The Great Sea|0:214:214:map_name:active:The Great Sea|0:2397:267:map_name:active:The Great Sea|1:2320:14:global_name:active:The Great Sea|1:2318:15:global_name:active:The Great Sea|1:2321:16:global_name:active:The Great Sea|1:2319:17:global_name:active:The Great Sea|1:332:332:global_name:active:The Great Sea|36:207:207:global_name:active:The Great Sea
+0,1966080,1966080,1,Hillsbrad Foothills,1,0:267:267:map_name:active:Hillsbrad Foothills
+0,1966083,1966080,0,Tarren Mill,2,0:272:267:map_name:active:Tarren Mill|560:2368:2367:global_name:active:Tarren Mill
+0,1966086,1966080,0,Durnholde Keep,2,0:275:267:map_name:active:Durnholde Keep|560:2370:2367:global_name:active:Durnholde Keep
+0,1966087,1966080,0,Southpoint Tower,2,0:285:267:map_name:active:Southpoint Tower|560:2376:2367:global_name:active:Southpoint Tower
+0,1966088,1966080,0,Hillsbrad Fields,2,0:286:267:map_name:active:Hillsbrad Fields|560:2372:2367:global_name:active:Hillsbrad Fields
+0,1966089,1966080,0,Hillsbrad,1,0:287:267:map_name:active:Hillsbrad
+0,1966090,1966080,0,Azureload Mine,0,
+0,1966091,1966080,0,Nethander Stead,2,0:289:267:map_name:active:Nethander Stead|560:2374:2367:global_name:active:Nethander Stead
+0,1966092,1966080,0,Dun Garok,2,0:290:267:map_name:active:Dun Garok|560:2371:2367:global_name:active:Dun Garok
+0,1966095,1966080,0,Eastern Strand,2,0:294:267:map_name:active:Eastern Strand|560:2373:2367:global_name:active:Eastern Strand
+0,1966082,1966080,0,Southshore,2,0:271:267:map_name:active:Southshore|560:2369:2367:global_name:active:Southshore
+0,1966096,1966080,0,Western Strand,2,0:295:267:map_name:active:Western Strand|560:2378:2367:global_name:active:Western Strand
+0,2031616,2031616,1,Dun Algaz,3,0:836:11:map_name:active:Dun Algaz|0:837:38:map_name:active:Dun Algaz|0:269:269:map_name:active:Dun Algaz
+0,2162688,2162688,1,Thoradin's Wall,4,0:1857:45:map_name:active:Thoradin's Wall|0:1057:267:map_name:active:Thoradin's Wall|0:293:293:map_name:active:Thoradin's Wall|560:2377:2367:global_name:active:Thoradin's Wall
+0,2228224,2228224,1,South Seas,3,0:2338:33:map_name:active:South Seas|0:296:296:map_name:unused:South Seas UNUSED|1:2317:440:global_name:active:South Seas
+0,2293760,2293760,1,The Forbidding Sea,5,0:2403:8:map_name:active:The Forbidding Sea|0:2402:11:map_name:active:The Forbidding Sea|0:2401:45:map_name:active:The Forbidding Sea|0:2400:47:map_name:active:The Forbidding Sea|0:308:308:map_name:active:The Forbidding Sea
+0,2359296,2359296,1,Thandol Span,3,0:881:11:map_name:active:Thandol Span|0:880:45:map_name:active:Thandol Span|0:330:330:map_name:active:Thandol Span
+0,2424832,2424832,1,Darrowmere Lake,2,0:2297:28:map_name:active:Darrowmere Lake|0:2299:139:map_name:active:Darrowmere Lake
+0,2424833,2424832,0,Caer Darrow,1,0:2298:28:map_name:active:Caer Darrow
+0,2490368,2490368,1,Gillijim's Isle,1,0:408:408:map_name:active:Gillijim's Isle
+0,2555904,2555904,1,Island of Doctor Lapidis,1,0:409:409:map_name:active:Island of Doctor Lapidis
+0,2621440,2621440,1,Twilight Grove,1,0:856:10:map_name:active:Twilight Grove
+0,1441792,1441792,1,Programmer Isle,1,451:22:22:global_name:active:Programmer Isle
+0,1441793,1441792,0,Dead Man's Hole,1,451:49:22:global_name:active:Dead Man's Hole
+0,1441797,1441792,0,Jeff NW Quadrant,1,451:82:22:global_name:active:Jeff NW Quadrant
+0,1441798,1441792,0,Jeff SE Quadrant,1,451:83:22:global_name:active:Jeff SE Quadrant
+0,1441799,1441792,0,Jeff SW Quadrant,1,451:84:22:global_name:active:Jeff SW Quadrant
+0,1441796,1441792,0,Jeff NE Quadrant,0,
+0,327680,327680,1,Deadwind Pass,1,0:41:41:map_name:active:Deadwind Pass
+0,1769472,1769472,1,Designer Island,1,451:151:151:global_name:active:Designer Island
+0,2097152,2097152,1,Stonewrought Pass,1,0:2838:51:map_name:active:Stonewrought Pass
+0,262144,262144,1,Duskwood,1,0:10:10:map_name:active:Duskwood
+0,262147,262144,0,The Cemetary,1,0:32:10:map_name:active:The Cemetary
+0,262145,262144,0,Darkshire,1,0:42:10:map_name:active:Darkshire
+0,262148,262144,0,Vul'Gol Ogre Mound,1,0:93:10:map_name:active:Vul'Gol Ogre Mound
+0,262149,262144,0,Raven Hill,1,0:94:10:map_name:active:Raven Hill
+0,262150,262144,0,Tranquil Gardens Cemetary,1,0:121:10:map_name:active:Tranquil Gardens Cemetery
+0,262151,262144,0,The Rotting Orchard,1,0:241:10:map_name:active:The Rotting Orchard
+0,262152,262144,0,Brightwood Grove,1,0:242:10:map_name:active:Brightwood Grove
+0,262153,262144,0,Forlorn Rowe,1,0:243:10:map_name:active:Forlorn Rowe
+0,262154,262144,0,The Whipple Estate,1,0:244:10:map_name:active:The Whipple Estate
+0,262156,262144,0,Raven Hill Cemetery,1,0:492:10:map_name:active:Raven Hill Cemetery
+0,262157,262144,0,Addle's Stead,1,0:536:10:map_name:active:Addle's Stead
+0,262158,262144,0,Beggar's Haunt,1,0:576:10:map_name:active:Beggar's Haunt
+0,262146,262144,0,The World Tree,1,0:13:10:map_name:active:The World Tree
+0,262155,262144,0,The Yorgen Farmstead,1,0:245:10:map_name:active:The Yorgen Farmstead
+0,917504,917504,1,Wetlands,1,0:11:11:map_name:active:Wetlands
+0,917505,917504,0,Whelgar's Excavation Site,1,0:118:11:map_name:active:Whelgar's Excavation Site
+0,917507,917504,0,Menethil Harbor,1,0:150:11:map_name:active:Menethil Harbor
+0,917508,917504,0,Dun Modr,1,0:205:11:map_name:active:Dun Modr
+0,917509,917504,0,Baradin Bay,1,0:298:11:map_name:active:Baradin Bay
+0,917510,917504,0,Menethil Bay,1,0:299:11:map_name:active:Menethil Bay
+0,917511,917504,0,Ironbeard's Tomb,1,0:309:11:map_name:active:Ironbeard's Tomb
+1,131072,131072,1,Durotar,1,1:14:14:map_name:active:Durotar
+1,131073,131072,0,Razor Hill,1,1:362:14:map_name:active:Razor Hill
+1,131074,131072,0,Valley of Trials,1,1:363:14:map_name:active:Valley of Trials
+1,131075,131072,0,The Den,1,1:364:14:map_name:active:The Den
+1,131076,131072,0,Burning Blade Coven,1,1:365:14:map_name:active:Burning Blade Coven
+1,131077,131072,0,Kolkar Crag,1,1:366:14:map_name:active:Kolkar Crag
+1,131078,131072,0,Sen'jin Village,1,1:367:14:map_name:active:Sen'jin Village
+1,131079,131072,0,Echo Isles,1,1:368:14:map_name:active:Echo Isles
+1,131080,131072,0,Thunder Ridge,1,1:369:14:map_name:active:Thunder Ridge
+1,131081,131072,0,Drygulch Ravine,1,1:370:14:map_name:active:Drygulch Ravine
+1,131083,131072,0,Tiragarde Keep,1,1:372:14:map_name:active:Tiragarde Keep
+1,131084,131072,0,Scuttle Coast,1,1:373:14:map_name:active:Scuttle Coast
+1,131085,131072,0,Bladefist Bay,1,1:374:14:map_name:active:Bladefist Bay
+1,131086,131072,0,Deadeye Shore,1,1:375:14:map_name:active:Deadeye Shore
+1,131087,131072,0,Darkspear Strand,1,1:393:14:map_name:active:Darkspear Strand
+1,131088,131072,0,Orgrimmar,1,1:1637:1637:map_name:active:Orgrimmar
+1,131089,131072,0,Razorwind Canyon,1,1:410:14:map_name:active:Razorwind Canyon
+1,131082,131072,0,Dustwind Cave,1,1:371:14:map_name:active:Dustwind Cave
+1,196608,196608,1,Dustwallow Marsh,1,1:15:15:map_name:active:Dustwallow Marsh
+1,196610,196608,0,Brackenwall Village,1,1:496:15:map_name:active:Brackenwall Village
+1,196611,196608,0,Swamplight Manor,1,1:497:15:map_name:active:Swamplight Manor
+1,196612,196608,0,Bloodfen Burrow,1,1:498:15:map_name:active:Bloodfen Burrow
+1,196613,196608,0,Darkmist Cavern,1,1:499:15:map_name:active:Darkmist Cavern
+1,196614,196608,0,Moggle Point,1,1:500:15:map_name:active:Moggle Point
+1,196616,196608,0,Witch Hill,1,1:502:15:map_name:active:Witch Hill
+1,196618,196608,0,North Point Tower,1,1:504:15:map_name:active:North Point Tower
+1,196619,196608,0,West Point Tower,1,1:505:15:map_name:active:West Point Tower
+1,196620,196608,0,Lost Point,1,1:506:15:map_name:active:Lost Point
+1,196621,196608,0,Bluefen,1,1:507:15:map_name:active:Bluefen
+1,196622,196608,0,Stonemaul Ruins,1,1:508:15:map_name:active:Stonemaul Ruins
+1,196623,196608,0,The Den of Flame,1,1:509:15:map_name:active:The Den of Flame
+1,196625,196608,0,Wyrmbog,1,1:511:15:map_name:active:Wyrmbog
+1,196626,196608,0,Onyxia's Lair,1,1:2159:2159:map_name:active:Onyxia's Lair
+1,196627,196608,0,Theramore Isle,1,1:513:15:map_name:active:Theramore Isle
+1,196628,196608,0,Foothold Citadel,1,1:514:15:map_name:active:Foothold Citadel
+1,196629,196608,0,Ironclad Prison,1,1:515:15:map_name:active:Ironclad Prison
+1,196630,196608,0,Dustwallow Bay,1,1:516:15:map_name:active:Dustwallow Bay
+1,196631,196608,0,Tidefury Cove,1,1:517:15:map_name:active:Tidefury Cove
+1,196632,196608,0,Dreadmurk Shore,1,1:518:15:map_name:active:Dreadmurk Shore
+1,196609,196608,0,Shady Rest Inn,1,1:403:15:map_name:active:Shady Rest Inn
+1,196617,196608,0,Sentry Point,1,1:503:15:map_name:active:Sentry Point
+1,196624,196608,0,The Dragonmurk,1,1:510:15:map_name:active:The Dragonmurk
+1,196615,196608,0,Beezil's Wreck,1,1:501:15:map_name:active:Beezil's Wreck
+1,262144,262144,1,Aszhara,1,1:16:16:map_name:active:Azshara
+1,65536,65536,1,The Barrens,1,1:17:17:map_name:active:The Barrens
+1,65537,65536,0,Bael Modan,1,1:359:17:map_name:active:Bael Modan
+1,65538,65536,0,Camp Taurajo,1,1:378:17:map_name:active:Camp Taurajo
+1,65539,65536,0,Far Watch Post,1,1:379:17:map_name:active:Far Watch Post
+1,65540,65536,0,The Crossroads,1,1:380:17:map_name:active:The Crossroads
+1,65541,65536,0,Boulder Load Mine,0,
+1,65543,65536,0,The Dry Hills,1,1:383:17:map_name:active:The Dry Hills
+1,65544,65536,0,Dreadmist Peak,1,1:384:17:map_name:active:Dreadmist Peak
+1,65545,65536,0,Northwatch Hold,1,1:385:17:map_name:active:Northwatch Hold
+1,65546,65536,0,The Forgotten Pools,1,1:386:17:map_name:active:The Forgotten Pools
+1,65548,65536,0,The Stagnant Oasis,1,1:388:17:map_name:active:The Stagnant Oasis
+1,65550,65536,0,Field of Giants,1,1:390:17:map_name:active:Field of Giants
+1,65551,65536,0,The Merchant Coast,1,1:391:17:map_name:active:The Merchant Coast
+1,65552,65536,0,Ratchet,1,1:392:17:map_name:active:Ratchet
+1,65553,65536,0,The Tidus Stair,1,1:401:17:map_name:active:The Tidus Stair
+1,65554,65536,0,Gold Road,1,1:458:17:map_name:active:Gold Road
+1,65542,65536,0,The Sludge Fen,1,1:382:17:map_name:active:The Sludge Fen
+1,65547,65536,0,Lushwater Oasis,1,1:387:17:map_name:active:Lushwater Oasis
+1,0,0,1,***On Map Dungeon***,0,
+1,327680,327680,1,Teldrassil,1,1:141:141:map_name:active:Teldrassil
+1,327681,327680,0,Dolanaar,1,1:186:141:map_name:active:Dolanaar
+1,327682,327680,0,Darnassus,1,1:1657:1657:map_name:active:Darnassus
+1,327684,327680,0,Aldrassil,1,1:256:141:map_name:active:Aldrassil
+1,327685,327680,0,Shadowthread Cave,1,1:257:141:map_name:active:Shadowthread Cave
+1,327686,327680,0,Fel Rock,1,1:258:141:map_name:active:Fel Rock
+1,327687,327680,0,Lake Al'Ameth,1,1:259:141:map_name:active:Lake Al'Ameth
+1,327688,327680,0,Starbreeze Village,1,1:260:141:map_name:active:Starbreeze Village
+1,327689,327680,0,Gnarlpine Hold,1,1:261:141:map_name:active:Gnarlpine Hold
+1,327690,327680,0,Ban'ethil Barrow Den,1,1:262:141:map_name:active:Ban'ethil Barrow Den
+1,327691,327680,0,The Cleft,1,1:263:141:map_name:active:The Cleft
+1,327692,327680,0,The Oracle Glade,1,1:264:141:map_name:active:The Oracle Glade
+1,327693,327680,0,The Wellspring River,1,1:265:141:map_name:active:Wellspring River
+1,327694,327680,0,Wellspring Lake,1,1:266:141:map_name:active:Wellspring Lake
+1,327695,327680,0,Pools of Arlithrien,1,1:478:141:map_name:active:Pools of Arlithrien
+1,327683,327680,0,Shadowglen,1,1:188:141:map_name:active:Shadowglen
+1,393216,393216,1,Darkshore,1,1:148:148:map_name:active:Darkshore
+1,393217,393216,0,Auberdine,1,1:442:148:map_name:active:Auberdine
+1,393218,393216,0,Ruins of Mathystra,1,1:443:148:map_name:active:Ruins of Mathystra
+1,393219,393216,0,Tower of Althalaxx,1,1:444:148:map_name:active:Tower of Althalaxx
+1,393220,393216,0,Cliffspring Falls,1,1:445:148:map_name:active:Cliffspring Falls
+1,393221,393216,0,Bashal'Aran,1,1:446:148:map_name:active:Bashal'Aran
+1,393222,393216,0,Ameth'Aran,1,1:447:148:map_name:active:Ameth'Aran
+1,393223,393216,0,Grove of the Ancients,1,1:448:148:map_name:active:Grove of the Ancients
+1,393224,393216,0,The Master's Glaive,1,1:449:148:map_name:active:The Master's Glaive
+1,393225,393216,0,Remtravel's Excavation,1,1:450:148:map_name:active:Remtravel's Excavation
+1,393227,393216,0,Mist's Edge,1,1:452:148:map_name:active:Mist's Edge
+1,393229,393216,0,Wildbend River,1,1:454:148:map_name:active:Wildbend River
+1,393230,393216,0,Blackwood Den,1,1:455:148:map_name:active:Blackwood Den
+1,393231,393216,0,Cliffspring River,1,1:456:148:map_name:active:Cliffspring River
+1,393228,393216,0,The Long Wash,1,1:453:148:map_name:active:The Long Wash
+1,458752,458752,1,Mulgore,1,1:215:215:map_name:active:Mulgore
+1,458754,458752,0,Camp Narache,1,1:221:215:map_name:active:Camp Narache
+1,458755,458752,0,Bloodhoof Village,1,1:222:215:map_name:active:Bloodhoof Village
+1,458756,458752,0,Stonebull Lake,1,1:223:215:map_name:active:Stonebull Lake
+1,458757,458752,0,Ravaged Caravan,1,1:224:215:map_name:active:Ravaged Caravan
+1,458758,458752,0,Red Rocks,1,1:225:215:map_name:active:Red Rocks
+1,458759,458752,0,Brambleblade Ravine,1,1:358:215:map_name:active:Brambleblade Ravine
+1,458760,458752,0,The Venture Co. Mine,1,1:360:215:map_name:active:The Venture Co. Mine
+1,458761,458752,0,Winterhoof Water Well,1,1:396:215:map_name:active:Winterhoof Water Well
+1,458762,458752,0,Thunderhorn Water Well,1,1:397:215:map_name:active:Thunderhorn Water Well
+1,458763,458752,0,Wildmane Water Well,1,1:398:215:map_name:active:Wildmane Water Well
+1,458765,458752,0,Bael'Dun Digsite,1,1:404:215:map_name:active:Bael'dun Digsite
+1,458766,458752,0,Thunder Bluff,1,1:1638:1638:map_name:active:Thunder Bluff
+1,458767,458752,0,Brave Wind Mesa,1,1:471:215:map_name:active:Brave Wind Mesa
+1,458768,458752,0,Fire Stone Mesa,1,1:472:215:map_name:active:Fire Stone Mesa
+1,458770,458752,0,Hunter Rise,1,1:1641:1638:map_name:active:Hunter Rise
+1,458771,458752,0,Spirit Rise,1,1:1640:1638:map_name:active:Spirit Rise
+1,458772,458752,0,Elder Rise,1,1:1639:1638:map_name:active:Elder Rise
+1,458769,458752,0,Mantle Rock,1,1:473:215:map_name:active:Mantle Rock
+1,458753,458752,0,Red Cloud Mesa,1,1:220:215:map_name:active:Red Cloud Mesa
+1,458764,458752,0,Skyline Ridge,1,1:399:215:map_name:active:Skyline Ridge
+1,524288,524288,1,Ashenvale,1,1:331:331:map_name:active:Ashenvale
+1,524289,524288,0,Bathran's Haunt,1,1:411:331:map_name:active:Bathran's Haunt
+1,524290,524288,0,The Ruins of Ordil'Aran,1,1:412:331:map_name:active:The Ruins of Ordil'Aran
+1,524291,524288,0,Maestra's Post,1,1:413:331:map_name:active:Maestra's Post
+1,524292,524288,0,The Zoram Strand,1,1:414:331:map_name:active:The Zoram Strand
+1,524293,524288,0,Astranaar,1,1:415:331:map_name:active:Astranaar
+1,524294,524288,0,The Shrine of Aessina,1,1:416:331:map_name:active:The Shrine of Aessina
+1,524295,524288,0,Fire Scar Shrine,1,1:417:331:map_name:active:Fire Scar Shrine
+1,524296,524288,0,The Ruins of Stardust,1,1:418:331:map_name:active:The Ruins of Stardust
+1,524297,524288,0,The Howling Vale,1,1:419:331:map_name:active:The Howling Vale
+1,524298,524288,0,Silverwind Refuge,1,1:420:331:map_name:active:Silverwind Refuge
+1,524299,524288,0,Mystral Lake,1,1:421:331:map_name:active:Mystral Lake
+1,524300,524288,0,Fallen Sky Lake,1,1:422:331:map_name:active:Fallen Sky Lake
+1,524302,524288,0,Iris Lake,1,1:424:331:map_name:active:Iris Lake
+1,524304,524288,0,Raynewood Retreat,1,1:426:331:map_name:active:Raynewood Retreat
+1,524305,524288,0,The Shady Nook,1,1:427:331:map_name:active:The Shady Nook
+1,524308,524288,0,Satyrnaar,1,1:430:331:map_name:active:Satyrnaar
+1,524310,524288,0,The Dor'danil Barrow Den,1,1:432:331:map_name:active:The Dor'Danil Barrow Den
+1,524311,524288,0,Falfarren River,1,1:433:331:map_name:active:Falfarren River
+1,524313,524288,0,Demon Fall Canyon,1,1:435:331:map_name:active:Demon Fall Canyon
+1,524314,524288,0,Demon Fall Ridge,1,1:436:331:map_name:active:Demon Fall Ridge
+1,524316,524288,0,Bough Shadow,1,1:438:331:map_name:active:Bough Shadow
+1,524317,524288,0,Lake Falathim,1,1:441:331:map_name:active:Lake Falathim
+1,524303,524288,0,Moonwell,1,1:425:331:map_name:active:Moonwell
+1,524309,524288,0,Solace Glade,0,
+1,524306,524288,0,Night Run,1,1:428:331:map_name:active:Night Run
+1,524312,524288,0,Felfire Hill,1,1:434:331:map_name:active:Felfire Hill
+1,524307,524288,0,Xavian,1,1:429:331:map_name:active:Xavian
+1,524315,524288,0,Kargathia Outpost,0,
+1,589824,589824,1,The Great Sea,13,1:2320:14:map_name:active:The Great Sea|1:2318:15:map_name:active:The Great Sea|1:2321:16:map_name:active:The Great Sea|1:2319:17:map_name:active:The Great Sea|1:332:332:map_name:active:The Great Sea|0:2365:11:global_name:active:The Great Sea|0:2339:33:global_name:active:The Great Sea|0:2364:40:global_name:active:The Great Sea|0:2399:85:global_name:active:The Great Sea|0:2398:130:global_name:active:The Great Sea|0:214:214:global_name:active:The Great Sea|0:2397:267:global_name:active:The Great Sea|36:207:207:global_name:active:The Great Sea
+1,655360,655360,1,Feralas,1,1:357:357:map_name:active:Feralas
+1,655361,655360,0,Thalanaar,1,1:489:357:map_name:active:Thalanaar
+1,720896,720896,1,Felwood,1,1:361:361:map_name:active:Felwood
+1,786432,786432,1,Southfury River,5,1:814:14:map_name:active:Southfury River|1:878:16:map_name:active:Southfury River|1:815:17:map_name:active:Southfury River|1:879:331:map_name:active:Southfury River|1:377:377:map_name:active:Southfury River
+1,851968,851968,1,Thousand Needles,1,1:400:400:map_name:active:Thousand Needles
+1,851969,851968,0,The Shimmering Flats,1,1:439:400:map_name:active:The Shimmering Flats
+1,851970,851968,0,The Rustmaul Dig Site,1,1:479:400:map_name:active:The Rustmaul Dig Site
+1,851971,851968,0,Camp E'thok,1,1:480:400:map_name:active:Camp E'thok
+1,851973,851968,0,Highperch,1,1:482:400:map_name:active:Highperch
+1,851974,851968,0,The Screeching Canyon,1,1:483:400:map_name:active:The Screeching Canyon
+1,851975,851968,0,Freewind Post,1,1:484:400:map_name:active:Freewind Post
+1,851976,851968,0,The Great Lift,2,1:1718:17:map_name:active:The Great Lift|1:485:400:map_name:active:The Great Lift
+1,851977,851968,0,Galak Hold,1,1:486:400:map_name:active:Galak Hold
+1,851978,851968,0,Roguefeather Den,1,1:487:400:map_name:active:Roguefeather Den
+1,851979,851968,0,The Weathered Nook,1,1:488:400:map_name:active:The Weathered Nook
+1,851972,851968,0,Galak Crag,0,
+1,917504,917504,1,Desolace,1,1:405:405:map_name:active:Desolace
+1,917505,917504,0,Kodo Graveyard,1,1:596:405:map_name:active:Kodo Graveyard
+1,917506,917504,0,Ghost Walker Post,1,1:597:405:map_name:active:Ghost Walker Post
+1,917507,917504,0,Sar'theris Strand,1,1:598:405:map_name:active:Sar'theris Strand
+1,917508,917504,0,Thunder Axe Fortress,1,1:599:405:map_name:active:Thunder Axe Fortress
+1,917509,917504,0,Bolgan's Hole,1,1:600:405:map_name:active:Bolgan's Hole
+1,917518,917504,0,Kolkar Village,1,1:609:405:map_name:active:Kolkar Village
+1,917511,917504,0,Mannoroc Coven,1,1:602:405:map_name:active:Mannoroc Coven
+1,917512,917504,0,Sargeron,1,1:603:405:map_name:active:Sargeron
+1,917513,917504,0,Magram Village,1,1:604:405:map_name:active:Magram Village
+1,917515,917504,0,Gelkis Village,1,1:606:405:map_name:active:Gelkis Village
+1,917516,917504,0,Valley of Spears,1,1:607:405:map_name:active:Valley of Spears
+1,917517,917504,0,Nijel's Point,1,1:608:405:map_name:active:Nijel's Point
+1,983040,983040,1,Stonetalon Mountains,1,1:406:406:map_name:active:Stonetalon Mountains
+1,983041,983040,0,Sun Rock Retreat,1,1:460:406:map_name:active:Sun Rock Retreat
+1,983042,983040,0,Windshear Crag,1,1:461:406:map_name:active:Windshear Crag
+1,983044,983040,0,Cragpool Lake,1,1:463:406:map_name:active:Cragpool Lake
+1,983045,983040,0,Mirkfallon Lake,1,1:464:406:map_name:active:Mirkfallon Lake
+1,983046,983040,0,The Charred Vale,1,1:465:406:map_name:active:The Charred Vale
+1,983047,983040,0,Valley of the Bloodfuries,1,1:466:406:map_name:active:Valley of the Bloodfuries
+1,983049,983040,0,The Talon Den,1,1:468:406:map_name:active:The Talon Den
+1,983050,983040,0,Greatwood Vale,1,1:469:406:map_name:active:Greatwood Vale
+1,983048,983040,0,Stonetalon Peak,1,1:467:406:map_name:active:Stonetalon Peak
+1,1048576,1048576,1,Tanaris,1,1:440:440:map_name:active:Tanaris
+1,1179648,1179648,1,Ungoro Crater,1,1:490:490:map_name:active:Un'Goro Crater
+1,1179649,1179648,0,Fire Plume Ridge,1,1:537:490:map_name:active:Fire Plume Ridge
+1,1179650,1179648,0,Lik'ash Tar Pits,1,1:538:490:map_name:active:Lakkari Tar Pits
+1,1179651,1179648,0,Terror Run,1,1:539:490:map_name:active:Terror Run
+1,1179652,1179648,0,The Slithering Scar,1,1:540:490:map_name:active:The Slithering Scar
+1,1179653,1179648,0,Marshal's Refuge,1,1:541:490:map_name:active:Marshal's Refuge
+1,1179654,1179648,0,Fungal Rock,1,1:542:490:map_name:active:Fungal Rock
+1,1179655,1179648,0,Golakka Hot Springs,1,1:543:490:map_name:active:Golakka Hot Springs
+1,1245184,1245184,1,Moonglade,1,1:493:493:map_name:active:Moonglade
+1,1114112,1114112,1,The Veiled Sea,8,1:2322:141:map_name:active:The Veiled Sea|1:2326:148:map_name:active:The Veiled Sea|1:2325:331:map_name:active:The Veiled Sea|1:2323:357:map_name:active:The Veiled Sea|1:2324:405:map_name:active:The Veiled Sea|1:457:457:map_name:active:The Veiled Sea|1:2477:1377:map_name:active:The Veiled Sea|530:3479:3479:global_name:active:The Veiled Sea
+1,1310720,1310720,1,Hyjal,1,1:616:616:map_name:active:Hyjal
+1,1376256,1376256,1,Winterspring,1,1:618:618:map_name:active:Winterspring
+17,0,0,1,***On Map Dungeon***,0,
+36,65536,65536,1,Westfall,1,0:40:40:global_name:active:Westfall
+36,131072,131072,1,The Great Sea,13,36:207:207:map_name:active:The Great Sea|0:2365:11:global_name:active:The Great Sea|0:2339:33:global_name:active:The Great Sea|0:2364:40:global_name:active:The Great Sea|0:2399:85:global_name:active:The Great Sea|0:2398:130:global_name:active:The Great Sea|0:214:214:global_name:active:The Great Sea|0:2397:267:global_name:active:The Great Sea|1:2320:14:global_name:active:The Great Sea|1:2318:15:global_name:active:The Great Sea|1:2321:16:global_name:active:The Great Sea|1:2319:17:global_name:active:The Great Sea|1:332:332:global_name:active:The Great Sea
+36,196608,196608,1,Ironclad Cove,1,36:1582:1581:map_name:active:Ironclad Cove
+36,0,0,1,***On Map Dungeon***,0,
+33,65536,65536,1,Shadowfang,2,33:209:209:map_name:active:Shadowfang Keep|0:236:130:global_name:active:Shadowfang Keep
+47,65536,65536,1,Razorfen Kraul,2,47:491:491:map_name:active:Razorfen Kraul|1:1717:17:global_name:active:Razorfen Kraul
+37,65536,65536,1,Plains of Snow,0,
