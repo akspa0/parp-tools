@@ -2,58 +2,94 @@
 
 ## Current Focus
 
-Building a C# reimplementation of the WoW Alpha 0.5.3 renderer within the existing MdxViewer project. The full itemized plan lives in `renderer_plan.md`.
+**BLOCKED: WMO rotation/facing is wrong.** Models sit in their bounding boxes correctly but face the wrong direction. Multiple approaches tried and failed. Need fresh approach next session.
 
-## Strategy: Terrain-First Reference Implementation
+## Immediate Next Steps
 
-Build a working reference implementation of the engine in this order:
-1. ~~Phase 0 — Foundation~~ ✅ COMPLETE
-2. **Phase 3 — Terrain rendering** ← NEXT (most impactful, gets world geometry on screen)
-3. **Phase 4 — World Scene** (compose terrain + existing model/WMO renderers, MDDF/MODF placements)
-4. Phase 1 — MDX Animation (enhance existing model renderer)
-5. Phase 2 — Particles
-6. Phase 5-7 — Liquids, Detail Doodads, Polish
+1. **SOLVE WMO rotation** — the critical blocker. See "WMO Rotation Problem" section below.
+2. MDX texturing could use more work but is lower priority.
+3. Standalone WMO/MDX viewer has black screen (medium priority).
 
-Goal is a working reference implementation first, then extend in our own direction.
+## WMO Rotation Problem (UNSOLVED)
 
-## Phase 0 — Foundation ✅ COMPLETE
+**Symptoms**: WMO models sit correctly in their MODF bounding boxes but face ~180° wrong direction. The bounding box position is always correct.
 
-6 files created and building (0 errors):
-- `Rendering/WoWConstants.cs` — Ghidra-verified constants
-- `Rendering/BlendStateManager.cs` — 4 EGxBlend modes with GL state
-- `Rendering/FrustumCuller.cs` — 6-plane VP extraction, point/sphere/AABB tests
-- `Rendering/ShaderProgram.cs` — Compile/link/uniform-cache wrapper
-- `Rendering/Material.cs` — BlendMode, texture, color, sorting
-- `Rendering/RenderQueue.cs` — Opaque front-to-back + transparent back-to-front
+**Known-good baseline** (current code state):
+- WMO vertices: raw pass-through from file (X, Y, Z) — no modification
+- WMO rotation: `CreateRotationX(rx) * CreateRotationY(ry) * CreateRotationZ(-rz) * CreateTranslation(p.Position)`
+- Where `rx = p.Rotation.X`, `ry = p.Rotation.Y`, `rz = p.Rotation.Z`
+- Models sit in bounding boxes but face wrong direction
 
-## Phase 3 — Terrain ✅ COMPLETE (building, 0 errors)
+**What was tried and failed**:
+- Vertex swap X↔Y → displaced model from BB
+- Vertex negate Y → closer but still wrong
+- Vertex negate X → flipped wrong way
+- Vertex swap+negate (-wowY, -wowX, wowZ) → model went sideways/flat
+- Basis change matrix in transform → model flipped upside down
+- Adding 180° to heading → displaced from BB
+- Adding 90° to heading → displaced from BB
+- Noggit's eulerAngleYZX formula adapted → various wrong results
 
-7 files created:
-- `Terrain/TerrainChunkData.cs` — GPU-ready data structures (heights, normals, layers, alpha maps)
-- `Terrain/AlphaTerrainAdapter.cs` — Bridge WdtAlpha/AdtAlpha/McnkAlpha → TerrainChunkData
-- `Terrain/TerrainMeshBuilder.cs` — 145 vertices → VAO/VBO/EBO per chunk (8 floats/vert: pos+norm+uv)
-- `Terrain/TerrainRenderer.cs` — Multi-pass texture layering with alpha blending, BLP texture loading
-- `Terrain/TerrainLighting.cs` — Day/night cycle, per-vertex Lambertian, linear fog
-- `Terrain/TerrainManager.cs` — AOI-based chunk loading/unloading, implements ISceneRenderer
-- Terrain shader embedded in TerrainRenderer (vertex: model/view/proj, fragment: multi-layer blend + lighting + fog)
+**Key reference: noggit-red SceneObject::updateTransformMatrix()**:
+```cpp
+// In noggit's Y-up rendering space:
+matrix = translate(pos);
+matrix *= eulerAngleYZX(dir.y - 90°, -dir.x, dir.z);
+matrix = scale(matrix, vec3(scale));
+// where dir = (rot[0], rot[1], rot[2]) from MODF file bytes
+```
 
-ViewerApp integration:
-- `.wdt` added to file browser filter
-- `LoadWdtTerrain()` creates TerrainManager, loads all tiles, positions camera
-- Render loop passes camera position for AOI updates and fog
-- Model Info panel shows terrain controls: day/night slider, fog sliders, tile/chunk stats
+**Coordinate system facts**:
+- WoW server: X=north, Y=west, Z=up
+- Noggit rendering: pos=(rawX, rawZ, rawY) from file, Y=up
+- Our renderer: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ (Z=up)
+- MODF adapter reads: rotX=rot[0] (off+20), rotZ=rot[1] (off+24), rotY=rot[2] (off+28)
+- Adapter stores: `Rotation = (rotX, rotY, rotZ)` — note rotY and rotZ are swapped vs file order
+- So: `p.Rotation.X = rot[0]`, `p.Rotation.Y = rot[2]`, `p.Rotation.Z = rot[1]`
+- Noggit's dir: `dir.x = rot[0] = p.Rotation.X`, `dir.y = rot[1] = p.Rotation.Z`, `dir.z = rot[2] = p.Rotation.Y`
 
-Also added: `AdtAlpha.GetMcnkOffsets()` public accessor (was only used internally before)
+**Fresh approach ideas for next session**:
+- Study how noggit renders WMO vertices (does it also swap/convert them?)
+- Study wow.export's WMO rendering pipeline end-to-end
+- Try rendering WMO in noggit's coordinate system (Y-up) and convert the camera instead
+- Check if the WMO v14 parser itself does any coordinate conversion during parsing
 
-## Key Decisions
+## Phase 4 — World Scene ✅ MOSTLY COMPLETE
 
-- **Rendering API**: OpenGL 3.3 Core via Silk.NET (original client used DX9; we translate to GL equivalents)
-- **Architecture**: Extend MdxViewer in-place rather than creating a separate project
-- **Scene model**: Single `WorldScene : ISceneRenderer` composing terrain, models, WMOs, particles, liquids
-- **Blend modes**: 4 modes from Ghidra — Opaque, Blend, Add, AlphaKey (exact GL state per mode)
-- **Terrain parsing**: Reuse existing `gillijimproject-csharp` Alpha parsers (no new parsers needed)
-- **Alpha vertex format**: Non-interleaved (81 outer then 64 inner); McvtAlpha.ToMcvt() handles reorder
-- **Approach**: Reference implementation first, then optimize and extend
+Working features:
+- Terrain rendering with AOI-based lazy tile loading (radius=2)
+- MDDF/MODF placement loading from ADT chunks
+- MDX doodad rendering (backface culling disabled, blend mode fixes, depth mask for transparency)
+- WMO rendering with BLP textures per-batch
+- WMO doodad sets loaded and rendered (transforms combined with WMO modelMatrix)
+- Bounding box visualization (actual MODF extents)
+- Object visibility toggles (terrain, WMOs, doodads)
+- Live minimap with click-to-teleport
+- AreaPOI system (DBC loading, 3D markers, minimap markers, UI list with teleport)
+
+## What Works
+
+| Feature | Status |
+|---------|--------|
+| Terrain rendering + AOI loading | ✅ |
+| MDX model rendering | ✅ (textures, no culling, blend modes) |
+| WMO rendering + textures | ✅ (BLP per-batch) |
+| WMO doodad sets | ✅ |
+| WMO rotation/facing | ❌ WRONG — models face ~180° off |
+| MDDF/MODF placements | ✅ (position correct, rotation TBD) |
+| Bounding boxes | ✅ (actual MODF extents) |
+| Live minimap + click-to-teleport | ✅ |
+| AreaPOI system | ✅ |
+| Object picking/selection | ✅ |
+| Standalone WMO/MDX viewer | ❌ Black screen |
+
+## Key Files
+
+- `Terrain/WorldScene.cs` — Object instance building, rotation transforms, rendering loop
+- `Terrain/AlphaTerrainAdapter.cs` — MDDF/MODF parsing, coordinate conversion
+- `Rendering/WmoRenderer.cs` — WMO geometry, textures, doodad sets
+- `Rendering/ModelRenderer.cs` — MDX rendering, blend modes, textures
+- `ViewerApp.cs` — Main app, UI, DBC loading, minimap
 
 ## Dependencies (all already integrated)
 
@@ -63,9 +99,3 @@ Also added: `AdtAlpha.GetMcnkOffsets()` public accessor (was only used internall
 - `Silk.NET` — OpenGL + windowing + input
 - `ImGuiNET` — UI overlay
 - `DBCD` — DBC database access
-
-## Resolved Questions
-
-- ✅ ADT parser: Reuse `gillijimproject-csharp` (WdtAlpha, AdtAlpha, McnkAlpha) — already a transitive dependency
-- Terrain loading: Start synchronous MVP, add async later in Phase 7
-- Target map: Load from MPQ ("H:\053-client\Data\World\Maps\Kalidar\orig\Kalidar.wdt.MPQ")

@@ -30,6 +30,9 @@ public class ViewerApp : IDisposable
     // Data source
     private IDataSource? _dataSource;
     private ReplaceableTextureResolver? _texResolver;
+    private DBCD.Providers.IDBCProvider? _dbcProvider;
+    private string? _dbdDir;
+    private string? _dbcBuild;
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
 
@@ -582,6 +585,14 @@ public class ViewerApp : IDisposable
                     if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
                         _worldScene.ShowBoundingBoxes = showBB;
 
+                    // POI toggle
+                    if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+                    {
+                        bool showPoi = _worldScene.ShowPoi;
+                        if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
+                            _worldScene.ShowPoi = showPoi;
+                    }
+
                     // WMO placements
                     if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
                     {
@@ -637,6 +648,33 @@ public class ViewerApp : IDisposable
                                 ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
                                 ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
                                 ImGui.Text($"Scale: {p.Scale:F3}");
+                                ImGui.EndTooltip();
+                            }
+                        }
+                        ImGui.TreePop();
+                    }
+
+                    // Area POI list
+                    if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0 &&
+                        ImGui.TreeNode($"Area POIs ({_worldScene.PoiLoader.Entries.Count})"))
+                    {
+                        foreach (var poi in _worldScene.PoiLoader.Entries)
+                        {
+                            string label = $"[{poi.Id}] {poi.Name}";
+                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                            {
+                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                                {
+                                    _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
+                                    _camera.Pitch = -30f;
+                                }
+                            }
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
+                                ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
+                                ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
                                 ImGui.EndTooltip();
                             }
                         }
@@ -722,6 +760,22 @@ public class ViewerApp : IDisposable
             drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, 2f);
             drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), 3f, 0xFFFFFFFF);
 
+            // POI markers on minimap (magenta dots with labels)
+            if (_worldScene?.PoiLoader != null && _worldScene.ShowPoi)
+            {
+                foreach (var poi in _worldScene.PoiLoader.Entries)
+                {
+                    float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / WoWConstants.ChunkSize;
+                    float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / WoWConstants.ChunkSize;
+                    float px = cursorPos.X + poiTileX * cellSize;
+                    float py = cursorPos.Y + poiTileY * cellSize;
+                    if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
+                    {
+                        drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF); // magenta
+                    }
+                }
+            }
+
             // Border
             drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
 
@@ -783,7 +837,8 @@ public class ViewerApp : IDisposable
             var mpqDs = _dataSource as MpqDataSource;
             if (mpqDs != null)
             {
-                var dbcProvider = new MpqDBCProvider(mpqDs.MpqService);
+                _dbcProvider = new MpqDBCProvider(mpqDs.MpqService);
+                var dbcProvider = _dbcProvider;
 
                 // Find WoWDBDefs definitions directory
                 string[] dbdSearchPaths = {
@@ -805,6 +860,8 @@ public class ViewerApp : IDisposable
 
                 if (dbdDir != null)
                 {
+                    _dbdDir = dbdDir;
+
                     // Infer build version from game path first
                     string buildAlias = InferBuildFromPath(gamePath);
                     
@@ -816,6 +873,7 @@ public class ViewerApp : IDisposable
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
+                        _dbcBuild = buildAlias;
                         Console.WriteLine($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
                         _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
                     }
@@ -1113,19 +1171,25 @@ public class ViewerApp : IDisposable
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene; // WorldScene implements ISceneRenderer
 
+            // Load AreaPOI from DBC if available
+            if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
+                _worldScene.LoadAreaPoi(_dbcProvider, _dbdDir, _dbcBuild);
+
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
             var startPos = _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
             _camera.Position = startPos;
             _camera.Yaw = 180f;
             _camera.Pitch = -20f;
 
+            int poiCount = _worldScene.PoiLoader?.Entries.Count ?? 0;
             _modelInfo = $"Type: Alpha WDT World\n" +
                          $"Map: {_terrainManager.MapName}\n\n" +
                          $"Tiles: {_terrainManager.LoadedTileCount}\n" +
                          $"Chunks: {_terrainManager.LoadedChunkCount}\n\n" +
                          $"WMO instances: {_worldScene.WmoInstanceCount} ({_worldScene.UniqueWmoModels} unique)\n" +
-                         $"MDX instances: {_worldScene.MdxInstanceCount} ({_worldScene.UniqueMdxModels} unique)\n\n" +
-                         $"Camera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
+                         $"MDX instances: {_worldScene.MdxInstanceCount} ({_worldScene.UniqueMdxModels} unique)\n" +
+                         (poiCount > 0 ? $"Area POIs: {poiCount}\n" : "") +
+                         $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
 
             _statusMessage = $"Loaded world: {_terrainManager.MapName} ({_terrainManager.LoadedTileCount} tiles, {_worldScene.WmoInstanceCount} WMOs, {_worldScene.MdxInstanceCount} doodads)";
         }

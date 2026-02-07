@@ -26,6 +26,9 @@ public class WmoRenderer : ISceneRenderer
     private readonly List<GroupBuffers> _groups = new();
     private bool _wireframe;
 
+    // Material textures: materialIndex → GL texture handle
+    private readonly Dictionary<int, uint> _materialTextures = new();
+
     // Doodad support
     private readonly Dictionary<string, MdxRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
@@ -46,6 +49,7 @@ public class WmoRenderer : ISceneRenderer
 
         InitShaders();
         InitBuffers();
+        LoadMaterialTextures();
         ResolveDoodadNames();
         LoadActiveDoodadSet();
     }
@@ -139,30 +143,64 @@ public class WmoRenderer : ISceneRenderer
         else
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
-        _gl.Uniform1(_uHasTexture, 0); // No textures yet for WMO viewer
-
         foreach (var gb in _groups)
         {
             if (!gb.Visible) continue;
-            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
-            _gl.Uniform4(_uColor, r, g, b, 1.0f);
+            var group = _wmo.Groups[gb.GroupIndex];
 
             _gl.BindVertexArray(gb.Vao);
-            _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+
+            // Render per-batch with material textures
+            if (group.Batches.Count > 0)
+            {
+                foreach (var batch in group.Batches)
+                {
+                    int matId = batch.MaterialId;
+                    if (_materialTextures.TryGetValue(matId, out uint glTex))
+                    {
+                        _gl.ActiveTexture(TextureUnit.Texture0);
+                        _gl.BindTexture(TextureTarget.Texture2D, glTex);
+                        _gl.Uniform1(_uHasTexture, 1);
+                        _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+                    }
+                    else
+                    {
+                        // Fallback: per-group color
+                        _gl.Uniform1(_uHasTexture, 0);
+                        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+                        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+                        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+                        _gl.Uniform4(_uColor, r, g, b, 1.0f);
+                    }
+                    _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
+                        DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
+                }
+            }
+            else
+            {
+                // No batches — draw whole group with fallback color
+                _gl.Uniform1(_uHasTexture, 0);
+                float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+                float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+                float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+                _gl.Uniform4(_uColor, r, g, b, 1.0f);
+                _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+            }
+
             _gl.BindVertexArray(0);
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
-        // 2. Render doodad instances
+        // 2. Render doodad instances (their transforms are in WMO-local space,
+        //    so multiply by the WMO's modelMatrix to place them in world space)
         if (_doodadsVisible)
         {
             foreach (var inst in _doodadInstances)
             {
                 if (!inst.Visible || inst.Renderer == null) continue;
-                inst.Renderer.RenderWithTransform(inst.Transform, view, proj);
+                var doodadWorld = inst.Transform * modelMatrix;
+                inst.Renderer.RenderWithTransform(doodadWorld, view, proj);
             }
         }
 
@@ -282,6 +320,8 @@ void main() {
             float[] vertexData = new float[vertCount * 8];
             for (int v = 0; v < vertCount; v++)
             {
+                // Pass through raw WoW model-local coords.
+                // WMO rotation issue is UNSOLVED — do not modify vertices here.
                 var pos = group.Vertices[v];
                 vertexData[v * 8 + 0] = pos.X;
                 vertexData[v * 8 + 1] = pos.Y;
@@ -326,6 +366,105 @@ void main() {
 
             gb.IndexCount = (uint)indices.Length;
             _groups.Add(gb);
+        }
+    }
+
+    private void LoadMaterialTextures()
+    {
+        if (_dataSource == null) return;
+
+        int loaded = 0, failed = 0;
+        for (int i = 0; i < _wmo.Materials.Count; i++)
+        {
+            var mat = _wmo.Materials[i];
+            string? texName = mat.Texture1Name;
+            if (string.IsNullOrEmpty(texName)) continue;
+
+            // Ensure .blp extension
+            if (!texName.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                texName += ".blp";
+
+            byte[]? blpData = null;
+
+            // Try data source (MPQ)
+            blpData = _dataSource.ReadFile(texName);
+
+            // Try normalized slashes
+            if (blpData == null)
+                blpData = _dataSource.ReadFile(texName.Replace('/', '\\'));
+
+            // Try case-insensitive via FindInFileSet
+            if (blpData == null && _dataSource is MpqDataSource mpqDs)
+            {
+                var found = mpqDs.FindInFileSet(texName);
+                if (found != null)
+                    blpData = _dataSource.ReadFile(found);
+            }
+
+            if (blpData != null && blpData.Length > 0)
+            {
+                uint glTex = LoadWmoTexture(blpData, texName);
+                if (glTex != 0)
+                {
+                    _materialTextures[i] = glTex;
+                    loaded++;
+                }
+                else failed++;
+            }
+            else failed++;
+        }
+        Console.WriteLine($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+    }
+
+    private unsafe uint LoadWmoTexture(byte[] blpData, string name)
+    {
+        try
+        {
+            using var ms = new MemoryStream(blpData);
+            using var blp = new SereniaBLPLib.BlpFile(ms);
+            var bmp = blp.GetBitmap(0);
+
+            int w = bmp.Width, h = bmp.Height;
+            var pixels = new byte[w * h * 4];
+            var rect = new System.Drawing.Rectangle(0, 0, w, h);
+            var data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            try
+            {
+                var srcBytes = new byte[data.Stride * h];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, srcBytes, 0, srcBytes.Length);
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int srcIdx = y * data.Stride + x * 4;
+                        int dstIdx = (y * w + x) * 4;
+                        pixels[dstIdx + 0] = srcBytes[srcIdx + 2]; // R
+                        pixels[dstIdx + 1] = srcBytes[srcIdx + 1]; // G
+                        pixels[dstIdx + 2] = srcBytes[srcIdx + 0]; // B
+                        pixels[dstIdx + 3] = srcBytes[srcIdx + 3]; // A
+                    }
+                }
+            }
+            finally { bmp.UnlockBits(data); }
+            bmp.Dispose();
+
+            uint tex = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, tex);
+            fixed (byte* ptr = pixels)
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+                    (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+            _gl.GenerateMipmap(TextureTarget.Texture2D);
+            return tex;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[WmoRenderer] Failed to decode BLP {name}: {ex.Message}");
+            return 0;
         }
     }
 
@@ -493,6 +632,11 @@ void main() {
             _gl.DeleteBuffer(gb.Vbo);
             _gl.DeleteBuffer(gb.Ebo);
         }
+
+        // Delete material textures
+        foreach (var tex in _materialTextures.Values)
+            _gl.DeleteTexture(tex);
+        _materialTextures.Clear();
 
         // Dispose cached doodad renderers
         foreach (var renderer in _doodadModelCache.Values)

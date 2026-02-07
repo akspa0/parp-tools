@@ -271,7 +271,12 @@ public class AlphaTerrainAdapter
             float bbMaxY = BitConverter.ToSingle(modfData, off + 52);
             ushort flags = BitConverter.ToUInt16(modfData, off + 56);
 
-            // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
+            // Convert to renderer coords: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
+            // Note: MapOrigin-min > MapOrigin-max, so swap min/max after conversion
+            float rBBMinX = WoWConstants.MapOrigin - bbMaxY;
+            float rBBMaxX = WoWConstants.MapOrigin - bbMinY;
+            float rBBMinY = WoWConstants.MapOrigin - bbMaxX;
+            float rBBMaxY = WoWConstants.MapOrigin - bbMinX;
             ModfPlacements.Add(new ModfPlacement
             {
                 NameIndex = nameIdx,
@@ -280,14 +285,8 @@ public class AlphaTerrainAdapter
                     WoWConstants.MapOrigin - rawX,
                     rawZ),
                 Rotation = new Vector3(rotX, rotY, rotZ),
-                BoundsMin = new Vector3(
-                    WoWConstants.MapOrigin - bbMinY,
-                    WoWConstants.MapOrigin - bbMinX,
-                    bbMinZ),
-                BoundsMax = new Vector3(
-                    WoWConstants.MapOrigin - bbMaxY,
-                    WoWConstants.MapOrigin - bbMaxX,
-                    bbMaxZ),
+                BoundsMin = new Vector3(rBBMinX, rBBMinY, bbMinZ),
+                BoundsMax = new Vector3(rBBMaxX, rBBMaxY, bbMaxZ),
                 Flags = flags
             });
         }

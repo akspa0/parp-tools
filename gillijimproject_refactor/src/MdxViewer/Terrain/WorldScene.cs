@@ -46,6 +46,21 @@ public class WorldScene : ISceneRenderer
     private BoundingBoxRenderer? _bbRenderer;
     public bool ShowBoundingBoxes { get => _showBoundingBoxes; set => _showBoundingBoxes = value; }
 
+    // Area POI
+    private AreaPoiLoader? _poiLoader;
+    private bool _showPoi = true;
+    public bool ShowPoi { get => _showPoi; set => _showPoi = value; }
+    public AreaPoiLoader? PoiLoader => _poiLoader;
+
+    /// <summary>
+    /// Load AreaPOI entries for this map from DBC. Call after construction when DBC provider is available.
+    /// </summary>
+    public void LoadAreaPoi(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build)
+    {
+        _poiLoader = new AreaPoiLoader();
+        _poiLoader.Load(dbcProvider, dbdDir, build, _terrainManager.MapName);
+    }
+
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         Action<string>? onStatus = null)
@@ -95,21 +110,23 @@ public class WorldScene : ISceneRenderer
         var wmoNames = adapter.WmoModelNames;
 
         // MDX (doodad) placements
-        // Rotation stored as (wowRotX, wowRotY, wowRotZ) in degrees
-        // Our renderer swaps X↔Y: rendererX=wowY, rendererY=wowX, rendererZ=wowZ
-        // So: rotate around rendererY (=wowX) by rotX, rendererX (=wowY) by rotY, rendererZ by rotZ
+        // Rotation.Z = WoW heading (yaw), Rotation.X/Y = pitch/roll
+        // The renderer swaps X↔Y vs WoW. The MODF bounding boxes (already converted)
+        // show where objects should be. We need the model geometry to land inside those boxes.
+        // WoW rotation convention: Y-up in file → Z-up in world, heading = rotation around Z.
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            float rx = p.Rotation.X * MathF.PI / 180f; // wowRotX → around rendererY
-            float ry = p.Rotation.Y * MathF.PI / 180f; // wowRotY → around rendererX
-            float rz = p.Rotation.Z * MathF.PI / 180f; // wowRotZ → around rendererZ (heading)
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            // Apply rotations: pitch(X), roll(Y), then heading(Z)
             var transform = Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationY(rx)
-                * Matrix4x4.CreateRotationX(ry)
+                * Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
@@ -117,6 +134,14 @@ public class WorldScene : ISceneRenderer
         }
 
         // WMO placements
+        // Original simple formula kept models in bounding boxes but facing wrong.
+        // The original used: CreateRotationX(rx) * CreateRotationY(ry) * CreateRotationZ(-rz) * Translate
+        // where rx=p.Rotation.X, ry=p.Rotation.Y, rz=p.Rotation.Z
+        // With the goldmine (rot 0,0,57): heading was -57° but model faced wrong.
+        // With Dark Portal (rot 0,0,0): no rotation, model faced backwards (180° off).
+        //
+        // Fix: add 180° to the Z rotation to flip the model's default facing.
+        // heading = -(rz) + 180° = 180° - rz
         foreach (var p in adapter.ModfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
@@ -125,8 +150,8 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = Matrix4x4.CreateRotationY(rx)
-                * Matrix4x4.CreateRotationX(ry)
+            var transform = Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
@@ -274,10 +299,19 @@ public class WorldScene : ISceneRenderer
             // MDDF markers (yellow)
             foreach (var p in adapter.MddfPlacements)
                 _bbRenderer.DrawMarker(p.Position, 5f, view, proj, new Vector3(1f, 1f, 0f));
-            // MODF markers (cyan)
+            // MODF bounding boxes (cyan) — use actual MODF bounds
             foreach (var p in adapter.ModfPlacements)
-                _bbRenderer.DrawMarker(p.Position, 10f, view, proj, new Vector3(0f, 1f, 1f));
+                _bbRenderer.DrawBoxMinMax(p.BoundsMin, p.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
 
+            _gl.Enable(EnableCap.DepthTest);
+        }
+
+        // 5. POI markers (magenta, always on top)
+        if (_showPoi && _poiLoader != null && _bbRenderer != null && _poiLoader.Entries.Count > 0)
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            foreach (var poi in _poiLoader.Entries)
+                _bbRenderer.DrawMarker(poi.Position, 8f, view, proj, new Vector3(1f, 0f, 1f));
             _gl.Enable(EnableCap.DepthTest);
         }
     }

@@ -98,6 +98,9 @@ public class MdxRenderer : ISceneRenderer
     {
         _gl.UseProgram(_shaderProgram);
 
+        // MDX models often have single-sided geometry — disable culling to avoid holes
+        _gl.Disable(EnableCap.CullFace);
+
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
@@ -124,10 +127,12 @@ public class MdxRenderer : ISceneRenderer
                     var layer = material.Layers[l];
                     int texId = layer.TextureId;
 
-                    // Set blend mode for layers after the first
-                    if (l > 0)
+                    // Set blend mode based on layer blend mode
+                    bool needsBlend = l > 0 || layer.BlendMode != MdlTexOp.Load;
+                    if (needsBlend)
                     {
                         _gl.Enable(EnableCap.Blend);
+                        _gl.DepthMask(false); // Don't write depth for blended layers
                         switch (layer.BlendMode)
                         {
                             case MdlTexOp.Transparent:
@@ -145,6 +150,11 @@ public class MdxRenderer : ISceneRenderer
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                                 break;
                         }
+                    }
+                    else
+                    {
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
                     }
 
                     if (texId >= 0 && _textures.TryGetValue(texId, out uint glTex))
@@ -168,8 +178,11 @@ public class MdxRenderer : ISceneRenderer
                     _gl.BindVertexArray(0);
                     anyLayerRendered = true;
 
-                    if (l > 0)
+                    if (needsBlend)
+                    {
                         _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true); // Restore depth writing
+                    }
                 }
             }
 
@@ -235,7 +248,7 @@ void main() {
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (texColor.a < 0.01) discard;
+        if (texColor.a < 0.1) discard;
     } else {
         // Bright pink for missing textures (matching reference viewer)
         texColor = vec4(1.0, 0.0, 1.0, 1.0);

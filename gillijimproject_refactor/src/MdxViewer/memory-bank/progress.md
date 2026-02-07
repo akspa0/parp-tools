@@ -1,59 +1,55 @@
 # Progress — MdxViewer Renderer Reimplementation
 
-## Status: Planning Complete → Ready for Phase 0
+## Status: Phase 4 Mostly Complete — WMO Rotation BLOCKED
 
 ## What Works Today
 
 | Feature | Status |
 |---------|--------|
-| MDX model loading + rendering | ✅ Per-geoset, multi-layer materials, textured |
-| WMO v14 loading + rendering | ✅ Groups, doodad sets, textured |
+| Terrain rendering + AOI lazy loading | ✅ |
+| MDX model loading + rendering | ✅ Per-geoset, multi-layer materials, textured, no backface culling |
+| MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
+| WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
+| WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
+| WMO rotation/facing | ❌ BLOCKED — models in BB but face wrong direction |
+| MDDF/MODF placements | ✅ Position correct |
+| Bounding boxes | ✅ Actual MODF extents with correct min/max swap |
 | BLP2 texture loading | ✅ DXT1/3/5, palette, JPEG |
 | MPQ data source | ✅ Listfile, nested WMO archives |
 | DBC integration | ✅ DBCD, replaceable texture resolution |
 | Camera | ✅ Free-fly WASD + mouse look |
 | ImGui UI | ✅ File browser, model info, visibility toggles |
+| Live minimap + click-to-teleport | ✅ |
+| AreaPOI system | ✅ DBC loading, 3D markers, minimap markers, UI list |
+| Object picking/selection | ✅ |
 | GLB export | ✅ MDX + WMO |
+| Standalone WMO/MDX viewer | ❌ Black screen |
 
-## What's Missing (by phase)
+## Phase Status
 
-| Phase | Description | Items | Status |
-|-------|-------------|-------|--------|
-| 0 | Foundation (constants, blend, materials, render queue, frustum, shaders) | 6 | ✅ Complete |
-| 1 | MDX Animation (keyframes, bones, geoset anim, playback, UI) | 7 | ⏳ Not started |
-| 2 | Particles (emitters, physics, rendering) | 5 | ⏳ Not started |
-| 3 | Terrain (WDT/ADT loading, mesh, texture layers, lighting, AOI) | 8 | ✅ Complete |
-| 4 | World Scene (composition, placements, fog, day/night) | 6 | ⏳ Not started |
-| 5 | Liquids (mesh, rendering, detection) | 3 | ⏳ Not started |
-| 6 | Detail Doodads (generation, rendering) | 2 | ⏳ Not started |
-| 7 | Polish (perf, debug overlays, extras) | 3 | ⏳ Not started |
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 0 | Foundation | ✅ Complete |
+| 3 | Terrain | ✅ Complete |
+| 4 | World Scene | ⚠️ Mostly complete — WMO rotation blocked |
+| 1 | MDX Animation | ⏳ Not started |
+| 2 | Particles | ⏳ Not started |
+| 5-7 | Liquids, Detail Doodads, Polish | ⏳ Not started |
 
-## Key Risks
+## Key Blocker: WMO Rotation
 
-- ~~**ADT parser**: May need to write one~~ → RESOLVED: Reuse `gillijimproject-csharp` (WdtAlpha, AdtAlpha, McnkAlpha)
-- **Alpha ADT format**: Non-interleaved vertices (81 outer then 64 inner) — McvtAlpha.ToMcvt() handles reorder
-- **Floating-point precision**: Large world coordinates need camera-relative rendering
-- **Texture memory**: Full map tile with all layers could be heavy
-- **Target map**: Need Alpha-format WDT from MPQ; test_data/development has split Cata ADTs (not suitable)
-
-## Implementation Order (terrain-first strategy)
-
-1. ~~Phase 0 — Foundation~~ ✅
-2. ~~Phase 3 — Terrain rendering~~ ✅
-3. Phase 4 — World Scene (compose terrain + models + WMOs)
-4. Phase 1 — MDX Animation
-5. Phase 2 — Particles
-6. Phase 5-7 — Liquids, Detail Doodads, Polish
-
-Reference implementation first, then extend in our own direction.
+See `activeContext.md` for full details. Models sit in bounding boxes but face ~180° wrong. Multiple vertex and transform approaches tried and failed. Need fresh approach — possibly study noggit's full WMO vertex pipeline or wow.export end-to-end.
 
 ## Recent Changes
 
-- 2026-02-06: Created itemized renderer plan (`renderer_plan.md`)
-- 2026-02-06: Created active context and progress tracking
-- 2026-02-06: Phase 0 COMPLETE — 6 foundation files building (0 errors)
-- 2026-02-06: Discovered existing Alpha parsers in gillijimproject-csharp — eliminates Phase 3 parser work
-- 2026-02-06: Updated plan: Phase 3 now only needs rendering adapter bridge, not new parsers
-- 2026-02-06: Decided terrain-first strategy: Phase 3 → Phase 4 → Phase 1 → rest
-- 2026-02-07: Phase 3 COMPLETE — 7 terrain files + ViewerApp integration, building (0 errors)
-- 2026-02-07: Added AdtAlpha.GetMcnkOffsets() public accessor for terrain adapter
+- 2026-02-06: Phase 0 COMPLETE — 6 foundation files
+- 2026-02-06: Phase 3 COMPLETE — 7 terrain files + ViewerApp integration
+- 2026-02-07: Phase 4 — World Scene: lazy tile loading, MDDF/MODF placements, object rendering
+- 2026-02-07: Fixed MDX holes — disabled backface culling
+- 2026-02-07: Fixed WMO textures — BLP loaded per-batch from materials
+- 2026-02-07: Fixed MODF bounding boxes — actual extents with min/max swap
+- 2026-02-07: Added live minimap with click-to-teleport
+- 2026-02-07: Added AreaPOI system (DBC loading, 3D/minimap markers, UI list)
+- 2026-02-07: Fixed MDX blend modes — depth mask off for transparent layers, alpha discard 0.1
+- 2026-02-07: WMO doodads now rendered with WMO's modelMatrix
+- 2026-02-07: WMO rotation — BLOCKED after many attempts. Reverted to known-good baseline (raw vertices, simple rotation formula). Models in BBs but facing wrong.
