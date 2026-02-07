@@ -271,22 +271,47 @@ public class AlphaTerrainAdapter
             float bbMaxY = BitConverter.ToSingle(modfData, off + 52);
             ushort flags = BitConverter.ToUInt16(modfData, off + 56);
 
-            // Convert to renderer coords: rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
-            // Note: MapOrigin-min > MapOrigin-max, so swap min/max after conversion
-            float rBBMinX = WoWConstants.MapOrigin - bbMaxY;
-            float rBBMaxX = WoWConstants.MapOrigin - bbMinY;
-            float rBBMinY = WoWConstants.MapOrigin - bbMaxX;
-            float rBBMaxY = WoWConstants.MapOrigin - bbMinX;
+            Vector3 position;
+            Vector3 boundsMin, boundsMax;
+
+            if (IsWmoBased)
+            {
+                // WMO-only maps: vertices are in WoW world coords (X, Y, Z with Z=up in file).
+                // MODF file layout: pos=(X, Z, Y), bb=(X, Z, Y) — middle component is height.
+                // WMO vertex file layout: (X, Y, Z) — Z is height.
+                // So position = (rawX, rawY, rawZ=height) and BB = (bbX, bbY, bbZ=height).
+                position = new Vector3(rawX, rawY, rawZ);
+                boundsMin = new Vector3(
+                    MathF.Min(bbMinX, bbMaxX), MathF.Min(bbMinY, bbMaxY), MathF.Min(bbMinZ, bbMaxZ));
+                boundsMax = new Vector3(
+                    MathF.Max(bbMinX, bbMaxX), MathF.Max(bbMinY, bbMaxY), MathF.Max(bbMinZ, bbMaxZ));
+                if (ModfPlacements.Count < 3)
+                    Console.WriteLine($"[MODF WMO-ONLY] pos=({position.X:F1},{position.Y:F1},{position.Z:F1}) bb=({boundsMin.X:F1},{boundsMin.Y:F1},{boundsMin.Z:F1})→({boundsMax.X:F1},{boundsMax.Y:F1},{boundsMax.Z:F1})  raw bb file: X({bbMinX:F1}..{bbMaxX:F1}) Z({bbMinZ:F1}..{bbMaxZ:F1}) Y({bbMinY:F1}..{bbMaxY:F1})");
+            }
+            else
+            {
+                // Normal terrain maps: convert to renderer coords
+                // rendererX=MapOrigin-wowY, rendererY=MapOrigin-wowX, rendererZ=wowZ
+                position = new Vector3(
+                    WoWConstants.MapOrigin - rawY,
+                    WoWConstants.MapOrigin - rawX,
+                    rawZ);
+                // Note: MapOrigin-min > MapOrigin-max, so swap min/max after conversion
+                float rBBMinX = WoWConstants.MapOrigin - bbMaxY;
+                float rBBMaxX = WoWConstants.MapOrigin - bbMinY;
+                float rBBMinY = WoWConstants.MapOrigin - bbMaxX;
+                float rBBMaxY = WoWConstants.MapOrigin - bbMinX;
+                boundsMin = new Vector3(rBBMinX, rBBMinY, bbMinZ);
+                boundsMax = new Vector3(rBBMaxX, rBBMaxY, bbMaxZ);
+            }
+
             ModfPlacements.Add(new ModfPlacement
             {
                 NameIndex = nameIdx,
-                Position = new Vector3(
-                    WoWConstants.MapOrigin - rawY,
-                    WoWConstants.MapOrigin - rawX,
-                    rawZ),
+                Position = position,
                 Rotation = new Vector3(rotX, rotY, rotZ),
-                BoundsMin = new Vector3(rBBMinX, rBBMinY, bbMinZ),
-                BoundsMax = new Vector3(rBBMaxX, rBBMaxY, bbMaxZ),
+                BoundsMin = boundsMin,
+                BoundsMax = boundsMax,
                 Flags = flags
             });
         }
@@ -310,10 +335,9 @@ public class AlphaTerrainAdapter
         // Extract alpha maps from MCAL
         var alphaMaps = ExtractAlphaMaps(mcnk.McalData, mcnk.MclyData, mcnk.NLayers);
 
-        // Compute world position for this chunk in WoW world coordinates
-        // WDT is column-major: tileX=column(east-west), tileY=row(north-south)
-        // WoW: X=north, Y=west — but our renderer axis mapping: rendererX=wowY, rendererY=wowX
-        // This matches the MDDF/MODF Position = Vector3(wowY, wowX, wowZ)
+        // Compute world position for this chunk in renderer coordinates.
+        // WDT MAIN index = tileX*64+tileY (column-major).
+        // Renderer coords match MODF: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
         float chunkSmall = WoWConstants.ChunkSize / 16f;
         float worldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall;
         float worldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall;

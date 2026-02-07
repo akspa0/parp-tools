@@ -34,6 +34,7 @@ public class TerrainManager : ISceneRenderer
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
+    public TerrainRenderer Renderer => _terrainRenderer;
     public string MapName { get; }
 
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
@@ -145,9 +146,9 @@ public class TerrainManager : ISceneRenderer
 
     private void FindInitialCameraPosition(out Vector3 cameraPos)
     {
-        // Find the center of all existing tiles in WoW world coordinates
-        // rendererX = wowY = MapOrigin - tileX * ChunkSize
-        // rendererY = wowX = MapOrigin - tileY * ChunkSize
+        // Find the center of all existing tiles in renderer coordinates.
+        // WDT index = tileX*64+tileY (column-major).
+        // Renderer: rendererX = MapOrigin - tileX * ChunkSize, rendererY = MapOrigin - tileY * ChunkSize
         if (_adapter.ExistingTiles.Count == 0)
         {
             cameraPos = Vector3.Zero;
@@ -157,9 +158,8 @@ public class TerrainManager : ISceneRenderer
         float sumX = 0, sumY = 0;
         foreach (int idx in _adapter.ExistingTiles)
         {
-            // Alpha WDT MAIN is column-major: index = tileX*64+tileY
-            int tx = idx / 64; // column (east-west)
-            int ty = idx % 64; // row (north-south)
+            int tx = idx / 64;
+            int ty = idx % 64;
             sumX += WoWConstants.MapOrigin - tx * WoWConstants.ChunkSize;
             sumY += WoWConstants.MapOrigin - ty * WoWConstants.ChunkSize;
         }

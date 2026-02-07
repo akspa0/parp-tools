@@ -41,6 +41,10 @@ public class WorldScene : ISceneRenderer
     public IReadOnlyList<string> MdxModelNames => _terrainManager.Adapter.MdxModelNames;
     public IReadOnlyList<string> WmoModelNames => _terrainManager.Adapter.WmoModelNames;
 
+    // Sky dome
+    private readonly SkyDomeRenderer _skyDome;
+    public SkyDomeRenderer SkyDome => _skyDome;
+
     // Bounding box debug rendering
     private bool _showBoundingBoxes = false;
     private BoundingBoxRenderer? _bbRenderer;
@@ -68,6 +72,7 @@ public class WorldScene : ISceneRenderer
         _gl = gl;
         _assets = new WorldAssetManager(gl, dataSource, texResolver);
         _bbRenderer = new BoundingBoxRenderer(gl);
+        _skyDome = new SkyDomeRenderer(gl);
 
         // Create terrain manager (uses AOI-based lazy loading — tiles load as camera moves)
         onStatus?.Invoke("Loading WDT...");
@@ -89,12 +94,15 @@ public class WorldScene : ISceneRenderer
         // Build lightweight instance lists (just key + transform)
         BuildInstances(adapter);
 
-        // For WMO-only maps, compute camera from MODF placement
+        // For WMO-only maps, compute camera from MODF bounding box center
         if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
         {
-            var wmoPos = adapter.ModfPlacements[0].Position;
-            _wmoCameraOverride = new Vector3(wmoPos.X, wmoPos.Y, wmoPos.Z + 50f);
-            Console.WriteLine($"[WorldScene] WMO-only map, camera at WMO position: ({wmoPos.X:F1}, {wmoPos.Y:F1}, {wmoPos.Z:F1})");
+            var p = adapter.ModfPlacements[0];
+            var bbCenter = (p.BoundsMin + p.BoundsMax) * 0.5f;
+            var bbExtent = p.BoundsMax - p.BoundsMin;
+            float dist = MathF.Max(bbExtent.Length() * 0.5f, 100f);
+            _wmoCameraOverride = bbCenter + new Vector3(dist, 0, bbExtent.Z * 0.3f);
+            Console.WriteLine($"[WorldScene] WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
         }
 
         onStatus?.Invoke("World loaded.");
@@ -109,59 +117,85 @@ public class WorldScene : ISceneRenderer
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
+        // Placement transform for Alpha WDT terrain maps.
+        // Positions are already converted to renderer coords in AlphaTerrainAdapter:
+        //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
+        // This swaps X↔Y and mirrors both axes.
+        //
+        // Rotation stored in MDDF/MODF as (rotX, rotY, rotZ) in degrees:
+        //   rotX = pitch (tilt around X axis)
+        //   rotY = heading/yaw (rotation around Z/up axis) — this is the main one
+        //   rotZ = roll (tilt around Y axis)
+        // After the X↔Y swap in position, heading must be negated.
+        //
+        // Model coordinate system: WoW models use Z-up, same as our renderer.
+        // The X↔Y swap is handled by the modelToRenderer matrix.
+        var modelToRenderer = new Matrix4x4(
+             0,  1, 0, 0,
+             1,  0, 0, 0,
+             0,  0, 1, 0,
+             0,  0, 0, 1);
+
         // MDX (doodad) placements
-        // Rotation.Z = WoW heading (yaw), Rotation.X/Y = pitch/roll
-        // The renderer swaps X↔Y vs WoW. The MODF bounding boxes (already converted)
-        // show where objects should be. We need the model geometry to land inside those boxes.
-        // WoW rotation convention: Y-up in file → Z-up in world, heading = rotation around Z.
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            // Apply rotations: pitch(X), roll(Y), then heading(Z)
-            var transform = Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(-rz)
+            // AlphaTerrainAdapter reads: rotX(off+20), rotZ(off+24), rotY(off+28)
+            // Stored as: Rotation = new Vector3(rotX, rotY, rotZ)
+            // So: Rotation.X = pitch, Rotation.Z = heading (around up axis), Rotation.Y = roll
+            // After X<->Y position swap: negate heading
+            float headingDeg = -p.Rotation.Z;
+            float pitchDeg   = p.Rotation.X;
+            float rollDeg    = p.Rotation.Y;
+            float headingRad = headingDeg * MathF.PI / 180f;
+            float pitchRad   = pitchDeg * MathF.PI / 180f;
+            float rollRad    = rollDeg * MathF.PI / 180f;
+            var transform = modelToRenderer
+                * Matrix4x4.CreateScale(scale)
+                * Matrix4x4.CreateRotationZ(headingRad)
+                * Matrix4x4.CreateRotationX(pitchRad)
+                * Matrix4x4.CreateRotationY(rollRad)
                 * Matrix4x4.CreateTranslation(p.Position);
 
-            // Approximate bounding box: position ± scale * defaultRadius
-            // MDX models typically have extents of ~50-100 units
-            float radius = scale * 15f;
+            // Use actual model bounds if available, transformed to world space
+            Vector3 bbMin, bbMax;
+            if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+            {
+                TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+            }
+            else
+            {
+                bbMin = p.Position - new Vector3(2f);
+                bbMax = p.Position + new Vector3(2f);
+            }
             _mdxInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
                 Transform = transform,
-                BoundsMin = p.Position - new Vector3(radius, radius, 0),
-                BoundsMax = p.Position + new Vector3(radius, radius, radius * 2)
+                BoundsMin = bbMin,
+                BoundsMax = bbMax
             });
         }
 
-        // WMO placements
-        // Original simple formula kept models in bounding boxes but facing wrong.
-        // The original used: CreateRotationX(rx) * CreateRotationY(ry) * CreateRotationZ(-rz) * Translate
-        // where rx=p.Rotation.X, ry=p.Rotation.Y, rz=p.Rotation.Z
-        // With the goldmine (rot 0,0,57): heading was -57° but model faced wrong.
-        // With Dark Portal (rot 0,0,0): no rotation, model faced backwards (180° off).
-        //
-        // Fix: add 180° to the Z rotation to flip the model's default facing.
-        // heading = -(rz) + 180° = 180° - rz
+        // WMO placements — same rotation logic
         foreach (var p in adapter.ModfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = Matrix4x4.CreateRotationX(rx)
-                * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(-rz)
+            float headingDeg = -p.Rotation.Z;
+            float pitchDeg   = p.Rotation.X;
+            float rollDeg    = p.Rotation.Y;
+            float headingRad = headingDeg * MathF.PI / 180f;
+            float pitchRad   = pitchDeg * MathF.PI / 180f;
+            float rollRad    = rollDeg * MathF.PI / 180f;
+            var transform = modelToRenderer
+                * Matrix4x4.CreateRotationZ(headingRad)
+                * Matrix4x4.CreateRotationX(pitchRad)
+                * Matrix4x4.CreateRotationY(rollRad)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             _wmoInstances.Add(new ObjectInstance
@@ -224,11 +258,43 @@ public class WorldScene : ISceneRenderer
         }
     }
 
+    /// <summary>
+    /// Transform an axis-aligned bounding box through a matrix by transforming all 8 corners
+    /// and computing the new AABB that encloses them.
+    /// </summary>
+    private static void TransformBounds(Vector3 min, Vector3 max, Matrix4x4 m, out Vector3 outMin, out Vector3 outMax)
+    {
+        outMin = new Vector3(float.MaxValue);
+        outMax = new Vector3(float.MinValue);
+        Span<float> xs = stackalloc float[] { min.X, max.X };
+        Span<float> ys = stackalloc float[] { min.Y, max.Y };
+        Span<float> zs = stackalloc float[] { min.Z, max.Z };
+        foreach (var x in xs)
+        foreach (var y in ys)
+        foreach (var z in zs)
+        {
+            var p = Vector3.Transform(new Vector3(x, y, z), m);
+            outMin = Vector3.Min(outMin, p);
+            outMax = Vector3.Max(outMax, p);
+        }
+    }
+
     // ── ISceneRenderer ──────────────────────────────────────────────────
 
     private bool _renderDiagPrinted = false;
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        // Extract camera position for sky dome
+        Matrix4x4.Invert(view, out var viewInvSky);
+        var camPos = new Vector3(viewInvSky.M41, viewInvSky.M42, viewInvSky.M43);
+
+        // 0. Render sky dome (before terrain, no depth write)
+        _skyDome.UpdateFromLighting(_terrainManager.Lighting.GameTime);
+        _skyDome.Render(view, proj, camPos);
+
+        // Also set clear color to horizon color so any gaps match the sky
+        _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
+
         // 1. Render terrain
         _terrainManager.Render(view, proj);
 
@@ -259,7 +325,19 @@ public class WorldScene : ISceneRenderer
             Console.WriteLine($"[WorldScene] Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
         }
 
-        // 2. Render WMO instances (each instance references a shared renderer)
+        // Extract camera position from view matrix (inverse of view translation)
+        Matrix4x4.Invert(view, out var viewInv);
+        var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
+
+        // ── PASS 1: OPAQUE ──────────────────────────────────────────────
+        // Render all opaque geometry first with depth write ON.
+        // This ensures correct depth buffer before any transparent rendering.
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Less);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+
+        // 2a. WMO opaque pass
         if (_wmosVisible)
         {
             int wmoRendered = 0;
@@ -267,7 +345,6 @@ public class WorldScene : ISceneRenderer
             {
                 var renderer = _assets.GetWmo(inst.ModelKey);
                 if (renderer == null) continue;
-                // Reset blend state before each model
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj);
@@ -276,7 +353,7 @@ public class WorldScene : ISceneRenderer
             if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] WMO render loop: {wmoRendered} rendered");
         }
 
-        // 3. Render MDX instances
+        // 3a. MDX opaque pass
         if (_doodadsVisible)
         {
             int mdxRendered = 0;
@@ -284,13 +361,45 @@ public class WorldScene : ISceneRenderer
             {
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
-                // Reset blend state before each model
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
-                renderer.RenderWithTransform(inst.Transform, view, proj);
+                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque);
                 mdxRendered++;
             }
-            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] MDX render loop: {mdxRendered} rendered");
+            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] MDX opaque pass: {mdxRendered} rendered");
+        }
+
+        // ── PASS 2: TRANSPARENT (back-to-front) ────────────────────────
+        // Render transparent/blended layers sorted by distance to camera.
+        // Depth test ON but depth write OFF so transparent objects don't
+        // occlude each other incorrectly.
+        if (_doodadsVisible)
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Lequal);
+
+            // Sort instances back-to-front by distance to camera
+            var sorted = new List<(int idx, float dist)>(_mdxInstances.Count);
+            for (int i = 0; i < _mdxInstances.Count; i++)
+            {
+                var inst = _mdxInstances[i];
+                if (_assets.GetMdx(inst.ModelKey) == null) continue;
+                var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
+                float dist = Vector3.DistanceSquared(cameraPos, center);
+                sorted.Add((i, dist));
+            }
+            sorted.Sort((a, b) => b.dist.CompareTo(a.dist)); // back-to-front
+
+            foreach (var (idx, _) in sorted)
+            {
+                var inst = _mdxInstances[idx];
+                var renderer = _assets.GetMdx(inst.ModelKey);
+                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent);
+            }
+            if (!_renderDiagPrinted) _renderDiagPrinted = true;
+        }
+        else
+        {
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
 
@@ -372,6 +481,7 @@ public class WorldScene : ISceneRenderer
         _terrainManager.Dispose();
         _assets.Dispose();
         _bbRenderer?.Dispose();
+        _skyDome.Dispose();
         _mdxInstances.Clear();
         _wmoInstances.Clear();
     }

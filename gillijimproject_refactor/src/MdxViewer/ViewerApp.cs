@@ -60,6 +60,7 @@ public class ViewerApp : IDisposable
     // UI state
     private bool _showFileBrowser = true;
     private bool _showModelInfo = true;
+    private bool _showTerrainControls = true;
     private bool _showDemoWindow = false;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -106,7 +107,7 @@ public class ViewerApp : IDisposable
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
 
-        _gl.ClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Enable(EnableCap.CullFace);
@@ -141,9 +142,6 @@ public class ViewerApp : IDisposable
 
                 if (_mouseDown && !ImGui.GetIO().WantCaptureMouse)
                 {
-                    // Free-fly: mouse controls camera rotation (yaw/pitch)
-                    // DEBUG: Log mouse movement to diagnose inversion
-                    Console.WriteLine($"[Camera] Mouse move: dx={dx:F2}, dy={dy:F2}, Yaw={_camera.Yaw:F2}, Pitch={_camera.Pitch:F2}");
                     _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
                     _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
                     _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
@@ -234,6 +232,9 @@ public class ViewerApp : IDisposable
         if (_showModelInfo)
             DrawModelInfoPanel();
 
+        if (_showTerrainControls && _terrainManager != null)
+            DrawTerrainControls();
+
         if (_worldScene != null)
             DrawMinimap();
 
@@ -286,6 +287,7 @@ public class ViewerApp : IDisposable
 
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
+                ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
 
                 ImGui.EndMenu();
             }
@@ -531,44 +533,9 @@ public class ViewerApp : IDisposable
                     }
                 }
 
-                // Terrain-specific controls
+                // Terrain stats (brief summary — full controls in separate window)
                 if (_terrainManager != null)
                 {
-                    ImGui.Separator();
-                    ImGui.Text("Terrain Controls:");
-
-                    // Day/night cycle slider
-                    var lighting = _terrainManager.Lighting;
-                    float gameTime = lighting.GameTime;
-                    if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
-                        lighting.GameTime = gameTime;
-
-                    // Time labels
-                    string timeLabel = gameTime switch
-                    {
-                        < 0.15f => "Night",
-                        < 0.25f => "Dawn",
-                        < 0.35f => "Morning",
-                        < 0.65f => "Day",
-                        < 0.75f => "Evening",
-                        < 0.85f => "Dusk",
-                        _ => "Night"
-                    };
-                    ImGui.SameLine();
-                    ImGui.Text(timeLabel);
-
-                    // Fog controls
-                    float fogStart = lighting.FogStart;
-                    float fogEnd = lighting.FogEnd;
-                    if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
-                        lighting.FogStart = fogStart;
-                    if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
-                        lighting.FogEnd = fogEnd;
-
-                    // Camera speed control
-                    ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
-                    ImGui.Text("Hold Shift for 5x boost");
-
                     ImGui.Separator();
                     ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
                     ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
@@ -694,6 +661,98 @@ public class ViewerApp : IDisposable
         ImGui.End();
     }
 
+    private void DrawTerrainControls()
+    {
+        if (_terrainManager == null) return;
+
+        ImGui.SetNextWindowSize(new Vector2(280, 380), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(_window.Size.X - 590, 22), ImGuiCond.FirstUseEver);
+        if (ImGui.Begin("Terrain Controls", ref _showTerrainControls))
+        {
+            var lighting = _terrainManager.Lighting;
+            var renderer = _terrainManager.Renderer;
+
+            // Day/night cycle
+            float gameTime = lighting.GameTime;
+            if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
+                lighting.GameTime = gameTime;
+            string timeLabel = gameTime switch
+            {
+                < 0.15f => "Night",
+                < 0.25f => "Dawn",
+                < 0.35f => "Morning",
+                < 0.65f => "Day",
+                < 0.75f => "Evening",
+                < 0.85f => "Dusk",
+                _ => "Night"
+            };
+            ImGui.SameLine();
+            ImGui.Text(timeLabel);
+
+            // Fog
+            float fogStart = lighting.FogStart;
+            float fogEnd = lighting.FogEnd;
+            if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
+                lighting.FogStart = fogStart;
+            if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
+                lighting.FogEnd = fogEnd;
+
+            // Camera speed
+            ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
+            ImGui.Text("Hold Shift for 5x boost");
+
+            ImGui.Separator();
+            ImGui.Text("Texture Layers:");
+
+            // Layer visibility toggles
+            bool l0 = renderer.ShowLayer0;
+            bool l1 = renderer.ShowLayer1;
+            bool l2 = renderer.ShowLayer2;
+            bool l3 = renderer.ShowLayer3;
+            if (ImGui.Checkbox("Layer 0 (Base)", ref l0)) renderer.ShowLayer0 = l0;
+            if (ImGui.Checkbox("Layer 1", ref l1)) renderer.ShowLayer1 = l1;
+            if (ImGui.Checkbox("Layer 2", ref l2)) renderer.ShowLayer2 = l2;
+            if (ImGui.Checkbox("Layer 3", ref l3)) renderer.ShowLayer3 = l3;
+
+            ImGui.Separator();
+            ImGui.Text("Grid Overlays:");
+
+            bool chunkGrid = renderer.ShowChunkGrid;
+            bool tileGrid = renderer.ShowTileGrid;
+            if (ImGui.Checkbox("Chunk Grid (cyan)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+            if (ImGui.Checkbox("ADT Tile Grid (orange)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+
+            ImGui.Separator();
+            ImGui.Text("Wireframe:");
+            if (ImGui.Button("Toggle Wireframe"))
+                _renderer?.ToggleWireframe();
+
+            // World scene toggles
+            if (_worldScene != null)
+            {
+                ImGui.Separator();
+                ImGui.Text("World Objects:");
+
+                bool showBB = _worldScene.ShowBoundingBoxes;
+                if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
+                    _worldScene.ShowBoundingBoxes = showBB;
+
+                if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+                {
+                    bool showPoi = _worldScene.ShowPoi;
+                    if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
+                        _worldScene.ShowPoi = showPoi;
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
+            ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
+            ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
+        }
+        ImGui.End();
+    }
+
     private void DrawStatusBar()
     {
         var io = ImGui.GetIO();
@@ -718,27 +777,33 @@ public class ViewerApp : IDisposable
         float mapSize = 200f; // pixel size of minimap
         float padding = 10f;
 
-        // Position bottom-left, above status bar
-        ImGui.SetNextWindowPos(new Vector2(padding, io.DisplaySize.Y - mapSize - 34));
-        ImGui.SetNextWindowSize(new Vector2(mapSize + 16, mapSize + 36));
+        // Position bottom-left on first use; user can move/resize freely
+        ImGui.SetNextWindowPos(new Vector2(padding, io.DisplaySize.Y - mapSize - 34), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(mapSize + 16, mapSize + 36), ImGuiCond.FirstUseEver);
 
-        if (ImGui.Begin("Minimap", ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse))
+        if (ImGui.Begin("Minimap", ImGuiWindowFlags.NoScrollbar))
         {
             var drawList = ImGui.GetWindowDrawList();
             var cursorPos = ImGui.GetCursorScreenPos();
+            // Adapt to window content area so resizing works
+            var contentSize = ImGui.GetContentRegionAvail();
+            mapSize = MathF.Min(contentSize.X, contentSize.Y);
+            if (mapSize < 50f) mapSize = 50f;
             float cellSize = mapSize / 64f;
 
             // Background
             drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF1A1A1A);
 
             // Draw existing tiles
+            // WDT is column-major: index = tileX*64+tileY
+            // Minimap: screen X = tileY (east-west), screen Y = tileX (north-south)
             var adapter = _terrainManager.Adapter;
             foreach (int tileIdx in adapter.ExistingTiles)
             {
                 int tx = tileIdx / 64;
                 int ty = tileIdx % 64;
-                float x = cursorPos.X + tx * cellSize;
-                float y = cursorPos.Y + ty * cellSize;
+                float x = cursorPos.X + ty * cellSize;
+                float y = cursorPos.Y + tx * cellSize;
 
                 // Loaded tiles = green, unloaded = dark green
                 bool loaded = _terrainManager.IsTileLoaded(tx, ty);
@@ -747,16 +812,19 @@ public class ViewerApp : IDisposable
             }
 
             // Draw camera position as a bright dot
+            // Camera renderer coords → tile coords, then swap for minimap (screenX=tileY, screenY=tileX)
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
             float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-            float camScreenX = cursorPos.X + camTileX * cellSize;
-            float camScreenY = cursorPos.Y + camTileY * cellSize;
+            float camScreenX = cursorPos.X + camTileY * cellSize;
+            float camScreenY = cursorPos.Y + camTileX * cellSize;
 
             // Camera direction indicator
+            // Renderer X increases with MapOrigin-wowY (east=decreasing rendererX),
+            // so negate the X component to match minimap orientation.
             float yawRad = _camera.Yaw * MathF.PI / 180f;
             float dirLen = 8f;
-            float dirX = camScreenX + MathF.Sin(yawRad) * dirLen;
-            float dirY = camScreenY - MathF.Cos(yawRad) * dirLen;
+            float dirX = camScreenX - MathF.Sin(yawRad) * dirLen;
+            float dirY = camScreenY + MathF.Cos(yawRad) * dirLen;
             drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, 2f);
             drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), 3f, 0xFFFFFFFF);
 
@@ -767,8 +835,8 @@ public class ViewerApp : IDisposable
                 {
                     float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / WoWConstants.ChunkSize;
                     float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / WoWConstants.ChunkSize;
-                    float px = cursorPos.X + poiTileX * cellSize;
-                    float py = cursorPos.Y + poiTileY * cellSize;
+                    float px = cursorPos.X + poiTileY * cellSize;
+                    float py = cursorPos.Y + poiTileX * cellSize;
                     if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
                     {
                         drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF); // magenta
@@ -783,8 +851,9 @@ public class ViewerApp : IDisposable
             if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
-                float clickTileX = (mousePos.X - cursorPos.X) / cellSize;
-                float clickTileY = (mousePos.Y - cursorPos.Y) / cellSize;
+                // Screen X = tileY, Screen Y = tileX (swapped)
+                float clickTileY = (mousePos.X - cursorPos.X) / cellSize;
+                float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize;
                 if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
                 {
                     float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;

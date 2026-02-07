@@ -7,6 +7,17 @@ using Silk.NET.OpenGL;
 namespace MdxViewer.Rendering;
 
 /// <summary>
+/// Controls which material layers are rendered in a given draw call.
+/// Used for two-pass rendering: opaque first (depth write ON), then transparent (back-to-front).
+/// </summary>
+public enum RenderPass
+{
+    Both,
+    Opaque,
+    Transparent
+}
+
+/// <summary>
 /// Renders an MDX model using OpenGL.
 /// Handles per-geoset VAO/VBO setup, shader management, BLP2 textured rendering.
 /// </summary>
@@ -20,11 +31,16 @@ public class MdxRenderer : ISceneRenderer
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
 
     private uint _shaderProgram;
-    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
+    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
     private bool _wireframe;
+
+    /// <summary>Model-space bounding box min corner.</summary>
+    public Vector3 BoundsMin => new(_mdx.Model.Bounds.Extent.Min.X, _mdx.Model.Bounds.Extent.Min.Y, _mdx.Model.Bounds.Extent.Min.Z);
+    /// <summary>Model-space bounding box max corner.</summary>
+    public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null)
@@ -93,8 +109,11 @@ public class MdxRenderer : ISceneRenderer
 
     /// <summary>
     /// Render this model with a custom world transform (for doodad instancing).
+    /// Pass = Opaque renders only opaque layers (depth write ON).
+    /// Pass = Transparent renders only blended layers (depth write OFF).
+    /// Pass = Both renders all layers (legacy behavior).
     /// </summary>
-    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj)
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both)
     {
         _gl.UseProgram(_shaderProgram);
 
@@ -127,13 +146,39 @@ public class MdxRenderer : ISceneRenderer
                     var layer = material.Layers[l];
                     int texId = layer.TextureId;
 
-                    // Set blend mode based on layer blend mode
+                    // Determine if this layer needs blending
                     bool needsBlend = l > 0 || layer.BlendMode != MdlTexOp.Load;
+
+                    // Filter by render pass
+                    if (pass == RenderPass.Opaque && needsBlend) continue;
+                    if (pass == RenderPass.Transparent && !needsBlend) continue;
+
+                    // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
+                    var geoFlags = layer.Flags;
+
+                    // TwoSided (0x10): disable back-face culling for this layer
+                    if (geoFlags.HasFlag(MdlGeoFlags.TwoSided))
+                        _gl.Disable(EnableCap.CullFace);
+                    else
+                        _gl.Disable(EnableCap.CullFace); // MDX models are generally single-sided geometry but often need both sides
+
+                    // NoDepthTest (0x40): disable depth testing entirely
+                    if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                        _gl.Disable(EnableCap.DepthTest);
+                    else
+                        _gl.Enable(EnableCap.DepthTest);
+
+                    // NoDepthSet (0x80): disable depth writing
+                    bool noDepthWrite = geoFlags.HasFlag(MdlGeoFlags.NoDepthSet);
+
+                    // Unshaded (0x1): skip lighting in shader
+                    _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
+
                     if (needsBlend)
                     {
                         _gl.Enable(EnableCap.Blend);
                         _gl.DepthMask(false); // Don't write depth for blended layers
-                        _gl.Uniform1(_uAlphaTest, 1); // Enable alpha discard for blended layers
+                        _gl.Uniform1(_uAlphaTest, 1);
                         switch (layer.BlendMode)
                         {
                             case MdlTexOp.Transparent:
@@ -155,8 +200,8 @@ public class MdxRenderer : ISceneRenderer
                     else
                     {
                         _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
-                        _gl.Uniform1(_uAlphaTest, 0); // No alpha discard for opaque layers
+                        _gl.DepthMask(!noDepthWrite); // Respect NoDepthSet flag
+                        _gl.Uniform1(_uAlphaTest, 0);
                     }
 
                     if (texId >= 0 && _textures.TryGetValue(texId, out uint glTex))
@@ -167,9 +212,8 @@ public class MdxRenderer : ISceneRenderer
                     }
                     else
                     {
-                        // Only show magenta for base layer
                         _gl.Uniform1(_uHasTexture, l == 0 ? 0 : 1);
-                        if (l > 0) continue; // Skip overlay layers with missing textures
+                        if (l > 0) continue;
                     }
 
                     float alpha = layer.StaticAlpha;
@@ -180,16 +224,23 @@ public class MdxRenderer : ISceneRenderer
                     _gl.BindVertexArray(0);
                     anyLayerRendered = true;
 
+                    // Restore state after this layer
                     if (needsBlend)
                     {
                         _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true); // Restore depth writing
+                        _gl.DepthMask(true);
                     }
+                    else if (noDepthWrite)
+                    {
+                        _gl.DepthMask(true);
+                    }
+                    if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                        _gl.Enable(EnableCap.DepthTest);
                 }
             }
 
-            // Fallback: no material or no layers rendered
-            if (!anyLayerRendered)
+            // Fallback: no material or no layers rendered — treat as opaque
+            if (!anyLayerRendered && pass != RenderPass.Transparent)
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -236,28 +287,29 @@ in vec3 vFragPos;
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
+uniform int uUnshaded;
 uniform vec4 uColor;
 
 out vec4 FragColor;
 
 void main() {
-    vec3 norm = normalize(vNormal);
-    // Simple directional light
-    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-    float diff = max(dot(norm, lightDir), 0.0);
-    float ambient = 0.35;
-    float lighting = ambient + diff * 0.65;
-
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (uAlphaTest == 1 && texColor.a < 0.1) discard;
+        if (texColor.a < 0.3) discard;
     } else {
-        // Bright pink for missing textures (matching reference viewer)
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
 
-    // Opaque layers: force alpha=1.0 to prevent depth holes
+    // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
+    float lighting = 1.0;
+    if (uUnshaded == 0) {
+        vec3 norm = normalize(vNormal);
+        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+        float diff = max(dot(norm, lightDir), 0.0);
+        lighting = 0.35 + diff * 0.65;
+    }
+
     float outAlpha = (uAlphaTest == 0) ? 1.0 : texColor.a;
     FragColor = vec4(texColor.rgb * lighting, outAlpha) * uColor;
 }
@@ -287,6 +339,7 @@ void main() {
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
+        _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
@@ -389,7 +442,8 @@ void main() {
 
     private void LoadTextures()
     {
-        Console.WriteLine($"[MdxRenderer] Loading {_mdx.Textures.Count} textures...");
+        string modelName = _modelVirtualPath != null ? Path.GetFileName(_modelVirtualPath) : "?";
+        Console.WriteLine($"[MdxRenderer] Loading {_mdx.Textures.Count} textures for {modelName}...");
         int loaded = 0, failed = 0, replaceableResolved = 0, replaceableFailed = 0;
 
         for (int i = 0; i < _mdx.Textures.Count; i++)
@@ -606,28 +660,70 @@ void main() {
 
     private string? ResolveReplaceableTexture(uint replaceableId)
     {
-        // Try DBC resolver first
+        // Try DBC resolver first (works for creature models)
         if (_texResolver != null && _modelVirtualPath != null)
         {
             string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId);
             if (resolved != null) return resolved;
         }
 
-        // Fallback: try to find a BLP in model's directory that matches common naming
-        // e.g., for HumanMalePeasantGold.mdx, look for HumanMalePeasantGold*.blp
+        // For environment models (trees, shrubs), replaceable textures use conventions:
+        // ReplaceableId 1 = bark/skin, 2 = leaves/detail
+        // Try to find BLPs in the model's directory that match common naming patterns
         if (_dataSource != null && _modelVirtualPath != null)
         {
             string modelDir = Path.GetDirectoryName(_modelVirtualPath)?.Replace('/', '\\') ?? "";
             string modelBase = Path.GetFileNameWithoutExtension(_modelVirtualPath);
-            // Search for BLPs in model directory that start with model name
-            var files = _dataSource.GetFileList(".blp");
-            foreach (var f in files)
+
+            // Common suffixes for replaceable texture IDs in environment models
+            string[] suffixes = replaceableId switch
             {
-                if (f.StartsWith(modelDir, StringComparison.OrdinalIgnoreCase) &&
-                    Path.GetFileNameWithoutExtension(f).StartsWith(modelBase, StringComparison.OrdinalIgnoreCase))
+                1 => new[] { "Bark", "Trunk", "Skin", "Body", "" },
+                2 => new[] { "Leaf", "Leaves", "Detail", "Foliage", "" },
+                _ => new[] { "" }
+            };
+
+            // Search for BLPs in model directory matching model name + suffix
+            if (_dataSource is MpqDataSource mpqDS)
+            {
+                foreach (var suffix in suffixes)
                 {
-                    return f;
+                    string candidate = string.IsNullOrEmpty(suffix)
+                        ? Path.Combine(modelDir, modelBase + ".blp")
+                        : Path.Combine(modelDir, modelBase + suffix + ".blp");
+                    var found = mpqDS.FindInFileSet(candidate);
+                    if (found != null)
+                    {
+                        Console.WriteLine($"[MdxRenderer] Replaceable #{replaceableId} resolved via naming convention: {found}");
+                        return found;
+                    }
                 }
+            }
+
+            // Last resort: scan all BLPs in model directory for any match
+            var files = _dataSource.GetFileList(".blp");
+            var candidates = files
+                .Where(f => f.StartsWith(modelDir, StringComparison.OrdinalIgnoreCase) &&
+                            Path.GetFileNameWithoutExtension(f).StartsWith(modelBase, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(f => f.Length) // Prefer shorter names (more likely to be the base texture)
+                .ToList();
+
+            if (candidates.Count > 0)
+            {
+                // For replaceableId 1, prefer bark/trunk textures; for 2, prefer leaf textures
+                string? best = null;
+                foreach (var c in candidates)
+                {
+                    string fname = Path.GetFileNameWithoutExtension(c).ToLowerInvariant();
+                    bool isBark = fname.Contains("bark") || fname.Contains("trunk");
+                    bool isLeaf = fname.Contains("leaf") || fname.Contains("leaves");
+
+                    if (replaceableId == 1 && isBark) { best = c; break; }
+                    if (replaceableId == 2 && isLeaf) { best = c; break; }
+                }
+                if (best == null) best = candidates[0]; // Fallback to first match
+                Console.WriteLine($"[MdxRenderer] Replaceable #{replaceableId} resolved via directory scan: {best}");
+                return best;
             }
         }
 

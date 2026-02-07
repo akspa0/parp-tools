@@ -120,6 +120,22 @@ public class WorldAssetManager : IDisposable
     }
 
     /// <summary>
+    /// Get the model-space bounding box for a loaded MDX model.
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetMdxBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            boundsMin = r.BoundsMin;
+            boundsMax = r.BoundsMax;
+            return true;
+        }
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
     /// Get a loaded WMO renderer by normalized key. Returns null if not loaded or failed.
     /// </summary>
     public WmoRenderer? GetWmo(string normalizedKey)
@@ -149,6 +165,35 @@ public class WorldAssetManager : IDisposable
                 data = _dataSource?.ReadFile(key + ".mpq");
         }
 
+        // Fallback: try stripping leading path components (e.g., "World\" prefix)
+        // Some MDNM entries may have paths that don't match the MPQ internal structure
+        if (data == null)
+        {
+            // Try just the filename
+            string fileName = Path.GetFileName(key);
+            if (!string.IsNullOrEmpty(fileName) && fileName != key)
+            {
+                data = _dataSource?.ReadFile(fileName);
+            }
+
+            // Try with common prefixes
+            if (data == null)
+            {
+                string[] prefixes = { "Creature\\", "World\\", "Environment\\" };
+                foreach (var prefix in prefixes)
+                {
+                    if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        data = _dataSource?.ReadFile(prefix + key);
+                        if (data != null) break;
+                        // Also try prefix + just filename
+                        data = _dataSource?.ReadFile(prefix + fileName);
+                        if (data != null) break;
+                    }
+                }
+            }
+        }
+
         _fileDataCache[key] = data;
         return data;
     }
@@ -164,8 +209,7 @@ public class WorldAssetManager : IDisposable
             byte[]? data = ReadFileData(normalizedKey);
             if (data == null || data.Length == 0)
             {
-                if (_mdxModels.Count < 3)
-                    Console.WriteLine($"[AssetManager] MDX data null for: \"{normalizedKey}\"");
+                Console.WriteLine($"[AssetManager] MDX data null for: \"{normalizedKey}\"");
                 return null;
             }
 

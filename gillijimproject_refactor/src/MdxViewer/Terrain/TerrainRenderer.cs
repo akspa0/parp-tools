@@ -28,6 +28,16 @@ public class TerrainRenderer : IDisposable
 
     private bool _wireframe;
 
+    // Layer visibility toggles (exposed for UI)
+    public bool ShowLayer0 { get; set; } = true;
+    public bool ShowLayer1 { get; set; } = true;
+    public bool ShowLayer2 { get; set; } = true;
+    public bool ShowLayer3 { get; set; } = true;
+
+    // Grid overlay
+    public bool ShowChunkGrid { get; set; } = false;
+    public bool ShowTileGrid { get; set; } = false;
+
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
@@ -91,6 +101,10 @@ public class TerrainRenderer : IDisposable
         else
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
+        // Pass grid uniforms
+        _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
+        _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
+
         // Render each chunk
         foreach (var chunk in _chunks)
         {
@@ -111,10 +125,15 @@ public class TerrainRenderer : IDisposable
             return;
         }
 
+        bool[] layerVisible = { ShowLayer0, ShowLayer1, ShowLayer2, ShowLayer3 };
+
         // Base layer (opaque, no alpha map)
-        _gl.Disable(EnableCap.Blend);
-        _gl.DepthMask(true);
-        RenderChunkPass(chunk, 0, isBaseLayer: true);
+        if (layerVisible[0])
+        {
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
+            RenderChunkPass(chunk, 0, isBaseLayer: true);
+        }
 
         // Alpha-blended overlay layers
         if (chunk.Layers.Length > 1)
@@ -124,8 +143,9 @@ public class TerrainRenderer : IDisposable
             _gl.DepthMask(false);
             _gl.DepthFunc(DepthFunction.Lequal);
 
-            for (int layer = 1; layer < chunk.Layers.Length; layer++)
+            for (int layer = 1; layer < chunk.Layers.Length && layer < 4; layer++)
             {
+                if (!layerVisible[layer]) continue;
                 RenderChunkPass(chunk, layer, isBaseLayer: false);
             }
 
@@ -338,6 +358,8 @@ uniform sampler2D uAlphaSampler;
 uniform int uHasTexture;
 uniform int uHasAlphaMap;
 uniform int uIsBaseLayer;
+uniform int uShowChunkGrid;
+uniform int uShowTileGrid;
 
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
@@ -350,40 +372,61 @@ uniform vec3 uCameraPos;
 out vec4 FragColor;
 
 void main() {
-    // Texture color
+    // Diffuse texture: use WORLD-SPACE UVs for seamless tiling across chunks.
+    // WoW terrain textures tile ~8 times per chunk (chunk = ChunkSize/16 = 33.333 units).
+    // So texture repeats every 33.333/8 = ~4.167 units.
+    float texScale = 8.0 / 33.333;
+    vec2 worldUV = vWorldPos.xy * texScale;
+
     vec4 texColor;
     if (uHasTexture == 1) {
-        // Scale UVs for terrain tiling (each texture repeats ~8 times across a chunk)
-        vec2 tiledUV = vTexCoord * 8.0;
-        texColor = texture(uDiffuseSampler, tiledUV);
+        texColor = texture(uDiffuseSampler, worldUV);
     } else {
-        // Flat green for untextured terrain
         texColor = vec4(0.3, 0.5, 0.2, 1.0);
     }
 
     // Alpha from alpha map (overlay layers only)
+    // Alpha maps use per-chunk 0-1 UVs (vTexCoord), which is correct.
     float alpha = 1.0;
     if (uIsBaseLayer == 0 && uHasAlphaMap == 1) {
-        // Inset UVs by half-texel to prevent sampling artifacts at chunk edges
-        // Alpha maps are 64x64, so half-texel = 0.5/64
         float halfTexel = 0.5 / 64.0;
         vec2 alphaUV = vTexCoord * (1.0 - 2.0 * halfTexel) + halfTexel;
         alpha = texture(uAlphaSampler, alphaUV).r;
-        if (alpha < 0.004) discard; // Skip fully transparent pixels
+        if (alpha < 0.004) discard;
     }
 
-    // Lighting: per-vertex Lambertian diffuse (abs for double-sided terrain)
+    // Lighting
     vec3 norm = normalize(vNormal);
     float diff = abs(dot(norm, normalize(uLightDir)));
     vec3 lighting = uAmbientColor + uLightColor * diff;
-
-    // Apply lighting to texture
     vec3 litColor = texColor.rgb * lighting;
 
-    // Fog (linear)
+    // Fog
     float dist = length(vWorldPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+
+    // Grid overlays (drawn on base layer only to avoid double-drawing)
+    if (uIsBaseLayer == 1) {
+        // Chunk grid: chunk size = 33.333 units
+        if (uShowChunkGrid == 1) {
+            float chunkSize = 33.333;
+            vec2 chunkFrac = fract(vWorldPos.xy / chunkSize);
+            float chunkLine = step(chunkFrac.x, 0.005) + step(1.0 - chunkFrac.x, 0.005)
+                            + step(chunkFrac.y, 0.005) + step(1.0 - chunkFrac.y, 0.005);
+            chunkLine = clamp(chunkLine, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
+        }
+        // Tile grid: tile size = 533.333 units
+        if (uShowTileGrid == 1) {
+            float tileSize = 533.333;
+            vec2 tileFrac = fract(vWorldPos.xy / tileSize);
+            float tileLine = step(tileFrac.x, 0.001) + step(1.0 - tileFrac.x, 0.001)
+                           + step(tileFrac.y, 0.001) + step(1.0 - tileFrac.y, 0.001);
+            tileLine = clamp(tileLine, 0.0, 1.0);
+            finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.8);
+        }
+    }
 
     FragColor = vec4(finalColor, alpha);
 }
