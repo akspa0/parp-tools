@@ -1,0 +1,42 @@
+{
+    "clients": [
+        {
+            "client_path": "H:\\053-client\\",
+            "version": "0.5.3",
+            "maps": [
+                "Azeroth",
+                "Kalimdor"
+            ],
+            "output_root": "J:\\wowDev\\parp-tools\\gillijimproject_refactor\\vlm_output\\v8_dataset\\053",
+            "generate_depth": false
+        },
+        {
+            "client_path": "H:\\3.X_Pre-Release_Windows_enUS_3.0.1.8303\\World of Warcraft",
+            "version": "3.0.1",
+            "maps": [
+                "Azeroth",
+                "Kalimdor",
+                "Northrend",
+                "Expansion01"
+            ],
+            "output_root": "J:\\wowDev\\parp-tools\\gillijimproject_refactor\\vlm_output\\v8_dataset\\301",
+            "generate_depth": false
+        },
+        {
+            "client_path": "G:\\WoW\\World of Warcraft Cata beta 11927",
+            "version": "4.0.0",
+            "maps": [
+                "Azeroth",
+                "Kalimdor",
+                "Northrend",
+                "Expansion01",
+                "Maelstrom",
+                "LostIsles",
+                "Deepholm",
+                "GilneasPhasedFromBeta"
+            ],
+            "output_root": "J:\\wowDev\\parp-tools\\gillijimproject_refactor\\vlm_output\\v8_dataset\\400",
+            "generate_depth": false
+        }
+    ]
+}

@@ -98,12 +98,17 @@ dotnet run
 
 ## TODO
 
-- [ ] Verify MDX/M2 file discovery
-- [ ] Test WMO loading from nested MPQ
-- [ ] Implement animation system
-- [ ] Add particle rendering
-- [ ] BLP texture loading with alpha
-- [ ] Transparency blend modes
-- [ ] Frustum culling
-- [ ] Terrain rendering
-- [ ] Detail doodad system
+See `renderer_plan.md` for the full itemized 40-task implementation plan across 8 phases.
+
+**Summary of phases:**
+- [x] MDX model loading + rendering (existing)
+- [x] WMO v14 loading + rendering (existing)
+- [x] BLP2 texture loading (existing)
+- [ ] Phase 0: Foundation (BlendStateManager, RenderQueue, FrustumCuller, shared shaders)
+- [ ] Phase 1: MDX Animation (keyframes, bones, geoset animation, playback UI)
+- [ ] Phase 2: Particle System (emitters, physics, billboard rendering)
+- [ ] Phase 3: Terrain (WDT/ADT loading, mesh gen, texture layering, lighting)
+- [ ] Phase 4: World Scene (composition, MDDF/MODF placements, fog, day/night)
+- [ ] Phase 5: Liquid Rendering (water, magma, slime surfaces)
+- [ ] Phase 6: Detail Doodads (per-chunk grass/foliage)
+- [ ] Phase 7: Polish (instancing, LOD, debug overlays)

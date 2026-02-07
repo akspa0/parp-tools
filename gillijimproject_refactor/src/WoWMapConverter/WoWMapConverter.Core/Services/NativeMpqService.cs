@@ -107,48 +107,166 @@ public class NativeMpqService : IDisposable
     }
 
     /// <summary>
-    /// Scans all blocks in loaded MPQ archives for WMO files (identified by 'MOHD' magic).
-    /// Useful for listfile-less MPQs containing Alpha WMO files.
+    /// Scans for WMO MPQ archives and their embedded WMO files.
+    /// Alpha 0.5.3 uses .wmo.mpq files where file 0 contains the actual WMO data.
     /// </summary>
-    /// <returns>List of virtual paths for found WMO files.</returns>
-    public List<string> ScanForWmoFiles()
+    public List<string> ScanWmoMpqArchives(string gamePath)
     {
         var foundWmos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         
-        foreach (var archive in _archives)
+        // Search for .wmo.mpq files in common locations
+        string[] searchPaths = {
+            Path.Combine(gamePath, "Data"),
+            Path.Combine(gamePath, "Data", "World"),
+            Path.Combine(gamePath, "Data", "World", "wmo"),
+            Path.Combine(gamePath, "Data", "World", "WMO"),
+            Path.Combine(gamePath, "World"),
+            Path.Combine(gamePath, "World", "wmo"),
+            Path.Combine(gamePath, "World", "WMO")
+        };
+        
+        foreach (var searchPath in searchPaths)
         {
-            foreach (var block in archive.BlockTable)
+            if (!Directory.Exists(searchPath)) continue;
+            
+            Console.WriteLine($"[NativeMpqService] Scanning for WMO MPQs in: {searchPath}");
+            
+            try
             {
-                if (block.FileSize < 16) continue; // Too small for WMO header
+                // Find all .wmo.mpq files
+                var wmoMpqFiles = Directory.GetFiles(searchPath, "*.wmo.mpq", SearchOption.AllDirectories)
+                    .Concat(Directory.GetFiles(searchPath, "*.WMO.MPQ", SearchOption.AllDirectories))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
                 
-                // Read the magic number from this block
-                try
+                foreach (var mpqPath in wmoMpqFiles)
                 {
-                    using var fs = new FileStream(archive.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    fs.Position = archive.HeaderOffset + block.BlockOffset;
-                    var magicBytes = new byte[4];
-                    if (fs.Read(magicBytes, 0, 4) != 4) continue;
+                    Console.WriteLine($"[NativeMpqService]   Found WMO MPQ: {Path.GetFileName(mpqPath)}");
                     
-                    // Check for 'MOHD' (WMO root) magic
-                    if (magicBytes[0] == 'M' && magicBytes[1] == 'O' && magicBytes[2] == 'H' && magicBytes[3] == 'D')
+                    // Generate virtual path from MPQ filename
+                    // e.g., "Dungeons\\test.wmo.mpq" -> "World\\wmo\\test.wmo"
+                    var mpqFileName = Path.GetFileNameWithoutExtension(mpqPath); // removes .mpq
+                    var mpqFileNameWithoutWmo = mpqFileName;
+                    
+                    // Handle case where filename ends with .wmo
+                    if (mpqFileNameWithoutWmo.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
                     {
-                        // Found a WMO file - generate a placeholder path
-                        var wmoPath = $"WMO_{block.BlockOffset:X8}.wmo";
-                        foundWmos.Add(wmoPath);
-                        
-                        // Store the mapping for later reading
-                        if (!_scannedFiles.ContainsKey(wmoPath))
-                        {
-                            _scannedFiles[wmoPath] = (archive.Path, block.BlockOffset);
-                        }
+                        mpqFileNameWithoutWmo = mpqFileNameWithoutWmo[0..^4]; // remove .wmo suffix
                     }
+                    
+                    // Build virtual path
+                    var relativePath = Path.GetRelativePath(gamePath, mpqPath);
+                    var virtualPath = $"World\\wmo\\{mpqFileNameWithoutWmo}.wmo";
+                    
+                    // Normalize path separators
+                    virtualPath = virtualPath.Replace('/', '\\');
+                    
+                    // Store for reading
+                    if (!_scannedFiles.ContainsKey(virtualPath))
+                    {
+                        _scannedFiles[virtualPath] = (mpqPath, 0); // 0 = read from file 0 in MPQ
+                    }
+                    
+                    foundWmos.Add(virtualPath);
+                    Console.WriteLine($"[NativeMpqService]     Added: {virtualPath}");
                 }
-                catch { continue; }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NativeMpqService]   Error scanning {searchPath}: {ex.Message}");
             }
         }
         
-        Console.WriteLine($"[NativeMpqService] Scanned {foundWmos.Count} WMO files in listfile-less MPQs.");
+        Console.WriteLine($"[NativeMpqService] Found {foundWmos.Count} WMO MPQ archives.");
         return foundWmos.ToList();
+    }
+    
+    /// <summary>
+    /// Reads file 0 from a WMO MPQ archive.
+    /// </summary>
+    public byte[]? ReadWmoMpqFile(string virtualPath)
+    {
+        if (!_scannedFiles.TryGetValue(virtualPath, out var mpqInfo))
+            return null;
+        
+        // Check if it's a nested MPQ read
+        if (mpqInfo.BlockOffset == 0 && mpqInfo.ArchivePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                // This is a .wmo.mpq file, read file 0 from it
+                using var fs = new FileStream(mpqInfo.ArchivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                using var reader = new BinaryReader(fs);
+                
+                // Parse nested MPQ header
+                long headerOffset = FindMpqHeader(reader);
+                if (headerOffset < 0) return null;
+                
+                fs.Position = headerOffset;
+                var header = ReadMpqHeader(reader);
+                if (header == null) return null;
+                
+                // Read hash table to find file 0
+                fs.Position = headerOffset + header.HashTableOffset;
+                var hashTable = ReadHashTable(reader, header.HashTableEntries);
+                
+                // Read block table
+                fs.Position = headerOffset + header.BlockTableOffset;
+                var blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+                
+                // Find file 0 (usually the first file or one with hash matching "")
+                BlockEntry? file0Block = null;
+                
+                // Try to find by looking for first valid file in hash table
+                foreach (var entry in hashTable)
+                {
+                    if (entry.BlockIndex != 0xFFFFFFFF && entry.BlockIndex < blockTable.Length)
+                    {
+                        var block = blockTable[entry.BlockIndex];
+                        if ((block.Flags & 0x80000000) != 0) // FLAG_EXISTS
+                        {
+                            file0Block = block;
+                            break;
+                        }
+                    }
+                }
+                
+                if (file0Block == null) return null;
+                
+                // Read file 0 data
+                fs.Position = headerOffset + file0Block.BlockOffset;
+                return ReadFileData(reader, file0Block, header.SectorSize, "file_0", fs.Position);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NativeMpqService] Error reading WMO MPQ {mpqInfo.ArchivePath}: {ex.Message}");
+                return null;
+            }
+        }
+        
+        return null;
+    }
+    
+    /// <summary>
+    /// Gets all known file paths including scanned files.
+    /// </summary>
+    public IReadOnlyList<string> GetAllKnownFiles()
+    {
+        var allFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Add files from hash table
+        foreach (var kvp in _hashToName)
+        {
+            allFiles.Add(kvp.Value);
+        }
+        
+        // Add scanned file paths
+        foreach (var path in _scannedFiles.Keys)
+        {
+            allFiles.Add(path);
+        }
+        
+        return allFiles.ToList();
     }
 
     private bool _disposed;
@@ -294,6 +412,19 @@ public class NativeMpqService : IDisposable
     public byte[]? ReadFile(string virtualPath)
     {
         var normalized = virtualPath.Replace('/', '\\');
+        
+        // First check if it's a scanned loose file
+        if (_scannedFiles.TryGetValue(normalized, out var scannedInfo))
+        {
+            if (scannedInfo.BlockOffset == 0 && !string.IsNullOrEmpty(scannedInfo.ArchivePath))
+            {
+                // Loose file - read directly from disk
+                if (File.Exists(scannedInfo.ArchivePath))
+                {
+                    return File.ReadAllBytes(scannedInfo.ArchivePath);
+                }
+            }
+        }
         
         // Search archives in reverse order (patches first)
         for (int i = _archives.Count - 1; i >= 0; i--)
