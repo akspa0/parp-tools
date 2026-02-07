@@ -14,6 +14,7 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class WorldScene : ISceneRenderer
 {
+    private readonly GL _gl;
     private readonly TerrainManager _terrainManager;
     private readonly WorldAssetManager _assets;
 
@@ -32,29 +33,64 @@ public class WorldScene : ISceneRenderer
     public int UniqueWmoModels => _assets.WmoModelsLoaded;
     public TerrainManager Terrain => _terrainManager;
     public WorldAssetManager Assets => _assets;
+    public bool IsWmoBased => _terrainManager.Adapter.IsWmoBased;
+
+    // Expose raw placement data for UI object list
+    public IReadOnlyList<MddfPlacement> MddfPlacements => _terrainManager.Adapter.MddfPlacements;
+    public IReadOnlyList<ModfPlacement> ModfPlacements => _terrainManager.Adapter.ModfPlacements;
+    public IReadOnlyList<string> MdxModelNames => _terrainManager.Adapter.MdxModelNames;
+    public IReadOnlyList<string> WmoModelNames => _terrainManager.Adapter.WmoModelNames;
+
+    // Bounding box debug rendering
+    private bool _showBoundingBoxes = false;
+    private BoundingBoxRenderer? _bbRenderer;
+    public bool ShowBoundingBoxes { get => _showBoundingBoxes; set => _showBoundingBoxes = value; }
 
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
-        ReplaceableTextureResolver? texResolver = null)
+        ReplaceableTextureResolver? texResolver = null,
+        Action<string>? onStatus = null)
     {
+        _gl = gl;
         _assets = new WorldAssetManager(gl, dataSource, texResolver);
+        _bbRenderer = new BoundingBoxRenderer(gl);
 
         // Create terrain manager (loads terrain chunks + collects MDDF/MODF placements)
+        onStatus?.Invoke("Loading WDT...");
         _terrainManager = new TerrainManager(gl, wdtPath, dataSource);
-        _terrainManager.LoadAllTiles();
+        _terrainManager.LoadAllTiles((loaded, total, name) =>
+        {
+            onStatus?.Invoke($"Loading terrain: {loaded}/{total} tiles ({name})");
+        });
 
         var adapter = _terrainManager.Adapter;
 
         // Build manifest of unique assets referenced by this map
+        onStatus?.Invoke("Building asset manifest...");
         var manifest = _assets.BuildManifest(
             adapter.MdxModelNames, adapter.WmoModelNames,
             adapter.MddfPlacements, adapter.ModfPlacements);
 
         // Load each unique model exactly once
+        onStatus?.Invoke($"Loading {manifest.ReferencedMdx.Count} MDX + {manifest.ReferencedWmo.Count} WMO models...");
         _assets.LoadManifest(manifest);
 
         // Build lightweight instance lists (just key + transform)
         BuildInstances(adapter);
+
+        // For WMO-only maps, compute camera from MODF placement
+        if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
+        {
+            var wmoPos = adapter.ModfPlacements[0].Position;
+            _wmoCameraOverride = new Vector3(wmoPos.X, wmoPos.Y, wmoPos.Z + 50f);
+            Console.WriteLine($"[WorldScene] WMO-only map, camera at WMO position: ({wmoPos.X:F1}, {wmoPos.Y:F1}, {wmoPos.Z:F1})");
+        }
+
+        onStatus?.Invoke("World loaded.");
     }
+
+    private Vector3? _wmoCameraOverride;
+    /// <summary>For WMO-only maps, returns the WMO position as camera start. Otherwise null.</summary>
+    public Vector3? WmoCameraOverride => _wmoCameraOverride;
 
     private void BuildInstances(AlphaTerrainAdapter adapter)
     {
@@ -94,20 +130,51 @@ public class WorldScene : ISceneRenderer
         Console.WriteLine($"[WorldScene] Instances: {_mdxInstances.Count} MDX, {_wmoInstances.Count} WMO");
         Console.WriteLine($"[WorldScene] Unique models: {UniqueMdxModels} MDX, {UniqueWmoModels} WMO");
 
-        // Diagnostic: show first few placement positions vs terrain center
+        // Diagnostic: terrain chunk WorldPosition range
         var camPos = _terrainManager.GetInitialCameraPosition();
-        Console.WriteLine($"[WorldScene] Terrain camera center: ({camPos.X:F1}, {camPos.Y:F1}, {camPos.Z:F1})");
-        for (int i = 0; i < Math.Min(5, adapter.MddfPlacements.Count); i++)
+        Console.WriteLine($"[WorldScene] Camera: ({camPos.X:F1}, {camPos.Y:F1}, {camPos.Z:F1})");
+
+        // Compute terrain bounding box from chunk WorldPositions
+        float tMinX = float.MaxValue, tMinY = float.MaxValue, tMinZ = float.MaxValue;
+        float tMaxX = float.MinValue, tMaxY = float.MinValue, tMaxZ = float.MinValue;
+        foreach (var chunk in _terrainManager.Adapter.LastLoadedChunkPositions)
+        {
+            tMinX = Math.Min(tMinX, chunk.X); tMaxX = Math.Max(tMaxX, chunk.X);
+            tMinY = Math.Min(tMinY, chunk.Y); tMaxY = Math.Max(tMaxY, chunk.Y);
+            tMinZ = Math.Min(tMinZ, chunk.Z); tMaxZ = Math.Max(tMaxZ, chunk.Z);
+        }
+        Console.WriteLine($"[WorldScene] TERRAIN  X:[{tMinX:F1} .. {tMaxX:F1}]  Y:[{tMinY:F1} .. {tMaxY:F1}]  Z:[{tMinZ:F1} .. {tMaxZ:F1}]");
+
+        // Compute object bounding box (from stored positions, which are already transformed)
+        float oMinX = float.MaxValue, oMinY = float.MaxValue, oMinZ = float.MaxValue;
+        float oMaxX = float.MinValue, oMaxY = float.MinValue, oMaxZ = float.MinValue;
+        foreach (var p in adapter.MddfPlacements)
+        {
+            oMinX = Math.Min(oMinX, p.Position.X); oMaxX = Math.Max(oMaxX, p.Position.X);
+            oMinY = Math.Min(oMinY, p.Position.Y); oMaxY = Math.Max(oMaxY, p.Position.Y);
+            oMinZ = Math.Min(oMinZ, p.Position.Z); oMaxZ = Math.Max(oMaxZ, p.Position.Z);
+        }
+        foreach (var p in adapter.ModfPlacements)
+        {
+            oMinX = Math.Min(oMinX, p.Position.X); oMaxX = Math.Max(oMaxX, p.Position.X);
+            oMinY = Math.Min(oMinY, p.Position.Y); oMaxY = Math.Max(oMaxY, p.Position.Y);
+            oMinZ = Math.Min(oMinZ, p.Position.Z); oMaxZ = Math.Max(oMaxZ, p.Position.Z);
+        }
+        Console.WriteLine($"[WorldScene] OBJECTS  X:[{oMinX:F1} .. {oMaxX:F1}]  Y:[{oMinY:F1} .. {oMaxY:F1}]  Z:[{oMinZ:F1} .. {oMaxZ:F1}]");
+        Console.WriteLine($"[WorldScene] DELTA    X:{(tMinX+tMaxX)/2 - (oMinX+oMaxX)/2:F1}  Y:{(tMinY+tMaxY)/2 - (oMinY+oMaxY)/2:F1}  Z:{(tMinZ+tMaxZ)/2 - (oMinZ+oMaxZ)/2:F1}");
+
+        // Print first 3 MDDF raw values for manual inspection
+        for (int i = 0; i < Math.Min(3, adapter.MddfPlacements.Count); i++)
         {
             var p = adapter.MddfPlacements[i];
             string name = p.NameIndex < mdxNames.Count ? Path.GetFileName(mdxNames[p.NameIndex]) : "?";
-            Console.WriteLine($"[WorldScene]   MDDF[{i}] raw=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) rot=({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1}) scale={p.Scale:F2} model={name}");
+            Console.WriteLine($"[WorldScene]   MDDF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
         }
-        for (int i = 0; i < Math.Min(5, adapter.ModfPlacements.Count); i++)
+        for (int i = 0; i < Math.Min(3, adapter.ModfPlacements.Count); i++)
         {
             var p = adapter.ModfPlacements[i];
             string name = p.NameIndex < wmoNames.Count ? Path.GetFileName(wmoNames[p.NameIndex]) : "?";
-            Console.WriteLine($"[WorldScene]   MODF[{i}] raw=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) rot=({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1}) model={name}");
+            Console.WriteLine($"[WorldScene]   MODF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
         }
     }
 
@@ -140,6 +207,18 @@ public class WorldScene : ISceneRenderer
                 if (renderer == null) continue;
                 renderer.RenderWithTransform(inst.Transform, view, proj);
             }
+        }
+
+        // 4. Debug bounding boxes for all placements
+        if (_showBoundingBoxes && _bbRenderer != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            // MDDF markers (yellow)
+            foreach (var p in adapter.MddfPlacements)
+                _bbRenderer.DrawMarker(p.Position, 2f, view, proj, new Vector3(1f, 1f, 0f));
+            // MODF markers (cyan)
+            foreach (var p in adapter.ModfPlacements)
+                _bbRenderer.DrawMarker(p.Position, 5f, view, proj, new Vector3(0f, 1f, 1f));
         }
     }
 
@@ -183,6 +262,7 @@ public class WorldScene : ISceneRenderer
     {
         _terrainManager.Dispose();
         _assets.Dispose();
+        _bbRenderer?.Dispose();
         _mdxInstances.Clear();
         _wmoInstances.Clear();
     }

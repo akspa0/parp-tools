@@ -54,8 +54,8 @@ public class TerrainMeshBuilder
             float z = chunk.Heights[i];
 
             // World position = chunk corner + local offset
-            vertices[i * 8 + 0] = chunk.WorldPosition.X - y; // WoW X decreases going east
-            vertices[i * 8 + 1] = chunk.WorldPosition.Y - x; // WoW Y decreases going south
+            vertices[i * 8 + 0] = chunk.WorldPosition.X - y;
+            vertices[i * 8 + 1] = chunk.WorldPosition.Y - x;
             vertices[i * 8 + 2] = z;
 
             // Normal

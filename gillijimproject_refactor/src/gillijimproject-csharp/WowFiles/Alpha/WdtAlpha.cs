@@ -108,4 +108,10 @@ public class WdtAlpha : WowFiles.WowChunkedFormat
     {
         return _monm.GetFilesNames();
     }
+
+    /// <summary>True if this WDT is a WMO-only map (no terrain tiles, just a global WMO).</summary>
+    public bool IsWmoBased => _mphd.IsWmoBased();
+
+    /// <summary>Get the raw MODF chunk data from the WDT header (for WMO-only maps).</summary>
+    public byte[] GetWdtModfRaw() => _modf.Data ?? Array.Empty<byte>();
 }

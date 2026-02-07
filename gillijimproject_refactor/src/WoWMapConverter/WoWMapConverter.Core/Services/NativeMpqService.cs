@@ -248,6 +248,57 @@ public class NativeMpqService : IDisposable
     }
     
     /// <summary>
+    /// Reads file 0 from any listfile-less .ext.MPQ archive given its disk path.
+    /// Used by MdxViewer for Alpha 0.5.3 WMO, WDT, and WDL files.
+    /// </summary>
+    public byte[]? ReadFile0FromPath(string mpqDiskPath)
+    {
+        try
+        {
+            using var fs = new FileStream(mpqDiskPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(fs);
+            
+            long headerOffset = FindMpqHeader(reader);
+            if (headerOffset < 0) return null;
+            
+            fs.Position = headerOffset;
+            var header = ReadMpqHeader(reader);
+            if (header == null) return null;
+            
+            fs.Position = headerOffset + header.HashTableOffset;
+            var hashTable = ReadHashTable(reader, header.HashTableEntries);
+            
+            fs.Position = headerOffset + header.BlockTableOffset;
+            var blockTable = ReadBlockTable(reader, header.BlockTableEntries);
+            
+            // Find first valid file in hash table (file 0)
+            BlockEntry? file0Block = null;
+            foreach (var entry in hashTable)
+            {
+                if (entry.BlockIndex != 0xFFFFFFFF && entry.BlockIndex < blockTable.Length)
+                {
+                    var block = blockTable[entry.BlockIndex];
+                    if ((block.Flags & 0x80000000) != 0)
+                    {
+                        file0Block = block;
+                        break;
+                    }
+                }
+            }
+            
+            if (file0Block == null) return null;
+            
+            fs.Position = headerOffset + file0Block.BlockOffset;
+            return ReadFileData(reader, file0Block, header.SectorSize, "file_0", fs.Position);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[NativeMpqService] Error reading file 0 from {Path.GetFileName(mpqDiskPath)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Gets all known file paths including scanned files.
     /// </summary>
     public IReadOnlyList<string> GetAllKnownFiles()

@@ -82,16 +82,43 @@ public static class AlphaMpqReader
             // Read and decompress the file data
             fs.Position = headerOffset + primaryBlock.BlockOffset;
             var primaryData = ReadFileData(reader, primaryBlock, header.SectorSize);
+            if (primaryData != null && primaryData.Length >= 8)
+            {
+                string magic4 = primaryData.Length >= 4 
+                    ? $"{(char)primaryData[0]}{(char)primaryData[1]}{(char)primaryData[2]}{(char)primaryData[3]}" 
+                    : "???";
+                Console.WriteLine($"[AlphaMpqReader] Primary block: {primaryBlock.FileSize} bytes, magic='{magic4}', valid={IsLikelyWdtOrWdl(primaryData)}");
+            }
+
             if (IsLikelyWdtOrWdl(primaryData))
                 return primaryData;
 
-            var magicBlock = FindBlockByMagic(reader, headerOffset, header.SectorSize, blockTable);
-            if (magicBlock != null)
+            // Primary block wasn't the data file — scan all blocks for one with valid magic
+            foreach (var block in blockTable)
             {
-                fs.Position = headerOffset + magicBlock.BlockOffset;
-                var magicData = ReadFileData(reader, magicBlock, header.SectorSize);
-                if (IsLikelyWdtOrWdl(magicData))
-                    return magicData;
+                if (block == primaryBlock || block.FileSize == 0) continue;
+                fs.Position = headerOffset + block.BlockOffset;
+                var blockData = ReadFileData(reader, block, header.SectorSize);
+                if (IsLikelyWdtOrWdl(blockData))
+                {
+                    Console.WriteLine($"[AlphaMpqReader] Found valid data in alternate block: {block.FileSize} bytes");
+                    return blockData;
+                }
+            }
+
+            // No block had valid magic — return the largest block as best guess
+            BlockEntry? largestBlock = null;
+            foreach (var block in blockTable)
+            {
+                if (block.FileSize > 0 && (largestBlock == null || block.FileSize > largestBlock.FileSize))
+                    largestBlock = block;
+            }
+            if (largestBlock != null && largestBlock != primaryBlock)
+            {
+                fs.Position = headerOffset + largestBlock.BlockOffset;
+                var largestData = ReadFileData(reader, largestBlock, header.SectorSize);
+                Console.WriteLine($"[AlphaMpqReader] Falling back to largest block: {largestBlock.FileSize} bytes");
+                return largestData;
             }
 
             return primaryData;
@@ -275,19 +302,7 @@ public static class AlphaMpqReader
             }
         }
 
-        foreach (var entry in hashTable)
-        {
-            if (entry.BlockIndex == HashEntryEmpty || entry.BlockIndex == HashEntryDeleted)
-                continue;
-
-            if (entry.BlockIndex < blockTable.Length)
-            {
-                var block = blockTable[entry.BlockIndex];
-                if (block.FileSize > 0)
-                    return block;
-            }
-        }
-
+        // No name match — fall back to the largest block (actual data, not MD5 checksum)
         BlockEntry? largestBlock = null;
         foreach (var block in blockTable)
         {
@@ -298,26 +313,19 @@ public static class AlphaMpqReader
         return largestBlock;
     }
 
-    private static BlockEntry? FindBlockByMagic(BinaryReader reader, long headerOffset, uint sectorSize, BlockEntry[] blockTable)
-    {
-        foreach (var block in blockTable)
-        {
-            if (block.FileSize == 0) continue;
-            reader.BaseStream.Position = headerOffset + block.BlockOffset;
-            var data = ReadFileData(reader, block, sectorSize);
-            if (IsLikelyWdtOrWdl(data))
-                return block;
-        }
-
-        return null;
-    }
-
     private static bool IsLikelyWdtOrWdl(byte[]? data)
     {
         if (data == null || data.Length < 8) return false;
 
-        // WDT/WDL start with MVER chunk
-        return data[0] == (byte)'M' && data[1] == (byte)'V' && data[2] == (byte)'E' && data[3] == (byte)'R';
+        // WDT/WDL start with MVER chunk (forward: "MVER")
+        if (data[0] == (byte)'M' && data[1] == (byte)'V' && data[2] == (byte)'E' && data[3] == (byte)'R')
+            return true;
+
+        // WMO v14 starts with reversed MVER ("REVM")
+        if (data[0] == (byte)'R' && data[1] == (byte)'E' && data[2] == (byte)'V' && data[3] == (byte)'M')
+            return true;
+
+        return false;
     }
 
     public static IEnumerable<string> BuildInternalNameCandidates(string filePath)

@@ -106,9 +106,11 @@ public class TerrainManager : ISceneRenderer
     /// <summary>
     /// Load all tiles at once (for small maps or initial load).
     /// </summary>
-    public void LoadAllTiles()
+    public void LoadAllTiles(Action<int, int, string>? onProgress = null)
     {
-        Console.WriteLine($"[TerrainManager] Loading all {_adapter.ExistingTiles.Count} tiles...");
+        int total = _adapter.ExistingTiles.Count;
+        int loaded = 0;
+        Console.WriteLine($"[TerrainManager] Loading all {total} tiles...");
         foreach (int tileIdx in _adapter.ExistingTiles)
         {
             // Alpha WDT MAIN is column-major: index = x*64+y
@@ -116,6 +118,8 @@ public class TerrainManager : ISceneRenderer
             int ty = tileIdx % 64;
             if (!_loadedTiles.ContainsKey((tx, ty)))
                 LoadTile(tx, ty);
+            loaded++;
+            onProgress?.Invoke(loaded, total, $"Tile ({tx},{ty})");
         }
         Console.WriteLine($"[TerrainManager] All tiles loaded: {_loadedTiles.Count} tiles, {LoadedChunkCount} chunks");
     }

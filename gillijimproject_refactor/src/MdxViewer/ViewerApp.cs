@@ -66,6 +66,9 @@ public class ViewerApp : IDisposable
     private TerrainManager? _terrainManager;
     private WorldScene? _worldScene;
 
+    // Camera speed (adjustable via UI)
+    private float _cameraSpeed = 50f;
+
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
     private string _folderInputBuf = "";
@@ -162,20 +165,25 @@ public class ViewerApp : IDisposable
 
     private void HandleKeyboardInput(float dt)
     {
-        // Free-fly: WASD moves the camera position
-        float speed = 20f * dt;
-        bool w = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.W);
-        bool a = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.A);
-        bool s = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.S);
-        bool d = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.D);
-        bool q = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.Q);
-        bool e = _input.Keyboards.Count > 0 && _input.Keyboards[0].IsKeyPressed(Key.E);
+        if (_input.Keyboards.Count == 0) return;
+        var kb = _input.Keyboards[0];
+
+        // Free-fly: WASD moves the camera position, Shift = 5x boost
+        bool shift = kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight);
+        float speed = _cameraSpeed * dt * (shift ? 5f : 1f);
+
+        bool w = kb.IsKeyPressed(Key.W);
+        bool a = kb.IsKeyPressed(Key.A);
+        bool s = kb.IsKeyPressed(Key.S);
+        bool d = kb.IsKeyPressed(Key.D);
+        bool q = kb.IsKeyPressed(Key.Q);
+        bool e = kb.IsKeyPressed(Key.E);
 
         if (w || a || s || d || q || e)
         {
             float forward = (w ? 1 : 0) - (s ? 1 : 0);
             float right = (d ? 1 : 0) - (a ? 1 : 0);
-            float up = (e ? 1 : 0) - (q ? 1 : 0);
+            float up = (q ? 1 : 0) - (e ? 1 : 0);
             _camera.Move(forward, right, up, speed);
         }
     }
@@ -548,10 +556,86 @@ public class ViewerApp : IDisposable
                     if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
                         lighting.FogEnd = fogEnd;
 
+                    // Camera speed control
+                    ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
+                    ImGui.Text("Hold Shift for 5x boost");
+
                     ImGui.Separator();
                     ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
                     ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
                     ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
+                }
+
+                // Object list panel (when WorldScene is active)
+                if (_worldScene != null)
+                {
+                    ImGui.Separator();
+
+                    // Bounding box toggle
+                    bool showBB = _worldScene.ShowBoundingBoxes;
+                    if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
+                        _worldScene.ShowBoundingBoxes = showBB;
+
+                    // WMO placements
+                    if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
+                    {
+                        for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
+                        {
+                            var p = _worldScene.ModfPlacements[i];
+                            string name = p.NameIndex < _worldScene.WmoModelNames.Count
+                                ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                            string label = $"[{i}] {name}";
+                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                            {
+                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                                {
+                                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
+                                    _camera.Pitch = -30f;
+                                }
+                            }
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                                ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                                ImGui.Text($"Flags: 0x{p.Flags:X4}");
+                                ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
+                                ImGui.EndTooltip();
+                            }
+                        }
+                        ImGui.TreePop();
+                    }
+
+                    // MDX placements (show first 200 to avoid UI lag)
+                    int mddfCount = _worldScene.MddfPlacements.Count;
+                    int mddfShow = Math.Min(mddfCount, 200);
+                    if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
+                    {
+                        for (int i = 0; i < mddfShow; i++)
+                        {
+                            var p = _worldScene.MddfPlacements[i];
+                            string name = p.NameIndex < _worldScene.MdxModelNames.Count
+                                ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                            string label = $"[{i}] {name} s={p.Scale:F2}";
+                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                            {
+                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                                {
+                                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
+                                    _camera.Pitch = -30f;
+                                }
+                            }
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                                ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                                ImGui.Text($"Scale: {p.Scale:F3}");
+                                ImGui.EndTooltip();
+                            }
+                        }
+                        ImGui.TreePop();
+                    }
                 }
             }
         }
@@ -934,12 +1018,13 @@ public class ViewerApp : IDisposable
 
         try
         {
-            _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver);
+            _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver,
+                onStatus: status => _statusMessage = status);
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene; // WorldScene implements ISceneRenderer
 
-            // Position camera at the center of the map
-            var startPos = _terrainManager.GetInitialCameraPosition();
+            // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
+            var startPos = _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
             _camera.Position = startPos;
             _camera.Yaw = 180f;
             _camera.Pitch = -20f;

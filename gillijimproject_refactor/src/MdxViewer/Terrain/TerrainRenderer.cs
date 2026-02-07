@@ -364,7 +364,11 @@ void main() {
     // Alpha from alpha map (overlay layers only)
     float alpha = 1.0;
     if (uIsBaseLayer == 0 && uHasAlphaMap == 1) {
-        alpha = texture(uAlphaSampler, vTexCoord).r;
+        // Inset UVs by half-texel to prevent sampling artifacts at chunk edges
+        // Alpha maps are 64x64, so half-texel = 0.5/64
+        float halfTexel = 0.5 / 64.0;
+        vec2 alphaUV = vTexCoord * (1.0 - 2.0 * halfTexel) + halfTexel;
+        alpha = texture(uAlphaSampler, alphaUV).r;
         if (alpha < 0.004) discard; // Skip fully transparent pixels
     }
 

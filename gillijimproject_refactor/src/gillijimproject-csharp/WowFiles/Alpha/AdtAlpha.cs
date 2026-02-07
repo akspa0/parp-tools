@@ -164,6 +164,11 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
     }
 
     /// <summary>
+    /// Returns the 256 MCNK offsets from the MCIN chunk.
+    /// </summary>
+    public List<int> GetMcnkOffsets() => _mcin.GetMcnkOffsets();
+
+    /// <summary>
     /// Exposes the set of Alpha MDDF indices referencing WDT MDNM names.
     /// Use WDT MDNM file list to resolve indices to model paths.
     /// </summary>
