@@ -151,9 +151,9 @@ public class AlphaTerrainAdapter
         // Diagnostic: print tile corner position for first tile loaded
         if (LastLoadedChunkPositions.Count <= 256)
         {
-            float cornerX = (32 - tileX) * WoWConstants.ChunkSize;
-            float cornerY = (32 - tileY) * WoWConstants.ChunkSize;
-            Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}) corner=({cornerX:F1}, {cornerY:F1})  formula: localX=(32-{tileX})*533.33={cornerX:F1}  localY=(32-{tileY})*533.33={cornerY:F1}");
+            float cornerX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize;
+            float cornerY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize;
+            Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}) corner=({cornerX:F1}, {cornerY:F1})  wowY={cornerX:F1}  wowX={cornerY:F1}");
         }
 
         Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures");
@@ -188,23 +188,24 @@ public class AlphaTerrainAdapter
                 if (MddfPlacements.Count == 2) _mddfDiagPrinted = true;
             }
 
-            // File layout per wowdev.wiki: position is 3 floats (X, Z, Y) in WoW coords
-            // off+8 = X (north), off+12 = Z (height), off+16 = Y (west)
-            float wowX = f0;  // north
-            float wowZ = f1;  // height
-            float wowY = f2;  // west
+            // Raw floats: off+8, off+12 (height), off+16
+            float rawX = f0;
+            float rawZ = f1;  // height
+            float rawY = f2;
 
             float rotX = BitConverter.ToSingle(mddfData, off + 20);
             float rotZ = BitConverter.ToSingle(mddfData, off + 24);
             float rotY = BitConverter.ToSingle(mddfData, off + 28);
             ushort scale = BitConverter.ToUInt16(mddfData, off + 32);
 
-            // Convert WoW world coords to terrain local coords:
-            // Terrain localX = wowY (west), localY = wowX (north), localZ = wowZ (height)
+            // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
             MddfPlacements.Add(new MddfPlacement
             {
                 NameIndex = nameIdx,
-                Position = new Vector3(wowY, wowX, wowZ),
+                Position = new Vector3(
+                    WoWConstants.MapOrigin - rawY,
+                    WoWConstants.MapOrigin - rawX,
+                    rawZ),
                 Rotation = new Vector3(rotX, rotY, rotZ),
                 Scale = scale / 1024f
             });
@@ -235,10 +236,10 @@ public class AlphaTerrainAdapter
                 Console.WriteLine($"[MODF RAW] [0] off+8={mf0:F2} off+12={mf1:F2} off+16={mf2:F2}  model={mname}");
             }
 
-            // File layout: X(+8) Z(+12) Y(+16) — WoW coords: X=north, Z=height, Y=west
-            float wowX = BitConverter.ToSingle(modfData, off + 8);
-            float wowZ = BitConverter.ToSingle(modfData, off + 12); // height
-            float wowY = BitConverter.ToSingle(modfData, off + 16);
+            // Raw floats from file
+            float rawX = BitConverter.ToSingle(modfData, off + 8);
+            float rawZ = BitConverter.ToSingle(modfData, off + 12); // height
+            float rawY = BitConverter.ToSingle(modfData, off + 16);
             float rotX = BitConverter.ToSingle(modfData, off + 20);
             float rotZ = BitConverter.ToSingle(modfData, off + 24);
             float rotY = BitConverter.ToSingle(modfData, off + 28);
@@ -250,15 +251,23 @@ public class AlphaTerrainAdapter
             float bbMaxY = BitConverter.ToSingle(modfData, off + 52);
             ushort flags = BitConverter.ToUInt16(modfData, off + 56);
 
-            // Convert WoW world coords to terrain local coords:
-            // Terrain localX = wowY (west), localY = wowX (north), localZ = wowZ (height)
+            // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
             ModfPlacements.Add(new ModfPlacement
             {
                 NameIndex = nameIdx,
-                Position = new Vector3(wowY, wowX, wowZ),
+                Position = new Vector3(
+                    WoWConstants.MapOrigin - rawY,
+                    WoWConstants.MapOrigin - rawX,
+                    rawZ),
                 Rotation = new Vector3(rotX, rotY, rotZ),
-                BoundsMin = new Vector3(bbMinY, bbMinX, bbMinZ),
-                BoundsMax = new Vector3(bbMaxY, bbMaxX, bbMaxZ),
+                BoundsMin = new Vector3(
+                    WoWConstants.MapOrigin - bbMinY,
+                    WoWConstants.MapOrigin - bbMinX,
+                    bbMinZ),
+                BoundsMax = new Vector3(
+                    WoWConstants.MapOrigin - bbMaxY,
+                    WoWConstants.MapOrigin - bbMaxX,
+                    bbMaxZ),
                 Flags = flags
             });
         }
@@ -282,9 +291,13 @@ public class AlphaTerrainAdapter
         // Extract alpha maps from MCAL
         var alphaMaps = ExtractAlphaMaps(mcnk.McalData, mcnk.MclyData, mcnk.NLayers);
 
-        // Compute world position for this chunk (local coordinate system)
-        float worldX = (32 - tileX) * WoWConstants.ChunkSize - chunkY * (WoWConstants.ChunkSize / 16f);
-        float worldY = (32 - tileY) * WoWConstants.ChunkSize - chunkX * (WoWConstants.ChunkSize / 16f);
+        // Compute world position for this chunk in WoW world coordinates
+        // WDT is column-major: tileX=column(east-west), tileY=row(north-south)
+        // WoW: X=north, Y=west — but our renderer axis mapping: rendererX=wowY, rendererY=wowX
+        // This matches the MDDF/MODF Position = Vector3(wowY, wowX, wowZ)
+        float chunkSmall = WoWConstants.ChunkSize / 16f;
+        float worldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall;
+        float worldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall;
 
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 

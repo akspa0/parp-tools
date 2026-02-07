@@ -60,6 +60,8 @@ public class TerrainManager : ISceneRenderer
         _cameraPos = cameraPos;
 
         // Convert camera world position to tile coordinates
+        // rendererX = wowY = MapOrigin - tileX * ChunkSize → tileX = (MapOrigin - rendererX) / ChunkSize
+        // rendererY = wowX = MapOrigin - tileY * ChunkSize → tileY = (MapOrigin - rendererY) / ChunkSize
         int tileX = (int)((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize);
         int tileY = (int)((WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize);
 
@@ -142,7 +144,9 @@ public class TerrainManager : ISceneRenderer
 
     private void FindInitialCameraPosition(out Vector3 cameraPos)
     {
-        // Find the center of all existing tiles
+        // Find the center of all existing tiles in WoW world coordinates
+        // rendererX = wowY = MapOrigin - tileX * ChunkSize
+        // rendererY = wowX = MapOrigin - tileY * ChunkSize
         if (_adapter.ExistingTiles.Count == 0)
         {
             cameraPos = Vector3.Zero;
@@ -152,17 +156,17 @@ public class TerrainManager : ISceneRenderer
         float sumX = 0, sumY = 0;
         foreach (int idx in _adapter.ExistingTiles)
         {
-            // Alpha WDT MAIN is column-major: index = x*64+y
-            int tx = idx / 64;
-            int ty = idx % 64;
-            sumX += (32 - tx) * WoWConstants.ChunkSize;
-            sumY += (32 - ty) * WoWConstants.ChunkSize;
+            // Alpha WDT MAIN is column-major: index = tileX*64+tileY
+            int tx = idx / 64; // column (east-west)
+            int ty = idx % 64; // row (north-south)
+            sumX += WoWConstants.MapOrigin - tx * WoWConstants.ChunkSize;
+            sumY += WoWConstants.MapOrigin - ty * WoWConstants.ChunkSize;
         }
 
         float avgX = sumX / _adapter.ExistingTiles.Count;
         float avgY = sumY / _adapter.ExistingTiles.Count;
 
-        cameraPos = new Vector3(avgX, avgY, 200f); // Start 200 units above terrain
+        cameraPos = new Vector3(avgX, avgY, 200f);
     }
 
     /// <summary>
