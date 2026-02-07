@@ -42,7 +42,7 @@ public class WorldScene : ISceneRenderer
     public IReadOnlyList<string> WmoModelNames => _terrainManager.Adapter.WmoModelNames;
 
     // Bounding box debug rendering
-    private bool _showBoundingBoxes = false;
+    private bool _showBoundingBoxes = true; // default ON for debugging
     private BoundingBoxRenderer? _bbRenderer;
     public bool ShowBoundingBoxes { get => _showBoundingBoxes; set => _showBoundingBoxes = value; }
 
@@ -180,33 +180,65 @@ public class WorldScene : ISceneRenderer
 
     // ── ISceneRenderer ──────────────────────────────────────────────────
 
+    private bool _renderDiagPrinted = false;
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
         // 1. Render terrain
         _terrainManager.Render(view, proj);
 
+        // Reset GL state after terrain (terrain leaves DepthFunc as Lequal)
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Enable(EnableCap.DepthTest);
+
         if (!_objectsVisible) return;
+
+        // One-time render diagnostic
+        if (!_renderDiagPrinted)
+        {
+            int wmoFound = 0, wmoMissing = 0;
+            foreach (var inst in _wmoInstances)
+            {
+                if (_assets.GetWmo(inst.ModelKey) != null) wmoFound++;
+                else { wmoMissing++; if (wmoMissing <= 3) Console.WriteLine($"[WorldScene] WMO NOT FOUND: \"{inst.ModelKey}\""); }
+            }
+            int mdxFound = 0, mdxMissing = 0;
+            foreach (var inst in _mdxInstances)
+            {
+                if (_assets.GetMdx(inst.ModelKey) != null) mdxFound++;
+                else { mdxMissing++; if (mdxMissing <= 3) Console.WriteLine($"[WorldScene] MDX NOT FOUND: \"{inst.ModelKey}\""); }
+            }
+            Console.WriteLine($"[WorldScene] Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
+        }
 
         // 2. Render WMO instances (each instance references a shared renderer)
         if (_wmosVisible)
         {
+            int wmoRendered = 0;
             foreach (var inst in _wmoInstances)
             {
                 var renderer = _assets.GetWmo(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderWithTransform(inst.Transform, view, proj);
+                wmoRendered++;
             }
+            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] WMO render loop: {wmoRendered} rendered");
         }
 
         // 3. Render MDX instances
         if (_doodadsVisible)
         {
+            int mdxRendered = 0;
             foreach (var inst in _mdxInstances)
             {
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderWithTransform(inst.Transform, view, proj);
+                mdxRendered++;
             }
+            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] MDX render loop: {mdxRendered} rendered");
+            if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
 
         // 4. Debug bounding boxes for all placements
