@@ -146,7 +146,7 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(-rz)
+                * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             // Use actual model bounds if available, transformed to world space
@@ -181,7 +181,7 @@ public class WorldScene : ISceneRenderer
             var transform = mirrorX
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
-                * Matrix4x4.CreateRotationZ(-rz)
+                * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             _wmoInstances.Add(new ObjectInstance
