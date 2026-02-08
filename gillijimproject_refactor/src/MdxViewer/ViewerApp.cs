@@ -142,7 +142,7 @@ public class ViewerApp : IDisposable
 
                 if (_mouseDown && !ImGui.GetIO().WantCaptureMouse)
                 {
-                    _camera.Yaw += dx * 0.5f;   // Drag left = look left, Drag right = look right
+                    _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
                     _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
                     _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
                 }
