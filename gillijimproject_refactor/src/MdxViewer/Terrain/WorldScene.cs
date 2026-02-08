@@ -128,13 +128,8 @@ public class WorldScene : ISceneRenderer
         //   rotZ = roll (tilt around Y axis)
         // After the X↔Y swap in position, heading must be negated.
         //
-        // Model coordinate system: WoW models use Z-up, same as our renderer.
-        // The X↔Y swap is handled by the modelToRenderer matrix.
-        var modelToRenderer = new Matrix4x4(
-             0,  1, 0, 0,
-             1,  0, 0, 0,
-             0,  0, 1, 0,
-             0,  0, 0, 1);
+        // No modelToRenderer swap — positions already have X↔Y swap from AlphaTerrainAdapter.
+        // Rotations applied directly per working commit (0c13208).
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -143,21 +138,13 @@ public class WorldScene : ISceneRenderer
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            // AlphaTerrainAdapter reads: rotX(off+20), rotZ(off+24), rotY(off+28)
-            // Stored as: Rotation = new Vector3(rotX, rotY, rotZ)
-            // So: Rotation.X = pitch, Rotation.Z = heading (around up axis), Rotation.Y = roll
-            // After X<->Y position swap: negate heading
-            float headingDeg = -p.Rotation.Z;
-            float pitchDeg   = p.Rotation.X;
-            float rollDeg    = p.Rotation.Y;
-            float headingRad = headingDeg * MathF.PI / 180f;
-            float pitchRad   = pitchDeg * MathF.PI / 180f;
-            float rollRad    = rollDeg * MathF.PI / 180f;
-            var transform = modelToRenderer
-                * Matrix4x4.CreateScale(scale)
-                * Matrix4x4.CreateRotationZ(headingRad)
-                * Matrix4x4.CreateRotationX(pitchRad)
-                * Matrix4x4.CreateRotationY(rollRad)
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = Matrix4x4.CreateScale(scale)
+                * Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
+                * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             // Use actual model bounds if available, transformed to world space
@@ -180,22 +167,18 @@ public class WorldScene : ISceneRenderer
             });
         }
 
-        // WMO placements — same rotation logic
+        // WMO placements
         foreach (var p in adapter.ModfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
 
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            float headingDeg = -p.Rotation.Z;
-            float pitchDeg   = p.Rotation.X;
-            float rollDeg    = p.Rotation.Y;
-            float headingRad = headingDeg * MathF.PI / 180f;
-            float pitchRad   = pitchDeg * MathF.PI / 180f;
-            float rollRad    = rollDeg * MathF.PI / 180f;
-            var transform = modelToRenderer
-                * Matrix4x4.CreateRotationZ(headingRad)
-                * Matrix4x4.CreateRotationX(pitchRad)
-                * Matrix4x4.CreateRotationY(rollRad)
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
+                * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
             _wmoInstances.Add(new ObjectInstance
