@@ -176,13 +176,16 @@ public static class GlbExporter
         Console.WriteLine($"  GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials exported");
     }
 
+    /// <summary>Z-up (WoW) to Y-up (glTF): (X,Y,Z) → (X,Z,-Y)</summary>
+    private static Vector3 ZupToYup(float x, float y, float z) => new Vector3(x, z, -y);
+
     private static VERTEX MakeVertex(MdlGeoset geoset, int idx, bool hasNormals, bool hasUVs)
     {
         var pos = geoset.Vertices[idx];
-        var position = new Vector3(-pos.X, pos.Y, pos.Z); // Flip X for WoW coords
+        var position = ZupToYup(pos.X, pos.Y, pos.Z);
 
         var normal = hasNormals
-            ? new Vector3(-geoset.Normals[idx].X, geoset.Normals[idx].Y, geoset.Normals[idx].Z)
+            ? ZupToYup(geoset.Normals[idx].X, geoset.Normals[idx].Y, geoset.Normals[idx].Z)
             : Vector3.UnitY;
 
         var uv = hasUVs
@@ -200,11 +203,14 @@ public static class GlbExporter
         List<Vector3> normals, bool hasUVs)
     {
         var pos = group.Vertices[idx];
-        var normal = idx < normals.Count ? normals[idx] : Vector3.UnitY;
+        var position = ZupToYup(pos.X, pos.Y, pos.Z);
+        var normal = idx < normals.Count
+            ? ZupToYup(normals[idx].X, normals[idx].Y, normals[idx].Z)
+            : Vector3.UnitY;
         var uv = hasUVs ? group.UVs[idx] : Vector2.Zero;
 
         return new VERTEX(
-            new VertexPositionNormal(pos, normal),
+            new VertexPositionNormal(position, normal),
             new VertexTexture1(uv)
         );
     }

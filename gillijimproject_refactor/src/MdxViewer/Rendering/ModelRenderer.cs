@@ -117,7 +117,9 @@ public class MdxRenderer : ISceneRenderer
     {
         _gl.UseProgram(_shaderProgram);
 
-        // MDX models often have single-sided geometry — disable culling to avoid holes
+        // WoW MDX uses clockwise winding order (OpenGL default is CCW)
+        _gl.FrontFace(FrontFaceDirection.CW);
+        // Disable culling — many MDX geosets have single-sided geometry
         _gl.Disable(EnableCap.CullFace);
 
         var model = modelMatrix;
@@ -251,6 +253,8 @@ public class MdxRenderer : ISceneRenderer
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        // Restore default winding order for other renderers
+        _gl.FrontFace(FrontFaceDirection.Ccw);
     }
 
     private void InitShaders()
