@@ -61,6 +61,7 @@ public class MdxFile
             uint size = br.ReadUInt32();
             long chunkEnd = br.BaseStream.Position + size;
 
+            // Console.WriteLine($"  Found chunk: {tag} ({size} bytes)");
             switch (tag)
             {
                 case MdxHeaders.VERS:
@@ -266,33 +267,30 @@ public class MdxFile
     {
         long end = br.BaseStream.Position + size;
         
-        // Ghidra-verified: GEOS chunk body starts with uint32 geosetCount
-        uint geosetCount = br.ReadUInt32();
-        Console.WriteLine($"  [GEOS] geosetCount={geosetCount}, chunkSize={size}, pos={br.BaseStream.Position}");
-
-        // Sanity check: if geosetCount looks like a size (> 255), it's probably not a count
-        // and the format doesn't have the count field here
-        if (geosetCount > 255)
+        // Alpha 0.5.3 seems to have a uint32 count here
+        if (size >= 4)
         {
-            Console.WriteLine($"  [GEOS] geosetCount={geosetCount} looks like a size, rewinding");
-            br.BaseStream.Position -= 4;
-            geosetCount = uint.MaxValue; // use while loop instead
+            uint possibleCount = br.ReadUInt32();
+            if (possibleCount > 100) // Likely a size, not a count
+            {
+                br.BaseStream.Position -= 4;
+            }
+            else
+            {
+            }
         }
 
-        uint g = 0;
-        while (br.BaseStream.Position < end && g < geosetCount)
+        while (br.BaseStream.Position < end)
         {
             if (end - br.BaseStream.Position < 4) break;
 
             uint geosetSize = br.ReadUInt32();
             long geosetEnd = br.BaseStream.Position - 4 + geosetSize;
-            if (g < 2) Console.WriteLine($"  [GEOS] Geoset[{g}]: size={geosetSize}, end={geosetEnd}, posAfterSize={br.BaseStream.Position}");
             
-            var geoset = ReadGeoset(br, geosetSize - 4, version, g < 2);
+            var geoset = ReadGeoset(br, geosetSize - 4, version);
             geosets.Add(geoset);
             
             br.BaseStream.Position = geosetEnd;
-            g++;
         }
     }
 
@@ -400,7 +398,7 @@ public class MdxFile
         }
     }
 
-    static MdlGeoset ReadGeoset(BinaryReader br, uint size, uint mdxVersion, bool debug = false)
+    static MdlGeoset ReadGeoset(BinaryReader br, uint size, uint mdxVersion)
     {
         var geo = new MdlGeoset();
         long geoEnd = br.BaseStream.Position + size;
@@ -409,85 +407,93 @@ public class MdxFile
         {
             if (geoEnd - br.BaseStream.Position < 8) break;
 
-            // Peek at next 4 bytes to check if it's a valid sub-chunk tag.
-            // If not, we've reached the trailing standalone fields (materialId, etc.)
-            long peekPos = br.BaseStream.Position;
-            string peekTag = ReadTag(br);
-            br.BaseStream.Position = peekPos; // rewind
-            if (!IsValidGeosetTag(peekTag))
-            {
-                if (debug) { Console.WriteLine($"    [PEEK] Non-tag at pos={peekPos}: '{peekTag}' (0x{(peekPos < br.BaseStream.Length - 4 ? BitConverter.ToString(br.ReadBytes(4)).Replace("-","") : "EOF")})"); br.BaseStream.Position = peekPos; }
-                break; // exit loop to read trailing fields
-            }
-
-            long subPos = br.BaseStream.Position;
             string tag = ReadTag(br);
             uint count = br.ReadUInt32();
-            long afterHeader = br.BaseStream.Position;
-            if (debug) Console.WriteLine($"    [{tag}] count={count} at pos={subPos} dataStart={afterHeader}");
+
+
             switch (tag)
             {
                 case "VRTX":
                     for (int i = 0; i < count; i++)
                         geo.Vertices.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
-                    if (debug) Console.WriteLine($"      VRTX read {count} verts, pos now={br.BaseStream.Position}");
                     break;
                 case "NRMS":
                     for (int i = 0; i < count; i++)
                         geo.Normals.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
-                    if (debug) Console.WriteLine($"      NRMS read {count} norms, pos now={br.BaseStream.Position}");
                     break;
                 case "PTYP":
-                    br.ReadBytes((int)count * 4);
-                    if (debug) Console.WriteLine($"      PTYP skipped {count*4} bytes, pos now={br.BaseStream.Position}");
+                    // Was 1 byte, but alignment suggests 4 bytes (standard uint32)
+                    // If count is 1 (triangles), we want 4 bytes.
+                    br.ReadBytes((int)count * 4); 
                     break;
                 case "PCNT":
-                    br.ReadBytes((int)count * 4);
+                    // Primitive Counts
+                    br.ReadBytes((int)count * 4); 
                     break;
                 case "PVTX":
                     for (int i = 0; i < count; i++)
                         geo.Indices.Add(br.ReadUInt16());
                     break;
                 case "GNDX":
-                    br.ReadBytes((int)count);
+                    br.ReadBytes((int)count); 
                     break;
                 case "MTGC":
-                    br.ReadBytes((int)count * 4);
+                    br.ReadBytes((int)count * 4); 
                     break;
                 case "MATS":
-                    // Bone matrix indices, NOT material ID.
-                    // materialId is a standalone trailing field after all sub-chunks.
-                    br.ReadBytes((int)count * 4);
+                    if (count > 0)
+                    {
+                        geo.MaterialId = br.ReadInt32();
+                        if (count > 1) br.ReadBytes((int)(count - 1) * 4);
+                    }
                     break;
                 case "TVER":
-                    br.ReadBytes((int)count * 4);
+                    br.ReadBytes((int)count * 4); 
                     break;
                 case "UVAS":
-                {
-                    // Alpha 0.5.3 (v1300): count = number of UV sets (typically 1)
-                    // Data follows inline: numVertices UV pairs per set
-                    int nVerts = geo.Vertices.Count;
-                    if (nVerts > 0)
+                    if (mdxVersion == 1300) // Alpha 0.5.3 Special Case
                     {
-                        for (int k = 0; k < nVerts; k++)
-                            geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
-                        // Skip additional UV sets beyond the first
-                        int extraSets = (int)count - 1;
-                        if (extraSets > 0)
-                            br.ReadBytes(extraSets * nVerts * 8);
+                        // Alpha 0.5.3 Optimization: 
+                        // If Version is 1300, UVAS block seemingly contains the data directly 
+                        // if Count is 1 (which means 1 UV set).
+                        // The data length corresponds to the number of vertices.
+                        // We must read this data to maintain alignment.
+                        int nVerts = geo.Vertices.Count;
+                        if (nVerts > 0)
+                        {
+                            for (int k = 0; k < nVerts; k++)
+                                geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
+                        }
                     }
-                    if (debug) Console.WriteLine($"      UVAS count={count} nVerts={nVerts}, pos now={br.BaseStream.Position}");
+                    // If not version 1300, it's a standard container and we continue to inner chunks (UVBS)
                     break;
-                }
                 case "UVBS":
                     for (int i = 0; i < count; i++)
                         geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
                     break;
                 case "BIDX":
-                    br.ReadBytes((int)count * 4);
-                    break;
-                case "BWGT":
-                    br.ReadBytes((int)count * 4);
+                    // Bone Indices (Alpha legacy?)
+                    // Determine element size based on remaining bytes in geoset
+                    long bidxRem = geoEnd - br.BaseStream.Position;
+                    if (count > 0 && bidxRem >= count)
+                    {
+                        // Check if 4 bytes per element matches remaining exactly
+                        if (bidxRem == count * 4)
+                        {
+                            br.ReadBytes((int)count * 4);
+                        }
+                        else if (bidxRem == count) // 1 byte per element
+                        {
+                            br.ReadBytes((int)count);
+                        }
+                        else
+                        {
+                            // Ambiguous. Default to 1 (safe?) or 4?
+                            // Or just Smart Seek the next tag?
+                            // If we are at end, consuming 'remaining' is safest.
+                                br.ReadBytes((int)bidxRem);
+                        }
+                    }
                     break;
 
                 default:
@@ -528,40 +534,6 @@ public class MdxFile
             }
         }
 
-        // Per wowdev wiki MDLGEOSETSECTION: after all sub-chunks come standalone fields:
-        //   uint32 materialId, uint32 selectionGroup, uint32 flags,
-        //   CMdlBounds bounds, uint32 numSeqBounds, CMdlBounds seqBounds[numSeqBounds]
-        // Read these if there's enough data remaining.
-        long remaining = geoEnd - br.BaseStream.Position;
-        if (debug) Console.WriteLine($"    [TRAILING] pos={br.BaseStream.Position}, remaining={remaining}, geoEnd={geoEnd}");
-        if (remaining >= 12) // at least materialId + selectionGroup + flags
-        {
-            geo.MaterialId = br.ReadInt32();
-            if (debug) Console.WriteLine($"    [TRAILING] materialId={geo.MaterialId}, selGroup={br.BaseStream.Position}, flags next");
-            geo.SelectionGroup = br.ReadUInt32();
-            geo.Flags = br.ReadUInt32();
-            
-            // CMdlBounds = CAaBox(6 floats) + float radius = 28 bytes
-            remaining = geoEnd - br.BaseStream.Position;
-            if (remaining >= 28)
-            {
-                br.ReadBytes(28); // bounds (min3 + max3 + radius) — skip for now
-                
-                remaining = geoEnd - br.BaseStream.Position;
-                if (remaining >= 4)
-                {
-                    uint numSeqBounds = br.ReadUInt32();
-                    long seqBoundsBytes = numSeqBounds * 28L;
-                    remaining = geoEnd - br.BaseStream.Position;
-                    if (seqBoundsBytes <= remaining)
-                        br.ReadBytes((int)seqBoundsBytes);
-                }
-            }
-        }
-
-        // Seek to exact geoset end in case of any alignment issues
-        br.BaseStream.Position = geoEnd;
-
         return geo;
     }
 
@@ -569,6 +541,6 @@ public class MdxFile
     {
         return tag == "VRTX" || tag == "NRMS" || tag == "PTYP" || tag == "PCNT" || 
                tag == "PVTX" || tag == "GNDX" || tag == "MTGC" || tag == "MATS" || 
-               tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX" || tag == "BWGT";
+               tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX";
     }
 }
