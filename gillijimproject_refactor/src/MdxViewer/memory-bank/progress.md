@@ -1,44 +1,45 @@
 # Progress — MdxViewer Renderer Reimplementation
 
-## Status: Phase 4 Mostly Complete — WMO Rotation BLOCKED
+## Status: Phase 4 Mostly Complete — MDX WorldScene Textures Next
 
 ## What Works Today
 
 | Feature | Status |
 |---------|--------|
 | Terrain rendering + AOI lazy loading | ✅ |
-| MDX model loading + rendering | ✅ Per-geoset, multi-layer materials, textured, no backface culling |
+| Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
+| Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
 | MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
+| MDX doodads in WorldScene | ⚠️ Position OK, textures broken (magenta) |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
-| WMO rotation/facing | ❌ BLOCKED — models in BB but face wrong direction |
+| WMO rotation/facing in WorldScene | ✅ Fixed — `-rz` negation for handedness |
 | MDDF/MODF placements | ✅ Position correct |
 | Bounding boxes | ✅ Actual MODF extents with correct min/max swap |
 | BLP2 texture loading | ✅ DXT1/3/5, palette, JPEG |
 | MPQ data source | ✅ Listfile, nested WMO archives |
-| DBC integration | ✅ DBCD, replaceable texture resolution |
+| DBC integration | ✅ DBCD, CreatureModelData, CreatureDisplayInfo |
 | Camera | ✅ Free-fly WASD + mouse look |
 | ImGui UI | ✅ File browser, model info, visibility toggles |
 | Live minimap + click-to-teleport | ✅ |
 | AreaPOI system | ✅ DBC loading, 3D markers, minimap markers, UI list |
 | Object picking/selection | ✅ |
-| GLB export | ✅ MDX + WMO |
-| Standalone WMO/MDX viewer | ❌ Black screen |
+| GLB export | ✅ MDX + WMO, Z-up → Y-up conversion |
 
 ## Phase Status
 
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Foundation | ✅ Complete |
-| 3 | Terrain | ✅ Complete |
-| 4 | World Scene | ⚠️ Mostly complete — WMO rotation blocked |
+| 3 | Terrain | ✅ Complete (alpha seam fix applied) |
+| 4 | World Scene | ⚠️ WMOs ✅, MDX textures ❌ |
 | 1 | MDX Animation | ⏳ Not started |
 | 2 | Particles | ⏳ Not started |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Not started |
 
-## Key Blocker: WMO Rotation
+## Next Priority: MDX Doodad Textures in WorldScene
 
-See `activeContext.md` for full details. Models sit in bounding boxes but face ~180° wrong. Multiple vertex and transform approaches tried and failed. Need fresh approach — possibly study noggit's full WMO vertex pipeline or wow.export end-to-end.
+MDX doodads render in correct positions but have no textures (magenta). This is a pre-existing issue, not a regression from this session. Likely a texture path resolution issue when loading MDX models via WorldAssetManager.
 
 ## Recent Changes
 
@@ -52,4 +53,11 @@ See `activeContext.md` for full details. Models sit in bounding boxes but face ~
 - 2026-02-07: Added AreaPOI system (DBC loading, 3D/minimap markers, UI list)
 - 2026-02-07: Fixed MDX blend modes — depth mask off for transparent layers, alpha discard 0.1
 - 2026-02-07: WMO doodads now rendered with WMO's modelMatrix
-- 2026-02-07: WMO rotation — BLOCKED after many attempts. Reverted to known-good baseline (raw vertices, simple rotation formula). Models in BBs but facing wrong.
+- 2026-02-07: WMO rotation — BLOCKED after many attempts
+- 2026-02-08: Fixed standalone MDX rendering — MirrorX model matrix for LH→RH conversion
+- 2026-02-08: Fixed BIDX parsing — 1 byte per vertex (not 4)
+- 2026-02-08: Reverted MTLS dual-format heuristic — back to stable count-header format
+- 2026-02-08: Fixed WMO WorldScene regression — reverted to stable commit a1b0b41
+- 2026-02-08: Fixed GLB export — Z-up → Y-up conversion for MDX and WMO
+- 2026-02-08: Added terrain alpha mask debug view (Show Alpha Masks toggle)
+- 2026-02-08: Applied Noggit edge fix for terrain alpha map seams

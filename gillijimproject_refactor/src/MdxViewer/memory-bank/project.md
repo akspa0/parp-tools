@@ -62,7 +62,6 @@
 ### MPQ File Discovery
 - **Symptom**: Only BLP/WMO files show, no MDX/M2
 - **Fix**: Call `_mpq.GetAllKnownFiles()` and add to `_fileSet`
-- **Debug**: Check "[MpqDataSource] Added X MPQ internal files"
 
 ### Case Sensitivity
 - **Symptom**: Files not found despite existing
@@ -74,6 +73,19 @@
 - **Cause**: WMO data stored in `.wmo.MPQ` archives
 - **Fix**: Use `ScanWmoMpqArchives()` for nested scanning
 
+### MDX Coordinate System (LH→RH)
+- **Symptom**: Standalone MDX models appear inside-out/mirrored
+- **Fix**: Apply `MirrorX = Matrix4x4.CreateScale(-1, 1, 1)` in `Render()` model matrix only
+- **Note**: WorldScene uses `RenderWithTransform()` directly — no mirror needed
+
+### BIDX Chunk Parsing
+- **Symptom**: Geoset recovery failures, corrupted MaterialId/textures
+- **Fix**: BIDX = 1 byte per vertex (like GNDX), NOT 4 bytes
+
+### Terrain Alpha Map Seams
+- **Symptom**: Grid pattern visible at chunk boundaries on layers 1-3
+- **Fix**: Noggit edge fix — duplicate last row/column in 64×64 alpha data before upload
+
 ## Build & Run
 
 ```powershell
@@ -82,33 +94,19 @@ dotnet build --no-restore
 dotnet run
 ```
 
-## Debug Output Examples
-
-### File Discovery
-```
-[MpqDataSource] Ready. X known files:
-  .blp: Y files
-  .wmo: Z files
-```
-
-### WMO Archive Scanning
-```
-[MpqDataSource] Added WMO MPQ: World\wmo\Dungeon\test.wmo
-```
-
 ## TODO
 
 See `renderer_plan.md` for the full itemized 40-task implementation plan across 8 phases.
 
 **Summary of phases:**
-- [x] MDX model loading + rendering (existing)
-- [x] WMO v14 loading + rendering (existing)
-- [x] BLP2 texture loading (existing)
-- [ ] Phase 0: Foundation (BlendStateManager, RenderQueue, FrustumCuller, shared shaders)
+- [x] MDX model loading + rendering
+- [x] WMO v14 loading + rendering
+- [x] BLP2 texture loading
+- [x] Phase 0: Foundation
+- [x] Phase 3: Terrain (WDT/ADT loading, mesh gen, texture layering, lighting, alpha debug)
+- [x] Phase 4: World Scene (WMOs ✅, MDX textures ❌)
 - [ ] Phase 1: MDX Animation (keyframes, bones, geoset animation, playback UI)
 - [ ] Phase 2: Particle System (emitters, physics, billboard rendering)
-- [ ] Phase 3: Terrain (WDT/ADT loading, mesh gen, texture layering, lighting)
-- [ ] Phase 4: World Scene (composition, MDDF/MODF placements, fog, day/night)
 - [ ] Phase 5: Liquid Rendering (water, magma, slime surfaces)
 - [ ] Phase 6: Detail Doodads (per-chunk grass/foliage)
 - [ ] Phase 7: Polish (instancing, LOD, debug overlays)

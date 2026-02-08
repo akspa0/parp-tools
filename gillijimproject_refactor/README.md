@@ -50,7 +50,23 @@ Key docs:
 - `053-chain/`, `053-viz/`, `053-viz-36/`
   - Example output trees generated during development from prior commands; not required by tools (which choose sensible output locations by default).
 
-- `next/`, `refactor/`, `src/`
+- `src/MdxViewer/`
+  - WoW Alpha 0.5.3 model and world viewer. Renders MDX models, WMO buildings, and WDT terrain with textures, lighting, and fog. Features:
+    - **Terrain**: AOI-based lazy tile loading, 4-layer texture blending with alpha maps, Noggit edge fix, alpha mask debug view
+    - **WMO**: v14 format, BLP textures per-batch, doodad sets, correct rotation/placement
+    - **MDX**: Per-geoset rendering, multi-layer materials, MirrorX for LH→RH coordinate conversion, blend modes
+    - **World Scene**: MDDF/MODF placements, bounding boxes, object visibility toggles
+    - **UI**: ImGui file browser, live minimap with click-to-teleport, AreaPOI system, terrain controls
+    - **Export**: GLB export with Z-up → Y-up conversion
+  - See `src/MdxViewer/memory-bank/` for detailed progress and architecture notes.
+
+- `src/MDX-L_Tool/`
+  - MDX file format parser library for WoW Alpha 0.5.3 binary model files.
+
+- `src/WoWMapConverter/`
+  - Map conversion tools including VLM (alpha map service, tile stitching, heightmap baking).
+
+- `next/`, `refactor/`
   - Experimental or in-progress tools and refactors outside the current preservation workflow.
 
 - `out/`, `docs/`, `memory-bank/`
