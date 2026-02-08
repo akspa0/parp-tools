@@ -178,12 +178,31 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
+            // Get MOHD local bounds from the loaded WMO model and transform to world space.
+            // The WMO is a container — its internal geometry has its own local bounding box
+            // (MOHD bounds) around the WMO's local origin. We transform that through the
+            // placement matrix to get the correct world-space AABB.
+            // Falls back to MODF file bounds if model isn't loaded.
+            Vector3 localMin, localMax, worldMin, worldMax;
+            if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+            {
+                TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
+            }
+            else
+            {
+                localMin = localMax = Vector3.Zero;
+                worldMin = p.BoundsMin;
+                worldMax = p.BoundsMax;
+            }
+
             _wmoInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
                 Transform = transform,
-                BoundsMin = p.BoundsMin,
-                BoundsMax = p.BoundsMax
+                BoundsMin = worldMin,
+                BoundsMax = worldMax,
+                LocalBoundsMin = localMin,
+                LocalBoundsMax = localMax
             });
         }
 
@@ -286,7 +305,29 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
-            tileWmo.Add(new ObjectInstance { ModelKey = key, Transform = transform, BoundsMin = p.BoundsMin, BoundsMax = p.BoundsMax });
+
+            // Get MOHD local bounds and transform to world space
+            Vector3 localMin, localMax, worldMin, worldMax;
+            if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+            {
+                TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
+            }
+            else
+            {
+                localMin = localMax = Vector3.Zero;
+                worldMin = p.BoundsMin;
+                worldMax = p.BoundsMax;
+            }
+
+            tileWmo.Add(new ObjectInstance
+            {
+                ModelKey = key,
+                Transform = transform,
+                BoundsMin = worldMin,
+                BoundsMax = worldMax,
+                LocalBoundsMin = localMin,
+                LocalBoundsMax = localMax
+            });
         }
 
         _tileMdxInstances[(tileX, tileY)] = tileMdx;
@@ -491,9 +532,18 @@ public class WorldScene : ISceneRenderer
             // MDDF bounding boxes (yellow)
             foreach (var inst in _mdxInstances)
                 _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
-            // MODF bounding boxes (cyan) — use actual MODF bounds
+            // MODF bounding boxes (cyan = world-space transformed bounds)
             foreach (var inst in _wmoInstances)
+            {
                 _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+                // If local MOHD bounds are available, also draw them in green
+                if (inst.LocalBoundsMin != Vector3.Zero || inst.LocalBoundsMax != Vector3.Zero)
+                {
+                    TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform,
+                        out var lWorldMin, out var lWorldMax);
+                    _bbRenderer.DrawBoxMinMax(lWorldMin, lWorldMax, view, proj, new Vector3(0f, 1f, 0f));
+                }
+            }
 
             _gl.Enable(EnableCap.DepthTest);
         }
@@ -567,6 +617,12 @@ public struct ObjectInstance
 {
     public string ModelKey;
     public Matrix4x4 Transform;
+    /// <summary>World-space AABB (local bounds transformed through placement matrix).</summary>
     public Vector3 BoundsMin;
+    /// <summary>World-space AABB (local bounds transformed through placement matrix).</summary>
     public Vector3 BoundsMax;
+    /// <summary>Model-local bounding box min (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
+    public Vector3 LocalBoundsMin;
+    /// <summary>Model-local bounding box max (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
+    public Vector3 LocalBoundsMax;
 }
