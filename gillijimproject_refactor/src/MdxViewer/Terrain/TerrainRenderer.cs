@@ -38,6 +38,9 @@ public class TerrainRenderer : IDisposable
     public bool ShowChunkGrid { get; set; } = false;
     public bool ShowTileGrid { get; set; } = false;
 
+    // Debug: show alpha masks as grayscale on white (no diffuse texture)
+    public bool ShowAlphaMask { get; set; } = false;
+
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
@@ -114,6 +117,7 @@ public class TerrainRenderer : IDisposable
         // Pass grid uniforms
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
+        _shader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
 
         // Render each chunk
         foreach (var chunk in _chunks)
@@ -301,7 +305,7 @@ public class TerrainRenderer : IDisposable
     }
 
     /// <summary>
-    /// Upload alpha map byte arrays as GL textures (R8, 64×64).
+    /// Upload alpha map byte arrays as GL textures (R8, 64x64).
     /// </summary>
     private unsafe void UploadAlphaTextures(TerrainChunkMesh chunk)
     {
@@ -310,10 +314,18 @@ public class TerrainRenderer : IDisposable
             int layer = kvp.Key;
             byte[] alphaData = kvp.Value;
 
-            // Alpha maps are 64×64 (4096 bytes after expansion)
+            // Alpha maps are 64x64 (4096 bytes after expansion)
             int size = 64;
             if (alphaData.Length < size * size)
                 continue;
+
+            // Noggit fix: duplicate last row/column so edge texels have valid data
+            for (int i = 0; i < 64; i++)
+            {
+                alphaData[i * 64 + 63] = alphaData[i * 64 + 62];
+                alphaData[63 * 64 + i] = alphaData[62 * 64 + i];
+            }
+            alphaData[63 * 64 + 63] = alphaData[62 * 64 + 62];
 
             uint tex = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, tex);
@@ -370,6 +382,7 @@ uniform int uHasAlphaMap;
 uniform int uIsBaseLayer;
 uniform int uShowChunkGrid;
 uniform int uShowTileGrid;
+uniform int uShowAlphaMask;
 
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
@@ -389,20 +402,24 @@ void main() {
     vec2 worldUV = vWorldPos.xy * texScale;
 
     vec4 texColor;
-    if (uHasTexture == 1) {
+    if (uHasTexture == 1 && uShowAlphaMask == 0) {
         texColor = texture(uDiffuseSampler, worldUV);
     } else {
         texColor = vec4(1.0, 1.0, 1.0, 1.0);
     }
 
     // Alpha from alpha map (overlay layers only)
-    // Alpha maps use per-chunk 0-1 UVs (vTexCoord), which is correct.
+    // Alpha maps are 64x64 with Noggit edge fix applied, sampled with ClampToEdge.
     float alpha = 1.0;
     if (uIsBaseLayer == 0 && uHasAlphaMap == 1) {
-        float halfTexel = 0.5 / 64.0;
-        vec2 alphaUV = vTexCoord * (1.0 - 2.0 * halfTexel) + halfTexel;
-        alpha = texture(uAlphaSampler, alphaUV).r;
+        alpha = texture(uAlphaSampler, vTexCoord).r;
         if (alpha < 0.004) discard;
+    }
+
+    // Alpha mask debug mode: show alpha as grayscale on white
+    if (uShowAlphaMask == 1 && uIsBaseLayer == 0) {
+        FragColor = vec4(alpha, alpha, alpha, 1.0);
+        return;
     }
 
     // Lighting

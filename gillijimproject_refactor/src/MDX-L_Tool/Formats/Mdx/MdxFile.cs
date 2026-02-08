@@ -213,106 +213,40 @@ public class MdxFile
 
     static void ReadMtls(BinaryReader br, uint size, List<MdlMaterial> materials)
     {
-        long chunkEnd = br.BaseStream.Position + size;
         if (size < 8) return;
+        uint count = br.ReadUInt32();
+        br.ReadUInt32(); // Padding/Unknown
         
-        // Peek at first uint32 to determine format
-        long startPos = br.BaseStream.Position;
-        uint firstVal = br.ReadUInt32();
-        br.BaseStream.Position = startPos;
-        
-        // Heuristic: if firstVal is small (< 200), it's likely a count header (v1300 Alpha format)
-        // If firstVal is large, it's an inclusive size (standard WC3 format)
-        bool hasCountHeader = firstVal < 200 && firstVal > 0;
-        
-        if (hasCountHeader)
+        for (uint i = 0; i < count; i++)
         {
-            uint count = br.ReadUInt32();
-            br.ReadUInt32(); // Padding/Unknown
-            Console.WriteLine($"  [MTLS] Count-header format: {count} materials");
+            uint matSize = br.ReadUInt32();
+            long matEnd = br.BaseStream.Position - 4 + matSize;
             
-            for (uint i = 0; i < count; i++)
+            var mat = new MdlMaterial();
+            mat.PriorityPlane = br.ReadInt32();
+            uint layerCount = br.ReadUInt32();
+            
+            for (uint j = 0; j < layerCount; j++)
             {
-                if (br.BaseStream.Position >= chunkEnd) break;
-                uint matSize = br.ReadUInt32();
-                long matEnd = br.BaseStream.Position - 4 + matSize;
+                uint layerSize = br.ReadUInt32();
+                long layerEnd = br.BaseStream.Position - 4 + layerSize;
                 
-                var mat = new MdlMaterial();
-                mat.PriorityPlane = br.ReadInt32();
-                uint layerCount = br.ReadUInt32();
-                
-                for (uint j = 0; j < layerCount; j++)
-                {
-                    uint layerSize = br.ReadUInt32();
-                    long layerEnd = br.BaseStream.Position - 4 + layerSize;
+                var layer = new MdlTexLayer();
+                layer.BlendMode = (MdlTexOp)br.ReadUInt32();
+                layer.Flags = (MdlGeoFlags)br.ReadUInt32();
+                layer.TextureId = br.ReadInt32();
+                layer.TransformId = br.ReadInt32();
+                layer.CoordId = br.ReadInt32();
+                layer.StaticAlpha = br.ReadSingle();
                     
-                    var layer = new MdlTexLayer();
-                    layer.BlendMode = (MdlTexOp)br.ReadUInt32();
-                    layer.Flags = (MdlGeoFlags)br.ReadUInt32();
-                    layer.TextureId = br.ReadInt32();
-                    layer.TransformId = br.ReadInt32();
-                    layer.CoordId = br.ReadInt32();
-                    layer.StaticAlpha = br.ReadSingle();
-                        
-                    br.BaseStream.Position = layerEnd;
-                    mat.Layers.Add(layer);
-                }
-                
-                Console.WriteLine($"  [MTLS] Mat[{i}]: priority={mat.PriorityPlane} layers={mat.Layers.Count} texIds=[{string.Join(",", mat.Layers.Select(l => l.TextureId))}]");
-                br.BaseStream.Position = matEnd;
-                materials.Add(mat);
+                // Skip animation tracks in layer
+                br.BaseStream.Position = layerEnd;
+                mat.Layers.Add(layer);
             }
+            
+            br.BaseStream.Position = matEnd;
+            materials.Add(mat);
         }
-        else
-        {
-            // Standard WC3 format: no count header, iterate by inclusive size
-            Console.WriteLine($"  [MTLS] Size-based format (firstVal={firstVal}, chunkSize={size})");
-            while (br.BaseStream.Position < chunkEnd)
-            {
-                if (chunkEnd - br.BaseStream.Position < 12) break;
-                uint matSize = br.ReadUInt32();
-                long matEnd = br.BaseStream.Position - 4 + matSize;
-                
-                var mat = new MdlMaterial();
-                mat.PriorityPlane = br.ReadInt32();
-                
-                // Read flags (standard format has flags here, before LAYS)
-                uint matFlags = br.ReadUInt32();
-                
-                // Look for LAYS sub-chunk
-                if (br.BaseStream.Position + 8 <= matEnd)
-                {
-                    string layTag = ReadTag(br);
-                    uint layerCount = br.ReadUInt32();
-                    
-                    if (layTag == "LAYS")
-                    {
-                        for (uint j = 0; j < layerCount; j++)
-                        {
-                            uint layerSize = br.ReadUInt32();
-                            long layerEnd = br.BaseStream.Position - 4 + layerSize;
-                            
-                            var layer = new MdlTexLayer();
-                            layer.BlendMode = (MdlTexOp)br.ReadUInt32();
-                            layer.Flags = (MdlGeoFlags)br.ReadUInt32();
-                            layer.TextureId = br.ReadInt32();
-                            layer.TransformId = br.ReadInt32();
-                            layer.CoordId = br.ReadInt32();
-                            layer.StaticAlpha = br.ReadSingle();
-                                
-                            br.BaseStream.Position = layerEnd;
-                            mat.Layers.Add(layer);
-                        }
-                    }
-                }
-                
-                Console.WriteLine($"  [MTLS] Mat[{materials.Count}]: priority={mat.PriorityPlane} flags=0x{matFlags:X} layers={mat.Layers.Count} texIds=[{string.Join(",", mat.Layers.Select(l => l.TextureId))}]");
-                br.BaseStream.Position = matEnd;
-                materials.Add(mat);
-            }
-        }
-        
-        br.BaseStream.Position = chunkEnd;
     }
 
     static void ReadTexs(BinaryReader br, uint size, List<MdlTexture> textures)

@@ -723,6 +723,12 @@ public class ViewerApp : IDisposable
             if (ImGui.Checkbox("ADT Tile Grid (orange)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
 
             ImGui.Separator();
+            ImGui.Text("Debug:");
+
+            bool alphaMask = renderer.ShowAlphaMask;
+            if (ImGui.Checkbox("Show Alpha Masks", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+
+            ImGui.Separator();
             ImGui.Text("Wireframe:");
             if (ImGui.Button("Toggle Wireframe"))
                 _renderer?.ToggleWireframe();
