@@ -111,6 +111,26 @@ public class WorldAssetManager : IDisposable
     }
 
     /// <summary>
+    /// Ensure an MDX model is loaded (lazy load on first reference).
+    /// </summary>
+    public void EnsureMdxLoaded(string normalizedKey)
+    {
+        if (_mdxModels.ContainsKey(normalizedKey)) return;
+        var renderer = LoadMdxModel(normalizedKey);
+        _mdxModels[normalizedKey] = renderer;
+    }
+
+    /// <summary>
+    /// Ensure a WMO model is loaded (lazy load on first reference).
+    /// </summary>
+    public void EnsureWmoLoaded(string normalizedKey)
+    {
+        if (_wmoModels.ContainsKey(normalizedKey)) return;
+        var renderer = LoadWmoModel(normalizedKey);
+        _wmoModels[normalizedKey] = renderer;
+    }
+
+    /// <summary>
     /// Get a loaded MDX renderer by normalized key. Returns null if not loaded or failed.
     /// </summary>
     public MdxRenderer? GetMdx(string normalizedKey)

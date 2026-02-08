@@ -22,7 +22,12 @@ public class TerrainManager : ISceneRenderer
     private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
 
     // AOI: how many tiles around the camera to keep loaded
-    private const int AoiRadius = 2; // Load 5×5 tiles around camera (max ~25, but limited by existing tiles)
+    private const int AoiRadius = 3; // Load 7×7 tiles around camera
+
+    /// <summary>Called when a tile is loaded, with per-tile placement data.</summary>
+    public event Action<int, int, TileLoadResult>? OnTileLoaded;
+    /// <summary>Called when a tile is unloaded.</summary>
+    public event Action<int, int>? OnTileUnloaded;
 
     // Camera tracking for AOI updates
     private int _lastCameraTileX = -1;
@@ -94,9 +99,12 @@ public class TerrainManager : ISceneRenderer
         var toUnload = _loadedTiles.Keys.Where(k => !desiredTiles.Contains(k)).ToList();
         foreach (var key in toUnload)
         {
-            foreach (var chunk in _loadedTiles[key])
+            var meshes = _loadedTiles[key];
+            _terrainRenderer.RemoveChunks(meshes);
+            foreach (var chunk in meshes)
                 chunk.Dispose();
             _loadedTiles.Remove(key);
+            OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }
 
         // Load new tiles
@@ -130,10 +138,10 @@ public class TerrainManager : ISceneRenderer
 
     private void LoadTile(int tileX, int tileY)
     {
-        var chunkDataList = _adapter.LoadTile(tileX, tileY);
+        var result = _adapter.LoadTileWithPlacements(tileX, tileY);
         var meshes = new List<TerrainChunkMesh>();
 
-        foreach (var chunkData in chunkDataList)
+        foreach (var chunkData in result.Chunks)
         {
             var mesh = _meshBuilder.BuildChunkMesh(chunkData);
             if (mesh != null)
@@ -142,6 +150,9 @@ public class TerrainManager : ISceneRenderer
 
         _loadedTiles[(tileX, tileY)] = meshes;
         _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+
+        // Notify listeners (WorldScene) about the new tile's placements
+        OnTileLoaded?.Invoke(tileX, tileY, result);
     }
 
     private void FindInitialCameraPosition(out Vector3 cameraPos)

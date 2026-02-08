@@ -82,10 +82,10 @@ The DBC texturing system interfaces with:
 
 ## License and Attribution
 
-This documentation is based on reverse engineering analysis of World of Warcraft client binaries using Ghidra. All information is provided for educational and interoperability purposes.
+This documentation is based on reverse engineering analysis of the leaked World of Warcraft Alpha 0.5.3 client binary using Ghidra. All information is provided for educational and interoperability purposes.
 
 ---
 
-**Last Updated**: 2026-02-08  
-**Version**: 1.0  
-**Analyzed Binary**: WoWClient.exe 0.5.3
+**Last Updated**: 2026-02-08
+**Version**: 1.0
+**Analyzed Binary**: WoWClient.exe 0.5.3 (Leaked Alpha)

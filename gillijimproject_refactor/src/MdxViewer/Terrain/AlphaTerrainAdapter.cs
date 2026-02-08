@@ -15,6 +15,7 @@ namespace MdxViewer.Terrain;
 public struct MddfPlacement
 {
     public int NameIndex;   // Index into WDT MDNM name table
+    public int UniqueId;    // For dedup across tiles
     public Vector3 Position;
     public Vector3 Rotation; // Degrees
     public float Scale;      // 1024 = 1.0 in Alpha
@@ -26,11 +27,22 @@ public struct MddfPlacement
 public struct ModfPlacement
 {
     public int NameIndex;   // Index into WDT MONM name table
+    public int UniqueId;    // For dedup across tiles
     public Vector3 Position;
     public Vector3 Rotation; // Degrees
     public Vector3 BoundsMin;
     public Vector3 BoundsMax;
     public ushort Flags;
+}
+
+/// <summary>
+/// Result of loading a single tile — terrain chunks + per-tile placements.
+/// </summary>
+public class TileLoadResult
+{
+    public List<TerrainChunkData> Chunks { get; init; } = new();
+    public List<MddfPlacement> MddfPlacements { get; init; } = new();
+    public List<ModfPlacement> ModfPlacements { get; init; } = new();
 }
 
 public class AlphaTerrainAdapter
@@ -88,9 +100,8 @@ public class AlphaTerrainAdapter
 
         Console.WriteLine($"[TerrainAdapter] WDT loaded: {_existingTiles.Count} tiles, {MdxModelNames.Count} MDX names, {WmoModelNames.Count} WMO names, wmoBased={IsWmoBased}");
 
-        // Pre-scan all ADTs for MDDF/MODF placements (lightweight — no geometry loaded)
-        if (!IsWmoBased)
-            PreScanPlacements();
+        // Placements are now collected per-tile in LoadTileWithPlacements() for lazy loading.
+        // No upfront PreScan needed — placements stream in as tiles enter AOI.
     }
 
     /// <summary>
@@ -139,10 +150,20 @@ public class AlphaTerrainAdapter
     /// </summary>
     public List<TerrainChunkData> LoadTile(int tileX, int tileY)
     {
+        var result = LoadTileWithPlacements(tileX, tileY);
+        return result.Chunks;
+    }
+
+    /// <summary>
+    /// Load a tile and return terrain chunks + per-tile MDDF/MODF placements.
+    /// Placements are collected into the returned TileLoadResult AND into the global lists.
+    /// </summary>
+    public TileLoadResult LoadTileWithPlacements(int tileX, int tileY)
+    {
         // Alpha WDT MAIN is column-major: index = x*64+y
         int tileIdx = tileX * 64 + tileY;
         if (tileIdx < 0 || tileIdx >= _adtOffsets.Count || _adtOffsets[tileIdx] == 0)
-            return new List<TerrainChunkData>();
+            return new TileLoadResult();
 
         // Use the existing AdtAlpha parser to get MCIN offsets and MTEX
         var adt = new AdtAlpha(_wdtPath, _adtOffsets[tileIdx], tileIdx);
@@ -173,9 +194,19 @@ public class AlphaTerrainAdapter
             }
         }
 
-        // Collect MDDF/MODF placement entries from this ADT
-        CollectMddfPlacements(adt.GetMddfRaw());
-        CollectModfPlacements(adt.GetModfRaw());
+        // Collect MDDF/MODF placement entries from this ADT into per-tile lists (no dedup — always parse all)
+        var tileMddf = new List<MddfPlacement>();
+        var tileModf = new List<ModfPlacement>();
+        ParseMddfEntries(adt.GetMddfRaw(), tileMddf);
+        ParseModfEntries(adt.GetModfRaw(), tileModf);
+
+        // Also add to global lists with dedup for backwards compat
+        foreach (var p in tileMddf)
+            if (_seenMddfIds.Add(p.UniqueId))
+                MddfPlacements.Add(p);
+        foreach (var p in tileModf)
+            if (_seenModfIds.Add(p.UniqueId))
+                ModfPlacements.Add(p);
 
         // Diagnostic: print tile corner position for first tile loaded
         if (LastLoadedChunkPositions.Count <= 256)
@@ -185,8 +216,8 @@ public class AlphaTerrainAdapter
             Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}) corner=({cornerX:F1}, {cornerY:F1})  wowY={cornerX:F1}  wowX={cornerY:F1}");
         }
 
-        Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures");
-        return chunks;
+        Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures, {tileMddf.Count} MDDF, {tileModf.Count} MODF");
+        return new TileLoadResult { Chunks = chunks, MddfPlacements = tileMddf, ModfPlacements = tileModf };
     }
 
     /// <summary>
@@ -196,13 +227,23 @@ public class AlphaTerrainAdapter
     private bool _mddfDiagPrinted = false;
     private void CollectMddfPlacements(byte[] mddfData)
     {
+        var temp = new List<MddfPlacement>();
+        ParseMddfEntries(mddfData, temp);
+        foreach (var p in temp)
+            if (_seenMddfIds.Add(p.UniqueId))
+                MddfPlacements.Add(p);
+    }
+
+    /// <summary>
+    /// Parse MDDF entries into a list WITHOUT dedup. Always returns all placements in the data.
+    /// </summary>
+    private void ParseMddfEntries(byte[] mddfData, List<MddfPlacement> target)
+    {
         const int entrySize = 36;
         for (int off = 0; off + entrySize <= mddfData.Length; off += entrySize)
         {
             int nameIdx = BitConverter.ToInt32(mddfData, off);
             int uniqueId = BitConverter.ToInt32(mddfData, off + 4);
-
-            if (!_seenMddfIds.Add(uniqueId)) continue; // deduplicate
 
             // Raw floats at file offsets
             float rawX = BitConverter.ToSingle(mddfData, off + 8);
@@ -222,9 +263,10 @@ public class AlphaTerrainAdapter
             }
 
             // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
-            MddfPlacements.Add(new MddfPlacement
+            target.Add(new MddfPlacement
             {
                 NameIndex = nameIdx,
+                UniqueId = uniqueId,
                 Position = new Vector3(
                     WoWConstants.MapOrigin - rawY,
                     WoWConstants.MapOrigin - rawX,
@@ -241,13 +283,23 @@ public class AlphaTerrainAdapter
     /// </summary>
     private void CollectModfPlacements(byte[] modfData)
     {
+        var temp = new List<ModfPlacement>();
+        ParseModfEntries(modfData, temp);
+        foreach (var p in temp)
+            if (_seenModfIds.Add(p.UniqueId))
+                ModfPlacements.Add(p);
+    }
+
+    /// <summary>
+    /// Parse MODF entries into a list WITHOUT dedup. Always returns all placements in the data.
+    /// </summary>
+    private void ParseModfEntries(byte[] modfData, List<ModfPlacement> target)
+    {
         const int entrySize = 64;
         for (int off = 0; off + entrySize <= modfData.Length; off += entrySize)
         {
             int nameIdx = BitConverter.ToInt32(modfData, off);
             int uniqueId = BitConverter.ToInt32(modfData, off + 4);
-
-            if (!_seenModfIds.Add(uniqueId)) continue; // deduplicate
 
             // Raw floats from file
             float rawX = BitConverter.ToSingle(modfData, off + 8);
@@ -305,9 +357,10 @@ public class AlphaTerrainAdapter
                 boundsMax = new Vector3(rBBMaxX, rBBMaxY, bbMaxZ);
             }
 
-            ModfPlacements.Add(new ModfPlacement
+            target.Add(new ModfPlacement
             {
                 NameIndex = nameIdx,
+                UniqueId = uniqueId,
                 Position = position,
                 Rotation = new Vector3(rotX, rotY, rotZ),
                 BoundsMin = boundsMin,

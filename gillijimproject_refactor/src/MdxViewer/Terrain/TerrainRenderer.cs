@@ -73,6 +73,16 @@ public class TerrainRenderer : IDisposable
     }
 
     /// <summary>
+    /// Remove specific chunk meshes from the render list (called when tiles unload).
+    /// The meshes themselves are disposed by TerrainManager.
+    /// </summary>
+    public void RemoveChunks(List<TerrainChunkMesh> chunks)
+    {
+        foreach (var chunk in chunks)
+            _chunks.Remove(chunk);
+    }
+
+    /// <summary>
     /// Render all loaded terrain chunks.
     /// </summary>
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)

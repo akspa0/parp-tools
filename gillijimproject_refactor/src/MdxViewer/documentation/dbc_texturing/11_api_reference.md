@@ -23,7 +23,7 @@ Reads and processes texture references from an MDX model file.
 - `status`: Status object for error reporting
 
 **Description**:
-Seeks to the TXTS (textures) chunk in the MDX file and processes all texture entries. Allocates or resizes the model's texture array and calls [`ProcessTextures()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:25) to load each texture.
+Seeks to the TXTS (textures) chunk in the MDX file and processes all texture entries. Allocates or resizes the model's texture array and calls `ProcessTextures()` to load each texture.
 
 **Example**:
 ```c
@@ -33,8 +33,8 @@ MdxReadTextures(mdxData, 0, 0, &model, &status);
 ```
 
 **Related Functions**:
-- [`ProcessTextures()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:25)
-- [`MDLFileBinarySeek()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:37)
+- `ProcessTextures()`
+- `MDLFileBinarySeek()`
 
 ---
 
@@ -57,7 +57,7 @@ Iterates through each texture entry in the MDX file. For each texture:
 1. Stores the texture type and flags
 2. Determines if a default texture should be used
 3. Configures texture filtering (point, bilinear, trilinear, anisotropic)
-4. Calls [`LoadModelTexture()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:59) to load the texture file
+4. Calls `LoadModelTexture()` to load the texture file
 5. Stores the resulting texture handle
 
 **Texture Flags**:
@@ -90,7 +90,7 @@ Loads a texture file referenced by an MDX model.
 **Returns**: Handle to the loaded texture, or NULL on failure
 
 **Description**:
-Handles special path handling for development builds (prepends `\\Guldan\Drive2\Projects\WoW\Data\` if flag 0x4000 is set). Delegates to [`TextureCreate()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:97) for actual loading.
+Handles special path handling for development builds (prepends `\\Guldan\Drive2\Projects\WoW\Data\` if flag 0x4000 is set). Delegates to `TextureCreate()` for actual loading.
 
 **Path Handling**:
 - Checks for absolute paths (starting with drive letter or backslash)
@@ -362,8 +362,8 @@ Updates a character's face texture based on customization choices.
 Looks up the appropriate texture from CharSections.dbc based on race, gender, and selected face ID. Updates the character model's texture references.
 
 **Related**:
-- [`ChangeFacialHairTexture()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:353)
-- [`ChangeScalpHairTexture()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/11_api_reference.md:361)
+- `ChangeFacialHairTexture()`
+- `ChangeScalpHairTexture()`
 
 ---
 

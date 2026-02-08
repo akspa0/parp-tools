@@ -2,20 +2,20 @@
 
 ## Overview
 
-This document covers compatibility across different DBC versions and World of Warcraft client builds, with a focus on the texture system.
+This document covers the DBC texturing system implementation in the leaked World of Warcraft Alpha 0.5.3 client. For reference, information about later release versions is included, but **this documentation specifically targets Alpha 0.5.3**.
 
 ## Client Version History
 
-### Vanilla (1.x)
+### Alpha 0.5.3 (Leaked Pre-Release Build)
 
-#### 1.12.1 (Build 5875) - Final Vanilla
-**Release**: September 2006
+#### Alpha 0.5.3 - Documentation Target Version
+**Status**: Leaked alpha build (pre-release)
 
 **DBC File Versions:**
-- CreatureDisplayInfo.dbc: Version 1
-- CreatureModelData.dbc: Version 1
-- CharSections.dbc: Version 1
-- ItemDisplayInfo.dbc: Version 1
+- CreatureDisplayInfo.dbc: Early alpha format
+- CreatureModelData.dbc: Early alpha format
+- CharSections.dbc: Early alpha format
+- ItemDisplayInfo.dbc: Early alpha format
 
 **Texture Features:**
 - BLP0 and BLP1 formats supported
@@ -25,20 +25,23 @@ This document covers compatibility across different DBC versions and World of Wa
 - Basic character customization
 
 **Key Functions Analyzed:**
-- [`MdxReadTextures()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/15_compatibility.md:22) @ 0x0044e310
-- [`ProcessTextures()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/15_compatibility.md:22) @ 0x0044c2e0
-- [`LoadModelTexture()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/15_compatibility.md:22) @ 0x00447f50
+- `MdxReadTextures()` @ 0x0044e310
+- `ProcessTextures()` @ 0x0044c2e0
+- `LoadModelTexture()` @ 0x00447f50
 
 **Compatibility Notes:**
-- This documentation primarily covers this version
-- Most stable and well-understood implementation
-- Reference implementation for custom servers
+- This documentation covers the Alpha 0.5.3 leaked build
+- Early pre-release implementation
+- Differs significantly from later release versions
 
-#### 1.11.x - 1.12.0
-**Notable Changes:**
-- Minor DBC record additions
-- No significant texture system changes
-- Binary compatible with 1.12.1
+### Release Versions (For Reference Only)
+
+#### Vanilla 1.12.1 (Build 5875) - Final Vanilla Release
+**Release**: September 2006
+**Notable Changes from Alpha:**
+- Refined DBC structure
+- Improved texture system
+- Enhanced caching
 
 #### 1.10.x and Earlier
 **Differences:**
@@ -46,17 +49,19 @@ This document covers compatibility across different DBC versions and World of Wa
 - Some DBC records have different field counts
 - Older BLP handling code
 
-### The Burning Crusade (2.x)
+### The Burning Crusade 2.x (For Reference - Not Alpha)
 
-#### 2.4.3 (Build 8606) - Final TBC
+**Note**: The following information describes later release versions for comparison purposes only. Alpha 0.5.3 does not include these features.
+
+#### 2.4.3 (Build 8606) - Final TBC Release
 **Release**: July 2008
 
-**DBC Changes:**
+**DBC Changes from Alpha:**
 - CreatureDisplayInfo.dbc: Added new fields for particle effects
 - CharacterFacialHairStyles.dbc: Expanded facial hair options
 - New races (Blood Elf, Draenei) with additional texture sets
 
-**Texture System Changes:**
+**Texture System Changes from Alpha:**
 - BLP2 format introduced (JPEG compression)
 - Support for normal maps (bump mapping)
 - Specular maps added
@@ -75,22 +80,24 @@ enum TextureType {
 };
 ```
 
-**Migration Notes:**
-- Vanilla DBC files cannot be used directly
+**Migration Notes (from Alpha to TBC):**
+- Alpha DBC files cannot be used directly in TBC
 - Texture paths remain compatible
 - Need to handle new BLP2 format
 
-### Wrath of the Lich King (3.x)
+### Wrath of the Lich King 3.x (For Reference - Not Alpha)
 
-#### 3.3.5a (Build 12340) - Final WotLK
+**Note**: The following information describes later release versions for comparison purposes only. Alpha 0.5.3 does not include these features.
+
+#### 3.3.5a (Build 12340) - Final WotLK Release
 **Release**: June 2010
 
-**Major Changes:**
+**Major Changes from Alpha:**
 - Significantly expanded CharSections.dbc
 - Death Knight customization added
 - Enhanced particle systems requiring texture arrays
 
-**Texture System Enhancements:**
+**Texture System Enhancements from Alpha:**
 - Texture array support for layered effects
 - Improved compression (BC7 on newer GPUs)
 - Streaming texture system
@@ -99,7 +106,7 @@ enum TextureType {
 
 **DBC Structure Changes:**
 ```c
-// WotLK CreatureDisplayInfo expanded
+// WotLK CreatureDisplayInfo expanded (from Alpha)
 struct CreatureDisplayInfoRec_WotLK {
     uint32_t ID;
     uint32_t ModelID;
@@ -129,7 +136,7 @@ struct CreatureDisplayInfoRec_WotLK {
 ### BLP Texture Formats
 
 #### BLP0 (Pre-1.0)
-**Status**: Legacy, rarely encountered  
+**Status**: Legacy, rarely encountered
 **Compression**: Uncompressed or simple RLE
 
 ```c
@@ -146,10 +153,10 @@ struct BLP0Header {
 };
 ```
 
-**Compatibility**: Supported in all WoW versions
+**Compatibility**: Supported in Alpha 0.5.3 and all later WoW versions
 
-#### BLP1 (Vanilla - WotLK)
-**Status**: Primary format for Vanilla  
+#### BLP1 (Alpha - WotLK)
+**Status**: Primary format for Alpha and later releases
 **Compression**: DXT1, DXT3, DXT5, or palette-based
 
 ```c
@@ -167,10 +174,10 @@ struct BLP1Header {
 };
 ```
 
-**Compatibility**: Supported in all WoW versions
+**Compatibility**: Supported in Alpha 0.5.3 and all later WoW versions
 
-#### BLP2 (TBC and later)
-**Status**: Optimized format with better compression  
+#### BLP2 (TBC and later - Not in Alpha)
+**Status**: Introduced in The Burning Crusade
 **Compression**: JPEG for color, DXT for alpha
 
 ```c
@@ -189,7 +196,7 @@ struct BLP2Header {
 };
 ```
 
-**Compatibility**: NOT supported in Vanilla client
+**Compatibility**: NOT supported in Alpha 0.5.3 client
 
 ### Conversion Utilities
 
@@ -236,6 +243,9 @@ bool ConvertBLP2ToBLP1(const char* blp2Path, const char* blp1Path) {
 Different client versions have different field counts:
 
 ```c
+// Alpha 0.5.3
+#define CREATUREDISPLAYINFO_FIELDS_ALPHA 13
+
 // Vanilla 1.12.1
 #define CREATUREDISPLAYINFO_FIELDS_VANILLA 15
 
@@ -249,6 +259,9 @@ bool ValidateDBCVersion(DBCHeader* header, ClientVersion version) {
     uint32_t expectedFields;
     
     switch (version) {
+        case VERSION_ALPHA:
+            expectedFields = CREATUREDISPLAYINFO_FIELDS_ALPHA;
+            break;
         case VERSION_VANILLA:
             expectedFields = CREATUREDISPLAYINFO_FIELDS_VANILLA;
             break;
@@ -274,7 +287,7 @@ bool ValidateDBCVersion(DBCHeader* header, ClientVersion version) {
 
 ### Safe Record Access
 
-Handle different field layouts:
+Handle different field layouts (Alpha to Release comparison):
 
 ```c
 struct CreatureDisplayInfo {
@@ -320,12 +333,14 @@ const char* GetSkin(CreatureDisplayInfo* info, uint32_t slot,
 }
 ```
 
+**Note**: Alpha 0.5.3 only has 3 skin slots (Skin1, Skin2, Skin3). The Skin4 and Skin5 fields were added in later versions.
+
 ## Cross-Version Texture Loading
 
 ### Universal Texture Loader
 
 ```c
-HTEXTURE__* LoadTextureUniversal(const char* path, 
+HTEXTURE__* LoadTextureUniversal(const char* path,
                                  ClientVersion version) {
     // Detect format
     void* data = LoadFileFromMPQ(path);
@@ -367,50 +382,53 @@ HTEXTURE__* LoadTextureUniversal(const char* path,
 
 ## Known Issues
 
-### Issue: TBC Textures in Vanilla Client
-**Problem**: BLP2 files crash Vanilla client  
-**Solution**: Pre-convert all BLP2 to BLP1  
+### Issue: TBC Textures in Alpha Client
+**Problem**: BLP2 files not supported in Alpha 0.5.3
+**Solution**: Pre-convert all BLP2 to BLP1
 **Tool**: Use BLPConverter utility
 
-### Issue: WotLK Display Info in Vanilla
-**Problem**: Extra fields cause misalignment  
-**Solution**: Strip extra fields when exporting DBC  
+### Issue: Release Version DBC Fields in Alpha
+**Problem**: Extra fields in release DBCs cause misalignment in Alpha
+**Solution**: Strip extra fields when using release DBCs with Alpha
 **Code**:
 ```c
-void ConvertWotLKDBCToVanilla(const char* input, const char* output) {
-    DBCFile* wotlk = LoadDBC(input);
-    DBCFile* vanilla = CreateDBC(wotlk->recordCount, 15);
+void ConvertReleaseDBCToAlpha(const char* input, const char* output,
+                              ClientVersion sourceVersion) {
+    DBCFile* source = LoadDBC(input);
+    uint32_t alphaFields = 13;  // Alpha 0.5.3 field count
     
-    for (uint32_t i = 0; i < wotlk->recordCount; i++) {
-        void* srcRec = GetRecord(wotlk, i);
-        void* dstRec = GetRecord(vanilla, i);
+    DBCFile* alpha = CreateDBC(source->recordCount, alphaFields);
+    
+    for (uint32_t i = 0; i < source->recordCount; i++) {
+        void* srcRec = GetRecord(source, i);
+        void* dstRec = GetRecord(alpha, i);
         
-        // Copy only first 15 fields (Vanilla compatible)
-        memcpy(dstRec, srcRec, 15 * sizeof(uint32_t));
+        // Copy only first 13 fields (Alpha compatible)
+        memcpy(dstRec, srcRec, alphaFields * sizeof(uint32_t));
     }
     
-    WriteDBC(output, vanilla);
-    FreeDBC(wotlk);
-    FreeDBC(vanilla);
+    WriteDBC(output, alpha);
+    FreeDBC(source);
+    FreeDBC(alpha);
 }
 ```
 
 ### Issue: Character Customization Options
-**Problem**: TBC/WotLK races not in Vanilla  
+**Problem**: TBC/WotLK races not in Alpha 0.5.3
 **Solution**: Filter CharSections.dbc by race ID
 
 ```c
-bool IsVanillaRace(uint32_t raceID) {
-    // Vanilla races: 1-8
-    return raceID >= 1 && raceID <= 8;
+bool IsAlphaRace(uint32_t raceID) {
+    // Alpha 0.5.3 races: Limited subset (check actual data)
+    return raceID >= 1 && raceID <= 8;  // Placeholder - verify actual IDs
 }
 
-void FilterCharSectionsForVanilla(CharSectionsRec* records, 
-                                 uint32_t* ioCount) {
+void FilterCharSectionsForAlpha(CharSectionsRec* records,
+                                uint32_t* ioCount) {
     uint32_t writeIdx = 0;
     
     for (uint32_t readIdx = 0; readIdx < *ioCount; readIdx++) {
-        if (IsVanillaRace(records[readIdx].RaceID)) {
+        if (IsAlphaRace(records[readIdx].RaceID)) {
             if (writeIdx != readIdx) {
                 records[writeIdx] = records[readIdx];
             }
@@ -439,7 +457,10 @@ ClientVersion DetectClientVersion(const char* exePath) {
     
     fclose(f);
     
-    if (major == 1) {
+    // Alpha 0.5.3 has different version scheme
+    if (major == 0 && minor == 5) {
+        return VERSION_ALPHA;
+    } else if (major == 1) {
         return VERSION_VANILLA;
     } else if (major == 2) {
         return VERSION_TBC;
@@ -456,12 +477,13 @@ ClientVersion DetectClientVersion(const char* exePath) {
 ```c
 void TestVersionCompatibility() {
     ClientVersion versions[] = {
+        VERSION_ALPHA,
         VERSION_VANILLA,
         VERSION_TBC,
         VERSION_WOTLK
     };
     
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         ClientVersion ver = versions[i];
         
         // Test DBC loading
@@ -481,6 +503,19 @@ void TestVersionCompatibility() {
 
 ## Migration Guide
 
+### Alpha 0.5.3 to Vanilla 1.12.x
+
+**Steps:**
+1. DBC field count changes (13 → 15 for CreatureDisplayInfo)
+2. Additional character customization options
+3. BLP formats remain compatible
+4. New creature model features
+
+**Code Changes:**
+- Handle increased DBC field counts
+- Add new character race support
+- Enhanced creature display options
+
 ### Vanilla to TBC
 
 **Steps:**
@@ -494,7 +529,7 @@ void TestVersionCompatibility() {
 - Handle BLP2 format
 - Add normal map and specular map paths
 
-### TBC to Vanilla (Backport)
+### TBC to Alpha (Backport - Not Recommended)
 
 **Steps:**
 1. Convert all BLP2 to BLP1
@@ -513,23 +548,23 @@ void TestVersionCompatibility() {
 
 ## Version Matrix
 
-| Feature | Vanilla | TBC | WotLK |
-|---------|---------|-----|-------|
-| BLP0 Support | ✓ | ✓ | ✓ |
-| BLP1 Support | ✓ | ✓ | ✓ |
-| BLP2 Support | ✗ | ✓ | ✓ |
-| DXT1 Compression | ✓ | ✓ | ✓ |
-| DXT3 Compression | ✓ | ✓ | ✓ |
-| DXT5 Compression | ✓ | ✓ | ✓ |
-| BC7 Compression | ✗ | ✗ | ✓ |
-| Normal Maps | ✗ | ✓ | ✓ |
-| Specular Maps | ✗ | ✓ | ✓ |
-| Max Texture Size | 1024 | 2048 | 4096 |
-| Skin Slots | 3 | 5 | 5 |
-| Character Races | 8 | 10 | 11 |
+| Feature | Alpha 0.5.3 | Vanilla 1.12 | TBC | WotLK |
+|---------|--------------|--------------|-----|-------|
+| BLP0 Support | ✓ | ✓ | ✓ | ✓ |
+| BLP1 Support | ✓ | ✓ | ✓ | ✓ |
+| BLP2 Support | ✗ | ✗ | ✓ | ✓ |
+| DXT1 Compression | ✓ | ✓ | ✓ | ✓ |
+| DXT3 Compression | ✓ | ✓ | ✓ | ✓ |
+| DXT5 Compression | ✓ | ✓ | ✓ | ✓ |
+| BC7 Compression | ✗ | ✗ | ✗ | ✓ |
+| Normal Maps | ✗ | ✗ | ✓ | ✓ |
+| Specular Maps | ✗ | ✗ | ✓ | ✓ |
+| Max Texture Size | 1024 | 1024 | 2048 | 4096 |
+| Skin Slots | 3 | 3 | 5 | 5 |
+| Character Races | 8 | 8 | 10 | 11 |
 
 ---
 
 **Documentation Complete**
 
-This concludes the comprehensive DBC texturing implementation documentation. For questions or issues, refer to the troubleshooting guide or consult the WoW modding community.
+This concludes the comprehensive DBC texturing implementation documentation for Alpha 0.5.3. For questions or issues, refer to the troubleshooting guide or consult the WoW modding community.

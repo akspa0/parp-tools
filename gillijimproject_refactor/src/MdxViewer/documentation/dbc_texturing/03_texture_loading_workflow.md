@@ -170,7 +170,7 @@ struct CModelTexture {
 
 ### Step 4: Texture Reference Resolution
 
-The [`ProcessTextures()`](e:/parp-2026/parp-tools/gillijimproject_refactor/src/MdxViewer/documentation/dbc_texturing/03_texture_loading_workflow.md:130) function handles texture path resolution:
+The `ProcessTextures()` function handles texture path resolution:
 
 ```c
 // From Ghidra analysis: ProcessTextures function (0x0044c2e0)

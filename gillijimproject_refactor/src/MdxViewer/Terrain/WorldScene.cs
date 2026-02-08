@@ -19,8 +19,14 @@ public class WorldScene : ISceneRenderer
     private readonly WorldAssetManager _assets;
 
     // Lightweight instance lists — just a key + transform, no renderer reference
-    private readonly List<ObjectInstance> _mdxInstances = new();
-    private readonly List<ObjectInstance> _wmoInstances = new();
+    // These are rebuilt from _tileMdxInstances/_tileWmoInstances when tiles change
+    private List<ObjectInstance> _mdxInstances = new();
+    private List<ObjectInstance> _wmoInstances = new();
+
+    // Per-tile instance storage for lazy load/unload
+    private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
+    private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
+    private bool _instancesDirty = false;
 
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
@@ -77,26 +83,19 @@ public class WorldScene : ISceneRenderer
         // Create terrain manager (uses AOI-based lazy loading — tiles load as camera moves)
         onStatus?.Invoke("Loading WDT...");
         _terrainManager = new TerrainManager(gl, wdtPath, dataSource);
-        // Initial AOI load happens on first UpdateAOI call from ViewerApp
 
         var adapter = _terrainManager.Adapter;
 
-        // Build manifest of unique assets referenced by this map
-        onStatus?.Invoke("Building asset manifest...");
-        var manifest = _assets.BuildManifest(
-            adapter.MdxModelNames, adapter.WmoModelNames,
-            adapter.MddfPlacements, adapter.ModfPlacements);
-
-        // Load each unique model exactly once
-        onStatus?.Invoke($"Loading {manifest.ReferencedMdx.Count} MDX + {manifest.ReferencedWmo.Count} WMO models...");
-        _assets.LoadManifest(manifest);
-
-        // Build lightweight instance lists (just key + transform)
-        BuildInstances(adapter);
-
-        // For WMO-only maps, compute camera from MODF bounding box center
+        // For WMO-only maps, pre-load the WDT-level placements + models
         if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
         {
+            // WMO-only: placements come from WDT header, load upfront
+            var manifest = _assets.BuildManifest(
+                adapter.MdxModelNames, adapter.WmoModelNames,
+                adapter.MddfPlacements, adapter.ModfPlacements);
+            _assets.LoadManifest(manifest);
+            BuildInstances(adapter);
+
             var p = adapter.ModfPlacements[0];
             var bbCenter = (p.BoundsMin + p.BoundsMax) * 0.5f;
             var bbExtent = p.BoundsMax - p.BoundsMin;
@@ -105,7 +104,11 @@ public class WorldScene : ISceneRenderer
             Console.WriteLine($"[WorldScene] WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
         }
 
-        onStatus?.Invoke("World loaded.");
+        // Subscribe to tile load/unload events for lazy object loading
+        _terrainManager.OnTileLoaded += OnTileLoaded;
+        _terrainManager.OnTileUnloaded += OnTileUnloaded;
+
+        onStatus?.Invoke("World loaded (tiles stream as you move).");
     }
 
     private Vector3? _wmoCameraOverride;
@@ -245,6 +248,93 @@ public class WorldScene : ISceneRenderer
     }
 
     /// <summary>
+    /// Called by TerrainManager when a new tile enters the AOI.
+    /// Builds object instances for the tile and lazy-loads any new models.
+    /// </summary>
+    private void OnTileLoaded(int tileX, int tileY, TileLoadResult result)
+    {
+        var adapter = _terrainManager.Adapter;
+        var mdxNames = adapter.MdxModelNames;
+        var wmoNames = adapter.WmoModelNames;
+        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+
+        // Build MDX instances for this tile
+        var tileMdx = new List<ObjectInstance>();
+        foreach (var p in result.MddfPlacements)
+        {
+            if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
+            string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
+            _assets.EnsureMdxLoaded(key);
+            float scale = p.Scale > 0 ? p.Scale : 1.0f;
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateScale(scale)
+                * Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
+                * Matrix4x4.CreateRotationZ(rz)
+                * Matrix4x4.CreateTranslation(p.Position);
+            Vector3 bbMin, bbMax;
+            if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+                TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+            else
+            { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
+            tileMdx.Add(new ObjectInstance { ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax });
+        }
+
+        // Build WMO instances for this tile
+        var tileWmo = new List<ObjectInstance>();
+        foreach (var p in result.ModfPlacements)
+        {
+            if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
+            string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
+            _assets.EnsureWmoLoaded(key);
+            float rx = p.Rotation.X * MathF.PI / 180f;
+            float ry = p.Rotation.Y * MathF.PI / 180f;
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateRotationX(rx)
+                * Matrix4x4.CreateRotationY(ry)
+                * Matrix4x4.CreateRotationZ(rz)
+                * Matrix4x4.CreateTranslation(p.Position);
+            tileWmo.Add(new ObjectInstance { ModelKey = key, Transform = transform, BoundsMin = p.BoundsMin, BoundsMax = p.BoundsMax });
+        }
+
+        _tileMdxInstances[(tileX, tileY)] = tileMdx;
+        _tileWmoInstances[(tileX, tileY)] = tileWmo;
+        _instancesDirty = true;
+
+        if (tileMdx.Count > 0 || tileWmo.Count > 0)
+            Console.WriteLine($"[WorldScene] Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileWmo.Count} WMO instances");
+    }
+
+    /// <summary>
+    /// Called by TerrainManager when a tile leaves the AOI.
+    /// </summary>
+    private void OnTileUnloaded(int tileX, int tileY)
+    {
+        _tileMdxInstances.Remove((tileX, tileY));
+        _tileWmoInstances.Remove((tileX, tileY));
+        _instancesDirty = true;
+    }
+
+    /// <summary>
+    /// Rebuild flat instance lists from per-tile dictionaries.
+    /// Called lazily before rendering when _instancesDirty is true.
+    /// </summary>
+    private void RebuildInstanceLists()
+    {
+        _mdxInstances.Clear();
+        foreach (var list in _tileMdxInstances.Values)
+            _mdxInstances.AddRange(list);
+        _wmoInstances.Clear();
+        foreach (var list in _tileWmoInstances.Values)
+            _wmoInstances.AddRange(list);
+        _instancesDirty = false;
+    }
+
+    /// <summary>
     /// Transform an axis-aligned bounding box through a matrix by transforming all 8 corners
     /// and computing the new AABB that encloses them.
     /// </summary>
@@ -270,6 +360,10 @@ public class WorldScene : ISceneRenderer
     private bool _renderDiagPrinted = false;
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        // Rebuild flat instance lists if tiles changed
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
         // Extract camera position for sky dome
         Matrix4x4.Invert(view, out var viewInvSky);
         var camPos = new Vector3(viewInvSky.M41, viewInvSky.M42, viewInvSky.M43);
@@ -464,12 +558,16 @@ public class WorldScene : ISceneRenderer
 
     public void Dispose()
     {
+        _terrainManager.OnTileLoaded -= OnTileLoaded;
+        _terrainManager.OnTileUnloaded -= OnTileUnloaded;
         _terrainManager.Dispose();
         _assets.Dispose();
         _bbRenderer?.Dispose();
         _skyDome.Dispose();
         _mdxInstances.Clear();
         _wmoInstances.Clear();
+        _tileMdxInstances.Clear();
+        _tileWmoInstances.Clear();
     }
 }
 

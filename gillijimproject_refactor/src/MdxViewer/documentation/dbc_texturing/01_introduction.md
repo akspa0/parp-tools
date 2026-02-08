@@ -175,4 +175,4 @@ To understand the system in depth, proceed to:
 
 ---
 
-**Note**: This documentation is based on reverse engineering analysis of the World of Warcraft 1.12.x client binary using Ghidra disassembler.
+**Note**: This documentation is based on reverse engineering analysis of the leaked World of Warcraft Alpha 0.5.3 client binary using Ghidra disassembler.
