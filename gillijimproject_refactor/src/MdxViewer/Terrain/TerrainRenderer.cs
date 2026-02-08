@@ -392,7 +392,7 @@ void main() {
     if (uHasTexture == 1) {
         texColor = texture(uDiffuseSampler, worldUV);
     } else {
-        texColor = vec4(0.3, 0.5, 0.2, 1.0);
+        texColor = vec4(1.0, 1.0, 1.0, 1.0);
     }
 
     // Alpha from alpha map (overlay layers only)

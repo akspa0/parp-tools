@@ -54,6 +54,11 @@ public class WmoRenderer : ISceneRenderer
         LoadActiveDoodadSet();
     }
 
+    /// <summary>MOHD bounding box min in WMO local space.</summary>
+    public Vector3 BoundsMin => _wmo.BoundsMin;
+    /// <summary>MOHD bounding box max in WMO local space.</summary>
+    public Vector3 BoundsMax => _wmo.BoundsMax;
+
     // Sub-object visibility: WMO groups + doodad toggle
     // Layout: [0..N-1] = WMO groups, [N] = "Doodads" toggle, [N+1..] = individual doodad models
     public int SubObjectCount => _groups.Count + 1 + _doodadInstances.Count;

@@ -660,7 +660,7 @@ void main() {
 
     private string? ResolveReplaceableTexture(uint replaceableId)
     {
-        // Try DBC resolver first (works for creature models)
+        // Try DBCD-based resolver first
         if (_texResolver != null && _modelVirtualPath != null)
         {
             string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId);

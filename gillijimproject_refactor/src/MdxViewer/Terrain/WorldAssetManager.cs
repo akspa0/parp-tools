@@ -156,6 +156,22 @@ public class WorldAssetManager : IDisposable
     }
 
     /// <summary>
+    /// Get the MOHD bounding box for a loaded WMO model (local space).
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetWmoBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (_wmoModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            boundsMin = r.BoundsMin;
+            boundsMax = r.BoundsMax;
+            return true;
+        }
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
     /// Get a loaded WMO renderer by normalized key. Returns null if not loaded or failed.
     /// </summary>
     public WmoRenderer? GetWmo(string normalizedKey)

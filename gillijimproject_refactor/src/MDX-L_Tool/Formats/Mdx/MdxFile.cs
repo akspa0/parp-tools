@@ -398,18 +398,24 @@ public class MdxFile
         }
     }
 
+    static int _geosetDebugIndex = 0;
+
     static MdlGeoset ReadGeoset(BinaryReader br, uint size, uint mdxVersion)
     {
         var geo = new MdlGeoset();
         long geoEnd = br.BaseStream.Position + size;
+        int gIdx = _geosetDebugIndex++;
+        var tagsFound = new List<string>();
 
         while (br.BaseStream.Position < geoEnd)
         {
             if (geoEnd - br.BaseStream.Position < 8) break;
 
+            long preTagPos = br.BaseStream.Position;
             string tag = ReadTag(br);
             uint count = br.ReadUInt32();
-
+            long tagPos = preTagPos;
+            tagsFound.Add($"{tag}({count})");
 
             switch (tag)
             {
@@ -422,14 +428,89 @@ public class MdxFile
                         geo.Normals.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
                     break;
                 case "PTYP":
-                    // Was 1 byte, but alignment suggests 4 bytes (standard uint32)
-                    // If count is 1 (triangles), we want 4 bytes.
-                    br.ReadBytes((int)count * 4); 
+                {
+                    // In Alpha 0.5.3, PTYP count is number of primitive groups.
+                    // Each entry is a uint32 primitive type (4 = triangles).
+                    // Peek ahead to validate: if reading count*4 bytes lands us on a valid tag, that's correct.
+                    long afterRead4 = br.BaseStream.Position + count * 4;
+                    long afterRead1 = br.BaseStream.Position + count; // 1 byte per entry?
+                    
+                    // Check what tag follows each size assumption
+                    bool valid4 = false, valid1 = false;
+                    if (afterRead4 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead4;
+                        string nextTag4 = (afterRead4 + 4 <= geoEnd) ? Encoding.ASCII.GetString(br.ReadBytes(4)) : "";
+                        valid4 = IsValidGeosetTag(nextTag4);
+                        br.BaseStream.Position = save;
+                    }
+                    if (afterRead1 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead1;
+                        string nextTag1 = (afterRead1 + 4 <= geoEnd) ? Encoding.ASCII.GetString(br.ReadBytes(4)) : "";
+                        valid1 = IsValidGeosetTag(nextTag1);
+                        br.BaseStream.Position = save;
+                    }
+                    
+                    if (valid4)
+                    {
+                        br.ReadBytes((int)count * 4);
+                    }
+                    else if (valid1)
+                    {
+                        Console.WriteLine($"      [PTYP] Using 1-byte elements (count={count}) — next tag valid at +{count}");
+                        br.ReadBytes((int)count);
+                    }
+                    else
+                    {
+                        // Fallback: try 4-byte
+                        Console.WriteLine($"      [PTYP] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
+                        br.ReadBytes((int)count * 4);
+                    }
                     break;
+                }
                 case "PCNT":
-                    // Primitive Counts
-                    br.ReadBytes((int)count * 4); 
+                {
+                    // Same ambiguity — check if 4 bytes or some other size per element
+                    long afterRead4 = br.BaseStream.Position + count * 4;
+                    long afterRead1 = br.BaseStream.Position + count;
+                    
+                    bool valid4 = false, valid1 = false;
+                    if (afterRead4 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead4;
+                        string nextTag4 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid4 = IsValidGeosetTag(nextTag4);
+                        br.BaseStream.Position = save;
+                    }
+                    if (afterRead1 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead1;
+                        string nextTag1 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid1 = IsValidGeosetTag(nextTag1);
+                        br.BaseStream.Position = save;
+                    }
+                    
+                    if (valid4)
+                    {
+                        br.ReadBytes((int)count * 4);
+                    }
+                    else if (valid1)
+                    {
+                        Console.WriteLine($"      [PCNT] Using 1-byte elements (count={count}) — next tag valid at +{count}");
+                        br.ReadBytes((int)count);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"      [PCNT] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
+                        br.ReadBytes((int)count * 4);
+                    }
                     break;
+                }
                 case "PVTX":
                     for (int i = 0; i < count; i++)
                         geo.Indices.Add(br.ReadUInt16());
@@ -441,11 +522,10 @@ public class MdxFile
                     br.ReadBytes((int)count * 4); 
                     break;
                 case "MATS":
-                    if (count > 0)
-                    {
-                        geo.MaterialId = br.ReadInt32();
-                        if (count > 1) br.ReadBytes((int)(count - 1) * 4);
-                    }
+                    // MATS = Matrix Indices (bone matrix refs for skinning), NOT MaterialId!
+                    // MaterialId is in the non-tagged footer after all sub-chunks.
+                    for (int i = 0; i < count; i++)
+                        geo.MatrixIndices.Add(br.ReadUInt32());
                     break;
                 case "TVER":
                     br.ReadBytes((int)count * 4); 
@@ -498,10 +578,22 @@ public class MdxFile
 
                 default:
                     // Smart Seek for Alignment/Padding Recovery
-                    // Alpha 0.5.3 often puts padding bytes between chunks (e.g. 8 bytes after UVAS data).
-                    // Instead of aborting, we scan forward a short distance to find the next valid tag.
                     long currentPos = br.BaseStream.Position - 8; // Start of the unknown tag
                     long limit = Math.Min(currentPos + 64, geoEnd);
+                    
+                    // Hex dump the mystery bytes for diagnosis
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = currentPos;
+                        int dumpLen = (int)Math.Min(20, geoEnd - currentPos);
+                        byte[] dump = br.ReadBytes(dumpLen);
+                        br.BaseStream.Position = save;
+                        string hex = BitConverter.ToString(dump).Replace("-", " ");
+                        string ascii = new string(dump.Select(b => b >= 32 && b < 127 ? (char)b : '.').ToArray());
+                        Console.WriteLine($"      [GEOS#{gIdx}] Unknown tag '{tag}' (0x{(uint)(tag[0])|(uint)(tag[1])<<8|(uint)(tag[2])<<16|(uint)(tag[3])<<24:X8}) count=0x{count:X8} at pos {currentPos}");
+                        Console.WriteLine($"      [GEOS#{gIdx}] Hex: {hex}");
+                        Console.WriteLine($"      [GEOS#{gIdx}] Asc: {ascii}");
+                    }
                     
                     // Start scan from 1 byte ahead
                     br.BaseStream.Position = currentPos + 1; 
@@ -516,7 +608,7 @@ public class MdxFile
                         string possibleTag = Encoding.ASCII.GetString(tagBytes);
                         if (IsValidGeosetTag(possibleTag))
                         {
-                             Console.WriteLine($"      [RECOVERY] Skipped {p - currentPos} bytes. Resuming at valid tag '{possibleTag}' (Pos: {p}).");
+                             Console.WriteLine($"      [GEOS#{gIdx}] RECOVERY: Skipped {p - currentPos} bytes → '{possibleTag}' at pos {p}");
                              br.BaseStream.Position = p; // Align to new tag
                              recovered = true;
                              break;
@@ -526,13 +618,39 @@ public class MdxFile
 
                     if (!recovered)
                     {
-                        Console.WriteLine($"      [WARN] Unknown GEOS sub-tag: {tag} at {currentPos}. Scan failed.");
-                        // Restore position to continue blindly or let loop finish
+                        Console.WriteLine($"      [GEOS#{gIdx}] WARN: Recovery scan failed for tag '{tag}' at {currentPos}");
                         br.BaseStream.Position = currentPos + 8;
                     }
                     break;
             }
         }
+
+        // After all tagged sub-chunks, check for non-tagged footer data
+        long remaining = geoEnd - br.BaseStream.Position;
+        if (remaining > 0)
+        {
+            long footerStart = br.BaseStream.Position;
+            // Hex dump footer for diagnosis
+            byte[] footerDump = br.ReadBytes((int)Math.Min(remaining, 64));
+            br.BaseStream.Position = footerStart;
+            string hex = BitConverter.ToString(footerDump).Replace("-", " ");
+            Console.WriteLine($"    [GEOS#{gIdx}] Footer: {remaining} bytes remaining after tagged chunks");
+            Console.WriteLine($"    [GEOS#{gIdx}] Footer hex: {hex}");
+
+            // Standard WC3 MDX geoset footer: MaterialId(4) + SelectionGroup(4) + SelectionFlags(4)
+            // + LodLevel(4) + LodName(260) [optional] + BoundsRadius(4) + BoundsMin(12) + BoundsMax(12)
+            // + NumSeqExtents(4) + SeqExtents[N](28 each)
+            if (remaining >= 12)
+            {
+                geo.MaterialId = br.ReadInt32();
+                geo.SelectionGroup = br.ReadUInt32();
+                geo.Flags = br.ReadUInt32();
+                Console.WriteLine($"    [GEOS#{gIdx}] Footer MaterialId={geo.MaterialId} SelectionGroup={geo.SelectionGroup} Flags=0x{geo.Flags:X8}");
+            }
+        }
+
+        // Log geoset parse summary
+        Console.WriteLine($"    [GEOS#{gIdx}] Tags: [{string.Join(" → ", tagsFound)}] MatId={geo.MaterialId} Verts={geo.Vertices.Count} Idx={geo.Indices.Count} UV={geo.TexCoords.Count}");
 
         return geo;
     }
