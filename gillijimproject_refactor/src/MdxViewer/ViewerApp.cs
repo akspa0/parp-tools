@@ -1120,19 +1120,20 @@ public class ViewerApp : IDisposable
         _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath);
 
         // Position camera to view model from a good angle
+        // MirrorX in Render() negates X, so camera sees mirrored model.
+        // Camera at -X with yaw=0 looks toward +X → sees the model's front (which is at -X after mirror).
         var bmin = mdx.Model.Bounds.Extent.Min;
         var bmax = mdx.Model.Bounds.Extent.Max;
         var center = new System.Numerics.Vector3(
-            (bmin.X + bmax.X) * 0.5f,
+            -(bmin.X + bmax.X) * 0.5f,
             (bmin.Y + bmax.Y) * 0.5f,
             (bmin.Z + bmax.Z) * 0.5f);
         var extent = new System.Numerics.Vector3(
             bmax.X - bmin.X, bmax.Y - bmin.Y, bmax.Z - bmin.Z);
 
-        // Position camera offset from model, looking at it
         float dist = Math.Max(extent.Length() * 1.5f, 50f);
-        _camera.Position = center + new System.Numerics.Vector3(dist, 0, extent.Z * 0.3f);
-        _camera.Yaw = 180f; // Face toward origin (model center)
+        _camera.Position = center + new System.Numerics.Vector3(-dist, 0, extent.Z * 0.3f);
+        _camera.Yaw = 0f;
         _camera.Pitch = -10f; // Slight downward angle
 
         _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +

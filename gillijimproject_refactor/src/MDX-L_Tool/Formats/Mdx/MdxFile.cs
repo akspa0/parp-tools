@@ -618,62 +618,9 @@ public class MdxFile
                         geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
                     break;
                 case "BIDX":
-                {
-                    // Bone Indices — per-vertex, like GNDX. Use peek-ahead to determine element size.
-                    long afterRead4 = br.BaseStream.Position + count * 4;
-                    long afterRead1 = br.BaseStream.Position + count;
-                    
-                    bool valid4 = false, valid1 = false;
-                    // Check if 4-byte elements leads to a valid next tag or reasonable footer
-                    if (afterRead4 <= geoEnd)
-                    {
-                        if (afterRead4 + 4 <= geoEnd)
-                        {
-                            long save = br.BaseStream.Position;
-                            br.BaseStream.Position = afterRead4;
-                            string nextTag4 = Encoding.ASCII.GetString(br.ReadBytes(4));
-                            valid4 = IsValidGeosetTag(nextTag4);
-                            br.BaseStream.Position = save;
-                        }
-                        else
-                        {
-                            // Remaining after read would be footer (no more tags)
-                            long footerSize4 = geoEnd - afterRead4;
-                            valid4 = footerSize4 >= 12; // At least MaterialId + SelectionGroup + Flags
-                        }
-                    }
-                    if (afterRead1 <= geoEnd)
-                    {
-                        if (afterRead1 + 4 <= geoEnd)
-                        {
-                            long save = br.BaseStream.Position;
-                            br.BaseStream.Position = afterRead1;
-                            string nextTag1 = Encoding.ASCII.GetString(br.ReadBytes(4));
-                            valid1 = IsValidGeosetTag(nextTag1);
-                            br.BaseStream.Position = save;
-                        }
-                        else
-                        {
-                            long footerSize1 = geoEnd - afterRead1;
-                            valid1 = footerSize1 >= 12;
-                        }
-                    }
-                    
-                    if (valid4 && !valid1)
-                        br.ReadBytes((int)count * 4);
-                    else if (valid1)
-                    {
-                        // 1 byte per element (like GNDX — both are per-vertex indices)
-                        br.ReadBytes((int)count);
-                    }
-                    else
-                    {
-                        // Fallback: use 1-byte (safe default, matches GNDX)
-                        Console.WriteLine($"      [BIDX] Ambiguous size (count={count}, remaining={geoEnd - br.BaseStream.Position}). Using 1-byte.");
-                        br.ReadBytes((int)Math.Min(count, geoEnd - br.BaseStream.Position));
-                    }
+                    // Bone Indices — 1 byte per vertex (like GNDX)
+                    br.ReadBytes((int)count);
                     break;
-                }
 
                 default:
                     // Smart Seek for Alignment/Padding Recovery

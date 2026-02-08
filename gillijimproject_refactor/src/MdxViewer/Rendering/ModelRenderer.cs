@@ -102,9 +102,15 @@ public class MdxRenderer : ISceneRenderer
         _wireframe = !_wireframe;
     }
 
+    /// <summary>
+    /// Mirror matrix for standalone viewing: negates X to convert WoW left-handed → OpenGL right-handed.
+    /// WorldScene callers use RenderWithTransform directly (no mirror needed — camera handles it).
+    /// </summary>
+    private static readonly Matrix4x4 MirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
-        RenderWithTransform(Matrix4x4.Identity, view, proj);
+        RenderWithTransform(MirrorX, view, proj);
     }
 
     /// <summary>
@@ -117,9 +123,6 @@ public class MdxRenderer : ISceneRenderer
     {
         _gl.UseProgram(_shaderProgram);
 
-        // WoW MDX uses clockwise winding order (OpenGL default is CCW)
-        _gl.FrontFace(FrontFaceDirection.CW);
-        // Disable culling — many MDX geosets have single-sided geometry
         _gl.Disable(EnableCap.CullFace);
 
         var model = modelMatrix;
@@ -158,11 +161,8 @@ public class MdxRenderer : ISceneRenderer
                     // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
                     var geoFlags = layer.Flags;
 
-                    // TwoSided (0x10): disable back-face culling for this layer
-                    if (geoFlags.HasFlag(MdlGeoFlags.TwoSided))
-                        _gl.Disable(EnableCap.CullFace);
-                    else
-                        _gl.Disable(EnableCap.CullFace); // MDX models are generally single-sided geometry but often need both sides
+                    // TwoSided (0x10): culling handled globally
+                    _gl.Disable(EnableCap.CullFace);
 
                     // NoDepthTest (0x40): disable depth testing entirely
                     if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
@@ -253,8 +253,6 @@ public class MdxRenderer : ISceneRenderer
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
-        // Restore default winding order for other renderers
-        _gl.FrontFace(FrontFaceDirection.Ccw);
     }
 
     private void InitShaders()
