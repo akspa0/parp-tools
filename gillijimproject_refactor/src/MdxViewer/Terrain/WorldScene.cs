@@ -128,8 +128,9 @@ public class WorldScene : ISceneRenderer
         //   rotZ = roll (tilt around Y axis)
         // After the X↔Y swap in position, heading must be negated.
         //
-        // No modelToRenderer swap — positions already have X↔Y swap from AlphaTerrainAdapter.
-        // Rotations applied directly per working commit (0c13208).
+        // Positions have X↔Y swap from AlphaTerrainAdapter but model geometry faces original direction.
+        // Mirror X to correct left-right swap without affecting rotation.
+        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -141,7 +142,8 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = Matrix4x4.CreateScale(scale)
+            var transform = mirrorX
+                * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(-rz)
@@ -176,7 +178,8 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = Matrix4x4.CreateRotationX(rx)
+            var transform = mirrorX
+                * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(-rz)
                 * Matrix4x4.CreateTranslation(p.Position);
