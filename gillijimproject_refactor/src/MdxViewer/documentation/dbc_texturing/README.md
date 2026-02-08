@@ -74,7 +74,7 @@ The DBC texturing system interfaces with:
 
 ## Technical Requirements
 
-- WoW Client version 1.12.x (Vanilla) compatibility
+- WoW Client version 0.5.3-0.5.5
 - Support for DBC format version 1
 - BLP texture format support (BLP0 and BLP1)
 - Memory-efficient texture caching
@@ -88,4 +88,4 @@ This documentation is based on reverse engineering analysis of World of Warcraft
 
 **Last Updated**: 2026-02-08  
 **Version**: 1.0  
-**Analyzed Binary**: WoWClient.exe (Vanilla 1.12.x)
+**Analyzed Binary**: WoWClient.exe 0.5.3
