@@ -123,17 +123,10 @@ public class WorldScene : ISceneRenderer
         // Placement transform for Alpha WDT terrain maps.
         // Positions are already converted to renderer coords in AlphaTerrainAdapter:
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
-        // This swaps X↔Y and mirrors both axes.
+        // This swaps X↔Y and negates both, changing coordinate handedness.
         //
-        // Rotation stored in MDDF/MODF as (rotX, rotY, rotZ) in degrees:
-        //   rotX = pitch (tilt around X axis)
-        //   rotY = heading/yaw (rotation around Z/up axis) — this is the main one
-        //   rotZ = roll (tilt around Y axis)
-        // After the X↔Y swap in position, heading must be negated.
-        //
-        // Positions have X↔Y swap from AlphaTerrainAdapter but model geometry faces original direction.
-        // Mirror X to correct left-right swap without affecting rotation.
-        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+        // The handedness flip means Z-axis rotation (heading) must be negated.
+        // Model geometry is NOT mirrored — only the heading sign is adjusted.
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -144,9 +137,8 @@ public class WorldScene : ISceneRenderer
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
-                * Matrix4x4.CreateScale(scale)
+            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
+            var transform = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -180,9 +172,8 @@ public class WorldScene : ISceneRenderer
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
-                * Matrix4x4.CreateRotationX(rx)
+            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
+            var transform = Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
@@ -256,7 +247,6 @@ public class WorldScene : ISceneRenderer
         var adapter = _terrainManager.Adapter;
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
-        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
 
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
@@ -268,9 +258,8 @@ public class WorldScene : ISceneRenderer
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
-                * Matrix4x4.CreateScale(scale)
+            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
+            var transform = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -292,9 +281,8 @@ public class WorldScene : ISceneRenderer
             _assets.EnsureWmoLoaded(key);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
-                * Matrix4x4.CreateRotationX(rx)
+            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
+            var transform = Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
