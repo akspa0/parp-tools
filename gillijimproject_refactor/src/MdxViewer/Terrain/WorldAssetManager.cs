@@ -156,6 +156,22 @@ public class WorldAssetManager : IDisposable
     }
 
     /// <summary>
+    /// Get the bounding box center for a loaded MDX model.
+    /// MDX geometry is offset from origin — the BB center is the effective pivot.
+    /// Returns false if the model is not loaded.
+    /// </summary>
+    public bool TryGetMdxPivotOffset(string normalizedKey, out Vector3 pivotOffset)
+    {
+        if (_mdxModels.TryGetValue(normalizedKey, out var r) && r != null)
+        {
+            pivotOffset = (r.BoundsMin + r.BoundsMax) * 0.5f;
+            return true;
+        }
+        pivotOffset = Vector3.Zero;
+        return false;
+    }
+
+    /// <summary>
     /// Get the MOHD bounding box for a loaded WMO model (local space).
     /// Returns false if the model is not loaded.
     /// </summary>

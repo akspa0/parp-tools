@@ -214,8 +214,8 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uHasAlphaMap", hasAlpha ? 1 : 0);
         _shader.SetInt("uAlphaSampler", 1);
 
-        // Bind shadow map texture (unit 2) — only meaningful on base layer
-        bool hasShadow = isBaseLayer && chunk.ShadowTexture != 0;
+        // Bind shadow map texture (unit 2) — applied on ALL layers so overlays don't wash out shadows
+        bool hasShadow = chunk.ShadowTexture != 0;
         if (hasShadow)
         {
             _gl.ActiveTexture(TextureUnit.Texture2);
@@ -478,8 +478,8 @@ void main() {
     vec3 lighting = uAmbientColor + uLightColor * diff;
     vec3 litColor = texColor.rgb * lighting;
 
-    // MCSH shadow map overlay (base layer only)
-    if (uShowShadowMap == 1 && uIsBaseLayer == 1 && uHasShadowMap == 1) {
+    // MCSH shadow map overlay (all layers — shadows must persist through alpha-blended overlays)
+    if (uShowShadowMap == 1 && uHasShadowMap == 1) {
         float shadow = texture(uShadowSampler, vTexCoord).r;
         // Darken shadowed areas: shadow=1.0 means shadowed, 0.0 means lit
         litColor *= mix(1.0, 0.4, shadow);

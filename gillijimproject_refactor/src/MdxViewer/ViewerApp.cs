@@ -11,6 +11,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WoWMapConverter.Core.Converters;
+using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer;
 
@@ -85,6 +86,17 @@ public class ViewerApp : IDisposable
     private string _folderInputBuf = "";
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
+
+    // VLM Dataset Generator state
+    private bool _showVlmExportDialog = false;
+    private string _vlmClientPath = "";
+    private string _vlmMapName = "development";
+    private string _vlmOutputDir = "";
+    private int _vlmTileLimit = 0; // 0 = unlimited
+    private bool _vlmExporting = false;
+    private readonly List<string> _vlmExportLog = new();
+    private bool _vlmExportScrollToBottom = false;
+    private VlmExportResult? _vlmExportResult = null;
 
     public void Run(string[]? initialArgs = null)
     {
@@ -249,6 +261,8 @@ public class ViewerApp : IDisposable
             DrawFolderInputDialog();
         if (_showListfileInput)
             DrawListfileInputDialog();
+        if (_showVlmExportDialog)
+            DrawVlmExportDialog();
     }
 
     private void DrawMenuBar()
@@ -268,6 +282,11 @@ public class ViewerApp : IDisposable
 
                 if (ImGui.MenuItem("Open VLM Project..."))
                     _wantOpenVlmProject = true;
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Generate VLM Dataset..."))
+                    _showVlmExportDialog = true;
 
                 ImGui.Separator();
 
@@ -437,6 +456,180 @@ public class ViewerApp : IDisposable
     {
         // No longer needed — listfile is auto-downloaded
         _showListfileInput = false;
+    }
+
+    private void DrawVlmExportDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(550, 500), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(
+            ImGui.GetIO().DisplaySize.X / 2 - 275,
+            ImGui.GetIO().DisplaySize.Y / 2 - 250), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("Generate VLM Dataset", ref _showVlmExportDialog))
+        {
+            ImGui.TextWrapped("Export terrain data from a WoW client folder into a VLM dataset (JSON + PNG). " +
+                "Supports Alpha 0.5.3 through Cataclysm 4.0.1.");
+            ImGui.Spacing();
+
+            // Client Path
+            ImGui.Text("Client Data Path:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##vlmClient", ref _vlmClientPath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##client"))
+            {
+                using var dialog = new System.Windows.Forms.FolderBrowserDialog
+                {
+                    Description = "Select WoW Client Data Folder",
+                    UseDescriptionForTitle = true
+                };
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                    _vlmClientPath = dialog.SelectedPath;
+            }
+
+            // Map Name
+            ImGui.Text("Map Name:");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputText("##vlmMap", ref _vlmMapName, 128);
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f),
+                "e.g. development, Azeroth, Kalimdor, PVPZone01");
+
+            // Output Directory
+            ImGui.Text("Output Directory:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##vlmOutput", ref _vlmOutputDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##output"))
+            {
+                using var dialog = new System.Windows.Forms.FolderBrowserDialog
+                {
+                    Description = "Select Output Directory",
+                    UseDescriptionForTitle = true
+                };
+                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                    _vlmOutputDir = dialog.SelectedPath;
+            }
+
+            // Tile Limit
+            ImGui.Text("Tile Limit (0 = all):");
+            ImGui.SetNextItemWidth(120);
+            ImGui.InputInt("##vlmLimit", ref _vlmTileLimit);
+            if (_vlmTileLimit < 0) _vlmTileLimit = 0;
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Export button
+            bool canExport = !_vlmExporting &&
+                !string.IsNullOrWhiteSpace(_vlmClientPath) &&
+                !string.IsNullOrWhiteSpace(_vlmMapName) &&
+                !string.IsNullOrWhiteSpace(_vlmOutputDir);
+
+            if (!canExport) ImGui.BeginDisabled();
+            if (ImGui.Button("Export Dataset", new Vector2(140, 30)))
+            {
+                StartVlmExport();
+            }
+            if (!canExport) ImGui.EndDisabled();
+
+            if (_vlmExporting)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Exporting...");
+            }
+            else if (_vlmExportResult != null)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f),
+                    $"Done: {_vlmExportResult.TilesExported} tiles, {_vlmExportResult.UniqueTextures} textures");
+
+                ImGui.SameLine();
+                if (ImGui.Button("Open in Viewer"))
+                {
+                    var datasetDir = Path.Combine(_vlmExportResult.OutputDirectory, "dataset");
+                    if (Directory.Exists(datasetDir))
+                        LoadVlmProject(_vlmExportResult.OutputDirectory);
+                    else
+                        LoadVlmProject(_vlmExportResult.OutputDirectory);
+                    _showVlmExportDialog = false;
+                }
+            }
+
+            // Progress log
+            ImGui.Spacing();
+            ImGui.Text("Log:");
+            float logHeight = ImGui.GetContentRegionAvail().Y - 4;
+            if (ImGui.BeginChild("VlmExportLog", new Vector2(-1, logHeight), true))
+            {
+                lock (_vlmExportLog)
+                {
+                    foreach (var line in _vlmExportLog)
+                        ImGui.TextWrapped(line);
+                }
+                if (_vlmExportScrollToBottom)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    _vlmExportScrollToBottom = false;
+                }
+            }
+            ImGui.EndChild();
+        }
+        ImGui.End();
+    }
+
+    private void StartVlmExport()
+    {
+        _vlmExporting = true;
+        _vlmExportResult = null;
+        lock (_vlmExportLog) { _vlmExportLog.Clear(); }
+
+        var clientPath = _vlmClientPath;
+        var mapName = _vlmMapName;
+        var outputDir = _vlmOutputDir;
+        var limit = _vlmTileLimit <= 0 ? int.MaxValue : _vlmTileLimit;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                var exporter = new VlmDatasetExporter();
+                var progress = new Progress<string>(msg =>
+                {
+                    lock (_vlmExportLog)
+                    {
+                        _vlmExportLog.Add(msg);
+                        // Keep log from growing unbounded
+                        if (_vlmExportLog.Count > 2000)
+                            _vlmExportLog.RemoveRange(0, _vlmExportLog.Count - 1500);
+                    }
+                    _vlmExportScrollToBottom = true;
+                });
+
+                var result = exporter.ExportMapAsync(clientPath, mapName, outputDir, progress, limit)
+                    .GetAwaiter().GetResult();
+
+                _vlmExportResult = result;
+                lock (_vlmExportLog)
+                {
+                    _vlmExportLog.Add($"=== Export complete: {result.TilesExported} tiles, {result.TilesSkipped} skipped, {result.UniqueTextures} textures ===");
+                }
+                _vlmExportScrollToBottom = true;
+            }
+            catch (Exception ex)
+            {
+                lock (_vlmExportLog)
+                {
+                    _vlmExportLog.Add($"ERROR: {ex.Message}");
+                    _vlmExportLog.Add(ex.StackTrace ?? "");
+                }
+                _vlmExportScrollToBottom = true;
+            }
+            finally
+            {
+                _vlmExporting = false;
+            }
+        });
     }
 
     private void DrawFileBrowser()

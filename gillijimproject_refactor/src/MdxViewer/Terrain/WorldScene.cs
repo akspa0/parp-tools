@@ -140,7 +140,15 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
+
+            // MDX geometry is offset from origin — pre-translate by -boundsCenter
+            // so the bounding box center aligns with origin before scale/rotation/translation.
+            Matrix4x4 pivotCorrection = Matrix4x4.Identity;
+            if (_assets.TryGetMdxPivotOffset(key, out var pivot))
+                pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
+
+            var transform = pivotCorrection
+                * mirrorX
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -285,7 +293,14 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
+
+            // MDX geometry is offset from origin — pre-translate by -boundsCenter
+            Matrix4x4 pivotCorrection = Matrix4x4.Identity;
+            if (_assets.TryGetMdxPivotOffset(key, out var pivot))
+                pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
+
+            var transform = pivotCorrection
+                * mirrorX
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
