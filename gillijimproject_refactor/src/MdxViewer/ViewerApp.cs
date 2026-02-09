@@ -67,6 +67,13 @@ public class ViewerApp : IDisposable
     private bool _wantOpenFolder = false;
     private bool _wantExportGlb = false;
 
+    // Sidebar layout
+    private bool _showLeftSidebar = true;
+    private bool _showRightSidebar = true;
+    private const float SidebarWidth = 320f;
+    private const float MenuBarHeight = 22f;
+    private const float StatusBarHeight = 24f;
+
     // Terrain/World state
     private TerrainManager? _terrainManager;
     private VlmTerrainManager? _vlmTerrainManager;
@@ -259,15 +266,13 @@ public class ViewerApp : IDisposable
     {
         DrawMenuBar();
 
-        if (_showFileBrowser)
-            DrawFileBrowser();
+        // Fixed sidebar layout
+        if (_showLeftSidebar)
+            DrawLeftSidebar();
+        if (_showRightSidebar)
+            DrawRightSidebar();
 
-        if (_showModelInfo)
-            DrawModelInfoPanel();
-
-        if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
-            DrawTerrainControls();
-
+        // Minimap floats independently (bottom-left or bottom-right depending on sidebars)
         if (_worldScene != null || _vlmTerrainManager != null)
             DrawMinimap();
 
@@ -328,6 +333,9 @@ public class ViewerApp : IDisposable
 
                 ImGui.Separator();
 
+                ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
+                ImGui.MenuItem("Right Sidebar", "", ref _showRightSidebar);
+                ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
@@ -692,384 +700,388 @@ public class ViewerApp : IDisposable
         });
     }
 
-    private void DrawFileBrowser()
+    private void DrawLeftSidebar()
     {
-        ImGui.SetNextWindowSize(new Vector2(350, 600), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(0, 22), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("File Browser", ref _showFileBrowser))
+        var io = ImGui.GetIO();
+        float sidebarHeight = io.DisplaySize.Y - MenuBarHeight - StatusBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(0, MenuBarHeight));
+        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
-            if (_dataSource == null || !_dataSource.IsLoaded)
+            // ── File Browser section ──
+            if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives.");
-                ImGui.End();
-                return;
+                DrawFileBrowserContent();
+            }
+        }
+        ImGui.End();
+        ImGui.PopStyleVar();
+    }
+
+    private void DrawFileBrowserContent()
+    {
+        if (_dataSource == null || !_dataSource.IsLoaded)
+        {
+            ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives.");
+            return;
+        }
+
+        ImGui.Text($"Source: {_dataSource.Name}");
+        ImGui.Separator();
+
+        // Extension filter
+        if (ImGui.BeginCombo("Type", _extensionFilter))
+        {
+            string[] filters = { ".mdx", ".wmo", ".m2", ".blp", ".wdt" };
+            foreach (var f in filters)
+            {
+                if (ImGui.Selectable(f, _extensionFilter == f))
+                {
+                    _extensionFilter = f;
+                    RefreshFileList();
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        // Search filter
+        var search = _searchFilter;
+        if (ImGui.InputText("Search", ref search, 256))
+        {
+            _searchFilter = search;
+            RefreshFileList();
+        }
+
+        ImGui.Text($"{_filteredFiles.Count} files");
+        ImGui.Separator();
+
+        // File list — use remaining height
+        float remainingH = ImGui.GetContentRegionAvail().Y;
+        if (ImGui.BeginChild("FileList", new Vector2(0, remainingH), true))
+        {
+            for (int i = 0; i < _filteredFiles.Count; i++)
+            {
+                var file = _filteredFiles[i];
+                var displayName = Path.GetFileName(file);
+                bool selected = i == _selectedFileIndex;
+
+                if (ImGui.Selectable(displayName, selected, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    _selectedFileIndex = i;
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        LoadFileFromDataSource(file);
+                    }
+                }
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(file);
+            }
+            ImGui.EndChild();
+        }
+    }
+
+    private void DrawRightSidebar()
+    {
+        var io = ImGui.GetIO();
+        float sidebarHeight = io.DisplaySize.Y - MenuBarHeight - StatusBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, MenuBarHeight));
+        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
+        if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            // ── Selected Object section (always visible when something is selected) ──
+            if (!string.IsNullOrEmpty(_selectedObjectInfo))
+            {
+                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
+                ImGui.Separator();
+                ImGui.TextWrapped(_selectedObjectInfo);
+                ImGui.Spacing();
             }
 
-            ImGui.Text($"Source: {_dataSource.Name}");
-            ImGui.Separator();
-
-            // Extension filter
-            if (ImGui.BeginCombo("Type", _extensionFilter))
+            // ── Model Info section ──
+            if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                string[] filters = { ".mdx", ".wmo", ".m2", ".blp", ".wdt" };
-                foreach (var f in filters)
+                DrawModelInfoContent();
+            }
+
+            // ── Terrain Controls section ──
+            if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
+            {
+                if (ImGui.CollapsingHeader("Terrain Controls", ImGuiTreeNodeFlags.DefaultOpen))
                 {
-                    if (ImGui.Selectable(f, _extensionFilter == f))
-                    {
-                        _extensionFilter = f;
-                        RefreshFileList();
-                    }
+                    DrawTerrainControlsContent();
+                }
+            }
+
+            // ── World Objects section ──
+            if (_worldScene != null)
+            {
+                if (ImGui.CollapsingHeader("World Objects", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    DrawWorldObjectsContent();
+                }
+            }
+        }
+        ImGui.End();
+        ImGui.PopStyleVar();
+    }
+
+    private void DrawModelInfoContent()
+    {
+        if (string.IsNullOrEmpty(_modelInfo))
+        {
+            ImGui.TextWrapped("No model loaded.");
+            return;
+        }
+
+        ImGui.TextWrapped(_modelInfo);
+
+        // DoodadSet selection (WMO only)
+        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text("Doodad Set:");
+            int activeSet = wmoR.ActiveDoodadSet;
+            string currentSetName = wmoR.GetDoodadSetName(activeSet);
+            if (ImGui.BeginCombo("##DoodadSet", currentSetName))
+            {
+                for (int s = 0; s < wmoR.DoodadSetCount; s++)
+                {
+                    bool selected = s == activeSet;
+                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
+                        wmoR.SetActiveDoodadSet(s);
+                    if (selected) ImGui.SetItemDefaultFocus();
                 }
                 ImGui.EndCombo();
             }
-
-            // Search filter
-            var search = _searchFilter;
-            if (ImGui.InputText("Search", ref search, 256))
-            {
-                _searchFilter = search;
-                RefreshFileList();
-            }
-
-            ImGui.Text($"{_filteredFiles.Count} files");
-            ImGui.Separator();
-
-            // File list
-            if (ImGui.BeginChild("FileList", new Vector2(0, 0), true))
-            {
-                for (int i = 0; i < _filteredFiles.Count; i++)
-                {
-                    var file = _filteredFiles[i];
-                    var displayName = Path.GetFileName(file);
-                    bool selected = i == _selectedFileIndex;
-
-                    if (ImGui.Selectable(displayName, selected, ImGuiSelectableFlags.AllowDoubleClick))
-                    {
-                        _selectedFileIndex = i;
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        {
-                            LoadFileFromDataSource(file);
-                        }
-                    }
-
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip(file);
-                }
-                ImGui.EndChild();
-            }
         }
-        ImGui.End();
-    }
 
-    private void DrawModelInfoPanel()
-    {
-        ImGui.SetNextWindowSize(new Vector2(300, 500), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(_window.Size.X - 300, 22), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Model Info", ref _showModelInfo))
+        // Geoset / Group visibility toggles
+        if (_renderer != null && _renderer.SubObjectCount > 0)
         {
-            if (string.IsNullOrEmpty(_modelInfo))
+            ImGui.Separator();
+            ImGui.Text("Visibility:");
+
+            if (ImGui.SmallButton("All On"))
+                for (int i = 0; i < _renderer.SubObjectCount; i++)
+                    _renderer.SetSubObjectVisible(i, true);
+            ImGui.SameLine();
+            if (ImGui.SmallButton("All Off"))
+                for (int i = 0; i < _renderer.SubObjectCount; i++)
+                    _renderer.SetSubObjectVisible(i, false);
+
+            for (int i = 0; i < _renderer.SubObjectCount; i++)
             {
-                ImGui.TextWrapped("No model loaded.");
-            }
-            else
-            {
-                ImGui.TextWrapped(_modelInfo);
-
-                // DoodadSet selection (WMO only)
-                if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Doodad Set:");
-                    int activeSet = wmoR.ActiveDoodadSet;
-                    string currentSetName = wmoR.GetDoodadSetName(activeSet);
-                    if (ImGui.BeginCombo("##DoodadSet", currentSetName))
-                    {
-                        for (int s = 0; s < wmoR.DoodadSetCount; s++)
-                        {
-                            bool selected = s == activeSet;
-                            if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
-                                wmoR.SetActiveDoodadSet(s);
-                            if (selected) ImGui.SetItemDefaultFocus();
-                        }
-                        ImGui.EndCombo();
-                    }
-                }
-
-                // Geoset / Group visibility toggles
-                if (_renderer != null && _renderer.SubObjectCount > 0)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Visibility:");
-
-                    // Show All / Hide All buttons
-                    if (ImGui.SmallButton("All On"))
-                        for (int i = 0; i < _renderer.SubObjectCount; i++)
-                            _renderer.SetSubObjectVisible(i, true);
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton("All Off"))
-                        for (int i = 0; i < _renderer.SubObjectCount; i++)
-                            _renderer.SetSubObjectVisible(i, false);
-
-                    for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    {
-                        bool vis = _renderer.GetSubObjectVisible(i);
-                        if (ImGui.Checkbox(_renderer.GetSubObjectName(i), ref vis))
-                            _renderer.SetSubObjectVisible(i, vis);
-                    }
-                }
-
-                // Terrain stats (brief summary — full controls in separate window)
-                if (_terrainManager != null)
-                {
-                    ImGui.Separator();
-                    ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
-                    ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
-                    ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
-                }
-
-                // Object list panel (when WorldScene is active)
-                if (_worldScene != null)
-                {
-                    ImGui.Separator();
-
-                    // Bounding box toggle
-                    bool showBB = _worldScene.ShowBoundingBoxes;
-                    if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
-                        _worldScene.ShowBoundingBoxes = showBB;
-
-                    // POI toggle
-                    if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
-                    {
-                        bool showPoi = _worldScene.ShowPoi;
-                        if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
-                            _worldScene.ShowPoi = showPoi;
-                    }
-
-                    // WMO placements
-                    if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
-                    {
-                        for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
-                        {
-                            var p = _worldScene.ModfPlacements[i];
-                            string name = p.NameIndex < _worldScene.WmoModelNames.Count
-                                ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
-                            string label = $"[{i}] {name}";
-                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                            {
-                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                                {
-                                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
-                                    _camera.Pitch = -30f;
-                                }
-                            }
-                            if (ImGui.IsItemHovered())
-                            {
-                                ImGui.BeginTooltip();
-                                ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                                ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                                ImGui.Text($"Flags: 0x{p.Flags:X4}");
-                                ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
-                                ImGui.EndTooltip();
-                            }
-                        }
-                        ImGui.TreePop();
-                    }
-
-                    // MDX placements (show first 200 to avoid UI lag)
-                    int mddfCount = _worldScene.MddfPlacements.Count;
-                    int mddfShow = Math.Min(mddfCount, 200);
-                    if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
-                    {
-                        for (int i = 0; i < mddfShow; i++)
-                        {
-                            var p = _worldScene.MddfPlacements[i];
-                            string name = p.NameIndex < _worldScene.MdxModelNames.Count
-                                ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
-                            string label = $"[{i}] {name} s={p.Scale:F2}";
-                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                            {
-                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                                {
-                                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
-                                    _camera.Pitch = -30f;
-                                }
-                            }
-                            if (ImGui.IsItemHovered())
-                            {
-                                ImGui.BeginTooltip();
-                                ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                                ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                                ImGui.Text($"Scale: {p.Scale:F3}");
-                                ImGui.EndTooltip();
-                            }
-                        }
-                        ImGui.TreePop();
-                    }
-
-                    // Area POI list
-                    if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0 &&
-                        ImGui.TreeNode($"Area POIs ({_worldScene.PoiLoader.Entries.Count})"))
-                    {
-                        foreach (var poi in _worldScene.PoiLoader.Entries)
-                        {
-                            string label = $"[{poi.Id}] {poi.Name}";
-                            if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                            {
-                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                                {
-                                    _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
-                                    _camera.Pitch = -30f;
-                                }
-                            }
-                            if (ImGui.IsItemHovered())
-                            {
-                                ImGui.BeginTooltip();
-                                ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
-                                ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
-                                ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
-                                ImGui.EndTooltip();
-                            }
-                        }
-                        ImGui.TreePop();
-                    }
-
-                    // Selected object info (from mouse picking)
-                    if (!string.IsNullOrEmpty(_selectedObjectInfo))
-                    {
-                        ImGui.Separator();
-                        ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object:");
-                        ImGui.TextWrapped(_selectedObjectInfo);
-                    }
-                }
+                bool vis = _renderer.GetSubObjectVisible(i);
+                if (ImGui.Checkbox(_renderer.GetSubObjectName(i), ref vis))
+                    _renderer.SetSubObjectVisible(i, vis);
             }
         }
-        ImGui.End();
     }
 
-    private void DrawTerrainControls()
+    private void DrawTerrainControlsContent()
     {
-        // Get lighting/renderer from whichever terrain manager is active
         TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (lighting == null || renderer == null) return;
 
-        ImGui.SetNextWindowSize(new Vector2(280, 380), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(_window.Size.X - 590, 22), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Terrain Controls", ref _showTerrainControls))
+        // Day/night cycle
+        float gameTime = lighting.GameTime;
+        if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
+            lighting.GameTime = gameTime;
+        string timeLabel = gameTime switch
         {
+            < 0.15f => "Night",
+            < 0.25f => "Dawn",
+            < 0.35f => "Morning",
+            < 0.65f => "Day",
+            < 0.75f => "Evening",
+            < 0.85f => "Dusk",
+            _ => "Night"
+        };
+        ImGui.SameLine();
+        ImGui.Text(timeLabel);
 
-            // Day/night cycle
-            float gameTime = lighting.GameTime;
-            if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
-                lighting.GameTime = gameTime;
-            string timeLabel = gameTime switch
+        // Fog
+        float fogStart = lighting.FogStart;
+        float fogEnd = lighting.FogEnd;
+        if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
+            lighting.FogStart = fogStart;
+        if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
+            lighting.FogEnd = fogEnd;
+
+        // Camera speed
+        ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
+        ImGui.Text("Hold Shift for 5x boost");
+
+        ImGui.Separator();
+        ImGui.Text("Texture Layers:");
+
+        bool l0 = renderer.ShowLayer0;
+        bool l1 = renderer.ShowLayer1;
+        bool l2 = renderer.ShowLayer2;
+        bool l3 = renderer.ShowLayer3;
+        if (ImGui.Checkbox("Layer 0 (Base)", ref l0)) renderer.ShowLayer0 = l0;
+        if (ImGui.Checkbox("Layer 1", ref l1)) renderer.ShowLayer1 = l1;
+        if (ImGui.Checkbox("Layer 2", ref l2)) renderer.ShowLayer2 = l2;
+        if (ImGui.Checkbox("Layer 3", ref l3)) renderer.ShowLayer3 = l3;
+
+        ImGui.Separator();
+        ImGui.Text("Grid Overlays:");
+
+        bool chunkGrid = renderer.ShowChunkGrid;
+        bool tileGrid = renderer.ShowTileGrid;
+        if (ImGui.Checkbox("Chunk Grid (cyan)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+        if (ImGui.Checkbox("ADT Tile Grid (orange)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+
+        ImGui.Separator();
+        ImGui.Text("Debug:");
+
+        bool alphaMask = renderer.ShowAlphaMask;
+        if (ImGui.Checkbox("Show Alpha Masks", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+
+        bool shadowMap = renderer.ShowShadowMap;
+        if (ImGui.Checkbox("Show MCSH Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+        if (liquidRenderer != null)
+        {
+            bool showLiquid = liquidRenderer.ShowLiquid;
+            if (ImGui.Checkbox($"Show Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
+                liquidRenderer.ShowLiquid = showLiquid;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Topography:");
+
+        bool contours = renderer.ShowContours;
+        if (ImGui.Checkbox("Contour Lines", ref contours)) renderer.ShowContours = contours;
+
+        if (renderer.ShowContours)
+        {
+            float interval = renderer.ContourInterval;
+            if (ImGui.SliderFloat("Contour Interval", ref interval, 0.5f, 20.0f, "%.1f"))
+                renderer.ContourInterval = interval;
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Toggle Wireframe"))
+            _renderer?.ToggleWireframe();
+
+        ImGui.Separator();
+        int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+        int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
+        ImGui.Text($"Tiles: {tiles}  Chunks: {chunks}");
+    }
+
+    private void DrawWorldObjectsContent()
+    {
+        if (_worldScene == null) return;
+
+        // Bounding box toggle
+        bool showBB = _worldScene.ShowBoundingBoxes;
+        if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
+            _worldScene.ShowBoundingBoxes = showBB;
+
+        // POI toggle
+        if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+        {
+            bool showPoi = _worldScene.ShowPoi;
+            if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
+                _worldScene.ShowPoi = showPoi;
+        }
+
+        // WMO placements
+        if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
+        {
+            for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
             {
-                < 0.15f => "Night",
-                < 0.25f => "Dawn",
-                < 0.35f => "Morning",
-                < 0.65f => "Day",
-                < 0.75f => "Evening",
-                < 0.85f => "Dusk",
-                _ => "Night"
-            };
-            ImGui.SameLine();
-            ImGui.Text(timeLabel);
-
-            // Fog
-            float fogStart = lighting.FogStart;
-            float fogEnd = lighting.FogEnd;
-            if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
-                lighting.FogStart = fogStart;
-            if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
-                lighting.FogEnd = fogEnd;
-
-            // Camera speed
-            ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
-            ImGui.Text("Hold Shift for 5x boost");
-
-            ImGui.Separator();
-            ImGui.Text("Texture Layers:");
-
-            // Layer visibility toggles
-            bool l0 = renderer.ShowLayer0;
-            bool l1 = renderer.ShowLayer1;
-            bool l2 = renderer.ShowLayer2;
-            bool l3 = renderer.ShowLayer3;
-            if (ImGui.Checkbox("Layer 0 (Base)", ref l0)) renderer.ShowLayer0 = l0;
-            if (ImGui.Checkbox("Layer 1", ref l1)) renderer.ShowLayer1 = l1;
-            if (ImGui.Checkbox("Layer 2", ref l2)) renderer.ShowLayer2 = l2;
-            if (ImGui.Checkbox("Layer 3", ref l3)) renderer.ShowLayer3 = l3;
-
-            ImGui.Separator();
-            ImGui.Text("Grid Overlays:");
-
-            bool chunkGrid = renderer.ShowChunkGrid;
-            bool tileGrid = renderer.ShowTileGrid;
-            if (ImGui.Checkbox("Chunk Grid (cyan)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-            if (ImGui.Checkbox("ADT Tile Grid (orange)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-
-            ImGui.Separator();
-            ImGui.Text("Debug:");
-
-            bool alphaMask = renderer.ShowAlphaMask;
-            if (ImGui.Checkbox("Show Alpha Masks", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-
-            bool shadowMap = renderer.ShowShadowMap;
-            if (ImGui.Checkbox("Show MCSH Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-
-            // Liquid rendering toggle
-            LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
-            if (liquidRenderer != null)
-            {
-                bool showLiquid = liquidRenderer.ShowLiquid;
-                if (ImGui.Checkbox($"Show Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
-                    liquidRenderer.ShowLiquid = showLiquid;
-            }
-
-            ImGui.Separator();
-            ImGui.Text("Topography:");
-
-            bool contours = renderer.ShowContours;
-            if (ImGui.Checkbox("Contour Lines", ref contours)) renderer.ShowContours = contours;
-
-            if (renderer.ShowContours)
-            {
-                float interval = renderer.ContourInterval;
-                if (ImGui.SliderFloat("Contour Interval", ref interval, 0.5f, 20.0f, "%.1f"))
-                    renderer.ContourInterval = interval;
-            }
-
-            ImGui.Separator();
-            ImGui.Text("Wireframe:");
-            if (ImGui.Button("Toggle Wireframe"))
-                _renderer?.ToggleWireframe();
-
-            // World scene toggles
-            if (_worldScene != null)
-            {
-                ImGui.Separator();
-                ImGui.Text("World Objects:");
-
-                bool showBB = _worldScene.ShowBoundingBoxes;
-                if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
-                    _worldScene.ShowBoundingBoxes = showBB;
-
-                if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+                var p = _worldScene.ModfPlacements[i];
+                string name = p.NameIndex < _worldScene.WmoModelNames.Count
+                    ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                string label = $"[{i}] {name}";
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
                 {
-                    bool showPoi = _worldScene.ShowPoi;
-                    if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
-                        _worldScene.ShowPoi = showPoi;
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
+                        _camera.Pitch = -30f;
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                    ImGui.Text($"Flags: 0x{p.Flags:X4}");
+                    ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
+                    ImGui.EndTooltip();
                 }
             }
-
-            ImGui.Separator();
-            int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
-            int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
-            ImGui.Text($"Tiles: {tiles}");
-            ImGui.Text($"Chunks: {chunks}");
-            ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
+            ImGui.TreePop();
         }
-        ImGui.End();
+
+        // MDX placements (show first 200 to avoid UI lag)
+        int mddfCount = _worldScene.MddfPlacements.Count;
+        int mddfShow = Math.Min(mddfCount, 200);
+        if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
+        {
+            for (int i = 0; i < mddfShow; i++)
+            {
+                var p = _worldScene.MddfPlacements[i];
+                string name = p.NameIndex < _worldScene.MdxModelNames.Count
+                    ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                string label = $"[{i}] {name} s={p.Scale:F2}";
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
+                        _camera.Pitch = -30f;
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                    ImGui.Text($"Scale: {p.Scale:F3}");
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.TreePop();
+        }
+
+        // Area POI list
+        if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0 &&
+            ImGui.TreeNode($"Area POIs ({_worldScene.PoiLoader.Entries.Count})"))
+        {
+            foreach (var poi in _worldScene.PoiLoader.Entries)
+            {
+                string label = $"[{poi.Id}] {poi.Name}";
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
+                        _camera.Pitch = -30f;
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
+                    ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
+                    ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.TreePop();
+        }
     }
 
     private void DrawStatusBar()
@@ -1083,6 +1095,20 @@ public class ViewerApp : IDisposable
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.Text(_statusMessage);
+
+            // Camera coordinates (local + WoW world) in the center-ish area
+            if (_terrainManager != null || _vlmTerrainManager != null)
+            {
+                var pos = _camera.Position;
+                float wowX = WoWConstants.MapOrigin - pos.Y;
+                float wowY = WoWConstants.MapOrigin - pos.X;
+                float wowZ = pos.Z;
+                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})";
+                float coordWidth = ImGui.CalcTextSize(coordText).X;
+                float centerX = (io.DisplaySize.X - coordWidth) * 0.5f;
+                ImGui.SameLine(centerX);
+                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
+            }
 
             // FPS counter on the right side
             string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
@@ -1288,11 +1314,14 @@ public class ViewerApp : IDisposable
                     // Infer build version from game path first
                     string buildAlias = InferBuildFromPath(gamePath);
                     
-                    // If not found, search WoWDBDefs for 0.5.3
+                    // If not found, search WoWDBDefs definitions
                     if (string.IsNullOrEmpty(buildAlias))
                     {
                         buildAlias = FindBuildInWoWDBDefs(dbdDir);
                     }
+                    
+                    // Resolve short alias to full build string (e.g. "0.6.0" -> "0.6.0.3592")
+                    buildAlias = ResolveFullBuild(buildAlias);
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
@@ -1340,23 +1369,45 @@ public class ViewerApp : IDisposable
         return "";
     }
 
+    private static readonly Dictionary<string, string> FullBuildMap = new()
+    {
+        { "0.5.3", "0.5.3.3368" },
+        { "0.5.5", "0.5.5.3494" },
+        { "0.6.0", "0.6.0.3592" },
+        { "3.3.5", "3.3.5.12340" },
+    };
+
+    private static string ResolveFullBuild(string alias)
+    {
+        if (string.IsNullOrEmpty(alias)) return alias;
+        return FullBuildMap.TryGetValue(alias, out var full) ? full : alias;
+    }
+
     private static string FindBuildInWoWDBDefs(string dbdDir)
     {
-        // Search WoWDBDefs for 0.5.3 build
+        // Search WoWDBDefs for known Alpha/early builds
         if (!Directory.Exists(dbdDir)) return "";
         
-        var dbdFiles = Directory.GetFiles(dbdDir, "*.dbd");
-        foreach (var file in dbdFiles)
+        // Ordered by preference — check newest Alpha first
+        var knownBuilds = new (string search, string result)[]
         {
-            var content = File.ReadAllText(file);
-            
-            // Check for 0.5.3 build strings
-            if (content.Contains("build = 0.5.3") || 
-                content.Contains("build=" + '"' + "0.5.3" + '"') ||
-                content.Contains("version = \"0.5.3\""))
+            ("BUILD 0.6.0.3592", "0.6.0"),
+            ("BUILD 0.5.5.3494", "0.5.5"),
+            ("BUILD 0.5.3.3368", "0.5.3"),
+        };
+        
+        // Only need to check one DBD file — AreaTable.dbd is always present
+        var areaTable = Path.Combine(dbdDir, "AreaTable.dbd");
+        if (File.Exists(areaTable))
+        {
+            var content = File.ReadAllText(areaTable);
+            foreach (var (search, result) in knownBuilds)
             {
-                Console.WriteLine($"[MdxViewer] Found 0.5.3 build in: {Path.GetFileName(file)}");
-                return "0.5.3";
+                if (content.Contains(search))
+                {
+                    Console.WriteLine($"[MdxViewer] Found {result} build definition in AreaTable.dbd");
+                    return result;
+                }
             }
         }
         
@@ -1444,6 +1495,40 @@ public class ViewerApp : IDisposable
                 case ".wmo":
                     var converter = new WmoV14ToV17Converter();
                     var wmo = converter.ParseWmoV14(cachePath);
+                    
+                    // v16 split format: root has GroupCount but no embedded MOGP chunks
+                    // Load separate group files from the data source
+                    if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+                    {
+                        var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
+                        var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
+                        Console.WriteLine($"[WMO] v16 split: loading {wmo.GroupCount} group files from data source");
+                        
+                        for (int gi = 0; gi < wmo.GroupCount; gi++)
+                        {
+                            var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                            var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                            var groupBytes = _dataSource.ReadFile(groupPath);
+                            if (groupBytes != null && groupBytes.Length > 0)
+                            {
+                                Console.WriteLine($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes from '{groupPath}'");
+                                converter.ParseGroupFile(groupBytes, wmo, gi);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[WMO] Group {gi}: NOT FOUND '{groupPath}'");
+                            }
+                        }
+                        
+                        // Populate group names after loading
+                        for (int gi = 0; gi < wmo.Groups.Count && gi < wmo.GroupInfos.Count; gi++)
+                        {
+                            var nameOfs = wmo.GroupInfos[gi].NameOffset;
+                            if (wmo.Groups[gi].Name == null)
+                                wmo.Groups[gi].Name = $"group_{gi}";
+                        }
+                    }
+                    
                     LoadWmoModel(wmo, CacheDir);
                     break;
 
@@ -1713,64 +1798,60 @@ public class ViewerApp : IDisposable
         var size = _window.Size;
         float aspect = (float)size.X / Math.Max(size.Y, 1);
         var view = _camera.GetViewMatrix();
-        var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, 5000f);
-        var vp = view * proj;
+        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, farPlane);
 
-        float bestDist = 30f; // max screen-space pixel distance to pick
-        int bestIdx = -1;
-        bool bestIsWmo = false;
+        // Convert mouse coords to NDC (-1..1)
+        float ndcX = (mouseX / size.X) * 2f - 1f;
+        float ndcY = 1f - (mouseY / size.Y) * 2f; // flip Y
 
-        // Check WMO placements
-        for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
+        var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
+        _worldScene.SelectObjectByRay(rayOrigin, rayDir);
+
+        // Build info string from selection
+        var sel = _worldScene.SelectedInstance;
+        if (sel.HasValue)
         {
-            var pos = _worldScene.ModfPlacements[i].Position;
-            if (TryProjectToScreen(pos, vp, size.X, size.Y, out float sx, out float sy))
-            {
-                float d = MathF.Sqrt((sx - mouseX) * (sx - mouseX) + (sy - mouseY) * (sy - mouseY));
-                if (d < bestDist) { bestDist = d; bestIdx = i; bestIsWmo = true; }
-            }
-        }
+            var inst = sel.Value;
+            string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
+            int idx = _worldScene.SelectedObjectIndex;
 
-        // Check MDX placements
-        for (int i = 0; i < _worldScene.MddfPlacements.Count; i++)
-        {
-            var pos = _worldScene.MddfPlacements[i].Position;
-            if (TryProjectToScreen(pos, vp, size.X, size.Y, out float sx, out float sy))
+            // Find placement data for name/rotation info
+            if (_worldScene.SelectedObjectType == Terrain.ObjectType.Wmo && idx < _worldScene.ModfPlacements.Count)
             {
-                float d = MathF.Sqrt((sx - mouseX) * (sx - mouseX) + (sy - mouseY) * (sy - mouseY));
-                if (d < bestDist) { bestDist = d; bestIdx = i; bestIsWmo = false; }
-            }
-        }
-
-        if (bestIdx >= 0)
-        {
-            _selectedObjectIndex = bestIdx;
-            if (bestIsWmo)
-            {
-                var p = _worldScene.ModfPlacements[bestIdx];
+                var p = _worldScene.ModfPlacements[idx];
                 string name = p.NameIndex < _worldScene.WmoModelNames.Count
                     ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                // Convert renderer coords to WoW world coords
+                float wowX = WoWConstants.MapOrigin - p.Position.Y;
+                float wowY = WoWConstants.MapOrigin - p.Position.X;
+                float wowZ = p.Position.Z;
                 _selectedObjectType = "WMO";
-                _selectedObjectInfo = $"WMO [{bestIdx}] {name}\n" +
-                    $"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                _selectedObjectInfo = $"WMO [{idx}] {name}\n" +
+                    $"Local: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                    $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
                     $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
-                    $"Flags: 0x{p.Flags:X4}\n" +
-                    $"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})";
+                    $"Flags: 0x{p.Flags:X4}";
             }
-            else
+            else if (_worldScene.SelectedObjectType == Terrain.ObjectType.Mdx && idx < _worldScene.MddfPlacements.Count)
             {
-                var p = _worldScene.MddfPlacements[bestIdx];
+                var p = _worldScene.MddfPlacements[idx];
                 string name = p.NameIndex < _worldScene.MdxModelNames.Count
                     ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                float wowX = WoWConstants.MapOrigin - p.Position.Y;
+                float wowY = WoWConstants.MapOrigin - p.Position.X;
+                float wowZ = p.Position.Z;
                 _selectedObjectType = "MDX";
-                _selectedObjectInfo = $"MDX [{bestIdx}] {name}\n" +
-                    $"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                _selectedObjectInfo = $"MDX [{idx}] {name}\n" +
+                    $"Local: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
+                    $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
                     $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
                     $"Scale: {p.Scale:F3}";
             }
         }
         else
         {
+            _worldScene.ClearSelection();
             _selectedObjectIndex = -1;
             _selectedObjectType = "";
             _selectedObjectInfo = "";

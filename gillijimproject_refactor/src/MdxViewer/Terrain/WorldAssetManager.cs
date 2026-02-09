@@ -210,6 +210,14 @@ public class WorldAssetManager : IDisposable
         if (data == null)
             data = _dataSource?.ReadFile(key);
 
+        // MDL/MDX interchangeable — game used both extensions for the same format
+        if (data == null)
+        {
+            string altPath = SwapMdlMdxExtension(key);
+            if (altPath != null)
+                data = _dataSource?.ReadFile(altPath);
+        }
+
         // Alpha 0.5.3: WMO/WDT/WDL files are stored as .ext.mpq — try appending .mpq
         if (data == null)
         {
@@ -252,6 +260,15 @@ public class WorldAssetManager : IDisposable
     }
 
     public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
+
+    private static string? SwapMdlMdxExtension(string path)
+    {
+        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            return path[..^4] + ".mdx";
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return path[..^4] + ".mdl";
+        return null;
+    }
 
     // ── Private loading ────────────────────────────────────────────────
 

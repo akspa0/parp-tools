@@ -1,6 +1,6 @@
 # Progress — MdxViewer Renderer Reimplementation
 
-## Status: Phase 4 Complete + VLM Support — MDX WorldScene Textures Next
+## Status: 0.6.0 MPQ Extraction Blocked — PKWARE DCL Decompression Failing
 
 ## What Works Today
 

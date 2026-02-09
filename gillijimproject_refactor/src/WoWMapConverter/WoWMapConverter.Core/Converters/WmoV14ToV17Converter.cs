@@ -5,8 +5,10 @@ using WoWMapConverter.Core.Services;
 namespace WoWMapConverter.Core.Converters;
 
 /// <summary>
-/// Converts WMO v14 (Alpha) to WMO v17 (LK 3.3.5) format.
+/// Converts WMO v14/v16 (Alpha 0.5.3 / 0.6.0) to WMO v17 (LK 3.3.5) format.
 /// Handles monolithic Alpha WMO → split root + group files.
+/// v14 (0.5.3): Uses MOMO container wrapping header chunks
+/// v16 (0.6.0): May use flat layout (no MOMO container) with same chunk formats
 /// </summary>
 public class WmoV14ToV17Converter
 {
@@ -72,6 +74,49 @@ public class WmoV14ToV17Converter
         return wmoData;
     }
     
+    /// <summary>
+    /// Parse a separate WMO group file (v16 split format) and add its group to the WMO data.
+    /// Group files contain MVER + MOGP at the top level.
+    /// </summary>
+    public void ParseGroupFile(byte[] groupBytes, WmoV14Data wmoData, int groupIndex)
+    {
+        using var ms = new MemoryStream(groupBytes);
+        using var reader = new BinaryReader(ms);
+        
+        // Read MVER (optional in group files — some have it, some start with MOGP)
+        var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
+        if (magic == "REVM") // Reversed MVER
+        {
+            var verSize = reader.ReadUInt32();
+            reader.BaseStream.Position += verSize; // Skip version data
+        }
+        else
+        {
+            reader.BaseStream.Position = 0; // Rewind — no MVER, starts with MOGP
+        }
+        
+        // Read MOGP chunk
+        while (reader.BaseStream.Position < reader.BaseStream.Length - 8)
+        {
+            var chunkMagic = new string(reader.ReadChars(4).Reverse().ToArray());
+            var chunkSize = reader.ReadUInt32();
+            
+            if (chunkMagic == "MOGP")
+            {
+                Console.WriteLine($"[WMO] Group file #{groupIndex}: MOGP size={chunkSize} at pos={reader.BaseStream.Position - 8}");
+                ParseMogp(reader, chunkSize, wmoData);
+                return;
+            }
+            else
+            {
+                // Skip non-MOGP chunks
+                reader.BaseStream.Position += chunkSize;
+            }
+        }
+        
+        Console.WriteLine($"[WMO] Group file #{groupIndex}: No MOGP chunk found ({groupBytes.Length} bytes)");
+    }
+    
     private string? GetGroupName(List<string> groupNames, int nameOffset)
     {
         // MOGN is a string table; nameOffset is a byte offset into the packed strings
@@ -85,6 +130,8 @@ public class WmoV14ToV17Converter
     {
         var data = new WmoV14Data();
 
+        Console.WriteLine($"[WMO] Parsing file, total size: {reader.BaseStream.Length} bytes");
+
         // Read MVER
         var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
         if (magic != "REVM") // Reversed
@@ -92,96 +139,83 @@ public class WmoV14ToV17Converter
         
         var size = reader.ReadUInt32();
         data.Version = reader.ReadUInt32();
+        Console.WriteLine($"[WMO] Version: {data.Version}, MVER size: {size}");
         
-        if (data.Version != 14)
-            throw new InvalidDataException($"Expected WMO v14, got v{data.Version}");
+        if (data.Version != 14 && data.Version != 16)
+            throw new InvalidDataException($"Expected WMO v14 or v16, got v{data.Version}");
 
-        // Read MOMO container (contains header chunks like MOHD, MOTX, MOMT, etc.)
-        magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
-        if (magic != "OMOM") // Reversed MOMO
-            throw new InvalidDataException($"Expected MOMO container, got {magic}");
+        // Peek at next chunk to determine structure:
+        // v14 (0.5.3): MOMO container wraps header chunks, MOGP groups follow outside
+        // v16 (0.6.0): Also uses MOMO container (same reversed FourCC format)
+        var nextMagicBytes = reader.ReadBytes(4);
+        var nextMagic = Encoding.ASCII.GetString(nextMagicBytes);
+        var nextMagicHex = BitConverter.ToString(nextMagicBytes);
+        Console.WriteLine($"[WMO] Next chunk after MVER: raw='{nextMagic}' hex={nextMagicHex} pos={reader.BaseStream.Position - 4}");
+        bool hasMomoContainer = (nextMagic == "OMOM"); // Reversed MOMO
         
-        var momoSize = reader.ReadUInt32();
-        var momoEnd = reader.BaseStream.Position + momoSize;
+        // Seek back to re-read the chunk properly
+        reader.BaseStream.Position -= 4;
 
-        // Parse chunks within MOMO (header data)
-        while (reader.BaseStream.Position < momoEnd)
+        if (hasMomoContainer)
         {
-            var chunkMagic = new string(reader.ReadChars(4).Reverse().ToArray());
-            var chunkSize = reader.ReadUInt32();
-            var chunkEnd = reader.BaseStream.Position + chunkSize;
+            reader.ReadBytes(4); // Skip MOMO FourCC (already identified)
+            var momoSize = reader.ReadUInt32();
+            var momoEnd = reader.BaseStream.Position + momoSize;
+            Console.WriteLine($"[WMO] MOMO container: size={momoSize}, end={momoEnd}");
 
-            switch (chunkMagic)
+            // Parse chunks within MOMO (header data)
+            while (reader.BaseStream.Position < momoEnd)
             {
-                case "MOHD":
-                    ParseMohd(reader, data);
-                    break;
-                case "MOTX":
-                    ParseMotx(reader, chunkSize, data);
-                    break;
-                case "MOMT":
-                    ParseMomt(reader, chunkSize, data);
-                    break;
-                case "MOGN":
-                    ParseMogn(reader, chunkSize, data);
-                    break;
-                case "MOGI":
-                    ParseMogi(reader, chunkSize, data);
-                    break;
-                case "MODS":
-                    ParseMods(reader, chunkSize, data);
-                    break;
-                case "MODN":
-                    data.DoodadNamesRaw = reader.ReadBytes((int)chunkSize);
-                    break;
-                case "MODD":
-                    ParseModd(reader, chunkSize, data);
-                    break;
-                case "MOPV":
-                    ParseMopv(reader, chunkSize, data);
-                    break;
-                case "MOPT":
-                    ParseMopt(reader, chunkSize, data);
-                    break;
-                case "MOPR":
-                    ParseMopr(reader, chunkSize, data);
-                    break;
-                case "MOLT":
-                    ParseMolt(reader, chunkSize, data);
-                    break;
-                default:
-                    // Skip unknown chunks
-                    break;
-            }
+                long chunkPos = reader.BaseStream.Position;
+                var chunkMagic = new string(reader.ReadChars(4).Reverse().ToArray());
+                var chunkSize = reader.ReadUInt32();
+                var chunkEnd = reader.BaseStream.Position + chunkSize;
+                Console.WriteLine($"[WMO]   MOMO sub-chunk: '{chunkMagic}' size={chunkSize} at pos={chunkPos}");
 
-            reader.BaseStream.Position = chunkEnd;
+                ParseHeaderChunk(chunkMagic, chunkSize, reader, data);
+
+                reader.BaseStream.Position = chunkEnd;
+            }
+        }
+        else
+        {
+            Console.WriteLine($"[WMO] No MOMO container detected, using flat chunk layout");
         }
 
-        // Alpha WMO: MOGP group chunks are OUTSIDE the MOMO container
-        // Continue reading until end of file
+        // Read remaining top-level chunks (MOGP groups, and header chunks if flat layout)
+        int topLevelCount = 0;
         while (reader.BaseStream.Position < reader.BaseStream.Length - 8)
         {
             try
             {
+                long chunkPos = reader.BaseStream.Position;
                 var chunkMagic = new string(reader.ReadChars(4).Reverse().ToArray());
                 var chunkSize = reader.ReadUInt32();
                 var chunkEnd = reader.BaseStream.Position + chunkSize;
+                topLevelCount++;
+                Console.WriteLine($"[WMO] Top-level chunk #{topLevelCount}: '{chunkMagic}' size={chunkSize} at pos={chunkPos}, end={chunkEnd}");
 
                 if (chunkMagic == "MOGP")
                 {
                     ParseMogp(reader, chunkSize, data);
                 }
-                // else skip unknown chunk
+                else if (!hasMomoContainer)
+                {
+                    // Flat layout: header chunks are at top level
+                    ParseHeaderChunk(chunkMagic, chunkSize, reader, data);
+                }
+                // else skip unknown chunk outside MOMO
 
                 reader.BaseStream.Position = chunkEnd;
             }
-            catch
+            catch (Exception ex)
             {
-                break; // End of file or parse error
+                Console.WriteLine($"[WMO] Parse error at pos={reader.BaseStream.Position}: {ex.Message}");
+                break;
             }
         }
 
-        Console.WriteLine($"[DEBUG] Parsed v14 WMO: {data.Groups.Count} groups, {data.Materials.Count} materials, {data.Textures.Count} textures");
+        Console.WriteLine($"[WMO] Parse complete: v{data.Version}, {data.Groups.Count} groups, {data.Materials.Count} materials, {data.Textures.Count} textures, GroupCount(MOHD)={data.GroupCount}");
         
         // Resolve material specific textures
         ResolveMaterialTextures(data);
@@ -199,6 +233,56 @@ public class WmoV14ToV17Converter
         return data;
     }
     
+    /// <summary>
+    /// Dispatch a header chunk (MOHD, MOTX, MOMT, etc.) to its parser.
+    /// Shared between MOMO-container and flat-layout code paths.
+    /// </summary>
+    private void ParseHeaderChunk(string chunkMagic, uint chunkSize, BinaryReader reader, WmoV14Data data)
+    {
+        switch (chunkMagic)
+        {
+            case "MOHD":
+                ParseMohd(reader, data);
+                break;
+            case "MOTX":
+                ParseMotx(reader, chunkSize, data);
+                break;
+            case "MOMT":
+                ParseMomt(reader, chunkSize, data);
+                break;
+            case "MOGN":
+                ParseMogn(reader, chunkSize, data);
+                break;
+            case "MOGI":
+                ParseMogi(reader, chunkSize, data);
+                break;
+            case "MODS":
+                ParseMods(reader, chunkSize, data);
+                break;
+            case "MODN":
+                data.DoodadNamesRaw = reader.ReadBytes((int)chunkSize);
+                break;
+            case "MODD":
+                ParseModd(reader, chunkSize, data);
+                break;
+            case "MOPV":
+                ParseMopv(reader, chunkSize, data);
+                break;
+            case "MOPT":
+                ParseMopt(reader, chunkSize, data);
+                break;
+            case "MOPR":
+                ParseMopr(reader, chunkSize, data);
+                break;
+            case "MOLT":
+                ParseMolt(reader, chunkSize, data);
+                break;
+            default:
+                // Skip unknown chunks
+                break;
+        }
+    }
+
     private void SortBatches(WmoV14Data data)
     {
         for (int i = 0; i < data.Groups.Count; i++)
@@ -459,8 +543,18 @@ public class WmoV14ToV17Converter
 
     private void ParseMomt(BinaryReader reader, uint size, WmoV14Data data)
     {
-        // v14 MOMT is 44 bytes per material
-        int count = (int)(size / 44);
+        // v14/v16 MOMT is 44 bytes per material; v17 is 64 bytes
+        // Auto-detect entry size using MaterialCount from MOHD
+        int entrySize;
+        if (data.MaterialCount > 0 && size / 44 == data.MaterialCount)
+            entrySize = 44;
+        else if (data.MaterialCount > 0 && size / 64 == data.MaterialCount)
+            entrySize = 64;
+        else
+            entrySize = 44; // Default to v14 layout
+        
+        int count = (int)(size / entrySize);
+        Console.WriteLine($"[DEBUG] MOMT: {size} bytes, {count} materials, entrySize={entrySize}");
         data.Materials = new List<WmoMaterial>(count);
 
         for (int i = 0; i < count; i++)
@@ -479,6 +573,10 @@ public class WmoV14ToV17Converter
                 Texture3Offset = reader.ReadUInt32(),
                 Color2 = reader.ReadUInt32()
             };
+            
+            // Skip extra bytes for larger entry sizes (v17 has 20 extra bytes)
+            if (entrySize > 44)
+                reader.ReadBytes(entrySize - 44);
             
             // Debug: Print parsed DiffuseColor
             byte b = (byte)(mat.DiffuseColor & 0xFF);
@@ -504,14 +602,27 @@ public class WmoV14ToV17Converter
         // v14 MOGI is 40 bytes per group (vs 32 in v17)
         // v14 layout: offset(4) + size(4) + flags(4) + bbox(24) + nameoffset(4) = 40
         // v17 layout: flags(4) + bbox(24) + nameoffset(4) = 32
-        int count = (int)(size / 40);
+        // Auto-detect entry size using MOHD group count
+        int entrySize;
+        if (data.GroupCount > 0 && size / 40 == data.GroupCount)
+            entrySize = 40;
+        else if (data.GroupCount > 0 && size / 32 == data.GroupCount)
+            entrySize = 32;
+        else
+            entrySize = 40; // Default to v14 layout
+
+        int count = (int)(size / entrySize);
+        Console.WriteLine($"[DEBUG] MOGI: {size} bytes, {count} entries, entrySize={entrySize}");
         data.GroupInfos = new List<WmoGroupInfo>(count);
 
         for (int i = 0; i < count; i++)
         {
-            // Skip v14-only fields (offset and size of the embedded group data)
-            reader.ReadUInt32(); // offset - not needed for v17 separate files
-            reader.ReadUInt32(); // size - not needed for v17 separate files
+            if (entrySize == 40)
+            {
+                // Skip v14-only fields (offset and size of the embedded group data)
+                reader.ReadUInt32(); // offset - not needed for v17 separate files
+                reader.ReadUInt32(); // size - not needed for v17 separate files
+            }
             
             var info = new WmoGroupInfo
             {
@@ -705,10 +816,13 @@ public class WmoV14ToV17Converter
             switch (chunkMagic)
             {
                 case "MOPY":
-                    // v14 MOPY is 4 bytes per face
-                    int faceCount = (int)(chunkSize / 4);
-                    Console.WriteLine($"[DEBUG] MOPY: {chunkSize} bytes, {faceCount} faces");
-                    // group.FaceMaterials = new List<byte>(faceCount); // Already init in struct
+                    // v14 MOPY is 4 bytes per face; v17 is 2 bytes per face
+                    // Auto-detect: if size is divisible by 4 and NOT by 2-only, use 4
+                    int mopyEntrySize = (chunkSize % 4 == 0) ? 4 : 2;
+                    // Heuristic: if 4-byte entries produce a reasonable face count, prefer 4
+                    // v17-style 2-byte entries would be flags(1)+matId(1) with no padding
+                    int faceCount = (int)(chunkSize / mopyEntrySize);
+                    Console.WriteLine($"[DEBUG] MOPY: {chunkSize} bytes, {faceCount} faces (entrySize={mopyEntrySize})");
                     
                     // Histogram for debugging geometry assignment
                     var matCounts = new Dictionary<byte, int>();
@@ -725,7 +839,8 @@ public class WmoV14ToV17Converter
                         // REVERTED remapping for diagnosis - trusting native
                         group.FaceMaterials.Add(matId); 
                         
-                        reader.ReadBytes(2); // padding
+                        if (mopyEntrySize == 4)
+                            reader.ReadBytes(2); // padding (v14 style)
                     }
                     
                     Console.WriteLine("[DEBUG] MOPY Material Histogram:");
@@ -746,9 +861,10 @@ public class WmoV14ToV17Converter
                     }
                     break;
 
-                case "MOIN": // v14 uses MOIN, not MOVI
+                case "MOIN": // v14 uses MOIN
+                case "MOVI": // v16+ uses standard MOVI
                     int idxCount = (int)(chunkSize / 2);
-                    Console.WriteLine($"[DEBUG] MOIN: {chunkSize} bytes, {idxCount} indices (Stride: 2)");
+                    Console.WriteLine($"[DEBUG] {chunkMagic}: {chunkSize} bytes, {idxCount} indices (Stride: 2)");
                     
                     // Sanity check: 0.5.3 might use uint32?
                     if (chunkSize % 2 != 0) Console.WriteLine("[ERROR] MOIN size not divisible by 2!");
@@ -774,21 +890,18 @@ public class WmoV14ToV17Converter
                     break;
 
                 case "MOBA":
-                    // v14 MOBA: 24 bytes per batch
-                    // Confirmed from Ghidra analysis of wowclient.exe (0.5.3):
-                    // Offset 0x00: unknown byte
-                    // Offset 0x01: Material ID (byte)
-                    // Offset 0x02-0x0D: BBox (6 x int16)
-                    // Offset 0x0E: StartIndex (ushort!) - NOT uint32!
-                    // Offset 0x10: IndexCount (ushort)
-                    // Offset 0x12-0x15: 4 unknown bytes (possibly vertex min/max)
-                    // Offset 0x16: Flags (byte)
-                    // Offset 0x17: unknown byte
+                    // v14 MOBA: 24 bytes per batch (v16 may differ — dump raw bytes to verify)
                     int batchCount = (int)(chunkSize / 24);
                     Console.WriteLine($"[DEBUG] MOBA chunk: {chunkSize} bytes, {batchCount} batches (v14 format)");
                     
                     for (int b = 0; b < batchCount; b++)
                     {
+                        // Dump raw 24 bytes for diagnosis
+                        long batchStart = reader.BaseStream.Position;
+                        byte[] rawBatch = reader.ReadBytes(24);
+                        Console.WriteLine($"[DEBUG] MOBA raw batch {b}: {BitConverter.ToString(rawBatch)}");
+                        reader.BaseStream.Position = batchStart;
+                        
                         byte unknown0 = reader.ReadByte(); // 0x00
                         byte matId = reader.ReadByte();    // 0x01 - Material ID!
                         
@@ -879,6 +992,26 @@ public class WmoV14ToV17Converter
                     // v14 MOLD: Raw lightmap pixel data
                     Console.WriteLine($"[DEBUG] MOLD: {chunkSize} bytes of lightmap pixel data");
                     group.LightmapData = reader.ReadBytes((int)chunkSize);
+                    break;
+
+                case "MONR":
+                    // Vertex normals (v16+): 12 bytes per normal (3 floats)
+                    int normalCount = (int)(chunkSize / 12);
+                    Console.WriteLine($"[DEBUG] MONR: {chunkSize} bytes, {normalCount} normals");
+                    group.Normals = new List<Vector3>(normalCount);
+                    for (int i = 0; i < normalCount; i++)
+                    {
+                        group.Normals.Add(new Vector3(
+                            reader.ReadSingle(),
+                            reader.ReadSingle(),
+                            reader.ReadSingle()));
+                    }
+                    break;
+
+                case "MLIQ":
+                    // WMO group liquid data — store raw bytes for rendering
+                    Console.WriteLine($"[DEBUG] MLIQ: {chunkSize} bytes of liquid data in group");
+                    group.LiquidData = reader.ReadBytes((int)chunkSize);
                     break;
             }
 
@@ -2165,6 +2298,7 @@ public class WmoV14ToV17Converter
         public byte[] LiquidData = Array.Empty<byte>(); // MLIQ
         
         // v14 Lightmap data (to be converted to MOCV)
+        public List<Vector3> Normals = new(); // MONR - vertex normals (v16+)
         public List<Vector2> LightmapUVs = new(); // MOLV - per-face-vertex UVs
         public byte[] LightmapData = Array.Empty<byte>(); // MOLD - raw lightmap pixels
         public List<LightmapInfo> LightmapInfos = new(); // MOLM - lightmap metadata

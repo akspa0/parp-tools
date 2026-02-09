@@ -487,14 +487,23 @@ public class NativeMpqService : IDisposable
             {
                 // Check if file is deleted (0 size in patches)
                 if (block.FileSize == 0)
+                {
+                    Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → found in {Path.GetFileName(archive.Path)} but FileSize=0 (patched out)");
                     continue; // File was "patched out", try base archives
+                }
                 
+                Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → found in {Path.GetFileName(archive.Path)}, block: offset={block.BlockOffset}, size={block.BlockSize}, fileSize={block.FileSize}, flags=0x{block.Flags:X8}");
                 var data = ReadFileFromArchive(archive, block, Path.GetFileName(normalized));
                 if (data != null && data.Length > 0)
+                {
+                    Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → extracted {data.Length} bytes");
                     return data;
+                }
+                Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → ReadFileFromArchive returned null/empty");
             }
         }
         
+        Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → not found in any of {_archives.Count} archives");
         return null;
     }
     
@@ -599,8 +608,9 @@ public class NativeMpqService : IDisposable
             fs.Position = baseOffset;
             return ReadFileData(reader, block, archive.Header.SectorSize, filename, baseOffset);
         }
-        catch
+        catch (Exception ex)
         {
+            Console.WriteLine($"[NativeMpqService] ReadFileFromArchive exception for '{filename}': {ex.Message}");
             return null;
         }
     }
@@ -714,8 +724,8 @@ public class NativeMpqService : IDisposable
                 key = (key + block.BlockOffset) ^ block.FileSize;
         }
 
-        // Single unit (no sectors)
-        if ((block.Flags & FLAG_SINGLE_UNIT) != 0 || block.FileSize <= sectorSize)
+        // Single unit files: no sector offset table, read directly
+        if ((block.Flags & FLAG_SINGLE_UNIT) != 0)
         {
             var data = reader.ReadBytes((int)block.BlockSize);
             
@@ -824,18 +834,24 @@ public class NativeMpqService : IDisposable
             case 0x02: // ZLIB
                 return DecompressZlib(compressedData);
             
-            case 0x08: // PKWARE DCL
-                // TODO: Implement DCL decompression
-                return null;
+            case 0x08: // PKWARE DCL (implode)
+                Console.WriteLine($"[NativeMpqService] PKWARE: first bytes after type: {(compressedData.Length >= 8 ? BitConverter.ToString(compressedData, 0, Math.Min(16, compressedData.Length)) : "too short")} ({compressedData.Length} bytes → {expectedSize})");
+                return PkwareExplode.Decompress(compressedData, expectedSize);
             
             case 0x10: // BZip2
-                // TODO: Implement BZip2
+                Console.WriteLine($"[NativeMpqService] BZip2 compression not implemented ({data.Length} bytes)");
                 return null;
             
+            case 0x12: // ZLIB + PKWARE combo (seen in some MPQs)
+                Console.WriteLine($"[NativeMpqService] ZLIB+PKWARE combo compression ({data.Length} bytes)");
+                return DecompressZlib(compressedData);
+            
             default:
+                Console.WriteLine($"[NativeMpqService] Unknown compression type 0x{compressionType:X2} ({data.Length} bytes)");
                 return data;
         }
     }
+
     
     private static byte[]? DecompressZlib(byte[] data)
     {

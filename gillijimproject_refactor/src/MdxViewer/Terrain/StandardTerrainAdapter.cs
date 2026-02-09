@@ -85,9 +85,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         var adtBytes = _dataSource.ReadFile(rootPath);
         if (adtBytes == null || adtBytes.Length == 0)
         {
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"ADT not found: {rootPath}");
+            Console.WriteLine($"[StandardADT] ADT not found or empty: {rootPath}");
             return result;
         }
+        Console.WriteLine($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
 
         // Optional split files (Cata+)
         var texBytes = _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
@@ -162,11 +163,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return;
         }
 
-        var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mhdrStart + mcinOff);
+        int mcinAbsPos = mhdrStart + mcinOff;
+        // Diagnostic: log MCIN position and first bytes
+        if (mcinAbsPos + 8 <= adtBytes.Length)
+        {
+            string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
+        }
+
+        var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
         var mcnkOffsets = mcin.GetMcnkOffsets();
 
         float chunkSmall = WoWConstants.ChunkSize / 16f;
         var chunks = new List<TerrainChunkData>(256);
+
+        // Diagnostic: log first 3 MCIN offsets
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"MCIN offsets[0..2]: {mcnkOffsets[0]}, {mcnkOffsets[1]}, {mcnkOffsets[2]} (fileLen={adtBytes.Length})");
 
         for (int ci = 0; ci < 256 && ci < mcnkOffsets.Count; ci++)
         {
@@ -182,8 +196,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
                     if (sig == "KNCM") // MCNK reversed
                         mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
+                    else if (ci == 0)
+                        ViewerLog.Important(ViewerLog.Category.Terrain,
+                            $"Chunk 0 at off={off}: sig='{sig}' (expected 'KNCM')");
                 }
-                if (mcnkSize <= 0) continue;
+                if (mcnkSize <= 0)
+                {
+                    if (ci == 0)
+                        ViewerLog.Important(ViewerLog.Category.Terrain,
+                            $"Chunk 0: mcnkSize={mcnkSize}, off={off}, off+8<len={off + 8 <= adtBytes.Length}");
+                    continue;
+                }
 
                 // Extract MCNK data (skip the 8-byte chunk header)
                 int dataLen = Math.Min(mcnkSize, adtBytes.Length - off - 8);
@@ -198,6 +221,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 // Heights (already interleaved in LK format)
                 float[]? heights = mcnk.Heightmap;
+                if (ci == 0)
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"Chunk 0: idx=({chunkX},{chunkY}), heights={heights?.Length ?? -1}, heightOff=0x{mcnk.Header.HeightmapOffset:X}");
                 if (heights == null || heights.Length < 145) continue;
 
                 // Normals (interleaved in LK)

@@ -57,6 +57,20 @@ public class WorldScene : ISceneRenderer
     private BoundingBoxRenderer? _bbRenderer;
     public bool ShowBoundingBoxes { get => _showBoundingBoxes; set => _showBoundingBoxes = value; }
 
+    // Object selection
+    private ObjectType _selectedObjectType = ObjectType.None;
+    private int _selectedObjectIndex = -1;
+    public ObjectType SelectedObjectType => _selectedObjectType;
+    public int SelectedObjectIndex => _selectedObjectIndex;
+
+    /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
+    public ObjectInstance? SelectedInstance => _selectedObjectType switch
+    {
+        ObjectType.Wmo when _selectedObjectIndex >= 0 && _selectedObjectIndex < _wmoInstances.Count => _wmoInstances[_selectedObjectIndex],
+        ObjectType.Mdx when _selectedObjectIndex >= 0 && _selectedObjectIndex < _mdxInstances.Count => _mdxInstances[_selectedObjectIndex],
+        _ => null
+    };
+
     // Area POI
     private AreaPoiLoader? _poiLoader;
     private bool _showPoi = true;
@@ -578,29 +592,31 @@ public class WorldScene : ISceneRenderer
         // 4. Debug bounding boxes for all placements
         if (_showBoundingBoxes && _bbRenderer != null)
         {
-            // Disable depth test so BBs always draw on top
-            _gl.Disable(EnableCap.DepthTest);
+            // Depth test ON so boxes behind terrain/objects are hidden,
+            // depth write OFF so box lines don't occlude models
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthFunc(DepthFunction.Lequal);
+            _gl.DepthMask(false);
 
             var adapter = _terrainManager.Adapter;
             if (!_renderDiagPrinted)
             ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
+
+            // Draw selected object highlight first (thicker visual via slightly larger box)
+            if (_selectedObjectType != ObjectType.None && _bbRenderer != null)
+            {
+                var sel = _selectedObjectType == ObjectType.Wmo ? _wmoInstances[_selectedObjectIndex] : _mdxInstances[_selectedObjectIndex];
+                _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
+            }
+
             // MDDF bounding boxes (yellow)
             foreach (var inst in _mdxInstances)
                 _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
-            // MODF bounding boxes (cyan = world-space transformed bounds)
+            // MODF bounding boxes (green)
             foreach (var inst in _wmoInstances)
-            {
-                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
-                // If local MOHD bounds are available, also draw them in green
-                if (inst.LocalBoundsMin != Vector3.Zero || inst.LocalBoundsMax != Vector3.Zero)
-                {
-                    TransformBounds(inst.LocalBoundsMin, inst.LocalBoundsMax, inst.Transform,
-                        out var lWorldMin, out var lWorldMax);
-                    _bbRenderer.DrawBoxMinMax(lWorldMin, lWorldMax, view, proj, new Vector3(0f, 1f, 0f));
-                }
-            }
+                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 0f));
 
-            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
         }
 
         // 5. POI markers (magenta, always on top)
@@ -649,6 +665,99 @@ public class WorldScene : ISceneRenderer
         }
     }
 
+    /// <summary>
+    /// Select the nearest object whose AABB is hit by a ray from camera.
+    /// Call with screen-space mouse coords to pick objects.
+    /// </summary>
+    public void SelectObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
+    {
+        float bestT = float.MaxValue;
+        ObjectType bestType = ObjectType.None;
+        int bestIndex = -1;
+
+        // Test WMO bounding boxes
+        for (int i = 0; i < _wmoInstances.Count; i++)
+        {
+            float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin, _wmoInstances[i].BoundsMax);
+            if (t >= 0 && t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
+        }
+
+        // Test MDX bounding boxes
+        for (int i = 0; i < _mdxInstances.Count; i++)
+        {
+            float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin, _mdxInstances[i].BoundsMax);
+            if (t >= 0 && t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
+        }
+
+        _selectedObjectType = bestType;
+        _selectedObjectIndex = bestIndex;
+    }
+
+    public void ClearSelection()
+    {
+        _selectedObjectType = ObjectType.None;
+        _selectedObjectIndex = -1;
+    }
+
+    /// <summary>
+    /// Ray-AABB slab intersection test. Returns distance along ray, or -1 if no hit.
+    /// </summary>
+    private static float RayAABBIntersect(Vector3 origin, Vector3 dir, Vector3 bmin, Vector3 bmax)
+    {
+        float tmin = float.NegativeInfinity;
+        float tmax = float.PositiveInfinity;
+
+        for (int i = 0; i < 3; i++)
+        {
+            float o = i == 0 ? origin.X : i == 1 ? origin.Y : origin.Z;
+            float d = i == 0 ? dir.X : i == 1 ? dir.Y : dir.Z;
+            float lo = i == 0 ? bmin.X : i == 1 ? bmin.Y : bmin.Z;
+            float hi = i == 0 ? bmax.X : i == 1 ? bmax.Y : bmax.Z;
+
+            if (MathF.Abs(d) < 1e-8f)
+            {
+                if (o < lo || o > hi) return -1;
+            }
+            else
+            {
+                float t1 = (lo - o) / d;
+                float t2 = (hi - o) / d;
+                if (t1 > t2) (t1, t2) = (t2, t1);
+                tmin = MathF.Max(tmin, t1);
+                tmax = MathF.Min(tmax, t2);
+                if (tmin > tmax) return -1;
+            }
+        }
+
+        return tmin >= 0 ? tmin : tmax >= 0 ? tmax : -1;
+    }
+
+    /// <summary>
+    /// Build a world-space ray from normalized device coordinates using view/proj matrices.
+    /// </summary>
+    public static (Vector3 origin, Vector3 dir) ScreenToRay(float ndcX, float ndcY, Matrix4x4 view, Matrix4x4 proj)
+    {
+        Matrix4x4.Invert(proj, out var invProj);
+        Matrix4x4.Invert(view, out var invView);
+
+        // Near point in clip space → world
+        var nearClip = new Vector4(ndcX, ndcY, -1f, 1f);
+        var nearView = Vector4.Transform(nearClip, invProj);
+        nearView /= nearView.W;
+        var nearWorld = Vector4.Transform(nearView, invView);
+
+        // Far point in clip space → world
+        var farClip = new Vector4(ndcX, ndcY, 1f, 1f);
+        var farView = Vector4.Transform(farClip, invProj);
+        farView /= farView.W;
+        var farWorld = Vector4.Transform(farView, invView);
+
+        var origin = new Vector3(nearWorld.X, nearWorld.Y, nearWorld.Z);
+        var farPt = new Vector3(farWorld.X, farWorld.Y, farWorld.Z);
+        var dir = Vector3.Normalize(farPt - origin);
+        return (origin, dir);
+    }
+
     public void Dispose()
     {
         _terrainManager.OnTileLoaded -= OnTileLoaded;
@@ -681,3 +790,5 @@ public struct ObjectInstance
     /// <summary>Model-local bounding box max (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
     public Vector3 LocalBoundsMax;
 }
+
+public enum ObjectType { None, Wmo, Mdx }

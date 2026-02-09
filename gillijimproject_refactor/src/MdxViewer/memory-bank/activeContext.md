@@ -2,14 +2,56 @@
 
 ## Current Focus
 
-**Multi-format terrain support complete.** Viewer can now load Alpha WDT (monolithic), Standard WDT+ADT (LK/Cata from MPQ), and VLM datasets. Format specifications written. Ghidra reverse engineering prompts prepared for 5 client versions. Next: Ghidra-guided format verification, then M2/WMOv17 reading for Standard WDT object rendering.
+**Fixing 0.6.0 MPQ file extraction.** WMO v16 root files and ADT tiles are found in MPQ hash tables but decompression fails. Compression type `0x08` (PKWARE DCL implode) returns invalid dict size bits. Need correct PKWARE DCL implementation — StormLib reference code in `lib/StormLib/src/pklib/explode.c` is the ground truth. Ghidra RE prompts written for 0.5.3 (with PDB) and 0.6.0 (without PDB) to verify from the binary.
 
-## Immediate Next Steps (Next Session)
+## Immediate Next Steps
 
-1. **Ghidra verification** — Load 0.5.3 WoWClient.exe (has PDB!) and run prompt-053.md to verify MCNK header, MCAL pixel order, MCLQ structure.
-2. **M2 model reader** — Build a proper M2 reader for the viewer (Phase 1a of converter plan).
-3. **WMO v17 reader** — Read split root+group WMO files from MPQ (Phase 1b).
-4. **Wire M2/WMOv17 into WorldAssetManager** — Complete Standard WDT rendering (Phase 1c).
+1. **Fix PKWARE DCL decompression** — Port StormLib's `explode.c` faithfully to C#, OR diagnose if the data read from MPQ is at wrong offset (block table decryption issue).
+2. **Test v16 WMO root loading** — Once decompression works, root files (e.g., Big_Keep.wmo, 472 bytes) should extract and parse.
+3. **Test 0.6.0 ADT loading** — ADTs in terrain.MPQ may also use PKWARE compression for small tiles.
+4. **Run Ghidra prompts** — `prompt-053-mpq.md` (0.5.3 with PDB, best starting point) and `prompt-060-mpq.md` (0.6.0) to verify MPQ decompression from binary.
+5. **M2/WMOv17 readers** — For Standard WDT object rendering (lower priority until MPQ extraction is fixed).
+
+## Session 2026-02-09 Summary
+
+### WMO v16 Root File Loading Investigation
+- **Symptom**: WMO v16 root files (e.g., `Big_Keep.wmo`) fail to load with "Failed to read" — group files load but without textures/lighting
+- **Root cause chain**: `MpqDataSource.ReadFile` → `NativeMpqService.ReadFile` → `FindFileInArchive` succeeds → `ReadFileFromArchive` returns null
+- **Block info**: offset=435912, size=318 (compressed), fileSize=472 (decompressed), flags=0x80000200 (EXISTS|COMPRESSED)
+- **Decompression failure**: Compression type byte = `0x08` (PKWARE DCL), but remaining data has dictShift=0 (expected 4/5/6)
+- **0.6.0 MPQ structure**: All files in standard MPQ archives (`wmo.MPQ`, `terrain.MPQ`, etc.) — NOT loose files, NOT per-asset `.ext.MPQ` wrappers
+
+### Key Findings About 0.6.0 MPQs
+- 11 MPQ archives: base, dbc, fonts, interface, misc, model, sound, speech, terrain(2331), texture(33520), wmo(4603)
+- All have internal listfiles (56573 total files extracted)
+- Zlib (0x02) works fine for large files (groups extract correctly)
+- PKWARE DCL (0x08) fails for small files (root WMOs, possibly some ADTs)
+- `FLAG_COMPRESSED (0x200)` = per-sector compression with type byte prefix
+- `FLAG_IMPLODED (0x100)` = whole-file PKWARE without type byte (not seen in these archives)
+
+### StormLib Reference Code Available
+- `lib/StormLib/src/pklib/explode.c` — Complete PKWARE DCL explode implementation
+- `lib/StormLib/src/pklib/pklib.h` — Data structures (`TDcmpStruct`, lookup tables)
+- `lib/StormLib/src/SCompression.cpp` — Decompression dispatch (`Decompress_PKLIB`, `SCompDecompress`)
+- Key: `explode()` reads bytes 0,1 as ctype/dsize_bits, byte 2 as initial bit buffer, position starts at 3
+
+### WMO Liquid Rendering Added
+- MLIQ chunk now parsed in `ParseMogp` sub-chunk switch
+- `WmoRenderer` has liquid mesh building + semi-transparent water surface rendering
+- Diagnostic logging added for failed material textures
+
+### Ghidra RE Prompts Written
+- `specifications/ghidra/prompt-053-mpq.md` — 0.5.3 MPQ implementation (HAS PDB — best starting point)
+- `specifications/ghidra/prompt-060-mpq.md` — 0.6.0 MPQ decompression (no PDB, use string refs)
+
+### Files Modified This Session
+- `NativeMpqService.cs` — Added diagnostic logging throughout ReadFile/ReadFileFromArchive/ReadFileData/DecompressData
+- `MpqDataSource.cs` — Added diagnostic logging to ReadFile and TryResolveLoosePath
+- `WmoV14ToV17Converter.cs` — Added diagnostic logging to ParseWmoV14Internal
+- `WmoRenderer.cs` — Added WMO liquid rendering, material texture diagnostics
+- `PkwareExplode.cs` — New file, PKWARE DCL decompression (needs fixing — current impl fails)
+- `AlphaMpqReader.cs` — Wired up PkwareExplode for 0x08 compression
+- `StandardTerrainAdapter.cs` — Added ADT loading diagnostics
 
 ## Session 2026-02-08 (Late Evening) Summary
 
@@ -112,7 +154,12 @@
 | GLB export (Z-up → Y-up) | ✅ |
 | Object picking/selection | ✅ |
 | Format specifications | ✅ (specifications/ folder) |
-| Ghidra RE prompts (5 versions) | ✅ (specifications/ghidra/) |
+| WMO liquid rendering (MLIQ) | ✅ (semi-transparent water surfaces) |
+| Object picking/selection | ✅ (ray-AABB, highlight, info) |
+| Camera world coordinates | ✅ (WoW coords in status bar) |
+| Left/right sidebar layout | ✅ (docked panels) |
+| Ghidra RE prompts (5+2 versions) | ✅ (specifications/ghidra/) |
+| 0.6.0 MPQ file extraction | ❌ PKWARE DCL (0x08) decompression fails |
 
 ## Key Files
 

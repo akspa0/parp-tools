@@ -368,8 +368,10 @@ public static class AlphaMpqReader
         const uint FLAG_IMPLODED = 0x00000100;
         const uint FLAG_SINGLE_UNIT = 0x01000000;
         
-        // Single unit (no sectors) - common for small files
-        if ((block.Flags & FLAG_SINGLE_UNIT) != 0 || block.FileSize <= sectorSize)
+        // Single unit files: no sector offset table, read directly
+        // NOTE: Do NOT use `fileSize <= sectorSize` shortcut here — without FLAG_SINGLE_UNIT,
+        // even small files have a sector offset table that must be read first.
+        if ((block.Flags & FLAG_SINGLE_UNIT) != 0)
         {
             var data = reader.ReadBytes((int)block.BlockSize);
             
@@ -430,9 +432,7 @@ public static class AlphaMpqReader
                 return DecompressZlib(compressedData, expectedSize);
             
             case 0x08: // PKWARE DCL (implode)
-                // For simplicity, return raw if we can't decompress
-                Console.WriteLine("[WARN] PKWARE DCL compression not implemented, returning raw data");
-                return data;
+                return PkwareExplode.Decompress(compressedData, expectedSize);
             
             default:
                 // Unknown compression, return raw

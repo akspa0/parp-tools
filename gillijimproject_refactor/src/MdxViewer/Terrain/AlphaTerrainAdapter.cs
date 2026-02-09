@@ -390,6 +390,31 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         var heights = ExtractHeights(mcnk.McvtData);
         if (heights == null) return null;
 
+        // Ghidra-verified (u001): MCNK header offset 0x68 stores Position as 3 floats.
+        // MCVT heights are relative to Position Z (the base height of this chunk).
+        // Unused1/2/3 in McnkAlphaHeader are int fields that actually hold float position data.
+        // Add Position Z to all MCVT heights to get absolute world-space Z values,
+        // matching absolute MCLQ liquid heights.
+        float posA = BitConverter.Int32BitsToSingle(mcnk.Header.Unused1);
+        float posB = BitConverter.Int32BitsToSingle(mcnk.Header.Unused2);
+        float posC = BitConverter.Int32BitsToSingle(mcnk.Header.Unused3);
+
+        // Diagnostic: log first chunk's position values to identify which component is height
+        if (chunkX == 0 && chunkY == 0)
+            Console.WriteLine($"[MCNK Position] tile({tileX},{tileY}) chunk(0,0): posA={posA:F2} posB={posB:F2} posC={posC:F2}  mcvt[0]={heights[0]:F2}");
+
+        // Position format per Ghidra u001: (X, Z, Y) — posB is the Z (height) component.
+        // If posB looks like a world coordinate (large), try posA instead (LK uses Z, X, Y order).
+        float baseHeight = posA; // Try posA first — LK convention stores Z first
+        if (float.IsNaN(baseHeight) || MathF.Abs(baseHeight) > 50000f)
+            baseHeight = 0f;
+
+        if (baseHeight != 0f)
+        {
+            for (int i = 0; i < heights.Length; i++)
+                heights[i] += baseHeight;
+        }
+
         // Extract normals (145 × 3 signed bytes, Alpha non-interleaved format)
         var normals = ExtractNormals(mcnk.McnrData);
 

@@ -37,6 +37,11 @@ public class WmoRenderer : ISceneRenderer
     private bool _doodadsVisible = true;
     private readonly string _cacheDir;
 
+    // WMO liquid meshes (from MLIQ chunks in groups)
+    private readonly List<LiquidMeshData> _liquidMeshes = new();
+    private uint _liquidShader;
+    private int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
+
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
     {
@@ -48,7 +53,9 @@ public class WmoRenderer : ISceneRenderer
         _cacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
 
         InitShaders();
+        InitLiquidShader();
         InitBuffers();
+        BuildLiquidMeshes();
         LoadMaterialTextures();
         ResolveDoodadNames();
         LoadActiveDoodadSet();
@@ -207,6 +214,30 @@ public class WmoRenderer : ISceneRenderer
                 var doodadWorld = inst.Transform * modelMatrix;
                 inst.Renderer.RenderWithTransform(doodadWorld, view, proj);
             }
+        }
+
+        // 3. Render WMO liquid surfaces (semi-transparent water)
+        if (_liquidMeshes.Count > 0)
+        {
+            _gl.UseProgram(_liquidShader);
+            _gl.UniformMatrix4(_uLiqModel, 1, false, (float*)&model);
+            _gl.UniformMatrix4(_uLiqView, 1, false, (float*)&view);
+            _gl.UniformMatrix4(_uLiqProj, 1, false, (float*)&proj);
+
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+
+            foreach (var liq in _liquidMeshes)
+            {
+                _gl.Uniform4(_uLiqColor, liq.ColorR, liq.ColorG, liq.ColorB, liq.ColorA);
+                _gl.BindVertexArray(liq.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, liq.IndexCount, DrawElementsType.UnsignedShort, null);
+            }
+
+            _gl.BindVertexArray(0);
+            _gl.DepthMask(true);
+            _gl.Disable(EnableCap.Blend);
         }
 
         _gl.Enable(EnableCap.CullFace);
@@ -417,9 +448,17 @@ void main() {
                     _materialTextures[i] = glTex;
                     loaded++;
                 }
-                else failed++;
+                else
+                {
+                    Console.WriteLine($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
+                    failed++;
+                }
             }
-            else failed++;
+            else
+            {
+                Console.WriteLine($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
+                failed++;
+            }
         }
         Console.WriteLine($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
     }
@@ -632,6 +671,208 @@ void main() {
         return renderer;
     }
 
+    private void InitLiquidShader()
+    {
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+
+out vec3 vWorldPos;
+
+void main() {
+    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vWorldPos = worldPos.xyz;
+    gl_Position = uProj * uView * worldPos;
+}
+";
+        string fragSrc = @"
+#version 330 core
+in vec3 vWorldPos;
+
+uniform vec4 uColor;
+
+out vec4 FragColor;
+
+void main() {
+    // Simple semi-transparent liquid with slight depth variation
+    float depthShade = 0.85 + 0.15 * sin(vWorldPos.x * 0.5 + vWorldPos.y * 0.5);
+    FragColor = vec4(uColor.rgb * depthShade, uColor.a);
+}
+";
+        uint vert = CompileShader(ShaderType.VertexShader, vertSrc);
+        uint frag = CompileShader(ShaderType.FragmentShader, fragSrc);
+
+        _liquidShader = _gl.CreateProgram();
+        _gl.AttachShader(_liquidShader, vert);
+        _gl.AttachShader(_liquidShader, frag);
+        _gl.LinkProgram(_liquidShader);
+
+        _gl.GetProgram(_liquidShader, ProgramPropertyARB.LinkStatus, out int status);
+        if (status == 0)
+            Console.WriteLine($"[WmoRenderer] Liquid shader link error: {_gl.GetProgramInfoLog(_liquidShader)}");
+
+        _gl.DeleteShader(vert);
+        _gl.DeleteShader(frag);
+
+        _gl.UseProgram(_liquidShader);
+        _uLiqModel = _gl.GetUniformLocation(_liquidShader, "uModel");
+        _uLiqView = _gl.GetUniformLocation(_liquidShader, "uView");
+        _uLiqProj = _gl.GetUniformLocation(_liquidShader, "uProj");
+        _uLiqColor = _gl.GetUniformLocation(_liquidShader, "uColor");
+    }
+
+    private unsafe void BuildLiquidMeshes()
+    {
+        for (int gi = 0; gi < _wmo.Groups.Count; gi++)
+        {
+            var group = _wmo.Groups[gi];
+            if (group.LiquidData == null || group.LiquidData.Length < 30)
+                continue;
+
+            try
+            {
+                using var ms = new MemoryStream(group.LiquidData);
+                using var reader = new BinaryReader(ms);
+
+                // MLIQ header: C2iVector verts(8), C2iVector tiles(8), C3Vector corner(12), uint16 matId(2) = 30 bytes
+                int xverts = reader.ReadInt32();
+                int yverts = reader.ReadInt32();
+                int xtiles = reader.ReadInt32();
+                int ytiles = reader.ReadInt32();
+                float cornerX = reader.ReadSingle();
+                float cornerY = reader.ReadSingle();
+                float cornerZ = reader.ReadSingle();
+                ushort matId = reader.ReadUInt16();
+
+                if (xverts <= 0 || yverts <= 0 || xverts > 256 || yverts > 256)
+                {
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: invalid dimensions {xverts}x{yverts}, skipping");
+                    continue;
+                }
+
+                int expectedVertBytes = xverts * yverts * 8;
+                int expectedTileBytes = xtiles * ytiles;
+                if (ms.Length - ms.Position < expectedVertBytes)
+                {
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts");
+                    continue;
+                }
+
+                // Read vertex heights (8 bytes per vertex: 4 bytes flow data + 4 bytes float height)
+                float[] heights = new float[xverts * yverts];
+                for (int v = 0; v < xverts * yverts; v++)
+                {
+                    reader.ReadInt32(); // flow/filler data (skip)
+                    heights[v] = reader.ReadSingle();
+                }
+
+                // Read tile flags (1 byte per tile) — check for visible tiles
+                byte[] tileFlags = new byte[xtiles * ytiles];
+                if (ms.Length - ms.Position >= expectedTileBytes)
+                {
+                    for (int t = 0; t < xtiles * ytiles; t++)
+                        tileFlags[t] = reader.ReadByte();
+                }
+
+                // Build vertex positions in WMO-local space
+                // WMO MLIQ tiles are the same size as map chunk tiles (1/8th of chunk)
+                // But for WMO liquids, the tile size is derived from the bounding area
+                float tileW = (xtiles > 0) ? (group.BoundsMax.X - group.BoundsMin.X) / xtiles : 1.0f;
+                float tileH = (ytiles > 0) ? (group.BoundsMax.Y - group.BoundsMin.Y) / ytiles : 1.0f;
+
+                // Use corner position from MLIQ header for liquid placement
+                // The wiki says liquid tile size = 1/8th of map chunk = ~4.1666 units
+                // For WMO local space, use the corner + standard tile spacing
+                float liquidTileSize = 4.16666f; // standard WoW liquid tile size
+
+                var vertices = new float[xverts * yverts * 3];
+                for (int vy = 0; vy < yverts; vy++)
+                {
+                    for (int vx = 0; vx < xverts; vx++)
+                    {
+                        int idx = vy * xverts + vx;
+                        vertices[idx * 3 + 0] = cornerX + vx * liquidTileSize;
+                        vertices[idx * 3 + 1] = cornerY + vy * liquidTileSize;
+                        vertices[idx * 3 + 2] = heights[idx];
+                    }
+                }
+
+                // Build indices: one quad per tile (2 triangles)
+                var indices = new List<ushort>();
+                for (int ty = 0; ty < ytiles; ty++)
+                {
+                    for (int tx = 0; tx < xtiles; tx++)
+                    {
+                        int tileIdx = ty * xtiles + tx;
+                        // Skip tiles marked as hidden (bit 0x0F = legacyLiquidType, 0x40 = fishable, etc.)
+                        // A tile with flags 0x0F (all type bits set) is typically "no liquid"
+                        if ((tileFlags[tileIdx] & 0x0F) == 0x0F)
+                            continue;
+
+                        ushort tl = (ushort)(ty * xverts + tx);
+                        ushort tr = (ushort)(ty * xverts + tx + 1);
+                        ushort bl = (ushort)((ty + 1) * xverts + tx);
+                        ushort br = (ushort)((ty + 1) * xverts + tx + 1);
+
+                        indices.Add(tl); indices.Add(bl); indices.Add(tr);
+                        indices.Add(tr); indices.Add(bl); indices.Add(br);
+                    }
+                }
+
+                if (indices.Count == 0)
+                {
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: no visible tiles");
+                    continue;
+                }
+
+                // Determine liquid color from group flags
+                float cr = 0.15f, cg = 0.35f, cb = 0.65f, ca = 0.55f; // water default
+                bool isOcean = (group.Flags & 0x80000) != 0;
+                if (isOcean) { cr = 0.10f; cg = 0.25f; cb = 0.55f; ca = 0.60f; }
+
+                // Upload to GPU
+                uint vao = _gl.GenVertexArray();
+                uint vbo = _gl.GenBuffer();
+                uint ebo = _gl.GenBuffer();
+
+                _gl.BindVertexArray(vao);
+
+                _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+                fixed (float* ptr = vertices)
+                    _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+                _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+                var indexArr = indices.ToArray();
+                fixed (ushort* ptr = indexArr)
+                    _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indexArr.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
+
+                _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+                _gl.EnableVertexAttribArray(0);
+                _gl.BindVertexArray(0);
+
+                _liquidMeshes.Add(new LiquidMeshData
+                {
+                    Vao = vao, Vbo = vbo, Ebo = ebo,
+                    IndexCount = (uint)indexArr.Length,
+                    ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
+                });
+
+                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1})");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: parse error — {ex.Message}");
+            }
+        }
+
+        if (_liquidMeshes.Count > 0)
+            Console.WriteLine($"[WmoRenderer] Built {_liquidMeshes.Count} liquid meshes");
+    }
+
     public void Dispose()
     {
         foreach (var gb in _groups)
@@ -646,6 +887,15 @@ void main() {
             _gl.DeleteTexture(tex);
         _materialTextures.Clear();
 
+        // Dispose liquid meshes
+        foreach (var liq in _liquidMeshes)
+        {
+            _gl.DeleteVertexArray(liq.Vao);
+            _gl.DeleteBuffer(liq.Vbo);
+            _gl.DeleteBuffer(liq.Ebo);
+        }
+        _liquidMeshes.Clear();
+
         // Dispose cached doodad renderers
         foreach (var renderer in _doodadModelCache.Values)
             renderer?.Dispose();
@@ -653,6 +903,7 @@ void main() {
         _doodadInstances.Clear();
 
         _gl.DeleteProgram(_shaderProgram);
+        _gl.DeleteProgram(_liquidShader);
     }
 
     private class GroupBuffers
@@ -670,5 +921,12 @@ void main() {
         public Matrix4x4 Transform;
         public bool Visible = true;
         public int DoodadDefIndex;
+    }
+
+    private class LiquidMeshData
+    {
+        public uint Vao, Vbo, Ebo;
+        public uint IndexCount;
+        public float ColorR, ColorG, ColorB, ColorA;
     }
 }

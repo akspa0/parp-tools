@@ -315,14 +315,19 @@ public class MpqDataSource : IDataSource
         // Try loose file first
         var loosePath = TryResolveLoosePath(virtualPath);
         if (loosePath != null)
+        {
+            Console.WriteLine($"[MpqDataSource] ReadFile '{virtualPath}' → loose file: {loosePath}");
             return File.ReadAllBytes(loosePath);
+        }
 
         // Try Alpha nested .ext.MPQ cache (WMO, WDT, WDL — file 0 inside individual MPQ)
         var normalized = virtualPath.Replace('/', '\\');
         if (_alphaMpqCache.TryGetValue(normalized, out var alphaMpqPath))
         {
+            Console.WriteLine($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ: {alphaMpqPath}");
             var data = ReadFromAlphaMpq(alphaMpqPath, normalized);
             if (data != null) return data;
+            Console.WriteLine($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
         }
         // Also try original path if different
         if (!normalized.Equals(virtualPath, StringComparison.OrdinalIgnoreCase) &&
@@ -335,8 +340,12 @@ public class MpqDataSource : IDataSource
         // Try standard MPQ archives (large MPQs with listfiles — MDX, BLP, etc.)
         var mpqData = _mpq.ReadFile(virtualPath);
         if (mpqData != null)
+        {
+            Console.WriteLine($"[MpqDataSource] ReadFile '{virtualPath}' → standard MPQ ({mpqData.Length} bytes)");
             return mpqData;
+        }
             
+        Console.WriteLine($"[MpqDataSource] ReadFile '{virtualPath}' → NOT FOUND (loose={_looseRoots.Count} roots, alphaMpq={_alphaMpqCache.ContainsKey(normalized)})");
         return null;
     }
 
@@ -377,6 +386,16 @@ public class MpqDataSource : IDataSource
         var dataPath = Path.Combine(_gamePath, "Data", normalized);
         if (File.Exists(dataPath))
             return dataPath;
+
+        // Log failed resolution for .wmo files to help debug loose file issues
+        if (virtualPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"[MpqDataSource] TryResolveLoosePath FAILED for '{normalized}':");
+            foreach (var root in _looseRoots)
+                Console.WriteLine($"  loose root: {Path.Combine(root, normalized)}");
+            Console.WriteLine($"  gamePath: {directPath}");
+            Console.WriteLine($"  dataPath: {dataPath}");
+        }
 
         return null;
     }
