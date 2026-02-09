@@ -1527,6 +1527,24 @@ public class ViewerApp : IDisposable
                             if (wmo.Groups[gi].Name == null)
                                 wmo.Groups[gi].Name = $"group_{gi}";
                         }
+                        
+                        // Recalculate bounds from loaded group geometry
+                        var bMin = new System.Numerics.Vector3(float.MaxValue);
+                        var bMax = new System.Numerics.Vector3(float.MinValue);
+                        foreach (var g in wmo.Groups)
+                        {
+                            foreach (var v in g.Vertices)
+                            {
+                                bMin = System.Numerics.Vector3.Min(bMin, v);
+                                bMax = System.Numerics.Vector3.Max(bMax, v);
+                            }
+                        }
+                        if (bMin.X < float.MaxValue)
+                        {
+                            wmo.BoundsMin = bMin;
+                            wmo.BoundsMax = bMax;
+                            Console.WriteLine($"[WMO] Recalculated bounds from groups: ({bMin.X:F1},{bMin.Y:F1},{bMin.Z:F1}) - ({bMax.X:F1},{bMax.Y:F1},{bMax.Z:F1})");
+                        }
                     }
                     
                     LoadWmoModel(wmo, CacheDir);

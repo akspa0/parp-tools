@@ -890,52 +890,60 @@ public class WmoV14ToV17Converter
                     break;
 
                 case "MOBA":
-                    // v14 MOBA: 24 bytes per batch (v16 may differ — dump raw bytes to verify)
                     int batchCount = (int)(chunkSize / 24);
-                    Console.WriteLine($"[DEBUG] MOBA chunk: {chunkSize} bytes, {batchCount} batches (v14 format)");
+                    Console.WriteLine($"[DEBUG] MOBA chunk: {chunkSize} bytes, {batchCount} batches");
                     
-                    for (int b = 0; b < batchCount; b++)
+                    // v16 split group files use a different MOBA layout than v14 monolithic:
+                    // v16: 12 bytes bbox (6 x int16) + uint32 startIndex + uint16 indexCount + ... (no material ID)
+                    // v14: byte unknown + byte matId + 12 bytes bbox + ushort startIndex + ushort indexCount + ...
+                    // Detect v16 format: if byte[1] == 0xFF for all batches AND MOPY has non-255 materials,
+                    // the MOBA lacks material IDs. Skip it and rebuild batches from MOPY instead.
+                    bool isV16MobaFormat = (data.Version == 16);
+                    
+                    if (isV16MobaFormat)
                     {
-                        // Dump raw 24 bytes for diagnosis
-                        long batchStart = reader.BaseStream.Position;
-                        byte[] rawBatch = reader.ReadBytes(24);
-                        Console.WriteLine($"[DEBUG] MOBA raw batch {b}: {BitConverter.ToString(rawBatch)}");
-                        reader.BaseStream.Position = batchStart;
-                        
-                        byte unknown0 = reader.ReadByte(); // 0x00
-                        byte matId = reader.ReadByte();    // 0x01 - Material ID!
-                        
-                        // BBox: 6 x int16 (0x02-0x0D)
-                        short bx = reader.ReadInt16();
-                        short by = reader.ReadInt16();
-                        short bz = reader.ReadInt16();
-                        short tx = reader.ReadInt16();
-                        short ty = reader.ReadInt16();
-                        short tz = reader.ReadInt16();
-                        
-                        // Index data
-                        ushort startIndex = reader.ReadUInt16(); // 0x0E - ushort, NOT uint!
-                        ushort indexCount = reader.ReadUInt16(); // 0x10
-                        
-                        // Unknown (possibly vertex range)
-                        ushort unknown1 = reader.ReadUInt16(); // 0x12
-                        ushort unknown2 = reader.ReadUInt16(); // 0x14
-                        
-                        byte flags = reader.ReadByte();        // 0x16
-                        byte unknown3 = reader.ReadByte();     // 0x17
-                        
-                        Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
-                        
-                        // Store parsed batch
-                        group.Batches.Add(new WmoBatch
+                        // v16 MOBA has no material ID — skip and let RebuildBatches handle it from MOPY
+                        Console.WriteLine($"[DEBUG] v16 MOBA: skipping {batchCount} batches (no material ID), will rebuild from MOPY");
+                        reader.BaseStream.Position += chunkSize;
+                    }
+                    else
+                    {
+                        for (int b = 0; b < batchCount; b++)
                         {
-                            MaterialId = matId,
-                            FirstIndex = startIndex, // Store raw index offset (v17 uses uint32)
-                            IndexCount = indexCount, // Store raw index count
-                            FirstVertex = unknown1, // May be vertex start
-                            LastVertex = unknown2,  // May be vertex end
-                            Flags = flags
-                        });
+                            byte unknown0 = reader.ReadByte(); // 0x00
+                            byte matId = reader.ReadByte();    // 0x01 - Material ID
+                            
+                            // BBox: 6 x int16 (0x02-0x0D)
+                            short bx = reader.ReadInt16();
+                            short by = reader.ReadInt16();
+                            short bz = reader.ReadInt16();
+                            short tx = reader.ReadInt16();
+                            short ty = reader.ReadInt16();
+                            short tz = reader.ReadInt16();
+                            
+                            // Index data
+                            ushort startIndex = reader.ReadUInt16(); // 0x0E
+                            ushort indexCount = reader.ReadUInt16(); // 0x10
+                            
+                            // Unknown (possibly vertex range)
+                            ushort unknown1 = reader.ReadUInt16(); // 0x12
+                            ushort unknown2 = reader.ReadUInt16(); // 0x14
+                            
+                            byte flags = reader.ReadByte();        // 0x16
+                            byte unknown3 = reader.ReadByte();     // 0x17
+                            
+                            Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
+                            
+                            group.Batches.Add(new WmoBatch
+                            {
+                                MaterialId = matId,
+                                FirstIndex = startIndex,
+                                IndexCount = indexCount,
+                                FirstVertex = unknown1,
+                                LastVertex = unknown2,
+                                Flags = flags
+                            });
+                        }
                     }
                     break;
                 
