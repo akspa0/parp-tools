@@ -21,7 +21,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly ReplaceableTextureResolver? _texResolver;
 
     private uint _shaderProgram;
-    private int _uModel, _uView, _uProj, _uHasTexture, _uColor;
+    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
 
     private readonly List<GroupBuffers> _groups = new();
     private bool _wireframe;
@@ -139,10 +139,9 @@ public class WmoRenderer : ISceneRenderer
     /// </summary>
     public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj)
     {
-        // 1. Render WMO geometry
+        // Two-pass WMO rendering: Opaque → Doodads → Liquids → Transparent
+        // This ensures liquids are visible through transparent materials (gratings, windows)
         _gl.UseProgram(_shaderProgram);
-
-        // Disable face culling — WMO interiors need both sides visible
         _gl.Disable(EnableCap.CullFace);
 
         var model = modelMatrix;
@@ -155,57 +154,37 @@ public class WmoRenderer : ISceneRenderer
         else
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
+        // Pass 1: Opaque geometry (BlendMode 0) — depth write ON, no blending
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Uniform1(_uAlphaTest, 0.0f);
+
         foreach (var gb in _groups)
         {
             if (!gb.Visible) continue;
             var group = _wmo.Groups[gb.GroupIndex];
-
             _gl.BindVertexArray(gb.Vao);
 
-            // Render per-batch with material textures
             if (group.Batches.Count > 0)
             {
                 foreach (var batch in group.Batches)
                 {
                     int matId = batch.MaterialId;
-                    if (_materialTextures.TryGetValue(matId, out uint glTex))
-                    {
-                        _gl.ActiveTexture(TextureUnit.Texture0);
-                        _gl.BindTexture(TextureTarget.Texture2D, glTex);
-                        _gl.Uniform1(_uHasTexture, 1);
-                        _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
-                    }
-                    else
-                    {
-                        // Fallback: per-group color
-                        _gl.Uniform1(_uHasTexture, 0);
-                        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-                        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-                        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
-                        _gl.Uniform4(_uColor, r, g, b, 1.0f);
-                    }
-                    _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
-                        DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
+                    uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                    if (blendMode != 0) continue; // Skip transparent batches
+
+                    DrawBatch(gb, batch, matId);
                 }
             }
             else
             {
-                // No batches — draw whole group with fallback color
-                _gl.Uniform1(_uHasTexture, 0);
-                float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
-                float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
-                float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
-                _gl.Uniform4(_uColor, r, g, b, 1.0f);
-                _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+                DrawGroupFallback(gb);
             }
-
             _gl.BindVertexArray(0);
         }
 
-        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
-
-        // 2. Render doodad instances (their transforms are in WMO-local space,
-        //    so multiply by the WMO's modelMatrix to place them in world space)
+        // Pass 2: Doodads (rendered between opaque and transparent WMO geometry)
         if (_doodadsVisible)
         {
             foreach (var inst in _doodadInstances)
@@ -216,7 +195,7 @@ public class WmoRenderer : ISceneRenderer
             }
         }
 
-        // 3. Render WMO liquid surfaces (semi-transparent water)
+        // Pass 3: Liquid surfaces (semi-transparent, before transparent WMO geometry)
         if (_liquidMeshes.Count > 0)
         {
             _gl.UseProgram(_liquidShader);
@@ -240,7 +219,86 @@ public class WmoRenderer : ISceneRenderer
             _gl.Disable(EnableCap.Blend);
         }
 
+        // Pass 4: Transparent geometry (BlendMode 1+ = alpha key/blend)
+        // Alpha key (BlendMode 1): hard cutout at alpha < 0.5
+        // Alpha blend (BlendMode 2+): smooth blending with depth writes off
+        _gl.UseProgram(_shaderProgram);
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+        foreach (var gb in _groups)
+        {
+            if (!gb.Visible) continue;
+            var group = _wmo.Groups[gb.GroupIndex];
+            _gl.BindVertexArray(gb.Vao);
+
+            if (group.Batches.Count > 0)
+            {
+                foreach (var batch in group.Batches)
+                {
+                    int matId = batch.MaterialId;
+                    uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                    if (blendMode == 0) continue; // Skip opaque batches (already drawn)
+
+                    // BlendMode 1 = alpha key (cutout): use alpha test, keep depth writes
+                    // BlendMode 2+ = alpha blend: disable depth writes for proper blending
+                    if (blendMode == 1)
+                    {
+                        _gl.Uniform1(_uAlphaTest, 0.5f);
+                        _gl.DepthMask(true);
+                    }
+                    else
+                    {
+                        _gl.Uniform1(_uAlphaTest, 0.01f);
+                        _gl.DepthMask(false);
+                    }
+
+                    DrawBatch(gb, batch, matId);
+                }
+            }
+            _gl.BindVertexArray(0);
+        }
+
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        _gl.Uniform1(_uAlphaTest, 0.0f);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private unsafe void DrawBatch(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch, int matId)
+    {
+        if (_materialTextures.TryGetValue(matId, out uint glTex))
+        {
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, glTex);
+            _gl.Uniform1(_uHasTexture, 1);
+            _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
+        else
+        {
+            _gl.Uniform1(_uHasTexture, 0);
+            float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+            float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+            float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+            _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        }
+        _gl.DrawElements(PrimitiveType.Triangles, batch.IndexCount,
+            DrawElementsType.UnsignedShort, (void*)(batch.FirstIndex * sizeof(ushort)));
+    }
+
+    private unsafe void DrawGroupFallback(GroupBuffers gb)
+    {
+        _gl.Uniform1(_uHasTexture, 0);
+        float r = ((gb.GroupIndex * 67 + 13) % 255) / 255f;
+        float g = ((gb.GroupIndex * 131 + 7) % 255) / 255f;
+        float b = ((gb.GroupIndex * 43 + 29) % 255) / 255f;
+        _gl.Uniform4(_uColor, r, g, b, 1.0f);
+        _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
     }
 
     private void InitShaders()
@@ -278,6 +336,7 @@ in vec3 vFragPos;
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform vec4 uColor;
+uniform float uAlphaTest;
 
 out vec4 FragColor;
 
@@ -295,7 +354,11 @@ void main() {
         texColor = uColor;
     }
 
-    FragColor = vec4(texColor.rgb * lighting, 1.0);
+    // Alpha test: discard fragments below threshold (for cutout/transparent materials)
+    if (uAlphaTest > 0.0 && texColor.a < uAlphaTest)
+        discard;
+
+    FragColor = vec4(texColor.rgb * lighting, texColor.a);
 }
 ";
 
@@ -320,6 +383,7 @@ void main() {
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
+        _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
     }
 
     private uint CompileShader(ShaderType type, string source)
@@ -580,9 +644,9 @@ void main() {
             _activeDoodadSet = 0;
 
         var set = _wmo.DoodadSets[_activeDoodadSet];
-        Console.WriteLine($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex})");
+        Console.WriteLine($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex}), DoodadDefs.Count={_wmo.DoodadDefs.Count}, DoodadNamesRaw.Length={_wmo.DoodadNamesRaw.Length}");
 
-        int loaded = 0, failed = 0;
+        int loaded = 0, failed = 0, emptyName = 0, notFound = 0, parseError = 0;
         for (uint i = set.StartIndex; i < set.StartIndex + set.Count && i < (uint)_wmo.DoodadDefs.Count; i++)
         {
             var def = _wmo.DoodadDefs[(int)i];
@@ -590,6 +654,7 @@ void main() {
 
             if (string.IsNullOrEmpty(modelPath))
             {
+                emptyName++;
                 failed++;
                 continue;
             }
@@ -611,21 +676,34 @@ void main() {
                 DoodadDefIndex = (int)i
             });
 
-            if (renderer != null) loaded++;
-            else failed++;
+            if (renderer != null)
+                loaded++;
+            else
+            {
+                failed++;
+                if (_lastLoadResult == DoodadLoadResult.NotFound) notFound++;
+                else if (_lastLoadResult == DoodadLoadResult.ParseError) parseError++;
+            }
         }
 
-        Console.WriteLine($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed/missing, {_doodadModelCache.Count} unique models cached");
+        Console.WriteLine($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
     }
+
+    private enum DoodadLoadResult { Loaded, NotFound, ParseError }
+    private DoodadLoadResult _lastLoadResult;
 
     private MdxRenderer? GetOrLoadDoodadModel(string modelPath)
     {
         string normalized = modelPath.Replace('/', '\\').ToLowerInvariant();
 
         if (_doodadModelCache.TryGetValue(normalized, out var cached))
+        {
+            _lastLoadResult = cached != null ? DoodadLoadResult.Loaded : DoodadLoadResult.NotFound;
             return cached;
+        }
 
         MdxRenderer? renderer = null;
+        _lastLoadResult = DoodadLoadResult.NotFound;
         try
         {
             byte[]? mdxData = null;
@@ -636,6 +714,35 @@ void main() {
                 mdxData = _dataSource.ReadFile(modelPath);
                 if (mdxData == null)
                     mdxData = _dataSource.ReadFile(normalized);
+
+                // Case-insensitive lookup via file set
+                if (mdxData == null && _dataSource is MpqDataSource mpqDs)
+                {
+                    var found = mpqDs.FindInFileSet(modelPath);
+                    if (found != null)
+                        mdxData = _dataSource.ReadFile(found);
+                }
+
+                // Try swapping .mdx ↔ .mdl (alpha used both interchangeably)
+                if (mdxData == null)
+                {
+                    string altPath = null;
+                    if (normalized.EndsWith(".mdx"))
+                        altPath = normalized[..^4] + ".mdl";
+                    else if (normalized.EndsWith(".mdl"))
+                        altPath = normalized[..^4] + ".mdx";
+
+                    if (altPath != null)
+                    {
+                        mdxData = _dataSource.ReadFile(altPath);
+                        if (mdxData == null && _dataSource is MpqDataSource mpqDs2)
+                        {
+                            var found = mpqDs2.FindInFileSet(altPath);
+                            if (found != null)
+                                mdxData = _dataSource.ReadFile(found);
+                        }
+                    }
+                }
             }
 
             // Try loading from local disk
@@ -655,15 +762,18 @@ void main() {
 
                 var mdx = MdxFile.Load(cachePath);
                 renderer = new MdxRenderer(_gl, mdx, _cacheDir, _dataSource, _texResolver, modelPath);
+                _lastLoadResult = DoodadLoadResult.Loaded;
                 Console.WriteLine($"  Doodad loaded: {Path.GetFileName(modelPath)} ({mdx.Geosets.Count} geosets)");
             }
             else
             {
-                Console.WriteLine($"  Doodad not found: {modelPath}");
+                if (_doodadModelCache.Count < 30) // only log first 30 unique misses
+                    Console.WriteLine($"  Doodad not found: {modelPath}");
             }
         }
         catch (Exception ex)
         {
+            _lastLoadResult = DoodadLoadResult.ParseError;
             Console.WriteLine($"  Doodad load failed: {modelPath} — {ex.Message}");
         }
 
