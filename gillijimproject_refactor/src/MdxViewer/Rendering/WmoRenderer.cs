@@ -738,6 +738,15 @@ void main() {
                 using var ms = new MemoryStream(group.LiquidData);
                 using var reader = new BinaryReader(ms);
 
+                // Dump first 32 raw header bytes for diagnosis
+                byte[] rawHeader = new byte[Math.Min(32, group.LiquidData.Length)];
+                Array.Copy(group.LiquidData, rawHeader, rawHeader.Length);
+                string hexDump = BitConverter.ToString(rawHeader).Replace("-", " ");
+                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: rawHeader[{rawHeader.Length}]: {hexDump}");
+                // Also write to file for easier capture
+                try { File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mliq_diag.log"), 
+                    $"MLIQ group {gi}: rawHeader: {hexDump} | bounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})\n"); } catch { }
+
                 // MLIQ header: C2iVector verts(8), C2iVector tiles(8), C3Vector corner(12), uint16 matId(2) = 30 bytes
                 int xverts = reader.ReadInt32();
                 int yverts = reader.ReadInt32();
@@ -748,6 +757,12 @@ void main() {
                 float cornerZ = reader.ReadSingle();
                 ushort matId = reader.ReadUInt16();
 
+                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: xverts={xverts} yverts={yverts} xtiles={xtiles} ytiles={ytiles} corner=({cornerX:F2},{cornerY:F2},{cornerZ:F2}) matId={matId} dataLen={group.LiquidData.Length} groupBounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})");
+
+                // Sanity: tiles should be verts-1
+                if (xtiles != xverts - 1 || ytiles != yverts - 1)
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: WARNING tiles != verts-1! xtiles={xtiles} vs xverts-1={xverts - 1}, ytiles={ytiles} vs yverts-1={yverts - 1}");
+
                 if (xverts <= 0 || yverts <= 0 || xverts > 256 || yverts > 256)
                 {
                     Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: invalid dimensions {xverts}x{yverts}, skipping");
@@ -756,9 +771,10 @@ void main() {
 
                 int expectedVertBytes = xverts * yverts * 8;
                 int expectedTileBytes = xtiles * ytiles;
+                int totalExpected = 30 + expectedVertBytes + expectedTileBytes;
                 if (ms.Length - ms.Position < expectedVertBytes)
                 {
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts");
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts (need {expectedVertBytes}, have {ms.Length - ms.Position}), totalExpected={totalExpected} vs dataLen={group.LiquidData.Length}");
                     continue;
                 }
 
@@ -793,8 +809,8 @@ void main() {
                     int visibleTiles = 0, hiddenTiles = 0;
                     for (int t = 0; t < tileFlags.Length; t++)
                     {
-                        // Tile with 0x0F in low nibble = no liquid per wowdev wiki
-                        if ((tileFlags[t] & 0x0F) == 0x0F) hiddenTiles++;
+                        // Noggit: bit 3 (0x08) = do not render
+                        if ((tileFlags[t] & 0x08) != 0) hiddenTiles++;
                         else visibleTiles++;
                     }
                     Console.WriteLine($"[WmoRenderer] MLIQ group {gi} diag: heights=[{hMin:F1}..{hMax:F1}], tiles visible={visibleTiles} hidden={hiddenTiles}, groupBounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})");
@@ -805,40 +821,54 @@ void main() {
                     Console.WriteLine($"[WmoRenderer] MLIQ group {gi} tileFlags sample: {flagSample}");
                 }
 
-                // Build vertex positions in WMO-local space
-                // The vertex grid is xverts × yverts. Corner is the base position.
-                // Row-major storage: data index = vy * xverts + vx
-                var vertices = new float[xverts * yverts * 3];
-                for (int vy = 0; vy < yverts; vy++)
+                // Build vertex positions in WMO-local space (raw file coords, Z-up)
+                // Camera uses Vector3.UnitZ as up, so our axes are:
+                //   axis0 = X (horizontal), axis1 = Y (horizontal), axis2 = Z (up)
+                // Raw file C3Vector: (x, y, z) where z is up.
+                // MLIQ corner: cornerX = base X, cornerY = base Y, cornerZ = base height
+                // Noggit converts (x,y,z)→(x,z,-y) for Y-up, then:
+                //   (pos.x + UNITSIZE*i, height, pos.z - UNITSIZE*j)
+                //   where pos.x=file.x, pos.z=-file.y
+                // So noggit spreads on file.x(+i) and file.y(-j converted).
+                // In our raw file Z-up space:
+                //   axis0 = cornerX + i * tileSize       (X horizontal spread)
+                //   axis1 = cornerY + j * tileSize       (Y horizontal spread)
+                //   axis2 = heights[idx]                  (Z = up = liquid surface height)
+                int nverts = xverts * yverts;
+                var vertices = new float[nverts * 3];
+                for (int j = 0; j < yverts; j++)
                 {
-                    for (int vx = 0; vx < xverts; vx++)
+                    for (int i = 0; i < xverts; i++)
                     {
-                        int idx = vy * xverts + vx;
-                        vertices[idx * 3 + 0] = cornerX + vx * liquidTileSize;
-                        vertices[idx * 3 + 1] = cornerY + vy * liquidTileSize;
+                        int idx = j * xverts + i;
+                        vertices[idx * 3 + 0] = cornerX - j * liquidTileSize;
+                        vertices[idx * 3 + 1] = cornerY + i * liquidTileSize;
                         vertices[idx * 3 + 2] = heights[idx];
                     }
                 }
 
-                // Build indices: one quad per tile (2 triangles)
+                // Build indices: one quad per visible tile
+                // Reference: noggit — tile.liquid is low 6 bits; if bit 3 (0x8) is set, skip tile
                 var indices = new List<ushort>();
-                for (int ty = 0; ty < ytiles; ty++)
+                for (int j = 0; j < ytiles; j++)
                 {
-                    for (int tx = 0; tx < xtiles; tx++)
+                    for (int i = 0; i < xtiles; i++)
                     {
-                        int tileIdx = ty * xtiles + tx;
+                        int tileIdx = j * xtiles + i;
                         if (tileIdx >= tileFlags.Length) continue;
-                        // Tile with legacyLiquidType bits 0x0F all set = "no liquid here"
-                        if ((tileFlags[tileIdx] & 0x0F) == 0x0F)
+                        // Noggit: !(tile.liquid & 0x8) — bit 3 means "do not render"
+                        if ((tileFlags[tileIdx] & 0x08) != 0)
                             continue;
 
-                        ushort tl = (ushort)(ty * xverts + tx);
-                        ushort tr = (ushort)(ty * xverts + tx + 1);
-                        ushort bl = (ushort)((ty + 1) * xverts + tx);
-                        ushort br = (ushort)((ty + 1) * xverts + tx + 1);
+                        ushort p = (ushort)(j * xverts + i);
+                        ushort tl = p;
+                        ushort tr = (ushort)(p + 1);
+                        ushort bl = (ushort)(p + xverts);
+                        ushort br = (ushort)(p + xverts + 1);
 
-                        indices.Add(tl); indices.Add(bl); indices.Add(tr);
-                        indices.Add(tr); indices.Add(bl); indices.Add(br);
+                        // Two triangles per quad (same winding as noggit)
+                        indices.Add(tl); indices.Add(tr); indices.Add(br);
+                        indices.Add(br); indices.Add(bl); indices.Add(tl);
                     }
                 }
 
@@ -848,46 +878,37 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid type from groupLiquid + tile legacyLiquidType
-                // Per wowdev wiki: for older WMOs without flag_use_liquid_type_dbc_id:
-                //   legacyLiquidType == 1 → Ocean
-                //   legacyLiquidType == 2 → Magma (lava)
-                //   legacyLiquidType == 3 → Slime
-                //   legacyLiquidType >= 4 → Water
-                // groupLiquid field from MOGP header also encodes type info.
-                // Flag 0x80000 = is_not_water_but_ocean
-                int liquidBasicType = 0; // 0=water, 1=ocean, 2=magma, 3=slime
+                // Determine liquid type using noggit's logic:
+                // liquid_basic_types: 0=water, 1=ocean, 2=magma, 3=slime
+                // noggit: basic_type = (group_liquid - 1) & 3, with ocean flag override
+                // For older WMOs (group_liquid == 15 "green lava"), sample tile flags
                 bool isOcean = (group.Flags & 0x80000) != 0;
-                if (isOcean)
+                int liquidBasicType = 0; // default water
+
+                if (group.GroupLiquid > 0 && group.GroupLiquid != 15)
                 {
-                    liquidBasicType = 1;
+                    // Noggit: to_wmo_liquid(group_liquid - 1, is_ocean) 
+                    // basic_type = (group_liquid - 1) & 3
+                    liquidBasicType = (int)((group.GroupLiquid - 1) & 3);
+                    if (isOcean && liquidBasicType == 0) liquidBasicType = 1; // water + ocean flag = ocean
                 }
                 else if (group.GroupLiquid == 15)
                 {
-                    // Use tile flags to determine type - sample first visible tile
+                    // Sample first visible tile's liquid field for type
                     for (int t = 0; t < tileFlags.Length; t++)
                     {
-                        if ((tileFlags[t] & 0x0F) != 0x0F)
+                        if ((tileFlags[t] & 0x08) == 0) // visible tile
                         {
-                            int legacyType = tileFlags[t] & 0x0F;
-                            if (legacyType == 1) liquidBasicType = 1; // ocean
-                            else if (legacyType == 2) liquidBasicType = 2; // magma
-                            else if (legacyType == 3) liquidBasicType = 3; // slime
-                            else liquidBasicType = 0; // water
+                            int tileLiquid = tileFlags[t] & 0x3F; // low 6 bits
+                            liquidBasicType = tileLiquid & 3; // basic type mask
+                            if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
                             break;
                         }
                     }
                 }
-                else if (group.GroupLiquid > 0)
+                else if (isOcean)
                 {
-                    // groupLiquid is a LiquidType DBC ID; basic type = (id - 1) & 3
-                    // Common IDs: 5=SlowWater, 6=SlowOcean, 7=SlowMagma, 8=SlowSlime
-                    //             13=WMO Water, 14=Ocean, 19=WMO Magma, 20=WMO Slime
-                    uint gl = group.GroupLiquid;
-                    if (gl == 14 || gl == 6) liquidBasicType = 1; // ocean
-                    else if (gl == 7 || gl == 19) liquidBasicType = 2; // magma
-                    else if (gl == 8 || gl == 20) liquidBasicType = 3; // slime
-                    else liquidBasicType = 0; // water
+                    liquidBasicType = 1;
                 }
 
                 // Assign color based on liquid type
