@@ -52,6 +52,10 @@ public class ViewerApp : IDisposable
 
     // Model info
     private string _modelInfo = "";
+    
+    // Stored loaded model data for export (avoids re-parsing from disk)
+    private WmoV14ToV17Converter.WmoV14Data? _loadedWmo;
+    private MdxFile? _loadedMdx;
 
     // Mouse state
     private float _lastMouseX, _lastMouseY;
@@ -418,18 +422,30 @@ public class ViewerApp : IDisposable
                 string glbPath = Path.Combine(ExportDir, Path.ChangeExtension(_loadedFileName!, ".glb"));
                 try
                 {
-                    var ext = Path.GetExtension(_loadedFilePath).ToLowerInvariant();
                     string dir = Path.GetDirectoryName(_loadedFilePath) ?? ".";
-                    if (ext == ".mdx")
+                    if (_loadedWmo != null)
                     {
-                        var mdx = MdxFile.Load(_loadedFilePath);
-                        GlbExporter.ExportMdx(mdx, dir, glbPath, _dataSource);
+                        GlbExporter.ExportWmoWithDoodads(_loadedWmo, dir, glbPath, _dataSource);
                     }
-                    else if (ext == ".wmo")
+                    else if (_loadedMdx != null)
                     {
-                        var converter = new WmoV14ToV17Converter();
-                        var wmo = converter.ParseWmoV14(_loadedFilePath);
-                        GlbExporter.ExportWmo(wmo, dir, glbPath, _dataSource);
+                        GlbExporter.ExportMdx(_loadedMdx, dir, glbPath, _dataSource);
+                    }
+                    else
+                    {
+                        // Fallback: re-parse from disk (legacy path)
+                        var ext = Path.GetExtension(_loadedFilePath).ToLowerInvariant();
+                        if (ext == ".mdx")
+                        {
+                            var mdx = MdxFile.Load(_loadedFilePath);
+                            GlbExporter.ExportMdx(mdx, dir, glbPath, _dataSource);
+                        }
+                        else if (ext == ".wmo")
+                        {
+                            var converter = new WmoV14ToV17Converter();
+                            var wmo = converter.ParseWmoV14(_loadedFilePath);
+                            GlbExporter.ExportWmo(wmo, dir, glbPath, _dataSource);
+                        }
                     }
                     _statusMessage = $"Exported: {glbPath}";
                 }
@@ -1570,6 +1586,9 @@ public class ViewerApp : IDisposable
 
     private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null)
     {
+        _loadedWmo = null;
+        _loadedMdx = mdx;
+        
         int validGeosets = mdx.Geosets.Count(g => g.Vertices.Count > 0 && g.Indices.Count > 0);
         int totalVerts = mdx.Geosets.Sum(g => g.Vertices.Count);
         int totalTris = mdx.Geosets.Sum(g => g.Indices.Count / 3);
@@ -1626,6 +1645,9 @@ public class ViewerApp : IDisposable
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {
+        _loadedMdx = null;
+        _loadedWmo = wmo;
+        
         int totalVerts = wmo.Groups.Sum(g => g.Vertices.Count);
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 

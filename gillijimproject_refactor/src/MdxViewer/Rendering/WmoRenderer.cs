@@ -778,17 +778,36 @@ void main() {
                         tileFlags[t] = reader.ReadByte();
                 }
 
+                // WMO MLIQ tile size = 1/8th of a map chunk = UNIT_SIZE/2 ≈ 4.16666
+                float liquidTileSize = 4.16666f;
+
+                // Diagnostic: log first few heights and tile flags
+                if (gi < 5 || group.LiquidData.Length > 100)
+                {
+                    float hMin = float.MaxValue, hMax = float.MinValue;
+                    for (int h = 0; h < heights.Length; h++)
+                    {
+                        if (heights[h] < hMin) hMin = heights[h];
+                        if (heights[h] > hMax) hMax = heights[h];
+                    }
+                    int visibleTiles = 0, hiddenTiles = 0;
+                    for (int t = 0; t < tileFlags.Length; t++)
+                    {
+                        // Tile with 0x0F in low nibble = no liquid per wowdev wiki
+                        if ((tileFlags[t] & 0x0F) == 0x0F) hiddenTiles++;
+                        else visibleTiles++;
+                    }
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi} diag: heights=[{hMin:F1}..{hMax:F1}], tiles visible={visibleTiles} hidden={hiddenTiles}, groupBounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})");
+                    // Log first few tile flag values
+                    string flagSample = "";
+                    for (int t = 0; t < Math.Min(16, tileFlags.Length); t++)
+                        flagSample += $"0x{tileFlags[t]:X2} ";
+                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi} tileFlags sample: {flagSample}");
+                }
+
                 // Build vertex positions in WMO-local space
-                // WMO MLIQ tiles are the same size as map chunk tiles (1/8th of chunk)
-                // But for WMO liquids, the tile size is derived from the bounding area
-                float tileW = (xtiles > 0) ? (group.BoundsMax.X - group.BoundsMin.X) / xtiles : 1.0f;
-                float tileH = (ytiles > 0) ? (group.BoundsMax.Y - group.BoundsMin.Y) / ytiles : 1.0f;
-
-                // Use corner position from MLIQ header for liquid placement
-                // The wiki says liquid tile size = 1/8th of map chunk = ~4.1666 units
-                // For WMO local space, use the corner + standard tile spacing
-                float liquidTileSize = 4.16666f; // standard WoW liquid tile size
-
+                // The vertex grid is xverts × yverts. Corner is the base position.
+                // Row-major storage: data index = vy * xverts + vx
                 var vertices = new float[xverts * yverts * 3];
                 for (int vy = 0; vy < yverts; vy++)
                 {
@@ -808,8 +827,8 @@ void main() {
                     for (int tx = 0; tx < xtiles; tx++)
                     {
                         int tileIdx = ty * xtiles + tx;
-                        // Skip tiles marked as hidden (bit 0x0F = legacyLiquidType, 0x40 = fishable, etc.)
-                        // A tile with flags 0x0F (all type bits set) is typically "no liquid"
+                        if (tileIdx >= tileFlags.Length) continue;
+                        // Tile with legacyLiquidType bits 0x0F all set = "no liquid here"
                         if ((tileFlags[tileIdx] & 0x0F) == 0x0F)
                             continue;
 
@@ -829,10 +848,66 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid color from group flags
-                float cr = 0.15f, cg = 0.35f, cb = 0.65f, ca = 0.55f; // water default
+                // Determine liquid type from groupLiquid + tile legacyLiquidType
+                // Per wowdev wiki: for older WMOs without flag_use_liquid_type_dbc_id:
+                //   legacyLiquidType == 1 → Ocean
+                //   legacyLiquidType == 2 → Magma (lava)
+                //   legacyLiquidType == 3 → Slime
+                //   legacyLiquidType >= 4 → Water
+                // groupLiquid field from MOGP header also encodes type info.
+                // Flag 0x80000 = is_not_water_but_ocean
+                int liquidBasicType = 0; // 0=water, 1=ocean, 2=magma, 3=slime
                 bool isOcean = (group.Flags & 0x80000) != 0;
-                if (isOcean) { cr = 0.10f; cg = 0.25f; cb = 0.55f; ca = 0.60f; }
+                if (isOcean)
+                {
+                    liquidBasicType = 1;
+                }
+                else if (group.GroupLiquid == 15)
+                {
+                    // Use tile flags to determine type - sample first visible tile
+                    for (int t = 0; t < tileFlags.Length; t++)
+                    {
+                        if ((tileFlags[t] & 0x0F) != 0x0F)
+                        {
+                            int legacyType = tileFlags[t] & 0x0F;
+                            if (legacyType == 1) liquidBasicType = 1; // ocean
+                            else if (legacyType == 2) liquidBasicType = 2; // magma
+                            else if (legacyType == 3) liquidBasicType = 3; // slime
+                            else liquidBasicType = 0; // water
+                            break;
+                        }
+                    }
+                }
+                else if (group.GroupLiquid > 0)
+                {
+                    // groupLiquid is a LiquidType DBC ID; basic type = (id - 1) & 3
+                    // Common IDs: 5=SlowWater, 6=SlowOcean, 7=SlowMagma, 8=SlowSlime
+                    //             13=WMO Water, 14=Ocean, 19=WMO Magma, 20=WMO Slime
+                    uint gl = group.GroupLiquid;
+                    if (gl == 14 || gl == 6) liquidBasicType = 1; // ocean
+                    else if (gl == 7 || gl == 19) liquidBasicType = 2; // magma
+                    else if (gl == 8 || gl == 20) liquidBasicType = 3; // slime
+                    else liquidBasicType = 0; // water
+                }
+
+                // Assign color based on liquid type
+                float cr, cg, cb, ca;
+                switch (liquidBasicType)
+                {
+                    case 1: // ocean
+                        cr = 0.10f; cg = 0.25f; cb = 0.55f; ca = 0.60f;
+                        break;
+                    case 2: // magma/lava
+                        cr = 0.85f; cg = 0.25f; cb = 0.05f; ca = 0.70f;
+                        break;
+                    case 3: // slime
+                        cr = 0.20f; cg = 0.65f; cb = 0.10f; ca = 0.65f;
+                        break;
+                    default: // water
+                        cr = 0.15f; cg = 0.35f; cb = 0.65f; ca = 0.55f;
+                        break;
+                }
+                string liquidTypeName = liquidBasicType switch { 1 => "ocean", 2 => "magma", 3 => "slime", _ => "water" };
 
                 // Upload to GPU
                 uint vao = _gl.GenVertexArray();
@@ -861,7 +936,7 @@ void main() {
                     ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
                 });
 
-                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1})");
+                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1}), type={liquidTypeName}, groupLiquid={group.GroupLiquid}, matId={matId}");
             }
             catch (Exception ex)
             {

@@ -111,7 +111,10 @@ public class MdxRenderer : ISceneRenderer
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
-        RenderWithTransform(MirrorX, view, proj);
+        // Two-pass rendering: opaque first (depth write ON), then transparent (depth write OFF)
+        // This prevents alpha/blended geosets from occluding opaque geometry behind them.
+        RenderWithTransform(MirrorX, view, proj, RenderPass.Opaque);
+        RenderWithTransform(MirrorX, view, proj, RenderPass.Transparent);
     }
 
     /// <summary>
@@ -125,6 +128,8 @@ public class MdxRenderer : ISceneRenderer
         _gl.UseProgram(_shaderProgram);
 
         _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);

@@ -774,16 +774,17 @@ public class WmoV14ToV17Converter
         group.IntBatchCount = reader.ReadUInt16();        // +0x2A
         group.ExtBatchCount = reader.ReadUInt16();        // +0x2C
         reader.ReadUInt16();                              // +0x2E padding
+        // +0x30: fogIds (4 bytes)
+        reader.ReadBytes(4);                              // +0x30 fogIds
+        group.GroupLiquid = reader.ReadUInt32();           // +0x34 groupLiquid (liquid type reference)
+        // We've now read 0x38 (56) bytes.
         
-        // Skip remaining header bytes to reach offset 0x80 where subchunks start
-        // We've read 48 bytes (0x30), need to skip to 0x80
         // ADAPTIVE HEADER SKIP:
         // Check for subchunk magic at offset 0x44 (68 bytes) vs 0x80 (128 bytes)
-        // We have read 0x30 (48) bytes.
         long currentPos = reader.BaseStream.Position;
         
-        // Peek at offset 0x44 (current + (0x44 - 0x30) = current + 20)
-        reader.BaseStream.Seek(currentPos + (0x44 - 0x30), SeekOrigin.Begin);
+        // Peek at offset 0x44 (current + (0x44 - 0x38) = current + 12)
+        reader.BaseStream.Seek(currentPos + (0x44 - 0x38), SeekOrigin.Begin);
         byte[] magicPeek = reader.ReadBytes(4);
         string magicStr = new string(magicPeek.Select(b => (char)b).Reverse().ToArray());
 
@@ -795,14 +796,14 @@ public class WmoV14ToV17Converter
         if (isShortHeader)
         {
              // Skip to 0x44 (68 bytes)
-             reader.ReadBytes(0x44 - 0x30);
-             Console.WriteLine($"[DEBUG] Detected SHORT MOGP Header (68 bytes) for group {group.NameOffset}");
+             reader.ReadBytes(0x44 - 0x38);
+             Console.WriteLine($"[DEBUG] Detected SHORT MOGP Header (68 bytes) for group {group.NameOffset}, groupLiquid={group.GroupLiquid}");
         }
         else
         {
              // Skip to 0x80 (128 bytes) - Standard Alpha
-             reader.ReadBytes(0x80 - 0x30);
-             Console.WriteLine($"[DEBUG] Detected LONG MOGP Header (128 bytes) for group {group.NameOffset}");
+             reader.ReadBytes(0x80 - 0x38);
+             Console.WriteLine($"[DEBUG] Detected LONG MOGP Header (128 bytes) for group {group.NameOffset}, groupLiquid={group.GroupLiquid}");
         }
 
 
@@ -2306,6 +2307,7 @@ public class WmoV14ToV17Converter
         public byte[] LiquidData = Array.Empty<byte>(); // MLIQ
         
         // v14 Lightmap data (to be converted to MOCV)
+        public uint GroupLiquid; // MOGP offset 0x34 — liquid type reference
         public List<Vector3> Normals = new(); // MONR - vertex normals (v16+)
         public List<Vector2> LightmapUVs = new(); // MOLV - per-face-vertex UVs
         public byte[] LightmapData = Array.Empty<byte>(); // MOLD - raw lightmap pixels
