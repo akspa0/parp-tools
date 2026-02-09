@@ -140,14 +140,12 @@ public class WorldScene : ISceneRenderer
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
-        // Placement transform for Alpha WDT terrain maps.
+        // Placement transform for terrain maps.
         // Positions are already converted to renderer coords in AlphaTerrainAdapter:
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
-        // The coordinate swap changes handedness. To correct the resulting mirror,
-        // we negate one geometry axis. Scale(1,-1,1) flips the local Y axis of the
-        // model geometry, which corrects the left-right mirror caused by the
-        // X↔Y swap in the position conversion.
-        var coordFix = Matrix4x4.CreateScale(1f, -1f, 1f);
+        // X negation is baked into vertex data at upload time (WmoRenderer/ModelRenderer),
+        // so placement transforms use identity — just scale, rotation, translation.
+        bool wmoBased = adapter.IsWmoBased;
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -167,7 +165,6 @@ public class WorldScene : ISceneRenderer
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
             var transform = pivotCorrection
-                * coordFix
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -203,8 +200,8 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = coordFix
-                * Matrix4x4.CreateRotationX(rx)
+
+            var transform = Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
@@ -298,9 +295,6 @@ public class WorldScene : ISceneRenderer
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
-        // Handedness correction (same as BuildInstances)
-        var coordFix = Matrix4x4.CreateScale(1f, -1f, 1f);
-
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
         foreach (var p in result.MddfPlacements)
@@ -318,8 +312,8 @@ public class WorldScene : ISceneRenderer
             if (_assets.TryGetMdxPivotOffset(key, out var pivot))
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
+            // X negation baked into vertex data — placement is just scale/rot/translate
             var transform = pivotCorrection
-                * coordFix
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -343,8 +337,9 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = coordFix
-                * Matrix4x4.CreateRotationX(rx)
+
+            // X negation baked into vertex data — placement is just rot/translate
+            var transform = Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
@@ -554,6 +549,16 @@ public class WorldScene : ISceneRenderer
         {
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
+
+        // ── PASS 3: LIQUID ──────────────────────────────────────────────
+        // Render liquid surfaces LAST so all opaque geometry (terrain, WMOs, MDX)
+        // is already in the framebuffer. Liquid uses alpha blending + depth mask off,
+        // so objects below the water surface are visible through the transparent water.
+        _gl.Disable(EnableCap.Blend);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _terrainManager.RenderLiquid(view, proj, cameraPos);
 
         // Reset GL state before bounding boxes
         _gl.Disable(EnableCap.Blend);

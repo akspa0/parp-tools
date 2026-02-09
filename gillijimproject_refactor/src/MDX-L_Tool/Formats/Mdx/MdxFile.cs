@@ -552,9 +552,80 @@ public class MdxFile
                         geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
                     break;
                 case "BIDX":
-                    // Bone Indices — 1 byte per vertex (like GNDX)
-                    br.ReadBytes((int)count);
+                {
+                    // Bone Indices — could be 1 byte or 4 bytes per entry depending on version.
+                    // Use peek-ahead validation (same pattern as PTYP/PCNT).
+                    long afterRead4 = br.BaseStream.Position + count * 4;
+                    long afterRead1 = br.BaseStream.Position + count;
+                    
+                    bool valid4 = false, valid1 = false;
+                    if (afterRead4 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead4;
+                        string nextTag4 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid4 = IsValidGeosetTag(nextTag4);
+                        br.BaseStream.Position = save;
+                    }
+                    if (afterRead1 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead1;
+                        string nextTag1 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid1 = IsValidGeosetTag(nextTag1);
+                        br.BaseStream.Position = save;
+                    }
+                    
+                    if (valid4)
+                        br.ReadBytes((int)count * 4);
+                    else if (valid1)
+                        br.ReadBytes((int)count);
+                    else
+                        br.ReadBytes((int)count * 4); // fallback to 4-byte
                     break;
+                }
+                case "BWGT":
+                {
+                    // Bone Weights — could be 1 byte or 4 bytes per entry.
+                    // Use peek-ahead validation.
+                    long afterRead4 = br.BaseStream.Position + count * 4;
+                    long afterRead1 = br.BaseStream.Position + count;
+                    
+                    bool valid4 = false, valid1 = false;
+                    if (afterRead4 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead4;
+                        string nextTag4 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid4 = IsValidGeosetTag(nextTag4);
+                        br.BaseStream.Position = save;
+                    }
+                    if (afterRead1 + 4 <= geoEnd)
+                    {
+                        long save = br.BaseStream.Position;
+                        br.BaseStream.Position = afterRead1;
+                        string nextTag1 = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        valid1 = IsValidGeosetTag(nextTag1);
+                        br.BaseStream.Position = save;
+                    }
+                    
+                    if (valid4)
+                        br.ReadBytes((int)count * 4);
+                    else if (valid1)
+                        br.ReadBytes((int)count);
+                    else
+                    {
+                        // BWGT is often the last tagged chunk before the footer.
+                        // If neither stride lands on a valid tag, consume remaining to geoEnd minus footer.
+                        long footerSize = Math.Min(geoEnd - br.BaseStream.Position, 12); // MaterialId+SelectionGroup+Flags minimum
+                        long dataToRead = geoEnd - br.BaseStream.Position - footerSize;
+                        if (dataToRead > 0 && dataToRead <= count * 4)
+                            br.ReadBytes((int)dataToRead);
+                        else
+                            br.ReadBytes((int)count * 4); // fallback
+                    }
+                    break;
+                }
 
                 default:
                     // Smart Seek for Alignment/Padding Recovery
@@ -639,6 +710,7 @@ public class MdxFile
     {
         return tag == "VRTX" || tag == "NRMS" || tag == "PTYP" || tag == "PCNT" || 
                tag == "PVTX" || tag == "GNDX" || tag == "MTGC" || tag == "MATS" || 
-               tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX";
+               tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX" ||
+               tag == "BWGT";
     }
 }

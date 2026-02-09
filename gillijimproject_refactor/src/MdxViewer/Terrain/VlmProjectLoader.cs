@@ -242,6 +242,8 @@ public class VlmProjectLoader
 
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 
+        var liquid = ExtractLiquid(data, chunkIndex, tileX, tileY, chunkX, chunkY, new Vector3(worldX, worldY, 0f));
+
         return new TerrainChunkData
         {
             TileX = tileX,
@@ -254,8 +256,103 @@ public class VlmProjectLoader
             Layers = layers,
             AlphaMaps = alphaMaps,
             ShadowMap = shadowMap,
+            Liquid = liquid,
             WorldPosition = new Vector3(worldX, worldY, 0f)
         };
+    }
+
+    private static LiquidChunkData? ExtractLiquid(VlmTerrainData data, int chunkIndex,
+        int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos)
+    {
+        var liquids = data.Liquids;
+        if (liquids == null || liquids.Length == 0)
+            return null;
+
+        var l = liquids.FirstOrDefault(x => x.ChunkIndex == chunkIndex);
+        if (l == null)
+            return null;
+
+        LiquidType type = l.LiquidType switch
+        {
+            1 => LiquidType.Ocean,
+            2 => LiquidType.Magma,
+            3 => LiquidType.Slime,
+            _ => LiquidType.Water
+        };
+
+        var heights = ConvertHeightsTo9x9(l.Heights, l.MinHeight);
+        if (heights == null)
+            return null;
+
+        return new LiquidChunkData
+        {
+            MinHeight = l.MinHeight,
+            MaxHeight = l.MaxHeight,
+            Heights = heights,
+            VertexData = new uint[81],
+            TileGrid = new float[16],
+            Type = type,
+            WorldPosition = worldPos,
+            TileX = tileX,
+            TileY = tileY,
+            ChunkX = chunkX,
+            ChunkY = chunkY
+        };
+    }
+
+    private static float[]? ConvertHeightsTo9x9(float[]? src, float fallbackHeight)
+    {
+        if (src == null || src.Length == 0)
+        {
+            var flat = new float[81];
+            Array.Fill(flat, fallbackHeight);
+            return flat;
+        }
+
+        if (src.Length >= 81)
+        {
+            var dst = new float[81];
+            Array.Copy(src, dst, 81);
+            return dst;
+        }
+
+        // MH2O can store partial sub-rect height grids (<= 9x9). Infer a small grid size and place it
+        // in the top-left of a 9x9 buffer.
+        int bestW = 0;
+        int bestH = 0;
+        for (int h = 2; h <= 9; h++)
+        {
+            if (src.Length % h != 0) continue;
+            int w = src.Length / h;
+            if (w < 2 || w > 9) continue;
+            if (w * h == src.Length)
+            {
+                bestW = w;
+                bestH = h;
+                break;
+            }
+        }
+
+        if (bestW == 0 || bestH == 0)
+        {
+            var flat = new float[81];
+            Array.Fill(flat, fallbackHeight);
+            return flat;
+        }
+
+        var outHeights = new float[81];
+        Array.Fill(outHeights, fallbackHeight);
+
+        for (int y = 0; y < bestH && y < 9; y++)
+        {
+            for (int x = 0; x < bestW && x < 9; x++)
+            {
+                int srcIdx = y * bestW + x;
+                outHeights[y * 9 + x] = src[srcIdx];
+            }
+        }
+
+        return outHeights;
     }
 
     /// <summary>

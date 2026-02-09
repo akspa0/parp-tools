@@ -276,7 +276,9 @@ public class TerrainManager : ISceneRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
         _terrainRenderer.Render(view, proj, _cameraPos);
-        _liquidRenderer.Render(view, proj, _cameraPos, _terrainRenderer.Lighting, 0.016f);
+        // Liquid is rendered separately AFTER all opaque geometry (WMOs, MDX)
+        // so objects below the water surface are visible through the transparent water.
+        // See WorldScene.Render() or call RenderLiquid() explicitly.
     }
 
     /// <summary>
@@ -286,7 +288,15 @@ public class TerrainManager : ISceneRenderer
     {
         _cameraPos = cameraPos;
         _terrainRenderer.Render(view, proj, cameraPos);
-        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, 0.016f);
+    }
+
+    /// <summary>
+    /// Render liquid surfaces. Call AFTER all opaque geometry (terrain, WMOs, MDX)
+    /// so objects below the water surface are visible through transparent water.
+    /// </summary>
+    public void RenderLiquid(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float deltaTime = 0.016f)
+    {
+        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, deltaTime);
     }
 
     public void ToggleWireframe()

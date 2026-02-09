@@ -383,6 +383,7 @@ void main() {
             float[] vertexData = new float[vertCount * 8];
             for (int v = 0; v < vertCount; v++)
             {
+                // Pass through raw WoW model-local coords.
                 var pos = geoset.Vertices[v];
                 vertexData[v * 8 + 0] = pos.X;
                 vertexData[v * 8 + 1] = pos.Y;
@@ -422,6 +423,9 @@ void main() {
             gb.Ebo = _gl.GenBuffer();
             _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
             var indices = geoset.Indices.ToArray();
+            // Reverse triangle winding: WoW/D3D uses CW front faces, OpenGL uses CCW.
+            for (int t = 0; t + 2 < indices.Length; t += 3)
+                (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);
             fixed (ushort* ptr = indices)
                 _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 

@@ -625,22 +625,14 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (mclqData == null || mclqData.Length < LiquidChunkData.InstanceSize)
             return null;
 
-        // Determine liquid types from MCNK flags bits 2-5
+        // Determine liquid type from MCNK flags bits 2-5 (if set).
         // Bit 2 (0x04) = Water, Bit 3 (0x08) = Ocean, Bit 4 (0x10) = Magma, Bit 5 (0x20) = Slime
-        bool hasWater = (mcnkFlags & 0x04) != 0;
-        bool hasOcean = (mcnkFlags & 0x08) != 0;
-        bool hasMagma = (mcnkFlags & 0x10) != 0;
-        bool hasSlime = (mcnkFlags & 0x20) != 0;
-
-        if (!hasWater && !hasOcean && !hasMagma && !hasSlime)
-            return null;
-
-        // Determine which liquid type this is (first set bit)
+        // Many chunks (rivers, lakes) have valid MCLQ data but no type flags set — default to Water.
         LiquidType liquidType;
-        if (hasWater) liquidType = LiquidType.Water;
-        else if (hasOcean) liquidType = LiquidType.Ocean;
-        else if (hasMagma) liquidType = LiquidType.Magma;
-        else liquidType = LiquidType.Slime;
+        if ((mcnkFlags & 0x08) != 0) liquidType = LiquidType.Ocean;
+        else if ((mcnkFlags & 0x10) != 0) liquidType = LiquidType.Magma;
+        else if ((mcnkFlags & 0x20) != 0) liquidType = LiquidType.Slime;
+        else liquidType = LiquidType.Water;
 
         // Parse the first 804-byte liquid instance
         return ParseLiquidInstance(mclqData, 0, liquidType, tileX, tileY, chunkX, chunkY, worldPos);
