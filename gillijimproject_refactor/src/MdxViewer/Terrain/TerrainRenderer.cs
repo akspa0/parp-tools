@@ -41,6 +41,13 @@ public class TerrainRenderer : IDisposable
     // Debug: show alpha masks as grayscale on white (no diffuse texture)
     public bool ShowAlphaMask { get; set; } = false;
 
+    // MCSH shadow map overlay
+    public bool ShowShadowMap { get; set; } = false;
+
+    // Topographical contour lines
+    public bool ShowContours { get; set; } = false;
+    public float ContourInterval { get; set; } = 2.0f;
+
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
@@ -55,12 +62,13 @@ public class TerrainRenderer : IDisposable
     /// <summary>
     /// Add chunk meshes and their texture tables for rendering.
     /// </summary>
-    public void AddChunks(List<TerrainChunkMesh> chunks, Dictionary<(int, int), List<string>> tileTextures)
+    public void AddChunks(List<TerrainChunkMesh> chunks, IDictionary<(int, int), List<string>> tileTextures)
     {
         foreach (var chunk in chunks)
         {
             chunk.Gl = _gl;
             UploadAlphaTextures(chunk);
+            UploadShadowTexture(chunk);
         }
         _chunks.AddRange(chunks);
 
@@ -118,6 +126,9 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
         _shader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
+        _shader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
+        _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
+        _shader.SetFloat("uContourInterval", ContourInterval);
 
         // Render each chunk
         foreach (var chunk in _chunks)
@@ -202,6 +213,16 @@ public class TerrainRenderer : IDisposable
         }
         _shader.SetInt("uHasAlphaMap", hasAlpha ? 1 : 0);
         _shader.SetInt("uAlphaSampler", 1);
+
+        // Bind shadow map texture (unit 2) — only meaningful on base layer
+        bool hasShadow = isBaseLayer && chunk.ShadowTexture != 0;
+        if (hasShadow)
+        {
+            _gl.ActiveTexture(TextureUnit.Texture2);
+            _gl.BindTexture(TextureTarget.Texture2D, chunk.ShadowTexture);
+        }
+        _shader.SetInt("uHasShadowMap", hasShadow ? 1 : 0);
+        _shader.SetInt("uShadowSampler", 2);
 
         // Draw
         _gl.BindVertexArray(chunk.Vao);
@@ -344,6 +365,30 @@ public class TerrainRenderer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Upload MCSH shadow map as a GL texture (R8, 64x64).
+    /// </summary>
+    private unsafe void UploadShadowTexture(TerrainChunkMesh chunk)
+    {
+        if (chunk.ShadowMap == null || chunk.ShadowMap.Length < 64 * 64)
+            return;
+
+        uint tex = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, tex);
+
+        fixed (byte* ptr = chunk.ShadowMap)
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+                64, 64, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+
+        chunk.ShadowTexture = tex;
+    }
+
     private ShaderProgram CreateTerrainShader()
     {
         string vertSrc = @"
@@ -377,12 +422,17 @@ in vec2 vTexCoord;
 
 uniform sampler2D uDiffuseSampler;
 uniform sampler2D uAlphaSampler;
+uniform sampler2D uShadowSampler;
 uniform int uHasTexture;
 uniform int uHasAlphaMap;
+uniform int uHasShadowMap;
 uniform int uIsBaseLayer;
 uniform int uShowChunkGrid;
 uniform int uShowTileGrid;
 uniform int uShowAlphaMask;
+uniform int uShowShadowMap;
+uniform int uShowContours;
+uniform float uContourInterval;
 
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
@@ -428,10 +478,39 @@ void main() {
     vec3 lighting = uAmbientColor + uLightColor * diff;
     vec3 litColor = texColor.rgb * lighting;
 
+    // MCSH shadow map overlay (base layer only)
+    if (uShowShadowMap == 1 && uIsBaseLayer == 1 && uHasShadowMap == 1) {
+        float shadow = texture(uShadowSampler, vTexCoord).r;
+        // Darken shadowed areas: shadow=1.0 means shadowed, 0.0 means lit
+        litColor *= mix(1.0, 0.4, shadow);
+    }
+
     // Fog
     float dist = length(vWorldPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+
+    // Topographical contour lines (base layer only)
+    if (uShowContours == 1 && uIsBaseLayer == 1) {
+        float height = vWorldPos.z;
+        float interval = max(uContourInterval, 0.5);
+        // Use fwidth for screen-space anti-aliased contour lines
+        float dh = fwidth(height);
+        float modH = mod(height, interval);
+        // Thin line at each contour interval
+        float lineWidth = max(dh * 1.5, 0.05);
+        float contourLine = 1.0 - smoothstep(0.0, lineWidth, min(modH, interval - modH));
+        // Major contour every 5 intervals - thicker and brighter
+        float majorInterval = interval * 5.0;
+        float modMajor = mod(height, majorInterval);
+        float majorLineWidth = max(dh * 2.5, 0.08);
+        float majorLine = 1.0 - smoothstep(0.0, majorLineWidth, min(modMajor, majorInterval - modMajor));
+        // Color: minor=dark brown, major=black
+        vec3 minorColor = vec3(0.35, 0.22, 0.1);
+        vec3 majorColor = vec3(0.0, 0.0, 0.0);
+        finalColor = mix(finalColor, minorColor, contourLine * 0.5);
+        finalColor = mix(finalColor, majorColor, majorLine * 0.7);
+    }
 
     // Grid overlays (drawn on base layer only to avoid double-drawing)
     if (uIsBaseLayer == 1) {

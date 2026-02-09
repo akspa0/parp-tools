@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using MdxViewer.Rendering;
@@ -53,7 +54,7 @@ public class AlphaTerrainAdapter
     private readonly List<int> _adtOffsets;
 
     /// <summary>Texture names referenced across all loaded tiles (MTEX).</summary>
-    public Dictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
+    public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
 
     /// <summary>MDX model name table from WDT MDNM.</summary>
     public IReadOnlyList<string> MdxModelNames { get; }
@@ -68,6 +69,7 @@ public class AlphaTerrainAdapter
     public List<ModfPlacement> ModfPlacements { get; } = new();
 
     // Track unique IDs to avoid duplicate placements across tiles
+    private readonly object _placementLock = new();
     private readonly HashSet<int> _seenMddfIds = new();
     private readonly HashSet<int> _seenModfIds = new();
 
@@ -168,7 +170,7 @@ public class AlphaTerrainAdapter
         // Use the existing AdtAlpha parser to get MCIN offsets and MTEX
         var adt = new AdtAlpha(_wdtPath, _adtOffsets[tileIdx], tileIdx);
         var mtexNames = adt.GetMtexTextureNames();
-        TileTextures[(tileX, tileY)] = mtexNames;
+        TileTextures.TryAdd((tileX, tileY), mtexNames);
 
         var chunks = new List<TerrainChunkData>(256);
 
@@ -201,12 +203,15 @@ public class AlphaTerrainAdapter
         ParseModfEntries(adt.GetModfRaw(), tileModf);
 
         // Also add to global lists with dedup for backwards compat
-        foreach (var p in tileMddf)
-            if (_seenMddfIds.Add(p.UniqueId))
-                MddfPlacements.Add(p);
-        foreach (var p in tileModf)
-            if (_seenModfIds.Add(p.UniqueId))
-                ModfPlacements.Add(p);
+        lock (_placementLock)
+        {
+            foreach (var p in tileMddf)
+                if (_seenMddfIds.Add(p.UniqueId))
+                    MddfPlacements.Add(p);
+            foreach (var p in tileModf)
+                if (_seenModfIds.Add(p.UniqueId))
+                    ModfPlacements.Add(p);
+        }
 
         // Diagnostic: print tile corner position for first tile loaded
         if (LastLoadedChunkPositions.Count <= 256)
@@ -229,9 +234,12 @@ public class AlphaTerrainAdapter
     {
         var temp = new List<MddfPlacement>();
         ParseMddfEntries(mddfData, temp);
-        foreach (var p in temp)
-            if (_seenMddfIds.Add(p.UniqueId))
-                MddfPlacements.Add(p);
+        lock (_placementLock)
+        {
+            foreach (var p in temp)
+                if (_seenMddfIds.Add(p.UniqueId))
+                    MddfPlacements.Add(p);
+        }
     }
 
     /// <summary>
@@ -285,9 +293,12 @@ public class AlphaTerrainAdapter
     {
         var temp = new List<ModfPlacement>();
         ParseModfEntries(modfData, temp);
-        foreach (var p in temp)
-            if (_seenModfIds.Add(p.UniqueId))
-                ModfPlacements.Add(p);
+        lock (_placementLock)
+        {
+            foreach (var p in temp)
+                if (_seenModfIds.Add(p.UniqueId))
+                    ModfPlacements.Add(p);
+        }
     }
 
     /// <summary>
@@ -388,6 +399,9 @@ public class AlphaTerrainAdapter
         // Extract alpha maps from MCAL
         var alphaMaps = ExtractAlphaMaps(mcnk.McalData, mcnk.MclyData, mcnk.NLayers);
 
+        // Extract MCSH shadow map (64×64 bits → 64×64 bytes)
+        byte[]? shadowMap = ExtractShadowMap(mcnk.McshData, mcnk.McshSize);
+
         // Compute world position for this chunk in renderer coordinates.
         // WDT MAIN index = tileX*64+tileY (column-major).
         // Renderer coords match MODF: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
@@ -408,6 +422,7 @@ public class AlphaTerrainAdapter
             HoleMask = mcnk.Holes,
             Layers = layers,
             AlphaMaps = alphaMaps,
+            ShadowMap = shadowMap,
             WorldPosition = new Vector3(worldX, worldY, 0f)
         };
     }
@@ -589,5 +604,38 @@ public class AlphaTerrainAdapter
         }
 
         return maps;
+    }
+
+    /// <summary>
+    /// Extract MCSH shadow map: 64×64 bits (512 bytes = 64 rows × 8 bytes/row).
+    /// Each bit represents one cell: 1=shadowed, 0=lit.
+    /// Expands to 64×64 bytes (0=lit, 255=shadowed) for GPU upload as R8 texture.
+    /// </summary>
+    private static byte[]? ExtractShadowMap(byte[] mcshData, int mcshSize)
+    {
+        if (mcshData == null || mcshData.Length == 0 || mcshSize <= 0)
+            return null;
+
+        // MCSH is 64 rows × 8 bytes/row = 512 bytes (64×64 bits)
+        int rows = Math.Min(64, mcshSize / 8);
+        if (rows == 0) return null;
+
+        var shadow = new byte[64 * 64];
+        for (int y = 0; y < rows; y++)
+        {
+            int srcRow = y * 8;
+            for (int byteIdx = 0; byteIdx < 8 && srcRow + byteIdx < mcshData.Length; byteIdx++)
+            {
+                byte bits = mcshData[srcRow + byteIdx];
+                for (int bit = 0; bit < 8; bit++)
+                {
+                    int x = byteIdx * 8 + bit;
+                    if (x < 64)
+                        shadow[y * 64 + x] = (byte)(((bits >> bit) & 1) * 255);
+                }
+            }
+        }
+
+        return shadow;
     }
 }

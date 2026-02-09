@@ -125,8 +125,10 @@ public class WorldScene : ISceneRenderer
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
         // This swaps X↔Y and negates both, changing coordinate handedness.
         //
-        // The handedness flip means Z-axis rotation (heading) must be negated.
-        // Model geometry is NOT mirrored — only the heading sign is adjusted.
+        // Mirror X corrects the left-right flip from the coordinate swap.
+        // Model geometry vertices stay in WoW local space; the mirror matrix
+        // converts them to renderer space after rotation.
+        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -137,8 +139,9 @@ public class WorldScene : ISceneRenderer
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
-            var transform = Matrix4x4.CreateScale(scale)
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -172,8 +175,9 @@ public class WorldScene : ISceneRenderer
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
-            var transform = Matrix4x4.CreateRotationX(rx)
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
@@ -267,6 +271,9 @@ public class WorldScene : ISceneRenderer
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
+        // Mirror X corrects left-right flip from coordinate swap (same as BuildInstances)
+        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
         foreach (var p in result.MddfPlacements)
@@ -277,8 +284,9 @@ public class WorldScene : ISceneRenderer
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
-            var transform = Matrix4x4.CreateScale(scale)
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -300,8 +308,9 @@ public class WorldScene : ISceneRenderer
             _assets.EnsureWmoLoaded(key);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
-            float rz = -p.Rotation.Z * MathF.PI / 180f; // negated for handedness
-            var transform = Matrix4x4.CreateRotationX(rx)
+            float rz = p.Rotation.Z * MathF.PI / 180f;
+            var transform = mirrorX
+                * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);

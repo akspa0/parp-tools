@@ -68,7 +68,9 @@ public class ViewerApp : IDisposable
 
     // Terrain/World state
     private TerrainManager? _terrainManager;
+    private VlmTerrainManager? _vlmTerrainManager;
     private WorldScene? _worldScene;
+    private bool _wantOpenVlmProject = false;
 
     // Object picking state
     private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
@@ -206,12 +208,14 @@ public class ViewerApp : IDisposable
             var size = _window.Size;
             float aspect = (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
-            float farPlane = _terrainManager != null ? 5000f : 10000f;
+            float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
             var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, farPlane);
 
             // Update terrain AOI before rendering
             if (_terrainManager != null)
                 _terrainManager.UpdateAOI(_camera.Position);
+            else if (_vlmTerrainManager != null)
+                _vlmTerrainManager.UpdateAOI(_camera.Position);
 
             // Render the scene (WorldScene handles terrain + objects + BBs; standalone renderers handle themselves)
             _renderer.Render(view, proj);
@@ -232,10 +236,10 @@ public class ViewerApp : IDisposable
         if (_showModelInfo)
             DrawModelInfoPanel();
 
-        if (_showTerrainControls && _terrainManager != null)
+        if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
             DrawTerrainControls();
 
-        if (_worldScene != null)
+        if (_worldScene != null || _vlmTerrainManager != null)
             DrawMinimap();
 
         DrawStatusBar();
@@ -261,6 +265,9 @@ public class ViewerApp : IDisposable
                     _showFolderInput = true;
                     _folderInputBuf = "";
                 }
+
+                if (ImGui.MenuItem("Open VLM Project..."))
+                    _wantOpenVlmProject = true;
 
                 ImGui.Separator();
 
@@ -331,6 +338,31 @@ public class ViewerApp : IDisposable
             if (ImGui.Button("Cancel"))
                 ImGui.CloseCurrentPopup();
             ImGui.EndPopup();
+        }
+
+        if (_wantOpenVlmProject)
+        {
+            _wantOpenVlmProject = false;
+
+            using var vlmDialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Select VLM Project folder (containing dataset/ with JSON files)",
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = false
+            };
+
+            string? vlmPath = null;
+            var vlmThread = new System.Threading.Thread(() =>
+            {
+                if (vlmDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                    vlmPath = vlmDialog.SelectedPath;
+            });
+            vlmThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            vlmThread.Start();
+            vlmThread.Join();
+
+            if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
+                LoadVlmProject(vlmPath);
         }
 
         if (_wantExportGlb)
@@ -663,14 +695,15 @@ public class ViewerApp : IDisposable
 
     private void DrawTerrainControls()
     {
-        if (_terrainManager == null) return;
+        // Get lighting/renderer from whichever terrain manager is active
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (lighting == null || renderer == null) return;
 
         ImGui.SetNextWindowSize(new Vector2(280, 380), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowPos(new Vector2(_window.Size.X - 590, 22), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Terrain Controls", ref _showTerrainControls))
         {
-            var lighting = _terrainManager.Lighting;
-            var renderer = _terrainManager.Renderer;
 
             // Day/night cycle
             float gameTime = lighting.GameTime;
@@ -728,6 +761,22 @@ public class ViewerApp : IDisposable
             bool alphaMask = renderer.ShowAlphaMask;
             if (ImGui.Checkbox("Show Alpha Masks", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
 
+            bool shadowMap = renderer.ShowShadowMap;
+            if (ImGui.Checkbox("Show MCSH Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+
+            ImGui.Separator();
+            ImGui.Text("Topography:");
+
+            bool contours = renderer.ShowContours;
+            if (ImGui.Checkbox("Contour Lines", ref contours)) renderer.ShowContours = contours;
+
+            if (renderer.ShowContours)
+            {
+                float interval = renderer.ContourInterval;
+                if (ImGui.SliderFloat("Contour Interval", ref interval, 0.5f, 20.0f, "%.1f"))
+                    renderer.ContourInterval = interval;
+            }
+
             ImGui.Separator();
             ImGui.Text("Wireframe:");
             if (ImGui.Button("Toggle Wireframe"))
@@ -752,8 +801,10 @@ public class ViewerApp : IDisposable
             }
 
             ImGui.Separator();
-            ImGui.Text($"Tiles: {_terrainManager.LoadedTileCount}");
-            ImGui.Text($"Chunks: {_terrainManager.LoadedChunkCount}");
+            int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
+            int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
+            ImGui.Text($"Tiles: {tiles}");
+            ImGui.Text($"Chunks: {chunks}");
             ImGui.Text($"Camera: ({_camera.Position.X:F0}, {_camera.Position.Y:F0}, {_camera.Position.Z:F0})");
         }
         ImGui.End();
@@ -777,13 +828,30 @@ public class ViewerApp : IDisposable
 
     private void DrawMinimap()
     {
-        if (_worldScene == null || _terrainManager == null) return;
+        // Gather tile data from whichever terrain manager is active
+        List<(int tx, int ty)>? existingTiles = null;
+        Func<int, int, bool>? isTileLoaded = null;
+        int loadedTileCount = 0;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+        }
+        else return;
 
         var io = ImGui.GetIO();
-        float mapSize = 200f; // pixel size of minimap
+        float mapSize = 200f;
         float padding = 10f;
 
-        // Position bottom-left on first use; user can move/resize freely
         ImGui.SetNextWindowPos(new Vector2(padding, io.DisplaySize.Y - mapSize - 34), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Vector2(mapSize + 16, mapSize + 36), ImGuiCond.FirstUseEver);
 
@@ -791,7 +859,6 @@ public class ViewerApp : IDisposable
         {
             var drawList = ImGui.GetWindowDrawList();
             var cursorPos = ImGui.GetCursorScreenPos();
-            // Adapt to window content area so resizing works
             var contentSize = ImGui.GetContentRegionAvail();
             mapSize = MathF.Min(contentSize.X, contentSize.Y);
             if (mapSize < 50f) mapSize = 50f;
@@ -801,32 +868,24 @@ public class ViewerApp : IDisposable
             drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF1A1A1A);
 
             // Draw existing tiles
-            // WDT is column-major: index = tileX*64+tileY
             // Minimap: screen X = tileY (east-west), screen Y = tileX (north-south)
-            var adapter = _terrainManager.Adapter;
-            foreach (int tileIdx in adapter.ExistingTiles)
+            foreach (var (tx, ty) in existingTiles)
             {
-                int tx = tileIdx / 64;
-                int ty = tileIdx % 64;
                 float x = cursorPos.X + ty * cellSize;
                 float y = cursorPos.Y + tx * cellSize;
 
-                // Loaded tiles = green, unloaded = dark green
-                bool loaded = _terrainManager.IsTileLoaded(tx, ty);
+                bool loaded = isTileLoaded(tx, ty);
                 uint color = loaded ? 0xFF00AA00 : 0xFF004400;
                 drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), color);
             }
 
-            // Draw camera position as a bright dot
-            // Camera renderer coords → tile coords, then swap for minimap (screenX=tileY, screenY=tileX)
+            // Camera position
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
             float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
             float camScreenX = cursorPos.X + camTileY * cellSize;
             float camScreenY = cursorPos.Y + camTileX * cellSize;
 
             // Camera direction indicator
-            // Renderer X increases with MapOrigin-wowY (east=decreasing rendererX),
-            // so negate the X component to match minimap orientation.
             float yawRad = _camera.Yaw * MathF.PI / 180f;
             float dirLen = 8f;
             float dirX = camScreenX - MathF.Sin(yawRad) * dirLen;
@@ -834,7 +893,7 @@ public class ViewerApp : IDisposable
             drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, 2f);
             drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), 3f, 0xFFFFFFFF);
 
-            // POI markers on minimap (magenta dots with labels)
+            // POI markers (WorldScene only)
             if (_worldScene?.PoiLoader != null && _worldScene.ShowPoi)
             {
                 foreach (var poi in _worldScene.PoiLoader.Entries)
@@ -844,9 +903,7 @@ public class ViewerApp : IDisposable
                     float px = cursorPos.X + poiTileY * cellSize;
                     float py = cursorPos.Y + poiTileX * cellSize;
                     if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
-                    {
-                        drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF); // magenta
-                    }
+                        drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF);
                 }
             }
 
@@ -857,7 +914,6 @@ public class ViewerApp : IDisposable
             if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
-                // Screen X = tileY, Screen Y = tileX (swapped)
                 float clickTileY = (mousePos.X - cursorPos.X) / cellSize;
                 float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize;
                 if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
@@ -872,7 +928,7 @@ public class ViewerApp : IDisposable
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 2);
             int ctX = (int)MathF.Floor(camTileX);
             int ctY = (int)MathF.Floor(camTileY);
-            ImGui.Text($"Tile: ({ctX},{ctY})  Loaded: {_terrainManager.LoadedTileCount}");
+            ImGui.Text($"Tile: ({ctX},{ctY})  Loaded: {loadedTileCount}");
         }
         ImGui.End();
     }
@@ -1239,6 +1295,8 @@ public class ViewerApp : IDisposable
         _worldScene = null;
         _terrainManager?.Dispose();
         _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
 
         try
         {
@@ -1277,6 +1335,51 @@ public class ViewerApp : IDisposable
             _worldScene?.Dispose();
             _worldScene = null;
             _terrainManager = null;
+        }
+    }
+
+    private void LoadVlmProject(string projectRoot)
+    {
+        _statusMessage = $"Loading VLM project from {projectRoot}...";
+
+        // Clean up any existing scene
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
+        _renderer = null;
+
+        try
+        {
+            _vlmTerrainManager = new VlmTerrainManager(_gl, projectRoot);
+            _renderer = _vlmTerrainManager;
+
+            // Position camera at center of loaded tiles
+            var startPos = _vlmTerrainManager.GetInitialCameraPosition();
+            _camera.Position = startPos;
+            _camera.Yaw = 180f;
+            _camera.Pitch = -20f;
+
+            var loader = _vlmTerrainManager.Loader;
+            _modelInfo = $"Type: VLM Project\n" +
+                         $"Map: {loader.MapName}\n" +
+                         $"Path: {projectRoot}\n\n" +
+                         $"Tiles: {loader.TileCoords.Count}\n" +
+                         $"MDX names: {loader.MdxModelNames.Count}\n" +
+                         $"WMO names: {loader.WmoModelNames.Count}\n" +
+                         $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
+
+            _statusMessage = $"Loaded VLM project: {loader.MapName} ({loader.TileCoords.Count} tiles)";
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ViewerApp] VLM project load failed: {ex}");
+            _statusMessage = $"VLM load failed: {ex.Message}";
+            _modelInfo = $"VLM load error:\n{ex.Message}\n\nPath: {projectRoot}";
+            _vlmTerrainManager?.Dispose();
+            _vlmTerrainManager = null;
         }
     }
 

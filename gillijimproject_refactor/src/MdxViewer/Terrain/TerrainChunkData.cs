@@ -34,6 +34,9 @@ public class TerrainChunkData
     /// <summary>Alpha map data per layer (layer index → 64×64 byte array). Layer 0 has no alpha.</summary>
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
 
+    /// <summary>MCSH shadow map: 64×64 bytes (expanded from 1-bit-per-cell). 0=lit, 255=shadowed.</summary>
+    public byte[]? ShadowMap { get; init; }
+
     /// <summary>World-space position of this chunk's corner.</summary>
     public Vector3 WorldPosition { get; init; }
 }

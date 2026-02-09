@@ -227,7 +227,8 @@ public class TerrainMeshBuilder
             TileY = chunk.TileY,
             WorldPosition = chunk.WorldPosition,
             Layers = chunk.Layers,
-            AlphaMaps = chunk.AlphaMaps
+            AlphaMaps = chunk.AlphaMaps,
+            ShadowMap = chunk.ShadowMap
         };
     }
 }
@@ -249,8 +250,14 @@ public class TerrainChunkMesh : IDisposable
     public TerrainLayer[] Layers { get; init; } = Array.Empty<TerrainLayer>();
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
 
+    /// <summary>MCSH shadow map: 64×64 bytes (0=lit, 255=shadowed). Null if no shadow data.</summary>
+    public byte[]? ShadowMap { get; init; }
+
     /// <summary>GL texture handles for alpha maps (layer index → GL texture).</summary>
     public Dictionary<int, uint> AlphaTextures { get; } = new();
+
+    /// <summary>GL texture handle for shadow map. 0 if no shadow data.</summary>
+    public uint ShadowTexture { get; set; }
 
     internal GL? Gl { get; set; }
 
@@ -262,5 +269,7 @@ public class TerrainChunkMesh : IDisposable
         Gl.DeleteBuffer(Ebo);
         foreach (var tex in AlphaTextures.Values)
             Gl.DeleteTexture(tex);
+        if (ShadowTexture != 0)
+            Gl.DeleteTexture(ShadowTexture);
     }
 }
