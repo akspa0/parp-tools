@@ -1,66 +1,64 @@
 # Active Context
 
-## Current Focus: MDX-L_Tool - Alpha 0.5.3 Archaeology (Feb 6, 2026)
+## Current Focus: MdxViewer — 3D World Viewer (Feb 9, 2026)
 
-### Critical Status
+### Recently Completed
 
-**Alpha 0.5.3 MDX Parsing**: ✅ WORKING - Validated `GEOS` chunk layout (Tag-Count structure, `UVAS` optimization).
-**Texture Resolution**: ✅ WORKING - DBC-driven resolution via `DbcService` (DisplayInfo & Extra support).
-**OBJ Export**: ✅ WORKING - Split (per-geoset) and Single (combined) modes with proper MTL/texture assignment.
-**M2 Export**: 🔧 IMPLEMENTING - Phase 2 (WotLK target) in progress.
+- **WMO/MDX Geometry Mirroring Fix**: ✅ RESOLVED
+  - Root cause: WoW/D3D uses CW triangle winding; OpenGL uses CCW
+  - Fix: Reverse index winding at upload (swap v1↔v2 per triangle) in both `WmoRenderer.cs` and `ModelRenderer.cs`
+  - Compensating 180° Z rotation in placement transforms (`WorldScene.cs`)
+  - Vertices pass through raw — no coordinate conversion at vertex level
+- **MDX GEOS Parsing Fix**: ✅ RESOLVED
+  - Added `BWGT` (bone weights) handler with peek-ahead validation
+  - Fixed `BIDX` (bone indices) stride detection (1-byte vs 4-byte)
+  - Eliminates "unknown tag '?'" spam and viewer crashes
 
-### MDX Archaeology Findings (Alpha 0.5.3)
+### Working Features
 
-| Aspect | Findings | Notes |
-|--------|----------|-------|
-| **GEOS Chunk** | Tag(4), Count(4), Data(...) | Robust scanner handles Alpha null padding. |
-| **ReplaceableId** | 11+n, 1+n mapping | Resolves to `CreatureDisplayInfo` variations. |
-| **DBC Service** | CDI + Extra lookup | Maps `ModelID` to Variations and Baked Skins. |
-| **Output Path** | `mdx-l_outputs/` | Standardized artifact storage directory. |
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Alpha WDT terrain | ✅ | Monolithic format, 256 MCNK chunks per tile |
+| Standard WDT+ADT (3.3.5) | ✅ | Split ADT files from MPQ/IDataSource |
+| WMO v14 rendering | ✅ | Correct orientation, winding, placement |
+| MDX rendering | ✅ | Geometry + textures, correct orientation |
+| MCSH shadow maps | ✅ | 64×64 bitmask, all layers |
+| MCLQ ocean liquid | ✅ | Inline liquid from MCNK flags |
+| Async tile streaming | ✅ | AOI-based lazy loading |
+| Frustum culling | ✅ | View-frustum + bounding box |
+| Minimap overlay | ✅ | From minimap tiles |
 
-### Root Causes Resolved
+### Next Steps (Priority Order)
 
-1. **Missing Mesh Data**: Validated that `UVAS` Count=1 in Version 1300 contains the raw UV data directly, skipping the `UVBS` tag used in later versions.
-2. **Missing Textures**: Resolved by implementing `DbcService` to query `CreatureDisplayInfo.csv` and `CreatureDisplayInfoExtra.csv` for variation strings and baked skins.
-
-### Current Workstream
-
-- [x] Implement robust `GEOS` scanner with smart padding detection.
-- [x] Integrate `DbcService` for automated texture resolution.
-- [x] Verify complex creature exports (Basilisk, Ogre, Lore).
-- [x] Implement ObjWriter with proper MTL/texture assignment per geoset.
-- [x] Add `--single` CLI option for combined OBJ output.
-- [ ] Implement M2 (v264) binary writer for 3.3.5 compatibility.
-
----
-
-## Architecture: MDX-L_Tool
-
-### Parsing Flow
-```
-1. FileStream → MdxFile.Load()
-2. Chunk Scan: VERS → MODL → GEOS → BONE → ...
-3. GEOS Scanner: Identify sub-chunks (VRTX, NRMS, TVRT/UVAS)
-4. Texture Resolution: Resolve ReplaceableId via TextureService
-5. Writer Dispatch: MDL (Text) or OBJ (Geometry)
-```
+1. **Liquid rendering** — rivers, lakes, magma, slime (currently only ocean renders)
+2. **WMO interior liquid** — MLIQ chunk rendering
+3. **MDX animations/bones** — skeletal animation system
+4. **MDX texture improvements** — team colors, replaceable textures
+5. **Lighting system** — ambient, directional, point lights from DBC data
+6. **Skybox from game data** — Light.dbc, LightSkybox.dbc
+7. **M2 model reader** — for 3.3.5 format support
+8. **WMO v17 reader** — for 3.3.5 format support
 
 ---
 
-## Key Files
+## Key Architecture Decisions
+
+### Coordinate System (Confirmed via Ghidra)
+- WoW uses **right-handed** coordinates: X=North, Y=West, Z=Up
+- WoW renders through **Direct3D** (CW front faces)
+- OpenGL uses **CCW front faces**
+- Fix: Reverse triangle winding at GPU upload + 180° Z rotation in placement
+- Terrain positions: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`
+- Model vertices: raw pass-through (no axis swap at vertex level)
+
+### Key Files
 
 | File | Purpose |
 |------|---------|
-| `MdxFile.cs` | Main parser/scanner - handles Alpha padding. |
-| `TextureService.cs`| Archaeology-driven texture resolution (DBC/Name fallback). |
-| `ObjWriter.cs` | Exports split-geoset or single OBJ with MTL and per-geoset textures. |
-| `Program.cs` | CLI with `--target obj` and `--single` options for combined output. |
-| `MdxToM2Converter.cs`| (Upcoming) Bone/Animation mapping to WotLK v264. |
-
----
-
-## Technical Notes
-
-- **GEOS Alignment**: Always seek to the next valid 4-character TAG if a chunk appears truncated or followed by null padding.
-- **UV Scaling**: Alpha UVs are standard floats [0..1] but may requires V-flip depending on the target renderer.
-- **ReplaceableId Mapping**: ID 11+n / 1+n resolved via `CreatureDisplayInfo` variations. Fallback to `ModelNameSkin.blp`.
+| `WorldScene.cs` | Placement transforms, instance management |
+| `WmoRenderer.cs` | WMO v14 GPU rendering, winding fix |
+| `ModelRenderer.cs` | MDX GPU rendering, winding fix |
+| `AlphaTerrainAdapter.cs` | Alpha WDT terrain loading |
+| `StandardTerrainAdapter.cs` | 3.3.5 WDT+ADT terrain loading |
+| `TerrainManager.cs` | AOI-based tile streaming |
+| `MdxFile.cs` | MDX parser (GEOS/BIDX/BWGT fix) |

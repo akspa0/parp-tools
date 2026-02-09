@@ -2,48 +2,55 @@
 
 ## ✅ Working
 
+### MdxViewer (3D World Viewer)
+- **Alpha WDT terrain**: ✅ Monolithic format, 256 MCNK per tile, async streaming
+- **Standard WDT+ADT (3.3.5)**: ✅ Split ADT files from MPQ/IDataSource
+- **WMO v14 rendering**: ✅ Correct geometry orientation (winding fix Feb 9)
+- **MDX rendering**: ✅ Geometry + BLP textures, correct orientation
+- **MDX GEOS parsing**: ✅ BIDX/BWGT peek-ahead validation (Feb 9)
+- **MCSH shadow maps**: ✅ 64×64 bitmask applied to all terrain layers
+- **MCLQ ocean liquid**: ✅ Inline liquid from MCNK header flags
+- **Async tile streaming**: ✅ AOI-based lazy loading with background threads
+- **Frustum culling**: ✅ View-frustum + bounding box culling
+- **Minimap overlay**: ✅ From minimap tile images
+
 ### Model Parsers & Tools
 - **MDX-L_Tool**: ✅ Core parsing and Archaeology logic complete.
 - **GEOS Chunk (Alpha)**: ✅ Robust scanner for Version 1300 validated.
-- **Texture Export**: ✅ DBC-driven `ReplaceableId` resolution working (DisplayInfo + Extra).
+- **Texture Export**: ✅ DBC-driven `ReplaceableId` resolution working.
 - **OBJ Splitter**: ✅ Geoset-keyed export verified on complex creatures.
-- **DBC Service**: ✅ Automates variation mapping for Alpha archaeology.
-- **0.5.3 Alpha WDT/ADT**: ✅ Monolithic format, sequential MCNK, works 100%.
-- **WMO v14/v17**: ✅ Both directions implemented.
+- **0.5.3 Alpha WDT/ADT**: ✅ Monolithic format, sequential MCNK.
+- **WMO v14/v17 converter**: ✅ Both directions implemented.
 - **BLP**: ✅ BlpResizer complete.
 
 ### Data Generation
 - **VLM Datasets (Alpha)**: ✅ Azeroth v10 (685 tiles).
-- **V8 Binary Export**: ✅ `.bin` format implemented.
 
 ## ⚠️ Partial / In Progress
 
+### MdxViewer Next Features
+- **Liquid types**: Only ocean renders; rivers/lakes/magma/slime not yet visible
+- **WMO interior liquid**: MLIQ chunk not yet parsed/rendered
+- **MDX animations/bones**: No skeletal animation system yet
+- **Lighting**: Basic hardcoded lighting only; no DBC-driven lights
+- **Skybox**: Procedural gradient only; no game-data skyboxes
+
 ### MDX-L_Tool Enhancements
-- **M2 Export (v264)**: 🔧 Implementing binary writer. Mapping MDX sequences to M2 animations.
+- **M2 Export (v264)**: 🔧 Implementing binary writer.
 
-### LK 3.3.5 / Cata 4.0.0 ADT Processing
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Minimap TRS | ✅ FIXED | Column order + coordinate padding |
-| JSON height_min/max | ✅ FIXED | MCIN-based parsing working |
-| JSON heights[] array | ✅ FIXED | 256 chunks populated |
-| Heightmap PNG | 🔧 FIX APPLIED | Removed posZ addition - untested |
-
-## ❌ Broken
+## ❌ Known Issues
 
 ### AdtModfInjector
 - **Problem**: Appends MWMO/MODF chunks to end of file; result is Noggit-incompatible.
 
-## Current Status Summary
+## Key Technical Insights
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| 0.5.3 Alpha MDX | ✅ Working | Geometry, UVs, and Skins (DBC) resolved correctly |
-| OBJ Split Export | ✅ Working | Verified with fat textures and creature variations |
-| LK/Cata ADT | ✅ Working | Heights correctly extracted via MCIN |
+### WMO/MDX Coordinate System (Feb 9, 2026)
+- WoW uses right-handed coords (X=North, Y=West, Z=Up) with Direct3D (CW winding)
+- OpenGL uses CCW winding for front faces
+- **Fix**: Reverse triangle winding at GPU upload (swap v1↔v2) + 180° Z rotation in placement
+- Model vertices pass through raw — NO axis swap at vertex level
+- Terrain positions: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`
 
-## Key Technical Insight
-
-**Alpha 0.5.3 MDX Archaeology:**
-Unlike Retail/M2 formats, Alpha MDX `GEOS` sub-chunks (VRTX, TVRT, etc) are often separated by variable null padding. Robust parsing requires scanning for the next UTF-8 chunk tag rather than relying on fixed offsets. Additionally, `UVAS` (TVRT) data in Version 1300 is stored as raw float pairs immediately following the Count field, differing from standard WC3/Later-WoW specs.
+### Alpha 0.5.3 MDX Archaeology
+Alpha MDX `GEOS` sub-chunks use Tag(4)+Count(4)+Data layout. `UVAS` Count=1 in Version 1300 contains raw UV data directly. `BIDX` and `BWGT` chunks require peek-ahead validation for 1-byte vs 4-byte stride detection.
