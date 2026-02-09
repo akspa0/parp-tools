@@ -738,15 +738,6 @@ void main() {
                 using var ms = new MemoryStream(group.LiquidData);
                 using var reader = new BinaryReader(ms);
 
-                // Dump first 32 raw header bytes for diagnosis
-                byte[] rawHeader = new byte[Math.Min(32, group.LiquidData.Length)];
-                Array.Copy(group.LiquidData, rawHeader, rawHeader.Length);
-                string hexDump = BitConverter.ToString(rawHeader).Replace("-", " ");
-                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: rawHeader[{rawHeader.Length}]: {hexDump}");
-                // Also write to file for easier capture
-                try { File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "mliq_diag.log"), 
-                    $"MLIQ group {gi}: rawHeader: {hexDump} | bounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})\n"); } catch { }
-
                 // MLIQ header: C2iVector verts(8), C2iVector tiles(8), C3Vector corner(12), uint16 matId(2) = 30 bytes
                 int xverts = reader.ReadInt32();
                 int yverts = reader.ReadInt32();
@@ -757,11 +748,6 @@ void main() {
                 float cornerZ = reader.ReadSingle();
                 ushort matId = reader.ReadUInt16();
 
-                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: xverts={xverts} yverts={yverts} xtiles={xtiles} ytiles={ytiles} corner=({cornerX:F2},{cornerY:F2},{cornerZ:F2}) matId={matId} dataLen={group.LiquidData.Length} groupBounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})");
-
-                // Sanity: tiles should be verts-1
-                if (xtiles != xverts - 1 || ytiles != yverts - 1)
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: WARNING tiles != verts-1! xtiles={xtiles} vs xverts-1={xverts - 1}, ytiles={ytiles} vs yverts-1={yverts - 1}");
 
                 if (xverts <= 0 || yverts <= 0 || xverts > 256 || yverts > 256)
                 {
@@ -797,43 +783,13 @@ void main() {
                 // WMO MLIQ tile size = 1/8th of a map chunk = UNIT_SIZE/2 ≈ 4.16666
                 float liquidTileSize = 4.16666f;
 
-                // Diagnostic: log first few heights and tile flags
-                if (gi < 5 || group.LiquidData.Length > 100)
-                {
-                    float hMin = float.MaxValue, hMax = float.MinValue;
-                    for (int h = 0; h < heights.Length; h++)
-                    {
-                        if (heights[h] < hMin) hMin = heights[h];
-                        if (heights[h] > hMax) hMax = heights[h];
-                    }
-                    int visibleTiles = 0, hiddenTiles = 0;
-                    for (int t = 0; t < tileFlags.Length; t++)
-                    {
-                        // Noggit: bit 3 (0x08) = do not render
-                        if ((tileFlags[t] & 0x08) != 0) hiddenTiles++;
-                        else visibleTiles++;
-                    }
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi} diag: heights=[{hMin:F1}..{hMax:F1}], tiles visible={visibleTiles} hidden={hiddenTiles}, groupBounds=({group.BoundsMin.X:F1},{group.BoundsMin.Y:F1},{group.BoundsMin.Z:F1})-({group.BoundsMax.X:F1},{group.BoundsMax.Y:F1},{group.BoundsMax.Z:F1})");
-                    // Log first few tile flag values
-                    string flagSample = "";
-                    for (int t = 0; t < Math.Min(16, tileFlags.Length); t++)
-                        flagSample += $"0x{tileFlags[t]:X2} ";
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi} tileFlags sample: {flagSample}");
-                }
-
                 // Build vertex positions in WMO-local space (raw file coords, Z-up)
-                // Camera uses Vector3.UnitZ as up, so our axes are:
-                //   axis0 = X (horizontal), axis1 = Y (horizontal), axis2 = Z (up)
-                // Raw file C3Vector: (x, y, z) where z is up.
-                // MLIQ corner: cornerX = base X, cornerY = base Y, cornerZ = base height
-                // Noggit converts (x,y,z)→(x,z,-y) for Y-up, then:
-                //   (pos.x + UNITSIZE*i, height, pos.z - UNITSIZE*j)
-                //   where pos.x=file.x, pos.z=-file.y
-                // So noggit spreads on file.x(+i) and file.y(-j converted).
-                // In our raw file Z-up space:
-                //   axis0 = cornerX + i * tileSize       (X horizontal spread)
-                //   axis1 = cornerY + j * tileSize       (Y horizontal spread)
-                //   axis2 = heights[idx]                  (Z = up = liquid surface height)
+                // Our renderer uses raw file coords with Camera up = UnitZ.
+                // MLIQ data has an inherent 90° CW misrotation (wowdev wiki note).
+                // Fix: apply 90° CCW rotation on XY plane: (-j, +i)
+                //   axis0 = cornerX - j * tileSize
+                //   axis1 = cornerY + i * tileSize
+                //   axis2 = heights[idx]  (Z = up = liquid surface height)
                 int nverts = xverts * yverts;
                 var vertices = new float[nverts * 3];
                 for (int j = 0; j < yverts; j++)
