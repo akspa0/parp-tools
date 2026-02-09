@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Text.Json;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using WoWMapConverter.Core.VLM;
 
@@ -91,11 +92,15 @@ public class VlmProjectLoader
         {
             var name = Path.GetFileNameWithoutExtension(jsonPath);
             // Parse tile coords from filename: MapName_X_Y
+            // The VLM exporter uses: x = tileIndex % 64 (= wowTileY), y = tileIndex / 64 (= wowTileX)
+            // So filename X is actually WoW tileY, and filename Y is WoW tileX.
             var parts = name.Split('_');
             if (parts.Length >= 3 &&
-                int.TryParse(parts[^2], out int tileX) &&
-                int.TryParse(parts[^1], out int tileY))
+                int.TryParse(parts[^2], out int fileX) &&
+                int.TryParse(parts[^1], out int fileY))
             {
+                int tileX = fileY;  // fileY = tileIndex / 64 = WoW tileX
+                int tileY = fileX;  // fileX = tileIndex % 64 = WoW tileY
                 if (MapName == "VLM Project")
                     MapName = string.Join("_", parts[..^2]);
 
@@ -106,7 +111,7 @@ public class VlmProjectLoader
             }
         }
 
-        Console.WriteLine($"[VlmProjectLoader] Found {ExistingTiles.Count} tiles for map '{MapName}' in {_datasetDir}");
+        ViewerLog.Important(ViewerLog.Category.Vlm, $"Found {ExistingTiles.Count} tiles for map '{MapName}' in {_datasetDir}");
     }
 
     /// <summary>
@@ -127,7 +132,7 @@ public class VlmProjectLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[VlmProjectLoader] Failed to parse {jsonPath}: {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Vlm, $"Failed to parse {jsonPath}: {ex.Message}");
             return result;
         }
 
@@ -139,17 +144,17 @@ public class VlmProjectLoader
         // Diagnostic: log first tile details
         if (_loadDiagCount < 2)
         {
-            Console.WriteLine($"[VlmProjectLoader] Tile ({tileX},{tileY}): Heights={data.Heights?.Length ?? 0}, " +
+            ViewerLog.Info(ViewerLog.Category.Vlm, $"Tile ({tileX},{tileY}): Heights={data.Heights?.Length ?? 0}, " +
                 $"ChunkPositions={data.ChunkPositions?.Length ?? 0}, Textures={data.Textures?.Count ?? 0}, " +
                 $"IsInterleaved={data.IsInterleaved}");
             if (data.Heights != null && data.Heights.Length > 0)
             {
                 var h0 = data.Heights[0];
-                Console.WriteLine($"  Heights[0]: idx={h0.ChunkIndex}, h.len={h0.Heights?.Length ?? 0}, " +
+                ViewerLog.Debug(ViewerLog.Category.Vlm, $"  Heights[0]: idx={h0.ChunkIndex}, h.len={h0.Heights?.Length ?? 0}, " +
                     $"first5={string.Join(",", (h0.Heights ?? Array.Empty<float>()).Take(5).Select(v => v.ToString("F1")))}");
             }
             if (data.ChunkPositions != null && data.ChunkPositions.Length >= 3)
-                Console.WriteLine($"  ChunkPos[0]: ({data.ChunkPositions[0]:F1}, {data.ChunkPositions[1]:F1}, {data.ChunkPositions[2]:F1})");
+                ViewerLog.Debug(ViewerLog.Category.Vlm, $"  ChunkPos[0]: ({data.ChunkPositions[0]:F1}, {data.ChunkPositions[1]:F1}, {data.ChunkPositions[2]:F1})");
             _loadDiagCount++;
         }
 
@@ -206,8 +211,8 @@ public class VlmProjectLoader
             heights = ReorderToInterleaved(chunkHeights.Heights);
         }
 
-        // Normals from chunk_layers
-        Vector3[] normals = ExtractNormals(data, chunkIndex);
+        // Normals from chunk_layers (must reinterleave if non-interleaved, same as heights)
+        Vector3[] normals = ExtractNormals(data, chunkIndex, !data.IsInterleaved);
 
         // Hole mask
         int holeMask = 0;
@@ -224,23 +229,16 @@ public class VlmProjectLoader
         byte[]? shadowMap = ExtractShadowMap(data, chunkIndex);
 
         // World position from chunk_positions
-        float worldX = 0, worldY = 0;
-        if (data.ChunkPositions != null && chunkIndex * 3 + 2 < data.ChunkPositions.Length)
-        {
-            // VLM stores raw MCNK header positions (posX, posY) in WoW world coords.
-            // Renderer mapping: worldX = posY, worldY = posX (swap, no MapOrigin needed)
-            float posX = data.ChunkPositions[chunkIndex * 3];
-            float posY = data.ChunkPositions[chunkIndex * 3 + 1];
-            worldX = posY;
-            worldY = posX;
-        }
-        else
-        {
-            // Fallback: compute from tile/chunk indices
-            float chunkSmall = WoWConstants.ChunkSize / 16f;
-            worldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall;
-            worldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall;
-        }
+        // VLM exporter stores positions already in WoW world coords:
+        //   Alpha: posX = (32-tileX)*533 - idxX*33, posY = (32-tileY)*533 - idxY*33
+        //   LK:    posX = Origin - y*Tile - IndexY*Chunk, posY = Origin - x*Tile - IndexX*Chunk
+        // The native AlphaTerrainAdapter uses:
+        //   worldX = MapOrigin - tileX*ChunkSize - chunkY*chunkSmall  (north-south)
+        //   worldY = MapOrigin - tileY*ChunkSize - chunkX*chunkSmall  (east-west)
+        // Use tile/chunk indices directly for consistency with native path.
+        float chunkSmall = WoWConstants.ChunkSize / 16f;
+        float worldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall;
+        float worldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall;
 
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 
@@ -289,7 +287,7 @@ public class VlmProjectLoader
         return dst;
     }
 
-    private static Vector3[] ExtractNormals(VlmTerrainData data, int chunkIndex)
+    private static Vector3[] ExtractNormals(VlmTerrainData data, int chunkIndex, bool needsReinterleave)
     {
         var normals = new Vector3[145];
 
@@ -297,16 +295,38 @@ public class VlmProjectLoader
         var chunkLayer = data.ChunkLayers?.FirstOrDefault(c => c.ChunkIndex == chunkIndex);
         if (chunkLayer?.Normals != null && chunkLayer.Normals.Length >= 435)
         {
-            // MCNR format: 145 × 3 signed bytes (X, Z, Y in WoW convention)
-            for (int i = 0; i < 145; i++)
+            if (needsReinterleave)
             {
-                int off = i * 3;
-                float nx = chunkLayer.Normals[off] / 127f;
-                float nz = chunkLayer.Normals[off + 1] / 127f;
-                float ny = chunkLayer.Normals[off + 2] / 127f;
-                var n = new Vector3(nx, ny, nz);
-                float len = n.Length();
-                normals[i] = len > 0.001f ? n / len : Vector3.UnitZ;
+                // MCNR in Alpha format is non-interleaved: 81 outer normals (243 bytes) then 64 inner normals (192 bytes).
+                // Must reinterleave to match the height vertex layout (9-8-9-8... pattern).
+                int destIdx = 0;
+                for (int row = 0; row < 17; row++)
+                {
+                    if (row % 2 == 0)
+                    {
+                        int outerRow = row / 2;
+                        for (int col = 0; col < 9; col++)
+                        {
+                            int srcIdx = (outerRow * 9 + col) * 3;
+                            normals[destIdx++] = DecodeNormal(chunkLayer.Normals, srcIdx);
+                        }
+                    }
+                    else
+                    {
+                        int innerRow = row / 2;
+                        for (int col = 0; col < 8; col++)
+                        {
+                            int srcIdx = (81 + innerRow * 8 + col) * 3;
+                            normals[destIdx++] = DecodeNormal(chunkLayer.Normals, srcIdx);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Already interleaved (LK format) — read linearly
+                for (int i = 0; i < 145; i++)
+                    normals[i] = DecodeNormal(chunkLayer.Normals, i * 3);
             }
             return normals;
         }
@@ -315,6 +335,19 @@ public class VlmProjectLoader
         for (int i = 0; i < 145; i++)
             normals[i] = Vector3.UnitZ;
         return normals;
+    }
+
+    private static Vector3 DecodeNormal(sbyte[] data, int offset)
+    {
+        if (offset + 2 >= data.Length) return Vector3.UnitZ;
+
+        // MCNR stores normals as signed bytes: X, Z, Y (WoW convention)
+        float nx = data[offset] / 127f;
+        float nz = data[offset + 1] / 127f;
+        float ny = data[offset + 2] / 127f;
+        var n = new Vector3(nx, ny, nz);
+        float len = n.Length();
+        return len > 0.001f ? n / len : Vector3.UnitZ;
     }
 
     private static TerrainLayer[] ExtractLayers(VlmTerrainData data, int chunkIndex)
@@ -394,20 +427,22 @@ public class VlmProjectLoader
             var raw = Convert.FromBase64String(bits.BitsBase64);
             if (raw.Length == 0) return null;
 
-            // Expand bits to bytes (64×64)
+            // Expand MCSH bits to bytes (64×64).
+            // Format: 64 rows × 8 bytes/row = 512 bytes. Each bit: 1=shadowed, 0=lit.
+            // Output: 0=lit (black shadow disabled), 255=shadowed (for shader: shadow=1.0 darkens).
+            // Matches ShadowMapService.ReadShadow polarity.
             var shadow = new byte[64 * 64];
-            int rows = Math.Min(64, raw.Length / 8);
-            for (int y = 0; y < rows; y++)
+            for (int y = 0; y < 64; y++)
             {
-                int srcRow = y * 8;
-                for (int byteIdx = 0; byteIdx < 8 && srcRow + byteIdx < raw.Length; byteIdx++)
+                for (int x = 0; x < 64; x++)
                 {
-                    byte b = raw[srcRow + byteIdx];
-                    for (int bit = 0; bit < 8; bit++)
+                    int byteIndex = y * 8 + (x / 8);
+                    int bitIndex = x % 8;
+
+                    if (byteIndex < raw.Length)
                     {
-                        int x = byteIdx * 8 + bit;
-                        if (x < 64)
-                            shadow[y * 64 + x] = (byte)(((b >> bit) & 1) * 255);
+                        bool isShadowed = (raw[byteIndex] & (1 << bitIndex)) != 0;
+                        shadow[y * 64 + x] = isShadowed ? (byte)255 : (byte)0;
                     }
                 }
             }
@@ -493,14 +528,20 @@ public class VlmProjectLoader
     /// </summary>
     public string? ResolveTexturePath(string textureName)
     {
-        // VLM exports textures as PNGs in textures/ folder
+        // VLM exporter writes tileset textures to tilesets/ folder as flat PNGs
         var pngName = Path.ChangeExtension(Path.GetFileName(textureName), ".png");
-        var pngPath = Path.Combine(_projectRoot, "textures", pngName);
+
+        // Try tilesets/ first (where the exporter writes them)
+        var pngPath = Path.Combine(_projectRoot, "tilesets", pngName);
         if (File.Exists(pngPath)) return pngPath;
 
-        // Try with full relative path
+        // Try textures/ as fallback
+        pngPath = Path.Combine(_projectRoot, "textures", pngName);
+        if (File.Exists(pngPath)) return pngPath;
+
+        // Try with full relative path under tilesets/
         var relPath = textureName.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar);
-        pngPath = Path.Combine(_projectRoot, "textures", Path.ChangeExtension(relPath, ".png"));
+        pngPath = Path.Combine(_projectRoot, "tilesets", Path.ChangeExtension(relPath, ".png"));
         if (File.Exists(pngPath)) return pngPath;
 
         return null;

@@ -2,13 +2,38 @@
 
 ## Current Focus
 
-**Terrain rendering, shadow blending, and MDX placement are now correct.** VLM dataset support added (load + generate). Async tile streaming implemented. Thread safety hardened. Next: verify all fixes visually, then move to MDX animation or particle systems.
+**Multi-format terrain support complete.** Viewer can now load Alpha WDT (monolithic), Standard WDT+ADT (LK/Cata from MPQ), and VLM datasets. Format specifications written. Ghidra reverse engineering prompts prepared for 5 client versions. Next: Ghidra-guided format verification, then M2/WMOv17 reading for Standard WDT object rendering.
 
 ## Immediate Next Steps (Next Session)
 
-1. **Visual verification** — Load a map and confirm: MCSH shadows visible through overlay layers, MDX models correctly positioned (pivot offset fix), minimap working for both WDT and VLM.
-2. **MDX doodad textures in WorldScene** — still untextured/magenta (pre-existing). Likely texture path resolution issue in WorldAssetManager.
-3. **MDX animation** — Phase 1: keyframes, bones, geoset animation, playback UI.
+1. **Ghidra verification** — Load 0.5.3 WoWClient.exe (has PDB!) and run prompt-053.md to verify MCNK header, MCAL pixel order, MCLQ structure.
+2. **M2 model reader** — Build a proper M2 reader for the viewer (Phase 1a of converter plan).
+3. **WMO v17 reader** — Read split root+group WMO files from MPQ (Phase 1b).
+4. **Wire M2/WMOv17 into WorldAssetManager** — Complete Standard WDT rendering (Phase 1c).
+
+## Session 2026-02-08 (Late Evening) Summary
+
+### Standard WDT+ADT Support
+- **ITerrainAdapter interface** — New common contract for all terrain adapters
+- **StandardTerrainAdapter** — Reads LK/Cata WDT (MAIN/MPHD) + split ADT files from MPQ via IDataSource
+- **TerrainManager refactored** — Accepts `ITerrainAdapter` (was hardcoded to `AlphaTerrainAdapter`)
+- **WorldScene refactored** — New constructor accepts pre-built `TerrainManager`
+- **ViewerApp detection** — File size ≥64KB → Alpha WDT, <64KB → Standard WDT (requires MPQ data source)
+
+### Format Specifications Written
+- `specifications/alpha-053-terrain.md` — Definitive WDT/ADT/MCNK/MCVT/MCNR/MCLY/MCAL/MCSH/MDDF/MODF spec
+- `specifications/alpha-053-coordinates.md` — Complete coordinate system documentation
+- `specifications/unknowns.md` — 13 prioritized format unknowns needing Ghidra investigation
+
+### Ghidra LLM Prompts Created
+- `specifications/ghidra/prompt-053.md` — 0.5.3 (HAS PDB! Best starting point)
+- `specifications/ghidra/prompt-055.md` — 0.5.5 (diff against 0.5.3)
+- `specifications/ghidra/prompt-060.md` — 0.6.0 (transitional format detection)
+- `specifications/ghidra/prompt-335.md` — 3.3.5 LK (reference build, well-documented)
+- `specifications/ghidra/prompt-400.md` — 4.0.0 Cata (split ADT introduction)
+
+### Converter Master Plan
+- `memory-bank/converter_plan.md` — 4-phase plan: LK model reading → format conversion → PM4 tiles → unified project
 
 ## Session 2026-02-08 (Evening) Summary
 
@@ -64,14 +89,17 @@
 
 | Feature | Status |
 |---------|--------|
-| Terrain rendering + AOI loading | ✅ |
+| Alpha WDT terrain rendering + AOI | ✅ |
+| Standard WDT+ADT terrain (LK/Cata) | ✅ (terrain only, needs M2/WMOv17 readers for objects) |
 | Terrain MCSH shadow maps | ✅ (all layers, not just base) |
 | Terrain alpha map debug view | ✅ (Show Alpha Masks toggle) |
 | Async tile streaming | ✅ (background parse, render-thread GPU upload) |
 | Standalone MDX rendering | ✅ (MirrorX, front-facing) |
 | MDX pivot offset correction | ✅ (bounding box center pre-translation) |
 | MDX doodads in WorldScene | ⚠️ Position fixed, textures still broken |
-| WMO rendering + textures | ✅ (BLP per-batch) |
+| WMO v14 rendering + textures | ✅ (BLP per-batch) |
+| WMO v17 rendering | ❌ Not implemented yet |
+| M2 model rendering | ❌ Not implemented yet |
 | WMO rotation/facing in WorldScene | ✅ |
 | WMO doodad sets | ✅ |
 | MDDF/MODF placements | ✅ (position + pivot correct) |
@@ -83,6 +111,8 @@
 | AreaPOI system | ✅ |
 | GLB export (Z-up → Y-up) | ✅ |
 | Object picking/selection | ✅ |
+| Format specifications | ✅ (specifications/ folder) |
+| Ghidra RE prompts (5 versions) | ✅ (specifications/ghidra/) |
 
 ## Key Files
 

@@ -796,8 +796,10 @@ public class VlmDatasetExporter
                             File.WriteAllBytes(Path.Combine(shadowsDir, shadowFileName), shadowPng);
                             shadowPaths.Add($"shadows/{shadowFileName}");
                             
-                            // Store raw shadow bits
-                            var rawShadowBytes = mcshBuf.Length >= 64 ? mcshBuf.Take(64).ToArray() : mcshBuf;
+                            // Store raw shadow bits (full 512 bytes = 64 rows × 8 bytes/row)
+                            int shadowByteCount = Math.Min(512, mcshBuf.Length);
+                            var rawShadowBytes = new byte[shadowByteCount];
+                            Array.Copy(mcshBuf, rawShadowBytes, shadowByteCount);
                             shadowBits.Add(new VlmChunkShadowBits(chunkIndex, Convert.ToBase64String(rawShadowBytes)));
                         }
                         catch (Exception ex)

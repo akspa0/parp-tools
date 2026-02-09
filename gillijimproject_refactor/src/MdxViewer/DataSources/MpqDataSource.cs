@@ -1,3 +1,4 @@
+using MdxViewer.Logging;
 using WoWMapConverter.Core.Services;
 
 namespace MdxViewer.DataSources;
@@ -32,7 +33,7 @@ public class MpqDataSource : IDataSource
     {
         _gamePath = gamePath;
 
-        Console.WriteLine($"[MpqDataSource] Loading game folder: {gamePath}");
+        ViewerLog.Important(ViewerLog.Category.MpqData, $"Loading game folder: {gamePath}");
 
         // 1. Load MPQ archives (large MPQs with listfiles)
         _mpq.LoadArchives(new[] { gamePath });
@@ -41,19 +42,19 @@ public class MpqDataSource : IDataSource
         var internalFiles = _mpq.ExtractInternalListfiles();
         foreach (var file in internalFiles)
             _fileSet.Add(file);
-        Console.WriteLine($"[MpqDataSource] Added {internalFiles.Count} files from MPQ internal listfiles.");
+        ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {internalFiles.Count} files from MPQ internal listfiles.");
 
         // Also add any previously known files (from hash table / scanned)
         var knownFiles = _mpq.GetAllKnownFiles();
         foreach (var file in knownFiles)
             _fileSet.Add(file);
         if (knownFiles.Count > 0)
-            Console.WriteLine($"[MpqDataSource] Added {knownFiles.Count} previously known files.");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {knownFiles.Count} previously known files.");
 
         // 3. Optionally load user-provided external listfile
         if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
         {
-            Console.WriteLine($"[MpqDataSource] Loading listfile: {listfilePath}");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Loading listfile: {listfilePath}");
             _mpq.LoadListfile(listfilePath);
             AddExternalListfileEntries(listfilePath);
         }
@@ -75,10 +76,10 @@ public class MpqDataSource : IDataSource
             if (!extCounts.ContainsKey(ext)) extCounts[ext] = 0;
             extCounts[ext]++;
         }
-        Console.WriteLine($"[MpqDataSource] Ready. {_fileList.Count} known files:");
+        ViewerLog.Important(ViewerLog.Category.MpqData, $"Ready. {_fileList.Count} known files:");
         foreach (var ec in extCounts.OrderByDescending(x => x.Value).Take(10))
         {
-            Console.WriteLine($"  {ec.Key}: {ec.Value} files");
+            ViewerLog.Important(ViewerLog.Category.MpqData, $"  {ec.Key}: {ec.Value} files");
         }
     }
 
@@ -167,9 +168,9 @@ public class MpqDataSource : IDataSource
             }
         }
 
-        Console.WriteLine($"[MpqDataSource] Alpha nested MPQ scan: {_alphaMpqCache.Count} files found");
+        ViewerLog.Info(ViewerLog.Category.MpqData, $"Alpha nested MPQ scan: {_alphaMpqCache.Count} files found");
         foreach (var kvp in countByExt.OrderByDescending(x => x.Value))
-            Console.WriteLine($"  {kvp.Key}: {kvp.Value} files");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"  {kvp.Key}: {kvp.Value} files");
     }
 
     private void AddExternalListfileEntries(string listfilePath)
@@ -192,7 +193,7 @@ public class MpqDataSource : IDataSource
                 count++;
             }
         }
-        Console.WriteLine($"[MpqDataSource] Added {count} listfile entries.");
+        ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {count} listfile entries.");
     }
 
     private void ScanLooseFiles(string gamePath)
@@ -209,7 +210,7 @@ public class MpqDataSource : IDataSource
         {
             if (!Directory.Exists(root)) continue;
 
-            Console.WriteLine($"[MpqDataSource] Scanning root: {root}");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Scanning root: {root}");
 
             // Look for common WoW data subdirectories
             string[] dataDirs = { "World", "Creature", "Character", "Item", "Textures",
@@ -227,7 +228,7 @@ public class MpqDataSource : IDataSource
                 if (!_looseRoots.Contains(root))
                     _looseRoots.Add(root);
 
-                Console.WriteLine($"[MpqDataSource] Scanning loose files: {fullDir}");
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"Scanning loose files: {fullDir}");
                 int before = _fileSet.Count;
 
                 try
@@ -244,11 +245,11 @@ public class MpqDataSource : IDataSource
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MpqDataSource] Scan error in {fullDir}: {ex.Message}");
+                    ViewerLog.Error(ViewerLog.Category.MpqData, $"Scan error in {fullDir}: {ex.Message}");
                 }
 
                 int found = _fileSet.Count - before;
-                Console.WriteLine($"[MpqDataSource]   Found {found} files in {subDir}/");
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} files in {subDir}/");
                 foundAny = found > 0;
             }
 
@@ -258,7 +259,7 @@ public class MpqDataSource : IDataSource
                 var fullWmoDir = Path.Combine(root, wmoDir);
                 if (!Directory.Exists(fullWmoDir)) continue;
 
-                Console.WriteLine($"[MpqDataSource] Scanning WMO files: {fullWmoDir}");
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"Scanning WMO files: {fullWmoDir}");
                 int before = _fileSet.Count;
 
                 try
@@ -271,11 +272,11 @@ public class MpqDataSource : IDataSource
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MpqDataSource] WMO scan error in {fullWmoDir}: {ex.Message}");
+                    ViewerLog.Error(ViewerLog.Category.MpqData, $"WMO scan error in {fullWmoDir}: {ex.Message}");
                 }
 
                 int found = _fileSet.Count - before;
-                Console.WriteLine($"[MpqDataSource]   Found {found} WMO files");
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} WMO files");
             }
 
             if (foundAny) break;

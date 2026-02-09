@@ -46,7 +46,7 @@ public class TileLoadResult
     public List<ModfPlacement> ModfPlacements { get; init; } = new();
 }
 
-public class AlphaTerrainAdapter
+public class AlphaTerrainAdapter : ITerrainAdapter
 {
     private readonly string _wdtPath;
     private readonly WdtAlpha _wdt;
@@ -411,6 +411,10 @@ public class AlphaTerrainAdapter
 
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 
+        // Extract MCLQ inline liquid data (type from MCNK header flags bits 2-5)
+        var liquid = ExtractLiquid(mcnk.MclqData, mcnk.Header.Flags, tileX, tileY, chunkX, chunkY,
+            new Vector3(worldX, worldY, 0f));
+
         return new TerrainChunkData
         {
             TileX = tileX,
@@ -423,6 +427,7 @@ public class AlphaTerrainAdapter
             Layers = layers,
             AlphaMaps = alphaMaps,
             ShadowMap = shadowMap,
+            Liquid = liquid,
             WorldPosition = new Vector3(worldX, worldY, 0f)
         };
     }
@@ -604,6 +609,95 @@ public class AlphaTerrainAdapter
         }
 
         return maps;
+    }
+
+    /// <summary>
+    /// Extract MCLQ inline liquid data from raw bytes (Ghidra-verified Alpha 0.5.3 format).
+    /// NO FourCC header — data is inline within MCNK, referenced by ofsLiquid.
+    /// Each instance: 8 (min/max) + 648 (81 verts × 8) + 64 (16 tile floats) + 84 (flows) = 804 bytes.
+    /// Liquid type determined from MCNK header flags bits 2-5.
+    /// Up to 4 liquid instances per chunk (one per type).
+    /// Returns the first valid liquid instance found, or null.
+    /// </summary>
+    private static LiquidChunkData? ExtractLiquid(byte[] mclqData, int mcnkFlags, int tileX, int tileY,
+        int chunkX, int chunkY, Vector3 worldPos)
+    {
+        if (mclqData == null || mclqData.Length < LiquidChunkData.InstanceSize)
+            return null;
+
+        // Determine liquid types from MCNK flags bits 2-5
+        // Bit 2 (0x04) = Water, Bit 3 (0x08) = Ocean, Bit 4 (0x10) = Magma, Bit 5 (0x20) = Slime
+        bool hasWater = (mcnkFlags & 0x04) != 0;
+        bool hasOcean = (mcnkFlags & 0x08) != 0;
+        bool hasMagma = (mcnkFlags & 0x10) != 0;
+        bool hasSlime = (mcnkFlags & 0x20) != 0;
+
+        if (!hasWater && !hasOcean && !hasMagma && !hasSlime)
+            return null;
+
+        // Determine which liquid type this is (first set bit)
+        LiquidType liquidType;
+        if (hasWater) liquidType = LiquidType.Water;
+        else if (hasOcean) liquidType = LiquidType.Ocean;
+        else if (hasMagma) liquidType = LiquidType.Magma;
+        else liquidType = LiquidType.Slime;
+
+        // Parse the first 804-byte liquid instance
+        return ParseLiquidInstance(mclqData, 0, liquidType, tileX, tileY, chunkX, chunkY, worldPos);
+    }
+
+    /// <summary>
+    /// Parse a single 804-byte MCLQ inline data instance.
+    /// Layout: float minH, float maxH, {float height, uint32 data}[81], float tiles[16], uint32 nFlowvs, SWFlowv[2]
+    /// </summary>
+    private static LiquidChunkData? ParseLiquidInstance(byte[] data, int offset, LiquidType type,
+        int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos)
+    {
+        if (offset + LiquidChunkData.InstanceSize > data.Length)
+            return null;
+
+        // Read min/max height range (8 bytes)
+        float minHeight = BitConverter.ToSingle(data, offset); offset += 4;
+        float maxHeight = BitConverter.ToSingle(data, offset); offset += 4;
+
+        // Sanity check: invalid height range suggests bad data
+        if (float.IsNaN(minHeight) || float.IsNaN(maxHeight) ||
+            minHeight < -5000f || maxHeight > 5000f)
+            return null;
+
+        // Read 81 vertices (9×9 grid, 8 bytes each: float height + uint32 data)
+        var heights = new float[81];
+        var vertexData = new uint[81];
+        for (int i = 0; i < 81; i++)
+        {
+            heights[i] = BitConverter.ToSingle(data, offset); offset += 4;
+            vertexData[i] = BitConverter.ToUInt32(data, offset); offset += 4;
+        }
+
+        // Read 16 tile floats (4×4 grid, 64 bytes)
+        var tileGrid = new float[16];
+        for (int i = 0; i < 16; i++)
+        {
+            tileGrid[i] = BitConverter.ToSingle(data, offset); offset += 4;
+        }
+
+        // Skip flow data (4 bytes nFlowvs + 80 bytes flowvs = 84 bytes)
+        // offset += 84; // Not needed, we don't use flow data for rendering
+
+        return new LiquidChunkData
+        {
+            MinHeight = minHeight,
+            MaxHeight = maxHeight,
+            Heights = heights,
+            VertexData = vertexData,
+            TileGrid = tileGrid,
+            Type = type,
+            WorldPosition = worldPos,
+            TileX = tileX,
+            TileY = tileY,
+            ChunkX = chunkX,
+            ChunkY = chunkY
+        };
     }
 
     /// <summary>

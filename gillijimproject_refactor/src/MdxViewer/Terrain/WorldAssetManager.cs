@@ -1,6 +1,7 @@
 using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Converters;
@@ -66,20 +67,20 @@ public class WorldAssetManager : IDisposable
                 manifest.ReferencedWmo.Add(NormalizeKey(wmoNames[p.NameIndex]));
         }
 
-        Console.WriteLine($"[AssetManager] Manifest: {manifest.ReferencedMdx.Count} unique MDX, {manifest.ReferencedWmo.Count} unique WMO");
-        Console.WriteLine($"[AssetManager] Name tables: {mdxNames.Count} MDX names, {wmoNames.Count} WMO names");
-        Console.WriteLine($"[AssetManager] Placements: {mddfPlacements.Count} MDDF, {modfPlacements.Count} MODF");
+        ViewerLog.Important(ViewerLog.Category.General, $"Manifest: {manifest.ReferencedMdx.Count} unique MDX, {manifest.ReferencedWmo.Count} unique WMO");
+        ViewerLog.Info(ViewerLog.Category.General, $"Name tables: {mdxNames.Count} MDX names, {wmoNames.Count} WMO names");
+        ViewerLog.Info(ViewerLog.Category.General, $"Placements: {mddfPlacements.Count} MDDF, {modfPlacements.Count} MODF");
         if (modfPlacements.Count > 0)
         {
             var p = modfPlacements[0];
             string name = p.NameIndex >= 0 && p.NameIndex < wmoNames.Count ? wmoNames[p.NameIndex] : $"BAD_INDEX({p.NameIndex})";
-            Console.WriteLine($"[AssetManager] First MODF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
+            ViewerLog.Debug(ViewerLog.Category.Wmo, $"First MODF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
         }
         if (mddfPlacements.Count > 0)
         {
             var p = mddfPlacements[0];
             string name = p.NameIndex >= 0 && p.NameIndex < mdxNames.Count ? mdxNames[p.NameIndex] : $"BAD_INDEX({p.NameIndex})";
-            Console.WriteLine($"[AssetManager] First MDDF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"First MDDF: nameIdx={p.NameIndex} name=\"{name}\" key=\"{NormalizeKey(name)}\"");
         }
         return manifest;
     }
@@ -107,7 +108,7 @@ public class WorldAssetManager : IDisposable
             if (renderer != null) wmoOk++; else wmoFail++;
         }
 
-        Console.WriteLine($"[AssetManager] Loaded: MDX {mdxOk} ok / {mdxFail} failed, WMO {wmoOk} ok / {wmoFail} failed");
+        ViewerLog.Important(ViewerLog.Category.General, $"Loaded: MDX {mdxOk} ok / {mdxFail} failed, WMO {wmoOk} ok / {wmoFail} failed");
     }
 
     /// <summary>
@@ -261,7 +262,7 @@ public class WorldAssetManager : IDisposable
             byte[]? data = ReadFileData(normalizedKey);
             if (data == null || data.Length == 0)
             {
-                Console.WriteLine($"[AssetManager] MDX data null for: \"{normalizedKey}\"");
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"MDX data null for: \"{normalizedKey}\"");
                 return null;
             }
 
@@ -272,7 +273,7 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AssetManager] MDX failed: {Path.GetFileName(normalizedKey)} — {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
             return null;
         }
     }
@@ -285,11 +286,11 @@ public class WorldAssetManager : IDisposable
             if (data == null || data.Length == 0)
             {
                 if (_wmoModels.Count < 3)
-                    Console.WriteLine($"[AssetManager] WMO data null for: \"{normalizedKey}\"");
+                    ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data null for: \"{normalizedKey}\"");
                 return null;
             }
             if (_wmoModels.Count < 3)
-                Console.WriteLine($"[AssetManager] WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
+                ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
 
             // WMO v14 needs to be written to temp file for the converter
             string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
@@ -308,7 +309,7 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AssetManager] WMO failed: {Path.GetFileName(normalizedKey)} — {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
             return null;
         }
     }

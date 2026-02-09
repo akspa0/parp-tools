@@ -325,7 +325,7 @@ void main() {
             for (int v = 0; v < vertCount; v++)
             {
                 // Pass through raw WoW model-local coords.
-                // WMO rotation issue is UNSOLVED — do not modify vertices here.
+                // The wowToRenderer matrix in WorldScene handles coordinate conversion.
                 var pos = group.Vertices[v];
                 vertexData[v * 8 + 0] = pos.X;
                 vertexData[v * 8 + 1] = pos.Y;

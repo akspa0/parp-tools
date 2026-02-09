@@ -15,9 +15,10 @@ namespace MdxViewer.Terrain;
 public class TerrainManager : ISceneRenderer
 {
     private readonly GL _gl;
-    private readonly AlphaTerrainAdapter _adapter;
+    private readonly ITerrainAdapter _adapter;
     private readonly TerrainMeshBuilder _meshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
+    private readonly LiquidRenderer _liquidRenderer;
     private readonly IDataSource? _dataSource;
 
     // Loaded tiles: (tileX, tileY) → list of chunk meshes
@@ -49,10 +50,11 @@ public class TerrainManager : ISceneRenderer
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
+    public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName { get; }
 
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
-    public AlphaTerrainAdapter Adapter => _adapter;
+    public ITerrainAdapter Adapter => _adapter;
 
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)
     {
@@ -63,8 +65,26 @@ public class TerrainManager : ISceneRenderer
         _adapter = new AlphaTerrainAdapter(wdtPath);
         _meshBuilder = new TerrainMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
+        _liquidRenderer = new LiquidRenderer(gl);
 
         // Find the center of populated tiles for initial camera placement
+        FindInitialCameraPosition(out _cameraPos);
+    }
+
+    /// <summary>
+    /// Create a TerrainManager with a pre-built terrain adapter (for Standard WDT, etc.).
+    /// </summary>
+    public TerrainManager(GL gl, ITerrainAdapter adapter, string mapName, IDataSource? dataSource)
+    {
+        _gl = gl;
+        _dataSource = dataSource;
+        MapName = mapName;
+
+        _adapter = adapter;
+        _meshBuilder = new TerrainMeshBuilder(gl);
+        _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
+        _liquidRenderer = new LiquidRenderer(gl);
+
         FindInitialCameraPosition(out _cameraPos);
     }
 
@@ -112,6 +132,7 @@ public class TerrainManager : ISceneRenderer
         {
             var meshes = _loadedTiles[key];
             _terrainRenderer.RemoveChunks(meshes);
+            _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
             foreach (var chunk in meshes)
                 chunk.Dispose();
             _loadedTiles.Remove(key);
@@ -171,6 +192,7 @@ public class TerrainManager : ISceneRenderer
 
             _loadedTiles[(tx, ty)] = meshes;
             _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+            _liquidRenderer.AddChunks(result.Chunks);
 
             // Notify listeners (WorldScene) about the new tile's placements
             OnTileLoaded?.Invoke(tx, ty, result);
@@ -212,6 +234,7 @@ public class TerrainManager : ISceneRenderer
 
         _loadedTiles[(tileX, tileY)] = meshes;
         _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+        _liquidRenderer.AddChunks(result.Chunks);
 
         OnTileLoaded?.Invoke(tileX, tileY, result);
     }
@@ -253,6 +276,7 @@ public class TerrainManager : ISceneRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
         _terrainRenderer.Render(view, proj, _cameraPos);
+        _liquidRenderer.Render(view, proj, _cameraPos, _terrainRenderer.Lighting, 0.016f);
     }
 
     /// <summary>
@@ -262,6 +286,7 @@ public class TerrainManager : ISceneRenderer
     {
         _cameraPos = cameraPos;
         _terrainRenderer.Render(view, proj, cameraPos);
+        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, 0.016f);
     }
 
     public void ToggleWireframe()
@@ -286,6 +311,7 @@ public class TerrainManager : ISceneRenderer
     {
         _disposed = true;
         while (_pendingTiles.TryDequeue(out _)) { }
+        _liquidRenderer.Dispose();
         _terrainRenderer.Dispose();
         foreach (var meshes in _loadedTiles.Values)
             foreach (var mesh in meshes)

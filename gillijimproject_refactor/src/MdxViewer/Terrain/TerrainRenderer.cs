@@ -17,6 +17,10 @@ public class TerrainRenderer : IDisposable
     private readonly IDataSource? _dataSource;
     private readonly TerrainLighting _lighting;
 
+    // Optional resolver: given a texture name (e.g. "Tileset\Ashenvale\..."), return
+    // a local file path to a PNG. Used by VLM projects that export textures as PNGs.
+    private readonly Func<string, string?>? _texturePathResolver;
+
     // Texture cache: texture name → GL handle
     private readonly Dictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -51,11 +55,13 @@ public class TerrainRenderer : IDisposable
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
-    public TerrainRenderer(GL gl, IDataSource? dataSource, TerrainLighting lighting)
+    public TerrainRenderer(GL gl, IDataSource? dataSource, TerrainLighting lighting,
+        Func<string, string?>? texturePathResolver = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _lighting = lighting;
+        _texturePathResolver = texturePathResolver;
         _shader = CreateTerrainShader();
     }
 
@@ -262,7 +268,13 @@ public class TerrainRenderer : IDisposable
 
         if (blpData == null || blpData.Length == 0)
         {
-            // Return 0 — will render as untextured
+            // Try PNG from texture path resolver (VLM projects)
+            if (_texturePathResolver != null)
+            {
+                var pngPath = _texturePathResolver(textureName);
+                if (pngPath != null)
+                    return LoadPngTexture(pngPath);
+            }
             return 0;
         }
 
@@ -326,6 +338,66 @@ public class TerrainRenderer : IDisposable
     }
 
     /// <summary>
+    /// Load a PNG file from disk and upload as a GL texture.
+    /// Used by VLM projects where textures are exported as PNGs.
+    /// </summary>
+    private unsafe uint LoadPngTexture(string pngPath)
+    {
+        try
+        {
+            using var bmp = new System.Drawing.Bitmap(pngPath);
+            int w = bmp.Width, h = bmp.Height;
+            var pixels = new byte[w * h * 4];
+            var rect = new System.Drawing.Rectangle(0, 0, w, h);
+            var data = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            try
+            {
+                var srcBytes = new byte[data.Stride * h];
+                System.Runtime.InteropServices.Marshal.Copy(data.Scan0, srcBytes, 0, srcBytes.Length);
+
+                // BGRA → RGBA
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int srcIdx = y * data.Stride + x * 4;
+                        int dstIdx = (y * w + x) * 4;
+                        pixels[dstIdx + 0] = srcBytes[srcIdx + 2]; // R
+                        pixels[dstIdx + 1] = srcBytes[srcIdx + 1]; // G
+                        pixels[dstIdx + 2] = srcBytes[srcIdx + 0]; // B
+                        pixels[dstIdx + 3] = srcBytes[srcIdx + 3]; // A
+                    }
+                }
+            }
+            finally
+            {
+                bmp.UnlockBits(data);
+            }
+
+            uint tex = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, tex);
+            fixed (byte* ptr = pixels)
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+                    (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+            _gl.GenerateMipmap(TextureTarget.Texture2D);
+            _gl.BindTexture(TextureTarget.Texture2D, 0);
+
+            return tex;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TerrainRenderer] Failed to load PNG texture {pngPath}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>
     /// Upload alpha map byte arrays as GL textures (R8, 64x64).
     /// </summary>
     private unsafe void UploadAlphaTextures(TerrainChunkMesh chunk)
@@ -380,8 +452,8 @@ public class TerrainRenderer : IDisposable
             _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
                 64, 64, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
@@ -478,7 +550,7 @@ void main() {
     vec3 lighting = uAmbientColor + uLightColor * diff;
     vec3 litColor = texColor.rgb * lighting;
 
-    // MCSH shadow map overlay (all layers — shadows must persist through alpha-blended overlays)
+    // MCSH shadow map overlay (all layers - shadows must persist through alpha-blended overlays)
     if (uShowShadowMap == 1 && uHasShadowMap == 1) {
         float shadow = texture(uShadowSampler, vTexCoord).r;
         // Darken shadowed areas: shadow=1.0 means shadowed, 0.0 means lit
@@ -497,19 +569,24 @@ void main() {
         // Use fwidth for screen-space anti-aliased contour lines
         float dh = fwidth(height);
         float modH = mod(height, interval);
-        // Thin line at each contour interval
-        float lineWidth = max(dh * 1.5, 0.05);
-        float contourLine = 1.0 - smoothstep(0.0, lineWidth, min(modH, interval - modH));
-        // Major contour every 5 intervals - thicker and brighter
+        // Very thin line at each contour interval
+        float lineWidth = max(dh * 0.8, 0.02);
+        float dist = min(modH, interval - modH);
+        float contourLine = 1.0 - smoothstep(0.0, lineWidth, dist);
+        // Threshold: only draw if clearly on a contour line
+        contourLine = contourLine > 0.1 ? contourLine : 0.0;
+        // Major contour every 5 intervals - slightly thicker
         float majorInterval = interval * 5.0;
         float modMajor = mod(height, majorInterval);
-        float majorLineWidth = max(dh * 2.5, 0.08);
-        float majorLine = 1.0 - smoothstep(0.0, majorLineWidth, min(modMajor, majorInterval - modMajor));
-        // Color: minor=dark brown, major=black
-        vec3 minorColor = vec3(0.35, 0.22, 0.1);
-        vec3 majorColor = vec3(0.0, 0.0, 0.0);
-        finalColor = mix(finalColor, minorColor, contourLine * 0.5);
-        finalColor = mix(finalColor, majorColor, majorLine * 0.7);
+        float majorLineWidth = max(dh * 1.2, 0.04);
+        float majorDist = min(modMajor, majorInterval - modMajor);
+        float majorLine = 1.0 - smoothstep(0.0, majorLineWidth, majorDist);
+        majorLine = majorLine > 0.1 ? majorLine : 0.0;
+        // Color: minor=dark overlay, major=darker overlay
+        vec3 minorColor = mix(finalColor, vec3(0.0), 0.4);
+        vec3 majorColor = mix(finalColor, vec3(0.0), 0.6);
+        finalColor = mix(finalColor, minorColor, contourLine);
+        finalColor = mix(finalColor, majorColor, majorLine);
     }
 
     // Grid overlays (drawn on base layer only to avoid double-drawing)

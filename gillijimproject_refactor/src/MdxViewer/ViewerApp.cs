@@ -87,6 +87,12 @@ public class ViewerApp : IDisposable
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
 
+    // FPS counter
+    private int _frameCount;
+    private double _fpsTimer;
+    private double _currentFps;
+    private double _frameTimeMs;
+
     // VLM Dataset Generator state
     private bool _showVlmExportDialog = false;
     private string _vlmClientPath = "";
@@ -212,6 +218,17 @@ public class ViewerApp : IDisposable
 
     private unsafe void OnRender(double dt)
     {
+        // FPS tracking
+        _frameCount++;
+        _fpsTimer += dt;
+        _frameTimeMs = dt * 1000.0;
+        if (_fpsTimer >= 1.0)
+        {
+            _currentFps = _frameCount / _fpsTimer;
+            _frameCount = 0;
+            _fpsTimer = 0;
+        }
+
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         // Render 3D scene first
@@ -474,25 +491,29 @@ public class ViewerApp : IDisposable
             // Client Path
             ImGui.Text("Client Data Path:");
             ImGui.SetNextItemWidth(-80);
+            string prevClient = _vlmClientPath;
             ImGui.InputText("##vlmClient", ref _vlmClientPath, 512);
             ImGui.SameLine();
             if (ImGui.Button("Browse##client"))
             {
-                using var dialog = new System.Windows.Forms.FolderBrowserDialog
-                {
-                    Description = "Select WoW Client Data Folder",
-                    UseDescriptionForTitle = true
-                };
-                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                    _vlmClientPath = dialog.SelectedPath;
+                string? result = ShowFolderDialogSTA("Select WoW Client Data Folder");
+                if (result != null) _vlmClientPath = result;
             }
 
             // Map Name
             ImGui.Text("Map Name:");
             ImGui.SetNextItemWidth(-1);
+            string prevMap = _vlmMapName;
             ImGui.InputText("##vlmMap", ref _vlmMapName, 128);
             ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f),
                 "e.g. development, Azeroth, Kalimdor, PVPZone01");
+
+            // Auto-generate output directory when client path or map name changes
+            if ((_vlmClientPath != prevClient || _vlmMapName != prevMap) &&
+                !string.IsNullOrWhiteSpace(_vlmClientPath) && !string.IsNullOrWhiteSpace(_vlmMapName))
+            {
+                _vlmOutputDir = GenerateVlmOutputPath(_vlmClientPath, _vlmMapName);
+            }
 
             // Output Directory
             ImGui.Text("Output Directory:");
@@ -501,13 +522,8 @@ public class ViewerApp : IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Browse##output"))
             {
-                using var dialog = new System.Windows.Forms.FolderBrowserDialog
-                {
-                    Description = "Select Output Directory",
-                    UseDescriptionForTitle = true
-                };
-                if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                    _vlmOutputDir = dialog.SelectedPath;
+                string? result = ShowFolderDialogSTA("Select Output Directory");
+                if (result != null) _vlmOutputDir = result;
             }
 
             // Tile Limit
@@ -576,6 +592,50 @@ public class ViewerApp : IDisposable
             ImGui.EndChild();
         }
         ImGui.End();
+    }
+
+    /// <summary>
+    /// Generate a versioned output folder path for VLM dataset export.
+    /// Format: {clientParent}/vlm_datasets/{mapName}_v{N}
+    /// </summary>
+    private static string GenerateVlmOutputPath(string clientPath, string mapName)
+    {
+        string baseDir = Path.Combine(Path.GetDirectoryName(clientPath) ?? clientPath, "vlm_datasets");
+        string prefix = $"{mapName}_v";
+        int version = 1;
+        if (Directory.Exists(baseDir))
+        {
+            foreach (var dir in Directory.GetDirectories(baseDir, $"{mapName}_v*"))
+            {
+                string name = Path.GetFileName(dir);
+                if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(name.Substring(prefix.Length), out int v) && v >= version)
+                    version = v + 1;
+            }
+        }
+        return Path.Combine(baseDir, $"{prefix}{version}");
+    }
+
+    /// <summary>
+    /// Show a native folder picker on an STA thread to avoid deadlocking the GLFW render thread.
+    /// </summary>
+    private static string? ShowFolderDialogSTA(string description)
+    {
+        string? result = null;
+        var thread = new Thread(() =>
+        {
+            using var dialog = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = description,
+                UseDescriptionForTitle = true
+            };
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                result = dialog.SelectedPath;
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        return result;
     }
 
     private void StartVlmExport()
@@ -957,6 +1017,15 @@ public class ViewerApp : IDisposable
             bool shadowMap = renderer.ShowShadowMap;
             if (ImGui.Checkbox("Show MCSH Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
 
+            // Liquid rendering toggle
+            LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+            if (liquidRenderer != null)
+            {
+                bool showLiquid = liquidRenderer.ShowLiquid;
+                if (ImGui.Checkbox($"Show Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
+                    liquidRenderer.ShowLiquid = showLiquid;
+            }
+
             ImGui.Separator();
             ImGui.Text("Topography:");
 
@@ -1014,6 +1083,15 @@ public class ViewerApp : IDisposable
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.Text(_statusMessage);
+
+            // FPS counter on the right side
+            string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
+            float textWidth = ImGui.CalcTextSize(fpsText).X;
+            ImGui.SameLine(io.DisplaySize.X - textWidth - 16);
+            var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
+                         : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
+                         : new Vector4(1f, 0.4f, 0.4f, 1f);
+            ImGui.TextColored(fpsColor, fpsText);
         }
         ImGui.End();
         ImGui.PopStyleVar();
@@ -1055,7 +1133,25 @@ public class ViewerApp : IDisposable
             var contentSize = ImGui.GetContentRegionAvail();
             mapSize = MathF.Min(contentSize.X, contentSize.Y);
             if (mapSize < 50f) mapSize = 50f;
-            float cellSize = mapSize / 64f;
+
+            // Auto-zoom: compute bounding box of populated tiles with 1-tile padding
+            int minTx = 64, maxTx = 0, minTy = 64, maxTy = 0;
+            foreach (var (tx, ty) in existingTiles)
+            {
+                if (tx < minTx) minTx = tx;
+                if (tx > maxTx) maxTx = tx;
+                if (ty < minTy) minTy = ty;
+                if (ty > maxTy) maxTy = ty;
+            }
+            // Add 1-tile padding, clamp to 0..63
+            minTx = Math.Max(0, minTx - 1);
+            maxTx = Math.Min(63, maxTx + 1);
+            minTy = Math.Max(0, minTy - 1);
+            maxTy = Math.Min(63, maxTy + 1);
+            int spanTx = Math.Max(maxTx - minTx + 1, 1);
+            int spanTy = Math.Max(maxTy - minTy + 1, 1);
+            int span = Math.Max(spanTx, spanTy); // Keep square aspect
+            float cellSize = mapSize / span;
 
             // Background
             drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF1A1A1A);
@@ -1064,8 +1160,8 @@ public class ViewerApp : IDisposable
             // Minimap: screen X = tileY (east-west), screen Y = tileX (north-south)
             foreach (var (tx, ty) in existingTiles)
             {
-                float x = cursorPos.X + ty * cellSize;
-                float y = cursorPos.Y + tx * cellSize;
+                float x = cursorPos.X + (ty - minTy) * cellSize;
+                float y = cursorPos.Y + (tx - minTx) * cellSize;
 
                 bool loaded = isTileLoaded(tx, ty);
                 uint color = loaded ? 0xFF00AA00 : 0xFF004400;
@@ -1075,16 +1171,19 @@ public class ViewerApp : IDisposable
             // Camera position
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
             float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-            float camScreenX = cursorPos.X + camTileY * cellSize;
-            float camScreenY = cursorPos.Y + camTileX * cellSize;
+            float camScreenX = cursorPos.X + (camTileY - minTy) * cellSize;
+            float camScreenY = cursorPos.Y + (camTileX - minTx) * cellSize;
 
-            // Camera direction indicator
+            // Camera direction indicator — scale with minimap size
             float yawRad = _camera.Yaw * MathF.PI / 180f;
-            float dirLen = 8f;
+            float dirLen = mapSize * 0.08f;       // 8% of minimap size
+            float dotRadius = mapSize * 0.02f;    // 2% of minimap size
+            // In tile space, forward = (-cosYaw, -sinYaw) because MapOrigin-X inverts.
+            // On screen, screenX=tileY, screenY=tileX, so:
             float dirX = camScreenX - MathF.Sin(yawRad) * dirLen;
-            float dirY = camScreenY + MathF.Cos(yawRad) * dirLen;
-            drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, 2f);
-            drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), 3f, 0xFFFFFFFF);
+            float dirY = camScreenY - MathF.Cos(yawRad) * dirLen;
+            drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, MathF.Max(2f, mapSize * 0.012f));
+            drawList.AddCircleFilled(new Vector2(camScreenX, camScreenY), MathF.Max(3f, dotRadius), 0xFFFFFFFF);
 
             // POI markers (WorldScene only)
             if (_worldScene?.PoiLoader != null && _worldScene.ShowPoi)
@@ -1093,8 +1192,8 @@ public class ViewerApp : IDisposable
                 {
                     float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / WoWConstants.ChunkSize;
                     float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / WoWConstants.ChunkSize;
-                    float px = cursorPos.X + poiTileY * cellSize;
-                    float py = cursorPos.Y + poiTileX * cellSize;
+                    float px = cursorPos.X + (poiTileY - minTy) * cellSize;
+                    float py = cursorPos.Y + (poiTileX - minTx) * cellSize;
                     if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
                         drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF);
                 }
@@ -1107,8 +1206,8 @@ public class ViewerApp : IDisposable
             if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
-                float clickTileY = (mousePos.X - cursorPos.X) / cellSize;
-                float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize;
+                float clickTileY = (mousePos.X - cursorPos.X) / cellSize + minTy;
+                float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + minTx;
                 if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
                 {
                     float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
@@ -1493,10 +1592,41 @@ public class ViewerApp : IDisposable
 
         try
         {
-            _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver,
-                onStatus: status => _statusMessage = status);
+            // Detect Alpha WDT vs Standard WDT by file size.
+            // Alpha WDTs are monolithic files containing all embedded ADTs (typically ≥64KB).
+            // Standard WDTs are small files (~33KB MAIN chunk) pointing to separate .adt files.
+            long fileSize = new FileInfo(wdtPath).Length;
+            bool isAlpha = fileSize >= 65536;
+            string wdtType;
+
+            if (isAlpha)
+            {
+                // Alpha WDT: monolithic file with embedded ADTs
+                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver,
+                    onStatus: status => _statusMessage = status);
+                wdtType = "Alpha WDT";
+            }
+            else
+            {
+                // Standard WDT: small file referencing separate ADT files via IDataSource (MPQ)
+                if (_dataSource == null)
+                {
+                    _statusMessage = "Standard WDT requires an MPQ data source. Open a game folder first.";
+                    _modelInfo = "Standard WDT detected but no data source loaded.\n\nUse File > Open Game Folder to load MPQ archives first,\nthen open the WDT from the file browser.";
+                    return;
+                }
+
+                var wdtBytes = File.ReadAllBytes(wdtPath);
+                string mapName = Path.GetFileNameWithoutExtension(wdtPath);
+                var adapter = new Terrain.StandardTerrainAdapter(wdtBytes, mapName, _dataSource);
+                var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
+                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver,
+                    onStatus: status => _statusMessage = status);
+                wdtType = "Standard WDT";
+            }
+
             _terrainManager = _worldScene.Terrain;
-            _renderer = _worldScene; // WorldScene implements ISceneRenderer
+            _renderer = _worldScene;
 
             // Load AreaPOI from DBC if available
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
@@ -1509,7 +1639,7 @@ public class ViewerApp : IDisposable
             _camera.Pitch = -20f;
 
             int poiCount = _worldScene.PoiLoader?.Entries.Count ?? 0;
-            _modelInfo = $"Type: Alpha WDT World\n" +
+            _modelInfo = $"Type: {wdtType} World\n" +
                          $"Map: {_terrainManager.MapName}\n\n" +
                          $"Tiles: {_terrainManager.LoadedTileCount}\n" +
                          $"Chunks: {_terrainManager.LoadedChunkCount}\n\n" +

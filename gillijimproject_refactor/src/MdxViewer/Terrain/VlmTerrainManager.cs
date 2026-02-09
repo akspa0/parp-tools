@@ -16,6 +16,7 @@ public class VlmTerrainManager : ISceneRenderer
     private readonly VlmProjectLoader _loader;
     private readonly TerrainMeshBuilder _meshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
+    private readonly LiquidRenderer _liquidRenderer;
 
     // Loaded tiles: (tileX, tileY) → list of chunk meshes
     private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
@@ -44,6 +45,7 @@ public class VlmTerrainManager : ISceneRenderer
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
+    public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
 
@@ -52,7 +54,9 @@ public class VlmTerrainManager : ISceneRenderer
         _gl = gl;
         _loader = new VlmProjectLoader(projectRoot);
         _meshBuilder = new TerrainMeshBuilder(gl);
-        _terrainRenderer = new TerrainRenderer(gl, null, new TerrainLighting());
+        _terrainRenderer = new TerrainRenderer(gl, null, new TerrainLighting(),
+            texturePathResolver: _loader.ResolveTexturePath);
+        _liquidRenderer = new LiquidRenderer(gl);
 
         FindInitialCameraPosition(out _cameraPos);
     }
@@ -96,6 +100,7 @@ public class VlmTerrainManager : ISceneRenderer
         {
             var meshes = _loadedTiles[key];
             _terrainRenderer.RemoveChunks(meshes);
+            _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
             foreach (var chunk in meshes)
                 chunk.Dispose();
             _loadedTiles.Remove(key);
@@ -156,6 +161,7 @@ public class VlmTerrainManager : ISceneRenderer
 
             _loadedTiles[(tx, ty)] = meshes;
             _terrainRenderer.AddChunks(meshes, _loader.TileTextures);
+            _liquidRenderer.AddChunks(result.Chunks);
             OnTileLoaded?.Invoke(tx, ty, result);
             uploaded++;
         }
@@ -189,12 +195,14 @@ public class VlmTerrainManager : ISceneRenderer
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
         _terrainRenderer.Render(view, proj, _cameraPos);
+        _liquidRenderer.Render(view, proj, _cameraPos, _terrainRenderer.Lighting, 0.016f);
     }
 
     public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)
     {
         _cameraPos = cameraPos;
         _terrainRenderer.Render(view, proj, cameraPos);
+        _liquidRenderer.Render(view, proj, cameraPos, _terrainRenderer.Lighting, 0.016f);
     }
 
     public void ToggleWireframe() => _terrainRenderer.ToggleWireframe();
@@ -215,6 +223,7 @@ public class VlmTerrainManager : ISceneRenderer
         _disposed = true;
         // Drain pending queue
         while (_pendingTiles.TryDequeue(out _)) { }
+        _liquidRenderer.Dispose();
         _terrainRenderer.Dispose();
         foreach (var meshes in _loadedTiles.Values)
             foreach (var mesh in meshes)

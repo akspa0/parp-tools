@@ -1,5 +1,6 @@
 using System.Numerics;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -84,12 +85,32 @@ public class WorldScene : ISceneRenderer
         onStatus?.Invoke("Loading WDT...");
         _terrainManager = new TerrainManager(gl, wdtPath, dataSource);
 
+        InitFromAdapter(onStatus);
+    }
+
+    /// <summary>
+    /// Create a WorldScene with a pre-built TerrainManager (for Standard WDT, etc.).
+    /// </summary>
+    public WorldScene(GL gl, TerrainManager terrainManager, IDataSource? dataSource,
+        ReplaceableTextureResolver? texResolver = null,
+        Action<string>? onStatus = null)
+    {
+        _gl = gl;
+        _assets = new WorldAssetManager(gl, dataSource, texResolver);
+        _bbRenderer = new BoundingBoxRenderer(gl);
+        _skyDome = new SkyDomeRenderer(gl);
+        _terrainManager = terrainManager;
+
+        InitFromAdapter(onStatus);
+    }
+
+    private void InitFromAdapter(Action<string>? onStatus)
+    {
         var adapter = _terrainManager.Adapter;
 
         // For WMO-only maps, pre-load the WDT-level placements + models
         if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
         {
-            // WMO-only: placements come from WDT header, load upfront
             var manifest = _assets.BuildManifest(
                 adapter.MdxModelNames, adapter.WmoModelNames,
                 adapter.MddfPlacements, adapter.ModfPlacements);
@@ -101,10 +122,9 @@ public class WorldScene : ISceneRenderer
             var bbExtent = p.BoundsMax - p.BoundsMin;
             float dist = MathF.Max(bbExtent.Length() * 0.5f, 100f);
             _wmoCameraOverride = bbCenter + new Vector3(dist, 0, bbExtent.Z * 0.3f);
-            Console.WriteLine($"[WorldScene] WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
         }
 
-        // Subscribe to tile load/unload events for lazy object loading
         _terrainManager.OnTileLoaded += OnTileLoaded;
         _terrainManager.OnTileUnloaded += OnTileUnloaded;
 
@@ -115,7 +135,7 @@ public class WorldScene : ISceneRenderer
     /// <summary>For WMO-only maps, returns the WMO position as camera start. Otherwise null.</summary>
     public Vector3? WmoCameraOverride => _wmoCameraOverride;
 
-    private void BuildInstances(AlphaTerrainAdapter adapter)
+    private void BuildInstances(ITerrainAdapter adapter)
     {
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
@@ -123,12 +143,11 @@ public class WorldScene : ISceneRenderer
         // Placement transform for Alpha WDT terrain maps.
         // Positions are already converted to renderer coords in AlphaTerrainAdapter:
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
-        // This swaps X↔Y and negates both, changing coordinate handedness.
-        //
-        // Mirror X corrects the left-right flip from the coordinate swap.
-        // Model geometry vertices stay in WoW local space; the mirror matrix
-        // converts them to renderer space after rotation.
-        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+        // The coordinate swap changes handedness. To correct the resulting mirror,
+        // we negate one geometry axis. Scale(1,-1,1) flips the local Y axis of the
+        // model geometry, which corrects the left-right mirror caused by the
+        // X↔Y swap in the position conversion.
+        var coordFix = Matrix4x4.CreateScale(1f, -1f, 1f);
 
         // MDX (doodad) placements
         foreach (var p in adapter.MddfPlacements)
@@ -148,7 +167,7 @@ public class WorldScene : ISceneRenderer
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
             var transform = pivotCorrection
-                * mirrorX
+                * coordFix
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -184,7 +203,7 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
+            var transform = coordFix
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -218,12 +237,12 @@ public class WorldScene : ISceneRenderer
             });
         }
 
-        Console.WriteLine($"[WorldScene] Instances: {_mdxInstances.Count} MDX, {_wmoInstances.Count} WMO");
-        Console.WriteLine($"[WorldScene] Unique models: {UniqueMdxModels} MDX, {UniqueWmoModels} WMO");
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"Instances: {_mdxInstances.Count} MDX, {_wmoInstances.Count} WMO");
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"Unique models: {UniqueMdxModels} MDX, {UniqueWmoModels} WMO");
 
         // Diagnostic: terrain chunk WorldPosition range
         var camPos = _terrainManager.GetInitialCameraPosition();
-        Console.WriteLine($"[WorldScene] Camera: ({camPos.X:F1}, {camPos.Y:F1}, {camPos.Z:F1})");
+        ViewerLog.Info(ViewerLog.Category.Terrain, $"Camera: ({camPos.X:F1}, {camPos.Y:F1}, {camPos.Z:F1})");
 
         // Compute terrain bounding box from chunk WorldPositions
         float tMinX = float.MaxValue, tMinY = float.MaxValue, tMinZ = float.MaxValue;
@@ -234,7 +253,7 @@ public class WorldScene : ISceneRenderer
             tMinY = Math.Min(tMinY, chunk.Y); tMaxY = Math.Max(tMaxY, chunk.Y);
             tMinZ = Math.Min(tMinZ, chunk.Z); tMaxZ = Math.Max(tMaxZ, chunk.Z);
         }
-        Console.WriteLine($"[WorldScene] TERRAIN  X:[{tMinX:F1} .. {tMaxX:F1}]  Y:[{tMinY:F1} .. {tMaxY:F1}]  Z:[{tMinZ:F1} .. {tMaxZ:F1}]");
+        ViewerLog.Info(ViewerLog.Category.Terrain, $"TERRAIN  X:[{tMinX:F1} .. {tMaxX:F1}]  Y:[{tMinY:F1} .. {tMaxY:F1}]  Z:[{tMinZ:F1} .. {tMaxZ:F1}]");
 
         // Compute object bounding box (from stored positions, which are already transformed)
         float oMinX = float.MaxValue, oMinY = float.MaxValue, oMinZ = float.MaxValue;
@@ -251,21 +270,21 @@ public class WorldScene : ISceneRenderer
             oMinY = Math.Min(oMinY, p.Position.Y); oMaxY = Math.Max(oMaxY, p.Position.Y);
             oMinZ = Math.Min(oMinZ, p.Position.Z); oMaxZ = Math.Max(oMaxZ, p.Position.Z);
         }
-        Console.WriteLine($"[WorldScene] OBJECTS  X:[{oMinX:F1} .. {oMaxX:F1}]  Y:[{oMinY:F1} .. {oMaxY:F1}]  Z:[{oMinZ:F1} .. {oMaxZ:F1}]");
-        Console.WriteLine($"[WorldScene] DELTA    X:{(tMinX+tMaxX)/2 - (oMinX+oMaxX)/2:F1}  Y:{(tMinY+tMaxY)/2 - (oMinY+oMaxY)/2:F1}  Z:{(tMinZ+tMaxZ)/2 - (oMinZ+oMaxZ)/2:F1}");
+        ViewerLog.Info(ViewerLog.Category.Terrain, $"OBJECTS  X:[{oMinX:F1} .. {oMaxX:F1}]  Y:[{oMinY:F1} .. {oMaxY:F1}]  Z:[{oMinZ:F1} .. {oMaxZ:F1}]");
+        ViewerLog.Info(ViewerLog.Category.Terrain, $"DELTA    X:{(tMinX+tMaxX)/2 - (oMinX+oMaxX)/2:F1}  Y:{(tMinY+tMaxY)/2 - (oMinY+oMaxY)/2:F1}  Z:{(tMinZ+tMaxZ)/2 - (oMinZ+oMaxZ)/2:F1}");
 
         // Print first 3 MDDF raw values for manual inspection
         for (int i = 0; i < Math.Min(3, adapter.MddfPlacements.Count); i++)
         {
             var p = adapter.MddfPlacements[i];
             string name = p.NameIndex < mdxNames.Count ? Path.GetFileName(mdxNames[p.NameIndex]) : "?";
-            Console.WriteLine($"[WorldScene]   MDDF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  MDDF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
         }
         for (int i = 0; i < Math.Min(3, adapter.ModfPlacements.Count); i++)
         {
             var p = adapter.ModfPlacements[i];
             string name = p.NameIndex < wmoNames.Count ? Path.GetFileName(wmoNames[p.NameIndex]) : "?";
-            Console.WriteLine($"[WorldScene]   MODF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  MODF[{i}] pos=({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1}) model={name}");
         }
     }
 
@@ -279,8 +298,8 @@ public class WorldScene : ISceneRenderer
         var mdxNames = adapter.MdxModelNames;
         var wmoNames = adapter.WmoModelNames;
 
-        // Mirror X corrects left-right flip from coordinate swap (same as BuildInstances)
-        var mirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+        // Handedness correction (same as BuildInstances)
+        var coordFix = Matrix4x4.CreateScale(1f, -1f, 1f);
 
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
@@ -300,7 +319,7 @@ public class WorldScene : ISceneRenderer
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
             var transform = pivotCorrection
-                * mirrorX
+                * coordFix
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -324,7 +343,7 @@ public class WorldScene : ISceneRenderer
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
-            var transform = mirrorX
+            var transform = coordFix
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
@@ -359,7 +378,7 @@ public class WorldScene : ISceneRenderer
         _instancesDirty = true;
 
         if (tileMdx.Count > 0 || tileWmo.Count > 0)
-            Console.WriteLine($"[WorldScene] Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileWmo.Count} WMO instances");
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileWmo.Count} WMO instances");
     }
 
     /// <summary>
@@ -447,15 +466,15 @@ public class WorldScene : ISceneRenderer
             foreach (var inst in _wmoInstances)
             {
                 if (_assets.GetWmo(inst.ModelKey) != null) wmoFound++;
-                else { wmoMissing++; if (wmoMissing <= 3) Console.WriteLine($"[WorldScene] WMO NOT FOUND: \"{inst.ModelKey}\""); }
+                else { wmoMissing++; if (wmoMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Wmo, $"NOT FOUND: \"{inst.ModelKey}\""); }
             }
             int mdxFound = 0, mdxMissing = 0;
             foreach (var inst in _mdxInstances)
             {
                 if (_assets.GetMdx(inst.ModelKey) != null) mdxFound++;
-                else { mdxMissing++; if (mdxMissing <= 3) Console.WriteLine($"[WorldScene] MDX NOT FOUND: \"{inst.ModelKey}\""); }
+                else { mdxMissing++; if (mdxMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Mdx, $"NOT FOUND: \"{inst.ModelKey}\""); }
             }
-            Console.WriteLine($"[WorldScene] Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
         }
 
         // Extract camera position from view matrix (inverse of view translation)
@@ -483,7 +502,7 @@ public class WorldScene : ISceneRenderer
                 renderer.RenderWithTransform(inst.Transform, view, proj);
                 wmoRendered++;
             }
-            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] WMO render loop: {wmoRendered} rendered");
+            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render loop: {wmoRendered} rendered");
         }
 
         // 3a. MDX opaque pass
@@ -499,7 +518,7 @@ public class WorldScene : ISceneRenderer
                 renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque);
                 mdxRendered++;
             }
-            if (!_renderDiagPrinted) Console.WriteLine($"[WorldScene] MDX opaque pass: {mdxRendered} rendered");
+            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque pass: {mdxRendered} rendered");
         }
 
         // ── PASS 2: TRANSPARENT (back-to-front) ────────────────────────
@@ -552,7 +571,7 @@ public class WorldScene : ISceneRenderer
 
             var adapter = _terrainManager.Adapter;
             if (!_renderDiagPrinted)
-                Console.WriteLine($"[WorldScene] BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
             // MDDF bounding boxes (yellow)
             foreach (var inst in _mdxInstances)
                 _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));

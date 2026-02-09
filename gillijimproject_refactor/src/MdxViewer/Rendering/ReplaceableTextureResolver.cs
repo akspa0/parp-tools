@@ -1,5 +1,6 @@
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Logging;
 
 namespace MdxViewer.Rendering;
 
@@ -69,11 +70,11 @@ public class ReplaceableTextureResolver
             TryLoadItemDisplayInfo(dbcd, build);
             _loaded = true;
 
-            Console.WriteLine($"[TexResolver] === DBC Texture Resolution Summary (build {build}) ===");
-            Console.WriteLine($"[TexResolver]   CreatureModelData:          {_modelPathToId.Count} model paths");
-            Console.WriteLine($"[TexResolver]   CreatureDisplayInfo:        {_displayVariations.Values.Sum(v => v.Count)} display entries for {_displayVariations.Count} unique models");
-            Console.WriteLine($"[TexResolver]   CreatureDisplayInfoExtra:   {_extraDisplayInfo.Count} entries");
-            Console.WriteLine($"[TexResolver]   ItemDisplayInfo:            {_itemDisplayInfo.Count} entries");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"=== DBC Texture Resolution Summary (build {build}) ===");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureModelData:          {_modelPathToId.Count} model paths");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureDisplayInfo:        {_displayVariations.Values.Sum(v => v.Count)} display entries for {_displayVariations.Count} unique models");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureDisplayInfoExtra:   {_extraDisplayInfo.Count} entries");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  ItemDisplayInfo:            {_itemDisplayInfo.Count} entries");
 
             // Log first few TextureVariation samples for debugging
             int sampleCount = 0;
@@ -86,7 +87,7 @@ public class ReplaceableTextureResolver
                     var nonEmpty = vars.Where(s => !string.IsNullOrEmpty(s)).ToArray();
                     if (nonEmpty.Length > 0)
                     {
-                        Console.WriteLine($"[TexResolver]   Sample: ModelID={kvp.Key} ({Path.GetFileName(modelPath)}) → [{string.Join(", ", nonEmpty)}]");
+                        ViewerLog.Debug(ViewerLog.Category.Dbc, $"  Sample: ModelID={kvp.Key} ({Path.GetFileName(modelPath)}) -> [{string.Join(", ", nonEmpty)}]");
                         sampleCount++;
                         break;
                     }
@@ -95,7 +96,7 @@ public class ReplaceableTextureResolver
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TexResolver] Failed to load DBCs: {ex.Message}\n{ex.StackTrace}");
+            ViewerLog.Error(ViewerLog.Category.Dbc, $"Failed to load DBCs: {ex.Message}");
         }
     }
 
@@ -124,7 +125,7 @@ public class ReplaceableTextureResolver
 
             count++;
         }
-        Console.WriteLine($"[TexResolver] CreatureModelData: {count} entries loaded");
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CreatureModelData: {count} entries loaded");
     }
 
     private void LoadCreatureDisplayInfo(DBCD.DBCD dbcd, string build)
@@ -156,14 +157,14 @@ public class ReplaceableTextureResolver
                 withTextures++;
             count++;
         }
-        Console.WriteLine($"[TexResolver] CreatureDisplayInfo: {count} entries, {withTextures} with textures");
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CreatureDisplayInfo: {count} entries, {withTextures} with textures");
     }
 
     private void TryLoadCreatureDisplayInfoExtra(DBCD.DBCD dbcd, string build)
     {
         IDBCDStorage? storage;
         try { storage = LoadDbc(dbcd, "CreatureDisplayInfoExtra", build); }
-        catch { Console.WriteLine("[TexResolver] CreatureDisplayInfoExtra: not available"); return; }
+        catch { ViewerLog.Info(ViewerLog.Category.Dbc, "CreatureDisplayInfoExtra: not available"); return; }
 
         int count = 0;
         foreach (var key in storage.Keys)
@@ -186,14 +187,14 @@ public class ReplaceableTextureResolver
             _extraDisplayInfo[id] = new ExtraDisplayData(bakeName, itemIds.ToArray());
             count++;
         }
-        Console.WriteLine($"[TexResolver] CreatureDisplayInfoExtra: {count} entries loaded");
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CreatureDisplayInfoExtra: {count} entries loaded");
     }
 
     private void TryLoadItemDisplayInfo(DBCD.DBCD dbcd, string build)
     {
         IDBCDStorage? storage;
         try { storage = LoadDbc(dbcd, "ItemDisplayInfo", build); }
-        catch { Console.WriteLine("[TexResolver] ItemDisplayInfo: not available"); return; }
+        catch { ViewerLog.Info(ViewerLog.Category.Dbc, "ItemDisplayInfo: not available"); return; }
 
         int count = 0;
         foreach (var key in storage.Keys)
@@ -211,7 +212,7 @@ public class ReplaceableTextureResolver
             _itemDisplayInfo[id] = new ItemDisplayData(modelNames, modelTextures, textures);
             count++;
         }
-        Console.WriteLine($"[TexResolver] ItemDisplayInfo: {count} entries loaded");
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"ItemDisplayInfo: {count} entries loaded");
     }
 
     /// <summary>
@@ -221,14 +222,14 @@ public class ReplaceableTextureResolver
     {
         if (!_loaded)
         {
-            Console.WriteLine($"[TexResolver] Resolve called but not loaded! model={modelPath} replId={replaceableId}");
+            ViewerLog.Debug(ViewerLog.Category.Dbc, $"Resolve called but not loaded! model={modelPath} replId={replaceableId}");
             return null;
         }
 
         int modelId = FindModelId(modelPath);
         if (modelId == 0)
         {
-            Console.WriteLine($"[TexResolver] No ModelID for: {modelPath}");
+            ViewerLog.Debug(ViewerLog.Category.Dbc, $"No ModelID for: {modelPath}");
             return null;
         }
 
@@ -244,7 +245,7 @@ public class ReplaceableTextureResolver
         result = ResolveFromItemDisplay(modelId, replaceableId);
         if (result != null) return result;
 
-        Console.WriteLine($"[TexResolver] Unresolved: ModelID={modelId} replId={replaceableId} ({Path.GetFileName(modelPath)})");
+        ViewerLog.Debug(ViewerLog.Category.Dbc, $"Unresolved: ModelID={modelId} replId={replaceableId} ({Path.GetFileName(modelPath)})");
         return null;
     }
 

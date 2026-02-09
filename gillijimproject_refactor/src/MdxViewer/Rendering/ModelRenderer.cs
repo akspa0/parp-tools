@@ -1,6 +1,7 @@
 using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 
@@ -57,15 +58,15 @@ public class MdxRenderer : ISceneRenderer
         LoadTextures();
 
         // Log material→texture mapping for debugging
-        Console.WriteLine($"[MdxRenderer] Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}");
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}");
         
         // Log geoset animation info
         if (_mdx.GeosetAnimations.Count > 0)
         {
-            Console.WriteLine("[MdxRenderer] Geoset Animations:");
+            ViewerLog.Debug(ViewerLog.Category.Mdx, "Geoset Animations:");
             foreach (var anim in _mdx.GeosetAnimations)
             {
-                Console.WriteLine($"  Geoset {anim.GeosetId}: AlphaKeys={anim.AlphaKeys.Count}, ColorKeys={anim.ColorKeys.Count}, DefaultAlpha={anim.DefaultAlpha:F3}");
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Geoset {anim.GeosetId}: AlphaKeys={anim.AlphaKeys.Count}, ColorKeys={anim.ColorKeys.Count}, DefaultAlpha={anim.DefaultAlpha:F3}");
             }
         }
         
@@ -87,7 +88,7 @@ public class MdxRenderer : ISceneRenderer
                     layerInfo += $" L{l}:[blend={layer.BlendMode} {texInfo}]";
                 }
             }
-            Console.WriteLine($"[MdxRenderer]   Geoset[{i}]: {layerInfo} ({g.Vertices.Count}v)");
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Geoset[{i}]: {layerInfo} ({g.Vertices.Count}v)");
         }
     }
 
@@ -445,7 +446,7 @@ void main() {
     private void LoadTextures()
     {
         string modelName = _modelVirtualPath != null ? Path.GetFileName(_modelVirtualPath) : "?";
-        Console.WriteLine($"[MdxRenderer] Loading {_mdx.Textures.Count} textures for {modelName}...");
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"Loading {_mdx.Textures.Count} textures for {modelName}...");
         int loaded = 0, failed = 0, replaceableResolved = 0, replaceableFailed = 0;
 
         for (int i = 0; i < _mdx.Textures.Count; i++)
@@ -459,19 +460,19 @@ void main() {
                 texPath = ResolveReplaceableTexture(tex.ReplaceableId);
                 if (texPath != null)
                 {
-                    Console.WriteLine($"[MdxRenderer] Texture[{i}]: Replaceable #{tex.ReplaceableId} → {texPath}");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} -> {texPath}");
                     replaceableResolved++;
                 }
                 else
                 {
-                    Console.WriteLine($"[MdxRenderer] Texture[{i}]: Replaceable #{tex.ReplaceableId} (unresolved)");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} (unresolved)");
                     replaceableFailed++;
                 }
             }
 
             if (string.IsNullOrEmpty(texPath))
             {
-                Console.WriteLine($"[MdxRenderer] Texture[{i}]: empty path, replaceableId={tex.ReplaceableId}");
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: empty path, replaceableId={tex.ReplaceableId}");
                 failed++;
                 continue;
             }
@@ -620,12 +621,12 @@ void main() {
                     if (glTex != 0)
                     {
                         _textures[i] = glTex;
-                        Console.WriteLine($"[MdxRenderer] Texture[{i}]: {pngName} (PNG) - loaded");
+                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - loaded");
                         loaded++;
                     }
                     else
                     {
-                        Console.WriteLine($"[MdxRenderer] Texture[{i}]: {pngName} (PNG) - failed to load");
+                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - failed to load");
                         failed++;
                     }
                     continue;
@@ -641,23 +642,23 @@ void main() {
                 if (glTex != 0)
                 {
                     _textures[i] = glTex;
-                    Console.WriteLine($"[MdxRenderer] Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}){(clamp ? " [clamped]" : "")}");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}){(clamp ? " [clamped]" : "")}");
                     loaded++;
                 }
                 else
                 {
-                    Console.WriteLine($"[MdxRenderer] Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}) - failed to decode");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}) - failed to decode");
                     failed++;
                 }
             }
             else
             {
-                Console.WriteLine($"[MdxRenderer] Texture[{i}]: not found ({texPath})");
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: not found ({texPath})");
                 failed++;
             }
         }
 
-        Console.WriteLine($"[MdxRenderer] Texture loading summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
     }
 
     private string? ResolveReplaceableTexture(uint replaceableId)
@@ -696,7 +697,7 @@ void main() {
                     var found = mpqDS.FindInFileSet(candidate);
                     if (found != null)
                     {
-                        Console.WriteLine($"[MdxRenderer] Replaceable #{replaceableId} resolved via naming convention: {found}");
+                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Replaceable #{replaceableId} resolved via naming convention: {found}");
                         return found;
                     }
                 }
@@ -724,7 +725,7 @@ void main() {
                     if (replaceableId == 2 && isLeaf) { best = c; break; }
                 }
                 if (best == null) best = candidates[0]; // Fallback to first match
-                Console.WriteLine($"[MdxRenderer] Replaceable #{replaceableId} resolved via directory scan: {best}");
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Replaceable #{replaceableId} resolved via directory scan: {best}");
                 return best;
             }
         }
