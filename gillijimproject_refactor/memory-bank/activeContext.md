@@ -21,7 +21,7 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Alpha WDT terrain | ✅ | Monolithic format, 256 MCNK chunks per tile |
-| Standard WDT+ADT (3.3.5) | ✅ | Split ADT files from MPQ/IDataSource |
+| Standard WDT+ADT (3.3.5) | NO | Split ADT files from MPQ/IDataSource |
 | WMO v14 rendering | ✅ | 4-pass: opaque/doodads/liquids/transparent |
 | WMO liquid (MLIQ) | ✅ | Type detection, positioning, tile visibility |
 | WMO doodad loading | ✅ | Case-insensitive MPQ + mdx/mdl swap |

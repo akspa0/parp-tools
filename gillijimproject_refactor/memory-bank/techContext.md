@@ -19,11 +19,24 @@
 
 ## Critical Files
 
+### MdxViewer (3D World Viewer)
+- `src/MdxViewer/Rendering/ModelRenderer.cs` — MDX GPU rendering (two-pass, blend modes)
+- `src/MdxViewer/Rendering/WmoRenderer.cs` — WMO GPU rendering (4-pass, liquid, doodads)
+- `src/MdxViewer/Terrain/WorldScene.cs` — Placement transforms, instance management
+- `src/MdxViewer/Terrain/WorldAssetManager.cs` — MDX/WMO asset loading + caching
+- `src/WoWMapConverter/WoWMapConverter.Core/Converters/WmoV14ToV17Converter.cs` — WMO parser
+- `src/MdxViewer/DataSources/MpqDataSource.cs` — MPQ reading + FindInFileSet
+
 ### MDX Archaeology
 - `src/MDX-L_Tool/Formats/Mdx/MdxFile.cs` — Chunk scanner & padding handler
 - `src/MDX-L_Tool/Services/DbcService.cs` — DBC variation and skin lookup
 - `src/MDX-L_Tool/Services/TextureService.cs` — Integrated resolution pipeline
 - `src/MDX-L_Tool/Formats/Obj/ObjWriter.cs` — Multi-body OBJ export logic
+
+### Reference Implementations (in lib/)
+- `lib/noggit-red/src/noggit/rendering/ModelRender.cpp` — Noggit M2 blend modes, render passes
+- `lib/wow-mdx-viewer/src/renderer/model/modelRenderer.ts` — Barncastle MDX FilterMode/blend
+- `lib/wow-mdx-viewer/src/renderer/model/particles.ts` — Barncastle particle system
 
 ### ADT Merge/Generation
 - `WoWRollback.PM4Module/AdtPatcher.cs` — ✅ Single source of truth for merging
