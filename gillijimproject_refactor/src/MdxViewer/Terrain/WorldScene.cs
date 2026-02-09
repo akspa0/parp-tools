@@ -143,8 +143,9 @@ public class WorldScene : ISceneRenderer
         // Placement transform for terrain maps.
         // Positions are already converted to renderer coords in AlphaTerrainAdapter:
         //   rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
-        // X negation is baked into vertex data at upload time (WmoRenderer/ModelRenderer),
-        // so placement transforms use identity — just scale, rotation, translation.
+        // Triangle winding is reversed at upload (CW→CCW for OpenGL), which flips the
+        // model's facing direction by 180°. Compensate with a 180° Z rotation.
+        var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
         bool wmoBased = adapter.IsWmoBased;
 
         // MDX (doodad) placements
@@ -165,6 +166,7 @@ public class WorldScene : ISceneRenderer
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
             var transform = pivotCorrection
+                * rot180Z
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -201,7 +203,8 @@ public class WorldScene : ISceneRenderer
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
-            var transform = Matrix4x4.CreateRotationX(rx)
+            var transform = rot180Z
+                * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
@@ -312,8 +315,10 @@ public class WorldScene : ISceneRenderer
             if (_assets.TryGetMdxPivotOffset(key, out var pivot))
                 pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
 
-            // X negation baked into vertex data — placement is just scale/rot/translate
+            // 180° Z rotation compensates for winding reversal (CW→CCW)
+            var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
             var transform = pivotCorrection
+                * rot180Z
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -338,8 +343,10 @@ public class WorldScene : ISceneRenderer
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
-            // X negation baked into vertex data — placement is just rot/translate
-            var transform = Matrix4x4.CreateRotationX(rx)
+            // 180° Z rotation compensates for winding reversal (CW→CCW)
+            var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
+            var transform = rot180Z
+                * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
