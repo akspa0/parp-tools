@@ -26,6 +26,7 @@ public class LoadingScreen : IDisposable
     private uint _bgTexture;
     private uint _borderTexture;
     private uint _fillTexture;
+    private uint _blackTexture;
     private uint _vao;
     private uint _vbo;
     private uint _shader;
@@ -33,15 +34,16 @@ public class LoadingScreen : IDisposable
     private bool _active;
     private bool _disposed;
 
-    // Progress bar position/size in normalized coords (0-1).
-    // Centered horizontally, near bottom of screen.
-    private const float BarX = 0.2f;
-    private const float BarY = 0.12f;
-    private const float BarW = 0.6f;
-    private const float BarH = 0.035f;
+    // Progress bar position/size in normalized coords relative to the 4:3 content area.
+    // Based on the Alpha client's LoadingBar placement: centered horizontally, near bottom.
+    // The original 800x600 client places the bar at roughly y=72px from bottom, 480px wide, 20px tall.
+    private const float BarRelX = 0.20f;   // 160/800
+    private const float BarRelY = 0.10f;   // ~60/600 from bottom
+    private const float BarRelW = 0.60f;   // 480/800
+    private const float BarRelH = 0.033f;  // 20/600
 
     // Border is slightly larger than fill
-    private const float BorderPad = 0.008f;
+    private const float BorderPad = 0.006f;
 
     public bool IsActive => _active;
     public float Progress => _progress;
@@ -98,13 +100,15 @@ public class LoadingScreen : IDisposable
         if (_bgTexture != 0) { _gl.DeleteTexture(_bgTexture); _bgTexture = 0; }
         if (_borderTexture != 0) { _gl.DeleteTexture(_borderTexture); _borderTexture = 0; }
         if (_fillTexture != 0) { _gl.DeleteTexture(_fillTexture); _fillTexture = 0; }
+        if (_blackTexture != 0) { _gl.DeleteTexture(_blackTexture); _blackTexture = 0; }
     }
 
     /// <summary>
-    /// Render the loading screen. Call this then swap buffers.
-    /// Renders in orthographic projection (0,0)-(1,1).
+    /// Render the loading screen with 4:3 letterboxing.
+    /// The background is displayed at 4:3 aspect ratio, centered in the viewport
+    /// with black bars on the sides for widescreen displays.
     /// </summary>
-    public unsafe void Render()
+    public unsafe void Render(int viewportW = 0, int viewportH = 0)
     {
         if (!_active) return;
 
@@ -117,19 +121,55 @@ public class LoadingScreen : IDisposable
         _gl.UseProgram(_shader);
         _gl.BindVertexArray(_vao);
 
-        // 1. Background (fullscreen)
-        if (_bgTexture != 0)
-            DrawQuad(_bgTexture, 0f, 0f, 1f, 1f);
+        // Compute 4:3 letterbox region in normalized [0,1] coords.
+        // If the viewport is wider than 4:3, we get pillarboxing (black bars on sides).
+        // If narrower, we get letterboxing (black bars top/bottom).
+        const float targetAspect = 4f / 3f;
+        float vpAspect = viewportW > 0 && viewportH > 0
+            ? (float)viewportW / viewportH
+            : targetAspect; // default to 4:3 if unknown
 
-        // 2. Progress bar border
+        float contentX, contentY, contentW, contentH;
+        if (vpAspect > targetAspect)
+        {
+            // Wider than 4:3 — pillarbox (black bars on sides)
+            contentH = 1f;
+            contentW = targetAspect / vpAspect;
+            contentX = (1f - contentW) * 0.5f;
+            contentY = 0f;
+        }
+        else
+        {
+            // Taller than 4:3 — letterbox (black bars top/bottom)
+            contentW = 1f;
+            contentH = vpAspect / targetAspect;
+            contentX = 0f;
+            contentY = (1f - contentH) * 0.5f;
+        }
+
+        // 0. Black background (fullscreen) — clears any area outside the 4:3 region
+        DrawColorQuad(0f, 0f, 1f, 1f, 0f, 0f, 0f, 1f);
+
+        // 1. Background image (within 4:3 region)
+        if (_bgTexture != 0)
+            DrawQuad(_bgTexture, contentX, contentY, contentW, contentH);
+
+        // 2. Progress bar border (positioned relative to 4:3 content area)
+        float barX = contentX + BarRelX * contentW;
+        float barY = contentY + BarRelY * contentH;
+        float barW = BarRelW * contentW;
+        float barH = BarRelH * contentH;
+        float borderPadX = BorderPad * contentW;
+        float borderPadY = BorderPad * contentH;
+
         if (_borderTexture != 0)
             DrawQuad(_borderTexture,
-                BarX - BorderPad, BarY - BorderPad,
-                BarW + BorderPad * 2, BarH + BorderPad * 2);
+                barX - borderPadX, barY - borderPadY,
+                barW + borderPadX * 2, barH + borderPadY * 2);
 
         // 3. Progress bar fill (width scaled by progress)
         if (_fillTexture != 0 && _progress > 0.001f)
-            DrawQuad(_fillTexture, BarX, BarY, BarW * _progress, BarH);
+            DrawQuad(_fillTexture, barX, barY, barW * _progress, barH);
 
         _gl.BindVertexArray(0);
         _gl.UseProgram(0);
@@ -162,6 +202,46 @@ public class LoadingScreen : IDisposable
         _gl.ActiveTexture(TextureUnit.Texture0);
         _gl.BindTexture(TextureTarget.Texture2D, texture);
 
+        _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
+    }
+
+    /// <summary>
+    /// Draw a solid-color quad (no texture). Used for black letterbox bars.
+    /// </summary>
+    private unsafe void DrawColorQuad(float x, float y, float w, float h, float r, float g, float b, float a)
+    {
+        float x0 = x * 2f - 1f;
+        float y0 = y * 2f - 1f;
+        float x1 = (x + w) * 2f - 1f;
+        float y1 = (y + h) * 2f - 1f;
+
+        float[] verts = {
+            x0, y0, 0f, 0f,
+            x1, y0, 0f, 0f,
+            x0, y1, 0f, 0f,
+            x1, y1, 0f, 0f,
+        };
+
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* ptr = verts)
+            _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, (nuint)(verts.Length * sizeof(float)), ptr);
+
+        // Bind a 1x1 black pixel texture (or just use the shader with a black texture)
+        // Simpler: create a tiny 1x1 texture on first use
+        if (_blackTexture == 0)
+        {
+            _blackTexture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, _blackTexture);
+            byte[] black = { 0, 0, 0, 255 };
+            fixed (byte* ptr = black)
+                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, 1, 1, 0,
+                    PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        }
+
+        _gl.ActiveTexture(TextureUnit.Texture0);
+        _gl.BindTexture(TextureTarget.Texture2D, _blackTexture);
         _gl.DrawArrays(PrimitiveType.TriangleStrip, 0, 4);
     }
 

@@ -162,6 +162,26 @@ Please provide:
 - The client was built with MSVC (likely VC6 or VC7)
 - There may be debug symbols or RTTI information that helps identify classes
 
+## New Hypothesis: File Path as Rendering Metadata
+
+Visual comparison between our renderer and the actual 0.5.3 client reveals:
+
+1. **Some MDX objects render correctly** (position, rotation, scale all match) while others from the same MDDF data are twisted/tilted
+2. **Plant/grass MDX objects** near waterways are far too opaque in our renderer — in the real client they appear as semi-transparent, fading grass
+3. **Bones/sticks** that should lean like `/` or `)` appear as `-` or `\` — a consistent ~90° rotation error on specific models
+
+**Hypothesis**: The MDX **file path** (directory structure) encodes rendering parameters that the client uses as a hidden metadata layer:
+- Models in certain directories (e.g. `World\NoDxt\Detail\`) may get special transparency/fade treatment
+- Models in certain directories may have different default orientation or winding
+- The client may apply path-based rules for: alpha blending mode, distance fade curve, billboard behavior, or model-space rotation correction
+
+**What to look for in Ghidra**:
+1. Does the client parse the MDX file path and branch on directory names?
+2. Is there a lookup table mapping path prefixes to rendering flags?
+3. Are there different code paths for "detail doodads" vs "structural doodads"?
+4. Does the MDDF `flags` field (uint16 at offset 0x22) control any of this?
+5. Is there a `CMapObjDef::GetRenderFlags()` or similar that derives behavior from the model path?
+
 ## Summary of the Mystery
 
 The core question is: **What transform does the 0.5.3 client apply between "raw MDX vertex in model space" and "final vertex in world space"?**

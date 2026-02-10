@@ -278,7 +278,8 @@ public class ViewerApp : IDisposable
                 // Update progress bar based on loaded vs expected tiles
                 if (_terrainManager != null && _terrainManager.LoadedTileCount > 0)
                     _loadingScreen.UpdateProgress(_terrainManager.LoadedTileCount, _terrainManager.LoadedTileCount + 10);
-                _loadingScreen.Render();
+                var sz = _window.Size;
+                _loadingScreen.Render(sz.X, sz.Y);
                 return;
             }
         }
@@ -2172,7 +2173,8 @@ public class ViewerApp : IDisposable
     {
         if (_loadingScreen == null || !_loadingScreen.IsActive) return;
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        _loadingScreen.Render();
+        var sz = _window.Size;
+        _loadingScreen.Render(sz.X, sz.Y);
         _window.GLContext?.SwapBuffers();
     }
 
@@ -2238,7 +2240,7 @@ public class ViewerApp : IDisposable
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
         _worldScene.SelectObjectByRay(rayOrigin, rayDir);
 
-        // Build info string from selection
+        // Build info string from the selected instance's embedded metadata
         var sel = _worldScene.SelectedInstance;
         if (sel.HasValue)
         {
@@ -2246,38 +2248,19 @@ public class ViewerApp : IDisposable
             string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
             int idx = _worldScene.SelectedObjectIndex;
 
-            // Find placement data for name/rotation info
-            if (_worldScene.SelectedObjectType == Terrain.ObjectType.Wmo && idx < _worldScene.ModfPlacements.Count)
-            {
-                var p = _worldScene.ModfPlacements[idx];
-                string name = p.NameIndex < _worldScene.WmoModelNames.Count
-                    ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
-                // Convert renderer coords to WoW world coords
-                float wowX = WoWConstants.MapOrigin - p.Position.Y;
-                float wowY = WoWConstants.MapOrigin - p.Position.X;
-                float wowZ = p.Position.Z;
-                _selectedObjectType = "WMO";
-                _selectedObjectInfo = $"WMO [{idx}] {name}\n" +
-                    $"Local: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
-                    $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
-                    $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
-                    $"Flags: 0x{p.Flags:X4}";
-            }
-            else if (_worldScene.SelectedObjectType == Terrain.ObjectType.Mdx && idx < _worldScene.MddfPlacements.Count)
-            {
-                var p = _worldScene.MddfPlacements[idx];
-                string name = p.NameIndex < _worldScene.MdxModelNames.Count
-                    ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
-                float wowX = WoWConstants.MapOrigin - p.Position.Y;
-                float wowY = WoWConstants.MapOrigin - p.Position.X;
-                float wowZ = p.Position.Z;
-                _selectedObjectType = "MDX";
-                _selectedObjectInfo = $"MDX [{idx}] {name}\n" +
-                    $"Local: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})\n" +
-                    $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
-                    $"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})\n" +
-                    $"Scale: {p.Scale:F3}";
-            }
+            // Convert renderer coords to WoW world coords
+            float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
+            float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
+            float wowZ = inst.PlacementPosition.Z;
+
+            _selectedObjectType = type;
+            _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
+                $"Path: {inst.ModelPath}\n" +
+                $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
+                $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
+                $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
+                $"Scale: {inst.PlacementScale:F3}\n" +
+                $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
         }
         else
         {

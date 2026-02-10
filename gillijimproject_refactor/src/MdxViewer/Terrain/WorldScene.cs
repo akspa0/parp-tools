@@ -268,12 +268,18 @@ public class WorldScene : ISceneRenderer
                 bbMin = p.Position - new Vector3(2f);
                 bbMax = p.Position + new Vector3(2f);
             }
+            string modelPath = mdxNames[p.NameIndex];
             _mdxInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
                 Transform = transform,
                 BoundsMin = bbMin,
-                BoundsMax = bbMax
+                BoundsMax = bbMax,
+                ModelName = Path.GetFileName(modelPath),
+                ModelPath = modelPath,
+                PlacementPosition = p.Position,
+                PlacementRotation = p.Rotation,
+                PlacementScale = scale
             });
         }
 
@@ -310,6 +316,7 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
+            string wmoPath = wmoNames[p.NameIndex];
             _wmoInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -317,7 +324,12 @@ public class WorldScene : ISceneRenderer
                 BoundsMin = worldMin,
                 BoundsMax = worldMax,
                 LocalBoundsMin = localMin,
-                LocalBoundsMax = localMax
+                LocalBoundsMax = localMax,
+                ModelName = Path.GetFileName(wmoPath),
+                ModelPath = wmoPath,
+                PlacementPosition = p.Position,
+                PlacementRotation = p.Rotation,
+                PlacementScale = 1.0f
             });
         }
 
@@ -408,7 +420,13 @@ public class WorldScene : ISceneRenderer
                 TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
-            tileMdx.Add(new ObjectInstance { ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax });
+            string modelPath = mdxNames[p.NameIndex];
+            tileMdx.Add(new ObjectInstance
+            {
+                ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
+                ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
+                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale
+            });
         }
 
         // Build WMO instances for this tile
@@ -443,6 +461,7 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
+            string wmoPath = wmoNames[p.NameIndex];
             tileWmo.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -450,7 +469,9 @@ public class WorldScene : ISceneRenderer
                 BoundsMin = worldMin,
                 BoundsMax = worldMax,
                 LocalBoundsMin = localMin,
-                LocalBoundsMax = localMax
+                LocalBoundsMax = localMax,
+                ModelName = Path.GetFileName(wmoPath), ModelPath = wmoPath,
+                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f
             });
         }
 
@@ -958,6 +979,16 @@ public struct ObjectInstance
     public Vector3 LocalBoundsMin;
     /// <summary>Model-local bounding box max (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
     public Vector3 LocalBoundsMax;
+    /// <summary>Display name (filename) for UI.</summary>
+    public string ModelName;
+    /// <summary>Renderer-space position from placement.</summary>
+    public Vector3 PlacementPosition;
+    /// <summary>Rotation in degrees from placement.</summary>
+    public Vector3 PlacementRotation;
+    /// <summary>Scale from placement (1.0 = default).</summary>
+    public float PlacementScale;
+    /// <summary>Full model path for diagnostics.</summary>
+    public string ModelPath;
 }
 
 public enum ObjectType { None, Wmo, Mdx }

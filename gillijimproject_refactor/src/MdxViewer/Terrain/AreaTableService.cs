@@ -59,15 +59,7 @@ public class AreaTableService
             _areas.TryAdd(areaNumber, entry); // Fallback: AreaNumber field
         }
 
-        Console.WriteLine($"[AreaTable] Loaded {_areas.Count} area entries (idCol={idCol}, nameCol={nameCol}, parentCol={parentCol}, mapCol={mapCol})");
-        // Dump first 10 entries for diagnostics
-        int dumped = 0;
-        foreach (var kv in _areas)
-        {
-            if (dumped++ >= 10) break;
-            var e = kv.Value;
-            Console.WriteLine($"  [AreaTable] key={kv.Key} id={e.Id} name=\"{e.Name}\" parent={e.ParentAreaId} map={e.MapId}");
-        }
+        Console.WriteLine($"[AreaTable] Loaded {_areas.Count} area entries (idCol={idCol})");
     }
 
     /// <summary>
