@@ -11,7 +11,7 @@ A high-performance .NET 9 / OpenGL 3.3 world viewer designed for bidirectional W
 - **MCSH Shadows** — 64×64 shadow bitmasks applied across all terrain layers.
 - **Liquids (MCLQ/MLIQ)** — Ghidra-verified liquid rendering for both terrain (MCLQ) and WMO (MLIQ) with proper type detection (Water, Ocean, Magma, Slime).
 
-### 🏛️ WMO Rendering (v14 & v17)
+### 🏛️ WMO Rendering (v14, v16 & v17)
 - **4-Pass Transparency** — Correct sorting for Opaque → Doodads → Liquids → Transparent layers.
 - **100% Doodad Load Rate** — Robust asset resolution using case-insensitive MPQ searching and `.mdx`/`.mdl` extension swapping.
 - **Doodad Sets** — Full support for switching between internal WMO doodad configurations.
@@ -73,7 +73,7 @@ The viewer is built on a modular "Adapter" pattern:
 |--------|---------|--------|
 | **WDT** | Alpha / LK | ✅ Fully supported |
 | **ADT** | Alpha / LK | ✅ Fully supported |
-| **WMO** | v14, v17 | ✅ Fully supported |
+| **WMO** | v14, v16, v17 | ✅ Fully supported |
 | **MDX** | v1300+ | ✅ Supported (Rendering Quality WIP) |
 | **M2** | v264+ | 🔧 Partial Support |
 | **GLB** | Export | ✅ MDX/WMO Export |

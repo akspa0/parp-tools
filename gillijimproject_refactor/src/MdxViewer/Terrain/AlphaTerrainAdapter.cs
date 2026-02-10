@@ -701,6 +701,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // Skip flow data (4 bytes nFlowvs + 80 bytes flowvs = 84 bytes)
         // offset += 84; // Not needed, we don't use flow data for rendering
 
+        // Diagnostic: log first liquid chunk to understand height values
+        if (chunkX == 0 && chunkY == 0)
+            Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} h[0]={heights[0]:F2} h[40]={heights[40]:F2} h[80]={heights[80]:F2} type={type}");
+
         return new LiquidChunkData
         {
             MinHeight = minHeight,

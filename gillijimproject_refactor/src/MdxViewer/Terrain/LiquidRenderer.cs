@@ -147,9 +147,11 @@ public class LiquidRenderer : IDisposable
                 float worldX = liquid.WorldPosition.X - vy * cellSize;
                 float worldY = liquid.WorldPosition.Y - vx * cellSize;
 
+                // Alpha 0.5.3: MCLQ heights use inverted Z convention.
+                // Negate to match renderer Z-up coordinate system.
                 vertices[idx * 3 + 0] = worldX;
                 vertices[idx * 3 + 1] = worldY;
-                vertices[idx * 3 + 2] = height;
+                vertices[idx * 3 + 2] = -height;
             }
         }
 

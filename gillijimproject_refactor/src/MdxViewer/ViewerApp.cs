@@ -3,6 +3,7 @@ using ImGuiNET;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Export;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using MdxViewer.Terrain;
 using Silk.NET.Input;
@@ -36,6 +37,11 @@ public class ViewerApp : IDisposable
     private string? _dbcBuild;
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
+
+    // Map discovery
+    private List<MapDefinition> _discoveredMaps = new();
+    private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
+    private MinimapRenderer? _minimapRenderer;
 
     // Output directories (next to the executable)
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
@@ -731,9 +737,55 @@ public class ViewerApp : IDisposable
             {
                 DrawFileBrowserContent();
             }
+
+            // ── World Maps section ──
+            if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                DrawMapDiscoveryContent();
+            }
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawMapDiscoveryContent()
+    {
+        if (_discoveredMaps.Count == 0) return;
+
+        ImGui.Text($"{_discoveredMaps.Count} maps discovered");
+        ImGui.Separator();
+
+        // Map list — use remaining height or fixed height
+        float listHeight = 300f; // Fixed height for map list
+        if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
+        {
+            foreach (var map in _discoveredMaps)
+            {
+                bool hasWdt = map.HasWdt;
+                string label = $"[{map.Id:D3}] {map.Name}";
+                if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
+
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        string wdtPath = $"World\\Maps\\{map.Directory}\\{map.Directory}.wdt";
+                        LoadFileFromDataSource(wdtPath);
+                    }
+                }
+
+                if (!hasWdt) ImGui.PopStyleColor();
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Directory: {map.Directory}");
+                    ImGui.Text($"Status: {(hasWdt ? "WDT Found" : "WDT Missing")}");
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.EndChild();
+        }
     }
 
     private void DrawFileBrowserContent()
@@ -773,8 +825,10 @@ public class ViewerApp : IDisposable
         ImGui.Text($"{_filteredFiles.Count} files");
         ImGui.Separator();
 
-        // File list — use remaining height
+        // File list — reserve space for World Maps section if present
         float remainingH = ImGui.GetContentRegionAvail().Y;
+        if (_discoveredMaps.Count > 0)
+            remainingH = MathF.Max(remainingH - 360f, 100f); // Reserve ~360px for World Maps header + list
         if (ImGui.BeginChild("FileList", new Vector2(0, remainingH), true))
         {
             for (int i = 0; i < _filteredFiles.Count; i++)
@@ -1145,6 +1199,7 @@ public class ViewerApp : IDisposable
         List<(int tx, int ty)>? existingTiles = null;
         Func<int, int, bool>? isTileLoaded = null;
         int loadedTileCount = 0;
+        string? mapName = null;
 
         if (_terrainManager != null)
         {
@@ -1152,12 +1207,14 @@ public class ViewerApp : IDisposable
             existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
             isTileLoaded = _terrainManager.IsTileLoaded;
             loadedTileCount = _terrainManager.LoadedTileCount;
+            mapName = _terrainManager.MapName;
         }
         else if (_vlmTerrainManager != null)
         {
             existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
             isTileLoaded = _vlmTerrainManager.IsTileLoaded;
             loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+            mapName = _vlmTerrainManager.MapName;
         }
         else return;
 
@@ -1205,9 +1262,47 @@ public class ViewerApp : IDisposable
                 float x = cursorPos.X + (ty - minTy) * cellSize;
                 float y = cursorPos.Y + (tx - minTx) * cellSize;
 
-                bool loaded = isTileLoaded(tx, ty);
-                uint color = loaded ? 0xFF00AA00 : 0xFF004400;
-                drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), color);
+                // Try to render BLP minimap tile texture
+                // WoW minimap: map{tx}_{ty}.blp — tx=column, ty=row (same as our coords)
+                // BLP image: U=WoW-X(north-south), V=WoW-Y(east-west)
+                // Screen:    screenX=tileY(east-west), screenY=tileX(north-south)
+                // So BLP axes are swapped vs screen axes — need 90° CW rotation + horizontal mirror.
+                // Using AddImageQuad to remap UV corners:
+                //   Screen TL(x,y)         = (west,north)  → BLP UV for (north,west)  = needs rotation
+                //   Screen TR(x+cs,y)      = (east,north)
+                //   Screen BR(x+cs,y+cs)   = (east,south)
+                //   Screen BL(x,y+cs)      = (west,south)
+                bool drewTexture = false;
+                if (_minimapRenderer != null && !string.IsNullOrEmpty(mapName))
+                {
+                    uint tileTex = _minimapRenderer.GetTileTexture(mapName, tx, ty);
+                    if (tileTex != 0)
+                    {
+                        var texId = (IntPtr)tileTex;
+                        var p1 = new Vector2(x, y);                         // screen TL
+                        var p2 = new Vector2(x + cellSize, y);              // screen TR
+                        var p3 = new Vector2(x + cellSize, y + cellSize);   // screen BR
+                        var p4 = new Vector2(x, y + cellSize);              // screen BL
+                        // Rotate UV 90° CW + mirror to fix orientation:
+                        // Screen TL → BLP bottom-left  (0,1)
+                        // Screen TR → BLP top-left     (0,0)
+                        // Screen BR → BLP top-right    (1,0)
+                        // Screen BL → BLP bottom-right (1,1)
+                        drawList.AddImageQuad(texId, p1, p2, p3, p4,
+                            new Vector2(0, 1), new Vector2(0, 0),
+                            new Vector2(1, 0), new Vector2(1, 1),
+                            0xFFFFFFFF);
+                        drewTexture = true;
+                    }
+                }
+
+                // Fallback: colored rectangle
+                if (!drewTexture)
+                {
+                    bool loaded = isTileLoaded(tx, ty);
+                    uint color = loaded ? 0xFF00AA00 : 0xFF004400;
+                    drawList.AddRectFilled(new Vector2(x, y), new Vector2(x + cellSize, y + cellSize), color);
+                }
             }
 
             // Camera position
@@ -1244,8 +1339,8 @@ public class ViewerApp : IDisposable
             // Border
             drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
 
-            // Click to teleport
-            if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            // Double-click to teleport (single-click interferes with window resize/drag)
+            if (ImGui.IsWindowHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
                 float clickTileY = (mousePos.X - cursorPos.X) / cellSize + minTy;
@@ -1305,6 +1400,16 @@ public class ViewerApp : IDisposable
                 _dbcProvider = new MpqDBCProvider(mpqDs.MpqService);
                 var dbcProvider = _dbcProvider;
 
+                // Load MD5 translate index for minimaps
+                if (WoWMapConverter.Core.Services.Md5TranslateResolver.TryLoad(new[] { gamePath }, mpqDs.MpqService, out var md5Idx))
+                {
+                    _md5Index = md5Idx;
+                    ViewerLog.Important(ViewerLog.Category.Dbc, $"Loaded MD5 Translate Index: {md5Idx?.HashToPlain.Count} entries");
+                }
+
+                _minimapRenderer?.Dispose();
+                _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index);
+
                 // Find WoWDBDefs definitions directory
                 string[] dbdSearchPaths = {
                     Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
@@ -1344,6 +1449,11 @@ public class ViewerApp : IDisposable
                         _dbcBuild = buildAlias;
                         Console.WriteLine($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
                         _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
+
+                        // Discover maps
+                        var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
+                        _discoveredMaps = mapDiscovery.DiscoverMaps();
+                        ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
                     }
                     else
                     {
@@ -1936,10 +2046,12 @@ public class ViewerApp : IDisposable
 
     public void Dispose()
     {
-        _worldScene?.Dispose();
-        _worldScene = null;
-        _terrainManager = null;
         _renderer?.Dispose();
-        _dataSource?.Dispose();
+        _worldScene?.Dispose();
+        _terrainManager?.Dispose();
+        _vlmTerrainManager?.Dispose();
+        _minimapRenderer?.Dispose();
+        _imGui.Dispose();
+        _gl.Dispose();
     }
 }
