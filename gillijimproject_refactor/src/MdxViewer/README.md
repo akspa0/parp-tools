@@ -1,6 +1,6 @@
-# WoW World Viewer (MdxViewer)
+# AlphaWoW Viewer
 
-A high-performance .NET 9 / OpenGL 3.3 world viewer designed for bidirectional WoW format conversion between **Alpha 0.5.3** and **Lich King 3.3.5**. It specializes in rendering monolithic Alpha WDTs, standard split ADTs, WMO world objects, and MDX/M2 models with high fidelity.
+A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3** and **Lich King 3.3.5** game data. Renders monolithic Alpha WDTs, standard split ADTs, WMO world objects, MDX/M2 models, and DBC-driven overlays (Area POIs, Taxi Paths) with high fidelity.
 
 ## Key Features
 
@@ -26,6 +26,13 @@ A high-performance .NET 9 / OpenGL 3.3 world viewer designed for bidirectional W
   - `CreatureDisplayInfoExtra.dbc`
   - `ItemDisplayInfo.dbc`
 
+### 🗺️ Minimap & Overlays
+- **Minimap** — Camera-centered minimap with BLP tile textures, scroll-wheel zoom, and double-click teleport.
+- **Area POIs** — DBC-driven point-of-interest markers rendered as 3D pins and minimap dots.
+- **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data, rendered as 3D lines and minimap overlays. Click a node or route in the sidebar to isolate it.
+- **Area Names** — Live area name display from AreaTable.dbc with MapID validation.
+- **Batched Rendering** — All overlay geometry (pins, lines) drawn in a single GPU draw call for performance.
+
 ## Coordinate System (Ghidra Verified)
 
 The viewer uses a unified coordinate system derived from WoW's raw file data:
@@ -41,8 +48,8 @@ The viewer uses a unified coordinate system derived from WoW's raw file data:
 | **WASD** | Move camera (North/South/East/West) |
 | **Q / E** | Move camera Vertical (Down / Up) |
 | **Right Drag** | Look around (Yaw / Pitch) |
-| **Scroll** | Adjust camera speed |
-| **W** | Toggle Wireframe |
+| **Scroll Wheel** | Adjust camera speed (viewport) / Minimap zoom (minimap) |
+| **Double-Click Minimap** | Teleport camera to clicked location |
 | **Day/Night Slider** | Adjust world lighting (Terrain/WMO) |
 
 ## Requirements
@@ -66,6 +73,9 @@ The viewer is built on a modular "Adapter" pattern:
 - **ITerrainAdapter** — Unified interface for Alpha (`AlphaTerrainAdapter`) and LK (`StandardTerrainAdapter`) terrain.
 - **ReplaceableTextureResolver** — DBCD-backed service for mapping dynamic texture IDs to BLP paths.
 - **WorldAssetManager** — Centralized caching for WMO and MDX/M2 geometry.
+- **BoundingBoxRenderer** — Batched line/pin renderer for overlays (1 draw call for all markers).
+- **TaxiPathLoader** — Loads TaxiNodes, TaxiPath, and TaxiPathNode DBC data for flight path visualization.
+- **AreaTableService** — MapID-aware area name lookups from AreaTable.dbc.
 
 ## Supported Formats
 
@@ -76,4 +86,5 @@ The viewer is built on a modular "Adapter" pattern:
 | **WMO** | v14, v16, v17 | ✅ Fully supported |
 | **MDX** | v1300+ | ✅ Supported (Rendering Quality WIP) |
 | **M2** | v264+ | 🔧 Partial Support |
+| **DBC** | Alpha 0.5.3 | ✅ AreaTable, AreaPOI, TaxiPath, TaxiPathNode, Map |
 | **GLB** | Export | ✅ MDX/WMO Export |

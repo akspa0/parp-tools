@@ -714,34 +714,40 @@ public class WorldScene : ISceneRenderer
             _gl.DepthMask(true);
         }
 
-        // 5. POI pin markers (magenta, with depth testing for proper 3D placement)
-        if (_showPoi && _poiLoader != null && _bbRenderer != null && _poiLoader.Entries.Count > 0)
+        // 5+6. Batched overlay rendering (POI pins + taxi paths) — single draw call
+        if (_bbRenderer != null)
         {
-            foreach (var poi in _poiLoader.Entries)
-                _bbRenderer.DrawPin(poi.Position, 40f, 6f, view, proj, new Vector3(1f, 0f, 1f));
-        }
+            _bbRenderer.BeginBatch();
 
-        // 6. Taxi paths (cyan lines + yellow node markers) — filtered by selection
-        if (_showTaxi && _taxiLoader != null && _bbRenderer != null)
-        {
-            // Draw visible taxi nodes as yellow pins
-            foreach (var node in _taxiLoader.Nodes)
+            // POI pin markers (magenta)
+            if (_showPoi && _poiLoader != null && _poiLoader.Entries.Count > 0)
             {
-                if (!IsTaxiNodeVisible(node)) continue;
-                _bbRenderer.DrawPin(node.Position, 50f, 8f, view, proj, new Vector3(1f, 1f, 0f));
+                var poiColor = new Vector3(1f, 0f, 1f);
+                foreach (var poi in _poiLoader.Entries)
+                    _bbRenderer.BatchPin(poi.Position, 40f, 6f, poiColor);
             }
 
-            // Draw visible flight path lines as cyan
-            foreach (var route in _taxiLoader.Routes)
+            // Taxi paths — filtered by selection
+            if (_showTaxi && _taxiLoader != null)
             {
-                if (!IsTaxiRouteVisible(route)) continue;
-                for (int i = 0; i < route.Waypoints.Count - 1; i++)
+                var nodeColor = new Vector3(1f, 1f, 0f);
+                var lineColor = new Vector3(0f, 1f, 1f);
+
+                foreach (var node in _taxiLoader.Nodes)
                 {
-                    var a = route.Waypoints[i];
-                    var b = route.Waypoints[i + 1];
-                    _bbRenderer.DrawLine(a, b, view, proj, new Vector3(0f, 1f, 1f));
+                    if (!IsTaxiNodeVisible(node)) continue;
+                    _bbRenderer.BatchPin(node.Position, 50f, 8f, nodeColor);
+                }
+
+                foreach (var route in _taxiLoader.Routes)
+                {
+                    if (!IsTaxiRouteVisible(route)) continue;
+                    for (int i = 0; i < route.Waypoints.Count - 1; i++)
+                        _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], lineColor);
                 }
             }
+
+            _bbRenderer.FlushBatch(view, proj);
         }
     }
 

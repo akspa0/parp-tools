@@ -87,6 +87,23 @@ public class AreaTableService
         return entry.Name;
     }
 
+    /// <summary>
+    /// Get area name with parent context, but only if the area belongs to the given MapID.
+    /// Returns null if the area belongs to a different map.
+    /// </summary>
+    public string? GetAreaDisplayNameForMap(int areaId, int mapId)
+    {
+        if (!_areas.TryGetValue(areaId, out var entry))
+            return null;
+
+        if (entry.MapId != mapId) return null;
+
+        if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var parent))
+            return $"{parent.Name} > {entry.Name}";
+
+        return entry.Name;
+    }
+
     private static string DetectColumn(IDBCDStorage storage, params string[] candidates)
     {
         if (storage.Values.Count == 0) return candidates[0];

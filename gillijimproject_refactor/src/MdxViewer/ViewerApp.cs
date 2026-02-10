@@ -39,6 +39,7 @@ public class ViewerApp : IDisposable
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
+    private int _currentMapId = -1; // MapID of the currently loaded world
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
@@ -272,7 +273,14 @@ public class ViewerApp : IDisposable
             {
                 var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
                 if (chunk != null && chunk.AreaId != 0)
-                    _currentAreaName = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                {
+                    // Use MapID-aware lookup to avoid showing areas from wrong maps
+                    if (_currentMapId >= 0)
+                        _currentAreaName = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId)
+                                           ?? _areaTableService.GetAreaDisplayName(chunk.AreaId) + " [wrong map?]";
+                    else
+                        _currentAreaName = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                }
                 else
                     _currentAreaName = "";
             }
@@ -2052,19 +2060,21 @@ public class ViewerApp : IDisposable
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene;
 
+            // Find mapId for this world
+            string curMapName = _terrainManager.MapName;
+            var curMapDef = _discoveredMaps.FirstOrDefault(m =>
+                string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
+            _currentMapId = curMapDef?.Id ?? -1;
+
             // Load AreaPOI and TaxiPaths from DBC if available
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
             {
                 _worldScene.LoadAreaPoi(_dbcProvider, _dbdDir, _dbcBuild);
 
-                // Find mapId for taxi path loading
-                string mapName = _terrainManager.MapName;
-                var mapDef = _discoveredMaps.FirstOrDefault(m =>
-                    string.Equals(m.Directory, mapName, StringComparison.OrdinalIgnoreCase));
-                if (mapDef != null)
+                if (curMapDef != null)
                 {
                     var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
-                    _worldScene.LoadTaxiPaths(dbcd, _dbcBuild, mapDef.Id);
+                    _worldScene.LoadTaxiPaths(dbcd, _dbcBuild, curMapDef.Id);
                 }
             }
 
