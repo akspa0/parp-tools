@@ -40,7 +40,7 @@ public class WorldScene : ISceneRenderer
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
     private const float WmoCullDistance = 2000f;     // Max distance for WMO instances (slightly past fog)
     private const float WmoFadeStartFraction = 0.85f;
-    private const float NoCullRadius = 150f;         // Objects within this radius are never frustum-culled
+    private const float NoCullRadius = 256f;         // Objects within this radius are never frustum-culled
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -238,9 +238,8 @@ public class WorldScene : ISceneRenderer
         var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
         bool wmoBased = adapter.IsWmoBased;
 
-        // MDX (doodad) placements
-        // Wiki says MDDF rotation is same as MODF, only with scale added.
-        // Rotation.X/Y/Z stored as degrees from file (same field mapping as MODF).
+        // MDX (doodad) placements — same rotation as WMO (wiki confirms "same as MODF"),
+        // with scale added. Rotation stored as degrees in file.
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
@@ -643,8 +642,10 @@ public class WorldScene : ISceneRenderer
         {
             foreach (var inst in _mdxInstances)
             {
-                var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
-                float dist = Vector3.Distance(cameraPos, center);
+                // Use placement position (transform translation) for distance — more reliable
+                // than AABB center when rotation transforms are imprecise
+                var placementPos = inst.Transform.Translation;
+                float dist = Vector3.Distance(cameraPos, placementPos);
                 // Skip frustum cull for nearby objects to prevent pop-in when turning
                 if (dist > NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { MdxCulledCount++; continue; }
@@ -683,8 +684,8 @@ public class WorldScene : ISceneRenderer
                 var inst = _mdxInstances[i];
                 if (_assets.GetMdx(inst.ModelKey) == null) continue;
                 // Same frustum + distance cull as opaque pass (with NoCullRadius)
-                var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
-                float dist = Vector3.DistanceSquared(cameraPos, center);
+                var placementPos = inst.Transform.Translation;
+                float dist = Vector3.DistanceSquared(cameraPos, placementPos);
                 if (dist > NoCullRadius * NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
                 if (diag < DoodadSmallThreshold && dist > DoodadCullDistance * DoodadCullDistance) continue;

@@ -257,13 +257,16 @@ public class ViewerApp : IDisposable
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         // If loading screen is active, render it instead of the normal scene.
-        // Disable once terrain tiles have actually loaded (LoadedTileCount > 0).
+        // Keep it up until the initial AOI tiles have all finished loading (no more
+        // background loads or pending GPU uploads). This prevents the map from appearing
+        // half-loaded while tiles are still streaming in.
         if (_loadingScreen != null && _loadingScreen.IsActive)
         {
-            // Check if terrain has loaded enough to dismiss
-            bool terrainReady = _terrainManager != null && _terrainManager.LoadedTileCount > 0;
             bool isWmoOnly = _worldScene != null && _terrainManager != null && _terrainManager.Adapter.IsWmoBased;
-            if (terrainReady || isWmoOnly)
+            bool hasTiles = _terrainManager != null && _terrainManager.LoadedTileCount > 0;
+            bool stillStreaming = _terrainManager != null && _terrainManager.IsStreaming;
+            // Dismiss when: WMO-only map, OR tiles are loaded AND no more streaming in progress
+            if (isWmoOnly || (hasTiles && !stillStreaming))
             {
                 _loadingScreen.Disable();
             }
@@ -272,6 +275,9 @@ public class ViewerApp : IDisposable
                 // Still loading — update AOI so tiles start streaming
                 if (_terrainManager != null)
                     _terrainManager.UpdateAOI(_camera.Position);
+                // Update progress bar based on loaded vs expected tiles
+                if (_terrainManager != null && _terrainManager.LoadedTileCount > 0)
+                    _loadingScreen.UpdateProgress(_terrainManager.LoadedTileCount, _terrainManager.LoadedTileCount + 10);
                 _loadingScreen.Render();
                 return;
             }
@@ -298,10 +304,10 @@ public class ViewerApp : IDisposable
                 var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
                 if (chunk != null && chunk.AreaId != 0)
                 {
-                    // Simple direct lookup — AreaID from MCNK maps to AreaTable key
+                    // Simple direct lookup — AreaID from MCNK maps to AreaTable row key
                     var name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
-                    if (name.StartsWith("Unknown") && _currentAreaName != name)
-                        Console.WriteLine($"[AreaLookup] MCNK AreaId={chunk.AreaId} → {name} (mapId={_currentMapId})");
+                    if (name != _currentAreaName && name.StartsWith("Unknown"))
+                        Console.WriteLine($"[AreaTable] Lookup miss: AreaId={chunk.AreaId} → {name}  (table has {_areaTableService.Count} entries)");
                     _currentAreaName = name;
                 }
                 else
