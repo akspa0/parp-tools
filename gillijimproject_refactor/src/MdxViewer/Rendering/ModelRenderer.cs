@@ -34,6 +34,7 @@ public class MdxRenderer : ISceneRenderer
     private uint _shaderProgram;
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
     private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
+    private int _uLightDir, _uLightColor, _uAmbientColor;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -126,7 +127,8 @@ public class MdxRenderer : ISceneRenderer
     /// fadeAlpha = 0..1 multiplier for distance-based fade-in/out (1.0 = fully opaque).
     /// </summary>
     public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both, float fadeAlpha = 1.0f,
-        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null)
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
         _gl.UseProgram(_shaderProgram);
 
@@ -146,6 +148,14 @@ public class MdxRenderer : ISceneRenderer
         _gl.Uniform1(_uFogStart, fogStart);
         _gl.Uniform1(_uFogEnd, fogEnd);
         _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
+
+        // Lighting uniforms (match terrain lighting for consistent scene illumination)
+        var ld = lightDir ?? Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+        var lc = lightColor ?? new Vector3(1.0f, 0.95f, 0.85f);
+        var ac = ambientColor ?? new Vector3(0.35f, 0.35f, 0.4f);
+        _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
+        _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
+        _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -339,6 +349,9 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
 
 out vec4 FragColor;
 
@@ -355,9 +368,9 @@ void main() {
     float lighting = 1.0;
     if (uUnshaded == 0) {
         vec3 norm = normalize(vNormal);
-        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-        float diff = max(dot(norm, lightDir), 0.0);
-        lighting = 0.35 + diff * 0.65;
+        float diff = max(dot(norm, normalize(uLightDir)), 0.0);
+        vec3 lit = uAmbientColor + uLightColor * diff;
+        lighting = (lit.r + lit.g + lit.b) / 3.0;
     }
 
     vec3 litColor = texColor.rgb * lighting;
@@ -406,6 +419,9 @@ void main() {
         _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
         _uFogEnd = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
         _uCameraPos = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
+        _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
+        _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
+        _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);

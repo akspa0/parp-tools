@@ -23,6 +23,7 @@ public class WmoRenderer : ISceneRenderer
     private uint _shaderProgram;
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
     private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
+    private int _uLightDir, _uLightColor, _uAmbientColor;
 
     private readonly List<GroupBuffers> _groups = new();
     private bool _wireframe;
@@ -143,10 +144,10 @@ public class WmoRenderer : ISceneRenderer
     /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
     /// </summary>
     public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
-        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null)
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
         // Two-pass WMO rendering: Opaque → Doodads → Liquids → Transparent
-        // This ensures liquids are visible through transparent materials (gratings, windows)
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
 
@@ -162,6 +163,14 @@ public class WmoRenderer : ISceneRenderer
         _gl.Uniform1(_uFogStart, fogStart);
         _gl.Uniform1(_uFogEnd, fogEnd);
         _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
+
+        // Lighting uniforms (match terrain lighting for consistent scene illumination)
+        var ld = lightDir ?? Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+        var lc = lightColor ?? new Vector3(1.0f, 0.95f, 0.85f);
+        var ac = ambientColor ?? new Vector3(0.35f, 0.35f, 0.4f);
+        _gl.Uniform3(_uLightDir, ld.X, ld.Y, ld.Z);
+        _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
+        _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -225,7 +234,8 @@ public class WmoRenderer : ISceneRenderer
                 var inst = _doodadInstances[visibleDoodads[vi].idx];
                 var doodadWorld = inst.Transform * modelMatrix;
                 inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Both, 1.0f,
-                    fogColor, fogStart, fogEnd, cameraPos);
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lightDir, lightColor, ambientColor);
             }
         }
 
@@ -380,15 +390,17 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbientColor;
 
 out vec4 FragColor;
 
 void main() {
     vec3 norm = normalize(vNormal);
-    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-    float diff = abs(dot(norm, lightDir));
-    float ambient = 0.4;
-    float lighting = ambient + diff * 0.6;
+    float diff = abs(dot(norm, normalize(uLightDir)));
+    vec3 lit = uAmbientColor + uLightColor * diff;
+    float lighting = (lit.r + lit.g + lit.b) / 3.0;
 
     vec4 texColor;
     if (uHasTexture == 1) {
@@ -437,6 +449,9 @@ void main() {
         _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
         _uFogEnd = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
         _uCameraPos = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
+        _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
+        _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
+        _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
     }
 
     private uint CompileShader(ShaderType type, string source)

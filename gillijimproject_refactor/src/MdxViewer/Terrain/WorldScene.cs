@@ -246,6 +246,8 @@ public class WorldScene : ISceneRenderer
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
+            // Rotation stored as degrees — same convention as WMO (no Z negation needed;
+            // the 180° Z compensation handles the coordinate axis swap).
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
@@ -403,6 +405,8 @@ public class WorldScene : ISceneRenderer
             _assets.EnsureMdxLoaded(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
+            // Rotation stored as degrees — same convention as WMO (no Z negation needed here;
+            // the 180° Z compensation handles the coordinate axis swap).
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
@@ -648,7 +652,8 @@ public class WorldScene : ISceneRenderer
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj,
-                    fogColor, fogStart, fogEnd, cameraPos);
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 WmoRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
@@ -683,7 +688,8 @@ public class WorldScene : ISceneRenderer
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
-                    fogColor, fogStart, fogEnd, cameraPos);
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 MdxRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
@@ -725,7 +731,8 @@ public class WorldScene : ISceneRenderer
                     tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
-                    fogColor, fogStart, fogEnd, cameraPos);
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
