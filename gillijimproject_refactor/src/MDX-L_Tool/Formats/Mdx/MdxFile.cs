@@ -411,8 +411,15 @@ public class MdxFile
         {
             if (geoEnd - br.BaseStream.Position < 8) break;
 
+            // Peek at next 4 bytes — if they don't form a valid geoset sub-chunk tag,
+            // this is the non-tagged footer (MaterialId, bounds, etc.), not another chunk.
             long preTagPos = br.BaseStream.Position;
             string tag = ReadTag(br);
+            if (!IsValidGeosetTag(tag))
+            {
+                br.BaseStream.Position = preTagPos; // Rewind — footer starts here
+                break;
+            }
             uint count = br.ReadUInt32();
             long tagPos = preTagPos;
             tagsFound.Add($"{tag}({count})");
@@ -676,32 +683,16 @@ public class MdxFile
             }
         }
 
-        // After all tagged sub-chunks, check for non-tagged footer data
+        // After all tagged sub-chunks, read non-tagged footer data
+        // Standard WC3/Alpha MDX geoset footer: MaterialId(4) + SelectionGroup(4) + SelectionFlags(4)
+        // + BoundsRadius(4) + BoundsMin(12) + BoundsMax(12) + NumSeqExtents(4) + SeqExtents[N](28 each)
         long remaining = geoEnd - br.BaseStream.Position;
-        if (remaining > 0)
+        if (remaining >= 12)
         {
-            long footerStart = br.BaseStream.Position;
-            // Hex dump footer for diagnosis
-            byte[] footerDump = br.ReadBytes((int)Math.Min(remaining, 64));
-            br.BaseStream.Position = footerStart;
-            string hex = BitConverter.ToString(footerDump).Replace("-", " ");
-            Console.WriteLine($"    [GEOS#{gIdx}] Footer: {remaining} bytes remaining after tagged chunks");
-            Console.WriteLine($"    [GEOS#{gIdx}] Footer hex: {hex}");
-
-            // Standard WC3 MDX geoset footer: MaterialId(4) + SelectionGroup(4) + SelectionFlags(4)
-            // + LodLevel(4) + LodName(260) [optional] + BoundsRadius(4) + BoundsMin(12) + BoundsMax(12)
-            // + NumSeqExtents(4) + SeqExtents[N](28 each)
-            if (remaining >= 12)
-            {
-                geo.MaterialId = br.ReadInt32();
-                geo.SelectionGroup = br.ReadUInt32();
-                geo.Flags = br.ReadUInt32();
-                Console.WriteLine($"    [GEOS#{gIdx}] Footer MaterialId={geo.MaterialId} SelectionGroup={geo.SelectionGroup} Flags=0x{geo.Flags:X8}");
-            }
+            geo.MaterialId = br.ReadInt32();
+            geo.SelectionGroup = br.ReadUInt32();
+            geo.Flags = br.ReadUInt32();
         }
-
-        // Log geoset parse summary
-        Console.WriteLine($"    [GEOS#{gIdx}] Tags: [{string.Join(" → ", tagsFound)}] MatId={geo.MaterialId} Verts={geo.Vertices.Count} Idx={geo.Indices.Count} UV={geo.TexCoords.Count}");
 
         return geo;
     }

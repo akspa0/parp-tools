@@ -103,9 +103,7 @@ public class MpqDataSource : IDataSource
         };
 
         // Extensions that use listfile-less individual .ext.MPQ wrapping in Alpha 0.5.3
-        // BLP textures are also wrapped as .blp.MPQ — critical for MDX model textures!
-        string[] nestedExts = { ".wmo.MPQ", ".wmo.mpq", ".wdt.MPQ", ".wdt.mpq", ".wdl.MPQ", ".wdl.mpq",
-                                ".blp.MPQ", ".blp.mpq" };
+        string[] nestedExts = { ".wmo.MPQ", ".wmo.mpq", ".wdt.MPQ", ".wdt.mpq", ".wdl.MPQ", ".wdl.mpq" };
 
         var countByExt = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 

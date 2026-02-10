@@ -347,12 +347,16 @@ void main() {
     vec3 litColor = texColor.rgb * lighting;
 
     // Fog: blend to fog color based on distance from camera (matches terrain fog)
-    float dist = length(vFragPos - uCameraPos);
-    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
-    vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
+    // Skip fog for untextured (magenta fallback) fragments — keep them visibly magenta for diagnosis
+    vec3 finalColor = litColor;
+    if (uHasTexture == 1) {
+        float dist = length(vFragPos - uCameraPos);
+        float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+        finalColor = mix(uFogColor, litColor, fogFactor);
+    }
 
     float outAlpha = (uAlphaTest == 0) ? 1.0 : texColor.a;
-    FragColor = vec4(foggedColor, outAlpha) * uColor;
+    FragColor = vec4(finalColor, outAlpha) * uColor;
 }
 ";
 

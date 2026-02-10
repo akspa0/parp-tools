@@ -1,30 +1,40 @@
-# Progress — MdxViewer Renderer Reimplementation
+# Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: 0.6.0 MPQ Extraction Blocked — PKWARE DCL Decompression Failing
+## Status: MDX Doodad Textures BROKEN — Root Cause Unknown
 
 ## What Works Today
 
 | Feature | Status |
 |---------|--------|
-| Terrain rendering + AOI lazy loading | ✅ |
+| Terrain rendering + AOI lazy loading | ✅ (AOI radius=2, 5×5 tiles) |
 | Terrain MCSH shadow maps | ✅ Applied on ALL layers (not just base) |
 | Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
+| Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
 | MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
 | MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
-| MDX doodads in WorldScene | ⚠️ Position fixed (pivot), textures broken (magenta) |
+| MDX fog blending | ✅ Models blend into fog like terrain |
+| MDX doodads in WorldScene | ❌ Position correct, **textures magenta — root cause unknown** |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
+| WMO fog blending | ✅ WMOs blend into fog like terrain |
 | WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
 | WMO rotation/facing in WorldScene | ✅ Fixed — `-rz` negation for handedness |
 | MDDF/MODF placements | ✅ Position + pivot correct |
 | Bounding boxes | ✅ Actual MODF extents with correct min/max swap |
+| Batched overlay rendering | ✅ POI pins + taxi paths in single draw call |
+| Minimap zoom (4 tiles around camera) | ✅ |
+| TaxiPath visualization | ✅ DBC-loaded flight paths as 3D lines |
+| Taxi path selection (sidebar) | ✅ |
+| AreaID/MapID-aware area names | ✅ Filters by current map, warns on mismatch |
+| POI + Taxi disabled by default | ✅ Toggle on via sidebar |
+| NoCullRadius (150 units) | ✅ Nearby objects skip frustum cull |
 | VLM terrain loading | ✅ JSON dataset → renderer |
 | VLM minimap | ✅ Works for VLM projects |
 | VLM dataset generator | ✅ File > Generate VLM Dataset (background export) |
 | BLP2 texture loading | ✅ DXT1/3/5, palette, JPEG |
-| MPQ data source | ✅ Listfile, nested WMO archives |
-| DBC integration | ✅ DBCD, CreatureModelData, CreatureDisplayInfo |
+| MPQ data source | ✅ Listfile, nested WMO/WDT/WDL archives |
+| DBC integration | ✅ DBCD, CreatureModelData, CreatureDisplayInfo, TaxiPath, AreaPOI, AreaTable |
 | Camera | ✅ Free-fly WASD + mouse look |
 | ImGui UI | ✅ File browser, model info, visibility toggles |
 | Live minimap + click-to-teleport | ✅ WDT + VLM |
@@ -38,18 +48,62 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 0 | Foundation | ✅ Complete |
-| 3 | Terrain | ✅ Complete (shadow fix, alpha seam fix, async streaming) |
-| 4 | World Scene | ⚠️ WMOs ✅, MDX pivot ✅, MDX textures ❌ |
+| 3 | Terrain | ✅ Complete (shadow fix, alpha seam fix, async streaming, fog culling) |
+| 4 | World Scene | ⚠️ WMOs ✅, MDX pivot ✅, **MDX textures ❌ BLOCKED** |
 | VLM | VLM Dataset Support | ✅ Load + Generate + Minimap |
+| Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering) |
 | 1 | MDX Animation | ⏳ Not started |
 | 2 | Particles | ⏳ Not started |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Not started |
 
-## Next Priority: MDX Doodad Textures in WorldScene
+## BLOCKER: MDX Doodad Textures — Root Cause Unknown
 
-MDX doodads render in correct positions (pivot offset fixed) but have no textures (magenta). This is a pre-existing issue. Likely a texture path resolution issue when loading MDX models via WorldAssetManager.
+MDX doodads render in correct positions but ALL textures are magenta. This has been the case since the beginning and multiple fix attempts have failed.
+
+### What has been tried (and did NOT fix it):
+1. **ResolveReplaceableTexture rewrite** — 4-strategy resolution (DBC, naming conventions, dir scan, hardcoded defaults). Did not help.
+2. **Alpha test threshold change** — Lowered from 0.3 to 0.1, made conditional on uAlphaTest. Did not help.
+3. **`.blp.MPQ` scan** — WRONG: `.blp.MPQ` files do not exist in WoW Alpha. This was fabricated. Reverted.
+
+### What needs to happen next:
+1. **Runtime diagnostic logging** — Print every texture path lookup and result during MDX loading
+2. **Check MPQ file set** — How many BLP files exist? What are their paths?
+3. **Trace one specific tree model** — Full path from TEXS chunk → resolution → ReadFile → result
+4. **Do NOT guess at fixes** — Understand the problem first
 
 ## Detailed Fix Log
+
+### 2026-02-09 Late Evening — Performance, Fog, Culling, Failed MDX Fix
+
+**Completed (working):**
+- Batched overlay rendering — POI pins + taxi paths in single draw call (BoundingBoxRenderer rewrite)
+- AreaID/MapID-aware area name lookup — filters by current map, warns on mismatch
+- Minimap zoom — 4 tiles around camera, scrollable
+- TaxiPath visualization — DBC-loaded flight paths as 3D lines with selection
+- POI + Taxi disabled by default
+- NoCullRadius (150 units) — nearby objects skip frustum cull to prevent pop-in
+- Fog added to MDX shader — models blend into fog like terrain
+- Fog added to WMO shader — WMOs blend into fog like terrain
+- Fog-based terrain chunk culling — skip chunks beyond FogEnd+200
+- AOI radius reduced 3→2 (49→25 tiles)
+- Doodad cull distance reduced 1500→1200, WMO cull distance 5000→2000
+- README renamed to AlphaWoW Viewer
+
+**Failed (reverted or ineffective):**
+- `.blp.MPQ` scan — WRONG, these files don't exist. Reverted.
+- ResolveReplaceableTexture 4-strategy rewrite — did not fix magenta textures
+- Alpha test threshold change (0.3→0.1, conditional) — did not fix magenta textures
+
+**Key files modified:**
+- `BoundingBoxRenderer.cs` — Complete rewrite for batched rendering
+- `WorldScene.cs` — Batched overlays, fog passing, reduced cull distances, NoCullRadius
+- `TerrainManager.cs` — AOI radius 3→2
+- `TerrainRenderer.cs` — Fog-based chunk distance culling
+- `ModelRenderer.cs` — Fog shader, alpha test fix, ResolveReplaceableTexture rewrite
+- `WmoRenderer.cs` — Fog shader
+- `AreaTableService.cs` — MapID-aware lookup
+- `ViewerApp.cs` — MapID tracking, area name display
+- `MpqDataSource.cs` — Reverted bad .blp.MPQ change
 
 ### 2026-02-08 Evening — Shadow, Pivot, VLM Generator
 

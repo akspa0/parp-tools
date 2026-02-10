@@ -1,16 +1,23 @@
-# Active Context — MdxViewer Renderer Reimplementation
+# Active Context — MdxViewer / AlphaWoW Viewer
 
 ## Current Focus
 
-**Fixing 0.6.0 MPQ file extraction.** WMO v16 root files and ADT tiles are found in MPQ hash tables but decompression fails. Compression type `0x08` (PKWARE DCL implode) returns invalid dict size bits. Need correct PKWARE DCL implementation — StormLib reference code in `lib/StormLib/src/pklib/explode.c` is the ground truth. Ghidra RE prompts written for 0.5.3 (with PDB) and 0.6.0 (without PDB) to verify from the binary.
+**MDX doodad textures are still magenta/broken.** Root cause is UNKNOWN. Multiple fix attempts have been made but none resolved the issue. The problem needs proper diagnosis with runtime logging to understand exactly what texture paths are being looked up, whether they exist in the MPQ file set, and why ReadFile returns null.
+
+## CRITICAL: What We Do NOT Know About MDX Textures
+- We do NOT know where BLP textures for MDX doodads are stored in WoW Alpha 0.5.3
+- BLP textures are NOT stored as `.blp.MPQ` individual files (that was a wrong assumption)
+- BLP textures are inside the main MPQ archives (dbc.MPQ, model.MPQ, texture.MPQ, etc.)
+- We do NOT know if the texture paths in MDX TEXS chunks match what's in the MPQ listfiles
+- We do NOT know if `FindInFileSet` / `ReadFile` is failing due to path case, missing entries, or something else entirely
+- **Next session MUST start with runtime diagnostic logging** — print every texture path lookup and its result
 
 ## Immediate Next Steps
 
-1. **Fix PKWARE DCL decompression** — Port StormLib's `explode.c` faithfully to C#, OR diagnose if the data read from MPQ is at wrong offset (block table decryption issue).
-2. **Test v16 WMO root loading** — Once decompression works, root files (e.g., Big_Keep.wmo, 472 bytes) should extract and parse.
-3. **Test 0.6.0 ADT loading** — ADTs in terrain.MPQ may also use PKWARE compression for small tiles.
-4. **Run Ghidra prompts** — `prompt-053-mpq.md` (0.5.3 with PDB, best starting point) and `prompt-060-mpq.md` (0.6.0) to verify MPQ decompression from binary.
-5. **M2/WMOv17 readers** — For Standard WDT object rendering (lower priority until MPQ extraction is fixed).
+1. **Add aggressive runtime logging to MDX texture loading** — Log every texture path attempted, every FindInFileSet result, every ReadFile result. Need to see EXACTLY what's failing and why.
+2. **Check MPQ file set** — How many BLP files are in `_fileSet`? What paths do they have? Do MDX texture paths match?
+3. **Check a specific tree MDX** — Pick one tree model, log its TEXS chunk paths and ReplaceableIds, trace the full resolution chain.
+4. **Only then attempt fixes** — Don't guess at solutions without understanding the problem first.
 
 ## Session 2026-02-09 Summary
 

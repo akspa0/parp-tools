@@ -224,8 +224,10 @@ public class WorldScene : ISceneRenderer
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
+            // Coordinate system swaps X↔Y (rendererX=wowY, rendererY=wowX)
+            // so rotations around those axes must also swap
+            float rx = p.Rotation.Y * MathF.PI / 180f; // WoW rotY → renderer rotX
+            float ry = p.Rotation.X * MathF.PI / 180f; // WoW rotX → renderer rotY
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
             // MDX geometry is offset from origin — pre-translate by -boundsCenter
@@ -375,8 +377,9 @@ public class WorldScene : ISceneRenderer
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             _assets.EnsureMdxLoaded(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
+            // Coordinate system swaps X↔Y — rotations must also swap
+            float rx = p.Rotation.Y * MathF.PI / 180f; // WoW rotY → renderer rotX
+            float ry = p.Rotation.X * MathF.PI / 180f; // WoW rotX → renderer rotY
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
             // MDX geometry is offset from origin — pre-translate by -boundsCenter
