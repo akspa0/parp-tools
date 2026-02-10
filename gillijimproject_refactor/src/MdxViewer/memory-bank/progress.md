@@ -1,12 +1,12 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: MDX Doodad Textures BROKEN — Root Cause Unknown
+## Status: Loading Screen Implementation In Progress
 
 ## What Works Today
 
 | Feature | Status |
 |---------|--------|
-| Terrain rendering + AOI lazy loading | ✅ (AOI radius=2, 5×5 tiles) |
+| Terrain rendering + AOI lazy loading | ✅ (AOI radius=3, 7×7 tiles, 4 uploads/frame) |
 | Terrain MCSH shadow maps | ✅ Applied on ALL layers (not just base) |
 | Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
 | Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
@@ -15,7 +15,7 @@
 | MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
 | MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
 | MDX fog blending | ✅ Models blend into fog like terrain |
-| MDX doodads in WorldScene | ❌ Position correct, **textures magenta — root cause unknown** |
+| MDX doodads in WorldScene | ⚠️ Position correct, magenta = unimplemented particles (PRE2/RIBB) |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO fog blending | ✅ WMOs blend into fog like terrain |
 | WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
@@ -49,27 +49,43 @@
 |-------|-------------|--------|
 | 0 | Foundation | ✅ Complete |
 | 3 | Terrain | ✅ Complete (shadow fix, alpha seam fix, async streaming, fog culling) |
-| 4 | World Scene | ⚠️ WMOs ✅, MDX pivot ✅, **MDX textures ❌ BLOCKED** |
+| 4 | World Scene | ✅ WMOs, MDX placement, rotation. Particles deferred. |
 | VLM | VLM Dataset Support | ✅ Load + Generate + Minimap |
 | Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering) |
+| Loading | Loading Screen | 🔧 In progress — RE docs ready, implementing now |
 | 1 | MDX Animation | ⏳ Not started |
-| 2 | Particles | ⏳ Not started |
-| 5-7 | Liquids, Detail Doodads, Polish | ⏳ Not started |
+| 2 | Particles (PRE2/RIBB) | ⏳ Not started — causes magenta on some MDX geosets |
+| 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |
+| MCP | MCP Server | ⏳ Designed — GLB terrain, NPC spawn, click-to-chat, audio |
 
-## BLOCKER: MDX Doodad Textures — Root Cause Unknown
+## MDX Magenta Textures — DEFERRED (Root Cause: Particles)
 
-MDX doodads render in correct positions but ALL textures are magenta. This has been the case since the beginning and multiple fix attempts have failed.
+The magenta quads on MDX doodads are **unimplemented particle emitter geometry** (PRE2/RIBB chunks). These are separate geosets that reference particle textures. Regular model textures load fine. This will be fixed when the particle system is implemented (Phase 2).
 
-### What has been tried (and did NOT fix it):
-1. **ResolveReplaceableTexture rewrite** — 4-strategy resolution (DBC, naming conventions, dir scan, hardcoded defaults). Did not help.
-2. **Alpha test threshold change** — Lowered from 0.3 to 0.1, made conditional on uAlphaTest. Did not help.
-3. **`.blp.MPQ` scan** — WRONG: `.blp.MPQ` files do not exist in WoW Alpha. This was fabricated. Reverted.
+## Upcoming: MCP Server for LLM-Orchestrated 3D
 
-### What needs to happen next:
-1. **Runtime diagnostic logging** — Print every texture path lookup and result during MDX loading
-2. **Check MPQ file set** — How many BLP files exist? What are their paths?
-3. **Trace one specific tree model** — Full path from TEXS chunk → resolution → ReadFile → result
-4. **Do NOT guess at fixes** — Understand the problem first
+New feature planned: turn MdxViewer into an MCP server that external applications (LLMs, procedural generators) can push content into at runtime.
+
+### MCP Server Tools (planned)
+| Tool | Description |
+|------|-------------|
+| `load_world` | Load GLB file as terrain (single mesh + texture) |
+| `spawn_npc` | Place NPC at position with GLB model, texture, name, personality |
+| `remove_npc` | Remove NPC by ID |
+| `move_npc` | Move/animate NPC to new position |
+| `play_audio` | Play sound file |
+| `set_npc_dialog` | Set chat response for NPC |
+| `get_scene_state` | Return camera pos, visible NPCs, selected NPC |
+| `get_click_events` | Poll for NPC click events |
+
+### Architecture
+- MCP server runs on background thread (stdio transport)
+- Commands queued and executed on render thread
+- GLB → OpenGL via SharpGLTF (already in deps) + ImageSharp
+- Entity system: `Dictionary<string, NpcEntity>` with position, mesh, click AABB
+- Click detection via ray-AABB on mouse click
+- Chat UI via ImGui overlay
+- Phased: (1) server + GLB terrain + spawn, (2) click + chat, (3) audio + movement
 
 ## Detailed Fix Log
 

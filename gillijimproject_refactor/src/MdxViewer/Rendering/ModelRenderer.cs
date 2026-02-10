@@ -757,7 +757,8 @@ void main() {
         if (_texResolver != null && _modelVirtualPath != null)
         {
             string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId);
-            if (resolved != null) return resolved;
+            if (resolved != null)
+                return resolved;
         }
 
         // Strategy 2: Search model's directory for BLPs matching naming conventions

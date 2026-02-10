@@ -46,6 +46,7 @@ public class ViewerApp : IDisposable
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
+    private Rendering.LoadingScreen? _loadingScreen;
 
     // Output directories (next to the executable)
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
@@ -154,6 +155,8 @@ public class ViewerApp : IDisposable
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Enable(EnableCap.CullFace);
 
+        _loadingScreen = new Rendering.LoadingScreen(_gl);
+
         // Style ImGui
         var style = ImGui.GetStyle();
         style.WindowRounding = 4f;
@@ -253,6 +256,27 @@ public class ViewerApp : IDisposable
 
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
+        // If loading screen is active, render it instead of the normal scene.
+        // Disable once terrain tiles have actually loaded (LoadedTileCount > 0).
+        if (_loadingScreen != null && _loadingScreen.IsActive)
+        {
+            // Check if terrain has loaded enough to dismiss
+            bool terrainReady = _terrainManager != null && _terrainManager.LoadedTileCount > 0;
+            bool isWmoOnly = _worldScene != null && _terrainManager != null && _terrainManager.Adapter.IsWmoBased;
+            if (terrainReady || isWmoOnly)
+            {
+                _loadingScreen.Disable();
+            }
+            else
+            {
+                // Still loading — update AOI so tiles start streaming
+                if (_terrainManager != null)
+                    _terrainManager.UpdateAOI(_camera.Position);
+                _loadingScreen.Render();
+                return;
+            }
+        }
+
         // Render 3D scene first
         if (_renderer != null)
         {
@@ -274,12 +298,11 @@ public class ViewerApp : IDisposable
                 var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
                 if (chunk != null && chunk.AreaId != 0)
                 {
-                    // Use MapID-aware lookup to avoid showing areas from wrong maps
-                    if (_currentMapId >= 0)
-                        _currentAreaName = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId)
-                                           ?? _areaTableService.GetAreaDisplayName(chunk.AreaId) + " [wrong map?]";
-                    else
-                        _currentAreaName = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                    // Simple direct lookup — AreaID from MCNK maps to AreaTable key
+                    var name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                    if (name.StartsWith("Unknown") && _currentAreaName != name)
+                        Console.WriteLine($"[AreaLookup] MCNK AreaId={chunk.AreaId} → {name} (mapId={_currentMapId})");
+                    _currentAreaName = name;
                 }
                 else
                     _currentAreaName = "";
@@ -1587,6 +1610,7 @@ public class ViewerApp : IDisposable
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
+            _texResolver.SetDataSource(_dataSource);
             var mpqDs = _dataSource as MpqDataSource;
             if (mpqDs != null)
             {
@@ -2022,6 +2046,10 @@ public class ViewerApp : IDisposable
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
 
+        // Show loading screen (replicates Alpha client's EnableLoadingScreen)
+        _loadingScreen?.Enable(_dataSource);
+        PresentLoadingFrame();
+
         try
         {
             // Detect Alpha WDT vs Standard WDT by file size.
@@ -2030,12 +2058,23 @@ public class ViewerApp : IDisposable
             long fileSize = new FileInfo(wdtPath).Length;
             bool isAlpha = fileSize >= 65536;
             string wdtType;
+            int loadStep = 0;
+
+            // onStatus callback: update loading screen progress and force-present a frame.
+            // This replicates the Alpha client's UpdateProgressBar → GxScenePresent pattern.
+            void OnLoadStatus(string status)
+            {
+                _statusMessage = status;
+                loadStep++;
+                _loadingScreen?.UpdateProgress(loadStep, 20); // Estimate ~20 status updates per load
+                PresentLoadingFrame();
+            }
 
             if (isAlpha)
             {
                 // Alpha WDT: monolithic file with embedded ADTs
                 _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver,
-                    onStatus: status => _statusMessage = status);
+                    onStatus: OnLoadStatus);
                 wdtType = "Alpha WDT";
             }
             else
@@ -2043,6 +2082,7 @@ public class ViewerApp : IDisposable
                 // Standard WDT: small file referencing separate ADT files via IDataSource (MPQ)
                 if (_dataSource == null)
                 {
+                    _loadingScreen?.Disable();
                     _statusMessage = "Standard WDT requires an MPQ data source. Open a game folder first.";
                     _modelInfo = "Standard WDT detected but no data source loaded.\n\nUse File > Open Game Folder to load MPQ archives first,\nthen open the WDT from the file browser.";
                     return;
@@ -2053,7 +2093,7 @@ public class ViewerApp : IDisposable
                 var adapter = new Terrain.StandardTerrainAdapter(wdtBytes, mapName, _dataSource);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
                 _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver,
-                    onStatus: status => _statusMessage = status);
+                    onStatus: OnLoadStatus);
                 wdtType = "Standard WDT";
             }
 
@@ -2066,7 +2106,7 @@ public class ViewerApp : IDisposable
                 string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = curMapDef?.Id ?? -1;
 
-            // Load AreaPOI and TaxiPaths from DBC if available
+            // Load AreaPOI, TaxiPaths, and Lighting from DBC if available
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
             {
                 _worldScene.LoadAreaPoi(_dbcProvider, _dbdDir, _dbcBuild);
@@ -2075,6 +2115,7 @@ public class ViewerApp : IDisposable
                 {
                     var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
                     _worldScene.LoadTaxiPaths(dbcd, _dbcBuild, curMapDef.Id);
+                    _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, curMapDef.Id);
                 }
             }
 
@@ -2098,6 +2139,11 @@ public class ViewerApp : IDisposable
                          $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
 
             _statusMessage = $"Loaded world: {_terrainManager.MapName} ({_terrainManager.LoadedTileCount} tiles, {_worldScene.WmoInstanceCount} WMOs, {_worldScene.MdxInstanceCount} doodads)";
+
+            // Signal world loaded (progress → 75%). Loading screen stays active
+            // until the first terrain tiles are actually rendered (checked in OnRender).
+            _loadingScreen?.SetWorldLoaded();
+            PresentLoadingFrame();
         }
         catch (Exception ex)
         {
@@ -2107,7 +2153,21 @@ public class ViewerApp : IDisposable
             _worldScene?.Dispose();
             _worldScene = null;
             _terrainManager = null;
+            _loadingScreen?.Disable();
         }
+    }
+
+    /// <summary>
+    /// Force-present a loading screen frame. Replicates the Alpha client's
+    /// UpdateProgressBar → GxScenePresent pattern: clear, draw loading screen, swap.
+    /// Called from the blocking WorldScene constructor via onStatus callback.
+    /// </summary>
+    private void PresentLoadingFrame()
+    {
+        if (_loadingScreen == null || !_loadingScreen.IsActive) return;
+        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _loadingScreen.Render();
+        _window.GLContext?.SwapBuffers();
     }
 
     private void LoadVlmProject(string projectRoot)
@@ -2248,6 +2308,7 @@ public class ViewerApp : IDisposable
 
     private void OnClose()
     {
+        _loadingScreen?.Dispose();
         _worldScene?.Dispose();
         _worldScene = null;
         _terrainManager = null; // owned by WorldScene

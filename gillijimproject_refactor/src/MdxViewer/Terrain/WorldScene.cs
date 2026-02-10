@@ -35,11 +35,11 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 1200f; // Max distance for small doodads (just inside fog end)
-    private const float DoodadSmallThreshold = 20f; // AABB diagonal below this = "small"
-    private const float FadeStartFraction = 0.75f;  // Fade begins at 75% of cull distance
+    private const float DoodadCullDistance = 1500f; // Max distance for small doodads (matches fog end)
+    private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
+    private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
     private const float WmoCullDistance = 2000f;     // Max distance for WMO instances (slightly past fog)
-    private const float WmoFadeStartFraction = 0.80f;
+    private const float WmoFadeStartFraction = 0.85f;
     private const float NoCullRadius = 150f;         // Objects within this radius are never frustum-culled
 
     // Culling stats (updated each frame)
@@ -98,6 +98,10 @@ public class WorldScene : ISceneRenderer
     public bool ShowTaxi { get => _showTaxi; set => _showTaxi = value; }
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
 
+    // DBC Lighting
+    private LightService? _lightService;
+    public LightService? LightService => _lightService;
+
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
     private int _selectedTaxiRouteId = -1;
@@ -141,6 +145,15 @@ public class WorldScene : ISceneRenderer
         _taxiLoader.Load(dbcd, build, mapId);
     }
 
+    /// <summary>
+    /// Load Light.dbc and LightData.dbc for zone-based lighting.
+    /// </summary>
+    public void LoadLighting(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
+    {
+        _lightService = new LightService();
+        _lightService.Load(dbcProvider, dbdDir, build, mapId);
+    }
+
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         Action<string>? onStatus = null)
@@ -177,9 +190,9 @@ public class WorldScene : ISceneRenderer
     {
         var adapter = _terrainManager.Adapter;
 
-        // For WMO-only maps, pre-load the WDT-level placements + models
         if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
         {
+            // WMO-only maps: pre-load placements + models
             var manifest = _assets.BuildManifest(
                 adapter.MdxModelNames, adapter.WmoModelNames,
                 adapter.MddfPlacements, adapter.ModfPlacements);
@@ -192,12 +205,20 @@ public class WorldScene : ISceneRenderer
             float dist = MathF.Max(bbExtent.Length() * 0.5f, 100f);
             _wmoCameraOverride = bbCenter + new Vector3(dist, 0, bbExtent.Z * 0.3f);
             ViewerLog.Info(ViewerLog.Category.Terrain, $"WMO-only map, camera at BB center: ({bbCenter.X:F1}, {bbCenter.Y:F1}, {bbCenter.Z:F1}), dist={dist:F0}");
+
+            // Still subscribe for any late-loaded tiles
+            _terrainManager.OnTileLoaded += OnTileLoaded;
+            _terrainManager.OnTileUnloaded += OnTileUnloaded;
+            onStatus?.Invoke("World loaded (WMO-only map).");
         }
-
-        _terrainManager.OnTileLoaded += OnTileLoaded;
-        _terrainManager.OnTileUnloaded += OnTileUnloaded;
-
-        onStatus?.Invoke("World loaded (tiles stream as you move).");
+        else
+        {
+            // Terrain maps: stream everything via AOI — tiles, placements, and models
+            // load incrementally as the camera moves.
+            _terrainManager.OnTileLoaded += OnTileLoaded;
+            _terrainManager.OnTileUnloaded += OnTileUnloaded;
+            onStatus?.Invoke("World loaded (tiles stream as you move).");
+        }
     }
 
     private Vector3? _wmoCameraOverride;
@@ -218,6 +239,8 @@ public class WorldScene : ISceneRenderer
         bool wmoBased = adapter.IsWmoBased;
 
         // MDX (doodad) placements
+        // Wiki says MDDF rotation is same as MODF, only with scale added.
+        // Rotation.X/Y/Z stored as degrees from file (same field mapping as MODF).
         foreach (var p in adapter.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
@@ -228,14 +251,7 @@ public class WorldScene : ISceneRenderer
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
-            // MDX geometry is offset from origin — pre-translate by -boundsCenter
-            // so the bounding box center aligns with origin before scale/rotation/translation.
-            Matrix4x4 pivotCorrection = Matrix4x4.Identity;
-            if (_assets.TryGetMdxPivotOffset(key, out var pivot))
-                pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
-
-            var transform = pivotCorrection
-                * rot180Z
+            var transform = rot180Z
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -375,19 +391,14 @@ public class WorldScene : ISceneRenderer
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             _assets.EnsureMdxLoaded(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
+
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
-            // MDX geometry is offset from origin — pre-translate by -boundsCenter
-            Matrix4x4 pivotCorrection = Matrix4x4.Identity;
-            if (_assets.TryGetMdxPivotOffset(key, out var pivot))
-                pivotCorrection = Matrix4x4.CreateTranslation(-pivot);
-
             // 180° Z rotation compensates for winding reversal (CW→CCW)
             var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
-            var transform = pivotCorrection
-                * rot180Z
+            var transform = rot180Z
                 * Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
@@ -512,7 +523,19 @@ public class WorldScene : ISceneRenderer
         var camPos = new Vector3(viewInvSky.M41, viewInvSky.M42, viewInvSky.M43);
 
         // 0. Render sky dome (before terrain, no depth write)
-        _skyDome.UpdateFromLighting(_terrainManager.Lighting.GameTime);
+        // Update DBC lighting early so sky colors are available
+        _lightService?.Update(camPos);
+        if (_lightService != null && _lightService.ActiveLightId >= 0)
+        {
+            // Override sky dome colors from DBC Light data
+            _skyDome.ZenithColor = _lightService.SkyTopColor;
+            _skyDome.HorizonColor = _lightService.FogColor;
+            _skyDome.SkyFogColor = _lightService.FogColor;
+        }
+        else
+        {
+            _skyDome.UpdateFromLighting(_terrainManager.Lighting.GameTime);
+        }
         _skyDome.Render(view, proj, camPos);
 
         // Also set clear color to horizon color so any gaps match the sky
@@ -552,11 +575,23 @@ public class WorldScene : ISceneRenderer
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
 
-        // Fog parameters from terrain lighting (shared with terrain shader)
+        // Fog parameters: prefer DBC light data if available, else terrain defaults
+        // (LightService already updated earlier for sky dome)
         var lighting = _terrainManager.Lighting;
-        var fogColor = lighting.FogColor;
-        float fogStart = lighting.FogStart;
-        float fogEnd = lighting.FogEnd;
+        Vector3 fogColor;
+        float fogStart, fogEnd;
+        if (_lightService != null && _lightService.ActiveLightId >= 0)
+        {
+            fogColor = _lightService.FogColor;
+            fogEnd = _lightService.FogEnd > 10f ? _lightService.FogEnd : lighting.FogEnd;
+            fogStart = fogEnd * 0.25f; // Fog starts at 25% of end distance
+        }
+        else
+        {
+            fogColor = lighting.FogColor;
+            fogStart = lighting.FogStart;
+            fogEnd = lighting.FogEnd;
+        }
 
         // Update frustum planes for culling
         var vp = view * proj;

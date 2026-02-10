@@ -1,5 +1,6 @@
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.DataSources;
 using MdxViewer.Logging;
 
 namespace MdxViewer.Rendering;
@@ -37,7 +38,11 @@ public class ReplaceableTextureResolver
     // CDI ModelID → ExtraDisplayInfoID (for NPC texture baking)
     private readonly Dictionary<int, int> _modelToExtraDisplayId = new();
 
+    private IDataSource? _dataSource;
     private bool _loaded;
+
+    /// <summary>Set the data source for texture existence validation.</summary>
+    public void SetDataSource(IDataSource? dataSource) => _dataSource = dataSource;
 
     private record ItemDisplayData(string[] ModelNames, string[] ModelTextures, string[] Textures);
     private record ExtraDisplayData(string BakeName, int[] ItemDisplayIds);
@@ -120,12 +125,36 @@ public class ReplaceableTextureResolver
             _modelPathToId[normalized] = id;
             _modelIdToPath[id] = normalized;
 
+            // Also store with/without .mdx extension for flexible matching
+            // DBC ModelName may or may not include the extension
+            if (normalized.EndsWith(".mdx") || normalized.EndsWith(".mdl"))
+            {
+                string withoutExt = normalized[..^4];
+                _modelPathToId.TryAdd(withoutExt, id);
+            }
+            else
+            {
+                _modelPathToId.TryAdd(normalized + ".mdx", id);
+            }
+
             string fileNameKey = Path.GetFileNameWithoutExtension(normalized);
             _modelFileNameToId.TryAdd(fileNameKey, id);
 
             count++;
         }
-        ViewerLog.Info(ViewerLog.Category.Dbc, $"CreatureModelData: {count} entries loaded");
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CreatureModelData: {count} entries loaded ({_modelPathToId.Count} path entries)");
+
+        // Dump a few sample paths for debugging
+        int samples = 0;
+        foreach (var kvp in _modelPathToId)
+        {
+            if (samples >= 5) break;
+            if (kvp.Key.Contains("creature"))
+            {
+                ViewerLog.Debug(ViewerLog.Category.Dbc, $"  CMD sample: \"{kvp.Key}\" -> ModelID={kvp.Value}");
+                samples++;
+            }
+        }
     }
 
     private void LoadCreatureDisplayInfo(DBCD.DBCD dbcd, string build)
@@ -221,15 +250,11 @@ public class ReplaceableTextureResolver
     public string? Resolve(string modelPath, uint replaceableId, int displayIndex = 0)
     {
         if (!_loaded)
-        {
-            ViewerLog.Debug(ViewerLog.Category.Dbc, $"Resolve called but not loaded! model={modelPath} replId={replaceableId}");
             return null;
-        }
 
         int modelId = FindModelId(modelPath);
         if (modelId == 0)
         {
-            ViewerLog.Debug(ViewerLog.Category.Dbc, $"No ModelID for: {modelPath}");
             return null;
         }
 
@@ -245,7 +270,6 @@ public class ReplaceableTextureResolver
         result = ResolveFromItemDisplay(modelId, replaceableId);
         if (result != null) return result;
 
-        ViewerLog.Debug(ViewerLog.Category.Dbc, $"Unresolved: ModelID={modelId} replId={replaceableId} ({Path.GetFileName(modelPath)})");
         return null;
     }
 
@@ -253,9 +277,6 @@ public class ReplaceableTextureResolver
     {
         if (!_displayVariations.TryGetValue(modelId, out var variants) || variants.Count == 0)
             return null;
-
-        if (displayIndex >= variants.Count) displayIndex = 0;
-        var texNames = variants[displayIndex];
 
         // Map replaceable ID to texture variation index
         int varIndex = replaceableId switch
@@ -269,12 +290,81 @@ public class ReplaceableTextureResolver
             _ => -1
         };
 
-        if (varIndex < 0 || varIndex >= texNames.Length) return null;
+        if (varIndex < 0) return null;
 
-        string texName = texNames[varIndex].Trim();
-        if (string.IsNullOrEmpty(texName)) return null;
+        // Try the requested display index first, then all others.
+        // Validate that the resolved texture actually exists in the data source,
+        // because a model can have many CDI entries and displayIndex=0 may be wrong.
+        var indicesToTry = new List<int>();
+        int startIdx = displayIndex < variants.Count ? displayIndex : 0;
+        indicesToTry.Add(startIdx);
+        for (int i = 0; i < variants.Count; i++)
+        {
+            if (i != startIdx) indicesToTry.Add(i);
+        }
 
-        return BuildTexturePath(texName, modelPath);
+        string? firstCandidate = null; // first non-empty result (even if not validated)
+        string modelDir = (Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "").ToLowerInvariant();
+
+        foreach (int idx in indicesToTry)
+        {
+            var texNames = variants[idx];
+            if (varIndex >= texNames.Length) continue;
+
+            string texName = texNames[varIndex].Trim();
+            if (string.IsNullOrEmpty(texName)) continue;
+
+            string candidate = BuildTexturePath(texName, modelPath);
+
+            // If we have a data source, validate the texture exists
+            if (_dataSource != null)
+            {
+                if (TextureExistsInDataSource(candidate))
+                    return candidate;
+
+                // For bare filenames, also try the model's directory explicitly
+                if (!texName.Contains('\\') && !texName.Contains('/') && !string.IsNullOrEmpty(modelDir))
+                {
+                    string inModelDir = Path.Combine(modelDir, texName.ToLowerInvariant());
+                    if (!inModelDir.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                        inModelDir += ".blp";
+                    if (TextureExistsInDataSource(inModelDir))
+                        return inModelDir;
+                }
+
+                // Remember first candidate as fallback
+                firstCandidate ??= candidate;
+            }
+            else
+            {
+                // No data source to validate — return first non-empty result
+                return candidate;
+            }
+        }
+
+        // Don't return unvalidated DBC candidates — let caller fall through to directory scan
+        if (firstCandidate != null)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Dbc, $"DBC: no validated texture for ModelID={modelId} ({Path.GetFileName(modelPath)}), replId={replaceableId}, {variants.Count} variants tried");
+        }
+        return null;
+    }
+
+    /// <summary>Check if a texture path exists in the data source (case-insensitive, no file read).</summary>
+    private bool TextureExistsInDataSource(string texPath)
+    {
+        if (_dataSource is MpqDataSource mpq)
+        {
+            // Fast: check file set index (case-insensitive) then MPQ header
+            if (mpq.FindInFileSet(texPath) != null) return true;
+            return mpq.FileExists(texPath);
+        }
+        if (_dataSource != null)
+        {
+            var data = _dataSource.ReadFile(texPath);
+            return data != null && data.Length > 0;
+        }
+        return false;
     }
 
     private string? ResolveFromExtraDisplay(int modelId, uint replaceableId)
@@ -388,6 +478,20 @@ public class ReplaceableTextureResolver
         string fileName = Path.GetFileNameWithoutExtension(normalized);
         if (_modelFileNameToId.TryGetValue(fileName, out modelId))
             return modelId;
+
+        // Try without extension (DBC ModelName often omits .mdx)
+        string withoutExt = normalized;
+        if (withoutExt.EndsWith(".mdx") || withoutExt.EndsWith(".mdl"))
+            withoutExt = withoutExt[..^4];
+        if (_modelPathToId.TryGetValue(withoutExt, out modelId))
+            return modelId;
+
+        // Try with .mdx appended (DBC ModelName sometimes includes extension)
+        if (!normalized.EndsWith(".mdx"))
+        {
+            if (_modelPathToId.TryGetValue(normalized + ".mdx", out modelId))
+                return modelId;
+        }
 
         return 0;
     }

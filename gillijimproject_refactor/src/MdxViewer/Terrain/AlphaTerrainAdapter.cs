@@ -110,7 +110,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Pre-scan all ADTs to collect MDDF/MODF placements without loading terrain geometry.
     /// This allows the asset manifest to be built before any tiles are loaded.
     /// </summary>
-    private void PreScanPlacements()
+    public void PreScanPlacements()
     {
         int scanned = 0;
         foreach (int tileIdx in _existingTiles)
@@ -257,6 +257,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             float rawX = BitConverter.ToSingle(mddfData, off + 8);
             float rawZ = BitConverter.ToSingle(mddfData, off + 12); // height
             float rawY = BitConverter.ToSingle(mddfData, off + 16);
+            // C3Vector rotation stored as (X, Z, Y) in file — same layout as position
             float rotX = BitConverter.ToSingle(mddfData, off + 20);
             float rotZ = BitConverter.ToSingle(mddfData, off + 24);
             float rotY = BitConverter.ToSingle(mddfData, off + 28);
@@ -266,11 +267,12 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (!_mddfDiagPrinted && MddfPlacements.Count < 3)
             {
                 string name = nameIdx < MdxModelNames.Count ? Path.GetFileName(MdxModelNames[nameIdx]) : "?";
-                Console.WriteLine($"[MDDF RAW] [{MddfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotZ:F2}, {rotY:F2}) scale={scale}  model={name}");
+                Console.WriteLine($"[MDDF RAW] [{MddfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotY:F2}, {rotZ:F2}) scale={scale}  model={name}");
                 if (MddfPlacements.Count == 2) _mddfDiagPrinted = true;
             }
 
             // Convert to renderer coords: terrainX=wowY, terrainY=wowX (swap + subtract)
+            // Rotation is stored as-is (X, Y, Z degrees) — no axis swap needed
             target.Add(new MddfPlacement
             {
                 NameIndex = nameIdx,
@@ -455,7 +457,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             ShadowMap = shadowMap,
             Liquid = liquid,
             WorldPosition = new Vector3(worldX, worldY, 0f),
-            AreaId = mcnk.Header.Unknown3,
+            // Alpha 0.5.3 AreaID is packed in Unknown3 — low 16 bits = AreaID
+            AreaId = mcnk.Header.Unknown3 & 0xFFFF,
             McnkFlags = mcnk.Header.Flags
         };
     }

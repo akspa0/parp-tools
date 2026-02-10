@@ -2,22 +2,17 @@
 
 ## Current Focus
 
-**MDX doodad textures are still magenta/broken.** Root cause is UNKNOWN. Multiple fix attempts have been made but none resolved the issue. The problem needs proper diagnosis with runtime logging to understand exactly what texture paths are being looked up, whether they exist in the MPQ file set, and why ReadFile returns null.
-
-## CRITICAL: What We Do NOT Know About MDX Textures
-- We do NOT know where BLP textures for MDX doodads are stored in WoW Alpha 0.5.3
-- BLP textures are NOT stored as `.blp.MPQ` individual files (that was a wrong assumption)
-- BLP textures are inside the main MPQ archives (dbc.MPQ, model.MPQ, texture.MPQ, etc.)
-- We do NOT know if the texture paths in MDX TEXS chunks match what's in the MPQ listfiles
-- We do NOT know if `FindInFileSet` / `ReadFile` is failing due to path case, missing entries, or something else entirely
-- **Next session MUST start with runtime diagnostic logging** — print every texture path lookup and its result
+**Implement loading screen** — RE analysis complete (specifications/outputs/053/LoadingScreens/). The Alpha client uses a single static loading screen (`Interface\Glues\loading.blp`) with a progress bar (`Loading-BarBorder.blp` + `Loading-BarFill.blp`). Progress formula: `(current/max) * 0.75 + 0.25` when world finishes. The client blocks the main thread during CWorld::LoadMap but force-presents frames via UpdateProgressBar → GxScenePresent. We do the same — our WorldScene constructor blocks the render thread, so we call SwapBuffers inside the progress callback.
 
 ## Immediate Next Steps
 
-1. **Add aggressive runtime logging to MDX texture loading** — Log every texture path attempted, every FindInFileSet result, every ReadFile result. Need to see EXACTLY what's failing and why.
-2. **Check MPQ file set** — How many BLP files are in `_fileSet`? What paths do they have? Do MDX texture paths match?
-3. **Check a specific tree MDX** — Pick one tree model, log its TEXS chunk paths and ReplaceableIds, trace the full resolution chain.
-4. **Only then attempt fixes** — Don't guess at solutions without understanding the problem first.
+1. **Implement LoadingScreen class** — Load 3 BLPs, render fullscreen ortho quads, progress bar fill scaled by ratio
+2. **Hook into ViewerApp map-open flow** — Show loading screen before WorldScene construction, update progress via onStatus callback, hide after construction
+3. **Then: MCP server design** — New feature to accept GLB terrain, procedural NPCs, audio, click-to-chat from external LLM orchestrators
+
+## MDX Magenta Textures — DEFERRED
+
+Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MDX files). The magenta quads are particle emitter geometry that references particle textures, not regular model textures. Defer until particle system implementation.
 
 ## Session 2026-02-09 Summary
 

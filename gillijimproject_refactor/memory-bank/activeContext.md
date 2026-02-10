@@ -1,67 +1,84 @@
 # Active Context
 
-## Current Focus: MdxViewer — MDX Rendering Quality (Feb 9, 2026)
+## Current Focus: MdxViewer — Performance & Rendering Quality (Feb 10, 2026)
 
-### Recently Completed (This Session)
+### Recently Completed (This Session — Feb 9-10)
 
-- **WMO Liquid Rendering**: ✅ COMPLETE
-  - Liquid type derived from `groupLiquid` + tile flags (noggit logic)
-  - Positioning fixed: Z-up axis + 90° CCW rotation fix `(-j, +i)` on XY plane
-  - Tile visibility: bit 0x08 hide flag from noggit SMOLTile
-- **MDX Z-Buffer Fix**: ✅ Two-pass render (opaque then transparent)
-- **WMO Transparent Textures**: ✅ 4-pass render: opaque → doodads → liquids → transparent
-  - Fragment shader uses `texColor.a` + `uAlphaTest` uniform for per-BlendMode discard
-- **WMO Doodad Loading**: ✅ Fixed 72% failure rate (4076/5614)
-  - Added `FindInFileSet` case-insensitive MPQ lookup
-  - Added `.mdx/.mdl` extension swap fallback
-  - Result: 5614/5614 loaded (0 failures)
+- **WMO Doodad Culling**: ✅ Distance cull (500u), nearest-first sort, max 64/frame, fog passthrough
+  - Major performance win — WMO doodads were the primary bottleneck
+- **WMO Liquid Type Fix**: ✅ `GroupLiquid=15` → magma (was incorrectly sampling tile flags → slime)
+- **GEOS Footer Parsing**: ✅ `IsValidGeosetTag()` peek-ahead prevents footer misread as chunk tags
+- **Alpha Cutout for Trees**: ✅ Layer 0 + BlendMode=Transparent → hard discard in opaque pass (no blend)
+- **MDX Fog Skip**: ✅ Untextured (magenta) MDX fragments skip fog blending
+- **AreaID Fix**: ✅ Extract low 16 bits from `Unknown3`, fallback to low byte for MapID mismatch
+- **MDX Cull Relaxation**: ✅ DoodadCullDistance 1200→1500, SmallThreshold 20→10
+- **Directional Tile Loading**: ✅ Camera heading tracking, forward lookahead tiles, priority-sorted load queue
+- **DBC Lighting**: ✅ LightService loads Light.dbc + LightData.dbc, zone-based ambient/fog/sky colors
+- **ReplaceableTexture Fix**: ✅ DBC resolver now validates all CDI variants against MPQ, picks correct skin
+- **Rotation Revert**: Reverted X↔Y rotation swap — original `rx=Rotation.X, ry=Rotation.Y` is correct
+
+### Reverted Changes (Caused Regressions)
+- ❌ WMO fog skip for untextured fragments — broke WMO rendering entirely
+- ❌ MDX rotation axis swap (X↔Y) — caused fence tilt issues
+- ❌ MDX rotation negation — caused tree geometry to mirror/stretch into sky
 
 ### Working Features
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Alpha WDT terrain | ✅ | Monolithic format, 256 MCNK chunks per tile |
-| Standard WDT+ADT (3.3.5) | NO | Split ADT files from MPQ/IDataSource |
 | WMO v14 rendering | ✅ | 4-pass: opaque/doodads/liquids/transparent |
-| WMO liquid (MLIQ) | ✅ | Type detection, positioning, tile visibility |
-| WMO doodad loading | ✅ | Case-insensitive MPQ + mdx/mdl swap |
-| MDX rendering | ✅ | Two-pass opaque/transparent, blend modes 0-6 |
-| MCSH shadow maps | ✅ | 64×64 bitmask, all layers |
-| MCLQ ocean liquid | ✅ | Inline liquid from MCNK flags |
-| Async tile streaming | ✅ | AOI-based lazy loading |
-| Frustum culling | ✅ | View-frustum + bounding box |
+| WMO doodad culling | ✅ | Distance + cap + sort + fog passthrough |
+| WMO liquid (MLIQ) | ✅ | GroupLiquid=15 → magma, type detection |
+| MDX rendering | ✅ | Two-pass, alpha cutout for trees, fog skip for untextured |
+| GEOS parser | ✅ | Tag validation + footer parsing |
+| Async tile streaming | ✅ | Directional loading with heading-based priority |
+| Frustum culling | ✅ | View-frustum + distance + fade |
+| AreaID lookup | ✅ | Low 16-bit extraction + low byte fallback |
+| DBC Lighting | ✅ | Light.dbc + LightData.dbc zone-based colors |
+| Replaceable Textures | ✅ | DBC CDI variant validation + model dir scan fallback |
 | Minimap overlay | ✅ | From minimap tiles |
 
-### Next Steps (Priority Order)
+### Known Issues / Next Steps
 
-1. **MDX rendering quality** — Fix alpha discard thresholds, per-geoset color/alpha ← SEE `memory-bank/planning/MDX_RENDERING_PLAN.md`
-2. **WMO lighting** — v14-16 grayscale lightmap, v17 vertex color (MOCV)
-3. **MDX particles** — Separate shader, billboard quads, blend modes
-4. **GLB export test** — End-to-end on v16 WMO
-5. **0.6.0 ADT+WDT loading** — New format support
-6. **LK StandardTerrainAdapter fix** — 0 chunks loading
+1. **Terrain liquid type** — Lava still green, diagnostic logging added, needs flag analysis
+3. **MDX textures magenta** — ROOT CAUSE UNKNOWN, needs diagnostic logging session
+4. **Water plane MDX rotation** — Flat water MDX models tilted wrong
 
 ---
 
 ## Key Architecture Decisions
 
 ### Coordinate System (Confirmed via Ghidra)
-- WoW uses **right-handed** coordinates: X=North, Y=West, Z=Up
-- WoW renders through **Direct3D** (CW front faces)
-- OpenGL uses **CCW front faces**
-- Fix: Reverse triangle winding at GPU upload + 180° Z rotation in placement
-- Terrain positions: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`
-- Model vertices: raw pass-through (no axis swap at vertex level)
+- WoW: right-handed, X=North, Y=West, Z=Up, Direct3D CW front faces
+- OpenGL: CCW front faces
+- Fix: Reverse winding at GPU upload + 180° Z rotation in placement
+- Terrain: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`
+- MDX rotations: `rx = Rotation.X`, `ry = Rotation.Y` (NO swap — swap was wrong)
+
+### Performance Constants
+
+| Constant | Value | Location |
+|----------|-------|----------|
+| DoodadCullDistance (world) | 1500f | WorldScene.cs |
+| DoodadSmallThreshold | 10f | WorldScene.cs |
+| WmoCullDistance | 2000f | WorldScene.cs |
+| NoCullRadius | 150f | WorldScene.cs |
+| WMO DoodadCullDistance | 500f | WmoRenderer.cs |
+| WMO DoodadMaxRenderCount | 64 | WmoRenderer.cs |
+| AoiRadius | 2 (5×5) | TerrainManager.cs |
+| AoiForwardExtra | 1 | TerrainManager.cs |
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
-| `WorldScene.cs` | Placement transforms, instance management |
-| `WmoRenderer.cs` | WMO v14 GPU rendering, 4-pass transparency, liquid |
-| `ModelRenderer.cs` | MDX GPU rendering, two-pass, blend modes |
-| `WmoV14ToV17Converter.cs` | WMO parser: materials, groups, doodads, MLIQ |
-| `AlphaTerrainAdapter.cs` | Alpha WDT terrain loading |
-| `StandardTerrainAdapter.cs` | 3.3.5 WDT+ADT terrain loading |
-| `TerrainManager.cs` | AOI-based tile streaming |
-| `MdxFile.cs` | MDX parser (GEOS/BIDX/BWGT fix) |
+| `WorldScene.cs` | Placement transforms, instance management, culling |
+| `WmoRenderer.cs` | WMO v14 GPU rendering, doodad culling, liquid |
+| `ModelRenderer.cs` | MDX GPU rendering, alpha cutout, fog skip |
+| `AlphaTerrainAdapter.cs` | Alpha WDT terrain + AreaID + liquid type |
+| `TerrainManager.cs` | Directional AOI tile streaming |
+| `AreaTableService.cs` | AreaID → name with MapID filtering |
+| `LightService.cs` | DBC Light/LightData zone-based lighting |
+| `ReplaceableTextureResolver.cs` | DBC-based replaceable texture resolution with MPQ validation |
+| `MdxFile.cs` | MDX parser (GEOS tag validation) |

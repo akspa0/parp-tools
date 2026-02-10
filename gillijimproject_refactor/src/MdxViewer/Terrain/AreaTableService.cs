@@ -42,19 +42,24 @@ public class AreaTableService
         string mapCol = DetectColumn(storage, "ContinentID", "MapID", "Continent");
         string flagsCol = DetectColumn(storage, "Flags", "AreaFlags");
 
+        // MCNK AreaId uses the DBC row key (implicit ID), NOT the AreaNumber field.
+        // AreaNumber is a packed value (e.g. 1048576) unrelated to MCNK placement.
+        // Index primarily by row key. Also index by AreaNumber as fallback.
         foreach (var key in storage.Keys)
         {
             var row = storage[key];
-            int id = SafeField<int>(row, idCol, key);
+            int areaNumber = SafeField<int>(row, idCol, key);
             string name = Sanitize(SafeField<string>(row, nameCol, "") ?? "");
             int parentId = SafeField<int>(row, parentCol, 0);
             int mapId = SafeField<int>(row, mapCol, 0);
             int flags = SafeField<int>(row, flagsCol, 0);
 
-            _areas[id] = new AreaEntry(id, name, parentId, mapId, flags);
+            var entry = new AreaEntry(key, name, parentId, mapId, flags);
+            _areas[key] = entry;           // Primary: DBC row key (matches MCNK AreaId)
+            _areas.TryAdd(areaNumber, entry); // Fallback: AreaNumber field
         }
 
-        Console.WriteLine($"[AreaTable] Loaded {_areas.Count} area entries");
+        Console.WriteLine($"[AreaTable] Loaded {_areas.Count} area entries (idCol={idCol})");
     }
 
     /// <summary>
@@ -89,18 +94,16 @@ public class AreaTableService
 
     /// <summary>
     /// Get area name with parent context, but only if the area belongs to the given MapID.
-    /// Returns null if the area belongs to a different map.
+    /// Returns null if the area belongs to a different map or AreaID is not found.
+    /// MCNK AreaID maps directly to AreaTable.dbc ID — no byte packing.
     /// </summary>
     public string? GetAreaDisplayNameForMap(int areaId, int mapId)
     {
-        if (!_areas.TryGetValue(areaId, out var entry))
+        if (!_areas.TryGetValue(areaId, out var entry) || entry.MapId != mapId)
             return null;
-
-        if (entry.MapId != mapId) return null;
 
         if (entry.ParentAreaId != 0 && _areas.TryGetValue(entry.ParentAreaId, out var parent))
             return $"{parent.Name} > {entry.Name}";
-
         return entry.Name;
     }
 
