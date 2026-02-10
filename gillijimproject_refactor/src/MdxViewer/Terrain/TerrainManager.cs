@@ -30,7 +30,7 @@ public class TerrainManager : ISceneRenderer
     private readonly ConcurrentDictionary<(int, int), byte> _loadingTiles = new();
 
     // AOI: how many tiles around the camera to keep loaded
-    private const int AoiRadius = 3; // Load 7×7 tiles around camera
+    private const int AoiRadius = 2; // Load 5×5 tiles around camera (fog hides beyond ~3 tiles)
     private const int MaxGpuUploadsPerFrame = 2;
 
     /// <summary>Called when a tile is loaded, with per-tile placement data.</summary>

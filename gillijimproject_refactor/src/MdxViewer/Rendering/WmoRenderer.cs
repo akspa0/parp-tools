@@ -22,6 +22,7 @@ public class WmoRenderer : ISceneRenderer
 
     private uint _shaderProgram;
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
+    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
 
     private readonly List<GroupBuffers> _groups = new();
     private bool _wireframe;
@@ -137,7 +138,8 @@ public class WmoRenderer : ISceneRenderer
     /// <summary>
     /// Render this WMO with a custom world transform (for placed WMO instances in WorldScene).
     /// </summary>
-    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj)
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null)
     {
         // Two-pass WMO rendering: Opaque → Doodads → Liquids → Transparent
         // This ensures liquids are visible through transparent materials (gratings, windows)
@@ -148,6 +150,14 @@ public class WmoRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        // Fog uniforms (match terrain fog for seamless blending)
+        var fc = fogColor ?? new Vector3(0.6f, 0.7f, 0.85f);
+        var cp = cameraPos ?? Vector3.Zero;
+        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -226,6 +236,11 @@ public class WmoRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+        // Re-set fog uniforms after UseProgram (doodad rendering may have changed active program)
+        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
 
         _gl.Enable(EnableCap.Blend);
         _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -337,6 +352,10 @@ uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform vec4 uColor;
 uniform float uAlphaTest;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uCameraPos;
 
 out vec4 FragColor;
 
@@ -358,7 +377,13 @@ void main() {
     if (uAlphaTest > 0.0 && texColor.a < uAlphaTest)
         discard;
 
-    FragColor = vec4(texColor.rgb * lighting, texColor.a);
+    // Fog: blend to fog color based on distance from camera
+    vec3 litColor = texColor.rgb * lighting;
+    float dist = length(vFragPos - uCameraPos);
+    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+    vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
+
+    FragColor = vec4(foggedColor, texColor.a);
 }
 ";
 
@@ -384,6 +409,10 @@ void main() {
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
+        _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
+        _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
+        _uFogEnd = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
+        _uCameraPos = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
     }
 
     private uint CompileShader(ShaderType type, string source)

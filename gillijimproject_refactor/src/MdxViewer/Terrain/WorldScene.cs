@@ -35,11 +35,12 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 1500f; // Max distance for small doodads
+    private const float DoodadCullDistance = 1200f; // Max distance for small doodads (just inside fog end)
     private const float DoodadSmallThreshold = 20f; // AABB diagonal below this = "small"
-    private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
-    private const float WmoCullDistance = 5000f;     // Max distance for WMO instances
-    private const float WmoFadeStartFraction = 0.85f;
+    private const float FadeStartFraction = 0.75f;  // Fade begins at 75% of cull distance
+    private const float WmoCullDistance = 2000f;     // Max distance for WMO instances (slightly past fog)
+    private const float WmoFadeStartFraction = 0.80f;
+    private const float NoCullRadius = 150f;         // Objects within this radius are never frustum-culled
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -87,13 +88,13 @@ public class WorldScene : ISceneRenderer
 
     // Area POI
     private AreaPoiLoader? _poiLoader;
-    private bool _showPoi = true;
+    private bool _showPoi = false;
     public bool ShowPoi { get => _showPoi; set => _showPoi = value; }
     public AreaPoiLoader? PoiLoader => _poiLoader;
 
     // Taxi paths
     private TaxiPathLoader? _taxiLoader;
-    private bool _showTaxi = true;
+    private bool _showTaxi = false;
     public bool ShowTaxi { get => _showTaxi; set => _showTaxi = value; }
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
 
@@ -551,6 +552,12 @@ public class WorldScene : ISceneRenderer
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
 
+        // Fog parameters from terrain lighting (shared with terrain shader)
+        var lighting = _terrainManager.Lighting;
+        var fogColor = lighting.FogColor;
+        float fogStart = lighting.FogStart;
+        float fogEnd = lighting.FogEnd;
+
         // Update frustum planes for culling
         var vp = view * proj;
         _frustumCuller.Update(vp);
@@ -572,11 +579,12 @@ public class WorldScene : ISceneRenderer
             float wmoFadeRange = WmoCullDistance - wmoFadeStart;
             foreach (var inst in _wmoInstances)
             {
-                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
-                { WmoCulledCount++; continue; }
-                // Distance cull + fade for WMOs
                 var wmoCenter = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
                 float wmoDist = Vector3.Distance(cameraPos, wmoCenter);
+                // Skip frustum cull for nearby objects to prevent pop-in when turning
+                if (wmoDist > NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                { WmoCulledCount++; continue; }
+                // Distance cull + fade for WMOs
                 if (wmoDist > WmoCullDistance)
                 { WmoCulledCount++; continue; }
                 float wmoFade = wmoDist > wmoFadeStart ? 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange : 1.0f;
@@ -584,7 +592,8 @@ public class WorldScene : ISceneRenderer
                 if (renderer == null) continue;
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
-                renderer.RenderWithTransform(inst.Transform, view, proj);
+                renderer.RenderWithTransform(inst.Transform, view, proj,
+                    fogColor, fogStart, fogEnd, cameraPos);
                 WmoRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
@@ -599,12 +608,12 @@ public class WorldScene : ISceneRenderer
         {
             foreach (var inst in _mdxInstances)
             {
-                // Frustum cull
-                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
-                { MdxCulledCount++; continue; }
-                // Distance cull small doodads (with fade)
                 var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
                 float dist = Vector3.Distance(cameraPos, center);
+                // Skip frustum cull for nearby objects to prevent pop-in when turning
+                if (dist > NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                { MdxCulledCount++; continue; }
+                // Distance cull small doodads (with fade)
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
                 if (diag < DoodadSmallThreshold && dist > DoodadCullDistance)
                 { MdxCulledCount++; continue; }
@@ -616,7 +625,8 @@ public class WorldScene : ISceneRenderer
                 if (renderer == null) continue;
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
-                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade);
+                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
+                    fogColor, fogStart, fogEnd, cameraPos);
                 MdxRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
@@ -637,10 +647,10 @@ public class WorldScene : ISceneRenderer
             {
                 var inst = _mdxInstances[i];
                 if (_assets.GetMdx(inst.ModelKey) == null) continue;
-                // Same frustum + distance cull as opaque pass
-                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                // Same frustum + distance cull as opaque pass (with NoCullRadius)
                 var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
                 float dist = Vector3.DistanceSquared(cameraPos, center);
+                if (dist > NoCullRadius * NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
                 if (diag < DoodadSmallThreshold && dist > DoodadCullDistance * DoodadCullDistance) continue;
                 sorted.Add((i, dist));
@@ -657,7 +667,8 @@ public class WorldScene : ISceneRenderer
                 if (tDiag < DoodadSmallThreshold && tDist > mdxFadeStart)
                     tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
-                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade);
+                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
+                    fogColor, fogStart, fogEnd, cameraPos);
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }

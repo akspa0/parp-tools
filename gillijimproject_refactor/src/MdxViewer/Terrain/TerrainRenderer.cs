@@ -163,11 +163,19 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _shader.SetFloat("uContourInterval", ContourInterval);
 
-        // Render each chunk (with frustum culling if available)
+        // Render each chunk (with frustum + distance culling)
+        // Chunks fully beyond fog are invisible — skip them to save GPU work
+        float chunkCullDist = _lighting.FogEnd + 200f; // Small buffer past fog end
+        float chunkCullDistSq = chunkCullDist * chunkCullDist;
         ChunksRendered = 0;
         ChunksCulled = 0;
         foreach (var chunk in _chunks)
         {
+            // Distance cull: skip chunks entirely beyond fog
+            var chunkCenter = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
+            float distSq = Vector3.DistanceSquared(cameraPos, chunkCenter);
+            if (distSq > chunkCullDistSq)
+            { ChunksCulled++; continue; }
             if (frustum != null && !frustum.TestAABB(chunk.BoundsMin, chunk.BoundsMax))
             { ChunksCulled++; continue; }
             RenderChunk(chunk);

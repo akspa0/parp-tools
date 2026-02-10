@@ -33,6 +33,7 @@ public class MdxRenderer : ISceneRenderer
 
     private uint _shaderProgram;
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
+    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -124,7 +125,8 @@ public class MdxRenderer : ISceneRenderer
     /// Pass = Both renders all layers (legacy behavior).
     /// fadeAlpha = 0..1 multiplier for distance-based fade-in/out (1.0 = fully opaque).
     /// </summary>
-    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both, float fadeAlpha = 1.0f)
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both, float fadeAlpha = 1.0f,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null)
     {
         _gl.UseProgram(_shaderProgram);
 
@@ -136,6 +138,14 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        // Fog uniforms (match terrain fog for seamless blending)
+        var fc = fogColor ?? new Vector3(0.6f, 0.7f, 0.85f);
+        var cp = cameraPos ?? Vector3.Zero;
+        _gl.Uniform3(_uFogColor, fc.X, fc.Y, fc.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cp.X, cp.Y, cp.Z);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -309,6 +319,10 @@ uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform int uUnshaded;
 uniform vec4 uColor;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uCameraPos;
 
 out vec4 FragColor;
 
@@ -316,7 +330,7 @@ void main() {
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (texColor.a < 0.3) discard;
+        if (uAlphaTest == 1 && texColor.a < 0.1) discard;
     } else {
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
@@ -330,8 +344,15 @@ void main() {
         lighting = 0.35 + diff * 0.65;
     }
 
+    vec3 litColor = texColor.rgb * lighting;
+
+    // Fog: blend to fog color based on distance from camera (matches terrain fog)
+    float dist = length(vFragPos - uCameraPos);
+    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
+    vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
+
     float outAlpha = (uAlphaTest == 0) ? 1.0 : texColor.a;
-    FragColor = vec4(texColor.rgb * lighting, outAlpha) * uColor;
+    FragColor = vec4(foggedColor, outAlpha) * uColor;
 }
 ";
 
@@ -361,6 +382,10 @@ void main() {
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
+        _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
+        _uFogStart = _gl.GetUniformLocation(_shaderProgram, "uFogStart");
+        _uFogEnd = _gl.GetUniformLocation(_shaderProgram, "uFogEnd");
+        _uCameraPos = _gl.GetUniformLocation(_shaderProgram, "uCameraPos");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);
@@ -682,75 +707,145 @@ void main() {
         ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
     }
 
+    /// <summary>
+    /// WoW client hardcoded default textures for each REPLACEABLE_MATERIAL_ID.
+    /// These are the fallback textures used when no DBC override is found.
+    /// From Ghidra analysis of the Alpha 0.5.3 client's texture resolution table.
+    /// </summary>
+    private static readonly Dictionary<uint, string> DefaultReplaceableTextures = new()
+    {
+        { 1,  @"Textures\ReplaceableTextures\CreatureSkin\CreatureSkin01.blp" },
+        { 2,  @"Textures\ReplaceableTextures\ObjectSkin\ObjectSkin01.blp" },
+        { 3,  @"Textures\ReplaceableTextures\WeaponBlade\WeaponBlade01.blp" },
+        { 4,  @"Textures\ReplaceableTextures\WeaponHandle\WeaponHandle01.blp" },
+        { 5,  @"Textures\ReplaceableTextures\Environment\Environment01.blp" },
+        { 6,  @"Textures\ReplaceableTextures\CharHair\CharHair00_00.blp" },
+        { 7,  @"Textures\ReplaceableTextures\CharFacialHair\CharFacialHair00_00.blp" },
+        { 8,  @"Textures\ReplaceableTextures\SkinExtra\SkinExtra01.blp" },
+        { 9,  @"Textures\ReplaceableTextures\UISkin\UISkin01.blp" },
+        { 10, @"Textures\ReplaceableTextures\TaurenMane\TaurenMane00_00.blp" },
+        { 11, @"Textures\ReplaceableTextures\Monster\Monster01_01.blp" },
+        { 12, @"Textures\ReplaceableTextures\Monster\Monster01_02.blp" },
+        { 13, @"Textures\ReplaceableTextures\Monster\Monster01_03.blp" },
+    };
+
     private string? ResolveReplaceableTexture(uint replaceableId)
     {
-        // Try DBCD-based resolver first
+        string modelName = _modelVirtualPath != null ? Path.GetFileName(_modelVirtualPath) : "?";
+
+        // Strategy 1: DBCD-based resolver (creatures with DBC entries)
         if (_texResolver != null && _modelVirtualPath != null)
         {
             string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId);
             if (resolved != null) return resolved;
         }
 
-        // For environment models (trees, shrubs), replaceable textures use conventions:
-        // ReplaceableId 1 = bark/skin, 2 = leaves/detail
-        // Try to find BLPs in the model's directory that match common naming patterns
-        if (_dataSource != null && _modelVirtualPath != null)
+        // Strategy 2: Search model's directory for BLPs matching naming conventions
+        // Environment doodads (trees, shrubs, rocks) have textures alongside the MDX
+        if (_dataSource is MpqDataSource mpqDS && _modelVirtualPath != null)
         {
             string modelDir = Path.GetDirectoryName(_modelVirtualPath)?.Replace('/', '\\') ?? "";
             string modelBase = Path.GetFileNameWithoutExtension(_modelVirtualPath);
 
-            // Common suffixes for replaceable texture IDs in environment models
-            string[] suffixes = replaceableId switch
+            // Build candidate list: ModelName + suffix + optional number + .blp
+            var suffixes = replaceableId switch
             {
-                1 => new[] { "Bark", "Trunk", "Skin", "Body", "" },
-                2 => new[] { "Leaf", "Leaves", "Detail", "Foliage", "" },
+                1 => new[] { "Bark", "_Bark", "Trunk", "_Trunk", "Skin", "_Skin", "Body", "_Body", "" },
+                2 => new[] { "Leaf", "_Leaf", "Leaves", "_Leaves", "Detail", "_Detail", "Foliage", "_Foliage", "" },
                 _ => new[] { "" }
             };
 
-            // Search for BLPs in model directory matching model name + suffix
-            if (_dataSource is MpqDataSource mpqDS)
+            // Try each suffix with optional numeric variants (00, 01, etc.)
+            foreach (var suffix in suffixes)
             {
-                foreach (var suffix in suffixes)
+                string baseName = string.IsNullOrEmpty(suffix) ? modelBase : modelBase + suffix;
+
+                // Try exact: ModelNameSuffix.blp
+                string candidate = Path.Combine(modelDir, baseName + ".blp");
+                var found = mpqDS.FindInFileSet(candidate);
+                if (found != null)
                 {
-                    string candidate = string.IsNullOrEmpty(suffix)
-                        ? Path.Combine(modelDir, modelBase + ".blp")
-                        : Path.Combine(modelDir, modelBase + suffix + ".blp");
-                    var found = mpqDS.FindInFileSet(candidate);
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming convention)");
+                    return found;
+                }
+
+                // Try with numbers: ModelNameSuffix00.blp, ModelNameSuffix01.blp
+                for (int n = 0; n <= 3; n++)
+                {
+                    candidate = Path.Combine(modelDir, $"{baseName}{n:D2}.blp");
+                    found = mpqDS.FindInFileSet(candidate);
                     if (found != null)
                     {
-                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Replaceable #{replaceableId} resolved via naming convention: {found}");
+                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} -> {Path.GetFileName(found)} (naming+num)");
                         return found;
                     }
                 }
             }
 
-            // Last resort: scan all BLPs in model directory for any match
+            // Strategy 3: Scan all BLPs in model directory for fuzzy match
             var files = _dataSource.GetFileList(".blp");
-            var candidates = files
-                .Where(f => f.StartsWith(modelDir, StringComparison.OrdinalIgnoreCase) &&
-                            Path.GetFileNameWithoutExtension(f).StartsWith(modelBase, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(f => f.Length) // Prefer shorter names (more likely to be the base texture)
+            string modelDirLower = modelDir.ToLowerInvariant();
+            string modelBaseLower = modelBase.ToLowerInvariant();
+            var dirCandidates = files
+                .Where(f =>
+                {
+                    string fLower = f.ToLowerInvariant();
+                    string fDir = Path.GetDirectoryName(fLower)?.Replace('/', '\\') ?? "";
+                    string fName = Path.GetFileNameWithoutExtension(fLower);
+                    return fDir == modelDirLower && fName.StartsWith(modelBaseLower);
+                })
+                .OrderBy(f => f.Length)
                 .ToList();
 
-            if (candidates.Count > 0)
+            if (dirCandidates.Count > 0)
             {
-                // For replaceableId 1, prefer bark/trunk textures; for 2, prefer leaf textures
+                // Score candidates by how well they match the expected texture type
                 string? best = null;
-                foreach (var c in candidates)
+                foreach (var c in dirCandidates)
                 {
                     string fname = Path.GetFileNameWithoutExtension(c).ToLowerInvariant();
-                    bool isBark = fname.Contains("bark") || fname.Contains("trunk");
-                    bool isLeaf = fname.Contains("leaf") || fname.Contains("leaves");
+                    string extra = fname[modelBaseLower.Length..]; // part after model name
+
+                    bool isBark = extra.Contains("bark") || extra.Contains("trunk") || extra.Contains("skin") || extra.Contains("body");
+                    bool isLeaf = extra.Contains("leaf") || extra.Contains("leaves") || extra.Contains("detail") || extra.Contains("foliage");
 
                     if (replaceableId == 1 && isBark) { best = c; break; }
                     if (replaceableId == 2 && isLeaf) { best = c; break; }
                 }
-                if (best == null) best = candidates[0]; // Fallback to first match
-                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Replaceable #{replaceableId} resolved via directory scan: {best}");
+                // If no keyword match, use heuristic: replaceableId 1 = first BLP, 2 = second BLP
+                if (best == null && dirCandidates.Count >= (int)replaceableId)
+                    best = dirCandidates[(int)replaceableId - 1];
+                else if (best == null)
+                    best = dirCandidates[0];
+
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} -> {Path.GetFileName(best)} (dir scan, {dirCandidates.Count} candidates)");
                 return best;
             }
         }
 
+        // Strategy 4: Hardcoded default replaceable texture paths (WoW client fallback)
+        if (_dataSource != null && DefaultReplaceableTextures.TryGetValue(replaceableId, out string? defaultPath))
+        {
+            byte[]? data = _dataSource.ReadFile(defaultPath);
+            if (data != null && data.Length > 0)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} -> {Path.GetFileName(defaultPath)} (hardcoded default)");
+                return defaultPath;
+            }
+
+            // Try case-insensitive search for the default path
+            if (_dataSource is MpqDataSource mpqDS2)
+            {
+                var found = mpqDS2.FindInFileSet(defaultPath);
+                if (found != null)
+                {
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} -> {Path.GetFileName(found)} (hardcoded default, case-fixed)");
+                    return found;
+                }
+            }
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} UNRESOLVED for {modelName} (tried DBC, naming, dir scan, defaults)");
         return null;
     }
 
