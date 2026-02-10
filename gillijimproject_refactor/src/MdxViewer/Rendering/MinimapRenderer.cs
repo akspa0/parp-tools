@@ -87,7 +87,7 @@ public class MinimapRenderer : IDisposable
                 var srcBytes = new byte[bmpData.Stride * h];
                 System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, srcBytes, 0, srcBytes.Length);
 
-                // BGRA → RGBA
+                // BGRA → RGBA (no vertical flip — ImGui uses top-left origin matching bitmap)
                 for (int y = 0; y < h; y++)
                 {
                     for (int x = 0; x < w; x++)

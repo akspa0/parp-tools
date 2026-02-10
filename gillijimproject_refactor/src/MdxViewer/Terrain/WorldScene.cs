@@ -33,6 +33,20 @@ public class WorldScene : ISceneRenderer
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
 
+    // Frustum culling
+    private readonly FrustumCuller _frustumCuller = new();
+    private const float DoodadCullDistance = 1500f; // Max distance for small doodads
+    private const float DoodadSmallThreshold = 20f; // AABB diagonal below this = "small"
+    private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
+    private const float WmoCullDistance = 5000f;     // Max distance for WMO instances
+    private const float WmoFadeStartFraction = 0.85f;
+
+    // Culling stats (updated each frame)
+    public int WmoRenderedCount { get; private set; }
+    public int WmoCulledCount { get; private set; }
+    public int MdxRenderedCount { get; private set; }
+    public int MdxCulledCount { get; private set; }
+
     // Stats
     public int MdxInstanceCount => _mdxInstances.Count;
     public int WmoInstanceCount => _wmoInstances.Count;
@@ -463,8 +477,8 @@ public class WorldScene : ISceneRenderer
         // Also set clear color to horizon color so any gaps match the sky
         _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
 
-        // 1. Render terrain
-        _terrainManager.Render(view, proj);
+        // 1. Render terrain (with frustum culling)
+        _terrainManager.Render(view, proj, camPos, _frustumCuller);
 
         // Reset GL state after terrain
         _gl.DepthFunc(DepthFunction.Lequal);
@@ -497,6 +511,10 @@ public class WorldScene : ISceneRenderer
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
 
+        // Update frustum planes for culling
+        var vp = view * proj;
+        _frustumCuller.Update(vp);
+
         // ── PASS 1: OPAQUE ──────────────────────────────────────────────
         // Render all opaque geometry first with depth write ON.
         // This ensures correct depth buffer before any transparent rendering.
@@ -505,39 +523,66 @@ public class WorldScene : ISceneRenderer
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
 
-        // 2a. WMO opaque pass
+        // 2a. WMO opaque pass (with frustum + distance culling + fade)
+        WmoRenderedCount = 0;
+        WmoCulledCount = 0;
         if (_wmosVisible)
         {
-            int wmoRendered = 0;
+            float wmoFadeStart = WmoCullDistance * WmoFadeStartFraction;
+            float wmoFadeRange = WmoCullDistance - wmoFadeStart;
             foreach (var inst in _wmoInstances)
             {
+                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                { WmoCulledCount++; continue; }
+                // Distance cull + fade for WMOs
+                var wmoCenter = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
+                float wmoDist = Vector3.Distance(cameraPos, wmoCenter);
+                if (wmoDist > WmoCullDistance)
+                { WmoCulledCount++; continue; }
+                float wmoFade = wmoDist > wmoFadeStart ? 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange : 1.0f;
                 var renderer = _assets.GetWmo(inst.ModelKey);
                 if (renderer == null) continue;
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj);
-                wmoRendered++;
+                WmoRenderedCount++;
             }
-            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render loop: {wmoRendered} rendered");
+            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
         }
 
-        // 3a. MDX opaque pass
+        // 3a. MDX opaque pass (with frustum + distance culling + fade)
+        MdxRenderedCount = 0;
+        MdxCulledCount = 0;
+        float mdxFadeStart = DoodadCullDistance * FadeStartFraction;
+        float mdxFadeRange = DoodadCullDistance - mdxFadeStart;
         if (_doodadsVisible)
         {
-            int mdxRendered = 0;
             foreach (var inst in _mdxInstances)
             {
+                // Frustum cull
+                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                { MdxCulledCount++; continue; }
+                // Distance cull small doodads (with fade)
+                var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
+                float dist = Vector3.Distance(cameraPos, center);
+                var diag = (inst.BoundsMax - inst.BoundsMin).Length();
+                if (diag < DoodadSmallThreshold && dist > DoodadCullDistance)
+                { MdxCulledCount++; continue; }
+                // Compute fade factor for objects near cull boundary
+                float fade = 1.0f;
+                if (diag < DoodadSmallThreshold && dist > mdxFadeStart)
+                    fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 _gl.Disable(EnableCap.Blend);
                 _gl.DepthMask(true);
-                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque);
-                mdxRendered++;
+                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade);
+                MdxRenderedCount++;
             }
-            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque pass: {mdxRendered} rendered");
+            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
         }
 
-        // ── PASS 2: TRANSPARENT (back-to-front) ────────────────────────
+        // ── PASS 2: TRANSPARENT (back-to-front, frustum-culled) ─────────
         // Render transparent/blended layers sorted by distance to camera.
         // Depth test ON but depth write OFF so transparent objects don't
         // occlude each other incorrectly.
@@ -546,23 +591,33 @@ public class WorldScene : ISceneRenderer
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthFunc(DepthFunction.Lequal);
 
-            // Sort instances back-to-front by distance to camera
+            // Sort visible instances back-to-front by distance to camera
             var sorted = new List<(int idx, float dist)>(_mdxInstances.Count);
             for (int i = 0; i < _mdxInstances.Count; i++)
             {
                 var inst = _mdxInstances[i];
                 if (_assets.GetMdx(inst.ModelKey) == null) continue;
+                // Same frustum + distance cull as opaque pass
+                if (!_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
                 float dist = Vector3.DistanceSquared(cameraPos, center);
+                var diag = (inst.BoundsMax - inst.BoundsMin).Length();
+                if (diag < DoodadSmallThreshold && dist > DoodadCullDistance * DoodadCullDistance) continue;
                 sorted.Add((i, dist));
             }
             sorted.Sort((a, b) => b.dist.CompareTo(a.dist)); // back-to-front
 
-            foreach (var (idx, _) in sorted)
+            foreach (var (idx, distSq) in sorted)
             {
                 var inst = _mdxInstances[idx];
+                // Compute fade for transparent pass (same as opaque)
+                float tDist = MathF.Sqrt(distSq);
+                var tDiag = (inst.BoundsMax - inst.BoundsMin).Length();
+                float tFade = 1.0f;
+                if (tDiag < DoodadSmallThreshold && tDist > mdxFadeStart)
+                    tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
-                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent);
+                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade);
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
@@ -619,13 +674,11 @@ public class WorldScene : ISceneRenderer
             _gl.DepthMask(true);
         }
 
-        // 5. POI markers (magenta, always on top)
+        // 5. POI pin markers (magenta, with depth testing for proper 3D placement)
         if (_showPoi && _poiLoader != null && _bbRenderer != null && _poiLoader.Entries.Count > 0)
         {
-            _gl.Disable(EnableCap.DepthTest);
             foreach (var poi in _poiLoader.Entries)
-                _bbRenderer.DrawMarker(poi.Position, 8f, view, proj, new Vector3(1f, 0f, 1f));
-            _gl.Enable(EnableCap.DepthTest);
+                _bbRenderer.DrawPin(poi.Position, 40f, 6f, view, proj, new Vector3(1f, 0f, 1f));
         }
     }
 

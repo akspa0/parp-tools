@@ -132,6 +132,23 @@ void main() { FragColor = vec4(uColor, 1.0); }";
         DrawBox(position, half, view, proj, color);
     }
 
+    /// <summary>
+    /// Draw a vertical pin marker: a tall line with a diamond at the top.
+    /// More visible than a small cube for POI markers.
+    /// </summary>
+    public void DrawPin(Vector3 position, float height, float headSize, Matrix4x4 view, Matrix4x4 proj, Vector3 color)
+    {
+        // Vertical line (tall thin box)
+        var lineHalf = new Vector3(0.5f, 0.5f, height * 0.5f);
+        var lineCenter = position + new Vector3(0, 0, height * 0.5f);
+        DrawBox(lineCenter, lineHalf, view, proj, color);
+
+        // Diamond head at top
+        var headHalf = new Vector3(headSize, headSize, headSize);
+        var headCenter = position + new Vector3(0, 0, height);
+        DrawBox(headCenter, headHalf, view, proj, color);
+    }
+
     private uint CompileShader(ShaderType type, string source)
     {
         uint shader = _gl.CreateShader(type);

@@ -28,14 +28,26 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, MdxRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
 
+    // LRU tracking — keys ordered by last access time (most recent at end)
+    private readonly LinkedList<string> _mdxLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _mdxLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _wmoLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _wmoLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxMdxCached = 500;  // Max MDX renderers in GPU memory
+    private const int MaxWmoCached = 100;  // Max WMO renderers in GPU memory
+
     // Raw file data cache — avoids re-reading the same file from MPQ multiple times
     private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _fileLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _fileLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private const int MaxFileCached = 1000; // Max raw file entries cached
 
     // Stats
     public int MdxModelsLoaded => _mdxModels.Count(kv => kv.Value != null);
     public int MdxModelsFailed => _mdxModels.Count(kv => kv.Value == null);
     public int WmoModelsLoaded => _wmoModels.Count(kv => kv.Value != null);
     public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
+    public int FileCacheCount => _fileDataCache.Count;
 
     public WorldAssetManager(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null)
     {
@@ -116,9 +128,15 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public void EnsureMdxLoaded(string normalizedKey)
     {
-        if (_mdxModels.ContainsKey(normalizedKey)) return;
+        if (_mdxModels.ContainsKey(normalizedKey))
+        {
+            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            return;
+        }
         var renderer = LoadMdxModel(normalizedKey);
         _mdxModels[normalizedKey] = renderer;
+        TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+        EvictMdxIfNeeded();
     }
 
     /// <summary>
@@ -126,9 +144,15 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public void EnsureWmoLoaded(string normalizedKey)
     {
-        if (_wmoModels.ContainsKey(normalizedKey)) return;
+        if (_wmoModels.ContainsKey(normalizedKey))
+        {
+            TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            return;
+        }
         var renderer = LoadWmoModel(normalizedKey);
         _wmoModels[normalizedKey] = renderer;
+        TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+        EvictWmoIfNeeded();
     }
 
     /// <summary>
@@ -136,8 +160,12 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public MdxRenderer? GetMdx(string normalizedKey)
     {
-        _mdxModels.TryGetValue(normalizedKey, out var r);
-        return r;
+        if (_mdxModels.TryGetValue(normalizedKey, out var r))
+        {
+            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            return r;
+        }
+        return null;
     }
 
     /// <summary>
@@ -193,8 +221,12 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public WmoRenderer? GetWmo(string normalizedKey)
     {
-        _wmoModels.TryGetValue(normalizedKey, out var r);
-        return r;
+        if (_wmoModels.TryGetValue(normalizedKey, out var r))
+        {
+            TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            return r;
+        }
+        return null;
     }
 
     /// <summary>
@@ -256,6 +288,8 @@ public class WorldAssetManager : IDisposable
         }
 
         _fileDataCache[key] = data;
+        TouchLru(_fileLru, _fileLruMap, key);
+        EvictFileCacheIfNeeded();
         return data;
     }
 
@@ -331,17 +365,80 @@ public class WorldAssetManager : IDisposable
         }
     }
 
+    // ── LRU helpers ─────────────────────────────────────────────────────
+
+    private static void TouchLru(LinkedList<string> lru, Dictionary<string, LinkedListNode<string>> map, string key)
+    {
+        if (map.TryGetValue(key, out var node))
+        {
+            lru.Remove(node);
+            lru.AddLast(node);
+        }
+        else
+        {
+            var newNode = lru.AddLast(key);
+            map[key] = newNode;
+        }
+    }
+
+    private void EvictMdxIfNeeded()
+    {
+        while (_mdxModels.Count > MaxMdxCached && _mdxLru.Count > 0)
+        {
+            string oldest = _mdxLru.First!.Value;
+            _mdxLru.RemoveFirst();
+            _mdxLruMap.Remove(oldest);
+            if (_mdxModels.TryGetValue(oldest, out var r))
+            {
+                r?.Dispose();
+                _mdxModels.Remove(oldest);
+            }
+        }
+    }
+
+    private void EvictWmoIfNeeded()
+    {
+        while (_wmoModels.Count > MaxWmoCached && _wmoLru.Count > 0)
+        {
+            string oldest = _wmoLru.First!.Value;
+            _wmoLru.RemoveFirst();
+            _wmoLruMap.Remove(oldest);
+            if (_wmoModels.TryGetValue(oldest, out var r))
+            {
+                r?.Dispose();
+                _wmoModels.Remove(oldest);
+            }
+        }
+    }
+
+    private void EvictFileCacheIfNeeded()
+    {
+        while (_fileDataCache.Count > MaxFileCached && _fileLru.Count > 0)
+        {
+            string oldest = _fileLru.First!.Value;
+            _fileLru.RemoveFirst();
+            _fileLruMap.Remove(oldest);
+            _fileDataCache.Remove(oldest);
+        }
+    }
+
     public void Dispose()
     {
         foreach (var r in _mdxModels.Values)
             r?.Dispose();
         _mdxModels.Clear();
+        _mdxLru.Clear();
+        _mdxLruMap.Clear();
 
         foreach (var r in _wmoModels.Values)
             r?.Dispose();
         _wmoModels.Clear();
+        _wmoLru.Clear();
+        _wmoLruMap.Clear();
 
         _fileDataCache.Clear();
+        _fileLru.Clear();
+        _fileLruMap.Clear();
     }
 }
 

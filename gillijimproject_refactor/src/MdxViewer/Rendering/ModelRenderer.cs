@@ -122,8 +122,9 @@ public class MdxRenderer : ISceneRenderer
     /// Pass = Opaque renders only opaque layers (depth write ON).
     /// Pass = Transparent renders only blended layers (depth write OFF).
     /// Pass = Both renders all layers (legacy behavior).
+    /// fadeAlpha = 0..1 multiplier for distance-based fade-in/out (1.0 = fully opaque).
     /// </summary>
-    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both)
+    public unsafe void RenderWithTransform(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, RenderPass pass = RenderPass.Both, float fadeAlpha = 1.0f)
     {
         _gl.UseProgram(_shaderProgram);
 
@@ -207,9 +208,20 @@ public class MdxRenderer : ISceneRenderer
                     }
                     else
                     {
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(!noDepthWrite); // Respect NoDepthSet flag
-                        _gl.Uniform1(_uAlphaTest, 0);
+                        // When fading, even opaque layers need alpha blending
+                        if (fadeAlpha < 1.0f)
+                        {
+                            _gl.Enable(EnableCap.Blend);
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            _gl.DepthMask(!noDepthWrite);
+                            _gl.Uniform1(_uAlphaTest, 1);
+                        }
+                        else
+                        {
+                            _gl.Disable(EnableCap.Blend);
+                            _gl.DepthMask(!noDepthWrite); // Respect NoDepthSet flag
+                            _gl.Uniform1(_uAlphaTest, 0);
+                        }
                     }
 
                     if (texId >= 0 && _textures.TryGetValue(texId, out uint glTex))
@@ -224,7 +236,7 @@ public class MdxRenderer : ISceneRenderer
                         if (l > 0) continue;
                     }
 
-                    float alpha = layer.StaticAlpha;
+                    float alpha = layer.StaticAlpha * fadeAlpha;
                     _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, alpha);
 
                     _gl.BindVertexArray(gb.Vao);

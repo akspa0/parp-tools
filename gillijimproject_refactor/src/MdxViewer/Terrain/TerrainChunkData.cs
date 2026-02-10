@@ -42,6 +42,12 @@ public class TerrainChunkData
 
     /// <summary>World-space position of this chunk's corner.</summary>
     public Vector3 WorldPosition { get; init; }
+
+    /// <summary>AreaID from MCNK header (Alpha: Unknown3 at offset 0x38). Used for AreaTable DBC lookup.</summary>
+    public int AreaId { get; init; }
+
+    /// <summary>Raw MCNK header flags. Bit 2=Water, Bit 3=Ocean, Bit 4=Magma, Bit 5=Slime, etc.</summary>
+    public int McnkFlags { get; init; }
 }
 
 /// <summary>

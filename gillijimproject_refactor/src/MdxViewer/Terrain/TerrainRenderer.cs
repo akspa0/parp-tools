@@ -55,6 +55,29 @@ public class TerrainRenderer : IDisposable
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
+    /// <summary>
+    /// Find the chunk mesh closest to the given world XY position (for area lookup).
+    /// Returns null if no chunks are loaded.
+    /// </summary>
+    public TerrainChunkMesh? GetChunkAt(float worldX, float worldY)
+    {
+        TerrainChunkMesh? best = null;
+        float bestDist = float.MaxValue;
+        foreach (var chunk in _chunks)
+        {
+            var center = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
+            float dx = center.X - worldX;
+            float dy = center.Y - worldY;
+            float dist = dx * dx + dy * dy;
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = chunk;
+            }
+        }
+        return best;
+    }
+
     public TerrainRenderer(GL gl, IDataSource? dataSource, TerrainLighting lighting,
         Func<string, string?>? texturePathResolver = null)
     {
@@ -99,10 +122,14 @@ public class TerrainRenderer : IDisposable
             _chunks.Remove(chunk);
     }
 
+    // Culling stats (updated each frame)
+    public int ChunksRendered { get; private set; }
+    public int ChunksCulled { get; private set; }
+
     /// <summary>
-    /// Render all loaded terrain chunks.
+    /// Render all loaded terrain chunks with optional frustum culling.
     /// </summary>
-    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)
+    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
     {
         if (_chunks.Count == 0) return;
 
@@ -136,10 +163,15 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _shader.SetFloat("uContourInterval", ContourInterval);
 
-        // Render each chunk
+        // Render each chunk (with frustum culling if available)
+        ChunksRendered = 0;
+        ChunksCulled = 0;
         foreach (var chunk in _chunks)
         {
+            if (frustum != null && !frustum.TestAABB(chunk.BoundsMin, chunk.BoundsMax))
+            { ChunksCulled++; continue; }
             RenderChunk(chunk);
+            ChunksRendered++;
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);

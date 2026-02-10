@@ -37,6 +37,8 @@ public class ViewerApp : IDisposable
     private string? _dbcBuild;
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
+    private AreaTableService? _areaTableService;
+    private string _currentAreaName = "";
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
@@ -82,6 +84,7 @@ public class ViewerApp : IDisposable
     private bool _showRightSidebar = true;
     private const float SidebarWidth = 320f;
     private const float MenuBarHeight = 22f;
+    private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
 
     // Terrain/World state
@@ -263,6 +266,16 @@ public class ViewerApp : IDisposable
             else if (_vlmTerrainManager != null)
                 _vlmTerrainManager.UpdateAOI(_camera.Position);
 
+            // Update current area name from chunk under camera (throttled to avoid per-frame overhead)
+            if (_areaTableService != null && _terrainManager != null && _frameCount == 0)
+            {
+                var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
+                if (chunk != null && chunk.AreaId != 0)
+                    _currentAreaName = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                else
+                    _currentAreaName = "";
+            }
+
             // Render the scene (WorldScene handles terrain + objects + BBs; standalone renderers handle themselves)
             _renderer.Render(view, proj);
         }
@@ -275,6 +288,10 @@ public class ViewerApp : IDisposable
     private void DrawUI()
     {
         DrawMenuBar();
+
+        // Top toolbar with visibility checkboxes (only when terrain is loaded)
+        if (_terrainManager != null || _vlmTerrainManager != null)
+            DrawToolbar();
 
         // Fixed sidebar layout
         if (_showLeftSidebar)
@@ -722,11 +739,91 @@ public class ViewerApp : IDisposable
         });
     }
 
+    private void DrawToolbar()
+    {
+        var io = ImGui.GetIO();
+        // Full-width toolbar (no gaps above sidebars)
+        ImGui.SetNextWindowPos(new Vector2(0, MenuBarHeight));
+        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, ToolbarHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
+        if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
+        {
+            TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+
+            if (renderer != null)
+            {
+                // Terrain layers
+                bool l0 = renderer.ShowLayer0;
+                if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
+                ImGui.SameLine();
+                bool l1 = renderer.ShowLayer1;
+                if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+                ImGui.SameLine();
+                bool l2 = renderer.ShowLayer2;
+                if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+                ImGui.SameLine();
+                bool l3 = renderer.ShowLayer3;
+                if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+
+                // Grid overlays
+                bool chunkGrid = renderer.ShowChunkGrid;
+                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+                ImGui.SameLine();
+                bool tileGrid = renderer.ShowTileGrid;
+                if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                ImGui.SameLine();
+
+                // Debug overlays
+                bool alphaMask = renderer.ShowAlphaMask;
+                if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+                ImGui.SameLine();
+                bool shadowMap = renderer.ShowShadowMap;
+                if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+                ImGui.SameLine();
+                bool contours = renderer.ShowContours;
+                if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+
+                // Liquid
+                if (liquidRenderer != null)
+                {
+                    ImGui.SameLine();
+                    bool showLiquid = liquidRenderer.ShowLiquid;
+                    if (ImGui.Checkbox($"Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
+                        liquidRenderer.ShowLiquid = showLiquid;
+                }
+
+                // World objects
+                if (_worldScene != null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+                    ImGui.SameLine();
+                    bool showBB = _worldScene.ShowBoundingBoxes;
+                    if (ImGui.Checkbox("BBs", ref showBB))
+                        _worldScene.ShowBoundingBoxes = showBB;
+                }
+            }
+        }
+        ImGui.End();
+        ImGui.PopStyleVar(2);
+    }
+
     private void DrawLeftSidebar()
     {
         var io = ImGui.GetIO();
-        float sidebarHeight = io.DisplaySize.Y - MenuBarHeight - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(0, MenuBarHeight));
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(0, topOffset));
         ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
@@ -856,8 +953,9 @@ public class ViewerApp : IDisposable
     private void DrawRightSidebar()
     {
         var io = ImGui.GetIO();
-        float sidebarHeight = io.DisplaySize.Y - MenuBarHeight - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, MenuBarHeight));
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset));
         ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
@@ -988,51 +1086,10 @@ public class ViewerApp : IDisposable
         ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
         ImGui.Text("Hold Shift for 5x boost");
 
-        ImGui.Separator();
-        ImGui.Text("Texture Layers:");
-
-        bool l0 = renderer.ShowLayer0;
-        bool l1 = renderer.ShowLayer1;
-        bool l2 = renderer.ShowLayer2;
-        bool l3 = renderer.ShowLayer3;
-        if (ImGui.Checkbox("Layer 0 (Base)", ref l0)) renderer.ShowLayer0 = l0;
-        if (ImGui.Checkbox("Layer 1", ref l1)) renderer.ShowLayer1 = l1;
-        if (ImGui.Checkbox("Layer 2", ref l2)) renderer.ShowLayer2 = l2;
-        if (ImGui.Checkbox("Layer 3", ref l3)) renderer.ShowLayer3 = l3;
-
-        ImGui.Separator();
-        ImGui.Text("Grid Overlays:");
-
-        bool chunkGrid = renderer.ShowChunkGrid;
-        bool tileGrid = renderer.ShowTileGrid;
-        if (ImGui.Checkbox("Chunk Grid (cyan)", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-        if (ImGui.Checkbox("ADT Tile Grid (orange)", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-
-        ImGui.Separator();
-        ImGui.Text("Debug:");
-
-        bool alphaMask = renderer.ShowAlphaMask;
-        if (ImGui.Checkbox("Show Alpha Masks", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-
-        bool shadowMap = renderer.ShowShadowMap;
-        if (ImGui.Checkbox("Show MCSH Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-
-        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
-        if (liquidRenderer != null)
-        {
-            bool showLiquid = liquidRenderer.ShowLiquid;
-            if (ImGui.Checkbox($"Show Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
-                liquidRenderer.ShowLiquid = showLiquid;
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Topography:");
-
-        bool contours = renderer.ShowContours;
-        if (ImGui.Checkbox("Contour Lines", ref contours)) renderer.ShowContours = contours;
-
+        // Contour interval (only when contours enabled via toolbar)
         if (renderer.ShowContours)
         {
+            ImGui.Separator();
             float interval = renderer.ContourInterval;
             if (ImGui.SliderFloat("Contour Interval", ref interval, 0.5f, 20.0f, "%.1f"))
                 renderer.ContourInterval = interval;
@@ -1042,20 +1099,26 @@ public class ViewerApp : IDisposable
         if (ImGui.Button("Toggle Wireframe"))
             _renderer?.ToggleWireframe();
 
+        // Stats
         ImGui.Separator();
         int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
         int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
-        ImGui.Text($"Tiles: {tiles}  Chunks: {chunks}");
+        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (terrainRenderer != null)
+            ImGui.Text($"Tiles: {tiles}  Chunks: {terrainRenderer.ChunksRendered}/{chunks}");
+        else
+            ImGui.Text($"Tiles: {tiles}  Chunks: {chunks}");
+
+        // Culling stats from WorldScene
+        if (_worldScene != null)
+        {
+            ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
+        }
     }
 
     private void DrawWorldObjectsContent()
     {
         if (_worldScene == null) return;
-
-        // Bounding box toggle
-        bool showBB = _worldScene.ShowBoundingBoxes;
-        if (ImGui.Checkbox("Show Bounding Boxes", ref showBB))
-            _worldScene.ShowBoundingBoxes = showBB;
 
         // POI toggle
         if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
@@ -1165,6 +1228,11 @@ public class ViewerApp : IDisposable
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
             ImGui.Text(_statusMessage);
+            if (!string.IsNullOrEmpty(_currentAreaName))
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
+            }
 
             // Camera coordinates (local + WoW world) in the center-ish area
             if (_terrainManager != null || _vlmTerrainManager != null)
@@ -1263,19 +1331,13 @@ public class ViewerApp : IDisposable
                 float y = cursorPos.Y + (tx - minTx) * cellSize;
 
                 // Try to render BLP minimap tile texture
-                // WoW minimap: map{tx}_{ty}.blp — tx=column, ty=row (same as our coords)
-                // BLP image: U=WoW-X(north-south), V=WoW-Y(east-west)
-                // Screen:    screenX=tileY(east-west), screenY=tileX(north-south)
-                // So BLP axes are swapped vs screen axes — need 90° CW rotation + horizontal mirror.
-                // Using AddImageQuad to remap UV corners:
-                //   Screen TL(x,y)         = (west,north)  → BLP UV for (north,west)  = needs rotation
-                //   Screen TR(x+cs,y)      = (east,north)
-                //   Screen BR(x+cs,y+cs)   = (east,south)
-                //   Screen BL(x,y+cs)      = (west,south)
                 bool drewTexture = false;
                 if (_minimapRenderer != null && !string.IsNullOrEmpty(mapName))
                 {
-                    uint tileTex = _minimapRenderer.GetTileTexture(mapName, tx, ty);
+                    // Minimap files use map{row}_{col}.blp convention.
+                    // tx = idx/64 = column (east-west), ty = idx%64 = row (north-south)
+                    // File expects: first arg = row (ty), second arg = col (tx)
+                    uint tileTex = _minimapRenderer.GetTileTexture(mapName, ty, tx);
                     if (tileTex != 0)
                     {
                         var texId = (IntPtr)tileTex;
@@ -1283,14 +1345,13 @@ public class ViewerApp : IDisposable
                         var p2 = new Vector2(x + cellSize, y);              // screen TR
                         var p3 = new Vector2(x + cellSize, y + cellSize);   // screen BR
                         var p4 = new Vector2(x, y + cellSize);              // screen BL
-                        // Rotate UV 90° CW + mirror to fix orientation:
-                        // Screen TL → BLP bottom-left  (0,1)
-                        // Screen TR → BLP top-left     (0,0)
-                        // Screen BR → BLP top-right    (1,0)
-                        // Screen BL → BLP bottom-right (1,1)
+                        // Minimap BLP tile UV mapping.
+                        // Identity = no rotation. If tiles look wrong, try rotation/mirror.
                         drawList.AddImageQuad(texId, p1, p2, p3, p4,
-                            new Vector2(0, 1), new Vector2(0, 0),
-                            new Vector2(1, 0), new Vector2(1, 1),
+                            new Vector2(0, 0),  // screen TL ← image TL
+                            new Vector2(1, 0),  // screen TR ← image TR
+                            new Vector2(1, 1),  // screen BR ← image BR
+                            new Vector2(0, 1),  // screen BL ← image BL
                             0xFFFFFFFF);
                         drewTexture = true;
                     }
@@ -1454,6 +1515,10 @@ public class ViewerApp : IDisposable
                         var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
                         _discoveredMaps = mapDiscovery.DiscoverMaps();
                         ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
+
+                        // Load AreaTable for area name display
+                        _areaTableService = new AreaTableService();
+                        _areaTableService.Load(dbcProvider, dbdDir, buildAlias);
                     }
                     else
                     {

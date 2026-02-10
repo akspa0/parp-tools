@@ -437,8 +437,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
 
         // Extract MCLQ inline liquid data (type from MCNK header flags bits 2-5)
+        // Pass baseHeight so MCLQ heights (which may be relative) get the same offset as MCVT terrain heights
         var liquid = ExtractLiquid(mcnk.MclqData, mcnk.Header.Flags, tileX, tileY, chunkX, chunkY,
-            new Vector3(worldX, worldY, 0f));
+            new Vector3(worldX, worldY, 0f), baseHeight);
 
         return new TerrainChunkData
         {
@@ -453,7 +454,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             AlphaMaps = alphaMaps,
             ShadowMap = shadowMap,
             Liquid = liquid,
-            WorldPosition = new Vector3(worldX, worldY, 0f)
+            WorldPosition = new Vector3(worldX, worldY, 0f),
+            AreaId = mcnk.Header.Unknown3,
+            McnkFlags = mcnk.Header.Flags
         };
     }
 
@@ -645,74 +648,82 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Returns the first valid liquid instance found, or null.
     /// </summary>
     private static LiquidChunkData? ExtractLiquid(byte[] mclqData, int mcnkFlags, int tileX, int tileY,
-        int chunkX, int chunkY, Vector3 worldPos)
+        int chunkX, int chunkY, Vector3 worldPos, float baseHeight = 0f)
     {
-        if (mclqData == null || mclqData.Length < LiquidChunkData.InstanceSize)
+        // Alpha 0.5.3 MCLQ is NOT the 804-byte LK format with 81 vertex heights.
+        // Ghidra analysis (CChunkLiquid): just float height[2] (min/max) + flow data.
+        // The liquid surface is a flat plane at the specified height.
+        // Minimum data: 8 bytes (2 floats for min/max height).
+        if (mclqData == null || mclqData.Length < 8)
             return null;
 
         // Determine liquid type from MCNK flags bits 2-5 (if set).
-        // Bit 2 (0x04) = Water, Bit 3 (0x08) = Ocean, Bit 4 (0x10) = Magma, Bit 5 (0x20) = Slime
-        // Many chunks (rivers, lakes) have valid MCLQ data but no type flags set — default to Water.
         LiquidType liquidType;
         if ((mcnkFlags & 0x08) != 0) liquidType = LiquidType.Ocean;
         else if ((mcnkFlags & 0x10) != 0) liquidType = LiquidType.Magma;
         else if ((mcnkFlags & 0x20) != 0) liquidType = LiquidType.Slime;
         else liquidType = LiquidType.Water;
 
-        // Parse the first 804-byte liquid instance
-        return ParseLiquidInstance(mclqData, 0, liquidType, tileX, tileY, chunkX, chunkY, worldPos);
-    }
+        // Read min/max height (8 bytes)
+        float minHeight = BitConverter.ToSingle(mclqData, 0);
+        float maxHeight = BitConverter.ToSingle(mclqData, 4);
 
-    /// <summary>
-    /// Parse a single 804-byte MCLQ inline data instance.
-    /// Layout: float minH, float maxH, {float height, uint32 data}[81], float tiles[16], uint32 nFlowvs, SWFlowv[2]
-    /// </summary>
-    private static LiquidChunkData? ParseLiquidInstance(byte[] data, int offset, LiquidType type,
-        int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos)
-    {
-        if (offset + LiquidChunkData.InstanceSize > data.Length)
+        // Sanity check
+        if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
             return null;
 
-        // Read min/max height range (8 bytes)
-        float minHeight = BitConverter.ToSingle(data, offset); offset += 4;
-        float maxHeight = BitConverter.ToSingle(data, offset); offset += 4;
+        // Use the average of min/max as the flat liquid surface height
+        float liquidHeight = (minHeight + maxHeight) * 0.5f;
 
-        // Sanity check: invalid height range suggests bad data
-        if (float.IsNaN(minHeight) || float.IsNaN(maxHeight) ||
-            minHeight < -5000f || maxHeight > 5000f)
-            return null;
+        // Apply base height offset if heights are relative (same as MCVT terrain)
+        liquidHeight += baseHeight;
+        minHeight += baseHeight;
+        maxHeight += baseHeight;
 
-        // Read 81 vertices (9×9 grid, 8 bytes each: float height + uint32 data)
-        var heights = new float[81];
-        var vertexData = new uint[81];
-        for (int i = 0; i < 81; i++)
-        {
-            heights[i] = BitConverter.ToSingle(data, offset); offset += 4;
-            vertexData[i] = BitConverter.ToUInt32(data, offset); offset += 4;
-        }
-
-        // Read 16 tile floats (4×4 grid, 64 bytes)
-        var tileGrid = new float[16];
-        for (int i = 0; i < 16; i++)
-        {
-            tileGrid[i] = BitConverter.ToSingle(data, offset); offset += 4;
-        }
-
-        // Skip flow data (4 bytes nFlowvs + 80 bytes flowvs = 84 bytes)
-        // offset += 84; // Not needed, we don't use flow data for rendering
-
-        // Diagnostic: log first liquid chunk to understand height values
+        // Diagnostic
         if (chunkX == 0 && chunkY == 0)
-            Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} h[0]={heights[0]:F2} h[40]={heights[40]:F2} h[80]={heights[80]:F2} type={type}");
+            Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} liquidH={liquidHeight:F2} baseH={baseHeight:F2} dataLen={mclqData.Length} type={liquidType}");
+
+        // If the height range is absurd after offset, skip (bad data)
+        if (MathF.Abs(liquidHeight) > 50000f)
+            return null;
+
+        // Build flat 9×9 grid at the liquid height
+        var heights = new float[81];
+        Array.Fill(heights, liquidHeight);
+
+        // Try to read 81 vertex heights if data is large enough (LK-style 804 bytes)
+        // Some Alpha chunks may have the full vertex grid
+        if (mclqData.Length >= 8 + 81 * 8)
+        {
+            bool hasNonZeroVertex = false;
+            var vertHeights = new float[81];
+            int off = 8;
+            for (int i = 0; i < 81; i++)
+            {
+                vertHeights[i] = BitConverter.ToSingle(mclqData, off);
+                off += 8; // skip uint32 data word
+                if (MathF.Abs(vertHeights[i]) > 0.01f)
+                    hasNonZeroVertex = true;
+            }
+            // Only use vertex heights if they contain actual data (not all zeros)
+            if (hasNonZeroVertex)
+            {
+                for (int i = 0; i < 81; i++)
+                    heights[i] = vertHeights[i] + baseHeight;
+                if (chunkX == 0 && chunkY == 0)
+                    Console.WriteLine($"[MCLQ]   Using per-vertex heights: h[0]={heights[0]:F2} h[40]={heights[40]:F2}");
+            }
+        }
 
         return new LiquidChunkData
         {
             MinHeight = minHeight,
             MaxHeight = maxHeight,
             Heights = heights,
-            VertexData = vertexData,
-            TileGrid = tileGrid,
-            Type = type,
+            VertexData = new uint[81],
+            TileGrid = new float[16],
+            Type = liquidType,
             WorldPosition = worldPos,
             TileX = tileX,
             TileY = tileY,

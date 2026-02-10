@@ -133,6 +133,12 @@ public class LiquidRenderer : IDisposable
         float chunkSize = WoWConstants.ChunkSize / 16f; // Size of one MCNK chunk in world units
         float cellSize = chunkSize / 8f; // Size of one liquid cell
 
+        // Diagnostic: log actual height values arriving at GPU mesh builder
+        if (_meshes.Count < 3)
+            Console.WriteLine($"[LiquidMesh] chunk({liquid.ChunkX},{liquid.ChunkY}) tile({liquid.TileX},{liquid.TileY}): " +
+                $"h[0]={liquid.Heights[0]:F2} h[40]={liquid.Heights[40]:F2} h[80]={liquid.Heights[80]:F2} " +
+                $"minH={liquid.MinHeight:F2} maxH={liquid.MaxHeight:F2} worldPos=({liquid.WorldPosition.X:F0},{liquid.WorldPosition.Y:F0},{liquid.WorldPosition.Z:F0})");
+
         // Build vertex data: position(3) = 3 floats per vertex, 81 vertices
         var vertices = new float[81 * 3];
         for (int vy = 0; vy < 9; vy++)
@@ -147,11 +153,11 @@ public class LiquidRenderer : IDisposable
                 float worldX = liquid.WorldPosition.X - vy * cellSize;
                 float worldY = liquid.WorldPosition.Y - vx * cellSize;
 
-                // Alpha 0.5.3: MCLQ heights use inverted Z convention.
-                // Negate to match renderer Z-up coordinate system.
+                // MCLQ heights are absolute world Z values — same convention as terrain MCVT.
+                // No negation needed; terrain uses heights directly (TerrainMeshBuilder line 65).
                 vertices[idx * 3 + 0] = worldX;
                 vertices[idx * 3 + 1] = worldY;
-                vertices[idx * 3 + 2] = -height;
+                vertices[idx * 3 + 2] = height;
             }
         }
 

@@ -57,6 +57,14 @@ public class AreaPoiLoader
             return;
         }
 
+        // Dump available columns for debugging
+        try
+        {
+            var cols = storage.AvailableColumns ?? Array.Empty<string>();
+            Console.WriteLine($"[AreaPOI] Available columns: {string.Join(", ", cols)}");
+        }
+        catch { }
+
         int total = 0, matched = 0;
         foreach (var key in storage.Keys)
         {
@@ -66,7 +74,7 @@ public class AreaPoiLoader
             int continentId = TryGetInt(row, "ContinentID") ?? 0;
             if (continentId != mapId) continue;
 
-            string name = TryGetString(row, "Name_lang") ?? $"POI #{key}";
+            string name = Sanitize(TryGetString(row, "Name_lang") ?? $"POI #{key}");
             int icon = TryGetInt(row, "Icon") ?? 0;
             int importance = TryGetInt(row, "Importance") ?? 0;
             int flags = TryGetInt(row, "Flags") ?? 0;
@@ -89,11 +97,12 @@ public class AreaPoiLoader
             }
             catch { continue; }
 
-            // Convert to renderer coords: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
-            var rendererPos = new Vector3(
-                WoWConstants.MapOrigin - wowY,
-                WoWConstants.MapOrigin - wowX,
-                wowZ);
+            // Renderer coords = WoW coords directly.
+            // Terrain uses: rendererX = MapOrigin - tileX * ChunkSize
+            //   where tileX = 32 - wowX/ChunkSize, so rendererX = wowX.
+            // rendererY = MapOrigin - tileY * ChunkSize = wowY.
+            // WoW X = north-south, WoW Y = east-west.
+            var rendererPos = new Vector3(wowX, wowY, wowZ);
 
             Entries.Add(new AreaPoiEntry(
                 key, name, rendererPos, new Vector3(wowX, wowY, wowZ),
@@ -103,9 +112,9 @@ public class AreaPoiLoader
 
         Console.WriteLine($"[AreaPOI] Loaded {matched}/{total} entries for map '{mapName}' (ID={mapId})");
 
-        // Diagnostic: print first few
+        // Diagnostic: print first few with raw WoW coords and renderer coords
         foreach (var e in Entries.Take(5))
-            Console.WriteLine($"[AreaPOI]   [{e.Id}] \"{e.Name}\" pos=({e.Position.X:F0},{e.Position.Y:F0},{e.Position.Z:F0}) icon={e.Icon} imp={e.Importance}");
+            Console.WriteLine($"[AreaPOI]   [{e.Id}] \"{e.Name}\" wowXYZ=({e.WoWPosition.X:F1},{e.WoWPosition.Y:F1},{e.WoWPosition.Z:F1}) renderer=({e.Position.X:F0},{e.Position.Y:F0},{e.Position.Z:F0})");
     }
 
     private static int FindMapId(DBCD.DBCD dbcd, string build, string mapName)
@@ -122,14 +131,46 @@ public class AreaPoiLoader
             return -1;
         }
 
+        // Detect actual ID column (varies by build: "ID", "MapID", etc.)
+        string idCol = DetectIdColumn(storage);
+
         foreach (var key in storage.Keys)
         {
             var row = storage[key];
             string? dir = TryGetString(row, "Directory");
             if (dir != null && dir.Equals(mapName, StringComparison.OrdinalIgnoreCase))
-                return key;
+            {
+                // Return actual MapID field, not DBCD key
+                int mapId = !string.IsNullOrEmpty(idCol) ? TryGetInt(row, idCol) ?? key : key;
+                Console.WriteLine($"[AreaPOI] Matched map '{mapName}': key={key}, MapID={mapId}, idCol={idCol}");
+                return mapId;
+            }
         }
         return -1;
+    }
+
+    private static string DetectIdColumn(IDBCDStorage storage)
+    {
+        try
+        {
+            var cols = storage.AvailableColumns ?? Array.Empty<string>();
+            string[] prefers = new[] { "ID", "Id", "MapID", "MapId", "m_ID" };
+            foreach (var p in prefers)
+            {
+                var match = cols.FirstOrDefault(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(match)) return match;
+            }
+            return "";
+        }
+        catch { return ""; }
+    }
+
+    private static string Sanitize(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        int nullIdx = s.IndexOf('\0');
+        if (nullIdx >= 0) s = s[..nullIdx];
+        return new string(s.Where(c => !char.IsControl(c) || c == '\n').ToArray());
     }
 
     private static string? TryGetString(dynamic row, string fieldName)

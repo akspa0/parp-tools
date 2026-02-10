@@ -282,12 +282,12 @@ public class TerrainManager : ISceneRenderer
     }
 
     /// <summary>
-    /// Render with explicit camera position (called from WorldScene or ViewerApp).
+    /// Render with explicit camera position and optional frustum culler.
     /// </summary>
-    public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos)
+    public void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum = null)
     {
         _cameraPos = cameraPos;
-        _terrainRenderer.Render(view, proj, cameraPos);
+        _terrainRenderer.Render(view, proj, cameraPos, frustum);
     }
 
     /// <summary>

@@ -40,12 +40,16 @@ public class MapDiscoveryService
             return maps;
         }
 
+        // Detect the actual MapID column (varies by build: "ID", "MapID", etc.)
+        string idCol = DetectIdColumn(storage);
+
         foreach (var key in storage.Keys)
         {
             var row = storage[key];
-            int id = key;
-            string? dir = TryGetString(row, "Directory");
-            string? name = TryGetString(row, "MapName_lang") ?? dir ?? $"Map {id}";
+            // Use the actual MapID field, falling back to DBCD key
+            int id = !string.IsNullOrEmpty(idCol) ? TryGetInt(row, idCol) ?? key : key;
+            string? dir = Sanitize(TryGetString(row, "Directory"));
+            string? name = Sanitize(TryGetString(row, "MapName_lang") ?? TryGetString(row, "MapName") ?? dir ?? $"Map {id}");
 
             if (string.IsNullOrEmpty(dir)) continue;
 
@@ -59,6 +63,22 @@ public class MapDiscoveryService
         return maps.OrderBy(m => m.Name).ToList();
     }
 
+    private static string DetectIdColumn(IDBCDStorage storage)
+    {
+        try
+        {
+            var cols = storage.AvailableColumns ?? Array.Empty<string>();
+            string[] prefers = new[] { "ID", "Id", "MapID", "MapId", "m_ID" };
+            foreach (var p in prefers)
+            {
+                var match = cols.FirstOrDefault(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(match)) return match;
+            }
+            return "";
+        }
+        catch { return ""; }
+    }
+
     private static string? TryGetString(dynamic row, string fieldName)
     {
         try
@@ -68,5 +88,28 @@ public class MapDiscoveryService
             return val?.ToString();
         }
         catch { return null; }
+    }
+
+    private static int? TryGetInt(dynamic row, string fieldName)
+    {
+        try
+        {
+            var val = row[fieldName];
+            if (val is int i) return i;
+            if (val is uint u) return (int)u;
+            if (val is short s) return s;
+            if (val is ushort us) return us;
+            if (int.TryParse(val?.ToString(), out int parsed)) return parsed;
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static string? Sanitize(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        int nullIdx = s.IndexOf('\0');
+        if (nullIdx >= 0) s = s[..nullIdx];
+        return new string(s.Where(c => !char.IsControl(c) || c == '\n').ToArray());
     }
 }

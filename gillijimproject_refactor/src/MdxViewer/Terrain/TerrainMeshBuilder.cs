@@ -32,6 +32,10 @@ public class TerrainMeshBuilder
         float cellSize = WoWConstants.ChunkSize / 16f; // size of one chunk
         float subCellSize = cellSize / 8f;             // size of one cell within chunk
 
+        // Track AABB for frustum culling
+        var bMin = new Vector3(float.MaxValue);
+        var bMax = new Vector3(float.MinValue);
+
         for (int i = 0; i < 145; i++)
         {
             // Determine row and column in the interleaved layout
@@ -54,9 +58,15 @@ public class TerrainMeshBuilder
             float z = chunk.Heights[i];
 
             // World position = chunk corner + local offset
-            vertices[i * 8 + 0] = chunk.WorldPosition.X - y;
-            vertices[i * 8 + 1] = chunk.WorldPosition.Y - x;
+            float wx = chunk.WorldPosition.X - y;
+            float wy = chunk.WorldPosition.Y - x;
+            vertices[i * 8 + 0] = wx;
+            vertices[i * 8 + 1] = wy;
             vertices[i * 8 + 2] = z;
+
+            // Update AABB
+            bMin = Vector3.Min(bMin, new Vector3(wx, wy, z));
+            bMax = Vector3.Max(bMax, new Vector3(wx, wy, z));
 
             // Normal
             var n = i < chunk.Normals.Length ? chunk.Normals[i] : Vector3.UnitZ;
@@ -82,7 +92,7 @@ public class TerrainMeshBuilder
 
         if (indices.Length == 0) return null;
 
-        return UploadMesh(vertices, indices, chunk);
+        return UploadMesh(vertices, indices, chunk, bMin, bMax);
     }
 
     /// <summary>
@@ -187,7 +197,7 @@ public class TerrainMeshBuilder
         return indices.ToArray();
     }
 
-    private unsafe TerrainChunkMesh UploadMesh(float[] vertices, ushort[] indices, TerrainChunkData chunk)
+    private unsafe TerrainChunkMesh UploadMesh(float[] vertices, ushort[] indices, TerrainChunkData chunk, Vector3 boundsMin, Vector3 boundsMax)
     {
         uint vao = _gl.GenVertexArray();
         _gl.BindVertexArray(vao);
@@ -226,6 +236,10 @@ public class TerrainMeshBuilder
             TileX = chunk.TileX,
             TileY = chunk.TileY,
             WorldPosition = chunk.WorldPosition,
+            BoundsMin = boundsMin,
+            BoundsMax = boundsMax,
+            AreaId = chunk.AreaId,
+            McnkFlags = chunk.McnkFlags,
             Layers = chunk.Layers,
             AlphaMaps = chunk.AlphaMaps,
             ShadowMap = chunk.ShadowMap
@@ -247,6 +261,10 @@ public class TerrainChunkMesh : IDisposable
     public int TileX { get; init; }
     public int TileY { get; init; }
     public Vector3 WorldPosition { get; init; }
+    public Vector3 BoundsMin { get; init; }
+    public Vector3 BoundsMax { get; init; }
+    public int AreaId { get; init; }
+    public int McnkFlags { get; init; }
     public TerrainLayer[] Layers { get; init; } = Array.Empty<TerrainLayer>();
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
 
