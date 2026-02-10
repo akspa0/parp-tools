@@ -44,6 +44,7 @@ public class ViewerApp : IDisposable
     private List<MapDefinition> _discoveredMaps = new();
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
+    private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
 
     // Output directories (next to the executable)
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
@@ -1128,6 +1129,20 @@ public class ViewerApp : IDisposable
                 _worldScene.ShowPoi = showPoi;
         }
 
+        // Taxi paths toggle + clear selection button
+        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
+        {
+            bool showTaxi = _worldScene.ShowTaxi;
+            if (ImGui.Checkbox($"Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
+                _worldScene.ShowTaxi = showTaxi;
+            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Show All"))
+                    _worldScene.ClearTaxiSelection();
+            }
+        }
+
         // WMO placements
         if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
         {
@@ -1210,6 +1225,83 @@ public class ViewerApp : IDisposable
                     ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
                     ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
                     ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.TreePop();
+        }
+
+        // Taxi Nodes list — single-click to select/filter, double-click to teleport
+        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Nodes.Count > 0 &&
+            ImGui.TreeNode($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})"))
+        {
+            foreach (var node in _worldScene.TaxiLoader.Nodes)
+            {
+                bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
+                string label = $"[{node.Id}] {node.Name}";
+                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = node.Position + new System.Numerics.Vector3(0, 0, 50);
+                        _camera.Pitch = -30f;
+                    }
+                    else
+                    {
+                        // Toggle selection: click again to deselect
+                        _worldScene.SelectedTaxiNodeId = isSelected ? -1 : node.Id;
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
+                    int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
+                    ImGui.Text($"Routes: {routeCount}");
+                    ImGui.Text("Click to filter, double-click to teleport");
+                    ImGui.EndTooltip();
+                }
+            }
+            ImGui.TreePop();
+        }
+
+        // Taxi Routes list — single-click to select/filter, double-click to teleport
+        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0 &&
+            ImGui.TreeNode($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})"))
+        {
+            foreach (var route in _worldScene.TaxiLoader.Routes)
+            {
+                bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
+                string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+                string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+                string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
+                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && route.Waypoints.Count > 0)
+                    {
+                        var mid = route.Waypoints[route.Waypoints.Count / 2];
+                        _camera.Position = mid + new System.Numerics.Vector3(0, 0, 100);
+                        _camera.Pitch = -30f;
+                    }
+                    else
+                    {
+                        // Toggle selection: click again to deselect
+                        _worldScene.SelectedTaxiRouteId = isSelected ? -1 : route.PathId;
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Cost: {route.Cost}");
+                    ImGui.Text($"Waypoints: {route.Waypoints.Count}");
+                    if (route.Waypoints.Count > 0)
+                    {
+                        var first = route.Waypoints[0];
+                        var last = route.Waypoints[^1];
+                        ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
+                        ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
+                    }
+                    ImGui.Text("Click to filter, double-click to teleport");
                     ImGui.EndTooltip();
                 }
             }
@@ -1301,57 +1393,62 @@ public class ViewerApp : IDisposable
             mapSize = MathF.Min(contentSize.X, contentSize.Y);
             if (mapSize < 50f) mapSize = 50f;
 
-            // Auto-zoom: compute bounding box of populated tiles with 1-tile padding
-            int minTx = 64, maxTx = 0, minTy = 64, maxTy = 0;
-            foreach (var (tx, ty) in existingTiles)
+            // Scroll-wheel zoom (when minimap window is hovered)
+            if (ImGui.IsWindowHovered())
             {
-                if (tx < minTx) minTx = tx;
-                if (tx > maxTx) maxTx = tx;
-                if (ty < minTy) minTy = ty;
-                if (ty > maxTy) maxTy = ty;
+                float wheel = io.MouseWheel;
+                if (wheel != 0)
+                {
+                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+                }
             }
-            // Add 1-tile padding, clamp to 0..63
-            minTx = Math.Max(0, minTx - 1);
-            maxTx = Math.Min(63, maxTx + 1);
-            minTy = Math.Max(0, minTy - 1);
-            maxTy = Math.Min(63, maxTy + 1);
-            int spanTx = Math.Max(maxTx - minTx + 1, 1);
-            int spanTy = Math.Max(maxTy - minTy + 1, 1);
-            int span = Math.Max(spanTx, spanTy); // Keep square aspect
-            float cellSize = mapSize / span;
+
+            // Camera tile position (center of view)
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+
+            // View window: _minimapZoom tiles in each direction from camera
+            float viewRadius = _minimapZoom;
+            float viewMinTx = camTileX - viewRadius;
+            float viewMaxTx = camTileX + viewRadius;
+            float viewMinTy = camTileY - viewRadius;
+            float viewMaxTy = camTileY + viewRadius;
+            float viewSpan = viewRadius * 2f;
+            float cellSize = mapSize / viewSpan;
 
             // Background
             drawList.AddRectFilled(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF1A1A1A);
 
+            // Clip to minimap area
+            drawList.PushClipRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), true);
+
             // Draw existing tiles
-            // Minimap: screen X = tileY (east-west), screen Y = tileX (north-south)
+            // Screen: X = tileY (east-west), Y = tileX (north-south)
             foreach (var (tx, ty) in existingTiles)
             {
-                float x = cursorPos.X + (ty - minTy) * cellSize;
-                float y = cursorPos.Y + (tx - minTx) * cellSize;
+                // Skip tiles outside view
+                if (tx + 1 < viewMinTx || tx > viewMaxTx || ty + 1 < viewMinTy || ty > viewMaxTy)
+                    continue;
+
+                float x = cursorPos.X + (ty - viewMinTy) * cellSize;
+                float y = cursorPos.Y + (tx - viewMinTx) * cellSize;
 
                 // Try to render BLP minimap tile texture
                 bool drewTexture = false;
                 if (_minimapRenderer != null && !string.IsNullOrEmpty(mapName))
                 {
-                    // Minimap files use map{row}_{col}.blp convention.
-                    // tx = idx/64 = column (east-west), ty = idx%64 = row (north-south)
-                    // File expects: first arg = row (ty), second arg = col (tx)
+                    // Minimap files: map{row}_{col}.blp. tx=col, ty=row.
                     uint tileTex = _minimapRenderer.GetTileTexture(mapName, ty, tx);
                     if (tileTex != 0)
                     {
                         var texId = (IntPtr)tileTex;
-                        var p1 = new Vector2(x, y);                         // screen TL
-                        var p2 = new Vector2(x + cellSize, y);              // screen TR
-                        var p3 = new Vector2(x + cellSize, y + cellSize);   // screen BR
-                        var p4 = new Vector2(x, y + cellSize);              // screen BL
-                        // Minimap BLP tile UV mapping.
-                        // Identity = no rotation. If tiles look wrong, try rotation/mirror.
+                        var p1 = new Vector2(x, y);
+                        var p2 = new Vector2(x + cellSize, y);
+                        var p3 = new Vector2(x + cellSize, y + cellSize);
+                        var p4 = new Vector2(x, y + cellSize);
                         drawList.AddImageQuad(texId, p1, p2, p3, p4,
-                            new Vector2(0, 0),  // screen TL ← image TL
-                            new Vector2(1, 0),  // screen TR ← image TR
-                            new Vector2(1, 1),  // screen BR ← image BR
-                            new Vector2(0, 1),  // screen BL ← image BL
+                            new Vector2(0, 0), new Vector2(1, 0),
+                            new Vector2(1, 1), new Vector2(0, 1),
                             0xFFFFFFFF);
                         drewTexture = true;
                     }
@@ -1366,18 +1463,14 @@ public class ViewerApp : IDisposable
                 }
             }
 
-            // Camera position
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-            float camScreenX = cursorPos.X + (camTileY - minTy) * cellSize;
-            float camScreenY = cursorPos.Y + (camTileX - minTx) * cellSize;
+            // Camera position (always centered)
+            float camScreenX = cursorPos.X + mapSize * 0.5f;
+            float camScreenY = cursorPos.Y + mapSize * 0.5f;
 
-            // Camera direction indicator — scale with minimap size
+            // Camera direction indicator
             float yawRad = _camera.Yaw * MathF.PI / 180f;
-            float dirLen = mapSize * 0.08f;       // 8% of minimap size
-            float dotRadius = mapSize * 0.02f;    // 2% of minimap size
-            // In tile space, forward = (-cosYaw, -sinYaw) because MapOrigin-X inverts.
-            // On screen, screenX=tileY, screenY=tileX, so:
+            float dirLen = mapSize * 0.08f;
+            float dotRadius = mapSize * 0.02f;
             float dirX = camScreenX - MathF.Sin(yawRad) * dirLen;
             float dirY = camScreenY - MathF.Cos(yawRad) * dirLen;
             drawList.AddLine(new Vector2(camScreenX, camScreenY), new Vector2(dirX, dirY), 0xFFFFFF00, MathF.Max(2f, mapSize * 0.012f));
@@ -1390,22 +1483,53 @@ public class ViewerApp : IDisposable
                 {
                     float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / WoWConstants.ChunkSize;
                     float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / WoWConstants.ChunkSize;
-                    float px = cursorPos.X + (poiTileY - minTy) * cellSize;
-                    float py = cursorPos.Y + (poiTileX - minTx) * cellSize;
+                    float px = cursorPos.X + (poiTileY - viewMinTy) * cellSize;
+                    float py = cursorPos.Y + (poiTileX - viewMinTx) * cellSize;
                     if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
-                        drawList.AddCircleFilled(new Vector2(px, py), 2.5f, 0xFFFF00FF);
+                        drawList.AddCircleFilled(new Vector2(px, py), MathF.Max(2.5f, cellSize * 0.15f), 0xFFFF00FF);
                 }
             }
+
+            // Taxi path lines on minimap (cyan lines, yellow node dots) — filtered by selection
+            if (_worldScene?.TaxiLoader != null && _worldScene.ShowTaxi)
+            {
+                // Draw visible route lines
+                foreach (var route in _worldScene.TaxiLoader.Routes)
+                {
+                    if (!_worldScene.IsTaxiRouteVisible(route)) continue;
+                    for (int i = 0; i < route.Waypoints.Count - 1; i++)
+                    {
+                        var a = route.Waypoints[i];
+                        var b = route.Waypoints[i + 1];
+                        float ax = cursorPos.X + ((WoWConstants.MapOrigin - a.Y) / WoWConstants.ChunkSize - viewMinTy) * cellSize;
+                        float ay = cursorPos.Y + ((WoWConstants.MapOrigin - a.X) / WoWConstants.ChunkSize - viewMinTx) * cellSize;
+                        float bx = cursorPos.X + ((WoWConstants.MapOrigin - b.Y) / WoWConstants.ChunkSize - viewMinTy) * cellSize;
+                        float by = cursorPos.Y + ((WoWConstants.MapOrigin - b.X) / WoWConstants.ChunkSize - viewMinTx) * cellSize;
+                        drawList.AddLine(new Vector2(ax, ay), new Vector2(bx, by), 0xFFFFFF00, 1.5f);
+                    }
+                }
+                // Draw visible taxi nodes
+                foreach (var node in _worldScene.TaxiLoader.Nodes)
+                {
+                    if (!_worldScene.IsTaxiNodeVisible(node)) continue;
+                    float nx = cursorPos.X + ((WoWConstants.MapOrigin - node.Position.Y) / WoWConstants.ChunkSize - viewMinTy) * cellSize;
+                    float ny = cursorPos.Y + ((WoWConstants.MapOrigin - node.Position.X) / WoWConstants.ChunkSize - viewMinTx) * cellSize;
+                    if (nx >= cursorPos.X && nx <= cursorPos.X + mapSize && ny >= cursorPos.Y && ny <= cursorPos.Y + mapSize)
+                        drawList.AddCircleFilled(new Vector2(nx, ny), MathF.Max(3f, cellSize * 0.2f), 0xFF00FFFF);
+                }
+            }
+
+            drawList.PopClipRect();
 
             // Border
             drawList.AddRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize), 0xFF666666);
 
-            // Double-click to teleport (single-click interferes with window resize/drag)
+            // Double-click to teleport
             if (ImGui.IsWindowHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
-                float clickTileY = (mousePos.X - cursorPos.X) / cellSize + minTy;
-                float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + minTx;
+                float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+                float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
                 if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
                 {
                     float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
@@ -1414,7 +1538,7 @@ public class ViewerApp : IDisposable
                 }
             }
 
-            // Tile coordinate label
+            // Tile coordinate label + zoom info
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 2);
             int ctX = (int)MathF.Floor(camTileX);
             int ctY = (int)MathF.Floor(camTileY);
@@ -1928,9 +2052,21 @@ public class ViewerApp : IDisposable
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene;
 
-            // Load AreaPOI from DBC if available
+            // Load AreaPOI and TaxiPaths from DBC if available
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
+            {
                 _worldScene.LoadAreaPoi(_dbcProvider, _dbdDir, _dbcBuild);
+
+                // Find mapId for taxi path loading
+                string mapName = _terrainManager.MapName;
+                var mapDef = _discoveredMaps.FirstOrDefault(m =>
+                    string.Equals(m.Directory, mapName, StringComparison.OrdinalIgnoreCase));
+                if (mapDef != null)
+                {
+                    var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
+                    _worldScene.LoadTaxiPaths(dbcd, _dbcBuild, mapDef.Id);
+                }
+            }
 
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
             var startPos = _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
@@ -1939,6 +2075,8 @@ public class ViewerApp : IDisposable
             _camera.Pitch = -20f;
 
             int poiCount = _worldScene.PoiLoader?.Entries.Count ?? 0;
+            int taxiNodeCount = _worldScene.TaxiLoader?.Nodes.Count ?? 0;
+            int taxiRouteCount = _worldScene.TaxiLoader?.Routes.Count ?? 0;
             _modelInfo = $"Type: {wdtType} World\n" +
                          $"Map: {_terrainManager.MapName}\n\n" +
                          $"Tiles: {_terrainManager.LoadedTileCount}\n" +
@@ -1946,6 +2084,7 @@ public class ViewerApp : IDisposable
                          $"WMO instances: {_worldScene.WmoInstanceCount} ({_worldScene.UniqueWmoModels} unique)\n" +
                          $"MDX instances: {_worldScene.MdxInstanceCount} ({_worldScene.UniqueMdxModels} unique)\n" +
                          (poiCount > 0 ? $"Area POIs: {poiCount}\n" : "") +
+                         (taxiNodeCount > 0 ? $"Taxi Nodes: {taxiNodeCount}, Routes: {taxiRouteCount}\n" : "") +
                          $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
 
             _statusMessage = $"Loaded world: {_terrainManager.MapName} ({_terrainManager.LoadedTileCount} tiles, {_worldScene.WmoInstanceCount} WMOs, {_worldScene.MdxInstanceCount} doodads)";

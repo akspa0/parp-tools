@@ -91,6 +91,37 @@ public class WorldScene : ISceneRenderer
     public bool ShowPoi { get => _showPoi; set => _showPoi = value; }
     public AreaPoiLoader? PoiLoader => _poiLoader;
 
+    // Taxi paths
+    private TaxiPathLoader? _taxiLoader;
+    private bool _showTaxi = true;
+    public bool ShowTaxi { get => _showTaxi; set => _showTaxi = value; }
+    public TaxiPathLoader? TaxiLoader => _taxiLoader;
+
+    // Taxi selection: -1 = show all (or none if !_showTaxi)
+    private int _selectedTaxiNodeId = -1;
+    private int _selectedTaxiRouteId = -1;
+    public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
+    public int SelectedTaxiRouteId { get => _selectedTaxiRouteId; set { _selectedTaxiRouteId = value; _selectedTaxiNodeId = -1; } }
+    public void ClearTaxiSelection() { _selectedTaxiNodeId = -1; _selectedTaxiRouteId = -1; }
+
+    public bool IsTaxiRouteVisible(TaxiPathLoader.TaxiRoute route)
+    {
+        if (_selectedTaxiRouteId >= 0) return route.PathId == _selectedTaxiRouteId;
+        if (_selectedTaxiNodeId >= 0) return route.FromNodeId == _selectedTaxiNodeId || route.ToNodeId == _selectedTaxiNodeId;
+        return true; // no selection = show all
+    }
+
+    public bool IsTaxiNodeVisible(TaxiPathLoader.TaxiNode node)
+    {
+        if (_selectedTaxiNodeId >= 0) return node.Id == _selectedTaxiNodeId;
+        if (_selectedTaxiRouteId >= 0)
+        {
+            var route = _taxiLoader?.Routes.FirstOrDefault(r => r.PathId == _selectedTaxiRouteId);
+            return route != null && (route.FromNodeId == node.Id || route.ToNodeId == node.Id);
+        }
+        return true; // no selection = show all
+    }
+
     /// <summary>
     /// Load AreaPOI entries for this map from DBC. Call after construction when DBC provider is available.
     /// </summary>
@@ -98,6 +129,15 @@ public class WorldScene : ISceneRenderer
     {
         _poiLoader = new AreaPoiLoader();
         _poiLoader.Load(dbcProvider, dbdDir, build, _terrainManager.MapName);
+    }
+
+    /// <summary>
+    /// Load TaxiPath data for this map from DBC.
+    /// </summary>
+    public void LoadTaxiPaths(DBCD.DBCD dbcd, string build, int mapId)
+    {
+        _taxiLoader = new TaxiPathLoader();
+        _taxiLoader.Load(dbcd, build, mapId);
     }
 
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
@@ -679,6 +719,29 @@ public class WorldScene : ISceneRenderer
         {
             foreach (var poi in _poiLoader.Entries)
                 _bbRenderer.DrawPin(poi.Position, 40f, 6f, view, proj, new Vector3(1f, 0f, 1f));
+        }
+
+        // 6. Taxi paths (cyan lines + yellow node markers) — filtered by selection
+        if (_showTaxi && _taxiLoader != null && _bbRenderer != null)
+        {
+            // Draw visible taxi nodes as yellow pins
+            foreach (var node in _taxiLoader.Nodes)
+            {
+                if (!IsTaxiNodeVisible(node)) continue;
+                _bbRenderer.DrawPin(node.Position, 50f, 8f, view, proj, new Vector3(1f, 1f, 0f));
+            }
+
+            // Draw visible flight path lines as cyan
+            foreach (var route in _taxiLoader.Routes)
+            {
+                if (!IsTaxiRouteVisible(route)) continue;
+                for (int i = 0; i < route.Waypoints.Count - 1; i++)
+                {
+                    var a = route.Waypoints[i];
+                    var b = route.Waypoints[i + 1];
+                    _bbRenderer.DrawLine(a, b, view, proj, new Vector3(0f, 1f, 1f));
+                }
+            }
         }
     }
 

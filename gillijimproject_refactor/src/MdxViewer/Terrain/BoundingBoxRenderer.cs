@@ -124,6 +124,51 @@ void main() { FragColor = vec4(uColor, 1.0); }";
     }
 
     /// <summary>
+    /// Draw a line between two points as a thin elongated box.
+    /// </summary>
+    public void DrawLine(Vector3 from, Vector3 to, Matrix4x4 view, Matrix4x4 proj, Vector3 color)
+    {
+        var mid = (from + to) * 0.5f;
+        var diff = to - from;
+        float len = diff.Length();
+        if (len < 0.01f) return;
+
+        // Draw as a thin box along the line direction
+        // Use the midpoint and half-extents aligned to the line
+        var dir = diff / len;
+        // Find a perpendicular vector for thickness
+        var up = MathF.Abs(dir.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX;
+        var right = Vector3.Normalize(Vector3.Cross(dir, up));
+        var forward = Vector3.Normalize(Vector3.Cross(right, dir));
+
+        float thickness = 1.0f;
+        // Build a model matrix that transforms the unit cube into a line segment
+        // Unit cube is 0..1, we need to map it to from..to with thickness
+        var scale = new Matrix4x4(
+            right.X * thickness, right.Y * thickness, right.Z * thickness, 0,
+            forward.X * thickness, forward.Y * thickness, forward.Z * thickness, 0,
+            dir.X * len, dir.Y * len, dir.Z * len, 0,
+            from.X - right.X * thickness * 0.5f - forward.X * thickness * 0.5f,
+            from.Y - right.Y * thickness * 0.5f - forward.Y * thickness * 0.5f,
+            from.Z - right.Z * thickness * 0.5f - forward.Z * thickness * 0.5f,
+            1);
+
+        var mvp = scale * view * proj;
+        DrawWithMvp(mvp, color);
+    }
+
+    private unsafe void DrawWithMvp(Matrix4x4 mvp, Vector3 color)
+    {
+        if (!_initialized) return;
+        _gl.UseProgram(_shader);
+        _gl.UniformMatrix4(_uMvp, 1, false, (float*)&mvp);
+        _gl.Uniform3(_uColor, color.X, color.Y, color.Z);
+        _gl.BindVertexArray(_vao);
+        _gl.DrawElements(PrimitiveType.Lines, (uint)CubeIndices.Length, DrawElementsType.UnsignedShort, (void*)0);
+        _gl.BindVertexArray(0);
+    }
+
+    /// <summary>
     /// Draw a small marker box at a point position.
     /// </summary>
     public void DrawMarker(Vector3 position, float size, Matrix4x4 view, Matrix4x4 proj, Vector3 color)
