@@ -38,6 +38,10 @@ public class WmoRenderer : ISceneRenderer
     private bool _doodadsVisible = true;
     private readonly string _cacheDir;
 
+    // Doodad culling constants
+    private const float DoodadCullDistance = 500f;   // Max distance from camera to render WMO doodads
+    private const float DoodadMaxRenderCount = 64;   // Max doodads rendered per WMO per frame
+
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
     private uint _liquidShader;
@@ -195,13 +199,33 @@ public class WmoRenderer : ISceneRenderer
         }
 
         // Pass 2: Doodads (rendered between opaque and transparent WMO geometry)
-        if (_doodadsVisible)
+        // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount
+        if (_doodadsVisible && _doodadInstances.Count > 0)
         {
-            foreach (var inst in _doodadInstances)
+            // Build list of visible doodads with world-space distance to camera
+            var visibleDoodads = new List<(int idx, float distSq)>();
+            float cullDistSq = DoodadCullDistance * DoodadCullDistance;
+            for (int di = 0; di < _doodadInstances.Count; di++)
             {
+                var inst = _doodadInstances[di];
                 if (!inst.Visible || inst.Renderer == null) continue;
+                // Transform local position to world space
+                var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
+                float distSq = Vector3.DistanceSquared(cp, worldPos);
+                if (distSq > cullDistSq) continue; // Distance cull
+                visibleDoodads.Add((di, distSq));
+            }
+
+            // Sort nearest-first and cap at max render count
+            visibleDoodads.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+            int renderCount = Math.Min(visibleDoodads.Count, (int)DoodadMaxRenderCount);
+
+            for (int vi = 0; vi < renderCount; vi++)
+            {
+                var inst = _doodadInstances[visibleDoodads[vi].idx];
                 var doodadWorld = inst.Transform * modelMatrix;
-                inst.Renderer.RenderWithTransform(doodadWorld, view, proj);
+                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Both, 1.0f,
+                    fogColor, fogStart, fogEnd, cameraPos);
             }
         }
 
@@ -702,7 +726,8 @@ void main() {
                 Renderer = renderer,
                 Transform = transform,
                 Visible = true,
-                DoodadDefIndex = (int)i
+                DoodadDefIndex = (int)i,
+                LocalPosition = def.Position
             });
 
             if (renderer != null)
@@ -989,17 +1014,9 @@ void main() {
                 }
                 else if (group.GroupLiquid == 15)
                 {
-                    // Sample first visible tile's liquid field for type
-                    for (int t = 0; t < tileFlags.Length; t++)
-                    {
-                        if ((tileFlags[t] & 0x08) == 0) // visible tile
-                        {
-                            int tileLiquid = tileFlags[t] & 0x3F; // low 6 bits
-                            liquidBasicType = tileLiquid & 3; // basic type mask
-                            if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
-                            break;
-                        }
-                    }
+                    // GroupLiquid=15 is "green lava" in old WMOs (Ironforge, Blackrock, etc.)
+                    // Always treat as magma — tile flag sampling is unreliable for this case
+                    liquidBasicType = 2; // magma
                 }
                 else if (isOcean)
                 {
@@ -1112,6 +1129,7 @@ void main() {
         public Matrix4x4 Transform;
         public bool Visible = true;
         public int DoodadDefIndex;
+        public Vector3 LocalPosition; // WMO-local position for fast culling
     }
 
     private class LiquidMeshData

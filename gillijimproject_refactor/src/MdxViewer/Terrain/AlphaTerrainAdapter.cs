@@ -657,12 +657,20 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         if (mclqData == null || mclqData.Length < 8)
             return null;
 
-        // Determine liquid type from MCNK flags bits 2-5 (if set).
+        // Determine liquid type from MCNK flags.
+        // Alpha 0.5.3: bit 2 (0x04) = has liquid, bit 3 (0x08) = ocean override
+        // Bits 4-5 encode basic liquid type: 0=water, 1=ocean, 2=magma, 3=slime
+        int liquidBits = (mcnkFlags >> 4) & 3; // extract bits 4-5
         LiquidType liquidType;
-        if ((mcnkFlags & 0x08) != 0) liquidType = LiquidType.Ocean;
-        else if ((mcnkFlags & 0x10) != 0) liquidType = LiquidType.Magma;
-        else if ((mcnkFlags & 0x20) != 0) liquidType = LiquidType.Slime;
-        else liquidType = LiquidType.Water;
+        if ((mcnkFlags & 0x08) != 0) liquidType = LiquidType.Ocean; // ocean flag override
+        else liquidType = liquidBits switch
+        {
+            1 => LiquidType.Ocean,
+            2 => LiquidType.Magma,
+            3 => LiquidType.Slime,
+            _ => LiquidType.Water
+        };
+        Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk({chunkX},{chunkY}): mcnkFlags=0x{mcnkFlags:X8} liquidBits={liquidBits} type={liquidType}");
 
         // Read min/max height (8 bytes)
         float minHeight = BitConverter.ToSingle(mclqData, 0);
