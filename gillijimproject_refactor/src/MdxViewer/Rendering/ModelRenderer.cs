@@ -179,9 +179,12 @@ public class MdxRenderer : ISceneRenderer
                     int texId = layer.TextureId;
 
                     // Determine if this layer needs blending
-                    bool needsBlend = l > 0 || layer.BlendMode != MdlTexOp.Load;
+                    // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
+                    // Render in opaque pass with high alpha threshold, not as blended
+                    bool isAlphaCutout = l == 0 && layer.BlendMode == MdlTexOp.Transparent;
+                    bool needsBlend = !isAlphaCutout && (l > 0 || layer.BlendMode != MdlTexOp.Load);
 
-                    // Filter by render pass
+                    // Filter by render pass — alpha cutout renders in opaque pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
                     if (pass == RenderPass.Transparent && !needsBlend) continue;
 
@@ -203,7 +206,15 @@ public class MdxRenderer : ISceneRenderer
                     // Unshaded (0x1): skip lighting in shader
                     _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
 
-                    if (needsBlend)
+                    if (isAlphaCutout)
+                    {
+                        // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+                        _gl.Uniform1(_uAlphaTest, 1);
+                        _gl.Uniform1(_uAlphaThreshold, 0.75f);
+                    }
+                    else if (needsBlend)
                     {
                         _gl.Enable(EnableCap.Blend);
                         _gl.DepthMask(false); // Don't write depth for blended layers

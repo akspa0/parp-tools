@@ -124,6 +124,19 @@ public class ViewerApp : IDisposable
     private double _currentFps;
     private double _frameTimeMs;
 
+    // Map Converter state
+    private bool _showMapConverterDialog = false;
+    private int _mapConvertDirection = 0; // 0 = Alpha→LK, 1 = LK→Alpha
+    private string _mapConvertSourcePath = "";
+    private string _mapConvertOutputDir = "";
+    private string _mapConvertLkMapDir = ""; // LK→Alpha: directory containing LK ADT files
+    private bool _mapConvertVerbose = true;
+    private bool _mapConverting = false;
+    private readonly List<string> _mapConvertLog = new();
+    private bool _mapConvertScrollToBottom = false;
+    private string? _mapConvertError = null;
+    private bool _mapConvertDone = false;
+
     // VLM Dataset Generator state
     private bool _showVlmExportDialog = false;
     private string _vlmClientPath = "";
@@ -477,6 +490,8 @@ void main() {
             DrawListfileInputDialog();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
+        if (_showMapConverterDialog)
+            DrawMapConverterDialog();
     }
 
     private void DrawMenuBar()
@@ -501,6 +516,9 @@ void main() {
 
                 if (ImGui.MenuItem("Generate VLM Dataset..."))
                     _showVlmExportDialog = true;
+
+                if (ImGui.MenuItem("Map Converter..."))
+                    _showMapConverterDialog = true;
 
                 ImGui.Separator();
 
@@ -698,6 +716,276 @@ void main() {
         _showListfileInput = false;
     }
 
+    private void DrawMapConverterDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(580, 520), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(
+            ImGui.GetIO().DisplaySize.X / 2 - 290,
+            ImGui.GetIO().DisplaySize.Y / 2 - 260), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("Map Converter", ref _showMapConverterDialog))
+        {
+            ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and LK 3.3.5 split ADT formats.");
+            ImGui.Spacing();
+
+            // Direction selector
+            ImGui.Text("Direction:");
+            ImGui.RadioButton("Alpha WDT \u2192 LK ADTs", ref _mapConvertDirection, 0);
+            ImGui.SameLine();
+            ImGui.RadioButton("LK ADTs \u2192 Alpha WDT", ref _mapConvertDirection, 1);
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            if (_mapConvertDirection == 0)
+            {
+                // Alpha → LK
+                ImGui.Text("Source Alpha WDT:");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##a2l_src", ref _mapConvertSourcePath, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##a2l_src"))
+                {
+                    string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
+                    var picked = ShowFileDialogSTA("Select Alpha WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
+                    if (picked != null) _mapConvertSourcePath = picked;
+                }
+
+                ImGui.Text("Output Directory:");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##a2l_out", ref _mapConvertOutputDir, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##a2l_out"))
+                {
+                    var picked = ShowFolderDialogSTA("Select output directory for LK ADT files");
+                    if (picked != null) _mapConvertOutputDir = picked;
+                }
+            }
+            else
+            {
+                // LK → Alpha
+                ImGui.Text("Source LK WDT:");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##l2a_src", ref _mapConvertSourcePath, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##l2a_src"))
+                {
+                    string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
+                    var picked = ShowFileDialogSTA("Select LK WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
+                    if (picked != null) _mapConvertSourcePath = picked;
+                }
+
+                ImGui.Text("LK ADT Directory (containing MapName_X_Y.adt files):");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##l2a_mapdir", ref _mapConvertLkMapDir, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##l2a_dir"))
+                {
+                    var picked = ShowFolderDialogSTA("Select directory containing LK ADT files");
+                    if (picked != null) _mapConvertLkMapDir = picked;
+                }
+
+                ImGui.Text("Output Alpha WDT Path:");
+                ImGui.SetNextItemWidth(-80);
+                ImGui.InputText("##l2a_out", ref _mapConvertOutputDir, 512);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse##l2a_out"))
+                {
+                    string? initDir = !string.IsNullOrEmpty(_mapConvertOutputDir) ? Path.GetDirectoryName(_mapConvertOutputDir) : null;
+                    var picked = ShowSaveFileDialogSTA("Save Alpha WDT as", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
+                    if (picked != null) _mapConvertOutputDir = picked;
+                }
+            }
+
+            ImGui.Spacing();
+            ImGui.Checkbox("Verbose logging", ref _mapConvertVerbose);
+            ImGui.Spacing();
+
+            // Auto-fill hints
+            if (!string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertOutputDir))
+            {
+                string srcDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
+                string mapName = Path.GetFileNameWithoutExtension(_mapConvertSourcePath);
+                if (_mapConvertDirection == 0)
+                    _mapConvertOutputDir = Path.Combine(srcDir, $"{mapName}_lk");
+                else
+                    _mapConvertOutputDir = Path.Combine(srcDir, $"{mapName}_alpha.wdt");
+            }
+            if (_mapConvertDirection == 1 && !string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertLkMapDir))
+            {
+                _mapConvertLkMapDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
+            }
+
+            // Convert button
+            bool canConvert = !_mapConverting
+                && !string.IsNullOrWhiteSpace(_mapConvertSourcePath)
+                && !string.IsNullOrWhiteSpace(_mapConvertOutputDir)
+                && (_mapConvertDirection == 0 || !string.IsNullOrWhiteSpace(_mapConvertLkMapDir));
+
+            if (!canConvert) ImGui.BeginDisabled();
+            if (ImGui.Button(_mapConverting ? "Converting..." : "Convert", new Vector2(120, 0)))
+            {
+                _mapConvertLog.Clear();
+                _mapConvertError = null;
+                _mapConvertDone = false;
+                _mapConverting = true;
+
+                string srcPath = _mapConvertSourcePath;
+                string outPath = _mapConvertOutputDir;
+                string lkMapDir = _mapConvertLkMapDir;
+                int direction = _mapConvertDirection;
+                bool verbose = _mapConvertVerbose;
+
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        if (direction == 0)
+                        {
+                            // Alpha → LK
+                            var opts = new WoWMapConverter.Core.Converters.ConversionOptions { Verbose = verbose };
+                            var converter = new WoWMapConverter.Core.Converters.AlphaToLkConverter(opts);
+
+                            // Redirect console output to log
+                            var origOut = Console.Out;
+                            var sw = new StringWriter();
+                            Console.SetOut(sw);
+
+                            var result = await converter.ConvertWdtAsync(srcPath, outPath);
+
+                            Console.SetOut(origOut);
+                            var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                            lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
+                            _mapConvertScrollToBottom = true;
+
+                            if (result.Success)
+                            {
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                            }
+                            else
+                            {
+                                _mapConvertError = result.Error ?? "Unknown error";
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
+                            }
+                            foreach (var w in result.Warnings)
+                            {
+                                lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                            }
+                        }
+                        else
+                        {
+                            // LK → Alpha
+                            var opts = new WoWMapConverter.Core.Converters.LkToAlphaOptions { Verbose = verbose };
+                            var converter = new WoWMapConverter.Core.Converters.LkToAlphaConverter(opts);
+
+                            var origOut = Console.Out;
+                            var sw = new StringWriter();
+                            Console.SetOut(sw);
+
+                            var result = await converter.ConvertAsync(srcPath, lkMapDir, outPath);
+
+                            Console.SetOut(origOut);
+                            var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                            lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
+                            _mapConvertScrollToBottom = true;
+
+                            if (result.Success)
+                            {
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                            }
+                            else
+                            {
+                                _mapConvertError = result.Error ?? "Unknown error";
+                                lock (_mapConvertLog)
+                                    _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
+                            }
+                            foreach (var w in result.Warnings)
+                            {
+                                lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _mapConvertError = ex.Message;
+                        lock (_mapConvertLog)
+                            _mapConvertLog.Add($"\n=== EXCEPTION: {ex.Message} ===");
+                    }
+                    finally
+                    {
+                        _mapConvertDone = true;
+                        _mapConverting = false;
+                        _mapConvertScrollToBottom = true;
+                    }
+                });
+            }
+            if (!canConvert) ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(80, 0)))
+                _showMapConverterDialog = false;
+
+            // Error display
+            if (_mapConvertError != null)
+            {
+                ImGui.Spacing();
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.3f, 0.3f, 1));
+                ImGui.TextWrapped($"Error: {_mapConvertError}");
+                ImGui.PopStyleColor();
+            }
+
+            // Log output
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Log:");
+            float logHeight = ImGui.GetContentRegionAvail().Y - 4;
+            if (ImGui.BeginChild("##mapconv_log", new Vector2(-1, logHeight), true))
+            {
+                lock (_mapConvertLog)
+                {
+                    foreach (var line in _mapConvertLog)
+                        ImGui.TextUnformatted(line);
+                }
+                if (_mapConvertScrollToBottom)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    _mapConvertScrollToBottom = false;
+                }
+            }
+            ImGui.EndChild();
+
+            // Load result button
+            if (_mapConvertDone && _mapConvertError == null && _mapConvertDirection == 0)
+            {
+                if (ImGui.Button("Load Converted Map in Viewer"))
+                {
+                    // Find the WDT in the output directory
+                    var wdtFiles = Directory.GetFiles(_mapConvertOutputDir, "*.wdt");
+                    if (wdtFiles.Length > 0)
+                    {
+                        LoadWdtTerrain(wdtFiles[0]);
+                        _showMapConverterDialog = false;
+                    }
+                }
+            }
+            else if (_mapConvertDone && _mapConvertError == null && _mapConvertDirection == 1)
+            {
+                if (ImGui.Button("Load Converted Alpha WDT in Viewer"))
+                {
+                    if (File.Exists(_mapConvertOutputDir))
+                    {
+                        LoadWdtTerrain(_mapConvertOutputDir);
+                        _showMapConverterDialog = false;
+                    }
+                }
+            }
+        }
+        ImGui.End();
+    }
+
     private void DrawVlmExportDialog()
     {
         ImGui.SetNextWindowSize(new Vector2(550, 500), ImGuiCond.FirstUseEver);
@@ -854,6 +1142,58 @@ void main() {
             };
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 result = dialog.SelectedPath;
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        return result;
+    }
+
+    /// <summary>
+    /// Show a native file-open picker on an STA thread to avoid deadlocking the GLFW render thread.
+    /// </summary>
+    private static string? ShowFileDialogSTA(string title, string filter, string? initialDir = null)
+    {
+        string? result = null;
+        var thread = new Thread(() =>
+        {
+            using var dialog = new System.Windows.Forms.OpenFileDialog
+            {
+                Title = title,
+                Filter = filter,
+                RestoreDirectory = true
+            };
+            if (initialDir != null && Directory.Exists(initialDir))
+                dialog.InitialDirectory = initialDir;
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                result = dialog.FileName;
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        return result;
+    }
+
+    /// <summary>
+    /// Show a native save-file picker on an STA thread.
+    /// </summary>
+    private static string? ShowSaveFileDialogSTA(string title, string filter, string? initialDir = null, string? defaultFileName = null)
+    {
+        string? result = null;
+        var thread = new Thread(() =>
+        {
+            using var dialog = new System.Windows.Forms.SaveFileDialog
+            {
+                Title = title,
+                Filter = filter,
+                RestoreDirectory = true
+            };
+            if (initialDir != null && Directory.Exists(initialDir))
+                dialog.InitialDirectory = initialDir;
+            if (defaultFileName != null)
+                dialog.FileName = defaultFileName;
+            if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                result = dialog.FileName;
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
@@ -2171,6 +2511,46 @@ void main() {
     }
 
     /// <summary>
+    /// Detect Alpha WDT format by examining MPHD data.
+    /// Alpha MPHD stores absolute file offsets to MDNM (byte 4) and MONM (byte 12).
+    /// Standard MPHD stores flags at byte 0 and has no MDNM/MONM offsets.
+    /// If MPHD byte 4 contains a large value (absolute offset to MDNM), it's Alpha.
+    /// </summary>
+    private static bool DetectAlphaWdt(byte[] wdtBytes)
+    {
+        // Find MPHD chunk (reversed on disk: "DHPM")
+        for (int i = 0; i + 8 <= wdtBytes.Length;)
+        {
+            string fcc = System.Text.Encoding.ASCII.GetString(wdtBytes, i, 4);
+            int sz = BitConverter.ToInt32(wdtBytes, i + 4);
+            if (sz < 0 || i + 8 + sz > wdtBytes.Length) break;
+
+            string reversed = new string(fcc.Reverse().ToArray());
+            if (fcc == "DHPM" || reversed == "DHPM") // MPHD
+            {
+                int dataStart = i + 8;
+                if (sz >= 16)
+                {
+                    // Alpha MPHD: [0..3]=nTextures, [4..7]=MDNM abs offset, [8..11]=nMapObjNames, [12..15]=MONM abs offset
+                    // Standard MPHD: [0..3]=flags (small: 0,1,4,8), rest is different
+                    int mdnmOffset = BitConverter.ToInt32(wdtBytes, dataStart + 4);
+                    // MDNM offset in Alpha is always after MVER+MPHD+MAIN, so > ~32KB
+                    // Standard MPHD byte 4 is 0 or a small relative offset
+                    if (mdnmOffset > 1000 && mdnmOffset < wdtBytes.Length)
+                        return true;
+                }
+                break;
+            }
+
+            int next = i + 8 + sz;
+            if (next <= i) break;
+            i = next;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Detect WMO version by reading the MVER chunk from the file.
     /// Returns 14 for Alpha, 17 for standard WotLK+, or 0 if detection fails.
     /// </summary>
@@ -2540,11 +2920,11 @@ void main() {
 
         try
         {
-            // Detect Alpha WDT vs Standard WDT by file size.
-            // Alpha WDTs are monolithic files containing all embedded ADTs (typically ≥64KB).
-            // Standard WDTs are small files (~33KB MAIN chunk) pointing to separate .adt files.
-            long fileSize = new FileInfo(wdtPath).Length;
-            bool isAlpha = fileSize >= 65536;
+            // Detect Alpha WDT vs Standard WDT by checking for MDNM chunk.
+            // Alpha WDTs are monolithic: MVER+MPHD+MAIN+MDNM+MONM+embedded ADTs.
+            // Standard WDTs have: MVER+MPHD+MAIN only, referencing external .adt files.
+            var wdtRawBytes = File.ReadAllBytes(wdtPath);
+            bool isAlpha = DetectAlphaWdt(wdtRawBytes);
             string wdtType;
             int loadStep = 0;
 
@@ -2576,9 +2956,8 @@ void main() {
                     return;
                 }
 
-                var wdtBytes = File.ReadAllBytes(wdtPath);
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
-                var adapter = new Terrain.StandardTerrainAdapter(wdtBytes, mapName, _dataSource);
+                var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
                 _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver,
                     onStatus: OnLoadStatus);

@@ -421,11 +421,11 @@ public class LkToAlphaConverter
             string name = NormalizePath(mmdxNames[localIdx]);
             if (!mdnmIndex.TryGetValue(name, out int globalIdx)) continue;
 
-            // Read LK MDDF entry
+            // Read LK MDDF entry — positions are (X, Y, Z) per spec
             int uniqueId = BitConverter.ToInt32(bytes, p + 4);
-            float posX = BitConverter.ToSingle(bytes, p + 8);
-            float posZ = BitConverter.ToSingle(bytes, p + 12); // Height in LK
-            float posY = BitConverter.ToSingle(bytes, p + 16);
+            float posX = BitConverter.ToSingle(bytes, p + 8);   // position[0] = X (North)
+            float posY = BitConverter.ToSingle(bytes, p + 12);  // position[1] = Y (West)
+            float posZ = BitConverter.ToSingle(bytes, p + 16);  // position[2] = Z (Up/height)
             float rotX = BitConverter.ToSingle(bytes, p + 20);
             float rotY = BitConverter.ToSingle(bytes, p + 24);
             float rotZ = BitConverter.ToSingle(bytes, p + 28);
@@ -436,15 +436,15 @@ public class LkToAlphaConverter
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
             ms.Write(BitConverter.GetBytes(scale));
             ms.Write(BitConverter.GetBytes(flags));
 
-            // Calculate chunk index for MCRF
+            // Calculate chunk index for MCRF using horizontal axes (X, Y)
             int chunkIdx = CalculateChunkIndex(posX, posY, tileX, tileY);
             if (chunkIdx >= 0 && chunkIdx < 256)
                 perChunkRefs[chunkIdx].Add(baseIndex + written);
@@ -515,49 +515,49 @@ public class LkToAlphaConverter
             string name = NormalizePath(mwmoNames[localIdx]);
             if (!monmIndex.TryGetValue(name, out int globalIdx)) continue;
 
-            // Read LK MODF entry
+            // Read LK MODF entry — positions are (X, Y, Z) per spec
             int uniqueId = BitConverter.ToInt32(bytes, p + 4);
-            float posX = BitConverter.ToSingle(bytes, p + 8);
-            float posZ = BitConverter.ToSingle(bytes, p + 12);
-            float posY = BitConverter.ToSingle(bytes, p + 16);
+            float posX = BitConverter.ToSingle(bytes, p + 8);   // position[0] = X (North)
+            float posY = BitConverter.ToSingle(bytes, p + 12);  // position[1] = Y (West)
+            float posZ = BitConverter.ToSingle(bytes, p + 16);  // position[2] = Z (Up/height)
             float rotX = BitConverter.ToSingle(bytes, p + 20);
             float rotY = BitConverter.ToSingle(bytes, p + 24);
             float rotZ = BitConverter.ToSingle(bytes, p + 28);
             
-            // Extents
-            float minX = BitConverter.ToSingle(bytes, p + 32);
-            float minZ = BitConverter.ToSingle(bytes, p + 36);
-            float minY = BitConverter.ToSingle(bytes, p + 40);
-            float maxX = BitConverter.ToSingle(bytes, p + 44);
-            float maxZ = BitConverter.ToSingle(bytes, p + 48);
-            float maxY = BitConverter.ToSingle(bytes, p + 52);
+            // Extents — (X, Y, Z) order per spec
+            float minX = BitConverter.ToSingle(bytes, p + 32);  // extentsLower[0]
+            float minY = BitConverter.ToSingle(bytes, p + 36);  // extentsLower[1]
+            float minZ = BitConverter.ToSingle(bytes, p + 40);  // extentsLower[2]
+            float maxX = BitConverter.ToSingle(bytes, p + 44);  // extentsUpper[0]
+            float maxY = BitConverter.ToSingle(bytes, p + 48);  // extentsUpper[1]
+            float maxZ = BitConverter.ToSingle(bytes, p + 52);  // extentsUpper[2]
             
             ushort flags = BitConverter.ToUInt16(bytes, p + 56);
             ushort doodadSet = BitConverter.ToUInt16(bytes, p + 58);
             ushort nameSet = BitConverter.ToUInt16(bytes, p + 60);
             ushort scale = BitConverter.ToUInt16(bytes, p + 62);
 
-            // Write Alpha MODF entry (same format)
+            // Write Alpha MODF entry (same format, byte-for-byte copy)
             ms.Write(BitConverter.GetBytes(globalIdx));
             ms.Write(BitConverter.GetBytes(uniqueId));
             ms.Write(BitConverter.GetBytes(posX));
-            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(posY));
+            ms.Write(BitConverter.GetBytes(posZ));
             ms.Write(BitConverter.GetBytes(rotX));
             ms.Write(BitConverter.GetBytes(rotY));
             ms.Write(BitConverter.GetBytes(rotZ));
             ms.Write(BitConverter.GetBytes(minX));
-            ms.Write(BitConverter.GetBytes(minZ));
             ms.Write(BitConverter.GetBytes(minY));
+            ms.Write(BitConverter.GetBytes(minZ));
             ms.Write(BitConverter.GetBytes(maxX));
-            ms.Write(BitConverter.GetBytes(maxZ));
             ms.Write(BitConverter.GetBytes(maxY));
+            ms.Write(BitConverter.GetBytes(maxZ));
             ms.Write(BitConverter.GetBytes(flags));
             ms.Write(BitConverter.GetBytes(doodadSet));
             ms.Write(BitConverter.GetBytes(nameSet));
             ms.Write(BitConverter.GetBytes(scale));
 
-            // Calculate chunk index for MCRF
+            // Calculate chunk index for MCRF using horizontal axes (X, Y)
             int chunkIdx = CalculateChunkIndex(posX, posY, tileX, tileY);
             if (chunkIdx >= 0 && chunkIdx < 256)
                 perChunkRefs[chunkIdx].Add(baseIndex + written);

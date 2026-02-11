@@ -76,7 +76,7 @@ public class WmoV17ToV14Converter
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = reader.BaseStream.Position + size;
+            var chunkEnd = Math.Min(reader.BaseStream.Position + size, reader.BaseStream.Length);
 
             // Reverse for comparison (chunks stored reversed on disk)
             var chunkId = new string(magic.Reverse().ToArray());
@@ -151,7 +151,7 @@ public class WmoV17ToV14Converter
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = reader.BaseStream.Position + size;
+            var chunkEnd = Math.Min(reader.BaseStream.Position + size, reader.BaseStream.Length);
             var chunkId = new string(magic.Reverse().ToArray());
 
             switch (chunkId)
@@ -172,6 +172,8 @@ public class WmoV17ToV14Converter
 
     private void ParseMohd(BinaryReader reader, WmoV17Data data)
     {
+        long remaining = reader.BaseStream.Length - reader.BaseStream.Position;
+        if (remaining < 60) return; // Need at least 60 bytes for core MOHD fields
         data.MaterialCount = reader.ReadUInt32();
         data.GroupCount = reader.ReadUInt32();
         data.PortalCount = reader.ReadUInt32();
@@ -183,14 +185,17 @@ public class WmoV17ToV14Converter
         data.WmoId = reader.ReadUInt32();
         data.BoundingBox1 = ReadVector3(reader);
         data.BoundingBox2 = ReadVector3(reader);
-        data.Flags = reader.ReadUInt32();
+        if (remaining >= 64)
+            data.Flags = reader.ReadUInt32();
     }
 
     private void ParseMogp(BinaryReader reader, uint totalSize, WmoV17GroupData data)
     {
         long mogpStart = reader.BaseStream.Position;
+        long mogpEnd = Math.Min(mogpStart + totalSize, reader.BaseStream.Length);
         
         // MOGP header (68 bytes in v17)
+        if (mogpEnd - mogpStart < 68) return;
         data.GroupNameOfs = reader.ReadUInt32();
         data.DescriptiveNameOfs = reader.ReadUInt32();
         data.Flags = reader.ReadUInt32();
@@ -210,12 +215,11 @@ public class WmoV17ToV14Converter
         reader.ReadUInt32(); // unused
 
         // Parse subchunks within MOGP
-        long mogpEnd = mogpStart + totalSize;
         while (reader.BaseStream.Position + 8 <= mogpEnd)
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = reader.BaseStream.Position + size;
+            var chunkEnd = Math.Min(reader.BaseStream.Position + size, mogpEnd);
             var chunkId = new string(magic.Reverse().ToArray());
 
             switch (chunkId)
