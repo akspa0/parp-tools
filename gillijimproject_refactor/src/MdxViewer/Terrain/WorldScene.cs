@@ -96,6 +96,7 @@ public class WorldScene : ISceneRenderer
         set { _showPoi = value; if (value && !_poiLoadAttempted) LazyLoadPoi(); }
     }
     public AreaPoiLoader? PoiLoader => _poiLoader;
+    public bool PoiLoadAttempted => _poiLoadAttempted;
 
     // Taxi paths (lazy-loaded on first toggle)
     private TaxiPathLoader? _taxiLoader;
@@ -107,6 +108,7 @@ public class WorldScene : ISceneRenderer
         set { _showTaxi = value; if (value && !_taxiLoadAttempted) LazyLoadTaxi(); }
     }
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
+    public bool TaxiLoadAttempted => _taxiLoadAttempted;
 
     // Stored DBC credentials for lazy loading
     private DBCD.Providers.IDBCProvider? _dbcProvider;

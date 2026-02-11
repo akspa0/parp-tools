@@ -5,6 +5,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Export;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
+using MdxViewer.Catalog;
 using MdxViewer.Terrain;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -78,6 +79,7 @@ public class ViewerApp : IDisposable
     private bool _showModelInfo = true;
     private bool _showTerrainControls = true;
     private bool _showDemoWindow = false;
+    private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
     private bool _wantExportGlb = false;
@@ -346,6 +348,9 @@ public class ViewerApp : IDisposable
 
         DrawStatusBar();
 
+        // Asset Catalog (floating window)
+        _catalogView?.Draw();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -407,6 +412,16 @@ public class ViewerApp : IDisposable
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
+                ImGui.Separator();
+                if (ImGui.MenuItem("Asset Catalog"))
+                {
+                    if (_catalogView == null)
+                    {
+                        _catalogView = new AssetCatalogView(_gl);
+                        _catalogView.SetDataSource(_dataSource);
+                    }
+                    _catalogView.IsVisible = !_catalogView.IsVisible;
+                }
 
                 ImGui.EndMenu();
             }
@@ -1164,15 +1179,24 @@ public class ViewerApp : IDisposable
     {
         if (_worldScene == null) return;
 
-        // POI toggle
+        // POI toggle — lazy-loaded on first request
         if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
         {
             bool showPoi = _worldScene.ShowPoi;
             if (ImGui.Checkbox($"Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
                 _worldScene.ShowPoi = showPoi;
         }
+        else if (!_worldScene.PoiLoadAttempted)
+        {
+            if (ImGui.Button("Load Area POIs"))
+                _worldScene.ShowPoi = true; // triggers lazy load
+        }
+        else if (_worldScene.PoiLoadAttempted && (_worldScene.PoiLoader == null || _worldScene.PoiLoader.Entries.Count == 0))
+        {
+            ImGui.TextDisabled("Area POIs: none found");
+        }
 
-        // Taxi paths toggle + clear selection button
+        // Taxi paths toggle — lazy-loaded on first request
         if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
         {
             bool showTaxi = _worldScene.ShowTaxi;
@@ -1184,6 +1208,15 @@ public class ViewerApp : IDisposable
                 if (ImGui.SmallButton("Show All"))
                     _worldScene.ClearTaxiSelection();
             }
+        }
+        else if (!_worldScene.TaxiLoadAttempted)
+        {
+            if (ImGui.Button("Load Taxi Paths"))
+                _worldScene.ShowTaxi = true; // triggers lazy load
+        }
+        else if (_worldScene.TaxiLoadAttempted && (_worldScene.TaxiLoader == null || _worldScene.TaxiLoader.Routes.Count == 0))
+        {
+            ImGui.TextDisabled("Taxi Paths: none found");
         }
 
         // WMO placements
@@ -1623,6 +1656,7 @@ public class ViewerApp : IDisposable
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
             _texResolver.SetDataSource(_dataSource);
+            _catalogView?.SetDataSource(_dataSource, _texResolver);
             var mpqDs = _dataSource as MpqDataSource;
             if (mpqDs != null)
             {
