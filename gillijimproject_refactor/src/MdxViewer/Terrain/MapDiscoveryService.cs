@@ -37,7 +37,7 @@ public class MapDiscoveryService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[MapDiscovery] Failed to load Map.dbc: {ex.Message}");
+            ViewerLog.Trace($"[MapDiscovery] Failed to load Map.dbc: {ex.Message}");
             return maps;
         }
 

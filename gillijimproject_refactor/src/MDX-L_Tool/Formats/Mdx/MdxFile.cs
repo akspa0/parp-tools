@@ -9,6 +9,9 @@ namespace MdxLTool.Formats.Mdx;
 /// </summary>
 public class MdxFile
 {
+    /// <summary>When false (default), suppresses diagnostic Console.WriteLine output for performance.</summary>
+    public static bool Verbose { get; set; } = false;
+
     public uint Version { get; set; }
     public MdlModel Model { get; set; } = new();
     public byte[]? RawData { get; set; }
@@ -169,7 +172,7 @@ public class MdxFile
     static uint ReadVers(BinaryReader br, uint size)
     {
         uint version = br.ReadUInt32();
-        Console.WriteLine($"MDX Version: {version}");
+        if (Verbose) Console.WriteLine($"MDX Version: {version}");
         return version;
     }
 
@@ -478,13 +481,13 @@ public class MdxFile
                     }
                     else if (valid1)
                     {
-                        Console.WriteLine($"      [PTYP] Using 1-byte elements (count={count}) — next tag valid at +{count}");
+                        if (Verbose) Console.WriteLine($"      [PTYP] Using 1-byte elements (count={count}) — next tag valid at +{count}");
                         br.ReadBytes((int)count);
                     }
                     else
                     {
                         // Fallback: try 4-byte
-                        Console.WriteLine($"      [PTYP] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
+                        if (Verbose) Console.WriteLine($"      [PTYP] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
                         br.ReadBytes((int)count * 4);
                     }
                     break;
@@ -519,12 +522,12 @@ public class MdxFile
                     }
                     else if (valid1)
                     {
-                        Console.WriteLine($"      [PCNT] Using 1-byte elements (count={count}) — next tag valid at +{count}");
+                        if (Verbose) Console.WriteLine($"      [PCNT] Using 1-byte elements (count={count}) — next tag valid at +{count}");
                         br.ReadBytes((int)count);
                     }
                     else
                     {
-                        Console.WriteLine($"      [PCNT] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
+                        if (Verbose) Console.WriteLine($"      [PCNT] Neither 1-byte nor 4-byte gives valid next tag. Defaulting to 4-byte (count={count})");
                         br.ReadBytes((int)count * 4);
                     }
                     break;
@@ -659,9 +662,12 @@ public class MdxFile
                         br.BaseStream.Position = save;
                         string hex = BitConverter.ToString(dump).Replace("-", " ");
                         string ascii = new string(dump.Select(b => b >= 32 && b < 127 ? (char)b : '.').ToArray());
-                        Console.WriteLine($"      [GEOS#{gIdx}] Unknown tag '{tag}' (0x{(uint)(tag[0])|(uint)(tag[1])<<8|(uint)(tag[2])<<16|(uint)(tag[3])<<24:X8}) count=0x{count:X8} at pos {currentPos}");
-                        Console.WriteLine($"      [GEOS#{gIdx}] Hex: {hex}");
-                        Console.WriteLine($"      [GEOS#{gIdx}] Asc: {ascii}");
+                        if (Verbose)
+                        {
+                            Console.WriteLine($"      [GEOS#{gIdx}] Unknown tag '{tag}' (0x{(uint)(tag[0])|(uint)(tag[1])<<8|(uint)(tag[2])<<16|(uint)(tag[3])<<24:X8}) count=0x{count:X8} at pos {currentPos}");
+                            Console.WriteLine($"      [GEOS#{gIdx}] Hex: {hex}");
+                            Console.WriteLine($"      [GEOS#{gIdx}] Asc: {ascii}");
+                        }
                     }
                     
                     // Start scan from 1 byte ahead
@@ -677,7 +683,7 @@ public class MdxFile
                         string possibleTag = Encoding.ASCII.GetString(tagBytes);
                         if (IsValidGeosetTag(possibleTag))
                         {
-                             Console.WriteLine($"      [GEOS#{gIdx}] RECOVERY: Skipped {p - currentPos} bytes → '{possibleTag}' at pos {p}");
+                             if (Verbose) Console.WriteLine($"      [GEOS#{gIdx}] RECOVERY: Skipped {p - currentPos} bytes → '{possibleTag}' at pos {p}");
                              br.BaseStream.Position = p; // Align to new tag
                              recovered = true;
                              break;
@@ -687,7 +693,7 @@ public class MdxFile
 
                     if (!recovered)
                     {
-                        Console.WriteLine($"      [GEOS#{gIdx}] WARN: Recovery scan failed for tag '{tag}' at {currentPos}");
+                        if (Verbose) Console.WriteLine($"      [GEOS#{gIdx}] WARN: Recovery scan failed for tag '{tag}' at {currentPos}");
                         br.BaseStream.Position = currentPos + 8;
                     }
                     break;
@@ -813,14 +819,14 @@ public class MdxFile
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PRE2] Failed to parse emitter {i}: {ex.Message}");
+                if (Verbose) Console.WriteLine($"[PRE2] Failed to parse emitter {i}: {ex.Message}");
             }
 
             br.BaseStream.Position = emitterEnd;
         }
 
         br.BaseStream.Position = chunkEnd;
-        Console.WriteLine($"[PRE2] Parsed {emitters.Count} particle emitters");
+        if (Verbose) Console.WriteLine($"[PRE2] Parsed {emitters.Count} particle emitters");
     }
 
     /// <summary>Parse RIBB chunk — Ribbon Emitter entries</summary>
@@ -869,13 +875,13 @@ public class MdxFile
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[RIBB] Failed to parse emitter {i}: {ex.Message}");
+                if (Verbose) Console.WriteLine($"[RIBB] Failed to parse emitter {i}: {ex.Message}");
             }
 
             br.BaseStream.Position = emitterEnd;
         }
 
         br.BaseStream.Position = chunkEnd;
-        Console.WriteLine($"[RIBB] Parsed {emitters.Count} ribbon emitters");
+        if (Verbose) Console.WriteLine($"[RIBB] Parsed {emitters.Count} ribbon emitters");
     }
 }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -125,7 +126,7 @@ public class VlmTerrainManager : ISceneRenderer
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[VlmTerrainManager] Background load ({capturedTx},{capturedTy}) failed: {ex.Message}");
+                        ViewerLog.Trace($"[VlmTerrainManager] Background load ({capturedTx},{capturedTy}) failed: {ex.Message}");
                     }
                     finally
                     {

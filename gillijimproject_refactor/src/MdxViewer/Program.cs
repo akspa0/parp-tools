@@ -1,5 +1,6 @@
 ﻿using MdxViewer;
 using MdxViewer.Logging;
+using MdxLTool.Formats.Mdx;
 
 /// <summary>
 /// WoW Model Viewer entry point.
@@ -14,7 +15,10 @@ class Program
     {
         var filteredArgs = args.Where(a => !a.Equals("--verbose", StringComparison.OrdinalIgnoreCase)).ToArray();
         if (filteredArgs.Length != args.Length)
+        {
             ViewerLog.Verbose = true;
+            MdxFile.Verbose = true;
+        }
 
         using var app = new ViewerApp();
         app.Run(filteredArgs.Length > 0 ? filteredArgs : null);
