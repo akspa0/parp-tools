@@ -108,6 +108,10 @@ public class ViewerApp : IDisposable
     // Field of view in degrees (adjustable via UI)
     private float _fovDegrees = 45f;
 
+    // Sky gradient for standalone model viewing
+    private uint _skyVao, _skyVbo, _skyShader;
+    private bool _skyReady;
+
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
     private string _folderInputBuf = "";
@@ -319,13 +323,128 @@ public class ViewerApp : IDisposable
                     _currentAreaName = "";
             }
 
-            // Render the scene (WorldScene handles terrain + objects + BBs; standalone renderers handle themselves)
-            _renderer.Render(view, proj);
+            // Render the scene
+            if (_renderer is MdxRenderer mdxR)
+            {
+                // Standalone MDX: render with proper lighting matching terrain viewer
+                RenderSkyGradient();
+                var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                var ambientColor = new Vector3(0.35f, 0.35f, 0.4f);
+                var fogColor = new Vector3(0.5f, 0.6f, 0.7f);
+                float fogStart = farPlane * 0.5f;
+                float fogEnd = farPlane;
+                var scale = Matrix4x4.CreateScale(-1f, 1f, 1f); // MirrorX for standalone
+                _gl.Disable(EnableCap.Blend);
+                mdxR.RenderWithTransform(scale, view, proj, RenderPass.Opaque, 1.0f,
+                    fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Lequal);
+                mdxR.RenderWithTransform(scale, view, proj, RenderPass.Transparent, 1.0f,
+                    fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
+            }
+            else if (_renderer is WmoRenderer wmoR)
+            {
+                // Standalone WMO: render with proper lighting
+                RenderSkyGradient();
+                var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                var ambientColor = new Vector3(0.35f, 0.35f, 0.4f);
+                var fogColor = new Vector3(0.5f, 0.6f, 0.7f);
+                float fogStart = farPlane * 0.5f;
+                float fogEnd = farPlane;
+                wmoR.RenderWithTransform(Matrix4x4.Identity, view, proj,
+                    fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
+            }
+            else
+            {
+                // WorldScene / VLM terrain — handles its own lighting
+                _renderer.Render(view, proj);
+            }
         }
 
         // Render ImGui overlay
         DrawUI();
         _imGui.Render();
+    }
+
+    /// <summary>
+    /// Render a fullscreen sky gradient background for standalone model viewing.
+    /// Top = light blue sky, bottom = darker horizon. Drawn before the model with depth test off.
+    /// </summary>
+    private unsafe void RenderSkyGradient()
+    {
+        if (!_skyReady)
+        {
+            // Fullscreen triangle (covers entire screen with one triangle)
+            // xy = NDC position, z = vertical interpolant (0=bottom, 1=top)
+            float[] verts = {
+                -1f, -1f, 0f,  // bottom-left
+                 3f, -1f, 0f,  // bottom-right (oversized)
+                -1f,  3f, 1f,  // top-left (oversized)
+            };
+
+            string vertSrc = @"#version 330 core
+layout(location=0) in vec3 aPos;
+out float vHeight;
+void main() {
+    gl_Position = vec4(aPos.xy, 0.9999, 1.0);
+    vHeight = (aPos.y + 1.0) * 0.5;
+}";
+            string fragSrc = @"#version 330 core
+in float vHeight;
+out vec4 FragColor;
+uniform vec3 uTopColor;
+uniform vec3 uBotColor;
+void main() {
+    vec3 col = mix(uBotColor, uTopColor, vHeight);
+    FragColor = vec4(col, 1.0);
+}";
+
+            uint vs = _gl.CreateShader(ShaderType.VertexShader);
+            _gl.ShaderSource(vs, vertSrc);
+            _gl.CompileShader(vs);
+            uint fs = _gl.CreateShader(ShaderType.FragmentShader);
+            _gl.ShaderSource(fs, fragSrc);
+            _gl.CompileShader(fs);
+            _skyShader = _gl.CreateProgram();
+            _gl.AttachShader(_skyShader, vs);
+            _gl.AttachShader(_skyShader, fs);
+            _gl.LinkProgram(_skyShader);
+            _gl.DeleteShader(vs);
+            _gl.DeleteShader(fs);
+
+            _skyVao = _gl.GenVertexArray();
+            _skyVbo = _gl.GenBuffer();
+            _gl.BindVertexArray(_skyVao);
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _skyVbo);
+            fixed (float* p = verts)
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), p, BufferUsageARB.StaticDraw);
+            _gl.EnableVertexAttribArray(0);
+            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+            _gl.BindVertexArray(0);
+            _skyReady = true;
+        }
+
+        // Draw sky gradient (depth write off, depth test off)
+        _gl.Disable(EnableCap.DepthTest);
+        _gl.DepthMask(false);
+        _gl.UseProgram(_skyShader);
+
+        // WoW-ish sky colors: light blue top, pale horizon bottom
+        int topLoc = _gl.GetUniformLocation(_skyShader, "uTopColor");
+        int botLoc = _gl.GetUniformLocation(_skyShader, "uBotColor");
+        _gl.Uniform3(topLoc, 0.35f, 0.55f, 0.85f);  // sky blue
+        _gl.Uniform3(botLoc, 0.65f, 0.72f, 0.80f);   // pale horizon
+
+        _gl.BindVertexArray(_skyVao);
+        _gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        _gl.BindVertexArray(0);
+
+        // Restore depth state for model rendering
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+        _gl.Clear(ClearBufferMask.DepthBufferBit);
     }
 
     private void DrawUI()
@@ -419,6 +538,7 @@ public class ViewerApp : IDisposable
                     {
                         _catalogView = new AssetCatalogView(_gl);
                         _catalogView.SetDataSource(_dataSource);
+                        _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
                     }
                     _catalogView.IsVisible = !_catalogView.IsVisible;
                 }
@@ -1850,6 +1970,113 @@ public class ViewerApp : IDisposable
         }
     }
 
+    /// <summary>
+    /// Called when the user double-clicks an entry in the Asset Catalog.
+    /// Loads the model into the viewer using the same pipeline as the file browser.
+    /// </summary>
+    private void OnCatalogLoadModel(string modelPath, bool isWmo, AssetCatalogEntry entry)
+    {
+        if (_dataSource == null)
+        {
+            _statusMessage = "No data source loaded";
+            return;
+        }
+
+        // Try exact path first, then fuzzy resolve via the data source file list
+        byte[]? data = _dataSource.ReadFile(modelPath);
+        string resolvedPath = modelPath;
+
+        if (data == null)
+        {
+            // Fuzzy: try Creature\Name\Name.mdx pattern and case variations
+            string baseName = Path.GetFileNameWithoutExtension(modelPath);
+            string[] candidates = {
+                modelPath,
+                $"Creature\\{baseName}\\{baseName}.mdx",
+                modelPath.Replace('/', '\\'),
+                modelPath.Replace('\\', '/'),
+            };
+            foreach (var c in candidates)
+            {
+                data = _dataSource.ReadFile(c);
+                if (data != null) { resolvedPath = c; break; }
+            }
+
+            // Last resort: search file list
+            if (data == null)
+            {
+                string ext = isWmo ? ".wmo" : ".mdx";
+                var files = _dataSource.GetFileList(ext);
+                string target = baseName.ToLowerInvariant();
+                var match = files.FirstOrDefault(f =>
+                    Path.GetFileNameWithoutExtension(f).Equals(target, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    data = _dataSource.ReadFile(match);
+                    if (data != null) resolvedPath = match;
+                }
+            }
+        }
+
+        if (data == null || data.Length == 0)
+        {
+            _statusMessage = $"Model not found: {modelPath}";
+            return;
+        }
+
+        try
+        {
+            _renderer?.Dispose();
+            _renderer = null;
+            _loadedFileName = Path.GetFileName(resolvedPath);
+            _lastVirtualPath = resolvedPath;
+
+            string dir = Path.GetDirectoryName(resolvedPath)?.Replace('/', '\\') ?? "";
+
+            if (isWmo)
+            {
+                // WMO: write to temp, parse, load
+                string tempFile = Path.Combine(Path.GetTempPath(), $"catalog_wmo_{entry.EntryId}.wmo");
+                File.WriteAllBytes(tempFile, data);
+                var converter = new WmoV14ToV17Converter();
+                var wmo = converter.ParseWmoV14(tempFile);
+
+                // Handle split WMO groups
+                if (wmo.Groups.Count == 0 && wmo.GroupCount > 0)
+                {
+                    string wmoBase = Path.GetFileNameWithoutExtension(resolvedPath);
+                    for (int gi = 0; gi < wmo.GroupCount; gi++)
+                    {
+                        var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                        var groupPath = string.IsNullOrEmpty(dir) ? groupName : $"{dir}\\{groupName}";
+                        var groupBytes = _dataSource.ReadFile(groupPath);
+                        if (groupBytes != null)
+                            converter.ParseGroupFile(groupBytes, wmo, gi);
+                    }
+                }
+
+                try { File.Delete(tempFile); } catch { }
+                LoadWmoModel(wmo, dir);
+            }
+            else
+            {
+                // MDX: parse from memory
+                using var ms = new MemoryStream(data);
+                using var br = new BinaryReader(ms);
+                var mdx = MdxFile.Load(br);
+                LoadMdxModel(mdx, dir, resolvedPath);
+            }
+
+            _window.Title = $"WoW Viewer - {entry.Name} ({_loadedFileName})";
+            _statusMessage = $"Loaded from catalog: {entry.Name} [{entry.EntryId}]";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Failed to load {entry.Name}: {ex.Message}";
+            _modelInfo = "";
+        }
+    }
+
     private void LoadFileFromDataSource(string virtualPath)
     {
         if (_dataSource == null) return;
@@ -2332,27 +2559,33 @@ public class ViewerApp : IDisposable
         _gl.Viewport(size);
     }
 
+    private bool _disposed;
+
     private void OnClose()
     {
-        _loadingScreen?.Dispose();
-        _worldScene?.Dispose();
-        _worldScene = null;
-        _terrainManager = null; // owned by WorldScene
-        _renderer?.Dispose();
-        _dataSource?.Dispose();
-        _imGui?.Dispose();
-        _gl?.Dispose();
-        _input?.Dispose();
+        Dispose();
     }
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
+        _loadingScreen?.Dispose();
         _renderer?.Dispose();
         _worldScene?.Dispose();
         _terrainManager?.Dispose();
         _vlmTerrainManager?.Dispose();
         _minimapRenderer?.Dispose();
-        _imGui.Dispose();
-        _gl.Dispose();
+        _dataSource?.Dispose();
+        if (_skyReady)
+        {
+            _gl.DeleteVertexArray(_skyVao);
+            _gl.DeleteBuffer(_skyVbo);
+            _gl.DeleteProgram(_skyShader);
+        }
+        _imGui?.Dispose();
+        _input?.Dispose();
+        _gl?.Dispose();
     }
 }

@@ -34,18 +34,26 @@ public class AssetCatalogView
     private bool _showOnlyWithSpawns = false;
     private int _selectedIndex = -1;
 
-    // Export state
+    // Export state — per-frame queue (GL calls must happen on render thread)
     private bool _isExporting;
     private int _exportProgress;
     private int _exportTotal;
     private string _exportStatus = "";
-    private CancellationTokenSource? _exportCts;
+    private bool _exportCancelled;
+    private List<AssetCatalogEntry>? _exportQueue;
+    private BatchExportResult? _exportResult;
 
     // Data source for model loading
     private IDataSource? _dataSource;
     private ReplaceableTextureResolver? _texResolver;
 
     public bool IsVisible { get; set; } = false;
+
+    /// <summary>
+    /// Fired when the user double-clicks an entry to load it in the viewer.
+    /// Parameters: (modelPath, isWmo, entry)
+    /// </summary>
+    public Action<string, bool, AssetCatalogEntry>? OnLoadModelRequested { get; set; }
 
     public AssetCatalogView(GL gl)
     {
@@ -85,6 +93,10 @@ public class AssetCatalogView
             ImGui.Separator();
             DrawExportPanel();
         }
+
+        // Process one export entry per frame on the render thread (GL context valid here)
+        if (_isExporting)
+            ProcessExportQueue();
 
         ImGui.End();
     }
@@ -157,8 +169,12 @@ public class AssetCatalogView
                 string label = $"{icon} [{entry.EntryId}] {entry.Name}{modelIndicator}";
 
                 bool isSelected = _selectedIndex == i;
-                if (ImGui.Selectable(label, isSelected))
+                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                {
                     _selectedIndex = i;
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && entry.ModelPath != null)
+                        OnLoadModelRequested?.Invoke(entry.ModelPath, entry.IsWmo, entry);
+                }
 
                 if (ImGui.IsItemHovered())
                 {
@@ -264,7 +280,7 @@ public class AssetCatalogView
                     new Vector2(-1, 0), $"{_exportProgress}/{_exportTotal}");
                 ImGui.Text(_exportStatus);
                 if (ImGui.Button("Cancel"))
-                    _exportCts?.Cancel();
+                    _exportCancelled = true;
             }
             else
             {
@@ -273,13 +289,13 @@ public class AssetCatalogView
 
                 if (ImGui.Button($"Export All Filtered ({_filteredEntries.Count})"))
                 {
-                    _ = ExportBatchAsync(_filteredEntries);
+                    StartBatchExport(_filteredEntries);
                 }
                 ImGui.SameLine();
                 if (ImGui.Button($"Export Only With Models ({withModel})"))
                 {
                     var withModels = _filteredEntries.Where(e => e.ModelPath != null).ToList();
-                    _ = ExportBatchAsync(withModels);
+                    StartBatchExport(withModels);
                 }
             }
 
@@ -354,48 +370,72 @@ public class AssetCatalogView
         if (_exporter == null)
             _exporter = new AssetExporter(_gl, _dataSource, _texResolver);
 
-        var (jsonPath, glbPath, ssPath) = _exporter.ExportEntry(entry, _outputDir);
+        var er = _exporter.ExportEntry(entry, _outputDir);
         string results = $"Exported {entry.Name}:";
-        if (jsonPath != null) results += $"\n  JSON: {jsonPath}";
-        if (glbPath != null) results += $"\n  GLB: {glbPath}";
-        if (ssPath != null) results += $"\n  Screenshot: {ssPath}";
-        if (jsonPath == null && glbPath == null) results += "\n  (no output)";
+        if (er.ObjectDir != null) results += $"\n  Folder: {er.ObjectDir}";
+        if (er.JsonPath != null) results += $"\n  JSON: metadata.json";
+        if (er.GlbPath != null) results += $"\n  GLB: model.glb";
+        if (er.ScreenshotCount > 0) results += $"\n  Screenshots: {er.ScreenshotCount} angles";
+        if (!er.HasAnyOutput) results += "\n  (no output)";
         _exportStatus = results;
     }
 
-    private async Task ExportBatchAsync(IReadOnlyList<AssetCatalogEntry> entries)
+    /// <summary>
+    /// Start a batch export by populating the per-frame queue.
+    /// Actual processing happens in ProcessExportQueue() called from Draw() on the render thread.
+    /// </summary>
+    private void StartBatchExport(IReadOnlyList<AssetCatalogEntry> entries)
     {
         if (_isExporting) return;
         _isExporting = true;
-        _exportCts = new CancellationTokenSource();
+        _exportCancelled = false;
         _exportProgress = 0;
         _exportTotal = entries.Count;
+        _exportQueue = new List<AssetCatalogEntry>(entries);
+        _exportResult = new BatchExportResult();
+        _exporter ??= new AssetExporter(_gl, _dataSource, _texResolver);
+        Directory.CreateDirectory(_outputDir);
+        _exportStatus = $"[0/{_exportTotal}] Starting...";
+    }
 
-        if (_exporter == null)
-            _exporter = new AssetExporter(_gl, _dataSource, _texResolver);
+    /// <summary>
+    /// Process one export entry per frame. Called from Draw() on the render thread
+    /// so that GL calls (FBO screenshots) have a valid GL context.
+    /// </summary>
+    private void ProcessExportQueue()
+    {
+        if (_exportQueue == null || _exportResult == null) return;
+
+        if (_exportCancelled || _exportProgress >= _exportQueue.Count)
+        {
+            // Done
+            _exportStatus = _exportCancelled
+                ? $"Cancelled at {_exportProgress}/{_exportTotal}. {_exportResult}"
+                : $"Batch complete: {_exportResult}";
+            _isExporting = false;
+            _exportQueue = null;
+            return;
+        }
+
+        var entry = _exportQueue[_exportProgress];
+        _exportStatus = $"[{_exportProgress + 1}/{_exportTotal}] {entry.Name}";
 
         try
         {
-            var result = await _exporter.ExportBatchAsync(entries, _outputDir,
-                (current, total, name) =>
-                {
-                    _exportProgress = current;
-                    _exportTotal = total;
-                    _exportStatus = $"[{current}/{total}] {name}";
-                },
-                _exportCts.Token);
-
-            _exportStatus = $"Batch complete: {result}";
+            var er = _exporter!.ExportEntry(entry, _outputDir);
+            if (er.JsonPath != null) _exportResult.JsonCount++;
+            if (er.GlbPath != null) _exportResult.GlbCount++;
+            _exportResult.ScreenshotCount += er.ScreenshotCount;
+            if (er.JsonPath == null && er.GlbPath == null) _exportResult.FailedCount++;
+            _exportResult.TotalProcessed++;
         }
         catch (Exception ex)
         {
-            _exportStatus = $"Batch failed: {ex.Message}";
+            Console.WriteLine($"[AssetExporter] Failed {entry.Name}: {ex.Message}");
+            _exportResult.FailedCount++;
+            _exportResult.TotalProcessed++;
         }
-        finally
-        {
-            _isExporting = false;
-            _exportCts?.Dispose();
-            _exportCts = null;
-        }
+
+        _exportProgress++;
     }
 }

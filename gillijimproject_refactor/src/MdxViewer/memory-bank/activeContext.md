@@ -2,13 +2,17 @@
 
 ## Current Focus
 
-**Implement loading screen** — RE analysis complete (specifications/outputs/053/LoadingScreens/). The Alpha client uses a single static loading screen (`Interface\Glues\loading.blp`) with a progress bar (`Loading-BarBorder.blp` + `Loading-BarFill.blp`). Progress formula: `(current/max) * 0.75 + 0.25` when world finishes. The client blocks the main thread during CWorld::LoadMap but force-presents frames via UpdateProgressBar → GxScenePresent. We do the same — our WorldScene constructor blocks the render thread, so we call SwapBuffers inside the progress callback.
+**Asset Catalog Enhancement + MDX Animation + Lighting** — The Asset Catalog is functional (SQL dump parser, no MySQL needed). Next priorities are:
+1. Per-object output folders with multi-angle screenshots
+2. MDX animation system
+3. Lighting improvements
 
 ## Immediate Next Steps
 
-1. **Implement LoadingScreen class** — Load 3 BLPs, render fullscreen ortho quads, progress bar fill scaled by ratio
-2. **Hook into ViewerApp map-open flow** — Show loading screen before WorldScene construction, update progress via onStatus callback, hide after construction
-3. **Then: MCP server design** — New feature to accept GLB terrain, procedural NPCs, audio, click-to-chat from external LLM orchestrators
+1. **Per-object output folders** — Restructure AssetExporter to create `{entryId}_{name}/` folders containing `metadata.json`, `model.glb`, and multiple angle screenshots
+2. **Multi-angle screenshots** — Capture each object from 6+ angles: front, back, left, right, top, 3/4 view. Save as individual PNGs in the object folder
+3. **MDX animation system** — Implement keyframe interpolation, bone transforms, geoset animation, playback controls
+4. **Lighting** — DBC light data integration, improved per-vertex lighting, ambient light
 
 ## MDX Magenta Textures — DEFERRED
 

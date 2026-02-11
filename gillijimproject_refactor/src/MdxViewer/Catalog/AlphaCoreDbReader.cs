@@ -70,6 +70,7 @@ public class AlphaCoreDbReader : IDisposable
 
         // Step 2: Load mdx_models_data → ModelName mapping from DBC
         // Columns: ID(0), ModelName(1), ModelScale(2), BoundingRadius(3), Height(4)
+        // ModelName is often a bare name like "Basilisk" — resolve to "Creature\Basilisk\Basilisk.mdx"
         var modelIdToPath = new Dictionary<int, string>();
         await foreach (var row in ParseInsertRowsAsync(_dbcSqlPath, "mdx_models_data"))
         {
@@ -77,7 +78,7 @@ public class AlphaCoreDbReader : IDisposable
             int id = ParseInt(row[0]);
             string? name = NullIfEmpty(row[1]);
             if (!string.IsNullOrEmpty(name))
-                modelIdToPath[id] = name;
+                modelIdToPath[id] = ResolveCreatureModelPath(name);
         }
         Console.WriteLine($"[AssetCatalog] Loaded {modelIdToPath.Count} mdx_models_data entries");
 
@@ -494,5 +495,30 @@ public class AlphaCoreDbReader : IDisposable
     {
         if (string.IsNullOrEmpty(s) || s == "NULL") return "";
         return s;
+    }
+
+    /// <summary>
+    /// Resolve a creature model name from mdx_models_data to a full virtual path.
+    /// 
+    /// mdx_models_data stores bare names like "Basilisk", "kobold", "Wolf".
+    /// The actual MPQ paths follow the convention: Creature\{Name}\{Name}.mdx
+    /// 
+    /// If the name already contains a path separator or .mdx extension, it's returned as-is.
+    /// </summary>
+    private static string ResolveCreatureModelPath(string modelName)
+    {
+        // Already a full path (contains backslash or forward slash)?
+        if (modelName.Contains('\\') || modelName.Contains('/'))
+            return modelName;
+
+        // Already has .mdx extension?
+        if (modelName.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            string nameNoExt = Path.GetFileNameWithoutExtension(modelName);
+            return $"Creature\\{nameNoExt}\\{modelName}";
+        }
+
+        // Bare name — construct Creature\Name\Name.mdx
+        return $"Creature\\{modelName}\\{modelName}.mdx";
     }
 }

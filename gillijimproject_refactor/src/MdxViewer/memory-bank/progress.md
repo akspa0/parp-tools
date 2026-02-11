@@ -1,6 +1,6 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: Loading Screen Implementation In Progress
+## Status: Asset Catalog Enhancement + Animation/Lighting Next
 
 ## What Works Today
 
@@ -10,6 +10,7 @@
 | Terrain MCSH shadow maps | ✅ Applied on ALL layers (not just base) |
 | Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
 | Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
+| Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain) |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
 | MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
@@ -18,6 +19,7 @@
 | MDX doodads in WorldScene | ⚠️ Position correct, magenta = unimplemented particles (PRE2/RIBB) |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO fog blending | ✅ WMOs blend into fog like terrain |
+| WMO liquid rendering (MLIQ) | ✅ Semi-transparent water surfaces |
 | WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
 | WMO rotation/facing in WorldScene | ✅ Fixed — `-rz` negation for handedness |
 | MDDF/MODF placements | ✅ Position + pivot correct |
@@ -26,8 +28,8 @@
 | Minimap zoom (4 tiles around camera) | ✅ |
 | TaxiPath visualization | ✅ DBC-loaded flight paths as 3D lines |
 | Taxi path selection (sidebar) | ✅ |
+| POI + Taxi lazy-load UI | ✅ Load buttons → toggle checkboxes after load |
 | AreaID/MapID-aware area names | ✅ Filters by current map, warns on mismatch |
-| POI + Taxi disabled by default | ✅ Toggle on via sidebar |
 | NoCullRadius (150 units) | ✅ Nearby objects skip frustum cull |
 | VLM terrain loading | ✅ JSON dataset → renderer |
 | VLM minimap | ✅ Works for VLM projects |
@@ -42,6 +44,8 @@
 | Object picking/selection | ✅ |
 | GLB export | ✅ MDX + WMO, Z-up → Y-up conversion |
 | Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
+| **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
+| **Loading screen** | ✅ BLP-based with progress bar |
 
 ## Phase Status
 
@@ -51,8 +55,10 @@
 | 3 | Terrain | ✅ Complete (shadow fix, alpha seam fix, async streaming, fog culling) |
 | 4 | World Scene | ✅ WMOs, MDX placement, rotation. Particles deferred. |
 | VLM | VLM Dataset Support | ✅ Load + Generate + Minimap |
-| Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering) |
-| Loading | Loading Screen | 🔧 In progress — RE docs ready, implementing now |
+| Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering, lazy-load UI) |
+| Loading | Loading Screen | ✅ Complete |
+| Catalog | Asset Catalog | ✅ SQL dump reader, ImGui browse/filter, JSON+GLB+screenshot export |
+| — | **Per-object folders + multi-angle screenshots** | 🔧 Next up |
 | 1 | MDX Animation | ⏳ Not started |
 | 2 | Particles (PRE2/RIBB) | ⏳ Not started — causes magenta on some MDX geosets |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |

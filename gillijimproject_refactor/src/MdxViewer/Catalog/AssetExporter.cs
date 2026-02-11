@@ -22,6 +22,10 @@ public class AssetExporter
 
     private ScreenshotRenderer? _screenshotRenderer;
 
+    // Fuzzy path resolution: filename (lowercase, no ext) → list of full paths
+    private Dictionary<string, List<string>>? _mdxPathIndex;
+    private Dictionary<string, List<string>>? _wmoPathIndex;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -37,25 +41,48 @@ public class AssetExporter
     }
 
     /// <summary>
-    /// Export a single entry: JSON metadata + GLB model + screenshot.
-    /// Returns (jsonPath, glbPath, screenshotPath) or nulls on failure.
+    /// Export a single entry to its own folder: metadata.json + model.glb + multi-angle screenshots.
+    /// Returns an ExportEntryResult with paths and counts.
+    /// 
+    /// Output structure:
+    ///   {outputDir}/{creatures|gameobjects}/{entryId}_{name}/
+    ///     metadata.json
+    ///     model.glb
+    ///     front.png, back.png, left.png, right.png, top.png, three_quarter.png
     /// </summary>
-    public (string? jsonPath, string? glbPath, string? screenshotPath) ExportEntry(AssetCatalogEntry entry, string outputDir)
+    public ExportEntryResult ExportEntry(AssetCatalogEntry entry, string outputDir)
     {
-        Directory.CreateDirectory(outputDir);
+        var result = new ExportEntryResult();
 
         string safeName = SanitizeFilename($"{entry.EntryId}_{entry.Name}");
-        string subDir = Path.Combine(outputDir, entry.Type == AssetType.Creature ? "creatures" : "gameobjects");
-        Directory.CreateDirectory(subDir);
+        string typeDir = Path.Combine(outputDir, entry.Type == AssetType.Creature ? "creatures" : "gameobjects");
+        string objectDir = Path.Combine(typeDir, safeName);
+        Directory.CreateDirectory(objectDir);
+        result.ObjectDir = objectDir;
+
+        // Resolve model path once (exact → fuzzy fallback)
+        string? resolvedModelPath = null;
+        if (!string.IsNullOrEmpty(entry.ModelPath) && _dataSource != null)
+        {
+            string ext = entry.IsWmo ? ".wmo" : ".mdx";
+            resolvedModelPath = entry.ModelPath;
+            if (!_dataSource.FileExists(resolvedModelPath))
+            {
+                resolvedModelPath = FuzzyResolvePath(entry.ModelPath, ext);
+                if (resolvedModelPath != null)
+                    Console.WriteLine($"[AssetExporter] Fuzzy resolved: {entry.ModelPath} → {resolvedModelPath}");
+            }
+        }
 
         // JSON metadata
-        string? jsonPath = null;
         try
         {
             var metadata = BuildMetadata(entry);
-            string jsonFile = Path.Combine(subDir, $"{safeName}.json");
+            if (resolvedModelPath != null && resolvedModelPath != entry.ModelPath)
+                metadata["resolvedModelPath"] = resolvedModelPath;
+            string jsonFile = Path.Combine(objectDir, "metadata.json");
             File.WriteAllText(jsonFile, JsonSerializer.Serialize(metadata, JsonOpts));
-            jsonPath = jsonFile;
+            result.JsonPath = jsonFile;
         }
         catch (Exception ex)
         {
@@ -63,22 +90,15 @@ public class AssetExporter
         }
 
         // GLB model
-        string? glbPath = null;
-        if (!string.IsNullOrEmpty(entry.ModelPath) && _dataSource != null)
+        if (resolvedModelPath != null && _dataSource != null)
         {
             try
             {
-                string glbFile = Path.Combine(subDir, $"{safeName}.glb");
+                string glbFile = Path.Combine(objectDir, "model.glb");
                 if (entry.IsWmo)
-                {
-                    // WMO export — use existing WMO→GLB pipeline
-                    glbPath = ExportWmoGlb(entry, glbFile);
-                }
+                    result.GlbPath = ExportWmoGlb(entry, glbFile, resolvedModelPath);
                 else
-                {
-                    // MDX export
-                    glbPath = ExportMdxGlb(entry, glbFile);
-                }
+                    result.GlbPath = ExportMdxGlb(entry, glbFile, resolvedModelPath);
             }
             catch (Exception ex)
             {
@@ -86,24 +106,21 @@ public class AssetExporter
             }
         }
 
-        // Screenshot
-        string? screenshotPath = null;
-        if (!string.IsNullOrEmpty(entry.ModelPath) && !entry.IsWmo && _dataSource != null)
+        // Multi-angle screenshots
+        if (resolvedModelPath != null && !entry.IsWmo && _dataSource != null)
         {
             try
             {
                 _screenshotRenderer ??= new ScreenshotRenderer(_gl, _dataSource, _texResolver);
-                string pngFile = Path.Combine(subDir, $"{safeName}.png");
-                if (_screenshotRenderer.CaptureScreenshot(entry, pngFile))
-                    screenshotPath = pngFile;
+                result.ScreenshotCount = _screenshotRenderer.CaptureMultiAngle(entry, objectDir, resolvedModelPath: resolvedModelPath);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AssetExporter] Screenshot failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
+                Console.WriteLine($"[AssetExporter] Screenshots failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
             }
         }
 
-        return (jsonPath, glbPath, screenshotPath);
+        return result;
     }
 
     /// <summary>
@@ -125,11 +142,11 @@ public class AssetExporter
             var entry = entries[i];
             onProgress?.Invoke(i + 1, entries.Count, entry.Name);
 
-            var (jsonPath, glbPath, ssPath) = ExportEntry(entry, outputDir);
-            if (jsonPath != null) result.JsonCount++;
-            if (glbPath != null) result.GlbCount++;
-            if (ssPath != null) result.ScreenshotCount++;
-            if (jsonPath == null && glbPath == null) result.FailedCount++;
+            var er = ExportEntry(entry, outputDir);
+            if (er.JsonPath != null) result.JsonCount++;
+            if (er.GlbPath != null) result.GlbCount++;
+            result.ScreenshotCount += er.ScreenshotCount;
+            if (er.JsonPath == null && er.GlbPath == null) result.FailedCount++;
             result.TotalProcessed++;
 
             // Yield to avoid blocking the UI thread
@@ -140,41 +157,33 @@ public class AssetExporter
         return result;
     }
 
-    private string? ExportMdxGlb(AssetCatalogEntry entry, string outputPath)
+    private string? ExportMdxGlb(AssetCatalogEntry entry, string outputPath, string resolvedPath)
     {
-        if (_dataSource == null || string.IsNullOrEmpty(entry.ModelPath)) return null;
+        if (_dataSource == null) return null;
 
-        // Try to load the MDX file from the data source
-        byte[]? mdxData = _dataSource.ReadFile(entry.ModelPath);
+        byte[]? mdxData = _dataSource.ReadFile(resolvedPath);
         if (mdxData == null)
         {
-            // Try with .mdx extension variations
-            string altPath = entry.ModelPath.Replace(".mdx", ".MDX", StringComparison.OrdinalIgnoreCase);
-            mdxData = _dataSource.ReadFile(altPath);
-        }
-        if (mdxData == null)
-        {
-            Console.WriteLine($"[AssetExporter] MDX not found: {entry.ModelPath}");
+            Console.WriteLine($"[AssetExporter] MDX not found: {resolvedPath}");
             return null;
         }
 
         using var ms = new MemoryStream(mdxData);
         using var br = new BinaryReader(ms);
         var mdx = MdxFile.Load(br);
-        string modelDir = Path.GetDirectoryName(entry.ModelPath)?.Replace('/', '\\') ?? "";
+        string modelDir = Path.GetDirectoryName(resolvedPath)?.Replace('/', '\\') ?? "";
         GlbExporter.ExportMdx(mdx, modelDir, outputPath, _dataSource);
-        Console.WriteLine($"[AssetExporter] Exported GLB: {outputPath}");
         return outputPath;
     }
 
-    private string? ExportWmoGlb(AssetCatalogEntry entry, string outputPath)
+    private string? ExportWmoGlb(AssetCatalogEntry entry, string outputPath, string resolvedPath)
     {
-        if (_dataSource == null || string.IsNullOrEmpty(entry.ModelPath)) return null;
+        if (_dataSource == null) return null;
 
-        byte[]? wmoData = _dataSource.ReadFile(entry.ModelPath);
+        byte[]? wmoData = _dataSource.ReadFile(resolvedPath);
         if (wmoData == null)
         {
-            Console.WriteLine($"[AssetExporter] WMO not found: {entry.ModelPath}");
+            Console.WriteLine($"[AssetExporter] WMO not found: {resolvedPath}");
             return null;
         }
 
@@ -198,6 +207,87 @@ public class AssetExporter
         }
     }
 
+    /// <summary>
+    /// Build a lazy index of filename (lowercase, no extension) → full paths for fuzzy matching.
+    /// </summary>
+    private void EnsurePathIndex(string extension)
+    {
+        if (_dataSource == null) return;
+
+        bool isMdx = extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase);
+        ref var index = ref (isMdx ? ref _mdxPathIndex : ref _wmoPathIndex);
+        if (index != null) return;
+
+        index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var files = _dataSource.GetFileList(extension);
+        foreach (var f in files)
+        {
+            string nameNoExt = Path.GetFileNameWithoutExtension(f).ToLowerInvariant();
+            if (!index.TryGetValue(nameNoExt, out var list))
+            {
+                list = new List<string>(1);
+                index[nameNoExt] = list;
+            }
+            list.Add(f);
+        }
+        Console.WriteLine($"[AssetExporter] Built {extension} path index: {index.Count} unique names from {files.Count} files");
+    }
+
+    /// <summary>
+    /// Fuzzy-resolve a model path that wasn't found by exact match.
+    /// Strategies:
+    ///   1. Extract filename, look up in index by name (case-insensitive)
+    ///   2. Try common path patterns (Creature\Name\Name.mdx, etc.)
+    ///   3. Try with/without extension
+    /// </summary>
+    private string? FuzzyResolvePath(string originalPath, string extension)
+    {
+        if (_dataSource == null) return null;
+        EnsurePathIndex(extension);
+
+        bool isMdx = extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase);
+        var index = isMdx ? _mdxPathIndex : _wmoPathIndex;
+        if (index == null) return null;
+
+        // Strategy 1: Extract the filename without extension and look up
+        string baseName = Path.GetFileNameWithoutExtension(originalPath).ToLowerInvariant();
+        if (index.TryGetValue(baseName, out var candidates) && candidates.Count > 0)
+        {
+            // Prefer path that contains the original directory hint
+            string? dirHint = Path.GetDirectoryName(originalPath)?.Replace('/', '\\');
+            if (!string.IsNullOrEmpty(dirHint))
+            {
+                var match = candidates.FirstOrDefault(c =>
+                    c.Contains(dirHint, StringComparison.OrdinalIgnoreCase));
+                if (match != null) return match;
+            }
+            return candidates[0]; // best guess
+        }
+
+        // Strategy 2: Try the bare name (no path, no extension) — common for creature models
+        // e.g. "Basilisk" → look for any file named "Basilisk.mdx"
+        string bareName = originalPath.Replace('\\', '/').Split('/').Last();
+        bareName = Path.GetFileNameWithoutExtension(bareName).ToLowerInvariant();
+        if (bareName != baseName && index.TryGetValue(bareName, out candidates) && candidates.Count > 0)
+            return candidates[0];
+
+        // Strategy 3: Try case-insensitive direct read
+        // Some data sources are case-sensitive; try common casing patterns
+        string[] casings = {
+            originalPath,
+            originalPath.ToLowerInvariant(),
+            originalPath.Replace('/', '\\'),
+            originalPath.Replace('\\', '/'),
+        };
+        foreach (var c in casings)
+        {
+            if (_dataSource.FileExists(c))
+                return c;
+        }
+
+        return null;
+    }
+
     private static Dictionary<string, object?> BuildMetadata(AssetCatalogEntry entry)
     {
         var meta = new Dictionary<string, object?>
@@ -211,6 +301,23 @@ public class AssetExporter
             ["scale"] = entry.EffectiveScale,
             ["isWmo"] = entry.IsWmo
         };
+
+        // File references (relative to this folder)
+        if (!string.IsNullOrEmpty(entry.ModelPath))
+        {
+            meta["glbFile"] = "model.glb";
+            if (!entry.IsWmo)
+            {
+                meta["screenshots"] = ScreenshotRenderer.CameraAngles
+                    .Select(a => new Dictionary<string, object>
+                    {
+                        ["angle"] = a.name,
+                        ["file"] = $"{a.name}.png",
+                        ["azimuth"] = a.azimuth,
+                        ["elevation"] = a.elevation
+                    }).ToList();
+            }
+        }
 
         if (entry.Type == AssetType.Creature)
         {
@@ -263,6 +370,19 @@ public class AssetExporter
         if (result.Length > 80) result = result[..80];
         return result;
     }
+}
+
+/// <summary>
+/// Result of exporting a single catalog entry.
+/// </summary>
+public class ExportEntryResult
+{
+    public string? ObjectDir { get; set; }
+    public string? JsonPath { get; set; }
+    public string? GlbPath { get; set; }
+    public int ScreenshotCount { get; set; }
+
+    public bool HasAnyOutput => JsonPath != null || GlbPath != null || ScreenshotCount > 0;
 }
 
 public class BatchExportResult

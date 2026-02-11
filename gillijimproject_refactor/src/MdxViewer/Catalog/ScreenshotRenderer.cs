@@ -34,23 +34,68 @@ public class ScreenshotRenderer : IDisposable
     }
 
     /// <summary>
-    /// Capture a screenshot of an MDX model with a nameplate overlay.
+    /// Predefined camera angles for multi-angle capture.
+    /// Each angle is (name, azimuthDegrees, elevationDegrees).
+    /// 
+    /// WoW MDX coordinate system (after MirrorX):
+    ///   - Model faces toward +X (front)
+    ///   - Z is up
+    ///   - Y is left/right
+    /// 
+    /// Azimuth 0° = front (camera at -X looking +X), 90° = left side, 180° = back, 270° = right side.
+    /// Elevation 0° = eye level, positive = looking down from above.
     /// </summary>
-    public bool CaptureScreenshot(AssetCatalogEntry entry, string outputPath, int width = 512, int height = 512)
+    public static readonly (string name, float azimuth, float elevation)[] CameraAngles =
     {
-        if (_dataSource == null || string.IsNullOrEmpty(entry.ModelPath))
-            return false;
+        ("front",          0f,  15f),
+        ("back",         180f,  15f),
+        ("left",          90f,  15f),
+        ("right",        270f,  15f),
+        ("top",            0f,  80f),
+        ("three_quarter", 35f,  25f),
+    };
 
-        // Skip WMO for now — screenshot only supports MDX
-        if (entry.IsWmo)
+    /// <summary>
+    /// Capture a single screenshot of an MDX model (default 3/4 angle) with a nameplate overlay.
+    /// </summary>
+    public bool CaptureScreenshot(AssetCatalogEntry entry, string outputPath, int width = 1024, int height = 1024)
+    {
+        var result = CaptureMultiAngle(entry, Path.GetDirectoryName(outputPath)!, width, height,
+            new[] { ("three_quarter", 35f, 25f) });
+        return result > 0;
+    }
+
+    /// <summary>
+    /// Capture screenshots from all predefined camera angles.
+    /// Loads the MDX once, creates one renderer, renders all angles.
+    /// Saves to {outputDir}/{angleName}.png.
+    /// Returns the number of screenshots successfully saved.
+    /// </summary>
+    public int CaptureMultiAngle(AssetCatalogEntry entry, string outputDir, int width = 1024, int height = 1024,
+        (string name, float azimuth, float elevation)[]? angles = null, string? resolvedModelPath = null)
+    {
+        angles ??= CameraAngles;
+
+        string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
+        if (_dataSource == null || string.IsNullOrEmpty(modelPath))
         {
-            Console.WriteLine($"[Screenshot] WMO screenshot not yet supported: {entry.ModelPath}");
-            return false;
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: no data source or model path");
+            return 0;
         }
 
-        // Load MDX
-        byte[]? mdxData = _dataSource.ReadFile(entry.ModelPath);
-        if (mdxData == null) return false;
+        if (entry.IsWmo)
+        {
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: WMO screenshot not yet supported");
+            return 0;
+        }
+
+        // Load MDX once
+        byte[]? mdxData = _dataSource.ReadFile(modelPath);
+        if (mdxData == null)
+        {
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MDX file not found: {modelPath}");
+            return 0;
+        }
 
         MdxFile mdx;
         try
@@ -61,88 +106,149 @@ public class ScreenshotRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Screenshot] Failed to load MDX: {ex.Message}");
-            return false;
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MDX parse failed: {ex.Message}");
+            return 0;
         }
 
-        // Create renderer for this model
-        string modelDir = Path.GetDirectoryName(entry.ModelPath)?.Replace('/', '\\') ?? "";
-        using var renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver);
+        if (mdx.Geosets.Count == 0)
+        {
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: no geosets");
+            return 0;
+        }
 
-        // Setup FBO
-        EnsureFbo(width, height);
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
-        _gl.Viewport(0, 0, (uint)width, (uint)height);
+        // Create renderer once for all angles
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? "";
+        MdxRenderer? renderer = null;
+        try
+        {
+            renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MdxRenderer creation failed: {ex.Message}");
+            return 0;
+        }
 
-        // Clear with a neutral background
-        _gl.ClearColor(0.15f, 0.15f, 0.2f, 1.0f);
-        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Less);
-        _gl.DepthMask(true);
-
-        // Compute camera to frame the model
+        // Compute bounds once
         var (boundsMin, boundsMax) = ComputeBounds(mdx);
         var center = (boundsMin + boundsMax) * 0.5f;
-        float radius = (boundsMax - boundsMin).Length() * 0.5f;
+        // Apply MirrorX to center (negate X) to match the rendered model space
+        center = new Vector3(-center.X, center.Y, center.Z);
+        var extent = boundsMax - boundsMin;
+        float radius = extent.Length() * 0.5f;
         if (radius < 0.01f) radius = 1.0f;
 
-        // Camera positioned at 45° elevation, looking at center
-        float dist = radius * 2.5f;
-        float elevation = MathF.PI / 6f; // 30 degrees
-        float azimuth = MathF.PI / 4f;   // 45 degrees
-        var camPos = center + new Vector3(
-            dist * MathF.Cos(elevation) * MathF.Sin(azimuth),
-            dist * MathF.Sin(elevation),
-            dist * MathF.Cos(elevation) * MathF.Cos(azimuth));
-
-        var view = Matrix4x4.CreateLookAt(camPos, center, Vector3.UnitY);
+        // Compute camera distance to fit the full model in frame.
+        // Use the largest dimension (height vs width) to ensure nothing is clipped.
+        // FOV = 30° (narrower = more telephoto, less distortion).
+        float fovRad = 25f * MathF.PI / 180f;
+        float halfFov = fovRad * 0.5f;
         float aspect = (float)width / height;
-        var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.01f, dist * 10f);
+        float verticalExtent = extent.Z * entry.EffectiveScale; // Z is up
+        float horizontalExtent = MathF.Max(extent.X, extent.Y) * entry.EffectiveScale;
+        // Distance needed to fit vertical extent
+        float distV = (verticalExtent * 0.5f) / MathF.Tan(halfFov);
+        // Distance needed to fit horizontal extent
+        float distH = (horizontalExtent * 0.5f) / MathF.Tan(halfFov * aspect);
+        // Use the larger + 20% padding
+        float dist = MathF.Max(distV, distH) * 1.2f;
+        dist = MathF.Max(dist, radius * 1.5f); // minimum fallback
 
-        // Apply scale
-        var scale = Matrix4x4.CreateScale(entry.EffectiveScale);
+        // MirrorX + scale: same transform as standalone MdxRenderer.Render()
+        var modelTransform = Matrix4x4.CreateScale(-entry.EffectiveScale, entry.EffectiveScale, entry.EffectiveScale);
 
-        // Render opaque pass
-        _gl.Disable(EnableCap.Blend);
-        renderer.RenderWithTransform(scale, view, proj, RenderPass.Opaque, 1.0f,
-            new Vector3(0.5f, 0.6f, 0.7f), dist * 5f, dist * 10f, camPos,
-            Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f)),
-            new Vector3(1.0f, 0.95f, 0.9f),
-            new Vector3(0.3f, 0.3f, 0.35f));
-
-        // Render transparent pass
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        renderer.RenderWithTransform(scale, view, proj, RenderPass.Transparent, 1.0f,
-            new Vector3(0.5f, 0.6f, 0.7f), dist * 5f, dist * 10f, camPos,
-            Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f)),
-            new Vector3(1.0f, 0.95f, 0.9f),
-            new Vector3(0.3f, 0.3f, 0.35f));
-
-        // Read pixels
-        byte[] pixels = new byte[width * height * 4];
-        unsafe
+        // Setup FBO once
+        EnsureFbo(width, height);
+        if (!_fboReady)
         {
-            fixed (byte* ptr = pixels)
-                _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+            Console.WriteLine($"[Screenshot] Skip {entry.Name}: FBO not ready");
+            renderer.Dispose();
+            return 0;
         }
 
-        // Unbind FBO
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        Directory.CreateDirectory(outputDir);
+        int count = 0;
 
-        // Convert to ImageSharp image (OpenGL reads bottom-up, need to flip)
-        using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
-        image.Mutate(x => x.Flip(FlipMode.Vertical));
+        try
+        {
+            foreach (var (angleName, azimuthDeg, elevationDeg) in angles)
+            {
+                try
+                {
+                    // Bind FBO and clear
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _fbo);
+                    _gl.Viewport(0, 0, (uint)width, (uint)height);
+                    _gl.ClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+                    _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Less);
+                    _gl.DepthMask(true);
 
-        // Draw nameplate overlay
-        DrawNameplate(image, entry);
+                    // Camera for this angle — Z-up coordinate system
+                    // After MirrorX, model faces +X. Camera orbits in XY plane, Z is up.
+                    // Azimuth 0° = front = camera at -X looking toward +X
+                    // Elevation 0° = eye level, positive = above
+                    float elev = elevationDeg * MathF.PI / 180f;
+                    float azim = azimuthDeg * MathF.PI / 180f;
+                    float cosElev = MathF.Cos(elev);
+                    float sinElev = MathF.Sin(elev);
+                    // Orbit: azimuth 0 puts camera at -X (front view)
+                    var camPos = center + new Vector3(
+                        -dist * cosElev * MathF.Cos(azim),   // -X for azim=0 (front)
+                        -dist * cosElev * MathF.Sin(azim),   // Y for left/right
+                         dist * sinElev);                     // Z up for elevation
 
-        // Save
-        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        image.SaveAsPng(outputPath);
-        Console.WriteLine($"[Screenshot] Saved: {outputPath}");
-        return true;
+                    var view = Matrix4x4.CreateLookAt(camPos, center, Vector3.UnitZ);
+                    var proj = Matrix4x4.CreatePerspectiveFieldOfView(fovRad, aspect, 0.01f, dist * 10f);
+
+                    var fogColor = new Vector3(1.0f, 1.0f, 1.0f);
+                    var lightDir = Vector3.Normalize(new Vector3(-0.5f, 0.8f, 0.3f));
+                    var lightColor = new Vector3(1.0f, 0.95f, 0.9f);
+                    var ambientColor = new Vector3(0.3f, 0.3f, 0.35f);
+
+                    // Render opaque pass
+                    _gl.Disable(EnableCap.Blend);
+                    renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Opaque, 1.0f,
+                        fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+
+                    // Render transparent pass
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Lequal);
+                    renderer.RenderWithTransform(modelTransform, view, proj, RenderPass.Transparent, 1.0f,
+                        fogColor, dist * 5f, dist * 10f, camPos, lightDir, lightColor, ambientColor);
+
+                    // Read pixels
+                    byte[] pixels = new byte[width * height * 4];
+                    unsafe
+                    {
+                        fixed (byte* ptr = pixels)
+                            _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+                    }
+
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+                    // Convert to image (OpenGL reads bottom-up, flip)
+                    using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, width, height);
+                    image.Mutate(x => x.Flip(FlipMode.Vertical));
+
+                    string path = Path.Combine(outputDir, $"{angleName}.png");
+                    image.SaveAsPng(path);
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Screenshot] Angle {angleName} failed for {entry.Name}: {ex.Message}");
+                    _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+                }
+            }
+        }
+        finally
+        {
+            renderer.Dispose();
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        }
+
+        return count;
     }
 
     private void DrawNameplate(SixLabors.ImageSharp.Image<Rgba32> image, AssetCatalogEntry entry)

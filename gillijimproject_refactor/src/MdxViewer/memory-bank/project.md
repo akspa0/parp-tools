@@ -121,6 +121,40 @@ dotnet build --no-restore
 dotnet run
 ```
 
+## Asset Catalog System
+
+### Files
+| File | Purpose |
+|------|---------|
+| `Catalog/AlphaCoreDbReader.cs` | Parses alpha-core SQL dump files directly (no MySQL needed) |
+| `Catalog/AssetCatalogEntry.cs` | Unified data model for NPCs and GameObjects |
+| `Catalog/AssetExporter.cs` | JSON metadata + GLB model + screenshot export (single + batch) |
+| `Catalog/AssetCatalogView.cs` | ImGui browse/search/filter panel with export controls |
+| `Catalog/ScreenshotRenderer.cs` | Offscreen FBO rendering + nameplate overlay + PNG save |
+
+### Data Chain
+- **Creatures**: creature_template.display_id1 → CreatureDisplayInfo.ModelID → mdx_models_data.ModelName
+- **GameObjects**: gameobject_template.displayId → GameObjectDisplayInfo.ModelName
+- **SQL dumps**: `{alphaCoreRoot}/etc/databases/world/world.sql` + `dbc/dbc.sql`
+
+### Output Structure (planned per-object folders)
+```
+asset_catalog_output/
+  creatures/
+    {entryId}_{name}/
+      metadata.json
+      model.glb
+      front.png
+      back.png
+      left.png
+      right.png
+      top.png
+      three_quarter.png
+  gameobjects/
+    {entryId}_{name}/
+      ...same structure...
+```
+
 ## TODO
 
 See `renderer_plan.md` for the full itemized 40-task implementation plan across 8 phases.
@@ -133,8 +167,11 @@ See `renderer_plan.md` for the full itemized 40-task implementation plan across 
 - [x] Phase 3: Terrain (WDT/ADT loading, mesh gen, texture layering, lighting, shadow fix, alpha debug, async streaming)
 - [x] Phase 4: World Scene (WMOs ✅, MDX pivot ✅, MDX textures ❌)
 - [x] VLM: Dataset loading, minimap, generator UI, async streaming
+- [x] Asset Catalog: SQL dump reader, browse/filter UI, JSON+GLB+screenshot export
+- [ ] Asset Catalog: Per-object folders + multi-angle screenshots
 - [ ] Phase 1: MDX Animation (keyframes, bones, geoset animation, playback UI)
+- [ ] Lighting improvements (DBC light data, per-vertex, ambient)
 - [ ] Phase 2: Particle System (emitters, physics, billboard rendering)
-- [ ] Phase 5: Liquid Rendering (water, magma, slime surfaces)
+- [ ] Phase 5: Liquid Rendering — lava type mapping still broken (green)
 - [ ] Phase 6: Detail Doodads (per-chunk grass/foliage)
 - [ ] Phase 7: Polish (instancing, LOD, debug overlays)
