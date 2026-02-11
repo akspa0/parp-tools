@@ -129,33 +129,30 @@ public class ScreenshotRenderer : IDisposable
             return 0;
         }
 
-        // Compute bounds once
+        // Compute bounds once and build 8 corners in world space (after model transform)
         var (boundsMin, boundsMax) = ComputeBounds(mdx);
-        var center = (boundsMin + boundsMax) * 0.5f;
-        // Apply MirrorX to center (negate X) to match the rendered model space
-        center = new Vector3(-center.X, center.Y, center.Z);
-        var extent = boundsMax - boundsMin;
-        float radius = extent.Length() * 0.5f;
+        float scale = entry.EffectiveScale;
+        // MirrorX + scale: same transform as standalone MdxRenderer.Render()
+        var modelTransform = Matrix4x4.CreateScale(-scale, scale, scale);
+
+        // Transform all 8 bounding box corners into world space
+        var corners = new Vector3[8];
+        for (int ci = 0; ci < 8; ci++)
+        {
+            corners[ci] = Vector3.Transform(new Vector3(
+                (ci & 1) == 0 ? boundsMin.X : boundsMax.X,
+                (ci & 2) == 0 ? boundsMin.Y : boundsMax.Y,
+                (ci & 4) == 0 ? boundsMin.Z : boundsMax.Z), modelTransform);
+        }
+        // World-space center and radius (after transform)
+        var wsMin = corners[0]; var wsMax = corners[0];
+        for (int ci = 1; ci < 8; ci++) { wsMin = Vector3.Min(wsMin, corners[ci]); wsMax = Vector3.Max(wsMax, corners[ci]); }
+        var center = (wsMin + wsMax) * 0.5f;
+        float radius = (wsMax - wsMin).Length() * 0.5f;
         if (radius < 0.01f) radius = 1.0f;
 
-        // Compute camera distance to fit the full model in frame.
-        // Use the largest dimension (height vs width) to ensure nothing is clipped.
-        // FOV = 30° (narrower = more telephoto, less distortion).
         float fovRad = 25f * MathF.PI / 180f;
-        float halfFov = fovRad * 0.5f;
         float aspect = (float)width / height;
-        float verticalExtent = extent.Z * entry.EffectiveScale; // Z is up
-        float horizontalExtent = MathF.Max(extent.X, extent.Y) * entry.EffectiveScale;
-        // Distance needed to fit vertical extent
-        float distV = (verticalExtent * 0.5f) / MathF.Tan(halfFov);
-        // Distance needed to fit horizontal extent
-        float distH = (horizontalExtent * 0.5f) / MathF.Tan(halfFov * aspect);
-        // Use the larger + 20% padding
-        float dist = MathF.Max(distV, distH) * 1.2f;
-        dist = MathF.Max(dist, radius * 1.5f); // minimum fallback
-
-        // MirrorX + scale: same transform as standalone MdxRenderer.Render()
-        var modelTransform = Matrix4x4.CreateScale(-entry.EffectiveScale, entry.EffectiveScale, entry.EffectiveScale);
 
         // Setup FBO once
         EnsureFbo(width, height);
@@ -192,13 +189,40 @@ public class ScreenshotRenderer : IDisposable
                     float azim = azimuthDeg * MathF.PI / 180f;
                     float cosElev = MathF.Cos(elev);
                     float sinElev = MathF.Sin(elev);
-                    // Orbit: azimuth 0 puts camera at -X (front view)
-                    var camPos = center + new Vector3(
-                        -dist * cosElev * MathF.Cos(azim),   // -X for azim=0 (front)
-                        -dist * cosElev * MathF.Sin(azim),   // Y for left/right
-                         dist * sinElev);                     // Z up for elevation
 
-                    var view = Matrix4x4.CreateLookAt(camPos, center, Vector3.UnitZ);
+                    // Camera direction (unit vector from camera toward center)
+                    var camDir = new Vector3(
+                        cosElev * MathF.Cos(azim),
+                        cosElev * MathF.Sin(azim),
+                        -sinElev);
+                    camDir = Vector3.Normalize(camDir);
+
+                    // Build a temporary view at unit distance to find required framing
+                    var tmpCam = center - camDir * radius;
+                    // Use a stable up vector (avoid degenerate case when looking straight down)
+                    var up = MathF.Abs(Vector3.Dot(camDir, Vector3.UnitZ)) > 0.99f
+                        ? Vector3.UnitX : Vector3.UnitZ;
+                    var tmpView = Matrix4x4.CreateLookAt(tmpCam, center, up);
+
+                    // Project all 8 corners into view space and find the required distance
+                    float halfFovV = fovRad * 0.5f;
+                    float halfFovH = MathF.Atan(MathF.Tan(halfFovV) * aspect);
+                    float maxDist = radius; // minimum
+                    for (int ci = 0; ci < 8; ci++)
+                    {
+                        var viewPos = Vector3.Transform(corners[ci], tmpView);
+                        // viewPos.Z is negative (into screen) in OpenGL view space
+                        float depth = -viewPos.Z;
+                        // Distance needed so this corner's vertical extent fits
+                        float needV = MathF.Abs(viewPos.Y) / MathF.Tan(halfFovV) + depth;
+                        // Distance needed so this corner's horizontal extent fits
+                        float needH = MathF.Abs(viewPos.X) / MathF.Tan(halfFovH) + depth;
+                        maxDist = MathF.Max(maxDist, MathF.Max(needV, needH));
+                    }
+                    float dist = maxDist * 1.15f; // 15% padding
+
+                    var camPos = center - camDir * dist;
+                    var view = Matrix4x4.CreateLookAt(camPos, center, up);
                     var proj = Matrix4x4.CreatePerspectiveFieldOfView(fovRad, aspect, 0.01f, dist * 10f);
 
                     var fogColor = new Vector3(1.0f, 1.0f, 1.0f);
