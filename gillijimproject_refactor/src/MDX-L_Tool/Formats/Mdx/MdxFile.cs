@@ -27,6 +27,8 @@ public class MdxFile
     public List<MdlAttachment> Attachments { get; } = new();
     public List<MdlCamera> Cameras { get; } = new();
     public List<MdlGeosetAnimation> GeosetAnimations { get; } = new();
+    public List<MdlParticleEmitter2> ParticleEmitters2 { get; } = new();
+    public List<MdlRibbonEmitter> RibbonEmitters { get; } = new();
 
     /// <summary>Load MDX binary file</summary>
     public static MdxFile Load(string path)
@@ -96,6 +98,14 @@ public class MdxFile
                     ReadAtsq(br, size, mdx.GeosetAnimations);
                     break;
 
+                case "PRE2":
+                    ReadPre2(br, size, mdx.ParticleEmitters2, mdx.PivotPoints);
+                    break;
+
+                case "RIBB":
+                    ReadRibb(br, size, mdx.RibbonEmitters, mdx.PivotPoints);
+                    break;
+
                 case MdxHeaders.BONE:
                 case MdxHeaders.LITE:
                 case MdxHeaders.HELP:
@@ -104,6 +114,7 @@ public class MdxFile
                 case MdxHeaders.CAMS:
                 case MdxHeaders.EVTS:
                 case MdxHeaders.CLID:
+                case "PREM":
                     // Known chunks we don't fully parse geometry for yet
                     br.BaseStream.Position = chunkEnd;
                     break;
@@ -703,5 +714,168 @@ public class MdxFile
                tag == "PVTX" || tag == "GNDX" || tag == "MTGC" || tag == "MATS" || 
                tag == "TVER" || tag == "UVAS" || tag == "UVBS" || tag == "BIDX" ||
                tag == "BWGT";
+    }
+
+    /// <summary>
+    /// Read a Node structure (shared base for bones, emitters, lights, etc.)
+    /// Returns (name, objectId, parentId, flags, pivotPosition).
+    /// The reader is positioned after the node (including any animation sub-chunks).
+    /// </summary>
+    static (string name, int objectId, int parentId, uint flags) ReadNode(BinaryReader br)
+    {
+        uint nodeSize = br.ReadUInt32();
+        long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
+
+        string name = ReadFixedString(br, 0x50);
+        int objectId = br.ReadInt32();
+        int parentId = br.ReadInt32();
+        uint flags = br.ReadUInt32();
+
+        // Skip animation sub-chunks (KGTR, KGRT, KGSC) within the node
+        br.BaseStream.Position = nodeEnd;
+
+        return (name, objectId, parentId, flags);
+    }
+
+    /// <summary>Parse PRE2 chunk — Particle Emitter 2 entries</summary>
+    static void ReadPre2(BinaryReader br, uint chunkSize, List<MdlParticleEmitter2> emitters, List<C3Vector> pivots)
+    {
+        long chunkEnd = br.BaseStream.Position + chunkSize;
+        uint count = br.ReadUInt32();
+
+        for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
+        {
+            long emitterStart = br.BaseStream.Position;
+            uint emitterSize = br.ReadUInt32();
+            long emitterEnd = emitterStart + emitterSize;
+
+            try
+            {
+                var emitter = new MdlParticleEmitter2();
+                var node = ReadNode(br);
+                emitter.Name = node.name;
+                emitter.ObjectId = node.objectId;
+                emitter.ParentId = node.parentId;
+                emitter.Flags = node.flags;
+
+                // Set pivot from PIVT chunk if available
+                if (node.objectId >= 0 && node.objectId < pivots.Count)
+                    emitter.Position = pivots[node.objectId];
+
+                // Emitter content size (redundant)
+                if (emitterEnd - br.BaseStream.Position < 4) { br.BaseStream.Position = emitterEnd; continue; }
+                br.ReadUInt32(); // content size
+
+                // Read emitter properties (matching reference implementation order)
+                if (emitterEnd - br.BaseStream.Position < 172) { br.BaseStream.Position = emitterEnd; continue; }
+
+                br.ReadUInt32(); // EmitterType (0=Base, 1=Plane, 2=Sphere, 3=Spline)
+                emitter.Speed = br.ReadSingle();
+                emitter.Variation = br.ReadSingle();
+                emitter.Latitude = br.ReadSingle();
+                br.ReadSingle(); // Longitude
+                emitter.Gravity = br.ReadSingle();
+                br.ReadSingle(); // ZSource
+                emitter.Lifespan = br.ReadSingle();
+                emitter.EmissionRate = br.ReadSingle();
+                emitter.Length = br.ReadSingle();
+                emitter.Width = br.ReadSingle();
+                emitter.Rows = br.ReadInt32();
+                emitter.Columns = br.ReadInt32();
+                emitter.HeadOrTail = br.ReadInt32(); // +1 in ref impl (0→Head=1, 1→Tail=2, 2→Both=3)
+                emitter.TailLength = br.ReadSingle();
+                emitter.Time = br.ReadSingle();
+
+                // 3 segment colors (RGB floats)
+                for (int c = 0; c < 3; c++)
+                    emitter.SegmentColor[c] = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+
+                // 3 segment alphas (bytes)
+                emitter.SegmentAlpha[0] = br.ReadByte();
+                emitter.SegmentAlpha[1] = br.ReadByte();
+                emitter.SegmentAlpha[2] = br.ReadByte();
+
+                // ParticleScaling[3], LifeSpanUVAnim[3], DecayUVAnim[3], TailUVAnim[3], TailDecayUVAnim[3]
+                // = 15 floats
+                emitter.SegmentScaling[0] = br.ReadSingle();
+                emitter.SegmentScaling[1] = br.ReadSingle();
+                emitter.SegmentScaling[2] = br.ReadSingle();
+                br.ReadBytes(12 * 4); // skip 12 UV anim floats
+
+                emitter.FilterMode = (ParticleFilterMode)br.ReadInt32();
+                emitter.TextureId = br.ReadInt32();
+                emitter.PriorityPlane = br.ReadInt32();
+                emitter.ReplaceableId = br.ReadUInt32();
+
+                // Skip remaining fields (GeometryModel, RecursionModel, TwinkleFps, etc.)
+                // and animation sub-chunks — just jump to end
+                emitters.Add(emitter);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PRE2] Failed to parse emitter {i}: {ex.Message}");
+            }
+
+            br.BaseStream.Position = emitterEnd;
+        }
+
+        br.BaseStream.Position = chunkEnd;
+        Console.WriteLine($"[PRE2] Parsed {emitters.Count} particle emitters");
+    }
+
+    /// <summary>Parse RIBB chunk — Ribbon Emitter entries</summary>
+    static void ReadRibb(BinaryReader br, uint chunkSize, List<MdlRibbonEmitter> emitters, List<C3Vector> pivots)
+    {
+        long chunkEnd = br.BaseStream.Position + chunkSize;
+        uint count = br.ReadUInt32();
+
+        for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
+        {
+            long emitterStart = br.BaseStream.Position;
+            uint emitterSize = br.ReadUInt32();
+            long emitterEnd = emitterStart + emitterSize;
+
+            try
+            {
+                var emitter = new MdlRibbonEmitter();
+                var node = ReadNode(br);
+                emitter.Name = node.name;
+                emitter.ObjectId = node.objectId;
+                emitter.ParentId = node.parentId;
+                emitter.Flags = node.flags;
+
+                if (node.objectId >= 0 && node.objectId < pivots.Count)
+                    emitter.Position = pivots[node.objectId];
+
+                // Emitter content size (redundant)
+                if (emitterEnd - br.BaseStream.Position < 4) { br.BaseStream.Position = emitterEnd; continue; }
+                br.ReadUInt32();
+
+                if (emitterEnd - br.BaseStream.Position < 40) { br.BaseStream.Position = emitterEnd; continue; }
+
+                emitter.HeightAbove = br.ReadSingle();
+                emitter.HeightBelow = br.ReadSingle();
+                emitter.Alpha = br.ReadSingle();
+                emitter.Color = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                emitter.Lifespan = br.ReadSingle();
+                emitter.TextureSlot = br.ReadInt32();
+                emitter.EmissionRate = br.ReadInt32();
+                emitter.Rows = br.ReadInt32();
+                emitter.Columns = br.ReadInt32();
+                emitter.MaterialId = br.ReadInt32();
+                emitter.Gravity = br.ReadSingle();
+
+                emitters.Add(emitter);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RIBB] Failed to parse emitter {i}: {ex.Message}");
+            }
+
+            br.BaseStream.Position = emitterEnd;
+        }
+
+        br.BaseStream.Position = chunkEnd;
+        Console.WriteLine($"[RIBB] Parsed {emitters.Count} ribbon emitters");
     }
 }

@@ -1,4 +1,5 @@
 using System.Numerics;
+using MdxViewer.Logging;
 using Silk.NET.OpenGL;
 
 namespace MdxViewer.Terrain;
@@ -66,7 +67,7 @@ void main() { FragColor = vec4(uColor, 1.0); }";
         _gl.LinkProgram(_shader);
         _gl.GetProgram(_shader, ProgramPropertyARB.LinkStatus, out int linkStatus);
         if (linkStatus == 0)
-            Console.WriteLine($"[BoundingBoxRenderer] Program link error: {_gl.GetProgramInfoLog(_shader)}");
+            ViewerLog.Trace($"[BoundingBoxRenderer] Program link error: {_gl.GetProgramInfoLog(_shader)}");
         _gl.DeleteShader(vs);
         _gl.DeleteShader(fs);
 
@@ -112,7 +113,7 @@ void main() { FragColor = vec4(vColor, 1.0); }";
         _gl.LinkProgram(_batchShader);
         _gl.GetProgram(_batchShader, ProgramPropertyARB.LinkStatus, out int batchLink);
         if (batchLink == 0)
-            Console.WriteLine($"[BoundingBoxRenderer] Batch program link error: {_gl.GetProgramInfoLog(_batchShader)}");
+            ViewerLog.Trace($"[BoundingBoxRenderer] Batch program link error: {_gl.GetProgramInfoLog(_batchShader)}");
         _gl.DeleteShader(bvs);
         _gl.DeleteShader(bfs);
 
@@ -132,7 +133,7 @@ void main() { FragColor = vec4(vColor, 1.0); }";
 
         _batchInitialized = 1;
         _initialized = true;
-        Console.WriteLine($"[BoundingBoxRenderer] Init: cube={_shader} batch={_batchShader}");
+        ViewerLog.Trace($"[BoundingBoxRenderer] Init: cube={_shader} batch={_batchShader}");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -273,7 +274,7 @@ void main() { FragColor = vec4(vColor, 1.0); }";
         _gl.CompileShader(shader);
         _gl.GetShader(shader, ShaderParameterName.CompileStatus, out int status);
         if (status == 0)
-            Console.WriteLine($"[BoundingBoxRenderer] Shader compile error: {_gl.GetShaderInfoLog(shader)}");
+            ViewerLog.Trace($"[BoundingBoxRenderer] Shader compile error: {_gl.GetShaderInfoLog(shader)}");
         return shader;
     }
 

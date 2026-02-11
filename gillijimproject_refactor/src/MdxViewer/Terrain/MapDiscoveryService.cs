@@ -2,6 +2,7 @@ using System.Numerics;
 using DBCD;
 using DBCD.Providers;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 
 namespace MdxViewer.Terrain;
 

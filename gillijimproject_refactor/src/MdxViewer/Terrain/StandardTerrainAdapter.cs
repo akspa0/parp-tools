@@ -85,10 +85,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
         var adtBytes = _dataSource.ReadFile(rootPath);
         if (adtBytes == null || adtBytes.Length == 0)
         {
-            Console.WriteLine($"[StandardADT] ADT not found or empty: {rootPath}");
+            ViewerLog.Trace($"[StandardADT] ADT not found or empty: {rootPath}");
             return result;
         }
-        Console.WriteLine($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
+        ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
 
         // Optional split files (Cata+)
         var texBytes = _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;

@@ -1,6 +1,7 @@
 using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
@@ -79,13 +80,13 @@ public class ScreenshotRenderer : IDisposable
         string modelPath = resolvedModelPath ?? entry.ModelPath ?? "";
         if (_dataSource == null || string.IsNullOrEmpty(modelPath))
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: no data source or model path");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: no data source or model path");
             return 0;
         }
 
         if (entry.IsWmo)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: WMO screenshot not yet supported");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: WMO screenshot not yet supported");
             return 0;
         }
 
@@ -93,7 +94,7 @@ public class ScreenshotRenderer : IDisposable
         byte[]? mdxData = _dataSource.ReadFile(modelPath);
         if (mdxData == null)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MDX file not found: {modelPath}");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: MDX file not found: {modelPath}");
             return 0;
         }
 
@@ -106,13 +107,13 @@ public class ScreenshotRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MDX parse failed: {ex.Message}");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: MDX parse failed: {ex.Message}");
             return 0;
         }
 
         if (mdx.Geosets.Count == 0)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: no geosets");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: no geosets");
             return 0;
         }
 
@@ -125,7 +126,7 @@ public class ScreenshotRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: MdxRenderer creation failed: {ex.Message}");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: MdxRenderer creation failed: {ex.Message}");
             return 0;
         }
 
@@ -158,7 +159,7 @@ public class ScreenshotRenderer : IDisposable
         EnsureFbo(width, height);
         if (!_fboReady)
         {
-            Console.WriteLine($"[Screenshot] Skip {entry.Name}: FBO not ready");
+            ViewerLog.Trace($"[Screenshot] Skip {entry.Name}: FBO not ready");
             renderer.Dispose();
             return 0;
         }
@@ -261,7 +262,7 @@ public class ScreenshotRenderer : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Screenshot] Angle {angleName} failed for {entry.Name}: {ex.Message}");
+                    ViewerLog.Trace($"[Screenshot] Angle {angleName} failed for {entry.Name}: {ex.Message}");
                     _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
                 }
             }
@@ -366,7 +367,7 @@ public class ScreenshotRenderer : IDisposable
         var status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
         if (status != GLEnum.FramebufferComplete)
         {
-            Console.WriteLine($"[Screenshot] FBO incomplete: {status}");
+            ViewerLog.Trace($"[Screenshot] FBO incomplete: {status}");
             _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
             return;
         }

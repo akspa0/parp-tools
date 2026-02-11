@@ -28,7 +28,22 @@ public static class ViewerLog
     }
 
     private static Level _minLevel = Level.Important;
+    private static bool _verbose = false;
     private static readonly HashSet<Category> _mutedCategories = new() { Category.Mdx, Category.Dbc };
+
+    /// <summary>
+    /// When true, Info/Debug messages are printed to console.
+    /// Set via --verbose CLI flag. Default: false (only Important/Error print).
+    /// </summary>
+    public static bool Verbose
+    {
+        get => _verbose;
+        set
+        {
+            _verbose = value;
+            _minLevel = value ? Level.Debug : Level.Important;
+        }
+    }
     private static readonly List<(DateTime Time, Category Cat, Level Lvl, string Message)> _history = new();
     private static readonly object _lock = new();
     private static int _maxHistory = 500;
@@ -66,6 +81,12 @@ public static class ViewerLog
     public static void Info(Category cat, string msg) => Log(cat, Level.Info, msg);
     public static void Important(Category cat, string msg) => Log(cat, Level.Important, msg);
     public static void Error(Category cat, string msg) => Log(cat, Level.Error, msg);
+
+    /// <summary>Write to console only if --verbose is active. No category/history overhead.</summary>
+    public static void Trace(string msg)
+    {
+        if (_verbose) Console.WriteLine(msg);
+    }
 
     /// <summary>
     /// Get recent log history for UI display.

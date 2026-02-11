@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -431,7 +432,7 @@ public class AssetCatalogView
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AssetExporter] Failed {entry.Name}: {ex.Message}");
+            ViewerLog.Trace($"[AssetExporter] Failed {entry.Name}: {ex.Message}");
             _exportResult.FailedCount++;
             _exportResult.TotalProcessed++;
         }

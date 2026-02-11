@@ -1,4 +1,5 @@
 using System.Numerics;
+using MdxViewer.Logging;
 using Silk.NET.OpenGL;
 
 namespace MdxViewer.Rendering;
@@ -224,7 +225,7 @@ void main() {
         if (linkStatus == 0)
         {
             string log = _gl.GetProgramInfoLog(_shaderProgram);
-            Console.WriteLine($"[SkyDome] Shader link error: {log}");
+            ViewerLog.Trace($"[SkyDome] Shader link error: {log}");
         }
 
         _gl.DeleteShader(vs);
@@ -249,7 +250,7 @@ void main() {
         if (status == 0)
         {
             string log = _gl.GetShaderInfoLog(shader);
-            Console.WriteLine($"[SkyDome] Shader compile error ({type}): {log}");
+            ViewerLog.Trace($"[SkyDome] Shader compile error ({type}): {log}");
         }
         return shader;
     }

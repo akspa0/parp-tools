@@ -132,6 +132,81 @@ public class MdlLight : MdlBone
     public float AmbientIntensity { get; set; }
 }
 
+/// <summary>Particle Emitter 2 filter modes (PRE2 chunk)</summary>
+public enum ParticleFilterMode
+{
+    Blend = 0,
+    Additive = 1,
+    Modulate = 2,
+    Modulate2x = 3,
+    AlphaKey = 4,
+}
+
+/// <summary>Particle Emitter 2 (PRE2 chunk) — the main particle system in WC3 MDX</summary>
+public class MdlParticleEmitter2
+{
+    // Node fields
+    public string Name { get; set; } = "";
+    public int ObjectId { get; set; }
+    public int ParentId { get; set; } = -1;
+    public uint Flags { get; set; }
+    public C3Vector Position { get; set; } = new();
+
+    // Emitter properties
+    public float Speed { get; set; }
+    public float Variation { get; set; }
+    public float Latitude { get; set; }
+    public float Gravity { get; set; }
+    public float Lifespan { get; set; }
+    public float EmissionRate { get; set; }
+    public float Length { get; set; }
+    public float Width { get; set; }
+
+    public ParticleFilterMode FilterMode { get; set; }
+    public int Rows { get; set; } = 1;
+    public int Columns { get; set; } = 1;
+    public int HeadOrTail { get; set; } // 0=Head, 1=Tail, 2=Both
+
+    public float TailLength { get; set; }
+    public float Time { get; set; }
+
+    // Segment colors (3 segments: birth, mid, death)
+    public C3Vector[] SegmentColor { get; set; } = new C3Vector[3] { new(), new(), new() };
+    public byte[] SegmentAlpha { get; set; } = new byte[3];
+    public float[] SegmentScaling { get; set; } = new float[3];
+
+    // Head/Tail interval data (12 DWORDs)
+    public uint[] Intervals { get; set; } = new uint[12];
+
+    public int TextureId { get; set; } = -1;
+    public int Squirt { get; set; }
+    public int PriorityPlane { get; set; }
+    public uint ReplaceableId { get; set; }
+}
+
+/// <summary>Ribbon Emitter (RIBB chunk)</summary>
+public class MdlRibbonEmitter
+{
+    // Node fields
+    public string Name { get; set; } = "";
+    public int ObjectId { get; set; }
+    public int ParentId { get; set; } = -1;
+    public uint Flags { get; set; }
+    public C3Vector Position { get; set; } = new();
+
+    public float HeightAbove { get; set; }
+    public float HeightBelow { get; set; }
+    public float Alpha { get; set; }
+    public C3Vector Color { get; set; } = new();
+    public float Lifespan { get; set; }
+    public int TextureSlot { get; set; }
+    public int EmissionRate { get; set; }
+    public int Rows { get; set; } = 1;
+    public int Columns { get; set; } = 1;
+    public int MaterialId { get; set; }
+    public float Gravity { get; set; }
+}
+
 /// <summary>Geoset animation data for alpha/color animations (ATSQ chunk)</summary>
 public class MdlGeosetAnimation
 {

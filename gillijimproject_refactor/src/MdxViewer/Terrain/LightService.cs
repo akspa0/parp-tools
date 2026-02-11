@@ -1,6 +1,7 @@
 using System.Numerics;
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 
 namespace MdxViewer.Terrain;
@@ -43,7 +44,7 @@ public class LightService
         LoadLightZones(dbcd, build, mapId);
         LoadLightData(dbcd, build);
 
-        Console.WriteLine($"[LightService] Loaded {_zones.Count} light zones for map {mapId}, {DataEntryCount} data entries");
+        ViewerLog.Trace($"[LightService] Loaded {_zones.Count} light zones for map {mapId}, {DataEntryCount} data entries");
     }
 
     private void LoadLightZones(DBCD.DBCD dbcd, string build, int mapId)
@@ -56,7 +57,7 @@ public class LightService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LightService] Failed to load Light.dbc: {ex.Message}");
+            ViewerLog.Trace($"[LightService] Failed to load Light.dbc: {ex.Message}");
             return;
         }
 
@@ -132,7 +133,7 @@ public class LightService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LightService] Failed to load LightData.dbc: {ex.Message}");
+            ViewerLog.Trace($"[LightService] Failed to load LightData.dbc: {ex.Message}");
             return;
         }
 

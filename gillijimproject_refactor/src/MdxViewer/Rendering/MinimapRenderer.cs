@@ -1,5 +1,6 @@
 using System.Numerics;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Services;
@@ -123,7 +124,7 @@ public class MinimapRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[MinimapRenderer] Failed to load tile {plainPath}: {ex.Message}");
+            ViewerLog.Trace($"[MinimapRenderer] Failed to load tile {plainPath}: {ex.Message}");
             return 0;
         }
     }

@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Export;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Converters;
@@ -70,7 +71,7 @@ public class AssetExporter
             {
                 resolvedModelPath = FuzzyResolvePath(entry.ModelPath, ext);
                 if (resolvedModelPath != null)
-                    Console.WriteLine($"[AssetExporter] Fuzzy resolved: {entry.ModelPath} → {resolvedModelPath}");
+                    ViewerLog.Trace($"[AssetExporter] Fuzzy resolved: {entry.ModelPath} → {resolvedModelPath}");
             }
         }
 
@@ -86,7 +87,7 @@ public class AssetExporter
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AssetExporter] JSON export failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
+            ViewerLog.Trace($"[AssetExporter] JSON export failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
         }
 
         // GLB model
@@ -102,7 +103,7 @@ public class AssetExporter
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AssetExporter] GLB export failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
+                ViewerLog.Trace($"[AssetExporter] GLB export failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
             }
         }
 
@@ -116,7 +117,7 @@ public class AssetExporter
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[AssetExporter] Screenshots failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
+                ViewerLog.Trace($"[AssetExporter] Screenshots failed for {entry.Name} ({entry.EntryId}): {ex.Message}");
             }
         }
 
@@ -164,7 +165,7 @@ public class AssetExporter
         byte[]? mdxData = _dataSource.ReadFile(resolvedPath);
         if (mdxData == null)
         {
-            Console.WriteLine($"[AssetExporter] MDX not found: {resolvedPath}");
+            ViewerLog.Trace($"[AssetExporter] MDX not found: {resolvedPath}");
             return null;
         }
 
@@ -183,7 +184,7 @@ public class AssetExporter
         byte[]? wmoData = _dataSource.ReadFile(resolvedPath);
         if (wmoData == null)
         {
-            Console.WriteLine($"[AssetExporter] WMO not found: {resolvedPath}");
+            ViewerLog.Trace($"[AssetExporter] WMO not found: {resolvedPath}");
             return null;
         }
 
@@ -197,12 +198,12 @@ public class AssetExporter
             var wmo = converter.ParseWmoV14(tempFile);
             GlbExporter.ExportWmo(wmo, modelDir, outputPath, _dataSource);
             try { File.Delete(tempFile); } catch { }
-            Console.WriteLine($"[AssetExporter] Exported WMO GLB: {outputPath}");
+            ViewerLog.Trace($"[AssetExporter] Exported WMO GLB: {outputPath}");
             return outputPath;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AssetExporter] WMO GLB export failed: {ex.Message}");
+            ViewerLog.Trace($"[AssetExporter] WMO GLB export failed: {ex.Message}");
             return null;
         }
     }
@@ -230,7 +231,7 @@ public class AssetExporter
             }
             list.Add(f);
         }
-        Console.WriteLine($"[AssetExporter] Built {extension} path index: {index.Count} unique names from {files.Count} files");
+        ViewerLog.Trace($"[AssetExporter] Built {extension} path index: {index.Count} unique names from {files.Count} files");
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 
 namespace MdxViewer.Terrain;
@@ -96,11 +97,11 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (wdtModf.Length > 0)
             {
                 CollectModfPlacements(wdtModf);
-                Console.WriteLine($"[TerrainAdapter] WMO-only map: {ModfPlacements.Count} WMO placements from WDT header");
+                ViewerLog.Trace($"[TerrainAdapter] WMO-only map: {ModfPlacements.Count} WMO placements from WDT header");
             }
         }
 
-        Console.WriteLine($"[TerrainAdapter] WDT loaded: {_existingTiles.Count} tiles, {MdxModelNames.Count} MDX names, {WmoModelNames.Count} WMO names, wmoBased={IsWmoBased}");
+        ViewerLog.Trace($"[TerrainAdapter] WDT loaded: {_existingTiles.Count} tiles, {MdxModelNames.Count} MDX names, {WmoModelNames.Count} WMO names, wmoBased={IsWmoBased}");
 
         // Placements are now collected per-tile in LoadTileWithPlacements() for lazy loading.
         // No upfront PreScan needed — placements stream in as tiles enter AOI.
@@ -125,10 +126,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TerrainAdapter] PreScan error tile {tileIdx}: {ex.Message}");
+                ViewerLog.Trace($"[TerrainAdapter] PreScan error tile {tileIdx}: {ex.Message}");
             }
         }
-        Console.WriteLine($"[TerrainAdapter] PreScan: {scanned} tiles → {MddfPlacements.Count} MDDF, {ModfPlacements.Count} MODF placements");
+        ViewerLog.Trace($"[TerrainAdapter] PreScan: {scanned} tiles → {MddfPlacements.Count} MDDF, {ModfPlacements.Count} MODF placements");
     }
 
     /// <summary>
@@ -192,7 +193,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[TerrainAdapter] Error reading chunk {i} of tile ({tileX},{tileY}): {ex.Message}");
+                ViewerLog.Trace($"[TerrainAdapter] Error reading chunk {i} of tile ({tileX},{tileY}): {ex.Message}");
             }
         }
 
@@ -218,10 +219,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         {
             float cornerX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize;
             float cornerY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize;
-            Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}) corner=({cornerX:F1}, {cornerY:F1})  wowY={cornerX:F1}  wowX={cornerY:F1}");
+            ViewerLog.Trace($"[TerrainAdapter] Tile ({tileX},{tileY}) corner=({cornerX:F1}, {cornerY:F1})  wowY={cornerX:F1}  wowX={cornerY:F1}");
         }
 
-        Console.WriteLine($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures, {tileMddf.Count} MDDF, {tileModf.Count} MODF");
+        ViewerLog.Trace($"[TerrainAdapter] Tile ({tileX},{tileY}): {chunks.Count} chunks, {mtexNames.Count} textures, {tileMddf.Count} MDDF, {tileModf.Count} MODF");
         return new TileLoadResult { Chunks = chunks, MddfPlacements = tileMddf, ModfPlacements = tileModf };
     }
 
@@ -267,7 +268,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (!_mddfDiagPrinted && MddfPlacements.Count < 3)
             {
                 string name = nameIdx < MdxModelNames.Count ? Path.GetFileName(MdxModelNames[nameIdx]) : "?";
-                Console.WriteLine($"[MDDF RAW] [{MddfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotY:F2}, {rotZ:F2}) scale={scale}  model={name}");
+                ViewerLog.Trace($"[MDDF RAW] [{MddfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotY:F2}, {rotZ:F2}) scale={scale}  model={name}");
                 if (MddfPlacements.Count == 2) _mddfDiagPrinted = true;
             }
 
@@ -326,7 +327,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             if (ModfPlacements.Count < 3)
             {
                 string mname = nameIdx < WmoModelNames.Count ? Path.GetFileName(WmoModelNames[nameIdx]) : "?";
-                Console.WriteLine($"[MODF RAW] [{ModfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotZ:F2}, {rotY:F2})  model={mname}");
+                ViewerLog.Trace($"[MODF RAW] [{ModfPlacements.Count}] pos=({rawX:F2}, {rawZ:F2}, {rawY:F2}) rot=({rotX:F2}, {rotZ:F2}, {rotY:F2})  model={mname}");
             }
             float bbMinX = BitConverter.ToSingle(modfData, off + 32);
             float bbMinZ = BitConverter.ToSingle(modfData, off + 36);
@@ -351,7 +352,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 boundsMax = new Vector3(
                     MathF.Max(bbMinX, bbMaxX), MathF.Max(bbMinY, bbMaxY), MathF.Max(bbMinZ, bbMaxZ));
                 if (ModfPlacements.Count < 3)
-                    Console.WriteLine($"[MODF WMO-ONLY] pos=({position.X:F1},{position.Y:F1},{position.Z:F1}) bb=({boundsMin.X:F1},{boundsMin.Y:F1},{boundsMin.Z:F1})→({boundsMax.X:F1},{boundsMax.Y:F1},{boundsMax.Z:F1})  raw bb file: X({bbMinX:F1}..{bbMaxX:F1}) Z({bbMinZ:F1}..{bbMaxZ:F1}) Y({bbMinY:F1}..{bbMaxY:F1})");
+                    ViewerLog.Trace($"[MODF WMO-ONLY] pos=({position.X:F1},{position.Y:F1},{position.Z:F1}) bb=({boundsMin.X:F1},{boundsMin.Y:F1},{boundsMin.Z:F1})→({boundsMax.X:F1},{boundsMax.Y:F1},{boundsMax.Z:F1})  raw bb file: X({bbMinX:F1}..{bbMaxX:F1}) Z({bbMinZ:F1}..{bbMaxZ:F1}) Y({bbMinY:F1}..{bbMaxY:F1})");
             }
             else
             {
@@ -403,7 +404,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
 
         // Diagnostic: log first chunk's position values to identify which component is height
         if (chunkX == 0 && chunkY == 0)
-            Console.WriteLine($"[MCNK Position] tile({tileX},{tileY}) chunk(0,0): posA={posA:F2} posB={posB:F2} posC={posC:F2}  mcvt[0]={heights[0]:F2}");
+            ViewerLog.Trace($"[MCNK Position] tile({tileX},{tileY}) chunk(0,0): posA={posA:F2} posB={posB:F2} posC={posC:F2}  mcvt[0]={heights[0]:F2}");
 
         // Position format per Ghidra u001: (X, Z, Y) — posB is the Z (height) component.
         // If posB looks like a world coordinate (large), try posA instead (LK uses Z, X, Y order).
@@ -673,7 +674,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             3 => LiquidType.Slime,
             _ => LiquidType.Water
         };
-        Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk({chunkX},{chunkY}): mcnkFlags=0x{mcnkFlags:X8} liquidBits={liquidBits} type={liquidType}");
+        ViewerLog.Trace($"[MCLQ] tile({tileX},{tileY}) chunk({chunkX},{chunkY}): mcnkFlags=0x{mcnkFlags:X8} liquidBits={liquidBits} type={liquidType}");
 
         // Read min/max height (8 bytes)
         float minHeight = BitConverter.ToSingle(mclqData, 0);
@@ -693,7 +694,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
 
         // Diagnostic
         if (chunkX == 0 && chunkY == 0)
-            Console.WriteLine($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} liquidH={liquidHeight:F2} baseH={baseHeight:F2} dataLen={mclqData.Length} type={liquidType}");
+            ViewerLog.Trace($"[MCLQ] tile({tileX},{tileY}) chunk(0,0): minH={minHeight:F2} maxH={maxHeight:F2} liquidH={liquidHeight:F2} baseH={baseHeight:F2} dataLen={mclqData.Length} type={liquidType}");
 
         // If the height range is absurd after offset, skip (bad data)
         if (MathF.Abs(liquidHeight) > 50000f)
@@ -723,7 +724,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 for (int i = 0; i < 81; i++)
                     heights[i] = vertHeights[i] + baseHeight;
                 if (chunkX == 0 && chunkY == 0)
-                    Console.WriteLine($"[MCLQ]   Using per-vertex heights: h[0]={heights[0]:F2} h[40]={heights[40]:F2}");
+                    ViewerLog.Trace($"[MCLQ]   Using per-vertex heights: h[0]={heights[0]:F2} h[40]={heights[40]:F2}");
             }
         }
 

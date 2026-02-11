@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using SereniaBLPLib;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
@@ -78,7 +79,7 @@ public static class GlbExporter
 
         var model = scene.ToGltf2();
         model.SaveGLB(outputPath);
-        Console.WriteLine($"  GLB: {mdx.Geosets.Count(g => g.Vertices.Count > 0)} geosets exported");
+        ViewerLog.Trace($"  GLB: {mdx.Geosets.Count(g => g.Vertices.Count > 0)} geosets exported");
     }
 
     /// <summary>
@@ -174,7 +175,7 @@ public static class GlbExporter
 
         var model = scene.ToGltf2();
         model.SaveGLB(outputPath);
-        Console.WriteLine($"  GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials exported");
+        ViewerLog.Trace($"  GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials exported");
     }
 
     /// <summary>
@@ -276,7 +277,7 @@ public static class GlbExporter
         {
             int setIdx = Math.Clamp(doodadSetIndex, 0, wmo.DoodadSets.Count - 1);
             var set = wmo.DoodadSets[setIdx];
-            Console.WriteLine($"[GlbExporter] Exporting DoodadSet [{setIdx}] \"{set.Name}\": {set.Count} doodads");
+            ViewerLog.Trace($"[GlbExporter] Exporting DoodadSet [{setIdx}] \"{set.Name}\": {set.Count} doodads");
 
             for (uint i = set.StartIndex; i < set.StartIndex + set.Count && i < (uint)wmo.DoodadDefs.Count; i++)
             {
@@ -314,7 +315,7 @@ public static class GlbExporter
 
         var glbModel = scene.ToGltf2();
         glbModel.SaveGLB(outputPath);
-        Console.WriteLine($"[GlbExporter] WMO GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials, " +
+        ViewerLog.Trace($"[GlbExporter] WMO GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials, " +
                           $"{doodadsLoaded} doodads ({doodadMeshCache.Count} unique models), {doodadsFailed} failed → {outputPath}");
     }
 
@@ -425,12 +426,12 @@ public static class GlbExporter
                 }
             }
 
-            Console.WriteLine($"[GlbExporter] Doodad loaded: {doodadName} ({mdx.Geosets.Count} geosets)");
+            ViewerLog.Trace($"[GlbExporter] Doodad loaded: {doodadName} ({mdx.Geosets.Count} geosets)");
             return mesh;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GlbExporter] Doodad load failed: {modelPath} — {ex.Message}");
+            ViewerLog.Trace($"[GlbExporter] Doodad load failed: {modelPath} — {ex.Message}");
             return null;
         }
     }
@@ -578,7 +579,7 @@ public static class GlbExporter
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GlbExporter] BLP→PNG decode failed: {ex.Message}");
+            ViewerLog.Trace($"[GlbExporter] BLP→PNG decode failed: {ex.Message}");
             return null;
         }
     }

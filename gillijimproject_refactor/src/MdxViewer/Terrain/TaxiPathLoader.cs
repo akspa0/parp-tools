@@ -1,6 +1,7 @@
 using System.Numerics;
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 
 namespace MdxViewer.Terrain;
@@ -34,7 +35,7 @@ public class TaxiPathLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TaxiPath] Failed to load TaxiNodes.dbc: {ex.Message}");
+            ViewerLog.Trace($"[TaxiPath] Failed to load TaxiNodes.dbc: {ex.Message}");
             return;
         }
 
@@ -53,7 +54,7 @@ public class TaxiPathLoader
             nodePositions[key] = pos;
         }
 
-        Console.WriteLine($"[TaxiPath] Loaded {Nodes.Count} taxi nodes for mapId={mapId}");
+        ViewerLog.Trace($"[TaxiPath] Loaded {Nodes.Count} taxi nodes for mapId={mapId}");
 
         if (Nodes.Count == 0) return;
 
@@ -66,7 +67,7 @@ public class TaxiPathLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TaxiPath] Failed to load TaxiPath.dbc: {ex.Message}");
+            ViewerLog.Trace($"[TaxiPath] Failed to load TaxiPath.dbc: {ex.Message}");
             return;
         }
 
@@ -83,7 +84,7 @@ public class TaxiPathLoader
                 pathIds[key] = (fromNode, toNode, cost);
         }
 
-        Console.WriteLine($"[TaxiPath] Found {pathIds.Count} paths touching mapId={mapId}");
+        ViewerLog.Trace($"[TaxiPath] Found {pathIds.Count} paths touching mapId={mapId}");
 
         // 3. Load TaxiPathNode (waypoints along each path)
         IDBCDStorage waypointStorage;
@@ -94,7 +95,7 @@ public class TaxiPathLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TaxiPath] Failed to load TaxiPathNode.dbc: {ex.Message}");
+            ViewerLog.Trace($"[TaxiPath] Failed to load TaxiPathNode.dbc: {ex.Message}");
             return;
         }
 
@@ -137,13 +138,13 @@ public class TaxiPathLoader
                 Routes.Add(new TaxiRoute(pathId, from, to, cost, waypoints));
         }
 
-        Console.WriteLine($"[TaxiPath] Built {Routes.Count} routes with waypoints");
+        ViewerLog.Trace($"[TaxiPath] Built {Routes.Count} routes with waypoints");
 
         // Diagnostic: print first few
         foreach (var n in Nodes.Take(5))
-            Console.WriteLine($"[TaxiPath]   Node [{n.Id}] \"{n.Name}\" pos=({n.Position.X:F0},{n.Position.Y:F0},{n.Position.Z:F0})");
+            ViewerLog.Trace($"[TaxiPath]   Node [{n.Id}] \"{n.Name}\" pos=({n.Position.X:F0},{n.Position.Y:F0},{n.Position.Z:F0})");
         foreach (var r in Routes.Take(3))
-            Console.WriteLine($"[TaxiPath]   Route [{r.PathId}] {r.FromNodeId}->{r.ToNodeId} ({r.Waypoints.Count} waypoints)");
+            ViewerLog.Trace($"[TaxiPath]   Route [{r.PathId}] {r.FromNodeId}->{r.ToNodeId} ({r.Waypoints.Count} waypoints)");
     }
 
     private static Vector3 ReadPos(dynamic row)

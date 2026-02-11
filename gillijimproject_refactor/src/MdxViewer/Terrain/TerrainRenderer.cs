@@ -1,5 +1,6 @@
 using System.Numerics;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
@@ -109,7 +110,7 @@ public class TerrainRenderer : IDisposable
                 GetOrLoadTexture(texName);
         }
 
-        Console.WriteLine($"[TerrainRenderer] Now rendering {_chunks.Count} chunks, {_textureCache.Count} textures cached");
+        ViewerLog.Trace($"[TerrainRenderer] Now rendering {_chunks.Count} chunks, {_textureCache.Count} textures cached");
     }
 
     /// <summary>
@@ -372,7 +373,7 @@ public class TerrainRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TerrainRenderer] Failed to load texture {textureName}: {ex.Message}");
+            ViewerLog.Trace($"[TerrainRenderer] Failed to load texture {textureName}: {ex.Message}");
             return 0;
         }
     }
@@ -432,7 +433,7 @@ public class TerrainRenderer : IDisposable
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TerrainRenderer] Failed to load PNG texture {pngPath}: {ex.Message}");
+            ViewerLog.Trace($"[TerrainRenderer] Failed to load PNG texture {pngPath}: {ex.Message}");
             return 0;
         }
     }

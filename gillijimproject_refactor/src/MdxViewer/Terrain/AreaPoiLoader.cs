@@ -1,6 +1,7 @@
 using System.Numerics;
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 
 namespace MdxViewer.Terrain;
@@ -39,10 +40,10 @@ public class AreaPoiLoader
         int mapId = FindMapId(dbcd, build, mapName);
         if (mapId < 0)
         {
-            Console.WriteLine($"[AreaPOI] Map '{mapName}' not found in Map.dbc");
+            ViewerLog.Trace($"[AreaPOI] Map '{mapName}' not found in Map.dbc");
             return;
         }
-        Console.WriteLine($"[AreaPOI] Map '{mapName}' = ID {mapId}");
+        ViewerLog.Trace($"[AreaPOI] Map '{mapName}' = ID {mapId}");
 
         // Load AreaPOI entries
         IDBCDStorage storage;
@@ -53,7 +54,7 @@ public class AreaPoiLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AreaPOI] Failed to load AreaPOI.dbc: {ex.Message}");
+            ViewerLog.Trace($"[AreaPOI] Failed to load AreaPOI.dbc: {ex.Message}");
             return;
         }
 
@@ -61,7 +62,7 @@ public class AreaPoiLoader
         try
         {
             var cols = storage.AvailableColumns ?? Array.Empty<string>();
-            Console.WriteLine($"[AreaPOI] Available columns: {string.Join(", ", cols)}");
+            ViewerLog.Trace($"[AreaPOI] Available columns: {string.Join(", ", cols)}");
         }
         catch { }
 
@@ -110,11 +111,11 @@ public class AreaPoiLoader
             matched++;
         }
 
-        Console.WriteLine($"[AreaPOI] Loaded {matched}/{total} entries for map '{mapName}' (ID={mapId})");
+        ViewerLog.Trace($"[AreaPOI] Loaded {matched}/{total} entries for map '{mapName}' (ID={mapId})");
 
         // Diagnostic: print first few with raw WoW coords and renderer coords
         foreach (var e in Entries.Take(5))
-            Console.WriteLine($"[AreaPOI]   [{e.Id}] \"{e.Name}\" wowXYZ=({e.WoWPosition.X:F1},{e.WoWPosition.Y:F1},{e.WoWPosition.Z:F1}) renderer=({e.Position.X:F0},{e.Position.Y:F0},{e.Position.Z:F0})");
+            ViewerLog.Trace($"[AreaPOI]   [{e.Id}] \"{e.Name}\" wowXYZ=({e.WoWPosition.X:F1},{e.WoWPosition.Y:F1},{e.WoWPosition.Z:F1}) renderer=({e.Position.X:F0},{e.Position.Y:F0},{e.Position.Z:F0})");
     }
 
     private static int FindMapId(DBCD.DBCD dbcd, string build, string mapName)
@@ -127,7 +128,7 @@ public class AreaPoiLoader
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AreaPOI] Failed to load Map.dbc: {ex.Message}");
+            ViewerLog.Trace($"[AreaPOI] Failed to load Map.dbc: {ex.Message}");
             return -1;
         }
 
@@ -142,7 +143,7 @@ public class AreaPoiLoader
             {
                 // Return actual MapID field, not DBCD key
                 int mapId = !string.IsNullOrEmpty(idCol) ? TryGetInt(row, idCol) ?? key : key;
-                Console.WriteLine($"[AreaPOI] Matched map '{mapName}': key={key}, MapID={mapId}, idCol={idCol}");
+                ViewerLog.Trace($"[AreaPOI] Matched map '{mapName}': key={key}, MapID={mapId}, idCol={idCol}");
                 return mapId;
             }
         }

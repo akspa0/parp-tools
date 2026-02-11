@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -236,7 +237,7 @@ public class TerrainManager : ISceneRenderer
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[TerrainManager] Background load ({capturedTx},{capturedTy}) failed: {ex.Message}");
+                    ViewerLog.Trace($"[TerrainManager] Background load ({capturedTx},{capturedTy}) failed: {ex.Message}");
                 }
                 finally
                 {
@@ -289,7 +290,7 @@ public class TerrainManager : ISceneRenderer
 
         int total = _adapter.ExistingTiles.Count;
         int loaded = 0;
-        Console.WriteLine($"[TerrainManager] Loading all {total} tiles...");
+        ViewerLog.Trace($"[TerrainManager] Loading all {total} tiles...");
         foreach (int tileIdx in _adapter.ExistingTiles)
         {
             int tx = tileIdx / 64;
@@ -299,7 +300,7 @@ public class TerrainManager : ISceneRenderer
             loaded++;
             onProgress?.Invoke(loaded, total, $"Tile ({tx},{ty})");
         }
-        Console.WriteLine($"[TerrainManager] All tiles loaded: {_loadedTiles.Count} tiles, {LoadedChunkCount} chunks");
+        ViewerLog.Trace($"[TerrainManager] All tiles loaded: {_loadedTiles.Count} tiles, {LoadedChunkCount} chunks");
         _allTilesResident = true;
     }
 

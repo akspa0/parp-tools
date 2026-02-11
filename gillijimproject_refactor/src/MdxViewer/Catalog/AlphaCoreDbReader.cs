@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using MdxViewer.Logging;
 
 namespace MdxViewer.Catalog;
 
@@ -66,7 +67,7 @@ public class AlphaCoreDbReader : IDisposable
             if (scale <= 0) scale = 1.0f;
             displayToModel[id] = (modelId, scale, tex1, tex2, tex3);
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {displayToModel.Count} CreatureDisplayInfo entries");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {displayToModel.Count} CreatureDisplayInfo entries");
 
         // Step 2: Load mdx_models_data → ModelName mapping from DBC
         // Columns: ID(0), ModelName(1), ModelScale(2), BoundingRadius(3), Height(4)
@@ -80,7 +81,7 @@ public class AlphaCoreDbReader : IDisposable
             if (!string.IsNullOrEmpty(name))
                 modelIdToPath[id] = ResolveCreatureModelPath(name);
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {modelIdToPath.Count} mdx_models_data entries");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {modelIdToPath.Count} mdx_models_data entries");
 
         // Step 3: Load creature_template
         // Columns: entry(0), display_id1(1), display_id2(2), display_id3(3), display_id4(4),
@@ -145,7 +146,7 @@ public class AlphaCoreDbReader : IDisposable
                 NpcFlags = npcFlags
             });
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {entries.Count} creature templates");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {entries.Count} creature templates");
 
         return entries;
     }
@@ -168,7 +169,7 @@ public class AlphaCoreDbReader : IDisposable
             if (!string.IsNullOrEmpty(name))
                 goDisplayToModel[id] = name;
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {goDisplayToModel.Count} GameObjectDisplayInfo entries");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {goDisplayToModel.Count} GameObjectDisplayInfo entries");
 
         // Step 2: Load gameobject_template
         // Columns: entry(0), type(1), displayId(2), name(3), faction(4), flags(5), size(6), ...
@@ -202,7 +203,7 @@ public class AlphaCoreDbReader : IDisposable
                 Flags = flags
             });
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {entries.Count} gameobject templates");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {entries.Count} gameobject templates");
 
         return entries;
     }
@@ -240,7 +241,7 @@ public class AlphaCoreDbReader : IDisposable
                 count++;
             }
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {count} creature spawns");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {count} creature spawns");
     }
 
     /// <summary>
@@ -276,7 +277,7 @@ public class AlphaCoreDbReader : IDisposable
                 count++;
             }
         }
-        Console.WriteLine($"[AssetCatalog] Loaded {count} gameobject spawns");
+        ViewerLog.Trace($"[AssetCatalog] Loaded {count} gameobject spawns");
     }
 
     /// <summary>
@@ -296,7 +297,7 @@ public class AlphaCoreDbReader : IDisposable
 
         int withModel = all.Count(e => e.ModelPath != null);
         int withSpawns = all.Count(e => e.Spawns.Count > 0);
-        Console.WriteLine($"[AssetCatalog] Total: {all.Count} entries ({withModel} with models, {withSpawns} with spawns)");
+        ViewerLog.Trace($"[AssetCatalog] Total: {all.Count} entries ({withModel} with models, {withSpawns} with spawns)");
 
         return all;
     }

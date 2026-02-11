@@ -1,6 +1,7 @@
 using Silk.NET.OpenGL;
 using SereniaBLPLib;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 
 namespace MdxViewer.Rendering;
 
@@ -69,7 +70,7 @@ public class LoadingScreen : IDisposable
         _fillTexture = TryLoadBlp(dataSource, "Interface\\Glues\\LoadingBar\\Loading-BarFill.blp");
 
         if (_bgTexture == 0)
-            Console.WriteLine("[LoadingScreen] Warning: background texture not found");
+            ViewerLog.Trace("[LoadingScreen] Warning: background texture not found");
     }
 
     /// <summary>
@@ -257,7 +258,7 @@ public class LoadingScreen : IDisposable
         }
         if (data == null)
         {
-            Console.WriteLine($"[LoadingScreen] BLP not found: {path}");
+            ViewerLog.Trace($"[LoadingScreen] BLP not found: {path}");
             return 0;
         }
 
@@ -308,12 +309,12 @@ public class LoadingScreen : IDisposable
             _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
             _gl.BindTexture(TextureTarget.Texture2D, 0);
 
-            Console.WriteLine($"[LoadingScreen] Loaded {name} ({w}x{h})");
+            ViewerLog.Trace($"[LoadingScreen] Loaded {name} ({w}x{h})");
             return tex;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[LoadingScreen] Failed to load {name}: {ex.Message}");
+            ViewerLog.Trace($"[LoadingScreen] Failed to load {name}: {ex.Message}");
             return 0;
         }
     }
@@ -375,7 +376,7 @@ void main() {
 
         _gl.GetProgram(_shader, ProgramPropertyARB.LinkStatus, out int linked);
         if (linked == 0)
-            Console.WriteLine($"[LoadingScreen] Shader link error: {_gl.GetProgramInfoLog(_shader)}");
+            ViewerLog.Trace($"[LoadingScreen] Shader link error: {_gl.GetProgramInfoLog(_shader)}");
 
         _gl.DeleteShader(vs);
         _gl.DeleteShader(fs);
@@ -391,7 +392,7 @@ void main() {
     {
         _gl.GetShader(shader, ShaderParameterName.CompileStatus, out int ok);
         if (ok == 0)
-            Console.WriteLine($"[LoadingScreen] {type} shader error: {_gl.GetShaderInfoLog(shader)}");
+            ViewerLog.Trace($"[LoadingScreen] {type} shader error: {_gl.GetShaderInfoLog(shader)}");
     }
 
     public void Dispose()

@@ -1,5 +1,6 @@
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Logging;
 
 namespace MdxViewer.Terrain;
 
@@ -31,7 +32,7 @@ public class AreaTableService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AreaTable] Failed to load AreaTable.dbc: {ex.Message}");
+            ViewerLog.Trace($"[AreaTable] Failed to load AreaTable.dbc: {ex.Message}");
             return;
         }
 
@@ -59,7 +60,7 @@ public class AreaTableService
             _areas.TryAdd(areaNumber, entry); // Fallback: AreaNumber field
         }
 
-        Console.WriteLine($"[AreaTable] Loaded {_areas.Count} area entries (idCol={idCol})");
+        ViewerLog.Trace($"[AreaTable] Loaded {_areas.Count} area entries (idCol={idCol})");
     }
 
     /// <summary>

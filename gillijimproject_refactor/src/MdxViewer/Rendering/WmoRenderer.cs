@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
+using MdxViewer.Logging;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Converters;
 
@@ -582,17 +583,17 @@ void main() {
                 }
                 else
                 {
-                    Console.WriteLine($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
+                    ViewerLog.Trace($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
                     failed++;
                 }
             }
             else
             {
-                Console.WriteLine($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
+                ViewerLog.Trace($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
                 failed++;
             }
         }
-        Console.WriteLine($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+        ViewerLog.Trace($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
     }
 
     private unsafe uint LoadWmoTexture(byte[] blpData, string name)
@@ -642,7 +643,7 @@ void main() {
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[WmoRenderer] Failed to decode BLP {name}: {ex.Message}");
+            ViewerLog.Trace($"[WmoRenderer] Failed to decode BLP {name}: {ex.Message}");
             return 0;
         }
     }
@@ -712,7 +713,7 @@ void main() {
             _activeDoodadSet = 0;
 
         var set = _wmo.DoodadSets[_activeDoodadSet];
-        Console.WriteLine($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex}), DoodadDefs.Count={_wmo.DoodadDefs.Count}, DoodadNamesRaw.Length={_wmo.DoodadNamesRaw.Length}");
+        ViewerLog.Trace($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex}), DoodadDefs.Count={_wmo.DoodadDefs.Count}, DoodadNamesRaw.Length={_wmo.DoodadNamesRaw.Length}");
 
         int loaded = 0, failed = 0, emptyName = 0, notFound = 0, parseError = 0;
         for (uint i = set.StartIndex; i < set.StartIndex + set.Count && i < (uint)_wmo.DoodadDefs.Count; i++)
@@ -755,7 +756,7 @@ void main() {
             }
         }
 
-        Console.WriteLine($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
+        ViewerLog.Trace($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
     }
 
     private enum DoodadLoadResult { Loaded, NotFound, ParseError }
@@ -832,18 +833,18 @@ void main() {
                 var mdx = MdxFile.Load(cachePath);
                 renderer = new MdxRenderer(_gl, mdx, _cacheDir, _dataSource, _texResolver, modelPath);
                 _lastLoadResult = DoodadLoadResult.Loaded;
-                Console.WriteLine($"  Doodad loaded: {Path.GetFileName(modelPath)} ({mdx.Geosets.Count} geosets)");
+                ViewerLog.Trace($"  Doodad loaded: {Path.GetFileName(modelPath)} ({mdx.Geosets.Count} geosets)");
             }
             else
             {
                 if (_doodadModelCache.Count < 30) // only log first 30 unique misses
-                    Console.WriteLine($"  Doodad not found: {modelPath}");
+                    ViewerLog.Trace($"  Doodad not found: {modelPath}");
             }
         }
         catch (Exception ex)
         {
             _lastLoadResult = DoodadLoadResult.ParseError;
-            Console.WriteLine($"  Doodad load failed: {modelPath} — {ex.Message}");
+            ViewerLog.Trace($"  Doodad load failed: {modelPath} — {ex.Message}");
         }
 
         _doodadModelCache[normalized] = renderer;
@@ -892,7 +893,7 @@ void main() {
 
         _gl.GetProgram(_liquidShader, ProgramPropertyARB.LinkStatus, out int status);
         if (status == 0)
-            Console.WriteLine($"[WmoRenderer] Liquid shader link error: {_gl.GetProgramInfoLog(_liquidShader)}");
+            ViewerLog.Trace($"[WmoRenderer] Liquid shader link error: {_gl.GetProgramInfoLog(_liquidShader)}");
 
         _gl.DeleteShader(vert);
         _gl.DeleteShader(frag);
@@ -930,7 +931,7 @@ void main() {
 
                 if (xverts <= 0 || yverts <= 0 || xverts > 256 || yverts > 256)
                 {
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: invalid dimensions {xverts}x{yverts}, skipping");
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: invalid dimensions {xverts}x{yverts}, skipping");
                     continue;
                 }
 
@@ -939,7 +940,7 @@ void main() {
                 int totalExpected = 30 + expectedVertBytes + expectedTileBytes;
                 if (ms.Length - ms.Position < expectedVertBytes)
                 {
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts (need {expectedVertBytes}, have {ms.Length - ms.Position}), totalExpected={totalExpected} vs dataLen={group.LiquidData.Length}");
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: not enough data for {xverts}x{yverts} verts (need {expectedVertBytes}, have {ms.Length - ms.Position}), totalExpected={totalExpected} vs dataLen={group.LiquidData.Length}");
                     continue;
                 }
 
@@ -1009,7 +1010,7 @@ void main() {
 
                 if (indices.Count == 0)
                 {
-                    Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: no visible tiles");
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: no visible tiles");
                     continue;
                 }
 
@@ -1085,16 +1086,16 @@ void main() {
                     ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
                 });
 
-                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1}), type={liquidTypeName}, groupLiquid={group.GroupLiquid}, matId={matId}");
+                ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: {xverts}x{yverts} verts, {xtiles}x{ytiles} tiles, {indices.Count / 3} tris, corner=({cornerX:F1},{cornerY:F1},{cornerZ:F1}), type={liquidTypeName}, groupLiquid={group.GroupLiquid}, matId={matId}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WmoRenderer] MLIQ group {gi}: parse error — {ex.Message}");
+                ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: parse error — {ex.Message}");
             }
         }
 
         if (_liquidMeshes.Count > 0)
-            Console.WriteLine($"[WmoRenderer] Built {_liquidMeshes.Count} liquid meshes");
+            ViewerLog.Trace($"[WmoRenderer] Built {_liquidMeshes.Count} liquid meshes");
     }
 
     public void Dispose()

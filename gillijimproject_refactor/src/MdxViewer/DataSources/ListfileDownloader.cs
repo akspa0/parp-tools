@@ -1,3 +1,5 @@
+using MdxViewer.Logging;
+
 namespace MdxViewer.DataSources;
 
 /// <summary>
@@ -34,7 +36,7 @@ public static class ListfileDownloader
 
         if (needsDownload)
         {
-            Console.WriteLine($"[Listfile] Downloading community listfile...");
+            ViewerLog.Trace($"[Listfile] Downloading community listfile...");
             try
             {
                 using var http = new HttpClient();
@@ -63,20 +65,20 @@ public static class ListfileDownloader
                         int percent = (int)(downloaded * 100 / totalBytes.Value);
                         if (percent != lastPercent && percent % 10 == 0)
                         {
-                            Console.WriteLine($"[Listfile] {percent}% ({downloaded / 1024 / 1024}MB / {totalBytes.Value / 1024 / 1024}MB)");
+                            ViewerLog.Trace($"[Listfile] {percent}% ({downloaded / 1024 / 1024}MB / {totalBytes.Value / 1024 / 1024}MB)");
                             lastPercent = percent;
                         }
                     }
                 }
 
-                Console.WriteLine($"[Listfile] Downloaded: {CachedPath} ({downloaded / 1024 / 1024}MB)");
+                ViewerLog.Trace($"[Listfile] Downloaded: {CachedPath} ({downloaded / 1024 / 1024}MB)");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Listfile] Download failed: {ex.Message}");
+                ViewerLog.Trace($"[Listfile] Download failed: {ex.Message}");
                 if (File.Exists(CachedPath))
                 {
-                    Console.WriteLine("[Listfile] Using cached version.");
+                    ViewerLog.Trace("[Listfile] Using cached version.");
                     return CachedPath;
                 }
                 return null;
@@ -84,7 +86,7 @@ public static class ListfileDownloader
         }
         else
         {
-            Console.WriteLine($"[Listfile] Using cached: {CachedPath}");
+            ViewerLog.Trace($"[Listfile] Using cached: {CachedPath}");
         }
 
         return File.Exists(CachedPath) ? CachedPath : null;

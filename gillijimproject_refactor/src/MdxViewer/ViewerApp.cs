@@ -316,7 +316,7 @@ public class ViewerApp : IDisposable
                     // Simple direct lookup — AreaID from MCNK maps to AreaTable row key
                     var name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
                     if (name != _currentAreaName && name.StartsWith("Unknown"))
-                        Console.WriteLine($"[AreaTable] Lookup miss: AreaId={chunk.AreaId} → {name}  (table has {_areaTableService.Count} entries)");
+                        ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={chunk.AreaId} → {name}  (table has {_areaTableService.Count} entries)");
                     _currentAreaName = name;
                 }
                 else
@@ -1830,7 +1830,7 @@ void main() {
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
                         _dbcBuild = buildAlias;
-                        Console.WriteLine($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
+                        ViewerLog.Trace($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
                         _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
 
                         // Discover maps
@@ -1844,12 +1844,12 @@ void main() {
                     }
                     else
                     {
-                        Console.WriteLine("[MdxViewer] Could not determine build version. DBC texture resolution unavailable.");
+                        ViewerLog.Trace("[MdxViewer] Could not determine build version. DBC texture resolution unavailable.");
                     }
                 }
                 else
                 {
-                    Console.WriteLine("[MdxViewer] WoWDBDefs definitions not found. DBC texture resolution unavailable.");
+                    ViewerLog.Trace("[MdxViewer] WoWDBDefs definitions not found. DBC texture resolution unavailable.");
                 }
             }
 
@@ -1918,7 +1918,7 @@ void main() {
             {
                 if (content.Contains(search))
                 {
-                    Console.WriteLine($"[MdxViewer] Found {result} build definition in AreaTable.dbd");
+                    ViewerLog.Trace($"[MdxViewer] Found {result} build definition in AreaTable.dbd");
                     return result;
                 }
             }
@@ -2122,7 +2122,7 @@ void main() {
                     {
                         var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
                         var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
-                        Console.WriteLine($"[WMO] v16 split: loading {wmo.GroupCount} group files from data source");
+                        ViewerLog.Trace($"[WMO] v16 split: loading {wmo.GroupCount} group files from data source");
                         
                         for (int gi = 0; gi < wmo.GroupCount; gi++)
                         {
@@ -2131,12 +2131,12 @@ void main() {
                             var groupBytes = _dataSource.ReadFile(groupPath);
                             if (groupBytes != null && groupBytes.Length > 0)
                             {
-                                Console.WriteLine($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes from '{groupPath}'");
+                                ViewerLog.Trace($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes from '{groupPath}'");
                                 converter.ParseGroupFile(groupBytes, wmo, gi);
                             }
                             else
                             {
-                                Console.WriteLine($"[WMO] Group {gi}: NOT FOUND '{groupPath}'");
+                                ViewerLog.Trace($"[WMO] Group {gi}: NOT FOUND '{groupPath}'");
                             }
                         }
                         
@@ -2163,7 +2163,7 @@ void main() {
                         {
                             wmo.BoundsMin = bMin;
                             wmo.BoundsMax = bMax;
-                            Console.WriteLine($"[WMO] Recalculated bounds from groups: ({bMin.X:F1},{bMin.Y:F1},{bMin.Z:F1}) - ({bMax.X:F1},{bMax.Y:F1},{bMax.Z:F1})");
+                            ViewerLog.Trace($"[WMO] Recalculated bounds from groups: ({bMin.X:F1},{bMin.Y:F1},{bMin.Z:F1}) - ({bMax.X:F1},{bMax.Y:F1},{bMax.Z:F1})");
                         }
                     }
                     
@@ -2418,7 +2418,7 @@ void main() {
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ViewerApp] WDT load failed: {ex}");
+            ViewerLog.Trace($"[ViewerApp] WDT load failed: {ex}");
             _statusMessage = $"Load failed: {ex.Message}";
             _modelInfo = $"WDT load error:\n{ex.Message}\n\nFile: {wdtPath}\nSize: {(File.Exists(wdtPath) ? new FileInfo(wdtPath).Length : 0)} bytes";
             _worldScene?.Dispose();
@@ -2479,7 +2479,7 @@ void main() {
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ViewerApp] VLM project load failed: {ex}");
+            ViewerLog.Trace($"[ViewerApp] VLM project load failed: {ex}");
             _statusMessage = $"VLM load failed: {ex.Message}";
             _modelInfo = $"VLM load error:\n{ex.Message}\n\nPath: {projectRoot}";
             _vlmTerrainManager?.Dispose();

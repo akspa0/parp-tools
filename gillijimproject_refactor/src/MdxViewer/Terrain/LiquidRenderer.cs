@@ -1,4 +1,5 @@
 using System.Numerics;
+using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -49,7 +50,7 @@ public class LiquidRenderer : IDisposable
             }
         }
         if (added > 0)
-            Console.WriteLine($"[LiquidRenderer] Added {added} liquid meshes (total: {_meshes.Count})");
+            ViewerLog.Trace($"[LiquidRenderer] Added {added} liquid meshes (total: {_meshes.Count})");
     }
 
     /// <summary>
@@ -135,7 +136,7 @@ public class LiquidRenderer : IDisposable
 
         // Diagnostic: log actual height values arriving at GPU mesh builder
         if (_meshes.Count < 3)
-            Console.WriteLine($"[LiquidMesh] chunk({liquid.ChunkX},{liquid.ChunkY}) tile({liquid.TileX},{liquid.TileY}): " +
+            ViewerLog.Trace($"[LiquidMesh] chunk({liquid.ChunkX},{liquid.ChunkY}) tile({liquid.TileX},{liquid.TileY}): " +
                 $"h[0]={liquid.Heights[0]:F2} h[40]={liquid.Heights[40]:F2} h[80]={liquid.Heights[80]:F2} " +
                 $"minH={liquid.MinHeight:F2} maxH={liquid.MaxHeight:F2} worldPos=({liquid.WorldPosition.X:F0},{liquid.WorldPosition.Y:F0},{liquid.WorldPosition.Z:F0})");
 
