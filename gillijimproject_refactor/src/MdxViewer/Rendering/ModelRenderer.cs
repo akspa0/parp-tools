@@ -33,7 +33,7 @@ public class MdxRenderer : ISceneRenderer
 
     private uint _shaderProgram;
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
-    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
+    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private int _uLightDir, _uLightColor, _uAmbientColor;
 
     private readonly List<GeosetBuffers> _geosets = new();
@@ -211,6 +211,7 @@ public class MdxRenderer : ISceneRenderer
                         _gl.Enable(EnableCap.Blend);
                         _gl.DepthMask(false); // Don't write depth for blended layers
                         _gl.Uniform1(_uAlphaTest, 1);
+                        _gl.Uniform1(_uAlphaThreshold, 0.05f); // Low threshold for smooth blending
                         switch (layer.BlendMode)
                         {
                             case MdlTexOp.Transparent:
@@ -234,9 +235,11 @@ public class MdxRenderer : ISceneRenderer
                         // Alpha-tested cutout (tree leaves, fences, etc.)
                         // Render in opaque pass with alpha discard — transparent pixels are discarded,
                         // opaque pixels write depth normally. No blending — hard cutout only.
+                        // Threshold 0.75 eliminates dark halo outlines around transparent edges.
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(!noDepthWrite);
                         _gl.Uniform1(_uAlphaTest, 1);
+                        _gl.Uniform1(_uAlphaThreshold, 0.75f);
                     }
                     else
                     {
@@ -247,6 +250,7 @@ public class MdxRenderer : ISceneRenderer
                             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                             _gl.DepthMask(!noDepthWrite);
                             _gl.Uniform1(_uAlphaTest, 1);
+                            _gl.Uniform1(_uAlphaThreshold, 0.05f);
                         }
                         else
                         {
@@ -343,6 +347,7 @@ in vec3 vFragPos;
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
+uniform float uAlphaThreshold;
 uniform int uUnshaded;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
@@ -359,7 +364,7 @@ void main() {
     vec4 texColor;
     if (uHasTexture == 1) {
         texColor = texture(uSampler, vTexCoord);
-        if (uAlphaTest == 1 && texColor.a < 0.1) discard;
+        if (uAlphaTest == 1 && texColor.a < uAlphaThreshold) discard;
     } else {
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
@@ -415,6 +420,7 @@ void main() {
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
+        _uAlphaThreshold = _gl.GetUniformLocation(_shaderProgram, "uAlphaThreshold");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
