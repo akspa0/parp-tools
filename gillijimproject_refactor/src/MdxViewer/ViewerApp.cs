@@ -103,6 +103,8 @@ public class ViewerApp : IDisposable
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
+    // Field of view in degrees (adjustable via UI)
+    private float _fovDegrees = 45f;
 
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
@@ -291,7 +293,7 @@ public class ViewerApp : IDisposable
             float aspect = (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
             float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
-            var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, farPlane);
+            var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
             // Update terrain AOI before rendering
             if (_terrainManager != null)
@@ -1124,6 +1126,9 @@ public class ViewerApp : IDisposable
         // Camera speed
         ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
         ImGui.Text("Hold Shift for 5x boost");
+
+        // Field of view
+        ImGui.SliderFloat("FOV", ref _fovDegrees, 30f, 120f, "%.0f\u00b0");
 
         // Contour interval (only when contours enabled via toolbar)
         if (renderer.ShowContours)
@@ -2113,17 +2118,15 @@ public class ViewerApp : IDisposable
                 string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = curMapDef?.Id ?? -1;
 
-            // Load AreaPOI, TaxiPaths, and Lighting from DBC if available
+            // Store DBC credentials for lazy loading (POI + Taxi deferred until user toggles them on)
+            // Only Lighting is loaded eagerly since it affects rendering immediately.
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
             {
-                _worldScene.LoadAreaPoi(_dbcProvider, _dbdDir, _dbcBuild);
+                int mapId = curMapDef?.Id ?? -1;
+                _worldScene.SetDbcCredentials(_dbcProvider, _dbdDir, _dbcBuild, mapId);
 
                 if (curMapDef != null)
-                {
-                    var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
-                    _worldScene.LoadTaxiPaths(dbcd, _dbcBuild, curMapDef.Id);
                     _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, curMapDef.Id);
-                }
             }
 
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
@@ -2231,7 +2234,7 @@ public class ViewerApp : IDisposable
         float aspect = (float)size.X / Math.Max(size.Y, 1);
         var view = _camera.GetViewMatrix();
         float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
-        var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, farPlane);
+        var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
         // Convert mouse coords to NDC (-1..1)
         float ndcX = (mouseX / size.X) * 2f - 1f;

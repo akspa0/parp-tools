@@ -86,17 +86,33 @@ public class WorldScene : ISceneRenderer
         _ => null
     };
 
-    // Area POI
+    // Area POI (lazy-loaded on first toggle)
     private AreaPoiLoader? _poiLoader;
     private bool _showPoi = false;
-    public bool ShowPoi { get => _showPoi; set => _showPoi = value; }
+    private bool _poiLoadAttempted = false;
+    public bool ShowPoi
+    {
+        get => _showPoi;
+        set { _showPoi = value; if (value && !_poiLoadAttempted) LazyLoadPoi(); }
+    }
     public AreaPoiLoader? PoiLoader => _poiLoader;
 
-    // Taxi paths
+    // Taxi paths (lazy-loaded on first toggle)
     private TaxiPathLoader? _taxiLoader;
     private bool _showTaxi = false;
-    public bool ShowTaxi { get => _showTaxi; set => _showTaxi = value; }
+    private bool _taxiLoadAttempted = false;
+    public bool ShowTaxi
+    {
+        get => _showTaxi;
+        set { _showTaxi = value; if (value && !_taxiLoadAttempted) LazyLoadTaxi(); }
+    }
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
+
+    // Stored DBC credentials for lazy loading
+    private DBCD.Providers.IDBCProvider? _dbcProvider;
+    private string? _dbdDir;
+    private string? _dbcBuild;
+    private int _mapId = -1;
 
     // DBC Lighting
     private LightService? _lightService;
@@ -128,21 +144,31 @@ public class WorldScene : ISceneRenderer
     }
 
     /// <summary>
-    /// Load AreaPOI entries for this map from DBC. Call after construction when DBC provider is available.
+    /// Store DBC credentials for lazy loading of POI, Taxi, and Lighting.
     /// </summary>
-    public void LoadAreaPoi(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build)
+    public void SetDbcCredentials(DBCD.Providers.IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
     {
-        _poiLoader = new AreaPoiLoader();
-        _poiLoader.Load(dbcProvider, dbdDir, build, _terrainManager.MapName);
+        _dbcProvider = dbcProvider;
+        _dbdDir = dbdDir;
+        _dbcBuild = build;
+        _mapId = mapId;
     }
 
-    /// <summary>
-    /// Load TaxiPath data for this map from DBC.
-    /// </summary>
-    public void LoadTaxiPaths(DBCD.DBCD dbcd, string build, int mapId)
+    private void LazyLoadPoi()
     {
+        _poiLoadAttempted = true;
+        if (_dbcProvider == null || _dbdDir == null || _dbcBuild == null) return;
+        _poiLoader = new AreaPoiLoader();
+        _poiLoader.Load(_dbcProvider, _dbdDir, _dbcBuild, _terrainManager.MapName);
+    }
+
+    private void LazyLoadTaxi()
+    {
+        _taxiLoadAttempted = true;
+        if (_dbcProvider == null || _dbdDir == null || _dbcBuild == null || _mapId < 0) return;
         _taxiLoader = new TaxiPathLoader();
-        _taxiLoader.Load(dbcd, build, mapId);
+        var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
+        _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
     }
 
     /// <summary>
@@ -246,10 +272,14 @@ public class WorldScene : ISceneRenderer
 
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
-            // Rotation stored as degrees — same convention as WMO (no Z negation needed;
-            // the 180° Z compensation handles the coordinate axis swap).
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
+            // Rotation stored as degrees in WoW coords (X=North, Y=West, Z=Up).
+            // Position axes are swapped: wowX→rendererY, wowY→rendererX (both negated).
+            // Rotation axes must follow the same swap:
+            //   WoW rotX (tilt around North) → renderer RotationY (negated)
+            //   WoW rotY (tilt around West)  → renderer RotationX (negated)
+            //   WoW rotZ (heading around Up)  → renderer RotationZ (as-is)
+            float rx = -p.Rotation.Y * MathF.PI / 180f;
+            float ry = -p.Rotation.X * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
             var transform = rot180Z
@@ -405,10 +435,9 @@ public class WorldScene : ISceneRenderer
             _assets.EnsureMdxLoaded(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
-            // Rotation stored as degrees — same convention as WMO (no Z negation needed here;
-            // the 180° Z compensation handles the coordinate axis swap).
-            float rx = p.Rotation.X * MathF.PI / 180f;
-            float ry = p.Rotation.Y * MathF.PI / 180f;
+            // Rotation stored as degrees in WoW coords — axes swapped to match position swap.
+            float rx = -p.Rotation.Y * MathF.PI / 180f;
+            float ry = -p.Rotation.X * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
             // 180° Z rotation compensates for winding reversal (CW→CCW)

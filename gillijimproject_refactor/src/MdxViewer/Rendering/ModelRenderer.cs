@@ -384,7 +384,9 @@ void main() {
         finalColor = mix(uFogColor, litColor, fogFactor);
     }
 
-    float outAlpha = (uAlphaTest == 0) ? 1.0 : texColor.a;
+    // For blended/alpha-tested layers (uAlphaTest=1), use texture alpha.
+    // For opaque layers (uAlphaTest=0), force alpha=1.0 to prevent invisible geometry.
+    float outAlpha = (uAlphaTest == 1) ? texColor.a : 1.0;
     FragColor = vec4(finalColor, outAlpha) * uColor;
 }
 ";

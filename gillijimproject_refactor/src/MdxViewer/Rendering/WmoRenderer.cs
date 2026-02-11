@@ -40,8 +40,8 @@ public class WmoRenderer : ISceneRenderer
     private readonly string _cacheDir;
 
     // Doodad culling constants
-    private const float DoodadCullDistance = 500f;   // Max distance from camera to render WMO doodads
-    private const float DoodadMaxRenderCount = 64;   // Max doodads rendered per WMO per frame
+    private const float DoodadCullDistance = 1200f;  // Max distance from camera to render WMO doodads
+    private const float DoodadMaxRenderCount = 256;  // Max doodads rendered per WMO per frame
 
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
@@ -1013,30 +1013,31 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid type using noggit's logic:
-                // liquid_basic_types: 0=water, 1=ocean, 2=magma, 3=slime
-                // noggit: basic_type = (group_liquid - 1) & 3, with ocean flag override
-                // For older WMOs (group_liquid == 15 "green lava"), sample tile flags
+                // Determine liquid type from MLIQ matId and tile flags.
+                // Alpha 0.5.3: GroupLiquid field (MOGP offset 0x34) contains large values
+                // that don't match the noggit (group_liquid-1)&3 formula.
+                // Instead, use tile flags and matId to determine the liquid type.
+                // Tile flag bits 0-2: liquid type (0=water, 1=ocean, 2=magma, 3=slime)
                 bool isOcean = (group.Flags & 0x80000) != 0;
                 int liquidBasicType = 0; // default water
 
-                if (group.GroupLiquid > 0 && group.GroupLiquid != 15)
+                // Sample tile flags to determine liquid type from the first visible tile
+                for (int t = 0; t < tileFlags.Length; t++)
                 {
-                    // Noggit: to_wmo_liquid(group_liquid - 1, is_ocean) 
-                    // basic_type = (group_liquid - 1) & 3
-                    liquidBasicType = (int)((group.GroupLiquid - 1) & 3);
-                    if (isOcean && liquidBasicType == 0) liquidBasicType = 1; // water + ocean flag = ocean
+                    if ((tileFlags[t] & 0x08) != 0) continue; // skip hidden tiles
+                    int tileType = tileFlags[t] & 0x07; // low 3 bits = liquid type
+                    if (tileType > 0)
+                    {
+                        liquidBasicType = tileType;
+                        break;
+                    }
                 }
-                else if (group.GroupLiquid == 15)
-                {
-                    // GroupLiquid=15 is "green lava" in old WMOs (Ironforge, Blackrock, etc.)
-                    // Always treat as magma — tile flag sampling is unreliable for this case
-                    liquidBasicType = 2; // magma
-                }
-                else if (isOcean)
-                {
-                    liquidBasicType = 1;
-                }
+
+                // Ocean flag override
+                if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
+
+                // Fallback: GroupLiquid=15 is "green lava" in old WMOs
+                if (group.GroupLiquid == 15) liquidBasicType = 2;
 
                 // Assign color based on liquid type
                 float cr, cg, cb, ca;
