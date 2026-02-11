@@ -179,10 +179,7 @@ public class MdxRenderer : ISceneRenderer
                     int texId = layer.TextureId;
 
                     // Determine if this layer needs blending
-                    // Layer 0 with Transparent blend mode = alpha-tested cutout (trees, leaves)
-                    // These render in the OPAQUE pass with alpha discard, not in transparent pass
-                    bool isAlphaCutout = l == 0 && layer.BlendMode == MdlTexOp.Transparent;
-                    bool needsBlend = (l > 0 || layer.BlendMode != MdlTexOp.Load) && !isAlphaCutout;
+                    bool needsBlend = l > 0 || layer.BlendMode != MdlTexOp.Load;
 
                     // Filter by render pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
@@ -230,17 +227,6 @@ public class MdxRenderer : ISceneRenderer
                                 break;
                         }
                     }
-                    else if (isAlphaCutout)
-                    {
-                        // Alpha-tested cutout (tree leaves, fences, etc.)
-                        // Render in opaque pass with alpha discard — transparent pixels are discarded,
-                        // opaque pixels write depth normally. No blending — hard cutout only.
-                        // Threshold 0.75 eliminates dark halo outlines around transparent edges.
-                        _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(!noDepthWrite);
-                        _gl.Uniform1(_uAlphaTest, 1);
-                        _gl.Uniform1(_uAlphaThreshold, 0.75f);
-                    }
                     else
                     {
                         // When fading, even opaque layers need alpha blending
@@ -284,10 +270,6 @@ public class MdxRenderer : ISceneRenderer
                     if (needsBlend)
                     {
                         _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
-                    }
-                    else if (isAlphaCutout && noDepthWrite)
-                    {
                         _gl.DepthMask(true);
                     }
                     else if (noDepthWrite)

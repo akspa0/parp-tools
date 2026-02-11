@@ -1948,10 +1948,12 @@ void main() {
                     LoadMdxModel(mdx, dir);
                     break;
 
+                case ".m2":
+                    LoadM2FromDisk(filePath, dir);
+                    break;
+
                 case ".wmo":
-                    var converter = new WmoV14ToV17Converter();
-                    var wmo = converter.ParseWmoV14(filePath);
-                    LoadWmoModel(wmo, dir);
+                    LoadWmoFromDisk(filePath, dir);
                     break;
 
                 case ".wdt":
@@ -1967,6 +1969,269 @@ void main() {
         {
             _statusMessage = $"Failed to load: {ex.Message}";
             _modelInfo = "";
+        }
+    }
+
+    /// <summary>
+    /// Load an M2 model from disk by converting it to MDX in-memory, then rendering with MdxRenderer.
+    /// Also attempts to load the companion .skin file for geometry data.
+    /// </summary>
+    private void LoadM2FromDisk(string filePath, string dir)
+    {
+        var m2Bytes = File.ReadAllBytes(filePath);
+        LoadM2FromBytes(m2Bytes, filePath, dir);
+    }
+
+    /// <summary>
+    /// Load an M2 model from raw bytes by converting to MDX in-memory.
+    /// </summary>
+    private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
+    {
+        // Try to find companion .skin file
+        byte[]? skinBytes = null;
+        string skinPath = Path.ChangeExtension(originalPath, "00.skin");
+        if (File.Exists(skinPath))
+        {
+            skinBytes = File.ReadAllBytes(skinPath);
+            ViewerLog.Trace($"[M2] Loaded skin file: {skinPath} ({skinBytes.Length} bytes)");
+        }
+        else
+        {
+            // Try from data source
+            if (_dataSource != null)
+            {
+                string virtualSkin = Path.ChangeExtension(originalPath, "00.skin");
+                skinBytes = _dataSource.ReadFile(virtualSkin);
+                if (skinBytes == null)
+                {
+                    // Try ModelName00.skin pattern
+                    string baseName = Path.GetFileNameWithoutExtension(originalPath);
+                    string skinDir = Path.GetDirectoryName(originalPath)?.Replace('/', '\\') ?? "";
+                    string altSkin = string.IsNullOrEmpty(skinDir) ? $"{baseName}00.skin" : $"{skinDir}\\{baseName}00.skin";
+                    skinBytes = _dataSource.ReadFile(altSkin);
+                }
+                if (skinBytes != null)
+                    ViewerLog.Trace($"[M2] Loaded skin from data source ({skinBytes.Length} bytes)");
+            }
+        }
+
+        var converter = new M2ToMdxConverter();
+        byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes);
+        ViewerLog.Trace($"[M2] Converted M2 ({m2Bytes.Length} bytes) → MDX ({mdxBytes.Length} bytes)");
+
+        using var ms = new MemoryStream(mdxBytes);
+        using var br = new BinaryReader(ms);
+        var mdx = MdxFile.Load(br);
+        LoadMdxModel(mdx, dir, originalPath);
+        _statusMessage = $"Loaded M2 (converted): {Path.GetFileName(originalPath)}";
+    }
+
+    /// <summary>
+    /// Load a WMO from disk, auto-detecting v14 (Alpha) vs v17+ (standard) format.
+    /// v17 files are converted to v14 in-memory before rendering.
+    /// </summary>
+    private void LoadWmoFromDisk(string filePath, string dir)
+    {
+        int version = DetectWmoVersion(filePath);
+        ViewerLog.Trace($"[WMO] Detected version {version} for {Path.GetFileName(filePath)}");
+
+        if (version >= 17)
+        {
+            // v17+: convert to v14 bytes, then parse with existing pipeline
+            var v17Converter = new WmoV17ToV14Converter();
+            var v17RootBytes = File.ReadAllBytes(filePath);
+
+            // Collect group files
+            var groupBytesList = new List<byte[]>();
+            string baseName = Path.GetFileNameWithoutExtension(filePath);
+            for (int gi = 0; gi < 512; gi++) // reasonable upper bound
+            {
+                string groupPath = Path.Combine(dir, $"{baseName}_{gi:D3}.wmo");
+                if (!File.Exists(groupPath)) break;
+                groupBytesList.Add(File.ReadAllBytes(groupPath));
+                ViewerLog.Trace($"[WMO] Loaded group file: {Path.GetFileName(groupPath)}");
+            }
+
+            byte[] v14Bytes = v17Converter.ConvertToBytes(v17RootBytes, groupBytesList);
+            ViewerLog.Trace($"[WMO] Converted v17 → v14 ({v14Bytes.Length} bytes, {groupBytesList.Count} groups)");
+
+            // Write to temp and parse with existing v14 pipeline
+            string tempPath = Path.Combine(Path.GetTempPath(), $"wmo_v14_{Path.GetFileName(filePath)}");
+            File.WriteAllBytes(tempPath, v14Bytes);
+            var v14Converter = new WmoV14ToV17Converter();
+            var wmo = v14Converter.ParseWmoV14(tempPath);
+            LoadWmoModel(wmo, dir);
+            _statusMessage = $"Loaded WMO v{version} (converted): {Path.GetFileName(filePath)}";
+        }
+        else
+        {
+            // v14 (Alpha): use existing pipeline directly
+            var converter = new WmoV14ToV17Converter();
+            var wmo = converter.ParseWmoV14(filePath);
+            LoadWmoModel(wmo, dir);
+        }
+    }
+
+    /// <summary>
+    /// Load a WMO from data source bytes, auto-detecting v14 vs v17+ format.
+    /// </summary>
+    private void LoadWmoFromDataSource(byte[] rootBytes, string virtualPath, string cachePath)
+    {
+        // Detect version from bytes
+        int version;
+        using (var ms = new MemoryStream(rootBytes))
+        using (var br = new BinaryReader(ms))
+            version = DetectWmoVersionFromBytes(br);
+
+        ViewerLog.Trace($"[WMO] Detected version {version} for {Path.GetFileName(virtualPath)}");
+
+        if (version >= 17)
+        {
+            // v17+: collect group files from data source, convert to v14, then parse
+            var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
+            var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
+
+            var groupBytesList = new List<byte[]>();
+            for (int gi = 0; gi < 512; gi++)
+            {
+                var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                var groupBytes = _dataSource?.ReadFile(groupPath);
+                if (groupBytes == null || groupBytes.Length == 0) break;
+                groupBytesList.Add(groupBytes);
+                ViewerLog.Trace($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes");
+            }
+
+            var v17Converter = new WmoV17ToV14Converter();
+            byte[] v14Bytes = v17Converter.ConvertToBytes(rootBytes, groupBytesList);
+            ViewerLog.Trace($"[WMO] Converted v17 → v14 ({v14Bytes.Length} bytes, {groupBytesList.Count} groups)");
+
+            string tempPath = Path.Combine(Path.GetTempPath(), $"wmo_v14_{Path.GetFileName(virtualPath)}");
+            File.WriteAllBytes(tempPath, v14Bytes);
+            var v14Converter = new WmoV14ToV17Converter();
+            var wmo = v14Converter.ParseWmoV14(tempPath);
+            LoadWmoModel(wmo, CacheDir);
+            _statusMessage = $"Loaded WMO v{version} (converted): {Path.GetFileName(virtualPath)}";
+        }
+        else
+        {
+            // v14 (Alpha): use existing pipeline
+            var converter = new WmoV14ToV17Converter();
+            var wmo = converter.ParseWmoV14(cachePath);
+
+            // v16 split format: root has GroupCount but no embedded MOGP chunks
+            if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+            {
+                var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
+                var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
+                ViewerLog.Trace($"[WMO] v14/v16 split: loading {wmo.GroupCount} group files from data source");
+
+                for (int gi = 0; gi < wmo.GroupCount; gi++)
+                {
+                    var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                    var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                    var groupBytes = _dataSource.ReadFile(groupPath);
+                    if (groupBytes != null && groupBytes.Length > 0)
+                    {
+                        ViewerLog.Trace($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes from '{groupPath}'");
+                        converter.ParseGroupFile(groupBytes, wmo, gi);
+                    }
+                    else
+                    {
+                        ViewerLog.Trace($"[WMO] Group {gi}: NOT FOUND '{groupPath}'");
+                    }
+                }
+
+                for (int gi = 0; gi < wmo.Groups.Count && gi < wmo.GroupInfos.Count; gi++)
+                {
+                    if (wmo.Groups[gi].Name == null)
+                        wmo.Groups[gi].Name = $"group_{gi}";
+                }
+
+                var bMin = new Vector3(float.MaxValue);
+                var bMax = new Vector3(float.MinValue);
+                foreach (var g in wmo.Groups)
+                {
+                    foreach (var v in g.Vertices)
+                    {
+                        bMin = Vector3.Min(bMin, v);
+                        bMax = Vector3.Max(bMax, v);
+                    }
+                }
+                if (bMin.X < float.MaxValue)
+                {
+                    wmo.BoundsMin = bMin;
+                    wmo.BoundsMax = bMax;
+                    ViewerLog.Trace($"[WMO] Recalculated bounds: ({bMin.X:F1},{bMin.Y:F1},{bMin.Z:F1}) - ({bMax.X:F1},{bMax.Y:F1},{bMax.Z:F1})");
+                }
+            }
+
+            LoadWmoModel(wmo, CacheDir);
+        }
+    }
+
+    /// <summary>
+    /// Detect WMO version by reading the MVER chunk from the file.
+    /// Returns 14 for Alpha, 17 for standard WotLK+, or 0 if detection fails.
+    /// </summary>
+    private static int DetectWmoVersion(string filePath)
+    {
+        try
+        {
+            using var fs = File.OpenRead(filePath);
+            using var br = new BinaryReader(fs);
+            return DetectWmoVersionFromBytes(br);
+        }
+        catch { return 0; }
+    }
+
+    /// <summary>
+    /// Detect WMO version from a BinaryReader by scanning for MVER chunk.
+    /// Handles both forward and reversed FourCC ordering.
+    /// </summary>
+    private static int DetectWmoVersionFromBytes(BinaryReader br)
+    {
+        long startPos = br.BaseStream.Position;
+        try
+        {
+            // Read first 8 bytes to check for MOMO container (v14) or MVER (v17)
+            if (br.BaseStream.Length < 12) return 0;
+
+            var magic = System.Text.Encoding.ASCII.GetString(br.ReadBytes(4));
+            var reversed = new string(magic.Reverse().ToArray());
+
+            // v14 Alpha: starts with MOMO container
+            if (magic == "MOMO" || reversed == "MOMO")
+                return 14;
+
+            // v17+: starts with MVER chunk directly
+            if (magic == "MVER" || reversed == "MVER")
+            {
+                uint size = br.ReadUInt32();
+                if (size >= 4)
+                {
+                    uint version = br.ReadUInt32();
+                    return (int)version;
+                }
+            }
+
+            // Fallback: scan first 64 bytes for MVER
+            br.BaseStream.Position = startPos;
+            byte[] header = br.ReadBytes((int)Math.Min(64, br.BaseStream.Length));
+            string headerStr = System.Text.Encoding.ASCII.GetString(header);
+            int mverIdx = headerStr.IndexOf("MVER");
+            if (mverIdx < 0) mverIdx = headerStr.IndexOf("REVM"); // reversed
+            if (mverIdx >= 0 && mverIdx + 12 <= header.Length)
+            {
+                uint ver = BitConverter.ToUInt32(header, mverIdx + 8);
+                return (int)ver;
+            }
+
+            return 0;
+        }
+        finally
+        {
+            br.BaseStream.Position = startPos;
         }
     }
 
@@ -2112,62 +2377,12 @@ void main() {
                     LoadMdxModel(mdx, CacheDir, virtualPath);
                     break;
 
+                case ".m2":
+                    LoadM2FromBytes(data, virtualPath, CacheDir);
+                    break;
+
                 case ".wmo":
-                    var converter = new WmoV14ToV17Converter();
-                    var wmo = converter.ParseWmoV14(cachePath);
-                    
-                    // v16 split format: root has GroupCount but no embedded MOGP chunks
-                    // Load separate group files from the data source
-                    if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
-                    {
-                        var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
-                        var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
-                        ViewerLog.Trace($"[WMO] v16 split: loading {wmo.GroupCount} group files from data source");
-                        
-                        for (int gi = 0; gi < wmo.GroupCount; gi++)
-                        {
-                            var groupName = $"{wmoBase}_{gi:D3}.wmo";
-                            var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
-                            var groupBytes = _dataSource.ReadFile(groupPath);
-                            if (groupBytes != null && groupBytes.Length > 0)
-                            {
-                                ViewerLog.Trace($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes from '{groupPath}'");
-                                converter.ParseGroupFile(groupBytes, wmo, gi);
-                            }
-                            else
-                            {
-                                ViewerLog.Trace($"[WMO] Group {gi}: NOT FOUND '{groupPath}'");
-                            }
-                        }
-                        
-                        // Populate group names after loading
-                        for (int gi = 0; gi < wmo.Groups.Count && gi < wmo.GroupInfos.Count; gi++)
-                        {
-                            var nameOfs = wmo.GroupInfos[gi].NameOffset;
-                            if (wmo.Groups[gi].Name == null)
-                                wmo.Groups[gi].Name = $"group_{gi}";
-                        }
-                        
-                        // Recalculate bounds from loaded group geometry
-                        var bMin = new System.Numerics.Vector3(float.MaxValue);
-                        var bMax = new System.Numerics.Vector3(float.MinValue);
-                        foreach (var g in wmo.Groups)
-                        {
-                            foreach (var v in g.Vertices)
-                            {
-                                bMin = System.Numerics.Vector3.Min(bMin, v);
-                                bMax = System.Numerics.Vector3.Max(bMax, v);
-                            }
-                        }
-                        if (bMin.X < float.MaxValue)
-                        {
-                            wmo.BoundsMin = bMin;
-                            wmo.BoundsMax = bMax;
-                            ViewerLog.Trace($"[WMO] Recalculated bounds from groups: ({bMin.X:F1},{bMin.Y:F1},{bMin.Z:F1}) - ({bMax.X:F1},{bMax.Y:F1},{bMax.Z:F1})");
-                        }
-                    }
-                    
-                    LoadWmoModel(wmo, CacheDir);
+                    LoadWmoFromDataSource(data, virtualPath, cachePath);
                     break;
 
                 case ".wdt":

@@ -317,6 +317,13 @@ public class WorldAssetManager : IDisposable
                 return null;
             }
 
+            // Detect M2 format (magic 0x3032444D = "MD20") and convert to MDX
+            if (data.Length >= 4 && BitConverter.ToUInt32(data, 0) == 0x3032444D)
+            {
+                data = ConvertM2ToMdx(data, normalizedKey);
+                if (data == null) return null;
+            }
+
             using var ms = new MemoryStream(data);
             var mdx = MdxFile.Load(ms);
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
@@ -325,6 +332,43 @@ public class WorldAssetManager : IDisposable
         catch (Exception ex)
         {
             ViewerLog.Error(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Convert M2 model bytes to MDX format. Attempts to load companion .skin file.
+    /// </summary>
+    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey)
+    {
+        try
+        {
+            // Try to find companion .skin file (ModelName00.skin)
+            byte[]? skinBytes = null;
+            string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
+            string dir = Path.GetDirectoryName(normalizedKey) ?? "";
+            string[] skinCandidates = {
+                Path.ChangeExtension(normalizedKey, "00.skin"),
+                string.IsNullOrEmpty(dir) ? $"{baseName}00.skin" : $"{dir}\\{baseName}00.skin",
+            };
+            foreach (var skinPath in skinCandidates)
+            {
+                skinBytes = ReadFileData(skinPath);
+                if (skinBytes != null)
+                {
+                    ViewerLog.Trace($"[M2] Loaded skin for {Path.GetFileName(normalizedKey)} ({skinBytes.Length} bytes)");
+                    break;
+                }
+            }
+
+            var converter = new M2ToMdxConverter();
+            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes);
+            ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} → {mdxBytes.Length} bytes");
+            return mdxBytes;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Mdx, $"M2→MDX convert failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
             return null;
         }
     }
@@ -343,13 +387,51 @@ public class WorldAssetManager : IDisposable
             if (_wmoModels.Count < 3)
                 ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
 
-            // WMO v14 needs to be written to temp file for the converter
+            // Detect WMO version from bytes
+            int version = DetectWmoVersion(data);
+            byte[] v14Bytes;
+
+            if (version >= 17)
+            {
+                // v17+: collect group files and convert to v14
+                v14Bytes = ConvertWmoV17ToV14(data, normalizedKey);
+                if (v14Bytes == null || v14Bytes.Length == 0)
+                    return null;
+                ViewerLog.Trace($"[WMO] Converted v{version} → v14: {Path.GetFileName(normalizedKey)} ({v14Bytes.Length} bytes)");
+            }
+            else
+            {
+                v14Bytes = data;
+            }
+
+            // Parse v14 WMO
             string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
             try
             {
-                File.WriteAllBytes(tmpPath, data);
+                File.WriteAllBytes(tmpPath, v14Bytes);
                 var converter = new WmoV14ToV17Converter();
                 var wmo = converter.ParseWmoV14(tmpPath);
+
+                // v14/v16 split format: load group files from data source
+                if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+                {
+                    var wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+                    var wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
+                    for (int gi = 0; gi < wmo.GroupCount; gi++)
+                    {
+                        var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                        var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                        var groupBytes = ReadFileData(groupPath);
+                        if (groupBytes != null && groupBytes.Length > 0)
+                            converter.ParseGroupFile(groupBytes, wmo, gi);
+                    }
+                    for (int gi = 0; gi < wmo.Groups.Count; gi++)
+                    {
+                        if (wmo.Groups[gi].Name == null)
+                            wmo.Groups[gi].Name = $"group_{gi}";
+                    }
+                }
+
                 string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
                 return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver);
             }
@@ -361,6 +443,58 @@ public class WorldAssetManager : IDisposable
         catch (Exception ex)
         {
             ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Detect WMO version from raw bytes. Returns 14 for Alpha (MOMO container), version number for v17+, or 0.
+    /// </summary>
+    private static int DetectWmoVersion(byte[] data)
+    {
+        if (data.Length < 12) return 0;
+        string magic = System.Text.Encoding.ASCII.GetString(data, 0, 4);
+        string reversed = new string(magic.Reverse().ToArray());
+
+        // v14 Alpha: starts with MOMO container
+        if (magic == "MOMO" || reversed == "MOMO") return 14;
+
+        // v17+: starts with MVER chunk
+        if (magic == "MVER" || reversed == "MVER")
+        {
+            uint size = BitConverter.ToUInt32(data, 4);
+            if (size >= 4 && data.Length >= 12)
+                return (int)BitConverter.ToUInt32(data, 8);
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Convert WMO v17 root + group files to v14 monolithic format.
+    /// </summary>
+    private byte[]? ConvertWmoV17ToV14(byte[] rootBytes, string normalizedKey)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+            var baseName = Path.GetFileNameWithoutExtension(normalizedKey);
+
+            var groupBytesList = new List<byte[]>();
+            for (int gi = 0; gi < 512; gi++)
+            {
+                var groupName = $"{baseName}_{gi:D3}.wmo";
+                var groupPath = string.IsNullOrEmpty(dir) ? groupName : $"{dir}\\{groupName}";
+                var groupBytes = ReadFileData(groupPath);
+                if (groupBytes == null || groupBytes.Length == 0) break;
+                groupBytesList.Add(groupBytes);
+            }
+
+            var v17Converter = new WmoV17ToV14Converter();
+            return v17Converter.ConvertToBytes(rootBytes, groupBytesList);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO v17→v14 convert failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
             return null;
         }
     }
