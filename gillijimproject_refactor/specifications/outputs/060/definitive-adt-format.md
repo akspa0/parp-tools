@@ -18,9 +18,10 @@ Items **not fully specified** here (because they were not established in the pro
 ## Key determinations (one-page summary)
 
 - **Tiles are separate ADT files** (LK-style naming): `MapName_XX_YY.adt`.
-- **Chunk FourCCs are forward on disk** (LK-style): `MCNK` is literally `'MCNK'` in-file, not reversed.
+- **Chunk FourCC tag bytes are reversed on disk**: e.g. `MCNK` appears as `KNCM` in the file; the client compares against 32-bit constants like `0x4D434E4B`.
 - **`MCNK` header is Alpha-style** (very similar to 0.5.3): fixed offset table pointing to sub-chunks.
 - **Vertex payloads are non-interleaved** (Alpha-style): `MCVT` and `MCNR` are stored as contiguous arrays.
+- **`MCLQ` in 0.6.0 is a normal chunk** inside `MCNK`: the client validates the `'MCLQ'` token and uses payload at `+8`.
 
 ## 1) Tile discovery + file naming
 
@@ -48,11 +49,20 @@ Notes:
 
 ### Determination
 
-All chunk FourCCs are stored **forward** on disk (LK-style).
+In 0.6.0 ADT/MCNK parsing, the client treats chunk tags as **32-bit integers** and compares them against constants like `0x4D434E4B`.
 
-Evidence: [task-06-chunk-fourcc-byte-order.md](task-06-chunk-fourcc-byte-order.md)
+Because the file is read on a little-endian CPU, this corresponds to **reversed ASCII bytes on disk**.
 
-Concrete proof point: the client compares 32-bit values against:
+Example (`MCNK`):
+
+| Concept | Bytes | 32-bit value (little-endian) |
+|---|---|---:|
+| Canonical tag | `MCNK` | — |
+| Bytes as stored in file | `KNCM` (`4B 4E 43 4D`) | `0x4D434E4B` |
+
+This matches what we see in Ghidra: `FUN_006a6d00` checks the first dword of the MCNK chunk against `0x4D434E4B`.
+
+Evidence: decompile of `FUN_006a6d00` (Ghidra).
 
 - `0x4d434e4b` → `'MCNK'`
 - `0x4d435654` → `'MCVT'`
@@ -66,7 +76,9 @@ Concrete proof point: the client compares 32-bit values against:
 
 Implementation consequence:
 
-- When reading chunk tags from file, treat them as literal strings (no Alpha-era reversed-FourCC handling for 0.6.0).
+- If you read 4 tag bytes from disk and want the human-readable FourCC, reverse the 4 bytes (`KNCM` → `MCNK`).
+- Alternatively, if you read as `uint32` little-endian, compare against constants like `0x4D434E4B`.
+
 
 ## 3) `MCNK` chunk structure
 
@@ -154,6 +166,80 @@ This matches the report’s “`+ 8`” adjustment when converting a chunk base 
 - `*(int *)(iVar1 + *(int *)(iVar1 + 0x1c)) == 'MCVT'`
 
 Evidence: [task-05-mcnk-header-layout.md](task-05-mcnk-header-layout.md)
+
+### 3.5 `MCLQ` (liquid) storage and parsing (0.6.0 client)
+
+This section documents what the **0.6.0 client actually expects** for `MCLQ` inside `MCNK`.
+
+#### 3.5.1 `MCLQ` is a normal sub-chunk with an 8-byte header
+
+The client validates that the `MCNK_HEADER.ofsLiquid` (offset `0x60`) points to a normal chunk header.
+
+In code it compares the dword against `0x4D434C51` (canonical `MCLQ`). On disk the 4 bytes would therefore appear reversed as `QLCM`.
+
+- `*(mcnkChunkStart + ofsLiquid) == 'MCLQ'`
+
+Then it stores the payload pointer as:
+
+- `mclqPayload = (mcnkChunkStart + ofsLiquid) + 8`
+
+This is visible directly in `FUN_006a6d00`:
+
+- Token check: `... + *(... + 0x60) == 0x4d434c51` (`'MCLQ'`)
+- Payload pointer: `*(int *)(param_1 + 0xf08) = *(... + 0x60) + 8 + base`
+
+Evidence: decompile of `FUN_006a6d00` (Ghidra).
+
+#### 3.5.2 `MCLQ` payload is a packed list of liquid “instances”
+
+The client parses liquid data in `FUN_006a6960`.
+
+Key behavior:
+
+- The presence bits live in `MCNK_HEADER.Flags` (first `uint32` of the header).
+- The code iterates over four bits in this order: `0x04`, `0x08`, `0x10`, `0x20`.
+- For each bit that is set, the parser **consumes one instance** from the payload and advances its pointer.
+- If a bit is not set, it does **not** advance the payload pointer.
+
+This means the payload is **packed**: it contains exactly `N = popcount(flags & 0x3C)` instances, stored in ascending bit order.
+
+Practical consequence for decoding:
+
+- `MCLQ.chunkSize` should be consistent with `N * 0x2D4` (plus any optional padding/alignment your file writer might add).
+
+Evidence: decompile of `FUN_006a6960` (Ghidra).
+
+#### 3.5.3 Instance layout and size (derived from pointer math)
+
+In `FUN_006a6960`, the instance pointer (`puVar4`) is a `uint32*` into the payload. The function uses these fixed offsets:
+
+- `puVar4[0]` and `puVar4[1]` are copied into the runtime liquid object (very likely the `minHeight`/`maxHeight` floats).
+- `puVar4 + 2` is stored as a pointer to the per-vertex/plane data.
+- `puVar4 + 0xA4` is stored as a pointer to the 8×8 tile flags area.
+- `*(puVar4 + 0xB4)` is copied as one additional `uint32` value.
+- The next instance begins at `puVar4 + 0xB5`.
+
+Converted to byte offsets (relative to start of one instance):
+
+| Byte offset | Size | Meaning | Evidence |
+|---:|---:|---|---|
+| `0x000` | 4 | value0 (likely `minHeight` float) | `*(iVar2+4) = *puVar4` |
+| `0x004` | 4 | value1 (likely `maxHeight` float) | `*(iVar2+8) = puVar4[1]` |
+| `0x008` | `0x288` (648) | vertex/entry array | `ptr = puVar4 + 2` and next pointer is at `+0x290` |
+| `0x290` | 64 | 8×8 tile flags (64 bytes) | `ptr = puVar4 + 0xA4` (`0xA4*4 = 0x290`) |
+| `0x2D0` | 4 | trailing value | `*(iVar2+0x14) = *(puVar4+0xB4)` |
+| `0x2D4` | — | start of next instance | `puVar4 += 0xB5` (`0xB5*4 = 0x2D4`) |
+
+So the **instance size is `0x2D4` bytes (724)**.
+
+The `0x288` (648) byte region between `0x008` and `0x290` strongly suggests **81 entries × 8 bytes** (since `81*8 = 648`), matching the common “9×9 liquid vertices” pattern.
+
+Unknowns (not established by the current Ghidra pass):
+
+- Exact meaning of the 8-byte per-entry format in the `0x008..0x28F` region (the client keeps it as a pointer).
+- The meaning of the trailing 4-byte value at `0x2D0`.
+
+Evidence: decompile of `FUN_006a6960` (Ghidra) and its constant offsets.
 
 ## 4) `MCVT` (heights) and `MCNR` (normals) payload layout
 

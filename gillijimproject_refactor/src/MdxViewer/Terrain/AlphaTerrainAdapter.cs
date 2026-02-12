@@ -69,10 +69,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// <summary>Collected MODF placements from all loaded tiles (deduplicated by uniqueId).</summary>
     public List<ModfPlacement> ModfPlacements { get; } = new();
 
-    // Track unique IDs to avoid duplicate placements across tiles
     private readonly object _placementLock = new();
-    private readonly HashSet<int> _seenMddfIds = new();
-    private readonly HashSet<int> _seenModfIds = new();
 
     /// <summary>WorldPosition of every loaded chunk (for diagnostics).</summary>
     public List<Vector3> LastLoadedChunkPositions { get; } = new();
@@ -207,11 +204,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         lock (_placementLock)
         {
             foreach (var p in tileMddf)
-                if (_seenMddfIds.Add(p.UniqueId))
-                    MddfPlacements.Add(p);
+                MddfPlacements.Add(p);
             foreach (var p in tileModf)
-                if (_seenModfIds.Add(p.UniqueId))
-                    ModfPlacements.Add(p);
+                ModfPlacements.Add(p);
         }
 
         // Diagnostic: print tile corner position for first tile loaded
@@ -238,8 +233,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         lock (_placementLock)
         {
             foreach (var p in temp)
-                if (_seenMddfIds.Add(p.UniqueId))
-                    MddfPlacements.Add(p);
+                MddfPlacements.Add(p);
         }
     }
 
@@ -299,8 +293,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         lock (_placementLock)
         {
             foreach (var p in temp)
-                if (_seenModfIds.Add(p.UniqueId))
-                    ModfPlacements.Add(p);
+                ModfPlacements.Add(p);
         }
     }
 
@@ -644,8 +637,11 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     }
 
     /// <summary>
-    /// Extract MCLQ inline liquid data from raw bytes (Ghidra-verified Alpha 0.5.3 format).
-    /// NO FourCC header — data is inline within MCNK, referenced by ofsLiquid.
+    /// Extract MCLQ liquid data from raw bytes.
+    ///
+    /// Alpha 0.5.3: often inline payload referenced by ofsLiquid (no chunk header).
+    /// Alpha 0.6.0: client code treats MCLQ as a normal chunk and uses payload at +8 (FourCC+size header).
+    /// This method strips an MCLQ chunk header if present so decoding starts at the payload.
     /// Each instance: 8 (min/max) + 648 (81 verts × 8) + 64 (16 tile floats) + 84 (flows) = 804 bytes.
     /// Liquid type determined from MCNK header flags bits 2-5.
     /// Up to 4 liquid instances per chunk (one per type).
@@ -659,6 +655,10 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         // The liquid surface is a flat plane at the specified height.
         // Minimum data: 8 bytes (2 floats for min/max height).
         if (mclqData == null || mclqData.Length < 8)
+            return null;
+
+        mclqData = StripMclqChunkHeaderIfPresent(mclqData);
+        if (mclqData.Length < 8)
             return null;
 
         // Determine liquid type from MCNK flags.
@@ -742,6 +742,29 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             ChunkX = chunkX,
             ChunkY = chunkY
         };
+    }
+
+    private static byte[] StripMclqChunkHeaderIfPresent(byte[] mclqData)
+    {
+        if (mclqData.Length < 8)
+            return mclqData;
+
+        bool isMclq = mclqData[0] == (byte)'M' && mclqData[1] == (byte)'C' && mclqData[2] == (byte)'L' && mclqData[3] == (byte)'Q';
+        bool isReversed = mclqData[0] == (byte)'Q' && mclqData[1] == (byte)'L' && mclqData[2] == (byte)'C' && mclqData[3] == (byte)'M';
+        if (!isMclq && !isReversed)
+            return mclqData;
+
+        uint size = BitConverter.ToUInt32(mclqData, 4);
+        if (size == 0)
+            return Array.Empty<byte>();
+
+        int available = mclqData.Length - 8;
+        if (size > (uint)available)
+            return mclqData;
+
+        var payload = new byte[size];
+        Buffer.BlockCopy(mclqData, 8, payload, 0, (int)size);
+        return payload;
     }
 
     /// <summary>

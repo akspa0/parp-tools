@@ -35,8 +35,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly List<string> _mdxNames = new();
     private readonly List<string> _wmoNames = new();
     private readonly object _placementLock = new();
-    private readonly HashSet<int> _seenMddfIds = new();
-    private readonly HashSet<int> _seenModfIds = new();
     private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
 
@@ -267,11 +265,32 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 // MCLQ inline liquid (per-chunk, legacy format used alongside MH2O)
                 LiquidChunkData? liquid = null;
+                uint mcnkFlagsRaw = (uint)mcnk.Header.Flags;
+                bool hasLiquidFlags = (mcnkFlagsRaw & 0x3C) != 0;
                 if (mcnk.MclqData != null && mcnk.MclqData.Length >= 8)
                 {
-                    liquid = ExtractMclq(mcnk.MclqData, (uint)mcnk.Header.Flags,
+                    liquid = ExtractMclq(mcnk.MclqData, mcnkFlagsRaw,
                         tileX, tileY, chunkX, chunkY,
                         new Vector3(worldX, worldY, 0f), baseZ);
+                }
+                // Diagnostic: log first few chunks with liquid flags
+                if (hasLiquidFlags && ci < 4)
+                {
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append($"[MCLQ-DIAG] tile({tileX},{tileY}) chunk({chunkX},{chunkY}) flags=0x{mcnkFlagsRaw:X} ofsMclq=0x{mcnk.Header.OfsMclq:X}");
+                    sb.Append($" baseZ={baseZ:F2} mclqData={mcnk.MclqData?.Length ?? -1}");
+                    if (mcnk.MclqData != null && mcnk.MclqData.Length >= 16)
+                    {
+                        float v0 = BitConverter.ToSingle(mcnk.MclqData, 0);
+                        float v1 = BitConverter.ToSingle(mcnk.MclqData, 4);
+                        float v2 = BitConverter.ToSingle(mcnk.MclqData, 8);
+                        float v3 = BitConverter.ToSingle(mcnk.MclqData, 12);
+                        sb.Append($" raw[0..3]: {v0:F2} {v1:F2} {v2:F2} {v3:F2}");
+                    }
+                    sb.Append($" liquid={liquid != null}");
+                    if (liquid != null)
+                        sb.Append($" minH={liquid.MinHeight:F2} maxH={liquid.MaxHeight:F2} h[0]={liquid.Heights[0]:F2} h[40]={liquid.Heights[40]:F2}");
+                    ViewerLog.Important(ViewerLog.Category.Terrain, sb.ToString());
                 }
 
                 chunks.Add(new TerrainChunkData
@@ -309,7 +328,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
         result.Chunks.AddRange(chunks);
 
         // Ghidra-verified (FUN_007d6ef0): MH2O located via MHDR offset +0x28.
-        ParseMh2o(adtBytes, mhdrStart, mhdr, tileX, tileY, chunkSmall, result);
+        // Only parse MH2O if no MCLQ liquid was already found (0.6.0 has MCLQ, not MH2O).
+        if (mclqCount == 0)
+            ParseMh2o(adtBytes, mhdrStart, mhdr, tileX, tileY, chunkSmall, result);
 
         // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
         // NOT by linear scan. Name resolution: MDDF.nameId → MMID[nameId] → byte offset into MMDX.
@@ -446,10 +467,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
     }
 
     /// <summary>
-    /// Extract MCLQ inline liquid data from raw bytes (3.3.5 per-chunk format).
-    /// Layout per spec: float minHeight, float maxHeight, then 81 vertex entries (8 bytes each:
-    /// union { struct { int16 depth, uint8 flow0..2, uint8 filler } water; struct { float height } simple; }),
-    /// then 64 tile flags (1 byte each).
+    /// Extract MCLQ inline liquid data from raw bytes.
+    /// Supports both 3.3.5 single-instance format and 0.6.0 packed multi-instance format.
+    /// 0.6.0: payload is packed instances (0x2D4 bytes each), one per liquid flag bit
+    /// (0x04=River, 0x08=Ocean, 0x10=Magma, 0x20=Slime). Instance layout:
+    ///   +0x000: minHeight (float), +0x004: maxHeight (float),
+    ///   +0x008: 81 vertices × 8 bytes (648), +0x290: 64 tile flags, +0x2D0: trailing uint32.
+    /// 3.3.5: single instance (8 + 81×8 + 64 = 720 bytes).
     /// </summary>
     private static LiquidChunkData? ExtractMclq(byte[] mclqData, uint mcnkFlags,
         int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos, float baseHeight)
@@ -457,89 +481,143 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mclqData == null || mclqData.Length < 8)
             return null;
 
-        float minHeight = BitConverter.ToSingle(mclqData, 0);
-        float maxHeight = BitConverter.ToSingle(mclqData, 4);
+        // Determine which liquid types are present from MCNK flags
+        uint[] liquidBits = { 0x04, 0x08, 0x10, 0x20 };
+        LiquidType[] liquidTypes = { LiquidType.Water, LiquidType.Ocean, LiquidType.Magma, LiquidType.Slime };
 
-        if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
+        // Check if this is a packed multi-instance format (0.6.0)
+        // by counting how many liquid flag bits are set
+        int instanceCount = 0;
+        for (int b = 0; b < 4; b++)
+            if ((mcnkFlags & liquidBits[b]) != 0) instanceCount++;
+
+        if (instanceCount == 0)
             return null;
 
-        // Determine liquid type from MCNK flags
-        // bit 2 (0x04) = River/Water, bit 3 (0x08) = Ocean, bit 4 (0x10) = Magma, bit 5 (0x20) = Slime
-        LiquidType liquidType;
-        if ((mcnkFlags & 0x08) != 0) liquidType = LiquidType.Ocean;
-        else if ((mcnkFlags & 0x10) != 0) liquidType = LiquidType.Magma;
-        else if ((mcnkFlags & 0x20) != 0) liquidType = LiquidType.Slime;
-        else liquidType = LiquidType.Water;
+        // Try to parse packed instances (0x2D4 each)
+        // If data is large enough for packed format, use it; otherwise fall back to single-instance
+        int packedSize = instanceCount * 0x2D4;
+        bool usePacked = mclqData.Length >= packedSize && instanceCount > 0;
 
-        // Build 9×9 height grid
-        var heights = new float[81];
+        // For single-instance (3.3.5 or single liquid type), also accept 720-byte format
+        if (!usePacked && mclqData.Length >= 720)
+            usePacked = false; // use legacy single-instance path below
 
-        // Try to read 81 vertex heights (8 bytes each, starting at offset 8)
-        if (mclqData.Length >= 8 + 81 * 8)
+        int offset = 0;
+        LiquidChunkData? result = null;
+
+        for (int b = 0; b < 4; b++)
         {
-            bool isMagmaOrSlime = liquidType == LiquidType.Magma || liquidType == LiquidType.Slime;
-            for (int i = 0; i < 81; i++)
+            if ((mcnkFlags & liquidBits[b]) == 0) continue;
+
+            if (offset + 8 > mclqData.Length) break;
+
+            float minHeight = BitConverter.ToSingle(mclqData, offset + 0);
+            float maxHeight = BitConverter.ToSingle(mclqData, offset + 4);
+
+            if (float.IsNaN(minHeight) || float.IsNaN(maxHeight))
             {
-                int off = 8 + i * 8;
-                if (isMagmaOrSlime)
+                if (usePacked) { offset += 0x2D4; continue; }
+                else break;
+            }
+
+            LiquidType liquidType = liquidTypes[b];
+
+            // Build 9×9 height grid from per-vertex data or flat plane
+            var heights = new float[81];
+            bool hasPerVertex = false;
+
+            if (offset + 8 + 81 * 8 <= mclqData.Length)
+            {
+                for (int i = 0; i < 81; i++)
                 {
-                    // Simple format: absolute float height
-                    heights[i] = BitConverter.ToSingle(mclqData, off);
-                }
-                else
-                {
-                    // Water format: first 4 bytes are union, use as float height
-                    // In practice the first 4 bytes of the water union can be read as float
-                    float h = BitConverter.ToSingle(mclqData, off);
+                    int voff = offset + 8 + i * 8;
+                    float h = BitConverter.ToSingle(mclqData, voff);
                     if (float.IsNaN(h) || MathF.Abs(h) > 50000f)
-                        h = maxHeight; // fallback
+                        h = 0f;
                     heights[i] = h;
                 }
+                // Check if per-vertex data is meaningful (not all near-zero)
+                for (int i = 0; i < 81; i++)
+                {
+                    if (MathF.Abs(heights[i]) > 0.01f) { hasPerVertex = true; break; }
+                }
             }
-        }
-        else
-        {
-            // Not enough data for per-vertex heights — flat surface
-            Array.Fill(heights, maxHeight);
-        }
 
-        // Read 64 tile flags (8×8 grid) if available
-        int tileFlagsOff = 8 + 81 * 8;
-        byte[] tileFlags = null;
-        if (mclqData.Length >= tileFlagsOff + 64)
-        {
-            tileFlags = new byte[64];
-            Array.Copy(mclqData, tileFlagsOff, tileFlags, 0, 64);
-        }
-
-        // Check if all tile flags indicate hidden (0x0F = do-not-render)
-        // If so, skip this liquid
-        if (tileFlags != null)
-        {
-            bool anyVisible = false;
-            for (int i = 0; i < 64; i++)
+            if (!hasPerVertex)
             {
-                if ((tileFlags[i] & 0x0F) != 0x0F) { anyVisible = true; break; }
+                // Flat plane at (min+max)/2 — these are absolute world Z
+                float liquidLevel = (minHeight + maxHeight) * 0.5f;
+                Array.Fill(heights, liquidLevel);
             }
-            if (!anyVisible) return null;
+
+            // Read 64 tile flags at offset + 0x290 (packed) or offset + 8 + 81*8 (legacy)
+            int tileFlagsOff = usePacked ? (offset + 0x290) : (offset + 8 + 81 * 8);
+            byte[] tileFlags = null;
+            if (tileFlagsOff + 64 <= mclqData.Length)
+            {
+                tileFlags = new byte[64];
+                Array.Copy(mclqData, tileFlagsOff, tileFlags, 0, 64);
+            }
+
+            // Check if all tiles hidden
+            bool anyVisible = true;
+            if (tileFlags != null)
+            {
+                anyVisible = false;
+                for (int i = 0; i < 64; i++)
+                {
+                    if ((tileFlags[i] & 0x0F) != 0x0F) { anyVisible = true; break; }
+                }
+            }
+
+            if (anyVisible && result == null)
+            {
+                result = new LiquidChunkData
+                {
+                    MinHeight = minHeight,
+                    MaxHeight = maxHeight,
+                    Heights = heights,
+                    Type = liquidType,
+                    WorldPosition = worldPos,
+                    TileX = tileX,
+                    TileY = tileY,
+                    ChunkX = chunkX,
+                    ChunkY = chunkY
+                };
+            }
+
+            if (usePacked) offset += 0x2D4;
+            else break; // single instance, done
         }
 
-        if (chunkX == 0 && chunkY == 0)
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  MCLQ tile({tileX},{tileY}) chunk(0,0): min={minHeight:F1} max={maxHeight:F1} type={liquidType} dataLen={mclqData.Length}");
+        return result;
+    }
 
-        return new LiquidChunkData
-        {
-            MinHeight = minHeight,
-            MaxHeight = maxHeight,
-            Heights = heights,
-            Type = liquidType,
-            WorldPosition = worldPos,
-            TileX = tileX,
-            TileY = tileY,
-            ChunkX = chunkX,
-            ChunkY = chunkY
-        };
+    private static byte[] StripMclqChunkHeaderIfPresent(byte[] mclqData)
+    {
+        // Some builds/paths provide MCLQ as a full chunk: [FourCC][uint32 size][payload...]
+        // 0.6.0 client code (Ghidra) treats MCLQ like a normal chunk and uses payload at +8.
+        if (mclqData.Length < 8)
+            return mclqData;
+
+        bool isMclq = mclqData[0] == (byte)'M' && mclqData[1] == (byte)'C' && mclqData[2] == (byte)'L' && mclqData[3] == (byte)'Q';
+        bool isReversed = mclqData[0] == (byte)'Q' && mclqData[1] == (byte)'L' && mclqData[2] == (byte)'C' && mclqData[3] == (byte)'M';
+        if (!isMclq && !isReversed)
+            return mclqData;
+
+        uint size = BitConverter.ToUInt32(mclqData, 4);
+        if (size == 0)
+            return Array.Empty<byte>();
+
+        // Basic sanity: size must fit in the provided buffer (ignore optional padding byte).
+        int available = mclqData.Length - 8;
+        if (size > (uint)available)
+            return mclqData;
+
+        var payload = new byte[size];
+        Buffer.BlockCopy(mclqData, 8, payload, 0, (int)size);
+        return payload;
     }
 
     /// <summary>
@@ -675,10 +753,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 ChunkY = chunkY
             };
 
-            // Attach to matching terrain chunk if possible
+            // Attach to matching terrain chunk if possible (never overwrite existing MCLQ liquid)
             var matchingChunk = result.Chunks.FirstOrDefault(c =>
                 c.TileX == tileX && c.TileY == tileY && c.ChunkX == chunkX && c.ChunkY == chunkY);
-            if (matchingChunk != null)
+            if (matchingChunk != null && matchingChunk.Liquid == null)
                 matchingChunk.Liquid = liquid;
 
             liquidCount++;
@@ -831,8 +909,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             lock (_placementLock)
             {
-                if (!_seenMddfIds.Add((int)uniqueId)) continue;
-
                 string name = ResolveNameViaXid(nameId, mmidEntries, mmdxData);
                 int nameIdx = GetOrAddMdxName(name);
 
@@ -889,8 +965,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             lock (_placementLock)
             {
-                if (!_seenModfIds.Add((int)uniqueId)) continue;
-
                 string name = ResolveNameViaXid(nameId, mwidEntries, mwmoData);
                 int nameIdx = GetOrAddWmoName(name);
 

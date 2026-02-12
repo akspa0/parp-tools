@@ -22,8 +22,11 @@ public class TerrainManager : ISceneRenderer
     private readonly LiquidRenderer _liquidRenderer;
     private readonly IDataSource? _dataSource;
 
-    // Loaded tiles: (tileX, tileY) → list of chunk meshes
+    // Loaded tiles: (tileX, tileY) → list of chunk meshes (GPU-resident)
     private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
+
+    // Persistent cache: parsed tile data stays in memory forever to avoid re-parsing from disk
+    private readonly ConcurrentDictionary<(int, int), TileLoadResult> _tileCache = new();
 
     // Async streaming: background-parsed tiles waiting for GPU upload
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
@@ -182,7 +185,7 @@ public class TerrainManager : ISceneRenderer
             }
         }
 
-        // Unload tiles no longer in AOI
+        // Unload tiles no longer in AOI — dispose GPU meshes but keep parsed data in cache
         var toUnload = _loadedTiles.Keys.Where(k => !desiredTiles.Contains(k)).ToList();
         foreach (var key in toUnload)
         {
@@ -192,6 +195,7 @@ public class TerrainManager : ISceneRenderer
             foreach (var chunk in meshes)
                 chunk.Dispose();
             _loadedTiles.Remove(key);
+            // NOTE: _tileCache retains the parsed data so re-entry is instant
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }
 
@@ -224,6 +228,15 @@ public class TerrainManager : ISceneRenderer
         foreach (var (tx, ty, _) in tilesToLoad)
         {
             if (!_loadingTiles.TryAdd((tx, ty), 0)) continue;
+
+            // Check cache first — if we already parsed this tile, skip the expensive disk read
+            if (_tileCache.TryGetValue((tx, ty), out var cached))
+            {
+                _pendingTiles.Enqueue((tx, ty, cached));
+                _loadingTiles.TryRemove((tx, ty), out _);
+                continue;
+            }
+
             var capturedTx = tx;
             var capturedTy = ty;
             ThreadPool.QueueUserWorkItem(_ =>
@@ -232,6 +245,7 @@ public class TerrainManager : ISceneRenderer
                 try
                 {
                     var result = _adapter.LoadTileWithPlacements(capturedTx, capturedTy);
+                    _tileCache[(capturedTx, capturedTy)] = result; // Cache for future re-entry
                     if (!_disposed)
                         _pendingTiles.Enqueue((capturedTx, capturedTy, result));
                 }

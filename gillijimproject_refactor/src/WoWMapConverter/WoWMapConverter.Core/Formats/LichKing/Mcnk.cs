@@ -49,13 +49,19 @@ namespace WoWMapConverter.Core.Formats.LichKing
         /// Matches Ghidra FUN_007c3a10 behavior exactly.
         /// </summary>
         private static int _diagCount = 0;
+        private static bool _diagLiquidDone = false;
 
         private void ScanSubchunks(byte[] data)
         {
             int pos = 0x80;
             int remaining = data.Length - 0x80;
-            bool diag = (_diagCount++ == 0);
+            // Diag: first chunk, AND first chunk with liquid flags
+            uint rawFlags = data.Length >= 4 ? BitConverter.ToUInt32(data, 0) : 0;
+            bool hasLiquidFlags = (rawFlags & 0x3C) != 0; // River|Ocean|Magma|Slime
+            bool diag = (_diagCount++ == 0) || (hasLiquidFlags && !_diagLiquidDone);
+            if (hasLiquidFlags && diag) _diagLiquidDone = true;
             var dl = diag ? new System.Collections.Generic.List<string>() : null;
+            if (diag && dl != null) dl.Add($"--- MCNK #{_diagCount - 1} flags=0x{rawFlags:X} hasLiquid={hasLiquidFlags} dataLen={data.Length} ---");
 
             while (remaining > 8)
             {
@@ -149,10 +155,53 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 remaining = data.Length - pos;
             }
 
+            // Fallback: if FourCC scan didn't find MCLQ but header has a valid offset,
+            // use the header offset to locate MCLQ data (0.6.0 style).
+            // Header offsets are relative to MCNK chunk start (token), but our data
+            // starts after the 8-byte chunk header, so subtract 8.
+            if (MclqData == null && Header.OfsMclq > 8)
+            {
+                int mclqPos = (int)Header.OfsMclq - 8; // adjust for missing chunk header
+                if (mclqPos >= 0 && mclqPos + 8 <= data.Length)
+                {
+                    // Validate MCLQ FourCC at the offset
+                    uint mclqFcc = BitConverter.ToUInt32(data, mclqPos);
+                    if (mclqFcc == 0x4D434C51) // MCLQ
+                    {
+                        uint mclqDeclaredSize = BitConverter.ToUInt32(data, mclqPos + 4);
+                        int mclqDataStart = mclqPos + 8;
+
+                        // Use declared size if > 0, otherwise compute from flags
+                        int mclqSize;
+                        if (mclqDeclaredSize > 0 && mclqDataStart + mclqDeclaredSize <= data.Length)
+                        {
+                            mclqSize = (int)mclqDeclaredSize;
+                        }
+                        else
+                        {
+                            // Compute from liquid flags: each set bit in 0x3C = one 0x2D4-byte instance
+                            uint flags = (uint)Header.Flags;
+                            int instanceCount = 0;
+                            if ((flags & 0x04) != 0) instanceCount++;
+                            if ((flags & 0x08) != 0) instanceCount++;
+                            if ((flags & 0x10) != 0) instanceCount++;
+                            if ((flags & 0x20) != 0) instanceCount++;
+                            mclqSize = instanceCount * 0x2D4;
+                        }
+
+                        if (mclqSize > 0 && mclqDataStart + mclqSize <= data.Length)
+                        {
+                            MclqData = new byte[mclqSize];
+                            Array.Copy(data, mclqDataStart, MclqData, 0, mclqSize);
+                        }
+                    }
+                }
+            }
+
             if (diag && dl != null)
             {
-                dl.Add($"RESULT: MCVT={Heightmap != null} MCNR={McnrData != null} MCLY={TextureLayers?.Count ?? -1} MCAL={McalRawData != null}({McalRawData?.Length ?? 0}) MCSH={McshData != null} MCLQ={MclqData != null}");
-                try { File.WriteAllLines(Path.Combine(Path.GetTempPath(), "mcnk_scan.txt"), dl); } catch { }
+                dl.Add($"RESULT: MCVT={Heightmap != null} MCNR={McnrData != null} MCLY={TextureLayers?.Count ?? -1} MCAL={McalRawData != null}({McalRawData?.Length ?? 0}) MCSH={McshData != null} MCLQ={MclqData != null}({MclqData?.Length ?? 0}) flags=0x{(uint)Header.Flags:X} ofsMclq=0x{Header.OfsMclq:X}");
+                try { File.AppendAllLines(Path.Combine(Path.GetTempPath(), "mcnk_scan.txt"), dl); } catch { }
             }
         }
 
@@ -171,6 +220,20 @@ namespace WoWMapConverter.Core.Formats.LichKing
             h.AreaId = BitConverter.ToUInt32(data, 0x34);
             h.MapObjRefs = BitConverter.ToUInt32(data, 0x38);
             h.Holes = BitConverter.ToUInt16(data, 0x3C);
+
+            // Sub-chunk offset table (0.6.0 Ghidra-verified)
+            if (data.Length >= 0x68)
+            {
+                h.OfsMcvt = BitConverter.ToUInt32(data, 0x14);
+                h.OfsMcnr = BitConverter.ToUInt32(data, 0x18);
+                h.OfsMcly = BitConverter.ToUInt32(data, 0x1C);
+                h.OfsMcrf = BitConverter.ToUInt32(data, 0x20);
+                h.OfsMcal = BitConverter.ToUInt32(data, 0x24);
+                h.OfsMcsh = BitConverter.ToUInt32(data, 0x2C);
+                h.OfsMcse = BitConverter.ToUInt32(data, 0x58);
+                h.OfsMclq = BitConverter.ToUInt32(data, 0x60);
+                h.SizeMclq = BitConverter.ToUInt32(data, 0x64);
+            }
 
             if (data.Length >= 0x7C)
             {
@@ -228,6 +291,18 @@ namespace WoWMapConverter.Core.Formats.LichKing
         public uint MapObjRefs;
         public ushort Holes;
         public float[] Position; // [0]=Z(height), [1]=X, [2]=Y at data offset 0x70
+
+        // 0.6.0 sub-chunk offset table (offsets relative to MCNK chunk start, i.e. where token lives)
+        // Since we receive data AFTER the 8-byte chunk header, these offsets need -8 adjustment.
+        public uint OfsMcvt;  // 0x14
+        public uint OfsMcnr;  // 0x18
+        public uint OfsMcly;  // 0x1c
+        public uint OfsMcrf;  // 0x20
+        public uint OfsMcal;  // 0x24
+        public uint OfsMcsh;  // 0x2c
+        public uint OfsMcse;  // 0x58
+        public uint OfsMclq;  // 0x60
+        public uint SizeMclq; // 0x64 (size of MCLQ data, from 0.5.3 header)
     }
 
     [Flags]
