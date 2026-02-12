@@ -1014,25 +1014,13 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid type from MLIQ matId and tile flags.
-                // Alpha 0.5.3: GroupLiquid field (MOGP offset 0x34) contains large values
-                // that don't match the noggit (group_liquid-1)&3 formula.
-                // Instead, use tile flags and matId to determine the liquid type.
-                // Tile flag bits 0-2: liquid type (0=water, 1=ocean, 2=magma, 3=slime)
+                // Determine liquid type from MLIQ matId (primary) and group flags.
+                // matId from MLIQ header is the material/liquid type reference:
+                //   0 = still water, 1 = ocean, 2 = magma, 3 = slime
+                // Tile flag bits 0-2 do NOT reliably encode liquid type in 0.5.3/0.6.0 WMOs
+                // (they may encode flow direction or other per-tile data).
                 bool isOcean = (group.Flags & 0x80000) != 0;
-                int liquidBasicType = 0; // default water
-
-                // Sample tile flags to determine liquid type from the first visible tile
-                for (int t = 0; t < tileFlags.Length; t++)
-                {
-                    if ((tileFlags[t] & 0x08) != 0) continue; // skip hidden tiles
-                    int tileType = tileFlags[t] & 0x07; // low 3 bits = liquid type
-                    if (tileType > 0)
-                    {
-                        liquidBasicType = tileType;
-                        break;
-                    }
-                }
+                int liquidBasicType = matId & 0x03; // low 2 bits of matId = basic type
 
                 // Ocean flag override
                 if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
