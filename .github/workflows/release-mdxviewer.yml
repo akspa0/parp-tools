@@ -1,4 +1,4 @@
-name: Release MdxViewer
+name: Release WoWAlphaViewer
 
 on:
   push:
