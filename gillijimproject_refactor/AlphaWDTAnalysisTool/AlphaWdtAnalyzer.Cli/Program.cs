@@ -58,8 +58,17 @@ public static class Program
     {
         Console.WriteLine("AlphaWdtAnalyzer");
         Console.WriteLine("Usage:");
-        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
-        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Single map: AlphaWdtAnalyzer --input <path/to/map.wdt> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Batch maps:  AlphaWdtAnalyzer --input-dir <root_of_wdts> --listfile <community_listfile.csv> [--lk-listfile <3x.txt>] --out <output_dir> [--cluster-threshold N] [--cluster-gap N] [--web] [--extract-mcnk-terrain] [--extract-mcnk-shadows] [--export-adt --export-dir <dir> [--fallback-tileset <blp>] [--fallback-wmo <wmo>] [--fallback-m2 <m2>] [--fallback-blp <blp>] [--no-mh2o] [--asset-fuzzy on|off] [--profile preserve|modified] [--no-fallbacks] [--no-fixups] [--remap <remap.json>] [--dbd-dir <dir>] [--dbctool-out-root <dir>] [--dbctool-src-alias <053|055|060>] [--dbctool-src-dir <dir>] [--dbctool-lk-dir <dir>] [--dbctool-patch-dir <dir>] [--dbctool-patch-file <file>] [--patch-only] [--no-zone-fallback] [--viz-svg] [--viz-html] [--viz-dir <dir>] [--verbose] [--track-assets]]");
+        Console.WriteLine("  Count tiles: AlphaWdtAnalyzer --count-tiles --input <path/to/map.wdt>");
+        Console.WriteLine("  LK Extract:  AlphaWdtAnalyzer --extract-lk-adts <lk_adt_dir> --map <map_name> --out <output_dir> [--extract-mcnk-terrain] [--extract-mcnk-shadows]");
+        Console.WriteLine("");
+        Console.WriteLine("New Terrain Extraction Flags:");
+        Console.WriteLine("  --extract-mcnk-terrain   Extract complete MCNK terrain data to CSV (all flags, liquids, holes, AreaID)");
+        Console.WriteLine("  --extract-mcnk-shadows   Extract MCSH shadow map bitmaps to CSV (64×64 bitmaps per chunk)");
+        Console.WriteLine("  --count-tiles            Print number of ADT tiles and exit (for cache validation)");
+        Console.WriteLine("  --extract-lk-adts <dir>  Extract CSVs directly from LK ADT directory (no Alpha WDT needed)");
+        Console.WriteLine("  --map <name>             Map name for LK extraction (required with --extract-lk-adts)");
         return 2;
     }
 
@@ -92,6 +101,10 @@ public static class Program
         string? dbdDir = null; string? dbctoolOutRoot = null; string? dbctoolSrcAlias = null; string? dbctoolSrcDir = null; string? dbctoolLkDir = null;
         string? dbctoolPatchDir = null; string? dbctoolPatchFile = null;
         bool vizSvg = false; bool vizHtml = false; bool patchOnly = false; bool noZoneFallback = false; string? vizDir = null; int? mdp = null;
+        bool extractMcnkTerrain = false; bool extractMcnkShadows = false;
+        bool countTiles = false;
+        string? extractLkAdtsDir = null;
+        string? mapName = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -233,9 +246,115 @@ public static class Program
                 case "--track-assets":
                     trackAssets = true;
                     break;
+                case "--extract-mcnk-terrain":
+                    extractMcnkTerrain = true;
+                    break;
+                case "--extract-mcnk-shadows":
+                    extractMcnkShadows = true;
+                    break;
+                case "--count-tiles":
+                    countTiles = true;
+                    break;
+                case "--extract-lk-adts":
+                    if (i + 1 >= args.Length) return Usage();
+                    extractLkAdtsDir = args[++i];
+                    break;
+                case "--map":
+                    if (i + 1 >= args.Length) return Usage();
+                    mapName = args[++i];
+                    break;
                 case "-h":
                 case "--help":
                     return Usage();
+            }
+        }
+
+        // Quick tile count mode (for cache validation in rebuild scripts)
+        if (countTiles)
+        {
+            if (string.IsNullOrWhiteSpace(wdt))
+            {
+                Console.Error.WriteLine("--count-tiles requires --input <path/to/map.wdt>");
+                return 1;
+            }
+            if (!File.Exists(wdt))
+            {
+                Console.Error.WriteLine($"WDT not found: {wdt}");
+                return 1;
+            }
+
+            try
+            {
+                var scanner = new WdtAlphaScanner(wdt);
+                Console.WriteLine(scanner.AdtNumbers.Count);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Error reading WDT: {ex.Message}");
+                return 1;
+            }
+        }
+
+        // LK ADT extraction mode (no Alpha WDT needed!)
+        if (!string.IsNullOrWhiteSpace(extractLkAdtsDir))
+        {
+            if (string.IsNullOrWhiteSpace(mapName))
+            {
+                Console.Error.WriteLine("--extract-lk-adts requires --map <map_name>");
+                return Usage();
+            }
+            if (string.IsNullOrWhiteSpace(outDir))
+            {
+                Console.Error.WriteLine("--extract-lk-adts requires --out <output_dir>");
+                return Usage();
+            }
+            
+            Console.WriteLine($"[LK Extraction] Extracting CSVs from LK ADTs: {extractLkAdtsDir}");
+            Console.WriteLine($"[LK Extraction] Map: {mapName}");
+            Console.WriteLine($"[LK Extraction] Output: {outDir}");
+            
+            try
+            {
+                // Note: No log file created here - the calling script handles logging
+                // This avoids file lock issues when the script redirects output via Tee-Object
+                
+                Directory.CreateDirectory(outDir);
+                
+                // Extract terrain if requested
+                if (extractMcnkTerrain)
+                {
+                    Console.WriteLine($"[LK Extraction] Extracting terrain data...");
+                    var terrain = AlphaWdtAnalyzer.Core.Terrain.LkAdtTerrainExtractor.ExtractFromLkAdts(extractLkAdtsDir, mapName);
+                    
+                    var terrainCsvDir = Path.Combine(outDir, "csv", mapName);
+                    Directory.CreateDirectory(terrainCsvDir);
+                    var terrainCsvPath = Path.Combine(terrainCsvDir, $"{mapName}_mcnk_terrain.csv");
+                    AlphaWdtAnalyzer.Core.Terrain.McnkTerrainCsvWriter.WriteCsv(terrain, terrainCsvPath);
+                    Console.WriteLine($"[LK Extraction] ✓ Terrain CSV: {terrainCsvPath}");
+                }
+                
+                // Extract shadows if requested
+                if (extractMcnkShadows)
+                {
+                    Console.WriteLine($"[LK Extraction] Extracting shadow data...");
+                    var shadows = AlphaWdtAnalyzer.Core.Terrain.LkAdtShadowExtractor.ExtractFromLkAdts(extractLkAdtsDir, mapName);
+                    
+                    var shadowCsvDir = Path.Combine(outDir, "csv", mapName);
+                    Directory.CreateDirectory(shadowCsvDir);
+                    var shadowCsvPath = Path.Combine(shadowCsvDir, $"{mapName}_mcnk_shadows.csv");
+                    AlphaWdtAnalyzer.Core.Terrain.McnkShadowCsvWriter.WriteCsv(shadows, shadowCsvPath);
+                    Console.WriteLine($"[LK Extraction] ✓ Shadow CSV: {shadowCsvPath}");
+                }
+                
+                Console.WriteLine($"[LK Extraction] Complete! CSVs written to: {outDir}");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[LK Extraction] Error: {ex.Message}");
+                Console.Error.WriteLine($"[LK Extraction] Stack trace: {ex.StackTrace}");
+                return 1;
             }
         }
 
@@ -312,7 +431,9 @@ public static class Program
                         OutDir = outDir!,
                         ClusterThreshold = clusterThreshold ?? 10,
                         ClusterGap = clusterGap ?? 1000,
-                        Web = web
+                        Web = web,
+                        ExtractMcnkTerrain = extractMcnkTerrain,
+                        ExtractMcnkShadows = extractMcnkShadows
                     });
 
                     if (exportAdt)
@@ -358,21 +479,10 @@ public static class Program
                         return 1;
                     }
 
-                    AnalysisPipeline.Run(new AnalysisPipeline.Options
-                    {
-                        WdtPath = wdt!,
-                        ListfilePath = listfile!,
-                        OutDir = outDir!,
-                        ClusterThreshold = clusterThreshold ?? 10,
-                        ClusterGap = clusterGap ?? 1000,
-                    });
-
-                    if (web)
-                    {
-                        WebAssetsWriter.Write(outDir!);
-                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
-                    }
-
+                    // Export ADTs FIRST if requested (needed for LK AreaIDs in terrain extraction)
+                    string? lkAdtDirectory = null;
+                    var wdtScanner = new WdtAlphaScanner(wdt!);
+                    
                     if (exportAdt)
                     {
                         AdtExportPipeline.ExportSingle(new AdtExportPipeline.Options
@@ -405,6 +515,53 @@ public static class Program
                             NoZoneFallback = noZoneFallback,
                             VizDir = vizDir,
                         });
+                    }
+                    
+                    // Determine LK ADT directory (check even if we didn't export, they might already exist)
+                    // Try outDir first (for CSV-only extraction from cache), then exportDir
+                    string? lkAdtSearchRoot = !string.IsNullOrWhiteSpace(outDir) ? outDir 
+                                             : !string.IsNullOrWhiteSpace(exportDir) ? exportDir 
+                                             : null;
+                    
+                    if (!string.IsNullOrWhiteSpace(lkAdtSearchRoot))
+                    {
+                        lkAdtDirectory = Path.Combine(lkAdtSearchRoot, "World", "Maps", wdtScanner.MapName);
+                        
+                        if (Directory.Exists(lkAdtDirectory))
+                        {
+                            Console.WriteLine($"[area] Found existing LK ADTs at: {lkAdtDirectory}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[area:warn] LK ADT directory not found: {lkAdtDirectory}");
+                            Console.WriteLine($"[area:warn] Area names will show as 'Unknown' (using Alpha AreaIDs)");
+                            lkAdtDirectory = null;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[area:warn] No --out or --export-dir specified, cannot search for LK ADTs");
+                        Console.WriteLine($"[area:warn] Area names will show as 'Unknown' (using Alpha AreaIDs)");
+                        lkAdtDirectory = null;
+                    }
+                    
+                    // Run analysis pipeline (after ADT export so we have LK AreaIDs)
+                    AnalysisPipeline.Run(new AnalysisPipeline.Options
+                    {
+                        WdtPath = wdt!,
+                        ListfilePath = listfile!,
+                        OutDir = outDir!,
+                        ClusterThreshold = clusterThreshold ?? 10,
+                        ClusterGap = clusterGap ?? 1000,
+                        ExtractMcnkTerrain = extractMcnkTerrain,
+                        ExtractMcnkShadows = extractMcnkShadows,
+                        LkAdtDirectory = lkAdtDirectory  // Pass LK ADT directory for area name mapping
+                    });
+
+                    if (web)
+                    {
+                        WebAssetsWriter.Write(outDir!);
+                        Console.WriteLine($"Web UI written to {Path.Combine(outDir!, "web")}. Open index.html in a browser.");
                     }
                 }
 

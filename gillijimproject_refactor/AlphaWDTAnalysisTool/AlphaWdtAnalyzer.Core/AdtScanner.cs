@@ -24,6 +24,8 @@ public sealed class AdtScanner
         var monm = wdt.MonmFiles.Select(ListfileLoader.NormalizePath).ToList();
         var baseDir = Path.GetDirectoryName(wdt.WdtPath) ?? ".";
 
+        Console.WriteLine($"[AdtScanner] Scanning WDT: {wdt.MapName}, {wdt.AdtNumbers.Count} ADTs");
+
         foreach (var adtNum in wdt.AdtNumbers)
         {
             var off = (adtNum < wdt.AdtMhdrOffsets.Count) ? wdt.AdtMhdrOffsets[adtNum] : 0;
@@ -39,23 +41,55 @@ public sealed class AdtScanner
             result.Tiles.Add(new MapTile(x, y, adtPath));
 
             // Parse MDDF entries (36 bytes each)
+            // In Alpha 0.5.3, MDDF coordinates are ALWAYS (0,0,0) - they weren't implemented yet!
+            // Blizzard didn't add world positions to MDDF/MODF until later Alpha builds.
+            // We can only get tile coordinates, not actual world positions.
             var mddf = adt.GetMddfRaw();
             const int mddfEntrySize = 36;
+            
             for (int start = 0; start + mddfEntrySize <= mddf.Length; start += mddfEntrySize)
             {
                 int nameIndex = BitConverter.ToInt32(mddf, start + 0);
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(mddf, start + 4); } catch { uniqueId = null; }
 
+                float worldX = BitConverter.ToSingle(mddf, start + 8);
+                float worldZ = BitConverter.ToSingle(mddf, start + 12);
+                float worldY = BitConverter.ToSingle(mddf, start + 16);
+                float rotX = BitConverter.ToSingle(mddf, start + 20);
+                float rotY = BitConverter.ToSingle(mddf, start + 24);
+                float rotZ = BitConverter.ToSingle(mddf, start + 28);
+                ushort scaleRaw = BitConverter.ToUInt16(mddf, start + 32);
+                ushort flags = BitConverter.ToUInt16(mddf, start + 34);
+
+                float scale = scaleRaw > 0 ? scaleRaw / 1024.0f : 1.0f;
+
                 if (nameIndex >= 0 && nameIndex < mdnm.Count)
                 {
                     var p = mdnm[nameIndex];
                     result.M2Assets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.MdxOrM2, p, wdt.MapName, x, y, uniqueId));
+                    result.Placements.Add(new PlacementRecord(
+                        AssetType.MdxOrM2,
+                        p,
+                        wdt.MapName,
+                        x,
+                        y,
+                        uniqueId,
+                        worldX,
+                        worldY,
+                        worldZ,
+                        rotX,
+                        rotY,
+                        rotZ,
+                        scale,
+                        flags,
+                        0,
+                        0));
                 }
             }
 
             // Parse MODF entries (64 bytes each)
+            // Layout: [0-3] nameId, [4-7] uniqueId, [8-11] X, [12-15] Z, [16-19] Y, [20-63] rotation/bbox/flags
             var modf = adt.GetModfRaw();
             const int modfEntrySize = 64;
             for (int start = 0; start + modfEntrySize <= modf.Length; start += modfEntrySize)
@@ -64,11 +98,39 @@ public sealed class AdtScanner
                 int? uniqueId = null;
                 try { uniqueId = BitConverter.ToInt32(modf, start + 4); } catch { uniqueId = null; }
 
+                float worldX = BitConverter.ToSingle(modf, start + 8);
+                float worldZ = BitConverter.ToSingle(modf, start + 12);
+                float worldY = BitConverter.ToSingle(modf, start + 16);
+                float rotX = BitConverter.ToSingle(modf, start + 20);
+                float rotY = BitConverter.ToSingle(modf, start + 24);
+                float rotZ = BitConverter.ToSingle(modf, start + 28);
+                ushort flags = BitConverter.ToUInt16(modf, start + 56);
+                ushort doodadSet = BitConverter.ToUInt16(modf, start + 58);
+                ushort nameSet = BitConverter.ToUInt16(modf, start + 60);
+                ushort scaleRaw = BitConverter.ToUInt16(modf, start + 62);
+                float scale = scaleRaw > 0 ? scaleRaw / 1024.0f : 1.0f;
+
                 if (nameIndex >= 0 && nameIndex < monm.Count)
                 {
                     var p = monm[nameIndex];
                     result.WmoAssets.Add(p);
-                    result.Placements.Add(new PlacementRecord(AssetType.Wmo, p, wdt.MapName, x, y, uniqueId));
+                    result.Placements.Add(new PlacementRecord(
+                        AssetType.Wmo,
+                        p,
+                        wdt.MapName,
+                        x,
+                        y,
+                        uniqueId,
+                        worldX,
+                        worldY,
+                        worldZ,
+                        rotX,
+                        rotY,
+                        rotZ,
+                        scale,
+                        flags,
+                        doodadSet,
+                        nameSet));
                 }
             }
 

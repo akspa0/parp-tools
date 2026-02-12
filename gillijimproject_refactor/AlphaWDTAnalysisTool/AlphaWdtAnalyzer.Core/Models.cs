@@ -19,7 +19,17 @@ public sealed record PlacementRecord(
     string MapName,
     int TileX,
     int TileY,
-    int? UniqueId // optional until we decode Alpha layout reliably
+    int? UniqueId, // optional until we decode Alpha layout reliably
+    float WorldX,
+    float WorldY,
+    float WorldZ,
+    float RotationX,
+    float RotationY,
+    float RotationZ,
+    float Scale,
+    ushort Flags,
+    ushort DoodadSet,
+    ushort NameSet
 );
 
 public sealed class AnalysisIndex

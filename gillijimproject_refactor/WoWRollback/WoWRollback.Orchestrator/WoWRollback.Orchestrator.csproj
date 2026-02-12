@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.DbcModule\WoWRollback.DbcModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.AdtModule\WoWRollback.AdtModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.ViewerModule\WoWRollback.ViewerModule.csproj" />
+    <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
+    <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.Mpq\WoWRollback.Mpq.csproj" />
+  </ItemGroup>
+
+</Project>

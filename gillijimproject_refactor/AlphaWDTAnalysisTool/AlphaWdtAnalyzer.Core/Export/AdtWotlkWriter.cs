@@ -24,12 +24,23 @@ public static class AdtWotlkWriter
     };
     private static readonly HashSet<int> s_forceZeroMapIds = new()
     {
-        17 // Kalidar prototype map: no LK AreaTable entries exist, preserve as 0
+        13, // Test
+        17, // Kalidar prototype map
+        451 // Development Land
     };
     private static readonly HashSet<string> s_forceZeroMapNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "Kalidar"
+        "Kalidar",
+        "Test",
+        "Development Land"
     };
+
+    private static bool IsForcedZero(int? mapId, string mapName)
+    {
+        if (mapId.HasValue && s_forceZeroMapIds.Contains(mapId.Value)) return true;
+        if (!string.IsNullOrWhiteSpace(mapName) && s_forceZeroMapNames.Contains(mapName)) return true;
+        return false;
+    }
 
     public sealed class WriteContext
     {
@@ -39,33 +50,45 @@ public static class AdtWotlkWriter
         public required int TileY { get; init; }
         public required IEnumerable<PlacementRecord> Placements { get; init; }
         public required AssetFixupPolicy Fixup { get; init; }
-        public bool ConvertToMh2o { get; init; }
+        public required bool ConvertToMh2o { get; init; }
         public AreaIdMapper? AreaMapper { get; init; }
         public AreaIdMapperV2? AreaMapperV2 { get; init; }
-        public IReadOnlyList<int>? AlphaAreaIds { get; init; }
         public DbcPatchMapping? PatchMapping { get; init; }
+        public IReadOnlyList<int>? AlphaAreaIds { get; init; }
         public required string WdtPath { get; init; }
         public required int AdtNumber { get; init; }
         public required int AdtOffset { get; init; }
         public required IReadOnlyList<string> MdnmFiles { get; init; }
         public required IReadOnlyList<string> MonmFiles { get; init; }
-        public bool Verbose { get; init; } = false;
-        public bool TrackAssets { get; init; } = false;
+        public bool Verbose { get; init; }
+        public bool TrackAssets { get; init; }
         public int? CurrentMapId { get; init; }
-        // Visualization
-        public bool VizSvg { get; init; } = false;
+        public bool VizSvg { get; init; }
         public string? VizDir { get; init; }
         public string? LkDbcDir { get; init; }
-        public bool VizHtml { get; init; } = false;
-        public bool PatchOnly { get; init; } = false;
-        public bool NoZoneFallback { get; init; } = false;
+        public bool VizHtml { get; init; }
+        public bool PatchOnly { get; init; }
+        public bool NoZoneFallback { get; init; }
+        public string? VersionAlias { get; init; }
+        public IReadOnlyDictionary<int, int>? AreaOverrides { get; init; }
     }
 
-    private static string BeautifyToken(string token)
+    private static string BeautifyToken(string value)
     {
-        var cleaned = (token ?? string.Empty).Replace('_', ' ').Replace('-', ' ').Trim();
-        if (cleaned.Length == 0) return string.Empty;
-        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(cleaned);
+        if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+        var cleaned = value.Trim().Replace('_', ' ').Replace('-', ' ');
+        var parts = cleaned
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part =>
+            {
+                if (part.Length == 0) return string.Empty;
+                if (part.Length == 1) return part.ToUpperInvariant();
+                return char.ToUpperInvariant(part[0]) + part.Substring(1).ToLowerInvariant();
+            })
+            .Where(part => part.Length > 0);
+
+        return string.Join(" ", parts);
     }
 
     private static string FormatChain(string? chain)
@@ -294,8 +317,7 @@ public static class AdtWotlkWriter
                 }
 
                 bool mapped = false;
-                bool forceZeroMapFlag = (currentMapId.HasValue && s_forceZeroMapIds.Contains(currentMapId.Value))
-                    || (!currentMapId.HasValue && s_forceZeroMapNames.Contains(mapName));
+                bool forceZeroMapFlag = IsForcedZero(currentMapId, mapName);
                 int zoneBase = (aIdNum > 0) ? (aIdNum & unchecked((int)0xFFFF0000)) : 0;
                 int subLo = (aIdNum > 0) ? (aIdNum & 0xFFFF) : 0;
                 int midAreaHint = 0;
@@ -1039,10 +1061,17 @@ WriteArea:
             }
 
             int lkAreaId = -1; string reason = "unmapped"; string lkName = string.Empty; int tgtParent = 0;
+            
+            bool forcedZero = IsForcedZero(ctx.CurrentMapId, ctx.MapName);
+            
             if (alphaRaw >= 0)
             {
+                if (forcedZero)
+                {
+                    lkAreaId = 0; reason = "map_forced_zero";
+                }
                 // Strict: numeric CSV mapping in order: mapId-locked, mapName-locked, then per-map src-name
-                if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
+                else if (ctx.PatchMapping is not null && ctx.CurrentMapId.HasValue && ctx.CurrentMapId.Value >= 0 && ctx.PatchMapping.TryMapByTarget(ctx.CurrentMapId.Value, alphaRaw, out var csvNumMap))
                 {
                     lkAreaId = csvNumMap; reason = "patch_csv_num_mapX";
                 }
@@ -1065,6 +1094,13 @@ WriteArea:
             {
                 // best-effort: capture parent id from CSV mapping for auditing
                 if (!ctx.PatchMapping.TryGetTargetParentId(lkAreaId, out tgtParent)) tgtParent = 0;
+            }
+
+            if (forcedZero && onDisk != 0)
+            {
+                // Critical validation failure: map is forced-zero but we found a non-zero AreaID on disk!
+                // This means PatchMcnkAreaIdsOnDiskV2 failed to enforce the lock or was skipped.
+                throw new InvalidOperationException($"[Validation Failure] Map {ctx.MapName} (MapID={ctx.CurrentMapId}) is forced-zero but chunk {i} has AreaID {onDisk}. This violates the prototype map lock.");
             }
 
             sw.WriteLine(string.Join(',', new[]

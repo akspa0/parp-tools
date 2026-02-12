@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.AnalysisModule\WoWRollback.AnalysisModule.csproj" />
+    <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
+    <ProjectReference Include="..\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\lib\WoWTools.Minimaps\StormLibWrapper\StormLib.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>StormLib.dll</Link>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WoWRollback.MinimapModule\WoWRollback.MinimapModule.csproj" />
+  </ItemGroup>
+</Project>

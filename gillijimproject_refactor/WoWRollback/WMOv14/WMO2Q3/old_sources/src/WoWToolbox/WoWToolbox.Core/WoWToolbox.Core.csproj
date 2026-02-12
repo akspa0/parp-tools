@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WoWToolbox.Core.v2" />
+    <InternalsVisibleTo Include="WoWToolbox.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="**/*.cs" Exclude="obj\**\*.cs;bin\**\*.cs" /> <!-- Explicitly include CS files, excluding obj/bin -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="YamlDotNet" Version="13.3.1" />
+  </ItemGroup>
+
+</Project>

@@ -33,50 +33,53 @@ public class Mddf : Chunk
 
     public void UpdateIndicesForLk(List<int> alphaIndices)
     {
-        var mddfAlphaIndices = GetEntriesIndices();
-        // remap values to their position in alphaIndices (O(n^2) as in C++)
-        for (int i = 0; i < mddfAlphaIndices.Count; ++i)
+        // Build reverse lookup: alphaIndex -> position in alphaIndices list
+        var alphaToLk = new Dictionary<int, int>();
+        for (int j = 0; j < alphaIndices.Count; j++)
         {
-            for (int j = 0; j < alphaIndices.Count; ++j)
-            {
-                if (mddfAlphaIndices[i] == alphaIndices[j])
-                {
-                    mddfAlphaIndices[i] = j;
-                }
-            }
+            // First occurrence wins (avoids double-remap bug from original O(n^2) loop)
+            if (!alphaToLk.ContainsKey(alphaIndices[j]))
+                alphaToLk[alphaIndices[j]] = j;
         }
+
         const int entrySize = 36;
-        var newData = new List<byte>(Data.Length);
-        int newIndex = 0;
-        for (int i = 0; i < Data.Length; i++)
+        for (int start = 0; start + entrySize <= Data.Length; start += entrySize)
         {
-            if ((i % entrySize) == 0)
+            int alphaIdx = BitConverter.ToInt32(Data, start);
+            if (alphaToLk.TryGetValue(alphaIdx, out int lkIdx))
             {
-                var bytes = U.GetCharVectorFromInt(mddfAlphaIndices[newIndex]);
-                newData.AddRange(bytes);
-                newIndex++;
-                i += 3; // skip the 3 bytes we just replaced
-            }
-            else
-            {
-                newData.Add(Data[i]);
+                var bytes = BitConverter.GetBytes(lkIdx);
+                Buffer.BlockCopy(bytes, 0, Data, start, 4);
             }
         }
-        // mutate this chunk's data
-        var arr = newData.ToArray();
-        // [PORT] Update GivenSize to match current data length
-        // (C++ uses givenSize=data.size())
-        this.GetType(); // no-op to avoid empty block warnings
-        // Replace Data contents
-        System.Buffer.BlockCopy(arr, 0, Data, 0, Math.Min(arr.Length, Data.Length));
-        if (arr.Length != Data.Length)
+    }
+
+    /// <summary>
+    /// [PORT] Remap LK per-ADT indices to Alpha WDT-global indices.
+    /// perAdtNames: the MMDX string table from this LK ADT (in order)
+    /// globalNames: the MDNM string table for the Alpha WDT (in order)
+    /// </summary>
+    public void UpdateIndicesForAlpha(List<string> perAdtNames, List<string> globalNames)
+    {
+        const int entrySize = 36;
+        // Build lookup: globalName -> globalIndex
+        var globalLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < globalNames.Count; i++)
+            globalLookup[globalNames[i]] = i;
+
+        for (int start = 0; start + entrySize <= Data.Length; start += entrySize)
         {
-            // resize Data to exact length
-            var newArr = new byte[arr.Length];
-            Buffer.BlockCopy(arr, 0, newArr, 0, arr.Length);
-            // reflection is not desired; instead, create a new Chunk to hold data is heavy.
-            // But Data has a public setter? No. So rebuild this chunk via letters/givenSize/data constructor is not possible here.
-            // [PORT] Simpler: assign via Array.Resize reference
+            int perAdtIndex = BitConverter.ToInt32(Data, start);
+            if (perAdtIndex < 0 || perAdtIndex >= perAdtNames.Count)
+                continue; // invalid index, leave as-is
+
+            var name = perAdtNames[perAdtIndex];
+            if (globalLookup.TryGetValue(name, out var globalIndex))
+            {
+                var bytes = BitConverter.GetBytes(globalIndex);
+                Buffer.BlockCopy(bytes, 0, Data, start, 4);
+            }
+            // else: name not in global table, leave index as-is (will be broken, but logged)
         }
     }
 

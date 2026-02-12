@@ -60,48 +60,51 @@ public class Mcrf : Chunk
     {
         List<int> mcrfAlphaM2Indices = GetDoodadsIndices(m2Number);
         List<int> mcrfAlphaWmoIndices = GetWmosIndices(wmoNumber);
-        
-        // TODO: Add check to be sure mcrfAlphaM2Indices.Count + mcrfAlphaWmoIndices.Count == Data.Length / 4
-        
+
+        // Build reverse lookups: alphaIndex -> position in alphaIndices list
+        var m2Lookup = new Dictionary<int, int>();
+        for (int j = 0; j < alphaM2Indices.Count; j++)
+        {
+            if (!m2Lookup.ContainsKey(alphaM2Indices[j]))
+                m2Lookup[alphaM2Indices[j]] = j;
+        }
+
+        var wmoLookup = new Dictionary<int, int>();
+        for (int j = 0; j < alphaWmoIndices.Count; j++)
+        {
+            if (!wmoLookup.ContainsKey(alphaWmoIndices[j]))
+                wmoLookup[alphaWmoIndices[j]] = j;
+        }
+
         // Update M2 indices
         for (int i = 0; i < mcrfAlphaM2Indices.Count; i++)
         {
-            for (int j = 0; j < alphaM2Indices.Count; j++)
-            {
-                if (mcrfAlphaM2Indices[i] == alphaM2Indices[j])
-                {
-                    mcrfAlphaM2Indices[i] = j;
-                }
-            }
+            if (m2Lookup.TryGetValue(mcrfAlphaM2Indices[i], out int lkIdx))
+                mcrfAlphaM2Indices[i] = lkIdx;
         }
-        
+
         // Update WMO indices
         for (int i = 0; i < mcrfAlphaWmoIndices.Count; i++)
         {
-            for (int j = 0; j < alphaWmoIndices.Count; j++)
-            {
-                if (mcrfAlphaWmoIndices[i] == alphaWmoIndices[j])
-                {
-                    mcrfAlphaWmoIndices[i] = j;
-                }
-            }
+            if (wmoLookup.TryGetValue(mcrfAlphaWmoIndices[i], out int lkIdx))
+                mcrfAlphaWmoIndices[i] = lkIdx;
         }
-        
+
         // Create new data array
         List<byte> newMcrfData = new List<byte>();
-        
+
         // Add M2 indices
         foreach (int index in mcrfAlphaM2Indices)
         {
             newMcrfData.AddRange(BitConverter.GetBytes(index));
         }
-        
+
         // Add WMO indices
         foreach (int index in mcrfAlphaWmoIndices)
         {
             newMcrfData.AddRange(BitConverter.GetBytes(index));
         }
-        
+
         // [PORT] Data is immutable; return a new Mcrf instance with updated indices.
         // Use canonical FourCC (e.g., "MCRF") in-memory; Chunk will reverse on I/O.
         return new Mcrf("MCRF", newMcrfData.Count, newMcrfData.ToArray());

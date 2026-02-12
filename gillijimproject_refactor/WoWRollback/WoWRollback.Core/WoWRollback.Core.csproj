@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\gillijimproject-csharp\gillijimproject-csharp.csproj" />
+    <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\..\lib\WoWTools.Minimaps\StormLibWrapper\StormLibWrapper.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\CascLib\CascLib\CascLib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BLPSharp" Version="0.1.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.6" />
+  </ItemGroup>
+
+</Project>

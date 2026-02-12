@@ -1,0 +1,147 @@
+{
+  "map": "Azeroth",
+  "global": {
+    "m2": [
+      {
+        "min": 4531,
+        "max": 337797,
+        "enabled": true
+      }
+    ],
+    "wmo": [
+      {
+        "min": 4531,
+        "max": 337797,
+        "enabled": true
+      }
+    ]
+  },
+  "tiles": {
+    "r0_c0": {
+      "m2": [
+        {
+          "layer": 0,
+          "min": 274791,
+          "max": 274793,
+          "enabled": true
+        },
+        {
+          "layer": 1,
+          "min": 293989,
+          "max": 293991,
+          "enabled": true
+        }
+      ],
+      "wmo": [
+        {
+          "layer": 0,
+          "min": 56223,
+          "max": 56223,
+          "enabled": true
+        },
+        {
+          "layer": 1,
+          "min": 274792,
+          "max": 274792,
+          "enabled": true
+        },
+        {
+          "layer": 2,
+          "min": 276057,
+          "max": 276057,
+          "enabled": true
+        }
+      ]
+    },
+    "r50_c30": {
+      "m2": [
+        {
+          "layer": 0,
+          "min": 11816,
+          "max": 11861,
+          "enabled": true
+        },
+        {
+          "layer": 1,
+          "min": 12637,
+          "max": 12640,
+          "enabled": true
+        },
+        {
+          "layer": 2,
+          "min": 16692,
+          "max": 16692,
+          "enabled": true
+        },
+        {
+          "layer": 3,
+          "min": 16930,
+          "max": 16954,
+          "enabled": true
+        },
+        {
+          "layer": 4,
+          "min": 17010,
+          "max": 17060,
+          "enabled": true
+        },
+        {
+          "layer": 5,
+          "min": 17130,
+          "max": 18063,
+          "enabled": true
+        },
+        {
+          "layer": 6,
+          "min": 18121,
+          "max": 18121,
+          "enabled": true
+        },
+        {
+          "layer": 7,
+          "min": 18177,
+          "max": 18220,
+          "enabled": true
+        },
+        {
+          "layer": 8,
+          "min": 18290,
+          "max": 18290,
+          "enabled": true
+        },
+        {
+          "layer": 9,
+          "min": 18381,
+          "max": 18428,
+          "enabled": true
+        },
+        {
+          "layer": 10,
+          "min": 18830,
+          "max": 18833,
+          "enabled": true
+        },
+        {
+          "layer": 11,
+          "min": 24875,
+          "max": 24933,
+          "enabled": true
+        }
+      ],
+      "wmo": [
+        {
+          "layer": 0,
+          "min": 17365,
+          "max": 17365,
+          "enabled": true
+        },
+        {
+          "layer": 1,
+          "min": 17423,
+          "max": 17423,
+          "enabled": true
+        }
+      ]
+    }
+  }
+}

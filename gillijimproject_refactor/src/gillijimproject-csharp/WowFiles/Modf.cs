@@ -33,36 +33,54 @@ public class Modf : Chunk
 
     public void UpdateIndicesForLk(List<int> alphaIndices)
     {
-        var modfAlphaIndices = GetEntriesIndices();
-        for (int i = 0; i < modfAlphaIndices.Count; ++i)
+        // Build reverse lookup: alphaIndex -> position in alphaIndices list
+        var alphaToLk = new Dictionary<int, int>();
+        for (int j = 0; j < alphaIndices.Count; j++)
         {
-            for (int j = 0; j < alphaIndices.Count; ++j)
-            {
-                if (modfAlphaIndices[i] == alphaIndices[j])
-                {
-                    modfAlphaIndices[i] = j;
-                }
-            }
+            // First occurrence wins (avoids double-remap bug from original O(n^2) loop)
+            if (!alphaToLk.ContainsKey(alphaIndices[j]))
+                alphaToLk[alphaIndices[j]] = j;
         }
+
         const int entrySize = 64;
-        var newData = new List<byte>(Data.Length);
-        int newIndex = 0;
-        for (int i = 0; i < Data.Length; i++)
+        for (int start = 0; start + entrySize <= Data.Length; start += entrySize)
         {
-            if ((i % entrySize) == 0)
+            int alphaIdx = BitConverter.ToInt32(Data, start);
+            if (alphaToLk.TryGetValue(alphaIdx, out int lkIdx))
             {
-                var bytes = U.GetCharVectorFromInt(modfAlphaIndices[newIndex]);
-                newData.AddRange(bytes);
-                newIndex++;
-                i += 3;
-            }
-            else
-            {
-                newData.Add(Data[i]);
+                var bytes = BitConverter.GetBytes(lkIdx);
+                Buffer.BlockCopy(bytes, 0, Data, start, 4);
             }
         }
-        var arr = newData.ToArray();
-        Buffer.BlockCopy(arr, 0, Data, 0, Math.Min(arr.Length, Data.Length));
+    }
+
+    /// <summary>
+    /// [PORT] Remap LK per-ADT indices to Alpha WDT-global indices.
+    /// perAdtNames: the MWMO string table from this LK ADT (in order)
+    /// globalNames: the MONM string table for the Alpha WDT (in order)
+    /// </summary>
+    public void UpdateIndicesForAlpha(List<string> perAdtNames, List<string> globalNames)
+    {
+        const int entrySize = 64;
+        // Build lookup: globalName -> globalIndex
+        var globalLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < globalNames.Count; i++)
+            globalLookup[globalNames[i]] = i;
+
+        for (int start = 0; start + entrySize <= Data.Length; start += entrySize)
+        {
+            int perAdtIndex = BitConverter.ToInt32(Data, start);
+            if (perAdtIndex < 0 || perAdtIndex >= perAdtNames.Count)
+                continue; // invalid index, leave as-is
+
+            var name = perAdtNames[perAdtIndex];
+            if (globalLookup.TryGetValue(name, out var globalIndex))
+            {
+                var bytes = BitConverter.GetBytes(globalIndex);
+                Buffer.BlockCopy(bytes, 0, Data, start, 4);
+            }
+            // else: name not in global table, leave index as-is (will be broken, but logged)
+        }
     }
 
     public void AddToObjectsHeight(int heightToAdd)

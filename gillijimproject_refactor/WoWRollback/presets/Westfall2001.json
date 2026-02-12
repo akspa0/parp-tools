@@ -1,0 +1,16 @@
+{
+  "name": "Westfall 2001 Alpha Layer",
+  "description": "Early pass focused on buildings and props for Westfall region in Azeroth.",
+  "uniqueId": {
+    "max": 50000,
+    "ranges": [
+      { "min": 0,     "max": 20000, "label": "Early scaffolding" },
+      { "min": 20001, "max": 35000, "label": "Buildings" },
+      { "min": 35001, "max": 50000, "label": "Props/Trees" }
+    ]
+  },
+  "filters": {
+    "assetTypes": ["tree", "bush", "rock", "prop", "building"],
+    "maps": ["Azeroth"]
+  }
+}

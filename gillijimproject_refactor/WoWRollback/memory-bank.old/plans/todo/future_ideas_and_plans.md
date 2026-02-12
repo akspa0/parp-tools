@@ -1,0 +1,19 @@
+We need to work on improving the viewer's performance. We are essentially reading databases of data to build up an interactive viewer. We should figure out how to first, optimize the viewer side of things - can we turn objects into images instead of plotting all 150k objects as separate svg overlays? That's the biggest hurdle now, because we've got the proof of concept, but the viewer is a performance hog, it eats CPU time and RAM like candy. It's not easy to use because it takes forever to re-draw every object placed, even when using the Sedimentary Layers feature.
+
+I believe the viewer should at least only display objects within the current zoom/field of view, and limit the number of objects shown at zoomed-out levels, such that only clusters of related objects show up when zoomed out. The current cluster maps do not work properly and need a complete overhaul anyways. They all appear at the very top of the middle of the map, stacked up in a single line over the X axis.
+
+World of Warcraft is just a database exploration tool with tightly packed data structures, at the end of the day. We should probably try to utilize the ingenuity of the original files and not extract data to csv, but harness the data directly, in-memory. I suspect this is why the map editors that hobbyists created, do not extract data to another project filetype, and instead keep everything in the ADT format - it's already optimized perfectly for the use case. A highly optimized database format, built specifically for the standardized data they choose to build within it.
+
+I would like us to maybe get up to speed by not taking it out of its original file format, and instead do all queries in-memory with our decoding logic as a guide for building a second generation library for interacting with this data? I think that alone would be a huge benefit at this stage.
+
+**→ See detailed plan: [in-memory-query-architecture.md](in-memory-query-architecture.md)**
+
+**Key improvements:**
+- Replace CSV extraction with lightweight JSON indices (~100KB vs 50MB)
+- Query ADT files on-demand instead of loading everything
+- 3-5x faster startup, 80% less memory usage
+- Keep CSV exports as `--debug` option only
+- Zoom-based progressive loading in viewer
+
+Much later ideas:
+We will need to be able to read data from WMO/v14 and MDX files from the alpha versions, to resolve filenames, missing data, and potentially convert WMO/v14 to WMO/v17 files.

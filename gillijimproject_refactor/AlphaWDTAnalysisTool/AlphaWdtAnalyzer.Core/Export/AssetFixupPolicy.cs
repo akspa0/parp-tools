@@ -95,6 +95,19 @@ public sealed class AssetFixupPolicy
             {
                 var originalExt = Path.GetExtension(norm).ToLowerInvariant();
                 var allowed = (originalExt == ".mdx" || originalExt == ".m2") ? new[] { originalExt } : new[] { ".m2", ".mdx" };
+
+                // [normalize] prefer .m2 when .mdx is referenced but .m2 exists
+                if (string.Equals(originalExt, ".mdx", StringComparison.OrdinalIgnoreCase))
+                {
+                    var asM2 = Path.ChangeExtension(norm, ".m2");
+                    if (_resolver.Exists(asM2) || _inventory.Exists(asM2))
+                    {
+                        var msrc = _resolver.ContainsPrimary(asM2) ? "normalize_ext:primary" : _resolver.ContainsSecondary(asM2) ? "normalize_ext:secondary" : "normalize_ext";
+                        Log(AssetType.MdxOrM2, norm, asM2, method: msrc);
+                        method = msrc;
+                        return asM2;
+                    }
+                }
                 if (_enableFuzzy)
                 {
                     var fuzzy = _resolver.FindSimilar(norm, allowed);
@@ -197,6 +210,19 @@ public sealed class AssetFixupPolicy
                     method = m;
                     return fuzzy;
                 }
+            }
+        }
+
+        // Specular mapping for tileset textures: try _s variant when original missing
+        if (_enableFixups && isTileset && isBlp && !originalIsSpecular)
+        {
+            var spec = origBaseNoExt + "_s.blp";
+            if (_resolver.Exists(spec) || _inventory.Exists(spec))
+            {
+                var m = SourceOf(spec, "tileset_variant");
+                Log(AssetType.Blp, norm, spec, method: m);
+                method = m;
+                return spec;
             }
         }
 

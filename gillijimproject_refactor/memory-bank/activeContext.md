@@ -1,16 +1,100 @@
 # Active Context
 
-- **Current Focus**: Stop cross-map leakage in Alpha (0.5.x) → LK (3.3.5) mapping, with emphasis on prototype maps such as Kalidar (`mapId=17`) defaulting to zero when no LK AreaTable entry exists. Stabilize DBCTool crosswalk CSVs so AlphaWDTAnalysisTool can rely exclusively on map-locked matches.
-- **Recent Changes**:
-  - Added `s_forceZeroMapIds` / `s_forceZeroMapNames` and an early exit in `AdtWotlkWriter.PatchMcnkAreaIdsOnDiskV2()` so Kalidar tiles always write `method=map_forced_zero`.
-  - Updated write logic to treat any unmatched candidate as `unmapped_zero`, preventing inherited LK IDs.
-  - Captured the forced-zero requirement in `docs/planning/003-areaid-regression-plan.md` and the memory bank project brief.
-  - Regenerated AlphaWDT outputs for Kalidar to validate that CSV `areaid_verify_*` rows now record `lk_areaid = -1` and on-disk `0`.
-- **Next Steps**:
-  - Sweep other prototype or developer maps; extend the forced-zero tables as similar gaps are discovered.
-  - Re-run DBCTool crosswalk generation after zero-overrides to confirm LK IDs are absent for Kalidar in CSV outputs.
-  - Wire stricter validation into AlphaWDTAnalysisTool logging/tests to fail when a forced-zero map produces non-zero LK IDs.
-  - Once mapping is stable, resume the GillijimProject.Core refactor and public API design.
-- **Decisions**:
-  - Library-first architecture (CLI delegates to library) remains the end goal but its implementation is paused until mapping is deterministic.
-  - FourCC handling, exception strategy, and immutable domain guidance remain unchanged.
+## Current Focus: MdxViewer — Multi-Version World Viewer (Feb 11, 2026)
+
+MdxViewer is the **primary project** in the tooling suite. It is a high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data.
+
+### Recently Completed (Feb 11-12)
+
+- **Full-Load Mode**: ✅ `--full-load` (default) / `--partial-load` CLI flags — loads all tiles at startup
+- **Specular Highlights**: ✅ Blinn-Phong specular in ModelRenderer fragment shader (shininess=32, intensity=0.3)
+- **Sphere Environment Map**: ✅ `SphereEnvMap` flag (0x2) generates UVs from view-space normals for reflective surfaces
+- **MDX Bone Parser**: ✅ BONE/HELP/PIVT chunks parsed with KGTR/KGRT/KGSC keyframe tracks + tangent data
+- **MDX Animation Engine**: ✅ `MdxAnimator` — hierarchy traversal, keyframe interpolation (linear/hermite/bezier/slerp)
+- **Animation Integration**: ✅ Per-frame bone matrix update in MdxRenderer.Render()
+- **WoWDBDefs Bundling**: ✅ `.dbd` definitions copied to output via csproj Content items
+- **Release Build**: ✅ `dotnet publish -c Release -r win-x64 --self-contained` verified working (1315 .dbd files bundled)
+- **GitHub Actions**: ✅ `.github/workflows/release-mdxviewer.yml` — tag-triggered + manual dispatch, creates ZIP + GitHub Release
+- **No StormLib**: ✅ Pure C# `NativeMpqService` handles all MPQ access — no native DLL dependency
+
+### Previously Completed (Feb 9-10)
+
+- WMO doodad culling (distance + cap + sort + fog passthrough)
+- GEOS footer parsing (tag validation)
+- Alpha cutout for trees, MDX fog skip for untextured
+- AreaID fix (low 16-bit extraction + fallback)
+- Directional tile loading with heading-based priority
+- DBC lighting (Light.dbc + LightData.dbc)
+- Replaceable texture DBC resolution with MPQ validation
+
+### Working Features
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Alpha 0.5.3 WDT terrain | ✅ | Monolithic format, 256 MCNK chunks per tile |
+| 0.6.0 split ADT terrain | ✅ | StandardTerrainAdapter, MCNK with header offsets |
+| 0.6.0 WMO-only maps | ✅ | MWMO+MODF parsed from WDT |
+| 3.3.5 split ADT terrain | ⚠️ | Loading freeze — needs investigation |
+| WMO v14 rendering | ✅ | 4-pass: opaque/doodads/liquids/transparent |
+| WMO liquid (MLIQ) | ✅ | matId-based type detection, correct positioning |
+| Terrain liquid (MCLQ) | ✅ | Per-vertex sloped heights, absolute world Z |
+| MDX rendering | ✅ | Two-pass, alpha cutout, blend modes 0-6 |
+| Async tile streaming | ✅ | 9×9 AOI, directional lookahead, persistent cache |
+| Frustum culling | ✅ | View-frustum + distance + fade |
+| DBC Lighting | ✅ | Zone-based ambient/fog/sky colors |
+| Minimap overlay | ✅ | BLP tiles, zoom, click-to-teleport |
+
+### Known Issues / Next Steps
+
+1. **3.3.5 ADT loading freeze** — needs investigation
+2. **WMO culling too aggressive** — objects outside WMO not visible from inside
+3. **GPU skinning** — bone matrices computed but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
+4. **Animation UI** — sequence selection combo box in ImGui panel
+5. **Proper lighting** — terrain + object shading improvements
+6. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
+7. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
+
+---
+
+## Key Architecture Decisions
+
+### Coordinate System (Confirmed via Ghidra)
+- WoW: right-handed, X=North, Y=West, Z=Up, Direct3D CW front faces
+- OpenGL: CCW front faces
+- Fix: Reverse winding at GPU upload + 180° Z rotation in placement
+- Terrain: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`
+- WMO-only maps: raw WoW world coords (no MapOrigin conversion)
+
+### Performance Constants
+
+| Constant | Value | Location |
+|----------|-------|----------|
+| DoodadCullDistance (world) | 1500f | WorldScene.cs |
+| DoodadSmallThreshold | 10f | WorldScene.cs |
+| WmoCullDistance | 2000f | WorldScene.cs |
+| NoCullRadius | 150f | WorldScene.cs |
+| WMO DoodadCullDistance | 500f | WmoRenderer.cs |
+| WMO DoodadMaxRenderCount | 64 | WmoRenderer.cs |
+| AoiRadius | 4 (9×9) | TerrainManager.cs |
+| AoiForwardExtra | 3 | TerrainManager.cs |
+| MaxGpuUploadsPerFrame | 8 | TerrainManager.cs |
+| MaxConcurrentMpqReads | 4 | TerrainManager.cs |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `WorldScene.cs` | Placement transforms, instance management, culling |
+| `WmoRenderer.cs` | WMO v14 GPU rendering, doodad culling, liquid |
+| `ModelRenderer.cs` | MDX GPU rendering, alpha cutout, fog skip |
+| `AlphaTerrainAdapter.cs` | Alpha 0.5.3 WDT terrain + AreaID + liquid type |
+| `StandardTerrainAdapter.cs` | 0.6.0 / 3.3.5 split ADT terrain + MCLQ + WMO-only maps |
+| `TerrainManager.cs` | AOI streaming, persistent cache, MPQ throttling |
+| `LiquidRenderer.cs` | MCLQ/MLIQ liquid mesh rendering |
+| `AreaTableService.cs` | AreaID → name with MapID filtering |
+| `LightService.cs` | DBC Light/LightData zone-based lighting |
+| `ReplaceableTextureResolver.cs` | DBC-based replaceable texture resolution |
+| `MdxFile.cs` | MDX parser (GEOS, BONE, PIVT, HELP with KGTR/KGRT/KGSC tracks) |
+| `MdxAnimator.cs` | Skeletal animation engine (hierarchy, interpolation, bone matrices) |
+| `MdxViewer.csproj` | Project file with WoWDBDefs bundling |
+| `.github/workflows/release-mdxviewer.yml` | CI/CD release workflow |

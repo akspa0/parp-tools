@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.0-alpha0034" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+    <ProjectReference Include="..\WoWRollback.DbcModule\WoWRollback.DbcModule.csproj" />
+    <ProjectReference Include="..\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
+    <ProjectReference Include="..\..\AlphaWDTAnalysisTool\AlphaWdtAnalyzer.Core\AlphaWdtAnalyzer.Core.csproj" />
+    <ProjectReference Include="..\..\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\WoWFormatLib\WoWFormatLib\WoWFormatLib.csproj" />
+  </ItemGroup>
+
+</Project>

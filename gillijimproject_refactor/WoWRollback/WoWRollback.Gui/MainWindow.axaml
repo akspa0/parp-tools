@@ -1,0 +1,356 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:primitives="clr-namespace:Avalonia.Controls.Primitives;assembly=Avalonia.Controls"
+        x:Class="WoWRollback.Gui.MainWindow"
+        Width="1600" MinWidth="1280" Height="950" MinHeight="800"
+        Title="WoWRollback GUI">
+  <DockPanel>
+
+    <DataGrid x:Name="MapsGrid" Margin="8" AutoGenerateColumns="False" IsReadOnly="True">
+      <DataGrid.Columns>
+        <DataGridTextColumn Header="Map" Binding="{Binding Map}" Width="*"/>
+        <DataGridTextColumn Header="tile_layers.csv" Binding="{Binding HasTileLayers}" Width="120"/>
+        <DataGridTextColumn Header="layers.json" Binding="{Binding HasLayersJson}" Width="120"/>
+        <DataGridTextColumn Header="Rows" Binding="{Binding TileLayerRows}" Width="80"/>
+        <DataGridTextColumn Header="Path" Binding="{Binding Path}" Width="2*"/>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <TabControl x:Name="MainTabs" Margin="8">
+      <TabItem Header="Data Sources">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+              <TextBlock Text="Source:" VerticalAlignment="Center"/>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <RadioButton x:Name="DsTypeLoose" Content="Loose/Test Data" IsChecked="True"/>
+                <RadioButton x:Name="DsTypeInstall" Content="Game Install"/>
+                <RadioButton x:Name="DsTypeCasc" Content="CASC"/>
+              </StackPanel>
+            </StackPanel>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Root:" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataRootBox"/>
+              <Button Grid.Column="2" x:Name="PickDataRootBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="160"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="180"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Version:" VerticalAlignment="Center"/>
+              <ComboBox Grid.Column="1" x:Name="DataVersionCombo"/>
+              <TextBlock Grid.Column="2" Text="Build:" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBox Grid.Column="3" x:Name="DataBuildBox"/>
+              <TextBlock Grid.Column="4" Text="DBD:" VerticalAlignment="Center" Margin="12,0,0,0"/>
+              <TextBox Grid.Column="5" x:Name="DataDbdBox"/>
+              <Button Grid.Column="6" x:Name="PickDataDbdBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="DBC (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataDbcBox"/>
+              <Button Grid.Column="2" x:Name="PickDataDbcBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="LK Client (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="LkClientBox"/>
+              <Button Grid.Column="2" x:Name="PickLkClientBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="LK DBC (optional):" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="LkDbcBox"/>
+              <Button Grid.Column="2" x:Name="PickLkDbcBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <Grid x:Name="CascListfileRow" IsVisible="False">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="CASC listfile:" VerticalAlignment="Center"/>
+              <TextBox Grid.Column="1" x:Name="DataListfileBox"/>
+              <Button Grid.Column="2" x:Name="PickDataListfileBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button x:Name="DataPreviewBtn" Content="Preview" MinWidth="100"/>
+              <Button x:Name="DataLoadBtn" Content="Load" MinWidth="160" Background="#2563EB" Foreground="White" FontWeight="Bold"/>
+              <Button x:Name="SaveDataDefaultsBtn" Content="Save Defaults" MinWidth="120"/>
+              <Button x:Name="LoadDataDefaultsBtn" Content="Load Defaults" MinWidth="120"/>
+              <CheckBox x:Name="AutoPrepareAfterLoadCheck" Content="Auto‑Prepare after Load" VerticalAlignment="Center" IsChecked="True"/>
+            </StackPanel>
+            <!-- CLI Options -->
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
+              <TextBlock Text="CLI Options:" VerticalAlignment="Center" FontWeight="Bold"/>
+              <CheckBox x:Name="CliForceCheck" Content="Force Re‑extract" VerticalAlignment="Center" ToolTip.Tip="--force: Re-extract even if cached"/>
+              <CheckBox x:Name="CliSkipMinimapsCheck" Content="Skip Minimaps" VerticalAlignment="Center" ToolTip.Tip="--skip-minimaps: Don't extract minimap tiles"/>
+              <CheckBox x:Name="CliExportMeshCheck" Content="Export Mesh (GLB)" VerticalAlignment="Center" ToolTip.Tip="--export-mesh: Export terrain as GLB/OBJ"/>
+              <CheckBox x:Name="CliPlacementsOnlyCheck" Content="Placements Only" VerticalAlignment="Center" ToolTip.Tip="--placements-only: Skip terrain, clusters, mesh"/>
+            </StackPanel>
+
+          </StackPanel>
+          <Grid Grid.Row="1" ColumnDefinitions="*,*">
+            <Border BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,0,8,0" Grid.Column="0">
+              <ScrollViewer>
+                <TextBox x:Name="DataPreviewBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="160"/>
+              </ScrollViewer>
+            </Border>
+            <Border BorderBrush="#444" BorderThickness="1" Padding="4" Grid.Column="1">
+              <ScrollViewer>
+                <TextBox x:Name="DataLoadLogBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="160"/>
+              </ScrollViewer>
+            </Border>
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Layers">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <!-- Selection row -->
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Map:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="LayersMapCombo" Width="220"/>
+            <TextBlock Text="Tile:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="TileSelectBox" Width="120"/>
+            <CheckBox x:Name="HeatmapToggle" Content="Heatmap" VerticalAlignment="Center"/>
+          </StackPanel>
+
+          <!-- Body -->
+          <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="2*"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Left visuals: Tile grid + Minimap preview -->
+            <StackPanel Grid.Column="0" Margin="0,8,12,0" Spacing="8">
+              <!-- Compact 64x64 tile grid -->
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <ScrollViewer Width="820" Height="820">
+                  <primitives:UniformGrid x:Name="TileGridPanel" Rows="64" Columns="64" Width="768" Height="768"/>
+                </ScrollViewer>
+              </Border>
+              <!-- Selected tile minimap preview -->
+              <Border BorderBrush="#444" BorderThickness="1" Padding="4">
+                <Image x:Name="MinimapImage" Width="256" Height="256" Stretch="Uniform"/>
+              </Border>
+            </StackPanel>
+
+            <!-- Column splitter -->
+            <GridSplitter Grid.Column="0" Width="6" Background="#333" HorizontalAlignment="Right"/>
+
+            <!-- Layers panel (Docked: header pinned, lists scroll) -->
+            <DockPanel Grid.Column="1" Margin="0,8,0,0" LastChildFill="True">
+              <!-- Pinned header controls -->
+              <StackPanel DockPanel.Dock="Top" Spacing="8">
+                <TextBlock x:Name="LayersHeader" Text="Per‑Tile Layers" FontWeight="Bold"/>
+                <Button x:Name="SaveSelectionPresetBtn" Content="Save Selection Preset"/>
+                <WrapPanel>
+                  <TextBlock Text="Start" VerticalAlignment="Center"/>
+                  <Slider x:Name="StartSlider" Width="220" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                  <TextBox x:Name="StartBox" Width="90" Margin="6,0,0,0"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <TextBlock Text="End" VerticalAlignment="Center"/>
+                  <Slider x:Name="EndSlider" Width="220" Margin="6,0,0,0" TickFrequency="1" IsSnapToTickEnabled="True"/>
+                  <TextBox x:Name="EndBox" Width="90" Margin="6,0,0,0"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <TextBlock x:Name="RangeLabel" VerticalAlignment="Center"/>
+                </WrapPanel>
+                <TextBlock x:Name="TimeStats"/>
+                <TextBlock Text="Baseline" FontWeight="Bold"/>
+                <WrapPanel>
+                  <Button x:Name="BaselineEnableAllBtn" Content="Enable All Baseline" Margin="0,0,6,6"/>
+                  <Button x:Name="BaselineDisableAllBtn" Content="Disable All Baseline" Margin="0,0,6,6"/>
+                  <Button x:Name="BaselineTimeSliceBtn" Content="Only Range" Margin="0,0,6,6"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <CheckBox x:Name="FixHolesCheck" Content="Fix terrain holes" IsChecked="True" Margin="0,0,12,6"/>
+                  <TextBlock Text="Scope:" VerticalAlignment="Center"/>
+                  <ComboBox x:Name="HolesScopeBox" Width="140" Margin="6,0,12,6">
+                    <ComboBoxItem Content="neighbors"/>
+                    <ComboBoxItem Content="self"/>
+                  </ComboBox>
+                  <CheckBox x:Name="PreserveWmoHolesCheck" Content="Preserve WMO holes" IsChecked="True" Margin="0,0,12,6"/>
+                  <CheckBox x:Name="DisableMcshCheck" Content="Disable MCSH" Margin="0,0,12,6"/>
+                </WrapPanel>
+                <WrapPanel>
+                  <Button x:Name="RecompileMapBtn" Content="RECOMPILE MAP" Margin="0,0,6,6" Background="#8B0000" Foreground="White" FontWeight="Bold"/>
+                </WrapPanel>
+                <!-- Area controls are temporarily hidden -->
+                <TextBlock Text="Area Groups" FontWeight="Bold" IsVisible="False"/>
+                <WrapPanel IsVisible="False">
+                  <ComboBox x:Name="ParentAreaCombo" Width="260" Margin="0,0,6,6"/>
+                  <CheckBox x:Name="AreaAddModeBox" Content="Add to selection" Margin="0,0,6,6"/>
+                  <Button x:Name="SelectParentBtn" Content="Select Parent Tiles" Margin="0,0,6,6"/>
+                </WrapPanel>
+                <Border BorderBrush="#444" BorderThickness="1" Padding="4" IsVisible="False">
+                  <StackPanel>
+                    <TextBlock Text="Areas Legend"/>
+                    <StackPanel x:Name="AreasLegend"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <!-- Scrollable lists -->
+              <ScrollViewer>
+                <StackPanel Spacing="8">
+<!-- Aggregated Bands hidden -->
+                  <StackPanel x:Name="TileLayersList" IsVisible="False"/>
+<!-- AddRange controls hidden -->
+                  <WrapPanel IsVisible="False">
+                    <TextBox x:Name="AddRangeMinBox" Width="120" Watermark="Min UniqueID" Margin="0,0,6,6"/>
+                    <TextBox x:Name="AddRangeMaxBox" Width="120" Watermark="Max UniqueID" Margin="0,0,6,6"/>
+                    <ComboBox x:Name="AddRangeTypeBox" Width="100" Margin="0,0,6,6">
+                      <ComboBoxItem Content="M2"/>
+                      <ComboBoxItem Content="WMO"/>
+                    </ComboBox>
+                    <Button x:Name="AddRangeBtn" Content="Add Tile Range" Margin="0,0,6,6"/>
+                    <Button x:Name="ClearTileCustomBtn" Content="Clear Tile Custom" Margin="0,0,0,6"/>
+                  </WrapPanel>
+<!-- Custom Ranges hidden -->
+                  <TextBlock Text="Custom Ranges" FontWeight="Bold" IsVisible="False"/>
+                  <StackPanel x:Name="TileCustomList" IsVisible="False"/>
+                </StackPanel>
+              </ScrollViewer>
+            </DockPanel>
+          </Grid>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Build">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <!-- Output path row -->
+          <Grid Grid.Row="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Output:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="BuildOutBox" Watermark="Output folder for LK files"/>
+            <Button Grid.Column="2" x:Name="PickBuildOutBtn" Content="Browse" Margin="6,0,0,0" MinWidth="90"/>
+          </Grid>
+
+          <!-- Actions row -->
+          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="PrepareBtn" Content="Prepare Layers"/>
+            <Button x:Name="BuildBtn" Content="Build Selected" IsEnabled="False"/>
+            <Button x:Name="OpenOutBtn" Content="Open Output"/>
+            <Button x:Name="ExportVlmBtn" Content="Export VLM Dataset" Background="#059669" Foreground="White" FontWeight="Bold"/>
+          </StackPanel>
+
+          <!-- Log -->
+          <Border Grid.Row="2" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ScrollViewer>
+              <TextBox x:Name="BuildLogBox" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap"/>
+            </ScrollViewer>
+          </Border>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Presets">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="RefreshPresetsBtn" Content="Refresh"/>
+            <Button x:Name="LoadPresetBtn" Content="Load Preset"/>
+            <Button x:Name="GenBaselineBtn" Content="Generate Baseline"/>
+            <Button x:Name="OpenPresetsBtn" Content="Open Presets Folder"/>
+          </StackPanel>
+          <Border Grid.Row="1" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ListBox x:Name="PresetsList"/>
+          </Border>
+        </Grid>
+      </TabItem>
+      <TabItem Header="Settings">
+        <StackPanel Margin="0,8,0,0" Spacing="12">
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Cache:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="CacheBox" HorizontalAlignment="Stretch" ToolTip.Tip="Cache: per-map analysis outputs (tile_layers.csv, layers.json). Produced by prepare-layers."/>
+            <Button Grid.Column="2" x:Name="RescanBtn" Content="Rescan" MinWidth="90" Margin="6,0,0,0"/>
+            <Button Grid.Column="3" x:Name="OpenCacheBtn" Content="Open Cache Folder" MinWidth="150" Margin="6,0,0,0"/>
+          </Grid>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Presets:" VerticalAlignment="Center"/>
+            <TextBox Grid.Column="1" x:Name="PresetsBox" HorizontalAlignment="Stretch" ToolTip.Tip="Presets: where the GUI saves/loads selection JSON."/>
+          </Grid>
+        </StackPanel>
+      </TabItem>
+      <TabItem Header="Filters">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="AnalyzeFiltersBtn" Content="Analyze"/>
+            <Button x:Name="WhitelistBtn" Content="Whitelist Selected"/>
+            <Button x:Name="BlacklistBtn" Content="Blacklist Selected"/>
+            <Button x:Name="ClearFilterSelBtn" Content="Clear Selection"/>
+            <Button x:Name="SaveFiltersBtn" Content="Save Filters to Preset"/>
+          </StackPanel>
+          <Border Grid.Row="1" BorderBrush="#444" BorderThickness="1" Padding="4" Margin="0,8,0,0">
+            <ListBox x:Name="FiltersList" SelectionMode="Multiple"/>
+          </Border>
+        </Grid>
+      </TabItem>
+    </TabControl>
+    <Border x:Name="LoadingOverlay" Background="#AA000000" IsVisible="False" ZIndex="9999">
+      <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+        <ProgressBar IsIndeterminate="True" Width="260"/>
+        <TextBlock x:Name="LoadingText" Text="Loading..." Foreground="White" FontSize="16" HorizontalAlignment="Center"/>
+      </StackPanel>
+    </Border>
+  </DockPanel>
+</Window>

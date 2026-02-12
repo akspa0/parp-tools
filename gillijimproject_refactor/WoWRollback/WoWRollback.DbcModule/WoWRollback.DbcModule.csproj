@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\DBCTool.V2\DBCTool.V2.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
+    <ProjectReference Include="..\WoWRollback.Core\WoWRollback.Core.csproj" />
+  </ItemGroup>
+
+</Project>

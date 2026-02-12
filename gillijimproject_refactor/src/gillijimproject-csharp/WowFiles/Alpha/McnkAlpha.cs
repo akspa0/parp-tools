@@ -29,6 +29,24 @@ public class McnkAlpha : Mcnk
     private readonly Mcal _mcal;
     private readonly Chunk _mclq;
 
+    // Public accessors for VLM export and lossless chunk extraction
+    public int AdtNumber => _adtNumber;
+    public McnkAlphaHeader Header => _mcnkAlphaHeader;
+    public int IndexX => _mcnkAlphaHeader.IndexX;
+    public int IndexY => _mcnkAlphaHeader.IndexY;
+    public int NLayers => _mcnkAlphaHeader.NLayers;
+    public int Holes => _mcnkAlphaHeader.Holes;
+    public byte[] McvtData => _mcvt.Data;
+    public byte[] McnrData => _mcnrAlpha.Data;
+    public byte[] MclyData => _mcly.Data;
+    public byte[] McalData => _mcal.Data;
+    public byte[] McshData => _mcsh.Data;
+    public byte[] MclqData => _mclq.Data;
+    public int McalSize => _mcnkAlphaHeader.McalSize;
+    public int McshSize => _mcnkAlphaHeader.McshSize;
+    public byte[] MccvData => Array.Empty<byte>();  // MCCV not present in Alpha - added in later versions
+
+
     public McnkAlpha(FileStream adtFile, int offsetInFile, int headerSize, int adtNum) : base(adtFile, offsetInFile)
     {
         _adtNumber = adtNum;
@@ -59,20 +77,42 @@ public class McnkAlpha : Mcnk
         _mcrf = new Mcrf(adtFile, offsetInFile);
 
         // Read MCSH
-        offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McshOffset;
-        byte[] mcshData = Util.GetByteArrayFromFile(adtFile, offsetInFile, _mcnkAlphaHeader.McshSize);
-        _mcsh = new Chunk("MCSH", _mcnkAlphaHeader.McshSize, mcshData);
+        if (_mcnkAlphaHeader.McshOffset > 0 && _mcnkAlphaHeader.McshSize > 0)
+        {
+            offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McshOffset;
+            byte[] mcshData = Util.GetByteArrayFromFile(adtFile, offsetInFile, _mcnkAlphaHeader.McshSize);
+            _mcsh = new Chunk("MCSH", _mcnkAlphaHeader.McshSize, mcshData);
+        }
+        else
+        {
+             _mcsh = new Chunk("MCSH", 0, Array.Empty<byte>());
+        }
 
         // Read MCAL
+        // [PORT] Reference uses McalSize from header.
         offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.McalOffset;
-        byte[] mcalData = Util.GetByteArrayFromFile(adtFile, offsetInFile, _mcnkAlphaHeader.McalSize);
-        _mcal = new Mcal("MCAL", _mcnkAlphaHeader.McalSize, mcalData);
+        // Clamp/Safety? Reference doesn't clamp. We trust header. 
+        // But preventing overflow is good.
+        int mcalSize = _mcnkAlphaHeader.McalSize;
+        if (mcalSize < 0) mcalSize = 0;
+        
+        byte[] mcalData = Util.GetByteArrayFromFile(adtFile, offsetInFile, mcalSize);
+        _mcal = new Mcal("MCAL", mcalSize, mcalData);
 
         // Read MCLQ
-        offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.MclqOffset;
-        int mclqSize = _mcnkAlphaHeader.McnkChunksSize - _mcnkAlphaHeader.MclqOffset;
-        byte[] mclqData = Util.GetByteArrayFromFile(adtFile, offsetInFile, mclqSize);
-        _mclq = new Chunk("MCLQ", mclqSize, mclqData);
+        if (_mcnkAlphaHeader.MclqOffset > 0)
+        {
+            offsetInFile = headerStartOffset + McnkTerrainHeaderSize + ChunkLettersAndSize + _mcnkAlphaHeader.MclqOffset;
+            int mclqSize = _mcnkAlphaHeader.McnkChunksSize - _mcnkAlphaHeader.MclqOffset; 
+            if (mclqSize > 0) {
+                 byte[] mclqData = Util.GetByteArrayFromFile(adtFile, offsetInFile, mclqSize);
+                 _mclq = new Chunk("MCLQ", mclqSize, mclqData);
+            } else { _mclq = new Chunk("MCLQ", 0, Array.Empty<byte>()); }
+        }
+        else
+        {
+            _mclq = new Chunk("MCLQ", 0, Array.Empty<byte>());
+        }
     }
 
     public McnkAlpha(byte[] wholeFile, int offsetInFile) : base(wholeFile, offsetInFile) 
@@ -192,14 +232,22 @@ public class McnkAlpha : Mcnk
 
         Mcrf cMcrf = _mcrf.UpdateIndicesForLk(alphaM2Indices, _mcnkAlphaHeader.M2Number, alphaWmoIndices, _mcnkAlphaHeader.WmoNumber);
 
-        McnkLk mcnkLk = new McnkLk(cMcnkHeader, cMcvt, emptyChunk, cMcnr, _mcly, cMcrf, _mcsh, _mcal, _mclq, emptyChunk);
+        // [PORT] Reference C++ implementation passes MCLY/MCAL through directly.
+        // Removed custom expansion logic that was causing texture corruption.
+        Chunk cMcly = _mcly;
+        Mcal cMcal = new Mcal("MCAL", _mcal.Data?.Length ?? 0, _mcal.Data ?? Array.Empty<byte>());
+
+        McnkLk mcnkLk = new McnkLk(cMcnkHeader, cMcvt, emptyChunk, cMcnr, cMcly, cMcrf, _mcsh, cMcal, _mclq, emptyChunk);
         return mcnkLk;
     }
+
+    // [PORT] Removed unused helpers (Expand4BitTo8_Fixed64, InvertAlpha, FlipY64) as we now pass-through.
 
     public int GetAlphaAreaId()
     {
         return unchecked((int)_mcnkAlphaHeader.Unknown3);
     }
+
 
     public override string ToString()
     {

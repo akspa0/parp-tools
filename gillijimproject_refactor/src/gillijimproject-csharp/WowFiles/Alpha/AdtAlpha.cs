@@ -92,6 +92,9 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         var cMwid = new Mwid(cMwmo.GetIndicesForMwid());
 
         // Copy and remap MDDF/MODF indices for LK
+        // Copy and remap MDDF/MODF indices for LK
+        // [PORT] Reference C++ implementation does NOT swap Y/Z. 
+        // Assuming Alpha coordinates are already compatible (Z-up) or consistent with what's expected.
         var cMddf = new Mddf("MDDF", _mddf.Data.Length, (byte[])_mddf.Data.Clone());
         cMddf.UpdateIndicesForLk(alphaM2Indices);
 
@@ -161,6 +164,11 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
     }
 
     /// <summary>
+    /// Returns the 256 MCNK offsets from the MCIN chunk.
+    /// </summary>
+    public List<int> GetMcnkOffsets() => _mcin.GetMcnkOffsets();
+
+    /// <summary>
     /// Exposes the set of Alpha MDDF indices referencing WDT MDNM names.
     /// Use WDT MDNM file list to resolve indices to model paths.
     /// </summary>
@@ -217,4 +225,5 @@ public class AdtAlpha : WowFiles.WowChunkedFormat
         var baseName = Path.GetFileNameWithoutExtension(wdtName);
         return $"{baseName}_{x}_{y}.adt";
     }
+
 }
