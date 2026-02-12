@@ -35,15 +35,21 @@ public class MdxRenderer : ISceneRenderer
     private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
     private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private int _uLightDir, _uLightColor, _uAmbientColor;
+    private int _uSphereEnvMap;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
     private bool _wireframe;
+    private MdxAnimator? _animator;
+    private DateTime _lastFrameTime = DateTime.UtcNow;
 
     /// <summary>Model-space bounding box min corner.</summary>
     public Vector3 BoundsMin => new(_mdx.Model.Bounds.Extent.Min.X, _mdx.Model.Bounds.Extent.Min.Y, _mdx.Model.Bounds.Extent.Min.Z);
     /// <summary>Model-space bounding box max corner.</summary>
     public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
+
+    /// <summary>Animation controller (null if model has no bones)</summary>
+    public MdxAnimator? Animator => _animator;
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null)
@@ -58,6 +64,14 @@ public class MdxRenderer : ISceneRenderer
         InitShaders();
         InitBuffers();
         LoadTextures();
+
+        // Initialize animation system
+        if (mdx.Bones.Count > 0)
+        {
+            _animator = new MdxAnimator(mdx);
+            if (_animator.HasAnimation)
+                ViewerLog.Info(ViewerLog.Category.Mdx, $"Animation: {mdx.Bones.Count} bones, {mdx.Sequences.Count} sequences");
+        }
 
         // Log material→texture mapping for debugging
         ViewerLog.Info(ViewerLog.Category.Mdx, $"Materials: {_mdx.Materials.Count}, Textures: {_mdx.Textures.Count}, Geosets: {_mdx.Geosets.Count}, GeosetAnimations: {_mdx.GeosetAnimations.Count}");
@@ -113,6 +127,15 @@ public class MdxRenderer : ISceneRenderer
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        // Advance animation each frame
+        if (_animator != null && _animator.HasAnimation)
+        {
+            var now = DateTime.UtcNow;
+            float deltaMs = (float)(now - _lastFrameTime).TotalMilliseconds;
+            _lastFrameTime = now;
+            _animator.Update(Math.Clamp(deltaMs, 0f, 100f)); // Cap to avoid huge jumps
+        }
+
         // Two-pass rendering: opaque first (depth write ON), then transparent (depth write OFF)
         // This prevents alpha/blended geosets from occluding opaque geometry behind them.
         RenderWithTransform(MirrorX, view, proj, RenderPass.Opaque);
@@ -205,6 +228,9 @@ public class MdxRenderer : ISceneRenderer
 
                     // Unshaded (0x1): skip lighting in shader
                     _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
+
+                    // SphereEnvMap (0x2): generate UVs from view-space normals for reflective surfaces
+                    _gl.Uniform1(_uSphereEnvMap, geoFlags.HasFlag(MdlGeoFlags.SphereEnvMap) ? 1 : 0);
 
                     if (isAlphaCutout)
                     {
@@ -321,11 +347,13 @@ uniform mat4 uProj;
 out vec3 vNormal;
 out vec2 vTexCoord;
 out vec3 vFragPos;
+out vec3 vViewNormal;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vFragPos = worldPos.xyz;
     vNormal = mat3(transpose(inverse(uModel))) * aNormal;
+    vViewNormal = mat3(uView) * vNormal;
     vTexCoord = aTexCoord;
     gl_Position = uProj * uView * worldPos;
 }
@@ -336,12 +364,14 @@ void main() {
 in vec3 vNormal;
 in vec2 vTexCoord;
 in vec3 vFragPos;
+in vec3 vViewNormal;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform float uAlphaThreshold;
 uniform int uUnshaded;
+uniform int uSphereEnvMap;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -354,27 +384,40 @@ uniform vec3 uAmbientColor;
 out vec4 FragColor;
 
 void main() {
+    // Sphere environment map: generate UVs from view-space normals
+    vec2 texCoord = vTexCoord;
+    if (uSphereEnvMap == 1) {
+        vec3 vn = normalize(vViewNormal);
+        texCoord = vn.xy * 0.5 + 0.5;
+    }
+
     vec4 texColor;
     if (uHasTexture == 1) {
-        texColor = texture(uSampler, vTexCoord);
+        texColor = texture(uSampler, texCoord);
         if (uAlphaTest == 1 && texColor.a < uAlphaThreshold) discard;
     } else {
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
 
     // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
-    float lighting = 1.0;
+    vec3 litColor = texColor.rgb;
     if (uUnshaded == 0) {
         vec3 norm = normalize(vNormal);
-        float diff = max(dot(norm, normalize(uLightDir)), 0.0);
-        vec3 lit = uAmbientColor + uLightColor * diff;
-        lighting = (lit.r + lit.g + lit.b) / 3.0;
+        vec3 lightDir = normalize(uLightDir);
+        float diff = max(dot(norm, lightDir), 0.0);
+        vec3 diffuse = uLightColor * diff;
+
+        // Blinn-Phong specular
+        vec3 viewDir = normalize(uCameraPos - vFragPos);
+        vec3 halfDir = normalize(lightDir + viewDir);
+        float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
+        vec3 specular = uLightColor * spec * 0.3;
+
+        litColor = texColor.rgb * (uAmbientColor + diffuse) + specular;
     }
 
-    vec3 litColor = texColor.rgb * lighting;
-
     // Fog: blend to fog color based on distance from camera (matches terrain fog)
-    // Skip fog for untextured (magenta fallback) fragments — keep them visibly magenta for diagnosis
+    // Skip fog for untextured (magenta fallback) fragments
     vec3 finalColor = litColor;
     if (uHasTexture == 1) {
         float dist = length(vFragPos - uCameraPos);
@@ -423,6 +466,7 @@ void main() {
         _uLightDir = _gl.GetUniformLocation(_shaderProgram, "uLightDir");
         _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
+        _uSphereEnvMap = _gl.GetUniformLocation(_shaderProgram, "uSphereEnvMap");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);

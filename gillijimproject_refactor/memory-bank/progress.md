@@ -11,7 +11,9 @@
 - **WMO liquid (MLIQ)**: ✅ matId-based type detection, correct positioning (Feb 11)
 - **WMO doodad culling**: ✅ Distance (500u) + cap (64) + nearest-first sort + fog passthrough
 - **WMO doodad loading**: ✅ FindInFileSet case-insensitive + mdx/mdl swap → 100% load rate
-- **MDX rendering**: ✅ Two-pass opaque/transparent, alpha cutout for trees, fog skip for untextured
+- **MDX rendering**: ✅ Two-pass opaque/transparent, alpha cutout, specular highlights, sphere env map
+- **MDX animation engine**: ✅ BONE/PIVT/HELP parsing, keyframe interpolation, bone hierarchy (Feb 12)
+- **Full-load mode**: ✅ `--full-load` (default) loads all tiles at startup with progress (Feb 11)
 - **MCSH shadow maps**: ✅ 64×64 bitmask applied to all terrain layers
 - **AOI streaming**: ✅ 9×9 tiles, directional lookahead, persistent tile cache, MPQ throttling (Feb 11)
 - **Frustum culling**: ✅ View-frustum + distance + fade
@@ -37,13 +39,19 @@
 ### MdxViewer — Rendering Quality & Performance
 - **3.3.5 ADT loading freeze**: Needs investigation
 - **WMO culling too aggressive**: Objects outside WMO not visible from inside
-- **MDX animation**: Bone/keyframe not implemented
+- **MDX GPU skinning**: Bone matrices computed per-frame but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
+- **MDX animation UI**: Sequence selection combo box in ImGui panel not yet wired
 - **MDX per-geoset color/alpha**: Only static alpha used; animated GeosetAnims not wired
 - **MDX particles/ribbons**: Not implemented
 - **MDX texture UV animation**: Not implemented
 - **MDX billboard bones**: Not implemented
 - **WMO lighting**: v14-16 grayscale lightmap + v17 MOCV vertex colors not implemented
 - **Vulkan RenderManager**: Research phase — `IRenderBackend` abstraction for Silk.NET Vulkan
+
+### Build & Release Infrastructure
+- **GitHub Actions**: ✅ `.github/workflows/release-mdxviewer.yml` — tag push or manual dispatch
+- **WoWDBDefs bundling**: ✅ 1315 `.dbd` files copied to output via csproj Content items
+- **Self-contained publish**: ✅ `dotnet publish -c Release -r win-x64 --self-contained` verified
 
 ### MDX-L_Tool Enhancements
 - **M2 Export (v264)**: 🔧 Implementing binary writer.

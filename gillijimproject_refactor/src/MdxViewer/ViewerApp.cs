@@ -92,6 +92,9 @@ public class ViewerApp : IDisposable
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
 
+    /// <summary>When true, load all tiles at startup instead of AOI streaming. Default: true.</summary>
+    public bool FullLoadMode { get; set; } = true;
+
     // Terrain/World state
     private TerrainManager? _terrainManager;
     private VlmTerrainManager? _vlmTerrainManager;
@@ -2967,6 +2970,22 @@ void main() {
 
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene;
+
+            // Full-load mode: load all tiles synchronously during loading screen
+            if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
+            {
+                int total = _terrainManager.Adapter.ExistingTiles.Count;
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"Full-load mode: loading all {total} tiles...");
+                _terrainManager.LoadAllTiles((loaded, tot, tileName) =>
+                {
+                    _statusMessage = $"Loading tiles... {loaded}/{tot} ({tileName})";
+                    _loadingScreen?.UpdateProgress(loaded, tot);
+                    PresentLoadingFrame();
+                });
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"Full-load complete: {_terrainManager.LoadedTileCount} tiles, {_terrainManager.LoadedChunkCount} chunks");
+            }
 
             // Find mapId for this world
             string curMapName = _terrainManager.MapName;

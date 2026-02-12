@@ -73,6 +73,23 @@ public class MdlGeoset
     public List<CMdlBounds> AnimExtents { get; } = new();
 }
 
+/// <summary>Animation track with keyframes for a specific transform channel</summary>
+public class MdlAnimTrack<T>
+{
+    public MdlTrackType InterpolationType { get; set; } = MdlTrackType.Linear;
+    public int GlobalSeqId { get; set; } = -1;
+    public List<MdlTrackKey<T>> Keys { get; } = new();
+}
+
+/// <summary>Single keyframe in an animation track</summary>
+public class MdlTrackKey<T>
+{
+    public int Frame { get; set; }
+    public T Value { get; set; } = default!;
+    public T InTan { get; set; } = default!;
+    public T OutTan { get; set; } = default!;
+}
+
 /// <summary>Bone (BONE entry)</summary>
 public class MdlBone
 {
@@ -86,10 +103,10 @@ public class MdlBone
     // Pivot from PIVT chunk (by index)
     public C3Vector Pivot { get; set; }
 
-    // Animation tracks (simplified for now)
-    public List<(int time, C3Vector value)> Translation { get; } = new();
-    public List<(int time, C4Quaternion value)> Rotation { get; } = new();
-    public List<(int time, C3Vector value)> Scaling { get; } = new();
+    // Animation tracks with full keyframe + tangent data
+    public MdlAnimTrack<C3Vector>? TranslationTrack { get; set; }
+    public MdlAnimTrack<C4Quaternion>? RotationTrack { get; set; }
+    public MdlAnimTrack<C3Vector>? ScalingTrack { get; set; }
 }
 
 /// <summary>Attachment point (ATCH entry)</summary>  

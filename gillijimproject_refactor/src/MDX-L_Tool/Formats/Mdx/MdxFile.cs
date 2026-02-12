@@ -109,11 +109,20 @@ public class MdxFile
                     ReadRibb(br, size, mdx.RibbonEmitters, mdx.PivotPoints);
                     break;
 
-                case MdxHeaders.BONE:
-                case MdxHeaders.LITE:
-                case MdxHeaders.HELP:
-                case MdxHeaders.ATCH:
                 case MdxHeaders.PIVT:
+                    ReadPivt(br, size, mdx.PivotPoints);
+                    break;
+
+                case MdxHeaders.BONE:
+                    ReadBone(br, size, mdx.Bones, mdx.PivotPoints);
+                    break;
+
+                case MdxHeaders.HELP:
+                    ReadHelp(br, size, mdx.Bones, mdx.PivotPoints);
+                    break;
+
+                case MdxHeaders.LITE:
+                case MdxHeaders.ATCH:
                 case MdxHeaders.CAMS:
                 case MdxHeaders.EVTS:
                 case MdxHeaders.CLID:
@@ -741,6 +750,204 @@ public class MdxFile
         br.BaseStream.Position = nodeEnd;
 
         return (name, objectId, parentId, flags);
+    }
+
+    /// <summary>
+    /// Read a Node structure with animation tracks (KGTR, KGRT, KGSC).
+    /// Used by BONE and HELP parsers that need animation data.
+    /// </summary>
+    static (string name, int objectId, int parentId, uint flags,
+            MdlAnimTrack<C3Vector>? translation, MdlAnimTrack<C4Quaternion>? rotation, MdlAnimTrack<C3Vector>? scaling)
+        ReadNodeWithTracks(BinaryReader br)
+    {
+        uint nodeSize = br.ReadUInt32();
+        long nodeEnd = br.BaseStream.Position - 4 + nodeSize;
+
+        string name = ReadFixedString(br, 0x50);
+        int objectId = br.ReadInt32();
+        int parentId = br.ReadInt32();
+        uint flags = br.ReadUInt32();
+
+        MdlAnimTrack<C3Vector>? translation = null;
+        MdlAnimTrack<C4Quaternion>? rotation = null;
+        MdlAnimTrack<C3Vector>? scaling = null;
+
+        // Parse animation sub-chunks within the node
+        while (br.BaseStream.Position + 8 <= nodeEnd)
+        {
+            long subPos = br.BaseStream.Position;
+            string subTag = ReadTag(br);
+            uint subCount = br.ReadUInt32();
+
+            switch (subTag)
+            {
+                case "KGTR": // Translation track (vec3)
+                    translation = ReadVec3Track(br, subCount);
+                    break;
+                case "KGRT": // Rotation track (quaternion)
+                    rotation = ReadQuatTrack(br, subCount);
+                    break;
+                case "KGSC": // Scaling track (vec3)
+                    scaling = ReadVec3Track(br, subCount);
+                    break;
+                default:
+                    // Unknown sub-chunk — skip to end of node
+                    br.BaseStream.Position = nodeEnd;
+                    return (name, objectId, parentId, flags, translation, rotation, scaling);
+            }
+        }
+
+        br.BaseStream.Position = nodeEnd;
+        return (name, objectId, parentId, flags, translation, rotation, scaling);
+    }
+
+    /// <summary>Read a vec3 animation track (KGTR or KGSC)</summary>
+    static MdlAnimTrack<C3Vector> ReadVec3Track(BinaryReader br, uint keyCount)
+    {
+        var track = new MdlAnimTrack<C3Vector>();
+        track.InterpolationType = (MdlTrackType)br.ReadUInt32();
+        track.GlobalSeqId = br.ReadInt32();
+
+        bool hasTangents = track.InterpolationType == MdlTrackType.Hermite ||
+                           track.InterpolationType == MdlTrackType.Bezier;
+
+        for (uint i = 0; i < keyCount; i++)
+        {
+            var key = new MdlTrackKey<C3Vector>();
+            key.Frame = br.ReadInt32();
+            key.Value = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            if (hasTangents)
+            {
+                key.InTan = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                key.OutTan = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            }
+            track.Keys.Add(key);
+        }
+
+        return track;
+    }
+
+    /// <summary>Read a quaternion animation track (KGRT)</summary>
+    static MdlAnimTrack<C4Quaternion> ReadQuatTrack(BinaryReader br, uint keyCount)
+    {
+        var track = new MdlAnimTrack<C4Quaternion>();
+        track.InterpolationType = (MdlTrackType)br.ReadUInt32();
+        track.GlobalSeqId = br.ReadInt32();
+
+        bool hasTangents = track.InterpolationType == MdlTrackType.Hermite ||
+                           track.InterpolationType == MdlTrackType.Bezier;
+
+        for (uint i = 0; i < keyCount; i++)
+        {
+            var key = new MdlTrackKey<C4Quaternion>();
+            key.Frame = br.ReadInt32();
+            key.Value = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            if (hasTangents)
+            {
+                key.InTan = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                key.OutTan = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            }
+            track.Keys.Add(key);
+        }
+
+        return track;
+    }
+
+    /// <summary>Parse PIVT chunk — pivot points for bones/nodes</summary>
+    static void ReadPivt(BinaryReader br, uint size, List<C3Vector> pivots)
+    {
+        uint count = size / 12; // 3 floats × 4 bytes
+        for (uint i = 0; i < count; i++)
+            pivots.Add(new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle()));
+        if (Verbose) Console.WriteLine($"[PIVT] Parsed {pivots.Count} pivot points");
+    }
+
+    /// <summary>Parse BONE chunk — skeleton bones with animation tracks</summary>
+    static void ReadBone(BinaryReader br, uint chunkSize, List<MdlBone> bones, List<C3Vector> pivots)
+    {
+        long chunkEnd = br.BaseStream.Position + chunkSize;
+        uint count = br.ReadUInt32();
+
+        for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
+        {
+            long boneStart = br.BaseStream.Position;
+            try
+            {
+                var node = ReadNodeWithTracks(br);
+                var bone = new MdlBone
+                {
+                    Name = node.name,
+                    ObjectId = node.objectId,
+                    ParentId = node.parentId,
+                    Flags = node.flags,
+                    TranslationTrack = node.translation,
+                    RotationTrack = node.rotation,
+                    ScalingTrack = node.scaling
+                };
+
+                // Bone-specific fields after the node
+                if (br.BaseStream.Position + 8 <= chunkEnd)
+                {
+                    bone.GeosetId = br.ReadInt32();
+                    bone.GeosetAnimId = br.ReadInt32();
+                }
+
+                // Assign pivot from PIVT chunk
+                if (bone.ObjectId >= 0 && bone.ObjectId < pivots.Count)
+                    bone.Pivot = pivots[bone.ObjectId];
+
+                bones.Add(bone);
+            }
+            catch (Exception ex)
+            {
+                if (Verbose) Console.WriteLine($"[BONE] Failed to parse bone {i}: {ex.Message}");
+                // Try to recover by scanning for next bone or end of chunk
+                break;
+            }
+        }
+
+        br.BaseStream.Position = chunkEnd;
+        if (Verbose) Console.WriteLine($"[BONE] Parsed {bones.Count} bones");
+    }
+
+    /// <summary>Parse HELP chunk — helper nodes (participate in skeleton hierarchy like bones)</summary>
+    static void ReadHelp(BinaryReader br, uint chunkSize, List<MdlBone> bones, List<C3Vector> pivots)
+    {
+        long chunkEnd = br.BaseStream.Position + chunkSize;
+        uint count = br.ReadUInt32();
+
+        for (uint i = 0; i < count && br.BaseStream.Position < chunkEnd; i++)
+        {
+            try
+            {
+                var node = ReadNodeWithTracks(br);
+                var bone = new MdlBone
+                {
+                    Name = node.name,
+                    ObjectId = node.objectId,
+                    ParentId = node.parentId,
+                    Flags = node.flags,
+                    TranslationTrack = node.translation,
+                    RotationTrack = node.rotation,
+                    ScalingTrack = node.scaling,
+                    GeosetId = -1,
+                    GeosetAnimId = -1
+                };
+
+                if (bone.ObjectId >= 0 && bone.ObjectId < pivots.Count)
+                    bone.Pivot = pivots[bone.ObjectId];
+
+                bones.Add(bone);
+            }
+            catch (Exception ex)
+            {
+                if (Verbose) Console.WriteLine($"[HELP] Failed to parse helper {i}: {ex.Message}");
+                break;
+            }
+        }
+
+        br.BaseStream.Position = chunkEnd;
+        if (Verbose) Console.WriteLine($"[HELP] Parsed helpers, total bones now: {bones.Count}");
     }
 
     /// <summary>Parse PRE2 chunk — Particle Emitter 2 entries</summary>

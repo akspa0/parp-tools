@@ -326,6 +326,7 @@ public class TerrainManager : ISceneRenderer
     private void LoadTileSynchronous(int tileX, int tileY)
     {
         var result = _adapter.LoadTileWithPlacements(tileX, tileY);
+        _tileCache[(tileX, tileY)] = result; // Cache for consistency with AOI path
         var meshes = new List<TerrainChunkMesh>();
 
         foreach (var chunkData in result.Chunks)

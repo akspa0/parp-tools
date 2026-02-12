@@ -7,6 +7,10 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>MdxViewer</AssemblyName>
+    <RootNamespace>MdxViewer</RootNamespace>
+    <Version>0.1.0</Version>
+    <Description>WoW World Viewer for Alpha 0.5.3, 0.6.0, and LK 3.3.5</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,5 +30,14 @@
     <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
   </ItemGroup>
+
+  <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
+  <ItemGroup>
+    <Content Include="..\..\lib\WoWDBDefs\definitions\**\*.dbd" Link="definitions\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- No StormLib needed — pure C# NativeMpqService handles all MPQ access -->
 
 </Project>

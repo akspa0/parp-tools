@@ -4,16 +4,18 @@
 
 MdxViewer is the **primary project** in the tooling suite. It is a high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data.
 
-### Recently Completed (Feb 11)
+### Recently Completed (Feb 11-12)
 
-- **MCLQ Liquid Fix**: ✅ MH2O was overwriting valid MCLQ with garbage on 0.6.0 ADTs — now skipped when MCLQ found
-- **WMO Liquid Type Fix**: ✅ Use `matId & 0x03` from MLIQ header instead of tile flag bits (unreliable in 0.6.0)
-- **Per-Vertex MCLQ Heights**: ✅ Always use vertex data for sloped water/waterfalls — removed incorrect "near zero" discard
-- **WMO-Only Maps (0.6.0)**: ✅ Parse MWMO+MODF from WDT for WMO-only maps (same as Alpha WDT)
-- **Persistent Tile Cache**: ✅ `TileLoadResult` cached in `TerrainManager` — re-entering AOI is instant
-- **AOI Expansion**: ✅ Radius 3→4 (9×9 tiles), forward lookahead 2→3, GPU uploads/frame 4→8
-- **MPQ Read Throttling**: ✅ `SemaphoreSlim(4)` limits concurrent disk reads to prevent frame drops
-- **Removed Dedup Sets**: ✅ `_seenMddfIds`/`_seenModfIds` removed from both adapters — objects always reload correctly
+- **Full-Load Mode**: ✅ `--full-load` (default) / `--partial-load` CLI flags — loads all tiles at startup
+- **Specular Highlights**: ✅ Blinn-Phong specular in ModelRenderer fragment shader (shininess=32, intensity=0.3)
+- **Sphere Environment Map**: ✅ `SphereEnvMap` flag (0x2) generates UVs from view-space normals for reflective surfaces
+- **MDX Bone Parser**: ✅ BONE/HELP/PIVT chunks parsed with KGTR/KGRT/KGSC keyframe tracks + tangent data
+- **MDX Animation Engine**: ✅ `MdxAnimator` — hierarchy traversal, keyframe interpolation (linear/hermite/bezier/slerp)
+- **Animation Integration**: ✅ Per-frame bone matrix update in MdxRenderer.Render()
+- **WoWDBDefs Bundling**: ✅ `.dbd` definitions copied to output via csproj Content items
+- **Release Build**: ✅ `dotnet publish -c Release -r win-x64 --self-contained` verified working (1315 .dbd files bundled)
+- **GitHub Actions**: ✅ `.github/workflows/release-mdxviewer.yml` — tag-triggered + manual dispatch, creates ZIP + GitHub Release
+- **No StormLib**: ✅ Pure C# `NativeMpqService` handles all MPQ access — no native DLL dependency
 
 ### Previously Completed (Feb 9-10)
 
@@ -46,10 +48,11 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 
 1. **3.3.5 ADT loading freeze** — needs investigation
 2. **WMO culling too aggressive** — objects outside WMO not visible from inside
-3. **MDX animation** — bone/keyframe not implemented
-4. **Proper lighting** — terrain + object shading improvements
-5. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
-6. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
+3. **GPU skinning** — bone matrices computed but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
+4. **Animation UI** — sequence selection combo box in ImGui panel
+5. **Proper lighting** — terrain + object shading improvements
+6. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
+7. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
 
 ---
 
@@ -91,4 +94,7 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 | `AreaTableService.cs` | AreaID → name with MapID filtering |
 | `LightService.cs` | DBC Light/LightData zone-based lighting |
 | `ReplaceableTextureResolver.cs` | DBC-based replaceable texture resolution |
-| `MdxFile.cs` | MDX parser (GEOS tag validation) |
+| `MdxFile.cs` | MDX parser (GEOS, BONE, PIVT, HELP with KGTR/KGRT/KGSC tracks) |
+| `MdxAnimator.cs` | Skeletal animation engine (hierarchy, interpolation, bone matrices) |
+| `MdxViewer.csproj` | Project file with WoWDBDefs bundling |
+| `.github/workflows/release-mdxviewer.yml` | CI/CD release workflow |

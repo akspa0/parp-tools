@@ -1,0 +1,115 @@
+name: Release MdxViewer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Clone external library dependencies into lib/ ──
+      # These are separate GitHub repos that aren't git submodules of this repo.
+      # Some of them have their own submodules (DBCD, SereniaBLPLib).
+
+      - name: Clone WoWDBDefs (DBC definitions)
+        run: git clone --depth 1 https://github.com/wowdev/WoWDBDefs.git lib/WoWDBDefs
+
+      - name: Clone wow.tools.local (DBCD library)
+        run: |
+          git clone --depth 1 https://github.com/Marlamin/wow.tools.local lib/wow.tools.local
+          cd lib/wow.tools.local
+          git submodule update --init --depth 1
+
+      - name: Patch DBCD target frameworks (upstream may have net10.0 which requires .NET 10 SDK)
+        run: |
+          $dbcdProjects = @(
+            "lib/wow.tools.local/DBCD/DBCD/DBCD.csproj",
+            "lib/wow.tools.local/DBCD/DBCD.IO/DBCD.IO.csproj"
+          )
+          foreach ($proj in $dbcdProjects) {
+            if (Test-Path $proj) {
+              $content = Get-Content $proj -Raw
+              $patched = $content -replace '<TargetFrameworks>[^<]+</TargetFrameworks>', '<TargetFrameworks>netstandard2.1;net8.0;net9.0</TargetFrameworks>'
+              Set-Content $proj $patched
+              Write-Host "Patched $proj"
+            }
+          }
+
+      - name: Clone WoWTools.Minimaps (SereniaBLPLib)
+        run: |
+          git clone --depth 1 https://github.com/Marlamin/WoWTools.Minimaps lib/WoWTools.Minimaps
+          cd lib/WoWTools.Minimaps
+          git submodule update --init --depth 1
+
+      - name: Setup .NET 9
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore src/MdxViewer/MdxViewer.csproj
+
+      - name: Publish Release (self-contained)
+        run: |
+          dotnet publish src/MdxViewer/MdxViewer.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/MdxViewer
+
+      - name: Verify definitions bundled
+        run: |
+          if (!(Test-Path "publish/MdxViewer/definitions/AreaTable.dbd")) {
+            Write-Error "WoWDBDefs definitions not found in publish output!"
+            exit 1
+          }
+          $count = (Get-ChildItem "publish/MdxViewer/definitions/*.dbd").Count
+          Write-Host "Bundled $count .dbd definition files"
+
+      - name: Create ZIP archive
+        run: |
+          $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
+          Compress-Archive -Path "publish/MdxViewer/*" -DestinationPath "MdxViewer-${version}-win-x64.zip"
+          Write-Host "Created MdxViewer-${version}-win-x64.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: MdxViewer ${{ github.event.inputs.version || github.ref_name }}
+          body: |
+            ## MdxViewer — WoW World Viewer
+
+            High-performance .NET 9 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
+
+            ### Quick Start
+            1. Extract the ZIP
+            2. Run `MdxViewer.exe path\to\game\directory`
+
+            ### Requirements
+            - Windows x64
+            - OpenGL 3.3+ capable GPU
+            - WoW game data (MPQ archives)
+
+            ### What's Included
+            - Self-contained .NET 9 runtime (no install needed)
+            - WoWDBDefs definitions for DBC parsing
+            - Pure C# MPQ reader (no StormLib dependency)
+          files: MdxViewer-*-win-x64.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
