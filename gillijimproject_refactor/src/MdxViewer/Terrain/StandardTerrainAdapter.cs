@@ -58,6 +58,14 @@ public class StandardTerrainAdapter : ITerrainAdapter
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"Standard WDT: {_existingTiles.Count} tiles, MPHD=0x{_mphdFlags:X}, bigAlpha={_useBigAlpha}");
 
+        // For WMO-only maps, parse MWMO + MODF from the WDT itself (same as Alpha WDT)
+        if (IsWmoBased)
+        {
+            ParseWdtWmoPlacement(wdtBytes);
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"  WMO-only map: {_wmoNames.Count} WMO names, {ModfPlacements.Count} MODF placements");
+        }
+
         // Diagnostic: dump first 5 tile indices and their decoded coordinates + filenames
         for (int di = 0; di < Math.Min(5, _existingTiles.Count); di++)
         {
@@ -523,9 +531,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             LiquidType liquidType = liquidTypes[b];
 
-            // Build 9×9 height grid from per-vertex data or flat plane
+            // Build 9×9 height grid from per-vertex data.
+            // Each vertex entry is 8 bytes: first 4 = float height (absolute world Z),
+            // second 4 = flow/depth data (ignored for rendering).
+            // Per-vertex heights can slope for waterfalls and adjacent water at different Z levels.
             var heights = new float[81];
-            bool hasPerVertex = false;
 
             if (offset + 8 + 81 * 8 <= mclqData.Length)
             {
@@ -534,21 +544,14 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     int voff = offset + 8 + i * 8;
                     float h = BitConverter.ToSingle(mclqData, voff);
                     if (float.IsNaN(h) || MathF.Abs(h) > 50000f)
-                        h = 0f;
+                        h = maxHeight; // fallback to maxHeight for bad data
                     heights[i] = h;
                 }
-                // Check if per-vertex data is meaningful (not all near-zero)
-                for (int i = 0; i < 81; i++)
-                {
-                    if (MathF.Abs(heights[i]) > 0.01f) { hasPerVertex = true; break; }
-                }
             }
-
-            if (!hasPerVertex)
+            else
             {
-                // Flat plane at (min+max)/2 — these are absolute world Z
-                float liquidLevel = (minHeight + maxHeight) * 0.5f;
-                Array.Fill(heights, liquidLevel);
+                // Not enough data for per-vertex grid — flat plane at maxHeight
+                Array.Fill(heights, maxHeight);
             }
 
             // Read 64 tile flags at offset + 0x290 (packed) or offset + 8 + 81*8 (legacy)
@@ -1015,6 +1018,93 @@ public class StandardTerrainAdapter : ITerrainAdapter
     }
 
     // ── WDT Parsing ──
+
+    /// <summary>
+    /// Parse MWMO + MODF from the WDT for WMO-only maps.
+    /// 0.6.0 WDTs use the same layout as Alpha WDTs:
+    ///   MWMO = null-terminated WMO filename string block
+    ///   MODF = 64-byte placement entries (nameIndex is byte offset into MWMO)
+    /// </summary>
+    private void ParseWdtWmoPlacement(byte[] wdt)
+    {
+        // Find MWMO chunk — WMO name string block
+        int mwmoOff = FindChunk(wdt, "MWMO");
+        if (mwmoOff < 0)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain, "  WMO-only: no MWMO chunk found in WDT");
+            return;
+        }
+        int mwmoSize = BitConverter.ToInt32(wdt, mwmoOff + 4);
+        int mwmoData = mwmoOff + 8;
+        if (mwmoSize <= 0 || mwmoData + mwmoSize > wdt.Length) return;
+
+        // Parse null-terminated strings from MWMO block
+        var wmoNames = ParseNullStrings(wdt, mwmoData, mwmoSize);
+        foreach (var name in wmoNames)
+            GetOrAddWmoName(name);
+
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"  WMO-only: MWMO has {wmoNames.Count} names: {string.Join(", ", wmoNames.Select(Path.GetFileName))}");
+
+        // Find MODF chunk — 64-byte placement entries
+        int modfOff = FindChunk(wdt, "MODF");
+        if (modfOff < 0)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain, "  WMO-only: no MODF chunk found in WDT");
+            return;
+        }
+        int modfSize = BitConverter.ToInt32(wdt, modfOff + 4);
+        int modfData = modfOff + 8;
+        if (modfSize < 64 || modfData + modfSize > wdt.Length) return;
+
+        int entryCount = modfSize / 64;
+        for (int i = 0; i < entryCount; i++)
+        {
+            int pos = modfData + i * 64;
+            if (pos + 64 > wdt.Length) break;
+
+            uint nameId = BitConverter.ToUInt32(wdt, pos);
+            uint uniqueId = BitConverter.ToUInt32(wdt, pos + 4);
+            float rawX = BitConverter.ToSingle(wdt, pos + 8);
+            float rawZ = BitConverter.ToSingle(wdt, pos + 12); // height
+            float rawY = BitConverter.ToSingle(wdt, pos + 16);
+            float rotX = BitConverter.ToSingle(wdt, pos + 20);
+            float rotZ = BitConverter.ToSingle(wdt, pos + 24);
+            float rotY = BitConverter.ToSingle(wdt, pos + 28);
+            float bbMinX = BitConverter.ToSingle(wdt, pos + 32);
+            float bbMinZ = BitConverter.ToSingle(wdt, pos + 36);
+            float bbMinY = BitConverter.ToSingle(wdt, pos + 40);
+            float bbMaxX = BitConverter.ToSingle(wdt, pos + 44);
+            float bbMaxZ = BitConverter.ToSingle(wdt, pos + 48);
+            float bbMaxY = BitConverter.ToSingle(wdt, pos + 52);
+            ushort flags = BitConverter.ToUInt16(wdt, pos + 56);
+
+            // For WDT-level MODF, nameId is an index (not a byte offset into MWMO via MWID).
+            // In WMO-only WDTs there's typically just one WMO at index 0.
+            int nameIdx = (int)nameId;
+            if (nameIdx >= _wmoNames.Count) nameIdx = 0;
+
+            // WMO-only maps: use raw WoW world coords (no MapOrigin conversion).
+            // MODF file layout: pos=(X, Z, Y), bb=(X, Z, Y) — middle component is height.
+            // Position = (rawX, rawY, rawZ=height), matching Alpha adapter's WMO-only path.
+            var placement = new ModfPlacement
+            {
+                NameIndex = nameIdx,
+                UniqueId = (int)uniqueId,
+                Position = new Vector3(rawX, rawY, rawZ),
+                Rotation = new Vector3(rotX, rotY, rotZ),
+                BoundsMin = new Vector3(
+                    MathF.Min(bbMinX, bbMaxX), MathF.Min(bbMinY, bbMaxY), MathF.Min(bbMinZ, bbMaxZ)),
+                BoundsMax = new Vector3(
+                    MathF.Max(bbMinX, bbMaxX), MathF.Max(bbMinY, bbMaxY), MathF.Max(bbMinZ, bbMaxZ)),
+                Flags = flags
+            };
+
+            ModfPlacements.Add(placement);
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"  WMO-only MODF[{i}]: name={_wmoNames[nameIdx]} pos=({rawX:F1},{rawY:F1},{rawZ:F1}) rot=({rotX:F1},{rotY:F1},{rotZ:F1})");
+        }
+    }
 
     private static uint ReadMphdFlags(byte[] wdtBytes)
     {

@@ -34,9 +34,11 @@ public class TerrainManager : ISceneRenderer
     private readonly ConcurrentDictionary<(int, int), byte> _loadingTiles = new();
 
     // AOI: how many tiles around the camera to keep loaded
-    private const int AoiRadius = 3; // Load 7×7 tiles around camera — Alpha WDT data is already in memory
-    private const int AoiForwardExtra = 2; // Extra tiles ahead of camera heading
-    private const int MaxGpuUploadsPerFrame = 4; // Upload more tiles per frame to reduce pop-in
+    private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
+    private const int AoiForwardExtra = 3; // Extra tiles ahead of camera heading
+    private const int MaxGpuUploadsPerFrame = 8; // Cached tiles are cheap; upload more per frame
+    private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
+    private readonly SemaphoreSlim _mpqReadSemaphore = new(MaxConcurrentMpqReads);
 
     /// <summary>Called when a tile is loaded, with per-tile placement data.</summary>
     public event Action<int, int, TileLoadResult>? OnTileLoaded;
@@ -242,6 +244,8 @@ public class TerrainManager : ISceneRenderer
             ThreadPool.QueueUserWorkItem(_ =>
             {
                 if (_disposed) return;
+                // Throttle concurrent MPQ reads to avoid saturating I/O and causing frame drops
+                _mpqReadSemaphore.Wait();
                 try
                 {
                     var result = _adapter.LoadTileWithPlacements(capturedTx, capturedTy);
@@ -255,6 +259,7 @@ public class TerrainManager : ISceneRenderer
                 }
                 finally
                 {
+                    _mpqReadSemaphore.Release();
                     _loadingTiles.TryRemove((capturedTx, capturedTy), out byte _);
                 }
             });
@@ -419,6 +424,7 @@ public class TerrainManager : ISceneRenderer
     {
         _disposed = true;
         while (_pendingTiles.TryDequeue(out _)) { }
+        _mpqReadSemaphore.Dispose();
         _liquidRenderer.Dispose();
         _terrainRenderer.Dispose();
         foreach (var meshes in _loadedTiles.Values)
