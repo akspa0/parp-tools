@@ -15,16 +15,21 @@ public class LiquidRenderer : IDisposable
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
 
-    // Per-chunk liquid meshes
+    // Per-chunk liquid meshes (from MCLQ/MH2O)
     private readonly List<LiquidMesh> _meshes = new();
 
-    // Global toggle
+    // WL liquid body meshes (from loose WLW/WLQ/WLM files)
+    private readonly List<LiquidMesh> _wlMeshes = new();
+
+    // Global toggles
     public bool ShowLiquid { get; set; } = true;
+    public bool ShowWlLiquids { get; set; } = true;
 
     // Animation time
     private float _time;
 
     public int MeshCount => _meshes.Count;
+    public int WlMeshCount => _wlMeshes.Count;
 
     public LiquidRenderer(GL gl)
     {
@@ -96,12 +101,25 @@ public class LiquidRenderer : IDisposable
 
         foreach (var mesh in _meshes)
         {
-            // Set liquid type color
             var (r, g, b, a) = GetLiquidColor(mesh.Type);
             _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
 
             _gl.BindVertexArray(mesh.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedShort, null);
+        }
+
+        // Render WL liquid bodies (loose project files)
+        if (ShowWlLiquids)
+        {
+            foreach (var mesh in _wlMeshes)
+            {
+                var (r, g, b, a) = GetLiquidColor(mesh.Type);
+                _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
+
+                _gl.BindVertexArray(mesh.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount,
+                    mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort, null);
+            }
         }
 
         _gl.BindVertexArray(0);
@@ -163,13 +181,20 @@ public class LiquidRenderer : IDisposable
         }
 
         // Build index buffer: 8×8 quads, each = 2 triangles
-        // Alpha 0.5.3: No per-tile visibility flags (tiles are 4×4 floats, not 8×8 byte flags).
-        // Render all 64 quads; liquid presence is determined by MCNK header flags.
+        // Per 0.8.0 Ghidra spec: (tileFlag & 0x0F) == 0x0F means no liquid at that tile.
+        // If TileFlags is null (Alpha 0.5.3), render all 64 quads.
         var indices = new List<ushort>(64 * 6);
         for (int ty = 0; ty < 8; ty++)
         {
             for (int tx = 0; tx < 8; tx++)
             {
+                int tileIdx = ty * 8 + tx;
+                if (liquid.TileFlags != null && tileIdx < liquid.TileFlags.Length)
+                {
+                    if ((liquid.TileFlags[tileIdx] & 0x0F) == 0x0F)
+                        continue; // no liquid at this tile
+                }
+
                 // Quad vertices:
                 // TL = (ty, tx), TR = (ty, tx+1)
                 // BL = (ty+1, tx), BR = (ty+1, tx+1)
@@ -300,11 +325,85 @@ void main() {
         return ShaderProgram.Create(_gl, vertSrc, fragSrc);
     }
 
+    /// <summary>
+    /// Upload WL liquid bodies as GPU meshes for rendering.
+    /// Call once after WlLiquidLoader.LoadAll() completes.
+    /// </summary>
+    public unsafe void AddWlBodies(IEnumerable<WlLiquidBody> bodies)
+    {
+        int added = 0;
+        foreach (var body in bodies)
+        {
+            if (body.Vertices.Length == 0 || body.Indices.Length == 0) continue;
+
+            // Build flat vertex array: 3 floats per vertex
+            var verts = new float[body.Vertices.Length * 3];
+            for (int i = 0; i < body.Vertices.Length; i++)
+            {
+                verts[i * 3 + 0] = body.Vertices[i].X;
+                verts[i * 3 + 1] = body.Vertices[i].Y;
+                verts[i * 3 + 2] = body.Vertices[i].Z;
+            }
+
+            uint vao = _gl.GenVertexArray();
+            uint vbo = _gl.GenBuffer();
+            uint ebo = _gl.GenBuffer();
+
+            _gl.BindVertexArray(vao);
+
+            _gl.BindBuffer(BufferTargetARB.ArrayBuffer, vbo);
+            fixed (float* ptr = verts)
+                _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(verts.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
+
+            // Use uint32 indices since WL bodies can have >65k vertices
+            _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, ebo);
+            var indices = body.Indices;
+            fixed (int* ptr = indices)
+                _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(int)), ptr, BufferUsageARB.StaticDraw);
+
+            _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), (void*)0);
+            _gl.EnableVertexAttribArray(0);
+
+            _gl.BindVertexArray(0);
+
+            _wlMeshes.Add(new LiquidMesh
+            {
+                Vao = vao,
+                Vbo = vbo,
+                Ebo = ebo,
+                IndexCount = (uint)indices.Length,
+                Type = body.Type,
+                TileX = -1, // WL bodies are not tile-specific
+                TileY = -1,
+                UseUint32Indices = true,
+                WlBodyName = body.Name
+            });
+            added++;
+
+            ViewerLog.Info(ViewerLog.Category.Terrain,
+                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}): {body.BlockCount} blocks, {body.Vertices.Length} verts, type={body.Type}");
+        }
+
+        if (added > 0)
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"[LiquidRenderer] Added {added} WL liquid bodies (total WL: {_wlMeshes.Count})");
+    }
+
+    /// <summary>Remove all WL liquid body meshes.</summary>
+    public void ClearWlBodies()
+    {
+        foreach (var mesh in _wlMeshes)
+            mesh.Dispose(_gl);
+        _wlMeshes.Clear();
+    }
+
     public void Dispose()
     {
         foreach (var mesh in _meshes)
             mesh.Dispose(_gl);
         _meshes.Clear();
+        foreach (var mesh in _wlMeshes)
+            mesh.Dispose(_gl);
+        _wlMeshes.Clear();
         _shader.Dispose();
     }
 }
@@ -321,6 +420,8 @@ internal class LiquidMesh
     public LiquidType Type { get; init; }
     public int TileX { get; init; }
     public int TileY { get; init; }
+    public bool UseUint32Indices { get; init; }
+    public string? WlBodyName { get; init; }
 
     public void Dispose(GL gl)
     {

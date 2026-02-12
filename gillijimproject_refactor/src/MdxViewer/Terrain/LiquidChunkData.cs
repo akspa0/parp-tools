@@ -29,6 +29,10 @@ public class LiquidChunkData
     /// <summary>4×4 tile grid (16 floats). Coarse tile data (heights or flags).</summary>
     public float[] TileGrid { get; init; } = Array.Empty<float>();
 
+    /// <summary>8×8 per-tile flags (64 bytes). Null = render all tiles.
+    /// Per 0.8.0 Ghidra spec: (flag &amp; 0x0F) == 0x0F means no liquid at tile.</summary>
+    public byte[]? TileFlags { get; init; }
+
     /// <summary>Liquid type for this instance (from MCNK header flags bits 2-5).</summary>
     public LiquidType Type { get; init; } = LiquidType.Water;
 

@@ -581,6 +581,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     MinHeight = minHeight,
                     MaxHeight = maxHeight,
                     Heights = heights,
+                    TileFlags = tileFlags,
                     Type = liquidType,
                     WorldPosition = worldPos,
                     TileX = tileX,

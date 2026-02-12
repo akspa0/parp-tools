@@ -1683,6 +1683,27 @@ void main() {
             ImGui.TextDisabled("Taxi Paths: none found");
         }
 
+        // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
+        if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)
+        {
+            bool showWl = _worldScene.ShowWlLiquids;
+            if (ImGui.Checkbox($"WL Liquids ({_worldScene.WlLoader.Bodies.Count})", ref showWl))
+                _worldScene.ShowWlLiquids = showWl;
+            if (_worldScene.ShowWlLiquids && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Loose WLW/WLQ/WLM liquid project files.\nContains water data for deleted/missing tiles.");
+        }
+        else if (!_worldScene.WlLoadAttempted)
+        {
+            if (ImGui.Button("Load WL Liquids"))
+                _worldScene.ShowWlLiquids = true; // triggers lazy load
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Load loose WLW/WLQ/WLM liquid project files.\nContains water heightmaps including deleted bodies of water.");
+        }
+        else if (_worldScene.WlLoadAttempted && (_worldScene.WlLoader == null || !_worldScene.WlLoader.HasData))
+        {
+            ImGui.TextDisabled("WL Liquids: none found");
+        }
+
         // WMO placements
         if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
         {

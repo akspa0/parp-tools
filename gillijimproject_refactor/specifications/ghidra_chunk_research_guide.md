@@ -16,7 +16,7 @@ The following versions have **little to no documentation**:
 - **0.6.0** (Alpha) — Split ADTs, transitional chunk layouts
 - **0.7.x–0.12.x** (Closed Beta) — Rapidly evolving formats
 - **1.0.0–1.11.x** (Vanilla pre-final) — Minor chunk additions
-- **2.0.0–2.3.x** (TBC pre-final) — MH2O introduction period
+- **2.0.0–2.4.x** (TBC era) — Mature `MCLQ`/pre-`MH2O` terrain liquid behavior
 
 ---
 
@@ -52,7 +52,7 @@ Search for FourCC chunk tags as 4-byte integer constants. WoW chunks use ASCII F
 | `MCLY` | `0x594C434D` | Texture layers |
 | `MCAL` | `0x4C41434D` | Alpha maps |
 | `MCLQ` | `0x514C434D` | Liquid data |
-| `MH2O` | `0x4F32484D` | Liquid data (post-TBC) |
+| `MH2O` | `0x4F32484D` | Liquid data (**WotLK-era; not expected pre-3.0.0 alpha**) |
 | `MOBJ` | `0x4A424F4D` | WMO object |
 | `MOGP` | `0x50474F4D` | WMO group |
 | `MOTV` | `0x56544F4D` | WMO texture UVs |
@@ -124,12 +124,14 @@ These chunks have known format variations that cause viewer hangs or crashes:
   - What flags exist per version?
 
 #### MH2O (New Liquid System)
-- **Known issue**: Introduced during beta, replaced MCLQ
+- **Known issue**: Introduced in **3.0.0 alpha (WotLK era)**, replaced/augmented older liquid paths
 - **Research**: Find the exact build where MH2O first appears
 - **Key questions**:
   - What build introduced MH2O?
   - Did MCLQ and MH2O coexist in any builds?
   - What is the header format in early MH2O builds?
+
+**Scope guard:** Do **not** spend time hunting `MH2O` in builds earlier than `3.0.0 alpha`; treat missing references there as expected behavior.
 
 ### Tier 2: Important (cause visual bugs)
 
@@ -279,6 +281,7 @@ specifications/chunks/
 - **Check for version checks in code** — the client often has `if (version >= X)` guards.
 - **Cross-reference with hex dumps** of actual data files to verify your structure.
 - **Start with MCLQ** — it's the most likely cause of viewer hangs on transitional builds.
+- **Don’t chase MH2O pre-3.0.0 alpha.** For 0.x/1.x/2.x builds, prioritize `MCLQ` + `MCNK` liquid fields instead.
 
 ---
 

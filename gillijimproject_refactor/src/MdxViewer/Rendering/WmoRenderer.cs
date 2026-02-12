@@ -996,7 +996,7 @@ void main() {
                 }
 
                 // Build indices: one quad per visible tile
-                // Reference: noggit — tile.liquid is low 6 bits; if bit 3 (0x8) is set, skip tile
+                // Per 0.8.0 Ghidra spec: (tileByte & 0x0F) == 0x0F means no liquid at tile
                 var indices = new List<ushort>();
                 for (int j = 0; j < ytiles; j++)
                 {
@@ -1004,9 +1004,8 @@ void main() {
                     {
                         int tileIdx = j * xtiles + i;
                         if (tileIdx >= tileFlags.Length) continue;
-                        // Noggit: !(tile.liquid & 0x8) — bit 3 means "do not render"
-                        if ((tileFlags[tileIdx] & 0x08) != 0)
-                            continue;
+                        if ((tileFlags[tileIdx] & 0x0F) == 0x0F)
+                            continue; // no liquid at this tile
 
                         ushort p = (ushort)(j * xverts + i);
                         ushort tl = p;
@@ -1026,57 +1025,37 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid type from per-tile flags (primary) and MOGP groupLiquid (hint).
-                // Pre-release v17 WMOs use different groupLiquid semantics than retail.
-                // Tile flags low 2 bits: 0=water, 1=ocean, 2=magma, 3=slime — consistent across versions.
-                // Strategy: always sample tile flags first; only use groupLiquid as override
-                // when tile flags are ambiguous AND groupLiquid explicitly indicates non-water.
+                // Determine liquid type from per-tile nibble (primary) and MOGP flags (hint).
+                // Per 0.8.0 Ghidra spec (FUN_006c0740 / FUN_006ae130):
+                //   Runtime returns first non-0x0F tile nibble, then dispatches:
+                //     nibble 0/4/8 → water renderer
+                //     nibble 2/3/6/7 → magma/slime renderer
+                // For our basic type mapping: water=0, ocean=1, magma=2, slime=3
                 bool isOcean = (group.Flags & 0x80000) != 0;
-                bool isV17 = _wmo.Version >= 17;
-                int liquidBasicType;
+                int liquidBasicType = 0; // default water
 
-                // Sample per-tile flags for liquid type (most reliable across all versions)
-                int tileSampledType = 0; // default water
+                // Sample first visible tile nibble for liquid type dispatch
                 for (int t = 0; t < tileFlags.Length; t++)
                 {
-                    if ((tileFlags[t] & 0x08) == 0) // visible tile
+                    int nibble = tileFlags[t] & 0x0F;
+                    if (nibble == 0x0F) continue; // empty tile
+                    // Map nibble to basic type per 0.8.0 dispatch table
+                    switch (nibble)
                     {
-                        int tileType = tileFlags[t] & 0x03;
-                        if (tileType != 0) { tileSampledType = tileType; break; }
+                        case 0: case 4: case 8:
+                            liquidBasicType = 0; // water
+                            break;
+                        case 2: case 6:
+                            liquidBasicType = 2; // magma
+                            break;
+                        case 3: case 7:
+                            liquidBasicType = 3; // slime
+                            break;
+                        default:
+                            liquidBasicType = 0; // unknown nibble → water fallback
+                            break;
                     }
-                }
-
-                if (tileSampledType != 0)
-                {
-                    // Tile flags explicitly say non-water — trust them
-                    liquidBasicType = tileSampledType;
-                }
-                else if (isV17)
-                {
-                    // v17 WMOs: tile flags say water — trust that.
-                    // groupLiquid values in early v17 builds don't follow retail mapping.
-                    // groupLiquid==15 does NOT mean magma in pre-release v17.
-                    liquidBasicType = 0; // water
-                }
-                else if (group.GroupLiquid == 0)
-                {
-                    // v14: no groupLiquid set, tile flags say water — it's water
-                    liquidBasicType = 0;
-                }
-                else if (group.GroupLiquid == 15)
-                {
-                    // v14 LIQUID_Green_Lava: ambiguous — but tile flags say water, trust them
-                    liquidBasicType = 0;
-                }
-                else if (group.GroupLiquid < 20)
-                {
-                    // v14 standard pre-Cata: groupLiquid & 3
-                    liquidBasicType = (int)(group.GroupLiquid & 0x03);
-                }
-                else
-                {
-                    // Non-basic liquid type (DBC reference) — use low 2 bits
-                    liquidBasicType = (int)(group.GroupLiquid & 0x03);
+                    break; // use first visible tile
                 }
 
                 // Ocean flag override

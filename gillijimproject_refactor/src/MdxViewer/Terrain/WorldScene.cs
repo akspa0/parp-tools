@@ -110,6 +110,24 @@ public class WorldScene : ISceneRenderer
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
     public bool TaxiLoadAttempted => _taxiLoadAttempted;
 
+    // WL loose liquid files (lazy-loaded on first toggle)
+    private WlLiquidLoader? _wlLoader;
+    private bool _showWlLiquids = false;
+    private bool _wlLoadAttempted = false;
+    private IDataSource? _dataSource;
+    public bool ShowWlLiquids
+    {
+        get => _showWlLiquids;
+        set
+        {
+            _showWlLiquids = value;
+            if (value && !_wlLoadAttempted) LazyLoadWlLiquids();
+            _terrainManager.LiquidRenderer.ShowWlLiquids = value;
+        }
+    }
+    public WlLiquidLoader? WlLoader => _wlLoader;
+    public bool WlLoadAttempted => _wlLoadAttempted;
+
     // Stored DBC credentials for lazy loading
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
@@ -156,6 +174,16 @@ public class WorldScene : ISceneRenderer
         _mapId = mapId;
     }
 
+    private void LazyLoadWlLiquids()
+    {
+        _wlLoadAttempted = true;
+        if (_dataSource == null) return;
+        _wlLoader = new WlLiquidLoader(_dataSource, _terrainManager.MapName);
+        _wlLoader.LoadAll();
+        if (_wlLoader.HasData)
+            _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
+    }
+
     private void LazyLoadPoi()
     {
         _poiLoadAttempted = true;
@@ -187,6 +215,7 @@ public class WorldScene : ISceneRenderer
         Action<string>? onStatus = null)
     {
         _gl = gl;
+        _dataSource = dataSource;
         _assets = new WorldAssetManager(gl, dataSource, texResolver);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
@@ -206,6 +235,7 @@ public class WorldScene : ISceneRenderer
         Action<string>? onStatus = null)
     {
         _gl = gl;
+        _dataSource = dataSource;
         _assets = new WorldAssetManager(gl, dataSource, texResolver);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
