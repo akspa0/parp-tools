@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>MdxLTool</RootNamespace>
     <AssemblyName>MDX-L_Tool</AssemblyName>
+    <!-- Suppress CA1416: System.Drawing usage is Windows-only but this tool is only used on Windows -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>WoWMapConverter.Core</RootNamespace>
     <Description>WoW Alpha WDT/ADT to LK 3.3.5 converter library with AreaID crosswalk support</Description>
+    <!-- Suppress CA1416: System.Drawing usage is Windows-only but this lib is only consumed on Windows -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
