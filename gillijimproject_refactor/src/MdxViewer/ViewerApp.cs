@@ -92,8 +92,8 @@ public class ViewerApp : IDisposable
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
 
-    /// <summary>When true, load all tiles at startup instead of AOI streaming. Default: true.</summary>
-    public bool FullLoadMode { get; set; } = true;
+    /// <summary>When true, load all tiles at startup instead of AOI streaming. Default: false (stream tiles as camera moves).</summary>
+    public bool FullLoadMode { get; set; } = false;
 
     // Terrain/World state
     private TerrainManager? _terrainManager;

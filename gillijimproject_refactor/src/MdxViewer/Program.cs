@@ -14,12 +14,13 @@ class Program
     static void Main(string[] args)
     {
         bool verbose = args.Any(a => a.Equals("--verbose", StringComparison.OrdinalIgnoreCase));
-        bool partialLoad = args.Any(a => a.Equals("--partial-load", StringComparison.OrdinalIgnoreCase));
-        // --full-load is the default; --partial-load enables AOI streaming
+        bool fullLoad = args.Any(a => a.Equals("--full-load", StringComparison.OrdinalIgnoreCase));
+        // AOI streaming is the default; --full-load loads all tiles at startup
         var filteredArgs = args
             .Where(a => !a.Equals("--verbose", StringComparison.OrdinalIgnoreCase)
                      && !a.Equals("--full-load", StringComparison.OrdinalIgnoreCase)
                      && !a.Equals("--partial-load", StringComparison.OrdinalIgnoreCase))
+                     // keep filtering both flags for backwards compat
             .ToArray();
 
         if (verbose)
@@ -29,7 +30,7 @@ class Program
         }
 
         using var app = new ViewerApp();
-        app.FullLoadMode = !partialLoad;
+        app.FullLoadMode = fullLoad;
         app.Run(filteredArgs.Length > 0 ? filteredArgs : null);
     }
 }
