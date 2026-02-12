@@ -1014,19 +1014,60 @@ void main() {
                     continue;
                 }
 
-                // Determine liquid type from MLIQ matId (primary) and group flags.
-                // matId from MLIQ header is the material/liquid type reference:
-                //   0 = still water, 1 = ocean, 2 = magma, 3 = slime
-                // Tile flag bits 0-2 do NOT reliably encode liquid type in 0.5.3/0.6.0 WMOs
-                // (they may encode flow direction or other per-tile data).
+                // Determine liquid type from MOGP groupLiquid field (primary) and group flags.
+                // Per wowdev wiki, for pre-Cata WMOs without flag_use_liquid_type_dbc_id:
+                //   groupLiquid & 3 gives basic type: 0=water, 1=ocean, 2=magma, 3=slime
+                //   groupLiquid==15 is LIQUID_Green_Lava — used for BOTH water and lava in old WMOs.
+                //   For groupLiquid==15, sample per-tile flags to disambiguate.
+                // matId from MLIQ header is a MOMT material index in 0.5.3, NOT a liquid type.
                 bool isOcean = (group.Flags & 0x80000) != 0;
-                int liquidBasicType = matId & 0x03; // low 2 bits of matId = basic type
+                int liquidBasicType;
+
+                if (group.GroupLiquid == 0)
+                {
+                    // No groupLiquid set — fall back to per-tile flags
+                    // Sample first visible tile's low 2 bits for liquid type
+                    liquidBasicType = 0; // default water
+                    for (int t = 0; t < tileFlags.Length; t++)
+                    {
+                        if ((tileFlags[t] & 0x08) == 0) // visible tile
+                        {
+                            liquidBasicType = tileFlags[t] & 0x03;
+                            break;
+                        }
+                    }
+                }
+                else if (group.GroupLiquid == 15)
+                {
+                    // LIQUID_Green_Lava: ambiguous in old WMOs — sample per-tile flags
+                    // If any visible tile has basic type 2 (magma), treat as lava; else water
+                    liquidBasicType = 0; // default water
+                    for (int t = 0; t < tileFlags.Length; t++)
+                    {
+                        if ((tileFlags[t] & 0x08) == 0) // visible tile
+                        {
+                            int tileType = tileFlags[t] & 0x03;
+                            if (tileType == 2) { liquidBasicType = 2; break; } // magma
+                            if (tileType != 0) { liquidBasicType = tileType; break; } // slime/ocean
+                        }
+                    }
+                    // If all tiles say water (0), check if groupLiquid suggests lava context
+                    // groupLiquid 15 = 0xF, (15-1)&3 = 2 = magma — use as final fallback
+                    if (liquidBasicType == 0) liquidBasicType = 2; // magma fallback for Green Lava
+                }
+                else if (group.GroupLiquid < 20)
+                {
+                    // Standard pre-Cata: to_wmo_liquid uses groupLiquid & 3
+                    liquidBasicType = (int)(group.GroupLiquid & 0x03);
+                }
+                else
+                {
+                    // Non-basic liquid type (DBC reference) — use low 2 bits as approximation
+                    liquidBasicType = (int)(group.GroupLiquid & 0x03);
+                }
 
                 // Ocean flag override
                 if (isOcean && liquidBasicType == 0) liquidBasicType = 1;
-
-                // Fallback: GroupLiquid=15 is "green lava" in old WMOs
-                if (group.GroupLiquid == 15) liquidBasicType = 2;
 
                 // Assign color based on liquid type
                 float cr, cg, cb, ca;

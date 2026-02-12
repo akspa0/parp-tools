@@ -148,8 +148,9 @@ public class TerrainRenderer : IDisposable
         _shader.SetFloat("uFogEnd", _lighting.FogEnd);
         _shader.SetVec3("uCameraPos", cameraPos);
 
-        // Disable face culling for terrain (winding varies with coordinate system)
-        _gl.Disable(EnableCap.CullFace);
+        // Terrain mesh uses CW winding — set FrontFace to CW so backface culling works correctly
+        _gl.FrontFace(FrontFaceDirection.CW);
+        _gl.Enable(EnableCap.CullFace);
 
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
@@ -184,7 +185,8 @@ public class TerrainRenderer : IDisposable
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
-        _gl.Enable(EnableCap.CullFace);
+        // Restore default FrontFace for other renderers (WMO, MDX use CCW)
+        _gl.FrontFace(FrontFaceDirection.Ccw);
     }
 
     private void RenderChunk(TerrainChunkMesh chunk)
