@@ -82,6 +82,19 @@ public class WmoV17ToV14Converter
     }
 
     /// <summary>
+    /// Resolve a null-terminated string at a byte offset within a raw string table blob.
+    /// Returns empty string if offset is out of range.
+    /// </summary>
+    private static string ResolveStringAtOffset(byte[] rawBlob, uint offset)
+    {
+        if (rawBlob == null || offset >= rawBlob.Length)
+            return "";
+        int end = Array.IndexOf(rawBlob, (byte)0, (int)offset);
+        if (end < 0) end = rawBlob.Length;
+        return Encoding.ASCII.GetString(rawBlob, (int)offset, end - (int)offset);
+    }
+
+    /// <summary>
     /// Convert parsed v17 data structures directly to WmoV14Data model.
     /// </summary>
     private static WmoV14ToV17Converter.WmoV14Data ConvertV17DataToModel(WmoV17Data v17)
@@ -105,13 +118,15 @@ public class WmoV17ToV14Converter
 
         // Textures
         model.Textures.AddRange(v17.TextureNames);
+        // Store raw MOTX for the v14 model (WmoRenderer uses it for offset resolution)
+        model.MotxRaw = v17.TextureNamesRaw;
 
-        // Materials — map v17 material fields to v14 model
+        // Materials — resolve texture names via byte offset into raw MOTX blob
         foreach (var m in v17.Materials)
         {
-            string tex1 = m.Texture1 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture1] : "";
-            string tex2 = m.Texture2 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture2] : "";
-            string tex3 = m.Texture3 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture3] : "";
+            string tex1 = ResolveStringAtOffset(v17.TextureNamesRaw, m.Texture1);
+            string tex2 = ResolveStringAtOffset(v17.TextureNamesRaw, m.Texture2);
+            string tex3 = ResolveStringAtOffset(v17.TextureNamesRaw, m.Texture3);
             model.Materials.Add(new WmoV14ToV17Converter.WmoMaterial
             {
                 Flags = m.Flags,
@@ -198,18 +213,8 @@ public class WmoV17ToV14Converter
             });
         }
 
-        // Doodad names → raw bytes for name resolution
-        if (v17.DoodadNames.Count > 0)
-        {
-            using var ms = new MemoryStream();
-            foreach (var name in v17.DoodadNames)
-            {
-                var bytes = Encoding.ASCII.GetBytes(name);
-                ms.Write(bytes, 0, bytes.Length);
-                ms.WriteByte(0);
-            }
-            model.DoodadNamesRaw = ms.ToArray();
-        }
+        // Doodad names → use raw MODN blob directly (preserves byte offsets)
+        model.DoodadNamesRaw = v17.DoodadNamesRaw;
 
         // Doodad defs
         foreach (var dd in v17.DoodadDefs)
@@ -242,11 +247,9 @@ public class WmoV17ToV14Converter
                 GroupLiquid = g.GroupLiquid,
             };
 
-            // Resolve group name from MOGN string table
-            if (g.GroupNameOfs < v17.GroupNames.Count)
-                group.Name = v17.GroupNames[(int)g.GroupNameOfs];
-            else
-                group.Name = $"group_{v17.Groups.IndexOf(g)}";
+            // Resolve group name from raw MOGN blob via byte offset
+            string resolved = ResolveStringAtOffset(v17.GroupNamesRaw, g.GroupNameOfs);
+            group.Name = !string.IsNullOrEmpty(resolved) ? resolved : $"group_{v17.Groups.IndexOf(g)}";
 
             if (g.Vertices != null)
                 group.Vertices.AddRange(g.Vertices);
@@ -332,13 +335,23 @@ public class WmoV17ToV14Converter
                     ParseMohd(reader, data);
                     break;
                 case "MOTX":
-                    data.TextureNames = ReadStringTable(reader, size);
+                    {
+                        long pos = reader.BaseStream.Position;
+                        data.TextureNamesRaw = reader.ReadBytes((int)size);
+                        reader.BaseStream.Position = pos;
+                        data.TextureNames = ReadStringTable(reader, size);
+                    }
                     break;
                 case "MOMT":
                     data.Materials = ReadMaterials(reader, size);
                     break;
                 case "MOGN":
-                    data.GroupNames = ReadStringTable(reader, size);
+                    {
+                        long pos = reader.BaseStream.Position;
+                        data.GroupNamesRaw = reader.ReadBytes((int)size);
+                        reader.BaseStream.Position = pos;
+                        data.GroupNames = ReadStringTable(reader, size);
+                    }
                     break;
                 case "MOGI":
                     data.GroupInfos = ReadGroupInfos(reader, size);
@@ -362,7 +375,12 @@ public class WmoV17ToV14Converter
                     data.DoodadSets = ReadDoodadSets(reader, size);
                     break;
                 case "MODN":
-                    data.DoodadNames = ReadStringTable(reader, size);
+                    {
+                        long pos = reader.BaseStream.Position;
+                        data.DoodadNamesRaw = reader.ReadBytes((int)size);
+                        reader.BaseStream.Position = pos;
+                        data.DoodadNames = ReadStringTable(reader, size);
+                    }
                     break;
                 case "MODD":
                     data.DoodadDefs = ReadDoodadDefs(reader, size);
@@ -1146,8 +1164,10 @@ public class WmoV17ToV14Converter
         public uint Flags;
 
         public List<string> TextureNames = new();
+        public byte[] TextureNamesRaw = Array.Empty<byte>(); // Raw MOTX blob for byte-offset resolution
         public List<WmoMaterial> Materials = new();
         public List<string> GroupNames = new();
+        public byte[] GroupNamesRaw = Array.Empty<byte>(); // Raw MOGN blob for byte-offset resolution
         public List<WmoGroupInfo> GroupInfos = new();
         public string SkyboxName = "";
         public Vector3[] PortalVertices = Array.Empty<Vector3>();
@@ -1156,6 +1176,7 @@ public class WmoV17ToV14Converter
         public List<WmoLight> Lights = new();
         public List<WmoDoodadSet> DoodadSets = new();
         public List<string> DoodadNames = new();
+        public byte[] DoodadNamesRaw = Array.Empty<byte>(); // Raw MODN blob for byte-offset resolution
         public List<WmoDoodadDef> DoodadDefs = new();
         public List<WmoFog> Fogs = new();
         public List<WmoV17GroupData> Groups = new();

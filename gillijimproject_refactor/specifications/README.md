@@ -10,6 +10,7 @@ Definitive format documentation derived from our verified viewer implementations
 | [alpha-053-models.md](alpha-053-models.md) | Alpha 0.5.3 MDX models and WMO v14 | `MdxFile.cs`, `WmoV14ToV17Converter.cs` |
 | [alpha-053-coordinates.md](alpha-053-coordinates.md) | Coordinate systems and conversions | `WoWConstants.cs`, `AlphaTerrainAdapter.cs` |
 | [lk-335-terrain.md](lk-335-terrain.md) | LK 3.3.5 WDT/ADT/MCNK terrain | `StandardTerrainAdapter.cs`, `Mcnk.cs` |
+| [mpq-070-patching.md](mpq-070-patching.md) | WoW 0.7.0.3694 MPQ patch overlay behavior (`patch.MPQ`) | Ghidra decompilation of mount/open/lookup flow |
 
 ## Ghidra Reverse Engineering Prompts
 

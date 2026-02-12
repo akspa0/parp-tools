@@ -10,6 +10,11 @@ This folder documents WMO chunks for **0.7.0.3694** from direct Ghidra decompila
 - Optional group subchunk gates: `FUN_006c1c60`
 - Group file name synthesis/loading: `FUN_006c1570`
 
+## Behavior-focused docs
+
+- `RENDERING_FLOW.md` — parse-to-render pipeline, chunk-to-runtime mapping, and cull/draw/query behavior.
+- `EARLY_V17_DIFFERENCES.md` — confirmed deltas between 0.7 early-v17 behavior and later 1.12+ style v17 documentation.
+
 ## Early v17 transition behavior confirmed in this build
 
 - Root and groups are split: root file loads first, groups are loaded from suffixed files using `_%03d` replacement in `FUN_006c1570`.

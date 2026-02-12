@@ -24,3 +24,8 @@ Stride: 8 bytes (`count = chunkSize >> 3`).
 
 ## Confidence
 - **High**
+
+## Runtime behavior (0.7.0.3694)
+
+- `FUN_006c1a10` wires `MOTV` to `group+0xC4` with UV count at `group+0x11C`.
+- UV data is used by textured batch rendering in conjunction with `MOBA` material selection and texture handles resolved from root material tables.

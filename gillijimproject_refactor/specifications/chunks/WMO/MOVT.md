@@ -20,3 +20,9 @@ Stride: 12 bytes (`count = chunkSize / 0x0C`).
 
 ## Confidence
 - **High**
+
+## Runtime behavior (0.7.0.3694)
+
+- `FUN_006c1a10` wires `MOVT` to `group+0xBC` with vertex count at `group+0x114`.
+- `FUN_006c1a10` also computes runtime vertex-bytes (`group+0xD4`) from this count, with format branch controlled by group flags (`flags & 0x48`).
+- Vertex positions are the base geometry for world culling, interaction tests, and render submission.
