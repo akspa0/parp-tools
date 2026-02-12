@@ -313,7 +313,8 @@ public class WorldScene : ISceneRenderer
                 ModelPath = modelPath,
                 PlacementPosition = p.Position,
                 PlacementRotation = p.Rotation,
-                PlacementScale = scale
+                PlacementScale = scale,
+                UniqueId = p.UniqueId
             });
         }
 
@@ -363,7 +364,8 @@ public class WorldScene : ISceneRenderer
                 ModelPath = wmoPath,
                 PlacementPosition = p.Position,
                 PlacementRotation = p.Rotation,
-                PlacementScale = 1.0f
+                PlacementScale = 1.0f,
+                UniqueId = p.UniqueId
             });
         }
 
@@ -460,7 +462,8 @@ public class WorldScene : ISceneRenderer
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
-                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale
+                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
+                UniqueId = p.UniqueId
             });
         }
 
@@ -506,7 +509,8 @@ public class WorldScene : ISceneRenderer
                 LocalBoundsMin = localMin,
                 LocalBoundsMax = localMax,
                 ModelName = Path.GetFileName(wmoPath), ModelPath = wmoPath,
-                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f
+                PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f,
+                UniqueId = p.UniqueId
             });
         }
 
@@ -1027,6 +1031,8 @@ public struct ObjectInstance
     public float PlacementScale;
     /// <summary>Full model path for diagnostics.</summary>
     public string ModelPath;
+    /// <summary>UniqueId from MODF/MDDF placement (for dedup and display).</summary>
+    public int UniqueId;
 }
 
 public enum ObjectType { None, Wmo, Mdx }

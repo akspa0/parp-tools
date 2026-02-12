@@ -44,13 +44,26 @@ public class MapDiscoveryService
         // Detect the actual MapID column (varies by build: "ID", "MapID", etc.)
         string idCol = DetectIdColumn(storage);
 
+        // Log available columns once for diagnostics
+        try
+        {
+            var cols = storage.AvailableColumns ?? Array.Empty<string>();
+            ViewerLog.Trace($"[MapDiscovery] Map.dbc columns ({cols.Length}): {string.Join(", ", cols)}");
+        }
+        catch { }
+
+        // Detect the name column — varies across builds
+        string nameCol = DetectNameColumn(storage);
+        ViewerLog.Trace($"[MapDiscovery] Using idCol='{idCol}', nameCol='{nameCol}'");
+
         foreach (var key in storage.Keys)
         {
             var row = storage[key];
             // Use the actual MapID field, falling back to DBCD key
             int id = !string.IsNullOrEmpty(idCol) ? TryGetInt(row, idCol) ?? key : key;
             string? dir = Sanitize(TryGetString(row, "Directory"));
-            string? name = Sanitize(TryGetString(row, "MapName_lang") ?? TryGetString(row, "MapName") ?? dir ?? $"Map {id}");
+            string? name = Sanitize(!string.IsNullOrEmpty(nameCol) ? TryGetString(row, nameCol) : null);
+            if (string.IsNullOrEmpty(name)) name = dir ?? $"Map {id}";
 
             if (string.IsNullOrEmpty(dir)) continue;
 
@@ -74,6 +87,35 @@ public class MapDiscoveryService
             {
                 var match = cols.FirstOrDefault(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase));
                 if (!string.IsNullOrEmpty(match)) return match;
+            }
+            return "";
+        }
+        catch { return ""; }
+    }
+
+    private static string DetectNameColumn(IDBCDStorage storage)
+    {
+        try
+        {
+            var cols = storage.AvailableColumns ?? Array.Empty<string>();
+            // Try all known name column variants across WoW builds
+            string[] prefers = new[] {
+                "MapName_lang", "MapName", "MapName_Lang",
+                "m_MapName_lang", "m_MapName",
+                "Name_lang", "Name", "name_lang", "name",
+                "MapDescription0_lang", "MapDescription0"
+            };
+            foreach (var p in prefers)
+            {
+                var match = cols.FirstOrDefault(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(match)) return match;
+            }
+            // Last resort: find any column containing "name" (case-insensitive)
+            var fuzzy = cols.FirstOrDefault(x => x.IndexOf("name", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (!string.IsNullOrEmpty(fuzzy))
+            {
+                ViewerLog.Trace($"[MapDiscovery] Fuzzy name column match: '{fuzzy}'");
+                return fuzzy;
             }
             return "";
         }

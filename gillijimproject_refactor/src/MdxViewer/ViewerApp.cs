@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.RegularExpressions;
 using ImGuiNET;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
@@ -2159,17 +2160,9 @@ void main() {
                 {
                     _dbdDir = dbdDir;
 
-                    // Infer build version from game path first
-                    string buildAlias = InferBuildFromPath(gamePath);
-                    
-                    // If not found, search WoWDBDefs definitions
-                    if (string.IsNullOrEmpty(buildAlias))
-                    {
-                        buildAlias = FindBuildInWoWDBDefs(dbdDir);
-                    }
-                    
-                    // Resolve short alias to full build string (e.g. "0.6.0" -> "0.6.0.3592")
-                    buildAlias = ResolveFullBuild(buildAlias);
+                    // Infer build version from game path, validated against WoWDBDefs
+                    string buildAlias = InferBuildFromPath(gamePath, dbdDir);
+                    ViewerLog.Trace($"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}");
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
@@ -2205,70 +2198,163 @@ void main() {
         }
     }
 
-    private static string InferBuildFromPath(string path)
+    /// <summary>
+    /// Infer the full build string (e.g. "0.10.0.3892") from the game path.
+    /// Strategy:
+    ///   1. Regex-extract all X.Y.Z.NNNN candidates from the path
+    ///   2. Validate each against WoWDBDefs BUILD lines
+    ///   3. If no 4-part match, try X.Y.Z short versions and resolve to full build via DBD
+    ///   4. Fallback: MPQ heuristics for 3.3.5
+    /// </summary>
+    private static string InferBuildFromPath(string path, string? dbdDir)
     {
-        var p = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).ToLowerInvariant();
-        
-        // Check for version strings in path (with or without dots)
-        if (p.Contains("0.5.3") || p.Contains("053")) return "0.5.3";
-        if (p.Contains("0.5.5") || p.Contains("055")) return "0.5.5";
-        if (p.Contains("0.6.0") || p.Contains("060")) return "0.6.0";
-        if (p.Contains("3.3.5") || p.Contains("335")) return "3.3.5";
-        
-        // Fallback: check for known MPQ names
-        if (Directory.Exists(path))
+        // Collect all known builds from WoWDBDefs (cached per call)
+        HashSet<string> dbdBuilds = new(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(dbdDir) && Directory.Exists(dbdDir))
         {
-            var mpqs = Directory.GetFiles(path, "*.mpq", SearchOption.AllDirectories)
-                .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
-            if (mpqs.Any(m => m.Contains("patch") && m.Contains("3"))) return "3.3.5";
-        }
-        
-        return "";
-    }
-
-    private static readonly Dictionary<string, string> FullBuildMap = new()
-    {
-        { "0.5.3", "0.5.3.3368" },
-        { "0.5.5", "0.5.5.3494" },
-        { "0.6.0", "0.6.0.3592" },
-        { "3.3.5", "3.3.5.12340" },
-    };
-
-    private static string ResolveFullBuild(string alias)
-    {
-        if (string.IsNullOrEmpty(alias)) return alias;
-        return FullBuildMap.TryGetValue(alias, out var full) ? full : alias;
-    }
-
-    private static string FindBuildInWoWDBDefs(string dbdDir)
-    {
-        // Search WoWDBDefs for known Alpha/early builds
-        if (!Directory.Exists(dbdDir)) return "";
-        
-        // Ordered by preference — check newest Alpha first
-        var knownBuilds = new (string search, string result)[]
-        {
-            ("BUILD 0.6.0.3592", "0.6.0"),
-            ("BUILD 0.5.5.3494", "0.5.5"),
-            ("BUILD 0.5.3.3368", "0.5.3"),
-        };
-        
-        // Only need to check one DBD file — AreaTable.dbd is always present
-        var areaTable = Path.Combine(dbdDir, "AreaTable.dbd");
-        if (File.Exists(areaTable))
-        {
-            var content = File.ReadAllText(areaTable);
-            foreach (var (search, result) in knownBuilds)
+            // Parse Map.dbd — it covers all versions and is always present
+            var mapDbd = Path.Combine(dbdDir, "Map.dbd");
+            if (File.Exists(mapDbd))
             {
-                if (content.Contains(search))
+                foreach (var line in File.ReadLines(mapDbd))
                 {
-                    ViewerLog.Trace($"[MdxViewer] Found {result} build definition in AreaTable.dbd");
-                    return result;
+                    var trimmed = line.Trim();
+                    if (!trimmed.StartsWith("BUILD ")) continue;
+                    // Parse "BUILD X.Y.Z.NNNN" or "BUILD X.Y.Z.NNNN-X.Y.Z.NNNN" or comma-separated
+                    var parts = trimmed[6..].Split(',', StringSplitOptions.TrimEntries);
+                    foreach (var part in parts)
+                    {
+                        // Handle ranges: "0.9.0.3807-0.12.0.3988"
+                        var rangeParts = part.Split('-', StringSplitOptions.TrimEntries);
+                        foreach (var rp in rangeParts)
+                            if (Regex.IsMatch(rp, @"^\d+\.\d+\.\d+\.\d+$"))
+                                dbdBuilds.Add(rp);
+                    }
                 }
             }
         }
-        
+        ViewerLog.Trace($"[BuildDetect] Loaded {dbdBuilds.Count} known builds from WoWDBDefs");
+
+        // 1. Extract all X.Y.Z.NNNN candidates from the path
+        var fullMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+\.\d+)");
+        foreach (Match m in fullMatches)
+        {
+            string candidate = m.Groups[1].Value;
+            if (dbdBuilds.Contains(candidate))
+            {
+                ViewerLog.Trace($"[BuildDetect] Exact match from path: {candidate}");
+                return candidate;
+            }
+        }
+
+        // 2. Extract X.Y.Z short versions and find matching full build in DBD
+        var shortMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+)");
+        foreach (Match m in shortMatches)
+        {
+            string shortVer = m.Groups[1].Value;
+            // Find any DBD build that starts with this short version
+            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(shortVer + "."));
+            if (!string.IsNullOrEmpty(match))
+            {
+                ViewerLog.Trace($"[BuildDetect] Short version '{shortVer}' resolved to: {match}");
+                return match;
+            }
+        }
+
+        // 3. Check for full build in path that might be in a BUILD range (not exact endpoint)
+        foreach (Match m in fullMatches)
+        {
+            string candidate = m.Groups[1].Value;
+            // Try to find it in DBD range lines
+            string? rangeMatch = FindBuildInDbdRanges(dbdDir, candidate);
+            if (!string.IsNullOrEmpty(rangeMatch))
+            {
+                ViewerLog.Trace($"[BuildDetect] Range match from path: {candidate}");
+                return candidate;
+            }
+        }
+
+        // 4. Fallback: MPQ heuristics
+        if (Directory.Exists(path))
+        {
+            try
+            {
+                var mpqs = Directory.GetFiles(path, "*.mpq", SearchOption.AllDirectories)
+                    .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
+                if (mpqs.Any(m => m.Contains("patch") && m.Contains("3")))
+                {
+                    var lkBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("3.3.5."));
+                    return lkBuild ?? "3.3.5.12340";
+                }
+            }
+            catch { }
+        }
+
         return "";
+    }
+
+    /// <summary>
+    /// Check if a build number falls within any BUILD range in the DBD files.
+    /// Parses ranges like "BUILD 0.9.0.3807-0.12.0.3988" and checks if the candidate
+    /// build falls within [start, end] using numeric tuple comparison.
+    /// </summary>
+    private static string? FindBuildInDbdRanges(string? dbdDir, string build)
+    {
+        if (string.IsNullOrEmpty(dbdDir)) return null;
+        var mapDbd = Path.Combine(dbdDir, "Map.dbd");
+        if (!File.Exists(mapDbd)) return null;
+
+        var buildTuple = ParseBuildTuple(build);
+        if (buildTuple == null) return null;
+
+        foreach (var line in File.ReadLines(mapDbd))
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith("BUILD ")) continue;
+
+            // Check explicit listing first
+            if (trimmed.Contains(build)) return build;
+
+            // Check ranges: "BUILD 0.9.0.3807-0.12.0.3988"
+            var entries = trimmed[6..].Split(',', StringSplitOptions.TrimEntries);
+            foreach (var entry in entries)
+            {
+                var rangeParts = entry.Split('-', StringSplitOptions.TrimEntries);
+                if (rangeParts.Length == 2)
+                {
+                    var lo = ParseBuildTuple(rangeParts[0]);
+                    var hi = ParseBuildTuple(rangeParts[1]);
+                    if (lo != null && hi != null &&
+                        CompareBuild(buildTuple, lo) >= 0 &&
+                        CompareBuild(buildTuple, hi) <= 0)
+                    {
+                        ViewerLog.Trace($"[BuildDetect] '{build}' falls within range {rangeParts[0]}-{rangeParts[1]}");
+                        return build;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static int[]? ParseBuildTuple(string build)
+    {
+        var parts = build.Split('.');
+        if (parts.Length != 4) return null;
+        var nums = new int[4];
+        for (int i = 0; i < 4; i++)
+            if (!int.TryParse(parts[i], out nums[i])) return null;
+        return nums;
+    }
+
+    private static int CompareBuild(int[] a, int[] b)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            if (a[i] < b[i]) return -1;
+            if (a[i] > b[i]) return 1;
+        }
+        return 0;
     }
 
     private void LoadFileFromDisk(string filePath)
@@ -3134,6 +3220,7 @@ void main() {
             _selectedObjectType = type;
             _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
                 $"Path: {inst.ModelPath}\n" +
+                $"UniqueId: {inst.UniqueId}\n" +
                 $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
                 $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
                 $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
