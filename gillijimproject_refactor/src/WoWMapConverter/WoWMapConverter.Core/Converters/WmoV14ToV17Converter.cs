@@ -68,7 +68,7 @@ public class WmoV14ToV17Converter
         for (int i = 0; i < wmoData.Groups.Count && i < wmoData.GroupInfos.Count; i++)
         {
             var nameOfs = wmoData.GroupInfos[i].NameOffset;
-            wmoData.Groups[i].Name = GetGroupName(wmoData.GroupNames, nameOfs) ?? $"group_{i}";
+            wmoData.Groups[i].Name = GetGroupName(wmoData.GroupNamesRaw, nameOfs) ?? $"group_{i}";
         }
         
         return wmoData;
@@ -117,13 +117,19 @@ public class WmoV14ToV17Converter
         Console.WriteLine($"[WMO] Group file #{groupIndex}: No MOGP chunk found ({groupBytes.Length} bytes)");
     }
     
-    private string? GetGroupName(List<string> groupNames, int nameOffset)
+    private string? GetGroupName(byte[] groupNamesRaw, int nameOffset)
     {
-        // MOGN is a string table; nameOffset is a byte offset into the packed strings
-        // For now, use index-based lookup (simplified)
-        if (nameOffset >= 0 && nameOffset < groupNames.Count)
-            return groupNames[nameOffset];
-        return null;
+        if (groupNamesRaw.Length == 0 || nameOffset < 0 || nameOffset >= groupNamesRaw.Length)
+            return null;
+
+        int end = nameOffset;
+        while (end < groupNamesRaw.Length && groupNamesRaw[end] != 0)
+            end++;
+
+        if (end == nameOffset)
+            return null;
+
+        return Encoding.UTF8.GetString(groupNamesRaw, nameOffset, end - nameOffset);
     }
 
     private WmoV14Data ParseWmoV14Internal(BinaryReader reader)
@@ -594,6 +600,7 @@ public class WmoV14ToV17Converter
     private void ParseMogn(BinaryReader reader, uint size, WmoV14Data data)
     {
         var bytes = reader.ReadBytes((int)size);
+        data.GroupNamesRaw = bytes;
         data.GroupNames = ParseStringTable(bytes);
     }
 
@@ -1066,6 +1073,8 @@ public class WmoV14ToV17Converter
         // DISABLED: Mesh repair breaks batch data (minIndex/maxIndex become invalid)
         // TODO: Need to recalculate batch bounds and unknown_box after vertex welding
         // RepairMesh(group);
+
+        group.Name = GetGroupName(data.GroupNamesRaw, (int)group.NameOffset);
 
         data.Groups.Add(group);
     }
@@ -2260,6 +2269,7 @@ public class WmoV14ToV17Converter
         
         // Temp storage for raw MOTX to resolve offsets
         public byte[] MotxRaw = Array.Empty<byte>();
+        public byte[] GroupNamesRaw = Array.Empty<byte>();
         public List<string> GroupNames = new();
         public List<WmoGroupInfo> GroupInfos = new();
         public List<WmoGroupData> Groups = new();

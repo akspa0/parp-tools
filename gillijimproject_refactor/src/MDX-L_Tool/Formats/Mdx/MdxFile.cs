@@ -274,13 +274,35 @@ public class MdxFile
 
     static void ReadTexs(BinaryReader br, uint size, List<MdlTexture> textures)
     {
-        uint entrySize = 268; // 0x10C
+        // TEXS entry size varies by version:
+        //   0.5.3 / WC3: 264 bytes (0x108) = ReplaceableId(4) + Path(0x100) + Flags(4)
+        //   0.8.0+:      268 bytes (0x10C) = ReplaceableId(4) + Path(0x104) + Flags(4)
+        // Auto-detect from chunk size divisibility.
+        uint entrySize;
+        int pathLen;
+        if (size % 268 == 0)
+        {
+            entrySize = 268;
+            pathLen = 0x104;
+        }
+        else if (size % 264 == 0)
+        {
+            entrySize = 264;
+            pathLen = 0x100;
+        }
+        else
+        {
+            // Fallback: try 268 first, then 264
+            entrySize = (size >= 268) ? 268u : 264u;
+            pathLen = (entrySize == 268) ? 0x104 : 0x100;
+        }
+
         uint count = size / entrySize;
         for (uint i = 0; i < count; i++)
         {
             var tex = new MdlTexture();
             tex.ReplaceableId = br.ReadUInt32();
-            tex.Path = ReadFixedString(br, 0x104);
+            tex.Path = ReadFixedString(br, pathLen);
             tex.Flags = br.ReadUInt32();
             textures.Add(tex);
         }

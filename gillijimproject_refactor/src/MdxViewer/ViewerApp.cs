@@ -2302,10 +2302,47 @@ void main() {
             {
                 var mpqs = Directory.GetFiles(path, "*.mpq", SearchOption.AllDirectories)
                     .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
+
+                // LK 3.3.5: has patch MPQs with "3" in name
                 if (mpqs.Any(m => m.Contains("patch") && m.Contains("3")))
                 {
                     var lkBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("3.3.5."));
                     return lkBuild ?? "3.3.5.12340";
+                }
+
+                // Alpha 0.5.3: dbc.mpq + model.mpq + texture.mpq, no common.mpq or patch-*.mpq
+                bool hasAlphaSignature = mpqs.Contains("dbc.mpq")
+                    && mpqs.Contains("model.mpq")
+                    && mpqs.Contains("texture.mpq")
+                    && !mpqs.Any(m => m.StartsWith("common"))
+                    && !mpqs.Any(m => m.StartsWith("patch-"));
+                if (hasAlphaSignature)
+                {
+                    // Check for patch.mpq → 0.7.0+, otherwise 0.5.3
+                    bool hasPatch = mpqs.Contains("patch.mpq");
+                    if (hasPatch)
+                    {
+                        // 0.6.0–0.8.0 range: try each in order
+                        foreach (var prefix in new[] { "0.8.0.", "0.7.0.", "0.6.0." })
+                        {
+                            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(prefix));
+                            if (!string.IsNullOrEmpty(match))
+                            {
+                                ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha+patch): {match}");
+                                return match;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var alphaBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("0.5.3."));
+                        if (!string.IsNullOrEmpty(alphaBuild))
+                        {
+                            ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha): {alphaBuild}");
+                            return alphaBuild;
+                        }
+                        return "0.5.3.3368";
+                    }
                 }
             }
             catch { }
