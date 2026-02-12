@@ -25,19 +25,19 @@ jobs:
       # Some of them have their own submodules (DBCD, SereniaBLPLib).
 
       - name: Clone WoWDBDefs (DBC definitions)
-        run: git clone --depth 1 https://github.com/wowdev/WoWDBDefs.git lib/WoWDBDefs
+        run: git clone --depth 1 https://github.com/wowdev/WoWDBDefs.git gillijimproject_refactor/lib/WoWDBDefs
 
-      - name: Clone wow.tools.local (DBCD library)
+      - name: Clone wow.tools.local + DBCD submodule only
         run: |
-          git clone --depth 1 https://github.com/Marlamin/wow.tools.local lib/wow.tools.local
-          cd lib/wow.tools.local
-          git submodule update --init --depth 1
+          git clone --depth 1 https://github.com/Marlamin/wow.tools.local gillijimproject_refactor/lib/wow.tools.local
+          Remove-Item -Recurse -Force gillijimproject_refactor/lib/wow.tools.local/DBCD -ErrorAction SilentlyContinue
+          git clone --depth 1 https://github.com/wowdev/DBCD gillijimproject_refactor/lib/wow.tools.local/DBCD
 
       - name: Patch DBCD target frameworks (upstream may have net10.0 which requires .NET 10 SDK)
         run: |
           $dbcdProjects = @(
-            "lib/wow.tools.local/DBCD/DBCD/DBCD.csproj",
-            "lib/wow.tools.local/DBCD/DBCD.IO/DBCD.IO.csproj"
+            "gillijimproject_refactor/lib/wow.tools.local/DBCD/DBCD/DBCD.csproj",
+            "gillijimproject_refactor/lib/wow.tools.local/DBCD/DBCD.IO/DBCD.IO.csproj"
           )
           foreach ($proj in $dbcdProjects) {
             if (Test-Path $proj) {
@@ -48,11 +48,11 @@ jobs:
             }
           }
 
-      - name: Clone WoWTools.Minimaps (SereniaBLPLib)
+      - name: Clone WoWTools.Minimaps + SereniaBLPLib submodule only
         run: |
-          git clone --depth 1 https://github.com/Marlamin/WoWTools.Minimaps lib/WoWTools.Minimaps
-          cd lib/WoWTools.Minimaps
-          git submodule update --init --depth 1
+          git clone --depth 1 https://github.com/Marlamin/WoWTools.Minimaps gillijimproject_refactor/lib/WoWTools.Minimaps
+          Remove-Item -Recurse -Force gillijimproject_refactor/lib/WoWTools.Minimaps/SereniaBLPLib -ErrorAction SilentlyContinue
+          git clone --depth 1 https://github.com/WoW-Tools/SereniaBLPLib.git gillijimproject_refactor/lib/WoWTools.Minimaps/SereniaBLPLib
 
       - name: Setup .NET 9
         uses: actions/setup-dotnet@v4
@@ -60,31 +60,31 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Restore dependencies
-        run: dotnet restore src/MdxViewer/MdxViewer.csproj
+        run: dotnet restore gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj
 
       - name: Publish Release (self-contained)
         run: |
-          dotnet publish src/MdxViewer/MdxViewer.csproj `
+          dotnet publish gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o publish/MdxViewer
+            -o gillijimproject_refactor/publish/MdxViewer
 
       - name: Verify definitions bundled
         run: |
-          if (!(Test-Path "publish/MdxViewer/definitions/AreaTable.dbd")) {
+          if (!(Test-Path "gillijimproject_refactor/publish/MdxViewer/definitions/AreaTable.dbd")) {
             Write-Error "WoWDBDefs definitions not found in publish output!"
             exit 1
           }
-          $count = (Get-ChildItem "publish/MdxViewer/definitions/*.dbd").Count
+          $count = (Get-ChildItem "gillijimproject_refactor/publish/MdxViewer/definitions/*.dbd").Count
           Write-Host "Bundled $count .dbd definition files"
 
       - name: Create ZIP archive
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
-          Compress-Archive -Path "publish/MdxViewer/*" -DestinationPath "MdxViewer-${version}-win-x64.zip"
+          Compress-Archive -Path "gillijimproject_refactor/publish/MdxViewer/*" -DestinationPath "MdxViewer-${version}-win-x64.zip"
           Write-Host "Created MdxViewer-${version}-win-x64.zip"
 
       - name: Create GitHub Release

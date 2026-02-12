@@ -49,12 +49,35 @@ A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alph
 
 ## Requirements
 
-- **Runtime**: .NET 9.0 SDK
-- **OS**: Windows (Native `StormLib.dll` for MPQ access)
+- **Runtime**: .NET 10.0 SDK
 - **GPU**: OpenGL 3.3+ capable hardware
+- **OS**: Windows x64 (other platforms untested)
 
-## Build & Run
+## Building from Source
 
+### 1. Clone the repo
+```bash
+git clone https://github.com/akspa0/parp-tools.git
+cd parp-tools/gillijimproject_refactor
+```
+
+### 2. Bootstrap library dependencies
+External libraries (SereniaBLPLib, DBCD, WoWDBDefs) are not git submodules — they are cloned on demand by the bootstrap script.
+
+**PowerShell (Windows):**
+```powershell
+./setup-libs.ps1
+```
+
+**Bash (Linux/macOS):**
+```bash
+chmod +x setup-libs.sh
+./setup-libs.sh
+```
+
+Re-run with `-Force` (PowerShell) or `--force` (bash) to re-clone all libraries.
+
+### 3. Build & Run
 ```bash
 cd src/MdxViewer
 dotnet build
@@ -62,6 +85,9 @@ dotnet run -- path/to/game/directory
 ```
 
 The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain adapter.
+
+### Pre-built Releases
+Download self-contained binaries from [Releases](../../releases) — no .NET SDK or library setup required.
 
 ## Architecture
 

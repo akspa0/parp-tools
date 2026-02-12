@@ -100,11 +100,15 @@ public class VlmDatasetExporter
         using var mpqService = new NativeMpqService();
         mpqService.LoadArchives(searchPaths);
 
-        // Load community listfile for debugging
-        var listfile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_data", "community-listfile-withcapitals.csv");
-        if (File.Exists(listfile)) mpqService.LoadListfile(listfile);
-        else if (File.Exists("community-listfile-withcapitals.csv")) mpqService.LoadListfile("community-listfile-withcapitals.csv");
-        else if (File.Exists("listfile.csv")) mpqService.LoadListfile("listfile.csv");
+        // Load community listfile — check cached download, app-local, then CWD
+        string[] listfileSearchPaths = {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "community-listfile-withcapitals.csv"),
+            "community-listfile-withcapitals.csv",
+            "listfile.csv",
+        };
+        var listfile = listfileSearchPaths.FirstOrDefault(File.Exists);
+        if (listfile != null) mpqService.LoadListfile(listfile);
         
         foreach (var tryPath in wdtPaths)
         {

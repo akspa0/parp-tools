@@ -1,4 +1,4 @@
-name: Release WoWAlphaViewer
+name: Release MdxViewer
 
 on:
   push:
@@ -13,79 +13,77 @@ on:
 permissions:
   contents: write
 
+env:
+  DOTNET_VERSION: '10.0.x'
+  PROJECT: gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj
+
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os_label: Windows x64
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Clone external library dependencies into lib/ ──
-      # These are separate GitHub repos that aren't git submodules of this repo.
-      # Some of them have their own submodules (DBCD, SereniaBLPLib).
+      - name: Bootstrap library dependencies
+        working-directory: gillijimproject_refactor
+        run: ./setup-libs.ps1
 
-      - name: Clone WoWDBDefs (DBC definitions)
-        run: git clone --depth 1 https://github.com/wowdev/WoWDBDefs.git lib/WoWDBDefs
-
-      - name: Clone wow.tools.local (DBCD library)
-        run: |
-          git clone --depth 1 https://github.com/Marlamin/wow.tools.local lib/wow.tools.local
-          cd lib/wow.tools.local
-          git submodule update --init --depth 1
-
-      - name: Patch DBCD target frameworks (upstream may have net10.0 which requires .NET 10 SDK)
-        run: |
-          $dbcdProjects = @(
-            "lib/wow.tools.local/DBCD/DBCD/DBCD.csproj",
-            "lib/wow.tools.local/DBCD/DBCD.IO/DBCD.IO.csproj"
-          )
-          foreach ($proj in $dbcdProjects) {
-            if (Test-Path $proj) {
-              $content = Get-Content $proj -Raw
-              $patched = $content -replace '<TargetFrameworks>[^<]+</TargetFrameworks>', '<TargetFrameworks>netstandard2.1;net8.0;net9.0</TargetFrameworks>'
-              Set-Content $proj $patched
-              Write-Host "Patched $proj"
-            }
-          }
-
-      - name: Clone WoWTools.Minimaps (SereniaBLPLib)
-        run: |
-          git clone --depth 1 https://github.com/Marlamin/WoWTools.Minimaps lib/WoWTools.Minimaps
-          cd lib/WoWTools.Minimaps
-          git submodule update --init --depth 1
-
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Restore dependencies
-        run: dotnet restore src/MdxViewer/MdxViewer.csproj
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT }}
 
-      - name: Publish Release (self-contained)
+      - name: Publish (${{ matrix.os_label }})
         run: |
-          dotnet publish gillijimproject-csharp/src/MdxViewer/MdxViewer.csproj `
+          dotnet publish ${{ env.PROJECT }} `
             -c Release `
-            -r win-x64 `
+            -r ${{ matrix.rid }} `
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o publish/MdxViewer
+            -o publish/MdxViewer-${{ matrix.rid }}
 
       - name: Verify definitions bundled
         run: |
-          if (!(Test-Path "publish/MdxViewer/definitions/AreaTable.dbd")) {
+          $pubDir = "publish/MdxViewer-${{ matrix.rid }}"
+          if (!(Test-Path "$pubDir/definitions/AreaTable.dbd")) {
             Write-Error "WoWDBDefs definitions not found in publish output!"
             exit 1
           }
-          $count = (Get-ChildItem "publish/MdxViewer/definitions/*.dbd").Count
+          $count = (Get-ChildItem "$pubDir/definitions/*.dbd").Count
           Write-Host "Bundled $count .dbd definition files"
 
       - name: Create ZIP archive
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
-          Compress-Archive -Path "publish/MdxViewer/*" -DestinationPath "MdxViewer-${version}-win-x64.zip"
-          Write-Host "Created MdxViewer-${version}-win-x64.zip"
+          $zipName = "MdxViewer-${version}-${{ matrix.rid }}.zip"
+          Compress-Archive -Path "publish/MdxViewer-${{ matrix.rid }}/*" -DestinationPath $zipName
+          Write-Host "Created $zipName"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MdxViewer-${{ matrix.rid }}
+          path: MdxViewer-*-${{ matrix.rid }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -95,21 +93,20 @@ jobs:
           body: |
             ## MdxViewer — WoW World Viewer
 
-            High-performance .NET 9 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
+            High-performance .NET 10 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
 
             ### Quick Start
-            1. Extract the ZIP
-            2. Run `MdxViewer.exe path\to\game\directory`
+            1. Extract the ZIP for your platform
+            2. Run `MdxViewer path/to/game/directory`
 
             ### Requirements
-            - Windows x64
             - OpenGL 3.3+ capable GPU
             - WoW game data (MPQ archives)
 
             ### What's Included
-            - Self-contained .NET 9 runtime (no install needed)
+            - Self-contained .NET 10 runtime (no install needed)
             - WoWDBDefs definitions for DBC parsing
             - Pure C# MPQ reader (no StormLib dependency)
-          files: MdxViewer-*-win-x64.zip
+          files: artifacts/MdxViewer-*.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
