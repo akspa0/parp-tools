@@ -395,56 +395,67 @@ public class WorldAssetManager : IDisposable
 
             // Detect WMO version from bytes
             int version = DetectWmoVersion(data);
-            byte[] v14Bytes;
+
+            WmoV14ToV17Converter.WmoV14Data wmo;
 
             if (version >= 17)
             {
-                // v17+: collect group files and convert to v14
-                v14Bytes = ConvertWmoV17ToV14(data, normalizedKey);
-                if (v14Bytes == null || v14Bytes.Length == 0)
-                    return null;
-                ViewerLog.Trace($"[WMO] Converted v{version} → v14: {Path.GetFileName(normalizedKey)} ({v14Bytes.Length} bytes)");
+                // v17+: parse directly into WmoV14Data — no lossy binary roundtrip
+                var dir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+                var baseName = Path.GetFileNameWithoutExtension(normalizedKey);
+
+                var groupBytesList = new List<byte[]>();
+                for (int gi = 0; gi < 512; gi++)
+                {
+                    var groupName = $"{baseName}_{gi:D3}.wmo";
+                    var groupPath = string.IsNullOrEmpty(dir) ? groupName : $"{dir}\\{groupName}";
+                    var groupBytes = ReadFileData(groupPath);
+                    if (groupBytes == null || groupBytes.Length == 0) break;
+                    groupBytesList.Add(groupBytes);
+                }
+
+                var v17Parser = new WmoV17ToV14Converter();
+                wmo = v17Parser.ParseV17ToModel(data, groupBytesList);
+                ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
             }
             else
             {
-                v14Bytes = data;
-            }
-
-            // Parse v14 WMO
-            string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
-            try
-            {
-                File.WriteAllBytes(tmpPath, v14Bytes);
-                var converter = new WmoV14ToV17Converter();
-                var wmo = converter.ParseWmoV14(tmpPath);
-
-                // v14/v16 split format: load group files from data source
-                if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+                // v14/v16: parse with existing pipeline
+                string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
+                try
                 {
-                    var wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
-                    var wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
-                    for (int gi = 0; gi < wmo.GroupCount; gi++)
+                    File.WriteAllBytes(tmpPath, data);
+                    var converter = new WmoV14ToV17Converter();
+                    wmo = converter.ParseWmoV14(tmpPath);
+
+                    // v14/v16 split format: load group files from data source
+                    if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
                     {
-                        var groupName = $"{wmoBase}_{gi:D3}.wmo";
-                        var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
-                        var groupBytes = ReadFileData(groupPath);
-                        if (groupBytes != null && groupBytes.Length > 0)
-                            converter.ParseGroupFile(groupBytes, wmo, gi);
-                    }
-                    for (int gi = 0; gi < wmo.Groups.Count; gi++)
-                    {
-                        if (wmo.Groups[gi].Name == null)
-                            wmo.Groups[gi].Name = $"group_{gi}";
+                        var wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+                        var wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
+                        for (int gi = 0; gi < wmo.GroupCount; gi++)
+                        {
+                            var groupName = $"{wmoBase}_{gi:D3}.wmo";
+                            var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                            var groupBytes = ReadFileData(groupPath);
+                            if (groupBytes != null && groupBytes.Length > 0)
+                                converter.ParseGroupFile(groupBytes, wmo, gi);
+                        }
+                        for (int gi = 0; gi < wmo.Groups.Count; gi++)
+                        {
+                            if (wmo.Groups[gi].Name == null)
+                                wmo.Groups[gi].Name = $"group_{gi}";
+                        }
                     }
                 }
+                finally
+                {
+                    try { File.Delete(tmpPath); } catch { }
+                }
+            }
 
-                string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
-                return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver);
-            }
-            finally
-            {
-                try { File.Delete(tmpPath); } catch { }
-            }
+            string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver);
         }
         catch (Exception ex)
         {
@@ -473,36 +484,6 @@ public class WorldAssetManager : IDisposable
                 return (int)BitConverter.ToUInt32(data, 8);
         }
         return 0;
-    }
-
-    /// <summary>
-    /// Convert WMO v17 root + group files to v14 monolithic format.
-    /// </summary>
-    private byte[]? ConvertWmoV17ToV14(byte[] rootBytes, string normalizedKey)
-    {
-        try
-        {
-            var dir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
-            var baseName = Path.GetFileNameWithoutExtension(normalizedKey);
-
-            var groupBytesList = new List<byte[]>();
-            for (int gi = 0; gi < 512; gi++)
-            {
-                var groupName = $"{baseName}_{gi:D3}.wmo";
-                var groupPath = string.IsNullOrEmpty(dir) ? groupName : $"{dir}\\{groupName}";
-                var groupBytes = ReadFileData(groupPath);
-                if (groupBytes == null || groupBytes.Length == 0) break;
-                groupBytesList.Add(groupBytes);
-            }
-
-            var v17Converter = new WmoV17ToV14Converter();
-            return v17Converter.ConvertToBytes(rootBytes, groupBytesList);
-        }
-        catch (Exception ex)
-        {
-            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO v17→v14 convert failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
-            return null;
-        }
     }
 
     // ── LRU helpers ─────────────────────────────────────────────────────

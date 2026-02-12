@@ -2467,14 +2467,12 @@ void main() {
 
         if (version >= 17)
         {
-            // v17+: convert to v14 bytes, then parse with existing pipeline
-            var v17Converter = new WmoV17ToV14Converter();
+            // v17+: parse directly into WmoV14Data — no lossy binary roundtrip
             var v17RootBytes = File.ReadAllBytes(filePath);
 
-            // Collect group files
             var groupBytesList = new List<byte[]>();
             string baseName = Path.GetFileNameWithoutExtension(filePath);
-            for (int gi = 0; gi < 512; gi++) // reasonable upper bound
+            for (int gi = 0; gi < 512; gi++)
             {
                 string groupPath = Path.Combine(dir, $"{baseName}_{gi:D3}.wmo");
                 if (!File.Exists(groupPath)) break;
@@ -2482,16 +2480,11 @@ void main() {
                 ViewerLog.Trace($"[WMO] Loaded group file: {Path.GetFileName(groupPath)}");
             }
 
-            byte[] v14Bytes = v17Converter.ConvertToBytes(v17RootBytes, groupBytesList);
-            ViewerLog.Trace($"[WMO] Converted v17 → v14 ({v14Bytes.Length} bytes, {groupBytesList.Count} groups)");
-
-            // Write to temp and parse with existing v14 pipeline
-            string tempPath = Path.Combine(Path.GetTempPath(), $"wmo_v14_{Path.GetFileName(filePath)}");
-            File.WriteAllBytes(tempPath, v14Bytes);
-            var v14Converter = new WmoV14ToV17Converter();
-            var wmo = v14Converter.ParseWmoV14(tempPath);
+            var v17Parser = new WmoV17ToV14Converter();
+            var wmo = v17Parser.ParseV17ToModel(v17RootBytes, groupBytesList);
+            ViewerLog.Trace($"[WMO] Parsed v{version} direct ({wmo.Groups.Count} groups)");
             LoadWmoModel(wmo, dir);
-            _statusMessage = $"Loaded WMO v{version} (converted): {Path.GetFileName(filePath)}";
+            _statusMessage = $"Loaded WMO v{version}: {Path.GetFileName(filePath)}";
         }
         else
         {
@@ -2517,7 +2510,7 @@ void main() {
 
         if (version >= 17)
         {
-            // v17+: collect group files from data source, convert to v14, then parse
+            // v17+: parse directly into WmoV14Data — no lossy binary roundtrip
             var wmoDir = Path.GetDirectoryName(virtualPath)?.Replace('/', '\\') ?? "";
             var wmoBase = Path.GetFileNameWithoutExtension(virtualPath);
 
@@ -2532,16 +2525,11 @@ void main() {
                 ViewerLog.Trace($"[WMO] Group {gi}: loaded {groupBytes.Length} bytes");
             }
 
-            var v17Converter = new WmoV17ToV14Converter();
-            byte[] v14Bytes = v17Converter.ConvertToBytes(rootBytes, groupBytesList);
-            ViewerLog.Trace($"[WMO] Converted v17 → v14 ({v14Bytes.Length} bytes, {groupBytesList.Count} groups)");
-
-            string tempPath = Path.Combine(Path.GetTempPath(), $"wmo_v14_{Path.GetFileName(virtualPath)}");
-            File.WriteAllBytes(tempPath, v14Bytes);
-            var v14Converter = new WmoV14ToV17Converter();
-            var wmo = v14Converter.ParseWmoV14(tempPath);
+            var v17Parser = new WmoV17ToV14Converter();
+            var wmo = v17Parser.ParseV17ToModel(rootBytes, groupBytesList);
+            ViewerLog.Trace($"[WMO] Parsed v{version} direct ({wmo.Groups.Count} groups)");
             LoadWmoModel(wmo, CacheDir);
-            _statusMessage = $"Loaded WMO v{version} (converted): {Path.GetFileName(virtualPath)}";
+            _statusMessage = $"Loaded WMO v{version}: {Path.GetFileName(virtualPath)}";
         }
         else
         {

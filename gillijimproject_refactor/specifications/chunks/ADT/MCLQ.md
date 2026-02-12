@@ -11,9 +11,9 @@ Legacy terrain liquid payload referenced by MCNK; present in early builds before
 |---|---|
 | 0.5.3.3368 | Inline liquid representation documented |
 | 0.6.0.3592 | `MCLQ` validated as MCNK subchunk and parsed in packed instances |
-| 0.7.0.3694 | Inferred same family as 0.6.0; direct confirmation pending |
+| 0.7.0.3694 | Confirmed in `FUN_006af6f0` (token check) + `FUN_006af340` (instance decode) |
 
-## Structure — Build 0.7.0.3694 (inferred, medium-high confidence)
+## Structure — Build 0.7.0.3694 (confirmed layout shape)
 
 ### Chunk-level
 | Offset | Type | Name | Description |
@@ -22,16 +22,16 @@ Legacy terrain liquid payload referenced by MCNK; present in early builds before
 | 0x04 | uint32 | size | Payload byte size |
 | 0x08 | byte[] | payload | Packed liquid instances |
 
-### Per-liquid-instance (0.6 lineage)
+### Per-liquid-instance (0.7 parser)
 | Offset | Type | Name | Description |
 |---|---|---|---|
 | 0x000 | float | minHeight | Minimum liquid height |
 | 0x004 | float | maxHeight | Maximum liquid height |
-| 0x008 | byte[0x288] | vertexRegion | Likely 9x9 vertex-related records (`???` exact field split) |
-| 0x290 | byte[64] | tileFlags | 8x8 tile/flags area |
-| 0x2D0 | uint32 | extra | Trailing value (`???`) |
+| 0x008 | void* | vertexRegionPtr | Runtime pointer assigned to `instance + 0x008` |
+| 0x290 | void* | tileRegionPtr | Runtime pointer assigned to `instance + 0x290` |
+| 0x2D0 | uint32 | extra | Copied from `instance + 0x2D0` |
 
-Per-instance stride (observed in 0.6): `0x2D4` bytes.
+Per-instance stride (observed in 0.7): `0x2D4` bytes (`0xB5` dwords).
 
 ## Version Differences
 - **0.5.3**: inline liquid model heavily coupled to MCNK internals.
@@ -39,8 +39,9 @@ Per-instance stride (observed in 0.6): `0x2D4` bytes.
 - **0.7.0**: expected to still support `MCLQ` while beta transitions continue.
 
 ## Ghidra Notes
-- 0.6.0 functions: `FUN_006a6d00` (validation), `FUN_006a6960` (instance parsing).
+- `FUN_006af6f0` validates `MCLQ` via header offset `+0x60`.
+- `FUN_006af340` iterates liquid-type bits (`0x04,0x08,0x10,0x20`) and consumes packed instances.
 
 ## Confidence
 - Presence/parsing path: **High**
-- Inner record semantics: **Medium**
+- Inner subfields not named by decompiler: **Medium**

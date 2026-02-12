@@ -9,18 +9,18 @@ UV coordinates for group vertices.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.7.0.3694 | Requires direct confirmation for dual-MOTV behavior; baseline UV role is inferred |
+| 0.7.0.3694 | Confirmed in `FUN_006c1a10` required group sequence |
 
-## Structure — Build 0.7.0.3694 (inferred, medium confidence)
+## Structure — Build 0.7.0.3694 (confirmed)
 | Offset | Type | Name | Description |
 |---|---|---|---|
 | 0x00 | float[2] * n | uv | UV coordinate list |
 
-Stride expected: 8 bytes per UV entry.
+Stride: 8 bytes (`count = chunkSize >> 3`).
 
 ## Open Questions
 - Single vs multiple `MOTV` blocks per group in this build.
 - Possible V-flip behavior.
 
 ## Confidence
-- **Medium**
+- **High**

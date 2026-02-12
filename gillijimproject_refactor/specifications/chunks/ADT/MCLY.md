@@ -9,11 +9,9 @@ Defines texture layers used by one MCNK and links into alpha map data.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.5.3.3368 | Layer-loop usage confirmed |
-| 0.6.0.3592 | Offset table and presence validated |
-| 0.7.0.3694 | Inferred from continuity |
+| 0.7.0.3694 | Presence/offset confirmed in `FUN_006af6f0`; per-layer loop in `FUN_006af0f0` |
 
-## Structure — Build 0.7.0.3694 (inferred, medium confidence)
+## Structure — Build 0.7.0.3694 (confirmed shape)
 | Offset | Type | Name | Description |
 |---|---|---|---|
 | 0x00 | uint32 | textureId | Texture table index |
@@ -23,5 +21,10 @@ Defines texture layers used by one MCNK and links into alpha map data.
 
 Entry size is expected to remain `0x10` bytes.
 
+## Ghidra Notes
+- `FUN_006af0f0` walks layer entries with `0x10` stride for `nLayers` iterations.
+- `nLayers` read from MCNK header offset `+0x0C`.
+
 ## Confidence
-- **Medium**
+- Entry stride/count handling: **High**
+- Bit semantics: **Medium**

@@ -10,8 +10,7 @@ Root-level ADT object section.
 | Build | Notes |
 |---|---|
 | 0.5.3.3368 | Fully mapped; binary-compatible with LK-era layout |
-| 0.6.0.3592 | No conflicting changes observed |
-| 0.7.0.3694 | Inferred stable layout |
+| 0.7.0.3694 | Confirmed count formula in `FUN_006bd840`: `mddfCount = chunkSize / 0x24` |
 
 ## Structure — Build 0.7.0.3694 (high confidence)
 | Offset | Type | Name | Description |

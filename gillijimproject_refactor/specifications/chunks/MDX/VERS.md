@@ -9,14 +9,14 @@ Root-level MDX chunk stream.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.5.3.3368 | Global-properties read path includes version handling |
-| 0.6.0.3592 | Loader still expects `MDLX` format |
-| 0.7.0.3694 | Inferred MDX continuity |
+| 0.7.0.3694 | `MDLX` magic confirmed in `FUN_004220e0`; no explicit `VERS` token query found in traced load chain |
 
-## Structure — Build 0.7.0.3694 (inferred)
+## Structure — Build 0.7.0.3694
 | Offset | Type | Name | Description |
 |---|---|---|---|
-| 0x00 | uint32 | version | MDX version value |
+| 0x00 | uint32 | magic | `MDLX` file signature |
+| 0x04 | ... | ... | Subsequent chunks (`MODL`, etc.) |
 
 ## Confidence
-- **Medium**
+- Magic presence: **High**
+- Standalone `VERS` chunk use in this build: **Low/Unknown**

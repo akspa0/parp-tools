@@ -9,14 +9,15 @@ Root-level MDX chunk stream.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.5.3.3368 | `CollisionDataCreate` path present |
-| 0.7.0.3694 | Inferred continuity |
+| 0.7.0.3694 | Confirmed in `FUN_004459c0` token `0x44494c43` (`CLID`) |
 
 ## Structure — Build 0.7.0.3694
 | Offset | Type | Name | Description |
 |---|---|---|---|
-| 0x00 | ??? | ??? | Collision primitive records (`???` exact shapes/offsets) |
+| 0x00 | subchunk | `VRTX` | Collision vertices (`count = header[2]`) |
+| ... | subchunk | `TRI ` | Triangle indices (`0x20495254`) |
+| ... | subchunk | `NRMS` | Collision normals |
 
 ## Confidence
-- Presence: **High**
-- Field map: **Low**
+- Subchunk framing/order: **High**
+- Full semantic mapping: **Medium**

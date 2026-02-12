@@ -61,6 +61,248 @@ public class WmoV17ToV14Converter
         return output.ToArray();
     }
 
+    /// <summary>
+    /// Parse v17 WMO root + group bytes directly into WmoV14Data model
+    /// without the lossy binary serialization roundtrip.
+    /// </summary>
+    public WmoV14ToV17Converter.WmoV14Data ParseV17ToModel(byte[] rootBytes, List<byte[]> groupBytesList)
+    {
+        using var rootStream = new MemoryStream(rootBytes);
+        using var reader = new BinaryReader(rootStream);
+        var v17 = ParseWmoV17RootFromReader(reader);
+
+        foreach (var gb in groupBytesList)
+        {
+            using var groupStream = new MemoryStream(gb);
+            using var groupReader = new BinaryReader(groupStream);
+            v17.Groups.Add(ParseWmoV17GroupFromReader(groupReader));
+        }
+
+        return ConvertV17DataToModel(v17);
+    }
+
+    /// <summary>
+    /// Convert parsed v17 data structures directly to WmoV14Data model.
+    /// </summary>
+    private static WmoV14ToV17Converter.WmoV14Data ConvertV17DataToModel(WmoV17Data v17)
+    {
+        var model = new WmoV14ToV17Converter.WmoV14Data
+        {
+            Version = v17.Version,
+            MaterialCount = v17.MaterialCount,
+            GroupCount = v17.GroupCount,
+            PortalCount = v17.PortalCount,
+            LightCount = v17.LightCount,
+            DoodadNameCount = v17.DoodadNameCount,
+            DoodadDefCount = v17.DoodadDefCount,
+            DoodadSetCount = v17.DoodadSetCount,
+            AmbientColor = v17.AmbientColor,
+            WmoId = v17.WmoId,
+            Flags = v17.Flags,
+            BoundsMin = v17.BoundingBox1,
+            BoundsMax = v17.BoundingBox2,
+        };
+
+        // Textures
+        model.Textures.AddRange(v17.TextureNames);
+
+        // Materials — map v17 material fields to v14 model
+        foreach (var m in v17.Materials)
+        {
+            string tex1 = m.Texture1 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture1] : "";
+            string tex2 = m.Texture2 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture2] : "";
+            string tex3 = m.Texture3 < v17.TextureNames.Count ? v17.TextureNames[(int)m.Texture3] : "";
+            model.Materials.Add(new WmoV14ToV17Converter.WmoMaterial
+            {
+                Flags = m.Flags,
+                Shader = m.Shader,
+                BlendMode = m.BlendMode,
+                Texture1Offset = m.Texture1,
+                EmissiveColor = m.SidnColor,
+                FrameEmissiveColor = m.FrameSidnColor,
+                Texture2Offset = m.Texture2,
+                DiffuseColor = m.DiffColor,
+                GroundType = m.GroundType,
+                Texture3Offset = m.Texture3,
+                Color2 = m.Color3,
+                Texture1Name = tex1,
+                Texture2Name = tex2,
+                Texture3Name = tex3,
+            });
+        }
+
+        // Group names and infos
+        model.GroupNames.AddRange(v17.GroupNames);
+        foreach (var gi in v17.GroupInfos)
+        {
+            model.GroupInfos.Add(new WmoV14ToV17Converter.WmoGroupInfo
+            {
+                Flags = gi.Flags,
+                BoundsMin = gi.BoundingBox1,
+                BoundsMax = gi.BoundingBox2,
+                NameOffset = gi.NameOfs,
+            });
+        }
+
+        // Portal vertices
+        model.PortalVertices.AddRange(v17.PortalVertices);
+
+        // Portal infos
+        foreach (var pi in v17.PortalInfos)
+        {
+            model.Portals.Add(new WmoV14ToV17Converter.WmoPortal
+            {
+                StartVertex = pi.StartVertex,
+                Count = pi.VertexCount,
+                PlaneA = pi.Normal.X,
+                PlaneB = pi.Normal.Y,
+                PlaneC = pi.Normal.Z,
+                PlaneD = pi.Distance,
+            });
+        }
+
+        // Portal refs
+        foreach (var pr in v17.PortalRefs)
+        {
+            model.PortalRefs.Add(new WmoV14ToV17Converter.WmoPortalRef
+            {
+                PortalIndex = pr.PortalIndex,
+                GroupIndex = pr.GroupIndex,
+                Side = pr.Side,
+            });
+        }
+
+        // Lights
+        foreach (var l in v17.Lights)
+        {
+            model.Lights.Add(new WmoV14ToV17Converter.WmoLight
+            {
+                Type = l.Type,
+                UseAtten = l.UseAtten != 0,
+                Color = l.Color,
+                Position = l.Position,
+                Intensity = l.Intensity,
+                AttenStart = l.AttenStart,
+                AttenEnd = l.AttenEnd,
+            });
+        }
+
+        // Doodad sets
+        foreach (var ds in v17.DoodadSets)
+        {
+            model.DoodadSets.Add(new WmoV14ToV17Converter.WmoDoodadSet
+            {
+                Name = ds.Name,
+                StartIndex = ds.StartIndex,
+                Count = ds.Count,
+            });
+        }
+
+        // Doodad names → raw bytes for name resolution
+        if (v17.DoodadNames.Count > 0)
+        {
+            using var ms = new MemoryStream();
+            foreach (var name in v17.DoodadNames)
+            {
+                var bytes = Encoding.ASCII.GetBytes(name);
+                ms.Write(bytes, 0, bytes.Length);
+                ms.WriteByte(0);
+            }
+            model.DoodadNamesRaw = ms.ToArray();
+        }
+
+        // Doodad defs
+        foreach (var dd in v17.DoodadDefs)
+        {
+            model.DoodadDefs.Add(new WmoV14ToV17Converter.WmoDoodadDef
+            {
+                NameIndex = dd.NameOfs,
+                Position = dd.Position,
+                Orientation = new Quaternion(dd.Rotation[0], dd.Rotation[1], dd.Rotation[2], dd.Rotation[3]),
+                Scale = dd.Scale,
+                Color = dd.Color,
+            });
+        }
+
+        // Groups
+        foreach (var g in v17.Groups)
+        {
+            var group = new WmoV14ToV17Converter.WmoGroupData
+            {
+                NameOffset = g.GroupNameOfs,
+                DescriptiveNameOffset = g.DescriptiveNameOfs,
+                Flags = g.Flags,
+                BoundsMin = g.BoundingBox1,
+                BoundsMax = g.BoundingBox2,
+                PortalStart = g.PortalStart,
+                PortalCount = g.PortalCount,
+                TransBatchCount = g.TransBatchCount,
+                IntBatchCount = g.IntBatchCount,
+                ExtBatchCount = g.ExtBatchCount,
+                GroupLiquid = g.GroupLiquid,
+            };
+
+            // Resolve group name from MOGN string table
+            if (g.GroupNameOfs < v17.GroupNames.Count)
+                group.Name = v17.GroupNames[(int)g.GroupNameOfs];
+            else
+                group.Name = $"group_{v17.Groups.IndexOf(g)}";
+
+            if (g.Vertices != null)
+                group.Vertices.AddRange(g.Vertices);
+            if (g.Indices != null)
+                group.Indices.AddRange(g.Indices);
+            if (g.TexCoords != null)
+                group.UVs.AddRange(g.TexCoords);
+            if (g.Normals != null)
+                group.Normals.AddRange(g.Normals);
+            if (g.DoodadRefs != null)
+                group.DoodadRefs.AddRange(g.DoodadRefs);
+            if (g.VertexColors != null)
+            {
+                for (int i = 0; i + 3 < g.VertexColors.Length; i += 4)
+                    group.VertexColors.Add(BitConverter.ToUInt32(g.VertexColors, i));
+            }
+            if (g.LiquidData != null)
+                group.LiquidData = g.LiquidData;
+
+            // Material info → FaceMaterials (1 byte per face: material ID)
+            if (g.MaterialInfo != null)
+            {
+                for (int i = 0; i + 1 < g.MaterialInfo.Length; i += 2)
+                    group.FaceMaterials.Add(g.MaterialInfo[i + 1]); // byte[1] = materialId
+            }
+
+            // Batches
+            if (g.Batches != null)
+            {
+                foreach (var b in g.Batches)
+                {
+                    var bbRaw = new byte[12];
+                    for (int i = 0; i < 6 && i < b.BoundingBox.Length; i++)
+                    {
+                        bbRaw[i * 2] = (byte)(b.BoundingBox[i] & 0xFF);
+                        bbRaw[i * 2 + 1] = (byte)((b.BoundingBox[i] >> 8) & 0xFF);
+                    }
+                    group.Batches.Add(new WmoV14ToV17Converter.WmoBatch
+                    {
+                        BoundingBoxRaw = bbRaw,
+                        FirstIndex = b.StartIndex,
+                        IndexCount = (ushort)b.IndexCount,
+                        FirstVertex = b.StartVertex,
+                        LastVertex = b.EndVertex,
+                        Flags = b.Flags,
+                        MaterialId = b.MaterialId,
+                    });
+                }
+            }
+
+            model.Groups.Add(group);
+        }
+
+        return model;
+    }
+
     private WmoV17Data ParseWmoV17Root(string path)
     {
         using var fs = File.OpenRead(path);

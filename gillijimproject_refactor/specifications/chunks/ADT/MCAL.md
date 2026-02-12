@@ -9,9 +9,7 @@ Contains per-layer blend masks for terrain texturing.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.5.3.3368 | 4-bit packed alpha decoding documented |
-| 0.6.0.3592 | MCAL presence and offset table confirmed |
-| 0.7.0.3694 | Inferred from transitional continuity |
+| 0.7.0.3694 | MCAL token validation confirmed in `FUN_006af6f0` |
 
 ## Structure — Build 0.7.0.3694 (inferred, medium confidence)
 | Offset | Type | Name | Description |
@@ -19,8 +17,8 @@ Contains per-layer blend masks for terrain texturing.
 | 0x00 | byte[] | alphaPayload | Layer alpha bit/byte packed data; decoding depends on layer flags |
 
 ## Notes
-- 0.5.3 analysis confirms row-major alpha interpretation for packed 4-bit paths.
-- Exact compression mode matrix for 0.7 requires direct decompile/asset checks.
+- MCAL base pointer is established from MCNK header offset `+0x24` in `FUN_006af6f0`.
+- Exact decode/compression branches are outside this function and still require dedicated tracing.
 
 ## Confidence
 - Presence and role: **High**

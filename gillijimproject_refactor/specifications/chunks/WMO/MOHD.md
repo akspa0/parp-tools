@@ -9,17 +9,19 @@ Root-level WMO chunk.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.6.0.3592 | Mandatory chunk in root parser sequence |
-| 0.7.0.3694 | Inferred required in same v14 path |
+| 0.7.0.3694 | Confirmed in `FUN_006c11a0` root WMO parser sequence |
 
 ## Structure — Build 0.7.0.3694
 
-Direct 0.7 field-by-field offsets are not yet extracted in this workspace.
+`FUN_006c11a0` resolves MOHD first and then maps subsequent chunk offsets via cumulative walking.
+
+Confirmed root chunk walk after `MOHD` in this build:
+`MOTX -> MOMT -> MOGN -> MOGI -> MOPV -> MOPT -> MOPR -> MOLT -> MODS -> MODN -> MODD -> MFOG -> [MCVP optional]`
 
 | Offset | Type | Name | Description |
 |---|---|---|---|
-| 0x00 | ??? | ??? | Root metadata fields pending direct decompile mapping |
+| 0x00 | ??? | ??? | Field-level MOHD internals not named in this pass |
 
 ## Confidence
 - Presence/order: **High**
-- Per-field offsets: **Low (pending direct 0.7 extraction)**
+- Per-field semantics: **Low**

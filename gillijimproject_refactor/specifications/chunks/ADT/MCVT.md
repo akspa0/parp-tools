@@ -9,10 +9,9 @@ Stores terrain heights for one MCNK using the classic 9x9 + 8x8 vertex pattern.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.6.0.3592 | Confirmed non-interleaved sequential float reads |
-| 0.7.0.3694 | Inferred continuity from 0.6.0 transitional implementation |
+| 0.7.0.3694 | Confirmed non-interleaved 9x9 + 8x8 decode in `FUN_006b0770` |
 
-## Structure — Build 0.7.0.3694 (inferred, high confidence)
+## Structure — Build 0.7.0.3694 (confirmed)
 
 | Offset | Type | Name | Description |
 |---|---|---|---|
@@ -22,8 +21,10 @@ Stores terrain heights for one MCNK using the classic 9x9 + 8x8 vertex pattern.
 - Expected payload size: `145 * 4 = 580` bytes.
 
 ## Ghidra Notes
-- 0.6.0 processing function: `FUN_006a7d20`.
-- Sequential float iteration confirms non-interleaved layout.
+- 0.7 function `FUN_006b0770` iterates:
+	- outer grid: 9x9
+	- inner grid: 8x8
+	- source pointer advances linearly over `float` heights.
 
 ## Confidence
 - **High**

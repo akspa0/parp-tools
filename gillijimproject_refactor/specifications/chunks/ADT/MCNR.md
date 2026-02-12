@@ -9,10 +9,9 @@ Stores per-vertex terrain normals for one MCNK.
 ## Builds Analyzed
 | Build | Notes |
 |---|---|
-| 0.6.0.3592 | Confirmed sequential 3-byte normal reads |
-| 0.7.0.3694 | Inferred continuity from 0.6.0 |
+| 0.7.0.3694 | Confirmed sequential 145x3-byte decode in `FUN_006afe90` |
 
-## Structure — Build 0.7.0.3694 (inferred, high confidence)
+## Structure — Build 0.7.0.3694 (confirmed)
 
 | Offset | Type | Name | Description |
 |---|---|---|---|
@@ -22,8 +21,8 @@ Stores per-vertex terrain normals for one MCNK.
 - Expected payload size: `145 * 3 = 435` bytes.
 
 ## Ghidra Notes
-- 0.6.0 processing function: `FUN_006a7490`.
-- Values are converted to float using a scale constant after byte decode.
+- `FUN_006afe90` runs fixed loop count `0x91` (145 normals).
+- Reads signed bytes triplets and scales each component by `_DAT_00827ff0`.
 
 ## Confidence
 - **High**
