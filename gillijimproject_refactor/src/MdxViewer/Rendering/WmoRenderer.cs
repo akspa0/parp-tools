@@ -483,6 +483,18 @@ void main() {
 
             int vertCount = group.Vertices.Count;
             bool hasUVs = group.UVs.Count == vertCount;
+            if (!hasUVs)
+                ViewerLog.Trace($"[WmoRenderer] Group {gi}: UV count mismatch! Verts={vertCount}, UVs={group.UVs.Count}");
+            else if (group.UVs.Count > 0)
+            {
+                float uMin = float.MaxValue, uMax = float.MinValue, vMin = float.MaxValue, vMax = float.MinValue;
+                foreach (var uv in group.UVs)
+                {
+                    if (uv.X < uMin) uMin = uv.X; if (uv.X > uMax) uMax = uv.X;
+                    if (uv.Y < vMin) vMin = uv.Y; if (uv.Y > vMax) vMax = uv.Y;
+                }
+                ViewerLog.Trace($"[WmoRenderer] Group {gi}: {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]");
+            }
 
             // Interleave: pos(3) + normal(3) + uv(2) = 8 floats
             float[] vertexData = new float[vertCount * 8];

@@ -561,22 +561,39 @@ public class MdxFile
                     br.ReadBytes((int)count * 4); 
                     break;
                 case "UVAS":
-                    if (mdxVersion == 1300) // Alpha 0.5.3 Special Case
+                {
+                    // UVAS = UV Animation Sets container. 'count' = number of UV sets (typically 1).
+                    // In standard WC3 MDX, UVAS contains nested UVBS sub-chunks.
+                    // In Alpha 0.5.3 (v1300), UVAS may contain UV data directly (no UVBS wrapper).
+                    // Detect by peeking: if next 4 bytes are "UVBS", parse as nested; otherwise read directly.
+                    long uvasDataStart = br.BaseStream.Position;
+                    bool hasNestedUvbs = false;
+                    if (br.BaseStream.Position + 4 <= geoEnd)
                     {
-                        // Alpha 0.5.3 Optimization: 
-                        // If Version is 1300, UVAS block seemingly contains the data directly 
-                        // if Count is 1 (which means 1 UV set).
-                        // The data length corresponds to the number of vertices.
-                        // We must read this data to maintain alignment.
+                        long peekPos = br.BaseStream.Position;
+                        string peekTag = Encoding.ASCII.GetString(br.ReadBytes(4));
+                        br.BaseStream.Position = peekPos; // rewind
+                        hasNestedUvbs = (peekTag == "UVBS");
+                    }
+
+                    if (hasNestedUvbs)
+                    {
+                        // Standard format: UVBS sub-chunk(s) follow — let the main loop handle them
+                        if (Verbose) Console.WriteLine($"      [UVAS] Nested UVBS detected (count={count})");
+                    }
+                    else
+                    {
+                        // Alpha 0.5.3 direct UV data: read nVerts UV pairs
                         int nVerts = geo.Vertices.Count;
                         if (nVerts > 0)
                         {
                             for (int k = 0; k < nVerts; k++)
                                 geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));
+                            if (Verbose) Console.WriteLine($"      [UVAS] Direct UV data: {nVerts} UVs for {nVerts} verts");
                         }
                     }
-                    // If not version 1300, it's a standard container and we continue to inner chunks (UVBS)
                     break;
+                }
                 case "UVBS":
                     for (int i = 0; i < count; i++)
                         geo.TexCoords.Add(new C2Vector(br.ReadSingle(), br.ReadSingle()));

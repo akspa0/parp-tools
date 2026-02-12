@@ -502,6 +502,18 @@ void main() {
             int vertCount = geoset.Vertices.Count;
             bool hasNormals = geoset.Normals.Count == vertCount;
             bool hasUVs = geoset.TexCoords.Count == vertCount;
+            if (!hasUVs)
+                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: UV count mismatch! Verts={vertCount}, UVs={geoset.TexCoords.Count}");
+            else if (geoset.TexCoords.Count > 0)
+            {
+                float uMin = float.MaxValue, uMax = float.MinValue, vMin = float.MaxValue, vMax = float.MinValue;
+                foreach (var uv in geoset.TexCoords)
+                {
+                    if (uv.U < uMin) uMin = uv.U; if (uv.U > uMax) uMax = uv.U;
+                    if (uv.V < vMin) vMin = uv.V; if (uv.V > vMax) vMax = uv.V;
+                }
+                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]");
+            }
 
             float[] vertexData = new float[vertCount * 8];
             for (int v = 0; v < vertCount; v++)

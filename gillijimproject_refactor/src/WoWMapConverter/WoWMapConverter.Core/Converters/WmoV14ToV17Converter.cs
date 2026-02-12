@@ -879,14 +879,22 @@ public class WmoV14ToV17Converter
 
                 case "MOTV":
                     int uvCount = (int)(chunkSize / 8);
-                    group.UVs = new List<Vector2>(uvCount);
-                    for (int i = 0; i < uvCount; i++)
+                    if (group.UVs.Count == 0)
                     {
-                        var u = reader.ReadSingle();
-                        var v = reader.ReadSingle();
-                        
-                        // FIX: Flip V coordinate for correct mapping
-                        group.UVs.Add(new Vector2(u, v));
+                        // First MOTV = diffuse texture UVs (keep these)
+                        group.UVs = new List<Vector2>(uvCount);
+                        for (int i = 0; i < uvCount; i++)
+                        {
+                            var u = reader.ReadSingle();
+                            var v = reader.ReadSingle();
+                            group.UVs.Add(new Vector2(u, v));
+                        }
+                        Console.WriteLine($"[DEBUG] MOTV (diffuse): {uvCount} UVs");
+                    }
+                    else
+                    {
+                        // Second MOTV = lightmap or secondary UV set — skip, don't overwrite diffuse
+                        Console.WriteLine($"[DEBUG] MOTV (secondary): {uvCount} UVs — skipping (keeping diffuse)");
                     }
                     break;
 
