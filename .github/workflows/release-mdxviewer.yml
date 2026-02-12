@@ -63,6 +63,12 @@ jobs:
           $count = (Get-ChildItem "$pubDir/definitions/*.dbd").Count
           Write-Host "Bundled $count .dbd definition files"
 
+      - name: Bundle README and user guide
+        run: |
+          $pubDir = "publish/MdxViewer-${{ matrix.rid }}"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/USERGUIDE.md" "$pubDir/USERGUIDE.md"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/README.md" "$pubDir/README.md"
+
       - name: Create ZIP archive
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
