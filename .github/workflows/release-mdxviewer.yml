@@ -50,6 +50,7 @@ jobs:
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:TreatWarningsAsErrors=false `
             -o publish/MdxViewer-${{ matrix.rid }}
 
       - name: Verify definitions bundled
