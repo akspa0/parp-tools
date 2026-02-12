@@ -713,8 +713,9 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             int off = 8;
             for (int i = 0; i < 81; i++)
             {
-                vertHeights[i] = BitConverter.ToSingle(mclqData, off);
-                off += 8; // skip uint32 data word
+                // Each vertex is 8 bytes: first 4 = flow/depth union, second 4 = float height
+                vertHeights[i] = BitConverter.ToSingle(mclqData, off + 4);
+                off += 8;
                 if (MathF.Abs(vertHeights[i]) > 0.01f)
                     hasNonZeroVertex = true;
             }

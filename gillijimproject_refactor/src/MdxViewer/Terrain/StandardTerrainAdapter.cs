@@ -532,8 +532,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             LiquidType liquidType = liquidTypes[b];
 
             // Build 9×9 height grid from per-vertex data.
-            // Each vertex entry is 8 bytes: first 4 = float height (absolute world Z),
-            // second 4 = flow/depth data (ignored for rendering).
+            // Each vertex entry is 8 bytes: first 4 = flow/depth union data,
+            // second 4 = float height (absolute world Z).
             // Per-vertex heights can slope for waterfalls and adjacent water at different Z levels.
             var heights = new float[81];
 
@@ -541,7 +541,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             {
                 for (int i = 0; i < 81; i++)
                 {
-                    int voff = offset + 8 + i * 8;
+                    int voff = offset + 8 + i * 8 + 4; // height is second float in 8-byte vertex
                     float h = BitConverter.ToSingle(mclqData, voff);
                     if (float.IsNaN(h) || MathF.Abs(h) > 50000f)
                         h = maxHeight; // fallback to maxHeight for bad data
