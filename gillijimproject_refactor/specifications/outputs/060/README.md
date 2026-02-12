@@ -41,6 +41,10 @@ Some format changes had already occurred, while others were still pending.
 | Task 5: MCNK Header | [task-05-mcnk-header-layout.md](task-05-mcnk-header-layout.md) | Alpha-Style (similar to 0.5.3) |
 | Task 6: FourCC Order | [task-06-chunk-fourcc-byte-order.md](task-06-chunk-fourcc-byte-order.md) | LK-Style (forward) |
 
+## Definitive Specs
+
+- [definitive-adt-format.md](definitive-adt-format.md) — Consolidated ADT spec for 0.6.0 (tile naming, FourCC order, MCNK/MCVT/MCNR layout, MPQ notes)
+
 ---
 
 ## Key Functions Identified

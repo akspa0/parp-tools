@@ -1973,7 +1973,8 @@ void main() {
                 bool drewTexture = false;
                 if (_minimapRenderer != null && !string.IsNullOrEmpty(mapName))
                 {
-                    // Minimap files: map{row}_{col}.blp. tx=col, ty=row.
+                    // Ghidra-verified: files are map{x}_{y}.blp. tx=row(y), ty=col(x).
+                    // So pass (ty, tx) = (col, row) = (x, y).
                     uint tileTex = _minimapRenderer.GetTileTexture(mapName, ty, tx);
                     if (tileTex != 0)
                     {

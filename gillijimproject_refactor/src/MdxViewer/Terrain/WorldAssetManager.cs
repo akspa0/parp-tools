@@ -301,11 +301,15 @@ public class WorldAssetManager : IDisposable
             return path[..^4] + ".mdx";
         if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
             return path[..^4] + ".mdl";
+        // 3.3.5: MMDX stores .m2 paths but MPQ archives contain .mdx files
+        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            return path[..^3] + ".mdx";
         return null;
     }
 
     // ── Private loading ────────────────────────────────────────────────
 
+    private int _mdxLoadFailCount = 0;
     private MdxRenderer? LoadMdxModel(string normalizedKey)
     {
         try
@@ -313,7 +317,8 @@ public class WorldAssetManager : IDisposable
             byte[]? data = ReadFileData(normalizedKey);
             if (data == null || data.Length == 0)
             {
-                ViewerLog.Debug(ViewerLog.Category.Mdx, $"MDX data null for: \"{normalizedKey}\"");
+                if (_mdxLoadFailCount++ < 5)
+                    ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX data null for: \"{normalizedKey}\"");
                 return null;
             }
 
@@ -331,7 +336,8 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            ViewerLog.Error(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+            if (_mdxLoadFailCount++ < 5)
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
             return null;
         }
     }

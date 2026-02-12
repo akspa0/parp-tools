@@ -38,7 +38,7 @@ public class TerrainChunkData
     public byte[]? ShadowMap { get; init; }
 
     /// <summary>Parsed MCLQ liquid data for this chunk. Null if no liquid present.</summary>
-    public LiquidChunkData? Liquid { get; init; }
+    public LiquidChunkData? Liquid { get; set; }
 
     /// <summary>World-space position of this chunk's corner.</summary>
     public Vector3 WorldPosition { get; init; }

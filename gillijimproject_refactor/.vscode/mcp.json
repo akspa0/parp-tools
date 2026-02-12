@@ -1,0 +1,30 @@
+{
+  "servers": {
+    "ghidra": {
+      "args": [
+        "H:/ghidra_11.3.2_PUBLIC/GhidraMCP-release-1-4/bridge_mcp_ghidra.py",
+        "--ghidra-server",
+        "http://localhost:8080/"
+      ],
+      "command": "python",
+      "disabled": false
+    },
+    "puppeteer": {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ],
+      "command": "npx",
+      "disabled": false,
+      "env": {}
+    },
+    "x64dbg-mcp": {
+      "args": [
+        "-m",
+        "x64dbg_mcp",
+        "--stdio"
+      ],
+      "command": "python"
+    }
+  }
+}
