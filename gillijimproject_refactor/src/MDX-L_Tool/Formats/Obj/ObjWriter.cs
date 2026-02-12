@@ -5,103 +5,263 @@ using MdxLTool.Formats.Mdx;
 namespace MdxLTool.Formats.Obj;
 
 /// <summary>
-/// Writes an MdxFile's geometry to Wavefront OBJ format.
-/// Supports per-geoset splitting and MTL material references.
+/// OBJ/MTL writer for MDX models.
+/// - Split mode: One OBJ + MTL per geoset
+/// - Single mode: One combined OBJ with all geosets, per-geoset materials
 /// </summary>
 public class ObjWriter
 {
     /// <summary>
-    /// Map of texture ID → exported texture file path (for MTL generation).
+    /// Map of texture index -> exported PNG filename (relative to output dir).
+    /// Populated by the caller after ExportTextures runs.
     /// </summary>
     public Dictionary<int, string> ExportedTextures { get; set; } = new();
 
-    /// <summary>
-    /// Write an MdxFile to OBJ (and optional MTL).
-    /// </summary>
-    /// <param name="mdx">Source MDX file.</param>
-    /// <param name="path">Output .obj file path.</param>
-    /// <param name="split">If true, write one OBJ per geoset.</param>
-    public void Write(MdxFile mdx, string path, bool split = false)
+    public void Write(MdxFile mdx, string path, bool split = true)
     {
+        var outputDir = Path.GetDirectoryName(path) ?? ".";
+        var baseName = Path.GetFileNameWithoutExtension(path);
+        
         if (split)
         {
-            for (int g = 0; g < mdx.Geosets.Count; g++)
-            {
-                var ext = Path.GetExtension(path);
-                var stem = Path.ChangeExtension(path, null);
-                var geoPath = $"{stem}_geo{g}{ext}";
-                WriteGeosets(mdx, geoPath, new[] { g });
-            }
+            WriteSplit(mdx, outputDir, baseName);
         }
         else
         {
-            WriteGeosets(mdx, path, Enumerable.Range(0, mdx.Geosets.Count).ToArray());
+            WriteSingle(mdx, path, baseName);
         }
     }
 
-    private void WriteGeosets(MdxFile mdx, string path, int[] geosetIndices)
+    private void WriteSplit(MdxFile mdx, string outputDir, string baseName)
+    {
+        int written = 0;
+        for (int i = 0; i < mdx.Geosets.Count; i++)
+        {
+            var geoset = mdx.Geosets[i];
+            if (geoset.Vertices.Count == 0 || geoset.Indices.Count == 0)
+            {
+                Console.WriteLine($"  [SKIP] Geoset {i}: empty (0 verts or 0 indices)");
+                continue;
+            }
+            
+            var geosetName = $"{baseName}_geoset_{i:D3}";
+            var objPath = Path.Combine(outputDir, $"{geosetName}.obj");
+            
+            WriteSplitObj(objPath, geosetName, mdx, geoset, outputDir);
+            written++;
+            Console.WriteLine($"  Written: {geosetName}.obj + .mtl");
+        }
+        
+        if (written == 0)
+            Console.WriteLine($"  [SKIP] No valid geosets to write for {baseName}");
+    }
+
+    private void WriteSingle(MdxFile mdx, string path, string baseName)
     {
         var mtlPath = Path.ChangeExtension(path, ".mtl");
-        var mtlName = Path.GetFileName(mtlPath);
-
-        using var sw = new StreamWriter(path, false, Encoding.ASCII);
-        sw.WriteLine($"# MDX-L_Tool OBJ export");
-        sw.WriteLine($"# Geosets: {string.Join(", ", geosetIndices)}");
-
-        if (ExportedTextures.Count > 0)
-            sw.WriteLine($"mtllib {mtlName}");
-
-        int vertexOffset = 1; // OBJ is 1-indexed
-
-        foreach (var gi in geosetIndices)
+        var outputDir = Path.GetDirectoryName(path) ?? ".";
+        
+        // Build per-geoset material names and texture paths
+        var geosetMaterials = new List<(string matName, string? texPath)>();
+        for (int i = 0; i < mdx.Geosets.Count; i++)
         {
-            if (gi < 0 || gi >= mdx.Geosets.Count) continue;
-            var geo = mdx.Geosets[gi];
-
-            sw.WriteLine($"g geoset_{gi}");
-
-            // Assign material if available
-            if (gi < mdx.Materials.Count && mdx.Materials[gi].Layers.Count > 0)
-            {
-                var texId = mdx.Materials[gi].Layers[0].TextureId;
-                if (ExportedTextures.ContainsKey(texId))
-                    sw.WriteLine($"usemtl mat_{texId}");
-            }
-
-            // Vertices
-            foreach (var v in geo.Vertices)
-                sw.WriteLine(string.Format(CultureInfo.InvariantCulture, "v {0:F6} {1:F6} {2:F6}", v.X, v.Y, v.Z));
-
-            // Normals
-            foreach (var n in geo.Normals)
-                sw.WriteLine(string.Format(CultureInfo.InvariantCulture, "vn {0:F6} {1:F6} {2:F6}", n.X, n.Y, n.Z));
-
-            // UVs
-            foreach (var uv in geo.TexCoords)
-                sw.WriteLine(string.Format(CultureInfo.InvariantCulture, "vt {0:F6} {1:F6}", uv.U, uv.V));
-
-            // Faces
-            for (int i = 0; i + 2 < geo.Indices.Count; i += 3)
-            {
-                int a = geo.Indices[i] + vertexOffset;
-                int b = geo.Indices[i + 1] + vertexOffset;
-                int c = geo.Indices[i + 2] + vertexOffset;
-                sw.WriteLine($"f {a}/{a}/{a} {b}/{b}/{b} {c}/{c}/{c}");
-            }
-
-            vertexOffset += geo.Vertices.Count;
+            var geoset = mdx.Geosets[i];
+            if (geoset.Vertices.Count == 0 || geoset.Indices.Count == 0)
+                continue;
+            var matName = $"{baseName}_mat{i}";
+            var texPath = ResolveExportedTexturePath(mdx, geoset, outputDir);
+            geosetMaterials.Add((matName, texPath));
         }
-
-        // Write MTL file if textures are available
-        if (ExportedTextures.Count > 0)
+        
+        if (geosetMaterials.Count == 0)
         {
-            using var mtlSw = new StreamWriter(mtlPath, false, Encoding.ASCII);
-            foreach (var (texId, texPath) in ExportedTextures)
+            Console.WriteLine($"  [SKIP] No valid geosets to write for {baseName}");
+            return;
+        }
+        
+        // Write MTL file with all materials
+        using (var mtlSw = new StreamWriter(mtlPath, false, new UTF8Encoding(false)))
+        {
+            mtlSw.WriteLine("# Material MTL file");
+            mtlSw.WriteLine("# Generated by MDX-L_Tool");
+            mtlSw.WriteLine();
+            foreach (var (matName, texPath) in geosetMaterials)
             {
-                mtlSw.WriteLine($"newmtl mat_{texId}");
-                mtlSw.WriteLine($"map_Kd {texPath}");
+                mtlSw.WriteLine($"newmtl {matName}");
+                mtlSw.WriteLine("  Ka 1.000 1.000 1.000");
+                mtlSw.WriteLine("  Kd 1.000 1.000 1.000");
+                mtlSw.WriteLine("  Ks 0.000 0.000 0.000");
+                mtlSw.WriteLine("  d 1.000");
+                mtlSw.WriteLine("  illum 2");
+                if (!string.IsNullOrEmpty(texPath))
+                    mtlSw.WriteLine($"  map_Kd {texPath}");
                 mtlSw.WriteLine();
             }
         }
+        
+        // Write single OBJ with all geosets combined
+        using var sw = new StreamWriter(path, false, new UTF8Encoding(false));
+        
+        sw.WriteLine($"# Wavefront OBJ - {baseName}");
+        sw.WriteLine($"# Generated by MDX-L_Tool");
+        sw.WriteLine($"# Combined from {mdx.Geosets.Count} geoset(s)");
+        sw.WriteLine();
+        sw.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+        sw.WriteLine();
+        
+        int vertexOffset = 1;
+        int uvOffset = 1;
+        int matIdx = 0;
+        
+        for (int i = 0; i < mdx.Geosets.Count; i++)
+        {
+            var geoset = mdx.Geosets[i];
+            if (geoset.Vertices.Count == 0 || geoset.Indices.Count == 0)
+                continue;
+            
+            var (matName, _) = geosetMaterials[matIdx++];
+            
+            sw.WriteLine($"o {baseName}_geoset_{i}");
+            sw.WriteLine($"g {baseName}_geoset_{i}");
+            sw.WriteLine($"usemtl {matName}");
+            sw.WriteLine();
+            
+            // Write vertices (flip X for WoW coordinate system)
+            foreach (var v in geoset.Vertices)
+                sw.WriteLine($"v {-v.X:F6} {v.Y:F6} {v.Z:F6}");
+            
+            // Write normals
+            foreach (var n in geoset.Normals)
+                sw.WriteLine($"vn {-n.X:F6} {n.Y:F6} {n.Z:F6}");
+            
+            // Write UVs (V flipped for OBJ convention)
+            foreach (var uv in geoset.TexCoords)
+                sw.WriteLine($"vt {uv.U:F6} {1.0f - uv.V:F6}");
+            
+            // Write faces with vertex/uv/normal
+            var triangles = ConvertToTriangles(geoset);
+            foreach (var (a, b, c) in triangles)
+            {
+                int va = a + vertexOffset, vb = b + vertexOffset, vc = c + vertexOffset;
+                int ta = a + uvOffset, tb = b + uvOffset, tc = c + uvOffset;
+                sw.WriteLine($"f {va}/{ta}/{va} {vb}/{tb}/{vb} {vc}/{tc}/{vc}");
+            }
+            
+            sw.WriteLine();
+            
+            vertexOffset += geoset.Vertices.Count;
+            uvOffset += geoset.TexCoords.Count;
+        }
+        
+        Console.WriteLine($"  Written: {Path.GetFileName(path)} ({geosetMaterials.Count} geosets)");
+        Console.WriteLine($"  Written: {Path.GetFileName(mtlPath)}");
+    }
+
+    private void WriteSplitObj(string path, string objectName, MdxFile mdx, MdlGeoset geoset, string outputDir)
+    {
+        var mtlPath = Path.ChangeExtension(path, ".mtl");
+        var texPath = ResolveExportedTexturePath(mdx, geoset, outputDir);
+        
+        // Write MTL
+        using (var mtlSw = new StreamWriter(mtlPath, false, new UTF8Encoding(false)))
+        {
+            mtlSw.WriteLine("# Material MTL file");
+            mtlSw.WriteLine($"newmtl {objectName}");
+            mtlSw.WriteLine("  Ka 1.000 1.000 1.000");
+            mtlSw.WriteLine("  Kd 1.000 1.000 1.000");
+            mtlSw.WriteLine("  Ks 0.000 0.000 0.000");
+            mtlSw.WriteLine("  d 1.000");
+            mtlSw.WriteLine("  illum 2");
+            if (!string.IsNullOrEmpty(texPath))
+                mtlSw.WriteLine($"  map_Kd {texPath}");
+        }
+        
+        // Write OBJ
+        using var sw = new StreamWriter(path, false, new UTF8Encoding(false));
+        sw.WriteLine($"# Wavefront OBJ - {objectName}");
+        sw.WriteLine("# Generated by MDX-L_Tool");
+        sw.WriteLine();
+        sw.WriteLine($"mtllib {Path.GetFileName(mtlPath)}");
+        sw.WriteLine();
+        sw.WriteLine($"o {objectName}");
+        sw.WriteLine($"g {objectName}");
+        sw.WriteLine($"usemtl {objectName}");
+        sw.WriteLine();
+        
+        foreach (var v in geoset.Vertices)
+            sw.WriteLine($"v {-v.X:F6} {v.Y:F6} {v.Z:F6}");
+        
+        foreach (var n in geoset.Normals)
+            sw.WriteLine($"vn {-n.X:F6} {n.Y:F6} {n.Z:F6}");
+        
+        foreach (var uv in geoset.TexCoords)
+            sw.WriteLine($"vt {uv.U:F6} {1.0f - uv.V:F6}");
+        
+        sw.WriteLine();
+        
+        var triangles = ConvertToTriangles(geoset);
+        foreach (var (a, b, c) in triangles)
+        {
+            sw.WriteLine($"f {a + 1}/{a + 1}/{a + 1} {b + 1}/{b + 1}/{b + 1} {c + 1}/{c + 1}/{c + 1}");
+        }
+    }
+
+    /// <summary>
+    /// Resolves the exported PNG texture path for a geoset.
+    /// Uses ExportedTextures map first, falls back to BLP path.
+    /// </summary>
+    private string? ResolveExportedTexturePath(MdxFile mdx, MdlGeoset geoset, string outputDir)
+    {
+        int textureId = GetTextureIdForGeoset(mdx, geoset);
+        
+        // Check if we have an exported PNG for this texture index
+        if (textureId >= 0 && ExportedTextures.TryGetValue(textureId, out var pngName))
+            return pngName;
+        
+        // Fallback: use the raw BLP path (won't render in most viewers but at least references something)
+        if (textureId >= 0 && textureId < mdx.Textures.Count)
+        {
+            var tex = mdx.Textures[textureId];
+            if (!string.IsNullOrEmpty(tex.Path))
+                return Path.ChangeExtension(Path.GetFileName(tex.Path), ".png");
+        }
+        
+        return null;
+    }
+
+    /// <summary>
+    /// Gets the texture index for a geoset by following Material -> Layer -> TextureId chain.
+    /// </summary>
+    private int GetTextureIdForGeoset(MdxFile mdx, MdlGeoset geoset)
+    {
+        if (geoset.MaterialId >= 0 && geoset.MaterialId < mdx.Materials.Count)
+        {
+            var material = mdx.Materials[geoset.MaterialId];
+            if (material.Layers.Count > 0)
+            {
+                var layer = material.Layers[0];
+                if (layer.TextureId >= 0 && layer.TextureId < mdx.Textures.Count)
+                    return layer.TextureId;
+            }
+        }
+        return mdx.Textures.Count > 0 ? 0 : -1;
+    }
+
+    private List<(int A, int B, int C)> ConvertToTriangles(MdlGeoset geoset)
+    {
+        var triangles = new List<(int, int, int)>();
+        var indices = geoset.Indices;
+        
+        // PVTX contains triangle indices
+        // Each triangle is 3 consecutive indices
+        for (int i = 0; i < indices.Count; i += 3)
+        {
+            if (i + 2 < indices.Count)
+            {
+                triangles.Add(((int)indices[i], (int)indices[i + 1], (int)indices[i + 2]));
+            }
+        }
+        
+        return triangles;
     }
 }
