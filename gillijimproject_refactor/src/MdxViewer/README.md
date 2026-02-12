@@ -1,45 +1,40 @@
-# AlphaWoW Viewer
+# MdxViewer — WoW World Viewer
 
-A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3** and **Lich King 3.3.5** game data. Renders monolithic Alpha WDTs, standard split ADTs, WMO world objects, MDX/M2 models, and DBC-driven overlays (Area POIs, Taxi Paths) with high fidelity.
+A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3**, **0.6.0**, and **Lich King 3.3.5** game data. Renders terrain, WMO world objects, MDX/M2 models, liquids, and DBC-driven overlays with high fidelity.
 
 ## Key Features
 
-### 🌍 Terrain & World
-- **Alpha WDT Support** — Full support for Alpha 0.5.3 monolithic WDT files with 256 MCNK chunks per tile.
-- **Standard WDT+ADT (3.3.5)** — Renders standard split ADTs (root, obj, tex) from MPQ or loose files.
-- **AOI Streaming** — Area-of-Interest based async tile streaming for seamless world traversal.
+### Terrain & World
+- **Alpha 0.5.3 WDT** — Monolithic WDT with 256 MCNK chunks per tile.
+- **0.6.0 Split ADTs** — Per-tile ADT files with reversed FourCC, MCNK header offsets, packed MCLQ instances.
+- **0.6.0 WMO-Only Maps** — Instance dungeons/battlegrounds via WDT-level MWMO+MODF.
+- **3.3.5 Split ADTs** — Standard root/obj/tex ADT files from MPQ (partial — loading freeze under investigation).
+- **AOI Streaming** — 9×9 tile area-of-interest with directional lookahead, persistent tile cache, and throttled MPQ reads.
 - **MCSH Shadows** — 64×64 shadow bitmasks applied across all terrain layers.
-- **Liquids (MCLQ/MLIQ)** — Ghidra-verified liquid rendering for both terrain (MCLQ) and WMO (MLIQ) with proper type detection (Water, Ocean, Magma, Slime).
 
-### 🏛️ WMO Rendering (v14, v16 & v17)
-- **4-Pass Transparency** — Correct sorting for Opaque → Doodads → Liquids → Transparent layers.
-- **100% Doodad Load Rate** — Robust asset resolution using case-insensitive MPQ searching and `.mdx`/`.mdl` extension swapping.
+### Liquids
+- **MCLQ** (0.5.3/0.6.0) — Per-vertex sloped heights for waterfalls, absolute world Z, packed multi-instance format.
+- **MH2O** (3.3.5) — Per-tile liquid with sub-rect heightmaps and visibility masks.
+- **MLIQ** (WMO) — WMO group liquids with `matId`-based type detection (Water, Ocean, Magma, Slime).
+
+### WMO Rendering (v14, v16 & v17)
+- **4-Pass Transparency** — Opaque → Doodads → Liquids → Transparent.
+- **100% Doodad Load Rate** — Case-insensitive MPQ search with `.mdx`/`.mdl` extension swapping.
+- **Doodad Culling** — Distance (500u) + cap (64) + nearest-first sort for performance.
 - **Doodad Sets** — Full support for switching between internal WMO doodad configurations.
-- **Orientation Fix** — Fixed 180° rotation and coordinate mapping for Alpha WMOs.
 
-### 📦 MDX/M2 Models
+### MDX/M2 Models
 - **Two-Pass Rendering** — Opaque pass followed by depth-sorted transparent pass.
-- **Blend Modes 0-6** — Implementation of all 7 standard WoW blend modes (Opaque, AlphaKey, Alpha, Additive, etc.).
-- **DBCD Texture Resolution** — Resolves character, creature, and item textures using 4 DBC tables:
-  - `CreatureModelData.dbc`
-  - `CreatureDisplayInfo.dbc`
-  - `CreatureDisplayInfoExtra.dbc`
-  - `ItemDisplayInfo.dbc`
+- **Blend Modes 0-6** — All 7 standard WoW blend modes (Opaque, AlphaKey, Alpha, Additive, etc.).
+- **Alpha Cutout** — Hard discard for tree canopies in opaque pass.
+- **DBCD Texture Resolution** — Resolves textures using CreatureModelData, CreatureDisplayInfo, CreatureDisplayInfoExtra, and ItemDisplayInfo DBC tables.
 
-### 🗺️ Minimap & Overlays
-- **Minimap** — Camera-centered minimap with BLP tile textures, scroll-wheel zoom, and double-click teleport.
-- **Area POIs** — DBC-driven point-of-interest markers rendered as 3D pins and minimap dots.
-- **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data, rendered as 3D lines and minimap overlays. Click a node or route in the sidebar to isolate it.
+### Minimap & Overlays
+- **Minimap** — Camera-centered with BLP tile textures, scroll-wheel zoom, and double-click teleport.
+- **Area POIs** — DBC-driven point-of-interest markers as 3D pins and minimap dots.
+- **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data.
 - **Area Names** — Live area name display from AreaTable.dbc with MapID validation.
-- **Batched Rendering** — All overlay geometry (pins, lines) drawn in a single GPU draw call for performance.
-
-## Coordinate System (Ghidra Verified)
-
-The viewer uses a unified coordinate system derived from WoW's raw file data:
-- **WoW Coords**: X=North, Y=West, Z=Up (Right-handed).
-- **Renderer Coords**: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`, `rendererZ = wowZ`.
-- **Winding**: Direct3D CW winding is reversed to OpenGL CCW winding during GPU upload.
-- **Placement**: Models receive a 180° Z-rotation to align with renderer basis.
+- **Zone Lighting** — DBC-driven ambient/fog/sky colors from Light.dbc + LightData.dbc.
 
 ## Controls
 
@@ -63,28 +58,49 @@ The viewer uses a unified coordinate system derived from WoW's raw file data:
 ```bash
 cd src/MdxViewer
 dotnet build
-dotnet run -- path/to/world.wdt
+dotnet run -- path/to/game/directory
 ```
+
+The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain adapter.
 
 ## Architecture
 
-The viewer is built on a modular "Adapter" pattern:
-- **IDataSource** — Abstraction for MPQ archives (`MpqDataSource`) or loose files.
-- **ITerrainAdapter** — Unified interface for Alpha (`AlphaTerrainAdapter`) and LK (`StandardTerrainAdapter`) terrain.
-- **ReplaceableTextureResolver** — DBCD-backed service for mapping dynamic texture IDs to BLP paths.
+The viewer is built on a modular adapter pattern:
+
+### Core Abstractions
+- **IDataSource** — MPQ archives (`MpqDataSource`) or loose files.
+- **ITerrainAdapter** — Unified interface for terrain loading:
+  - `AlphaTerrainAdapter` — Alpha 0.5.3 monolithic WDT
+  - `StandardTerrainAdapter` — 0.6.0 / 3.3.5 split ADTs + WMO-only maps
+
+### Rendering Pipeline
+- **TerrainManager** — AOI streaming with persistent cache, MPQ throttling (`SemaphoreSlim(4)`), directional priority loading.
+- **WorldScene** — Placement transforms, instance management, frustum culling.
+- **WmoRenderer** — WMO GPU rendering (4-pass, doodad culling, MLIQ liquid).
+- **ModelRenderer** — MDX GPU rendering (two-pass, blend modes, alpha cutout).
+- **LiquidRenderer** — MCLQ/MLIQ/MH2O liquid mesh rendering.
+
+### Services
 - **WorldAssetManager** — Centralized caching for WMO and MDX/M2 geometry.
-- **BoundingBoxRenderer** — Batched line/pin renderer for overlays (1 draw call for all markers).
-- **TaxiPathLoader** — Loads TaxiNodes, TaxiPath, and TaxiPathNode DBC data for flight path visualization.
-- **AreaTableService** — MapID-aware area name lookups from AreaTable.dbc.
+- **ReplaceableTextureResolver** — DBCD-backed dynamic texture ID → BLP path resolution.
+- **LightService** — Zone-based lighting from Light.dbc + LightData.dbc.
+- **AreaTableService** — MapID-aware area name lookups.
 
 ## Supported Formats
 
 | Format | Version | Status |
 |--------|---------|--------|
-| **WDT** | Alpha / LK | ✅ Fully supported |
-| **ADT** | Alpha / LK | ✅ Fully supported |
+| **WDT** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ Fully supported |
+| **ADT** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ (3.3.5 has loading freeze) |
 | **WMO** | v14, v16, v17 | ✅ Fully supported |
-| **MDX** | v1300+ | ✅ Supported (Rendering Quality WIP) |
-| **M2** | v264+ | 🔧 Partial Support |
-| **DBC** | Alpha 0.5.3 | ✅ AreaTable, AreaPOI, TaxiPath, TaxiPathNode, Map |
-| **GLB** | Export | ✅ MDX/WMO Export |
+| **MDX** | v1300+ | ✅ Supported (animation WIP) |
+| **M2** | v264+ | 🔧 Partial support |
+| **DBC** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ AreaTable, AreaPOI, TaxiPath, Light, Map |
+| **GLB** | Export | ✅ MDX/WMO export |
+
+## Coordinate System (Ghidra Verified)
+
+- **WoW Coords**: X=North, Y=West, Z=Up (Right-handed, Direct3D CW winding).
+- **Renderer Coords**: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`, `rendererZ = wowZ`.
+- **WMO-Only Maps**: Raw WoW world coords (no MapOrigin conversion).
+- **GPU Fix**: Reverse triangle winding at upload (CW→CCW) + 180° Z rotation in placement transforms.

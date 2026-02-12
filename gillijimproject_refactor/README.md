@@ -1,78 +1,51 @@
 # Parp Tools — Gillijim Project (C# refactor)
 
-This repository contains tools and libraries to restore and analyze AreaTable mappings across early World of Warcraft builds, with a preservation-first philosophy. The current focus is strict, numeric, auditable mapping from Alpha-era data (0.5.x) to LK 3.3.5 — without editing DBC files.
+WoW format preservation, analysis, and visualization tooling. The **primary project** is [MdxViewer](src/MdxViewer/) — a high-performance .NET 9 / OpenGL 3.3 world viewer supporting **Alpha 0.5.3**, **0.6.0**, and **LK 3.3.5** game data.
 
-Key docs:
+## Quick Start — MdxViewer
 
-- AreaID Restoration Approach: `DBCTool.V2/docs/areaid-restoration-approach.md`
-- Input Data Preparation (test_data layout and Alpha WDT extraction): `DBCTool.V2/docs/input-data-prep.md`
+```bash
+cd src/MdxViewer
+dotnet build
+dotnet run -- path/to/game/directory
+```
+
+The viewer auto-detects the WoW build version from the game path and loads terrain, WMOs, MDX models, liquids, and DBC overlays.
+
+See [`src/MdxViewer/README.md`](src/MdxViewer/README.md) for full documentation.
 
 ---
 
-## Repository structure (what each folder is for)
+## Repository Structure
 
-- `AlphaWDTAnalysisTool/`
-  - `AlphaWdtAnalyzer.Cli/` — CLI to remap LK ADTs using numeric crosswalks and Alpha-captured area values; writes verify CSVs and (optionally) visualizations.
-  - `AlphaWdtAnalyzer.Core/` — core exporter/patcher, CSV schemas, visualization helpers.
-  - Uses per-map numeric crosswalks from `DBCTool.V2` and enforces strict, map-locked, non-heuristic behavior.
+### Primary Project
 
-- `DBCTool.V2/`
-  - CLI that generates crosswalks (`Area_patch_crosswalk_via060_map*_*.csv`), dumps, and audits under `DBCTool.V2/dbctool_outputs/session_*/compare/v2/`.
-  - Rules are strict and map-locked; only via060 rows with non-zero targets are used for patching.
-  - See `DBCTool.V2/README.md` and the docs linked above.
+- **`src/MdxViewer/`** — 3D world viewer (active development)
+  - Multi-version terrain: Alpha monolithic WDT, 0.6.0 split ADTs, 3.3.5 split ADTs
+  - WMO v14/v16/v17 rendering with 4-pass transparency, doodads, liquids
+  - MDX/M2 model rendering with blend modes, alpha cutout, DBC texture resolution
+  - AOI streaming with persistent cache, directional lookahead, MPQ throttling
+  - DBC overlays: AreaPOI, TaxiPaths, area names, zone-based lighting
+  - ImGui UI with minimap, file browser, object list, terrain controls
 
-- `DBCTool.V2.Core/`
-  - Shared types and helpers used by `DBCTool.V2`.
+### Supporting Projects
 
-- `DBCTool/` (legacy — unmaintained; use `DBCTool.V2`)
-  - Earlier implementation with issues we could not resolve; kept for historical reference. Please use `DBCTool.V2`.
+- `src/MDX-L_Tool/` — MDX file format parser for Alpha 0.5.3 model archaeology
+- `src/WoWMapConverter/` — Map conversion tools, VLM, ADT format library
 
-- `lib/`
-  - Vendored reference libraries and tooling used by this project and experiments:
-    - `wow.tools.local/` (e.g., `WoWFormatLib`, `DBCD`, `TACTSharp`) — CASC/TACT access, format parsers, and DBC helpers.
-    - `Warcraft.NET/` — WoW format domain models/utilities.
-    - `WoWDBDefs/` — DBDefs parsing and utilities.
-    - `MapUpconverter/` — reference materials for map/terrain conversions.
-  - Not all subprojects are required at runtime; treat as a toolbox/reference.
+### Data & Conversion Tools
 
-- `test_data/`
-  - Standard input tree: `test_data/<version>/tree/...`. Examples:
-    - `test_data/0.5.3/tree/World/Maps/Azeroth/Azeroth.wdt`
-    - `test_data/3.3.5/tree/DBFilesClient/AreaTable.dbc`
-  - See `DBCTool.V2/docs/input-data-prep.md` for full layout and Alpha WDT extraction notes (MPQEditor from Zezula.net).
+- `AlphaWDTAnalysisTool/` — CLI to remap LK ADTs using numeric crosswalks
+- `DBCTool.V2/` — DBC crosswalk generation, dumps, and audits
+- `WoWRollback/` — ADT merger, PM4 tools, MCCV painting, asset gating
+- `BlpResizer/` — BLP texture conversion
 
-- `tools/`
-  - Utility scripts like `tools/agg-area-verify.ps1` to summarize verify CSVs (per-map `alpha_areas_used_*.csv` and `unknown_area_numbers_*.csv`).
+### Libraries & References
 
-- `reference_data/`
-  - Local copies of WoWDev wiki pages used during development. Treat as reference only; can be out of date and is not authoritative.
-
-- `053-chain/`, `053-viz/`, `053-viz-36/`
-  - Example output trees generated during development from prior commands; not required by tools (which choose sensible output locations by default).
-
-- `src/MdxViewer/`
-  - WoW Alpha 0.5.3 model and world viewer. Renders MDX models, WMO buildings, and WDT terrain with textures, lighting, and fog. Features:
-    - **Terrain**: AOI-based lazy tile loading, 4-layer texture blending with alpha maps, Noggit edge fix, alpha mask debug view
-    - **WMO**: v14 format, BLP textures per-batch, doodad sets, correct rotation/placement
-    - **MDX**: Per-geoset rendering, multi-layer materials, MirrorX for LH→RH coordinate conversion, blend modes
-    - **World Scene**: MDDF/MODF placements, bounding boxes, object visibility toggles
-    - **UI**: ImGui file browser, live minimap with click-to-teleport, AreaPOI system, terrain controls
-    - **Export**: GLB export with Z-up → Y-up conversion
-  - See `src/MdxViewer/memory-bank/` for detailed progress and architecture notes.
-
-- `src/MDX-L_Tool/`
-  - MDX file format parser library for WoW Alpha 0.5.3 binary model files.
-
-- `src/WoWMapConverter/`
-  - Map conversion tools including VLM (alpha map service, tile stitching, heightmap baking).
-
-- `next/`, `refactor/`
-  - Experimental or in-progress tools and refactors outside the current preservation workflow.
-
-- `out/`, `docs/`, `memory-bank/`
-  - `out/` — ad hoc outputs (varies by experiment).
-  - `docs/` — planning or top-level documentation.
-  - `memory-bank/` — working context notes.
+- `lib/` — Vendored libraries: `wow.tools.local` (DBCD), `Warcraft.NET`, `WoWDBDefs`, `MapUpconverter`
+- `reference_data/` — Local WoWDev wiki copies (reference only)
+- `test_data/` — Input data tree (`test_data/<version>/tree/...`)
+- `memory-bank/` — Working context notes
 
 ---
 
