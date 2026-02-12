@@ -80,7 +80,11 @@ public class WmoRenderer : ISceneRenderer
     public string GetSubObjectName(int index)
     {
         if (index < _groups.Count)
-            return $"Group {_groups[index].GroupIndex}";
+        {
+            int gi = _groups[index].GroupIndex;
+            string name = (gi < _wmo.Groups.Count ? _wmo.Groups[gi].Name : null) ?? $"Group {gi}";
+            return $"[{gi}] {name}";
+        }
         if (index == _groups.Count)
             return $"--- Doodads ({_doodadInstances.Count}) ---";
         int di = index - _groups.Count - 1;
