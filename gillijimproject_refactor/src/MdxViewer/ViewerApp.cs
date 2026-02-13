@@ -241,7 +241,8 @@ public partial class ViewerApp : IDisposable
             {
                 if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse)
                     _mouseDown = true;
-                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse && _worldScene != null)
+                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse && _worldScene != null
+                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
                     PickObjectAtMouse(_lastMouseX, _lastMouseY);
             };
             mouse.MouseUp += (_, btn) =>
@@ -1803,6 +1804,14 @@ void main() {
                         liquidRenderer.ShowLiquid = showLiquid;
                 }
 
+                if (_worldScene != null)
+                {
+                    ImGui.SameLine();
+                    bool showWdl = _worldScene.ShowWdlTerrain;
+                    if (ImGui.Checkbox("WDL", ref showWdl))
+                        _worldScene.ShowWdlTerrain = showWdl;
+                }
+
                 // World objects
                 if (_worldScene != null)
                 {
@@ -2255,12 +2264,14 @@ void main() {
         if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
             lighting.FogEnd = fogEnd;
 
-        // Camera speed
-        ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 5f, 500f, "%.0f");
-        ImGui.Text("Hold Shift for 5x boost");
-
-        // Field of view
-        ImGui.SliderFloat("FOV", ref _fovDegrees, 30f, 120f, "%.0f\u00b0");
+        if (_worldScene != null)
+        {
+            bool showWdl = _worldScene.ShowWdlTerrain;
+            if (ImGui.Checkbox("Show WDL Far Terrain", ref showWdl))
+                _worldScene.ShowWdlTerrain = showWdl;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
+        }
 
         // Contour interval (only when contours enabled via toolbar)
         if (renderer.ShowContours)
@@ -2385,6 +2396,42 @@ void main() {
                 _worldScene.ShowWlLiquids = showWl;
             if (_worldScene.ShowWlLiquids && ImGui.IsItemHovered())
                 ImGui.SetTooltip("Loose WLW/WLQ/WLM liquid project files.\nContains water data for deleted/missing tiles.");
+
+            if (ImGui.TreeNode("WL Transform Tuning"))
+            {
+                var ts = WlLiquidLoader.TransformSettings;
+
+                bool enabled = ts.Enabled;
+                if (ImGui.Checkbox("Enable Transform", ref enabled))
+                    ts.Enabled = enabled;
+
+                bool swapXY = ts.SwapXYBeforeRotation;
+                if (ImGui.Checkbox("Swap XY Before Rotation", ref swapXY))
+                    ts.SwapXYBeforeRotation = swapXY;
+
+                var rot = ts.RotationDegrees;
+                if (ImGui.SliderFloat3("Rotation (deg)", ref rot, -180f, 180f, "%.1f"))
+                    ts.RotationDegrees = rot;
+
+                var tr = ts.Translation;
+                if (ImGui.SliderFloat3("Translation", ref tr, -20000f, 20000f, "%.1f"))
+                    ts.Translation = tr;
+
+                if (ImGui.Button("Apply + Reload WL"))
+                    _worldScene.ReloadWlLiquids();
+
+                ImGui.SameLine();
+                if (ImGui.Button("Print Current WL Transform"))
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"[WL Transform] Enabled={ts.Enabled} SwapXY={ts.SwapXYBeforeRotation} " +
+                        $"Rot=({ts.RotationDegrees.X:F1},{ts.RotationDegrees.Y:F1},{ts.RotationDegrees.Z:F1}) " +
+                        $"Trans=({ts.Translation.X:F1},{ts.Translation.Y:F1},{ts.Translation.Z:F1})");
+                }
+
+                ImGui.TextDisabled("Tune here, then share the printed values to hard-wire final config.");
+                ImGui.TreePop();
+            }
         }
         else if (!_worldScene.WlLoadAttempted)
         {
@@ -4323,14 +4370,22 @@ void main() {
         if (_worldScene == null) return;
 
         var size = _window.Size;
-        float aspect = (float)size.X / Math.Max(size.Y, 1);
+        if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+            return;
+
+        if (mouseX < vpX || mouseX > vpX + vpW || mouseY < vpY || mouseY > vpY + vpH)
+            return;
+
+        float aspect = vpW / Math.Max(vpH, 1f);
         var view = _camera.GetViewMatrix();
         float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
-        // Convert mouse coords to NDC (-1..1)
-        float ndcX = (mouseX / size.X) * 2f - 1f;
-        float ndcY = 1f - (mouseY / size.Y) * 2f; // flip Y
+        // Convert viewport-local mouse coords to NDC (-1..1)
+        float localX = mouseX - vpX;
+        float localY = mouseY - vpY;
+        float ndcX = (localX / vpW) * 2f - 1f;
+        float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
         _worldScene.SelectObjectByRay(rayOrigin, rayDir);
@@ -4365,6 +4420,27 @@ void main() {
             _selectedObjectType = "";
             _selectedObjectInfo = "";
         }
+    }
+
+    private bool IsPointInSceneViewport(float x, float y)
+    {
+        if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+            return false;
+        return x >= vpX && x <= vpX + vpW && y >= vpY && y <= vpY + vpH;
+    }
+
+    private bool TryGetSceneViewportRect(out float x, out float y, out float width, out float height)
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float leftInset = _showLeftSidebar ? SidebarWidth : 0f;
+        float rightInset = _showRightSidebar ? SidebarWidth : 0f;
+
+        x = leftInset;
+        y = topOffset;
+        width = io.DisplaySize.X - leftInset - rightInset;
+        height = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        return width > 10f && height > 10f;
     }
 
     private static bool TryProjectToScreen(Vector3 worldPos, Matrix4x4 viewProj, int screenW, int screenH, out float sx, out float sy)

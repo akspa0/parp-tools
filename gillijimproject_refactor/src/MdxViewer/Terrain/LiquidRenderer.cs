@@ -63,11 +63,14 @@ public class LiquidRenderer : IDisposable
     /// </summary>
     public void RemoveChunksForTile(int tileX, int tileY)
     {
-        var toRemove = _meshes.Where(m => m.TileX == tileX && m.TileY == tileY).ToList();
-        foreach (var mesh in toRemove)
+        for (int i = _meshes.Count - 1; i >= 0; i--)
         {
+            var mesh = _meshes[i];
+            if (mesh.TileX != tileX || mesh.TileY != tileY)
+                continue;
+
             mesh.Dispose(_gl);
-            _meshes.Remove(mesh);
+            _meshes.RemoveAt(i);
         }
     }
 

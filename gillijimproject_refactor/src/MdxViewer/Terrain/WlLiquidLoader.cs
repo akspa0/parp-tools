@@ -14,6 +14,17 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class WlLiquidLoader
 {
+    public sealed class WlTransformSettings
+    {
+        public bool Enabled { get; set; } = true;
+        public bool SwapXYBeforeRotation { get; set; } = false;
+        public Vector3 RotationDegrees { get; set; } = new(90f, 0f, 0f);
+        public Vector3 Translation { get; set; } = Vector3.Zero;
+    }
+
+    // Tunable WL->renderer transform (editor-only files, no client runtime reference).
+    public static WlTransformSettings TransformSettings { get; } = new();
+
     private readonly IDataSource _dataSource;
     private readonly string _mapName;
     private readonly string _mapDir;
@@ -106,16 +117,11 @@ public class WlLiquidLoader
 
             // WL blocks have 16 vertices in a 4x4 grid, stored in reverse order
             // (index 15 = lower-right corner first in file)
-            // WL files store vertices in WoW world coordinates
-            // Try direct coordinate swap without MapOrigin offset
+            // WL files are editor-only; apply configurable 3D transform for alignment.
             for (int i = 0; i < 16; i++)
             {
-                var v = block.Vertices[i];
-                // Swap X/Y axes to match renderer coordinate system
-                float rendererX = v.Y;
-                float rendererY = v.X;
-                float rendererZ = v.Z;
-                allVertices.Add(new Vector3(rendererX, rendererY, rendererZ));
+                var v = ApplyWlTransform(block.Vertices[i]);
+                allVertices.Add(v);
             }
 
             // Build 3x3 quads from the 4x4 grid (reversed index order)
@@ -166,6 +172,29 @@ public class WlLiquidLoader
             BoundsMax = max,
             BlockCount = wl.Blocks.Count
         };
+    }
+
+    private static Vector3 ApplyWlTransform(Vector3 input)
+    {
+        var s = TransformSettings;
+        if (!s.Enabled)
+            return input;
+
+        Vector3 p = input;
+        if (s.SwapXYBeforeRotation)
+            p = new Vector3(p.Y, p.X, p.Z);
+
+        float rx = MathF.PI / 180f * s.RotationDegrees.X;
+        float ry = MathF.PI / 180f * s.RotationDegrees.Y;
+        float rz = MathF.PI / 180f * s.RotationDegrees.Z;
+
+        var rotation = Matrix4x4.CreateRotationX(rx)
+                     * Matrix4x4.CreateRotationY(ry)
+                     * Matrix4x4.CreateRotationZ(rz);
+
+        p = Vector3.Transform(p, rotation);
+        p += s.Translation;
+        return p;
     }
 }
 

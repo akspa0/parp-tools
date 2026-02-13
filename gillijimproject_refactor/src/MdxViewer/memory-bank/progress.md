@@ -1,6 +1,6 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: MDX Animation Complete — Particles + Catalog Enhancement Next
+## Status: WDL/WL Stabilization In Progress — Core parser/render fixes landed
 
 ## What Works Today
 
@@ -11,6 +11,10 @@
 | Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
 | Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
 | Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain) |
+| WDL parser (MVER/MAOF/MARE, v0x12) | ✅ Strict parsing + version validation |
+| WDL terrain tile scale | ✅ Uses TileSize (8533.3333), not ChunkSize |
+| WDL preview window reliability | ✅ Error reporting + `.wdl.mpq` fallback |
+| WDL runtime visibility toggle | ✅ UI checkbox for testing overlap issues |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
 | **MDX skeletal animation** | ✅ Compressed quats, GPU skinning, standalone + terrain |
@@ -21,6 +25,7 @@
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO fog blending | ✅ WMOs blend into fog like terrain |
 | WMO liquid rendering (MLIQ) | ✅ Semi-transparent water surfaces |
+| WMO intermittent render race | ✅ Fixed via shared static shaders + ref counting |
 | WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
 | WMO rotation/facing in WorldScene | ✅ Fixed — `-rz` negation for handedness |
 | MDDF/MODF placements | ✅ Position + pivot correct |
@@ -62,6 +67,7 @@
 | 1 | **MDX Animation** | ✅ Complete (compressed quats, GPU skinning, terrain doodads) |
 | — | **Per-object folders + multi-angle screenshots** | 🔧 Next up |
 | 2 | Particles (PRE2/RIBB) | ⏳ Not started — causes magenta on some MDX geosets |
+| WL | WL loose liquids transform alignment | 🔧 In progress — matrix tuning UI added, values not finalized |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |
 | MCP | MCP Server | ⏳ Designed — GLB terrain, NPC spawn, click-to-chat, audio |
 
@@ -75,6 +81,25 @@
 **Terrain animation** — Added `UpdateAnimation()` for unique MDX renderers in `WorldScene.cs` before render passes.
 
 **Key files:** `MdxTypes.cs`, `MdxFile.cs`, `MdxAnimator.cs`, `ModelRenderer.cs`, `ViewerApp.cs`, `WorldScene.cs`
+
+## 2026-02-13 — WDL/WL/WMO Rendering Fix Pass
+
+**WDL parser + rendering fixes:**
+1. `WdlParser` rewritten for strict chunk parsing and version check (`0x12`)
+2. `MARE` chunk header handling corrected before reading 545 heights
+3. WDL renderer now uses `WoWConstants.TileSize` (8533.3333)
+4. WDL preview improved: `.wdl` / `.wdl.mpq` fallback + explicit failure reason
+5. WDL tile overlap mitigation: hide preloaded ADT tiles + depth polygon offset
+6. Added UI toggle to disable WDL rendering for overlap testing
+
+**WMO render reliability fix:**
+- Converted WMO main shader and liquid shader to static shared programs with ref-counted lifetime.
+- Fixes intermittent WMO disappearance caused by per-instance shader program deletion/reuse.
+
+**WL liquids iteration tooling:**
+- Replaced hardcoded axis swap with matrix-based configurable transform (rotation + translation).
+- Added UI controls and hot-reload path (`Apply + Reload WL`) for rapid empirical alignment.
+- Final transform values not yet locked/hard-wired.
 
 ## MDX Magenta Textures — DEFERRED (Root Cause: Particles)
 

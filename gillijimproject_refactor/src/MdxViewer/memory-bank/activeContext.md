@@ -2,16 +2,44 @@
 
 ## Current Focus
 
-**MDX Animation Working + Particle System Next** — MDX skeletal animation is fully functional in both standalone model viewer and terrain WorldScene. Next priorities are:
-1. Particle system (PRE2/RIBB) — fixes remaining magenta quads
-2. Per-object output folders with multi-angle screenshots
-3. Lighting improvements
+**WDL/WL Stabilization + Remaining Render Bugs** — WDL parsing/rendering correctness and WL transform tooling were advanced this session, plus WMO shader race fix. Current focus is now validation + lock-in:
+1. WDL overlap behavior validation in live scenes (using new WDL UI toggle)
+2. WL liquid 3D transform tuning in UI, then hard-wire final transform
+3. MDX UV/texturing stretch investigation (Ghidra prompts prepared)
 
 ## Immediate Next Steps
 
-1. **Particle system (PRE2/RIBB)** — Implement particle emitters to fix magenta quads on MDX doodads
-2. **Per-object output folders** — Restructure AssetExporter to create `{entryId}_{name}/` folders containing `metadata.json`, `model.glb`, and multiple angle screenshots
-3. **Lighting** — DBC light data integration, improved per-vertex lighting, ambient light
+1. **WDL overlap root-cause pass** — Use new UI WDL toggle to isolate whether artifact is WDL mesh, ordering, or ADT coverage gaps
+2. **WL transform lock-in** — Tune in `WL Transform Tuning` UI, log final values, then hard-code configuration
+3. **MDX stretched texture bug** — Validate vertex stride / UV channel / TextureCoordId behavior via Ghidra
+4. **Particle system (PRE2/RIBB)** — Still needed for magenta particle quads
+
+## Session 2026-02-13 Summary — WDL/WL/WMO Fixes
+
+### Completed
+
+1. **WDL parser correctness**
+   - Strict chunk parsing (`MVER`/`MAOF`/`MARE`) with version `0x12` validation
+   - Proper `MARE` chunk header handling before height reads
+
+2. **WDL terrain scale + overlay behavior improvements**
+   - WDL cell size corrected to `WoWConstants.TileSize` (8533.3333), not chunk size
+   - Existing ADT-loaded tiles hidden from WDL at load-time
+   - Polygon offset added to reduce z-fighting with real terrain
+   - UI toggle added to fully disable WDL rendering for testing
+
+3. **WDL preview reliability**
+   - `.wdl.mpq` fallback path and error propagation (`LastError`)
+   - Preview dialog now displays failure reason instead of closing silently
+
+4. **WMO intermittent non-rendering fix**
+   - Converted WMO main + liquid shader programs to shared static programs with ref-counted lifetime
+   - Prevents per-instance shader deletion race (same class of bug previously fixed in MDX renderer)
+
+5. **WL liquids transform tooling**
+   - Replaced hardcoded axis swap with configurable matrix transform (rotation + translation)
+   - Added `WL Transform Tuning` controls in UI and `Apply + Reload WL`
+   - Added `WorldScene.ReloadWlLiquids()` for fast iteration
 
 ## MDX Magenta Textures — DEFERRED
 

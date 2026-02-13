@@ -48,6 +48,12 @@
 - 16x16 chunks (MCNK)
 - Supports alpha maps, heightmaps
 
+### WDL (Low-Detail Far Terrain)
+- Optional low-detail terrain layer (64x64 tile grid)
+- Parsed as strict `MVER -> MAOF -> MARE` chunk sequence
+- `MVER` version expected: `0x12`
+- One WDL cell equals one ADT tile (`WoWConstants.TileSize` = 8533.3333)
+
 ## Key Classes
 
 | Class | Purpose |
@@ -73,6 +79,39 @@
 - **Symptom**: WMO files won't load
 - **Cause**: WMO data stored in `.wmo.MPQ` archives
 - **Fix**: Use `ScanWmoMpqArchives()` for nested scanning
+
+### WDL Parsing / Rendering Alignment
+- **Symptom**: Incorrect WDL terrain or bad positioning
+- **Causes fixed**:
+  - Chunk parsing not strict enough (`MVER`/`MAOF`/`MARE`)
+  - Missing `MVER` version validation
+  - `MARE` heights read without consuming per-chunk header first
+  - WDL using chunk size instead of tile size
+- **Fixes**:
+  - Strict parser with version `0x12` check
+  - Proper `MARE` header handling before 545 height samples
+  - WDL renderer/preview use `WoWConstants.TileSize`
+
+### WDL Overlap / Testing Controls
+- **Symptom**: WDL low-res mesh visible where detailed ADT is expected
+- **Fixes**:
+  - Hide WDL cells for already-loaded ADT tiles at WDL load time
+  - Keep hide/show sync on tile load/unload events
+  - Apply polygon offset to reduce z-fighting
+  - Add UI toggle (`ShowWdlTerrain`) to disable WDL layer during testing
+
+### WMO Intermittent Non-Rendering
+- **Symptom**: Some WMOs randomly disappear/reappear
+- **Cause**: Per-instance shader program lifetime; one renderer disposing could delete a program another instance still used
+- **Fix**: Shared static shader programs (main + liquid) with reference-counted lifetime
+
+### WL Loose Liquids Alignment
+- **Context**: WLW/WLQ/WLM are editor-side files; no client runtime loader for authoritative transform behavior
+- **Approach**: Matrix-based 3D transform tuning in UI (rotation + translation), then lock final values
+- **Tools added**:
+  - `WlLiquidLoader.TransformSettings`
+  - `WorldScene.ReloadWlLiquids()`
+  - `WL Transform Tuning` UI + `Apply + Reload WL`
 
 ### MDX Coordinate System (LH→RH)
 - **Symptom**: Standalone MDX models appear inside-out/mirrored

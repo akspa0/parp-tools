@@ -39,11 +39,17 @@ public class WorldScene : ISceneRenderer
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
     private const float DoodadCullDistance = 1500f; // Max distance for small doodads (matches fog end)
+    private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
     private const float WmoCullDistance = 2000f;     // Max distance for WMO instances (slightly past fog)
     private const float WmoFadeStartFraction = 0.85f;
     private const float NoCullRadius = 256f;         // Objects within this radius are never frustum-culled
+    private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
+
+    // Scratch collections reused every frame to avoid hot-path allocations.
+    private readonly HashSet<string> _updatedMdxRenderers = new();
+    private readonly List<(int idx, float distSq)> _transparentSortScratch = new();
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -208,6 +214,18 @@ public class WorldScene : ISceneRenderer
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
     }
 
+    /// <summary>
+    /// Reload WL loose liquid bodies (WLW/WLQ/WLM) and rebuild GPU meshes.
+    /// Useful when tweaking WL transform settings in the UI.
+    /// </summary>
+    public void ReloadWlLiquids()
+    {
+        _terrainManager.LiquidRenderer.ClearWlBodies();
+        _wlLoader = null;
+        _wlLoadAttempted = false;
+        LazyLoadWlLiquids();
+    }
+
     private void LazyLoadPoi()
     {
         _poiLoadAttempted = true;
@@ -319,11 +337,16 @@ public class WorldScene : ISceneRenderer
             _terrainManager.OnTileLoaded += OnTileLoaded;
             _terrainManager.OnTileUnloaded += OnTileUnloaded;
 
-            // Hide WDL tiles for any tiles already loaded by the terrain manager
+            // Hide WDL for all ADT-backed tiles in the map so WDL only fills gaps
+            // where no detailed ADT tile exists (developer/empty tiles).
             if (_wdlTerrain != null)
             {
-                foreach (var (tx, ty) in _terrainManager.LoadedTiles)
+                foreach (int tileIdx in adapter.ExistingTiles)
+                {
+                    int tx = tileIdx / 64;
+                    int ty = tileIdx % 64;
                     _wdlTerrain.HideTile(tx, ty);
+                }
             }
             onStatus?.Invoke("World loaded (tiles stream as you move).");
         }
@@ -619,9 +642,6 @@ public class WorldScene : ISceneRenderer
         _tileMdxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
         _instancesDirty = true;
-
-        // Show WDL low-res tile again now that ADT is unloaded
-        _wdlTerrain?.ShowTile(tileX, tileY);
     }
 
     /// <summary>
@@ -909,10 +929,10 @@ public class WorldScene : ISceneRenderer
         // Advance animation once per unique MDX renderer before any render passes
         if (_doodadsVisible)
         {
-            var updatedRenderers = new HashSet<string>();
+            _updatedMdxRenderers.Clear();
             foreach (var inst in _mdxInstances)
             {
-                if (updatedRenderers.Add(inst.ModelKey))
+                if (_updatedMdxRenderers.Add(inst.ModelKey))
                 {
                     var r = _assets.GetMdx(inst.ModelKey);
                     r?.UpdateAnimation();
@@ -968,7 +988,7 @@ public class WorldScene : ISceneRenderer
             _gl.DepthFunc(DepthFunction.Lequal);
 
             // Sort visible instances back-to-front by distance to camera
-            var sorted = new List<(int idx, float dist)>(_mdxInstances.Count);
+            _transparentSortScratch.Clear();
             for (int i = 0; i < _mdxInstances.Count; i++)
             {
                 var inst = _mdxInstances[i];
@@ -976,14 +996,14 @@ public class WorldScene : ISceneRenderer
                 // Same frustum + distance cull as opaque pass (with NoCullRadius)
                 var placementPos = inst.Transform.Translation;
                 float dist = Vector3.DistanceSquared(cameraPos, placementPos);
-                if (dist > NoCullRadius * NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                if (dist > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
-                if (diag < DoodadSmallThreshold && dist > DoodadCullDistance * DoodadCullDistance) continue;
-                sorted.Add((i, dist));
+                if (diag < DoodadSmallThreshold && dist > DoodadCullDistanceSq) continue;
+                _transparentSortScratch.Add((i, dist));
             }
-            sorted.Sort((a, b) => b.dist.CompareTo(a.dist)); // back-to-front
+            _transparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq)); // back-to-front
 
-            foreach (var (idx, distSq) in sorted)
+            foreach (var (idx, distSq) in _transparentSortScratch)
             {
                 var inst = _mdxInstances[idx];
                 // Compute fade for transparent pass (same as opaque)
@@ -1035,18 +1055,17 @@ public class WorldScene : ISceneRenderer
             ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
 
             // Draw selected object highlight first (thicker visual via slightly larger box)
-            if (_selectedObjectType != ObjectType.None && _bbRenderer != null)
+            if (SelectedInstance is ObjectInstance sel)
             {
-                var sel = _selectedObjectType == ObjectType.Wmo ? _wmoInstances[_selectedObjectIndex] : _mdxInstances[_selectedObjectIndex];
                 _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
             }
 
-            // MDDF bounding boxes (yellow)
+            // MDDF bounding boxes (magenta)
             foreach (var inst in _mdxInstances)
-                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
-            // MODF bounding boxes (green)
+                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
+            // MODF bounding boxes (cyan)
             foreach (var inst in _wmoInstances)
-                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 0f));
+                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
 
             _gl.DepthMask(true);
         }
@@ -1212,6 +1231,9 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     public void SelectObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
     {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
         float bestT = float.MaxValue;
         ObjectType bestType = ObjectType.None;
         int bestIndex = -1;
@@ -1221,7 +1243,9 @@ public class WorldScene : ISceneRenderer
         // Test WMO bounding boxes
         for (int i = 0; i < _wmoInstances.Count; i++)
         {
-            float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin, _wmoInstances[i].BoundsMax);
+            // Slightly inflate AABBs to make selection more forgiving for thin geometry.
+            Vector3 pad = new(2f, 2f, 2f);
+            float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin - pad, _wmoInstances[i].BoundsMax + pad);
             if (t >= 0)
             {
                 hits.Add(("WMO", i, t, _wmoInstances[i].ModelName));
@@ -1232,7 +1256,8 @@ public class WorldScene : ISceneRenderer
         // Test MDX bounding boxes
         for (int i = 0; i < _mdxInstances.Count; i++)
         {
-            float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin, _mdxInstances[i].BoundsMax);
+            Vector3 pad = new(1f, 1f, 1f);
+            float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin - pad, _mdxInstances[i].BoundsMax + pad);
             if (t >= 0)
             {
                 hits.Add(("MDX", i, t, _mdxInstances[i].ModelName));

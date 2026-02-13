@@ -32,6 +32,8 @@ public class TerrainManager : ISceneRenderer
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
     // Tiles currently being loaded on background thread
     private readonly ConcurrentDictionary<(int, int), byte> _loadingTiles = new();
+    private readonly List<(int tileX, int tileY)> _unloadScratch = new();
+    private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
 
     // AOI: how many tiles around the camera to keep loaded
     private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
@@ -188,9 +190,16 @@ public class TerrainManager : ISceneRenderer
             }
         }
 
-        // Unload tiles no longer in AOI — dispose GPU meshes but keep parsed data in cache
-        var toUnload = _loadedTiles.Keys.Where(k => !desiredTiles.Contains(k)).ToList();
-        foreach (var key in toUnload)
+        // Unload tiles no longer in AOI — dispose GPU meshes but keep parsed data in cache.
+        // Reuse a scratch list to avoid per-update LINQ/ToList allocations.
+        _unloadScratch.Clear();
+        foreach (var key in _loadedTiles.Keys)
+        {
+            if (!desiredTiles.Contains(key))
+                _unloadScratch.Add(key);
+        }
+
+        foreach (var key in _unloadScratch)
         {
             var meshes = _loadedTiles[key];
             _terrainRenderer.RemoveChunks(meshes);
@@ -204,7 +213,7 @@ public class TerrainManager : ISceneRenderer
 
         // Queue new tiles for background loading, prioritized by direction
         // Sort: tiles ahead of camera heading load first, tiles behind load last
-        var tilesToLoad = new List<(int tx, int ty, float priority)>();
+        _tilesToLoadScratch.Clear();
         foreach (var (tx, ty) in desiredTiles)
         {
             if (_loadedTiles.ContainsKey((tx, ty)) || !_loadingTiles.TryAdd((tx, ty), 0))
@@ -223,12 +232,12 @@ public class TerrainManager : ISceneRenderer
                     priority = -dot; // ahead = negative priority = loads first
                 }
             }
-            tilesToLoad.Add((tx, ty, priority));
+            _tilesToLoadScratch.Add((tx, ty, priority));
             _loadingTiles.TryRemove((tx, ty), out _); // will re-add below
         }
-        tilesToLoad.Sort((a, b) => a.priority.CompareTo(b.priority));
+        _tilesToLoadScratch.Sort((a, b) => a.priority.CompareTo(b.priority));
 
-        foreach (var (tx, ty, _) in tilesToLoad)
+        foreach (var (tx, ty, _) in _tilesToLoadScratch)
         {
             if (!_loadingTiles.TryAdd((tx, ty), 0)) continue;
 
