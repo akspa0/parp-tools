@@ -35,6 +35,7 @@ A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alph
 - **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data.
 - **Area Names** — Live area name display from AreaTable.dbc with MapID validation.
 - **Zone Lighting** — DBC-driven ambient/fog/sky colors from Light.dbc + LightData.dbc.
+- **SQL World Population** — Optional NPC/GameObject placement injection from alpha-core SQL dumps.
 
 ## Controls
 
@@ -59,7 +60,10 @@ A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alph
 ```bash
 git clone https://github.com/akspa0/parp-tools.git
 cd parp-tools/gillijimproject_refactor
+git submodule update --init --recursive
 ```
+
+This initializes the alpha-core dependency at `external/alpha-core` used by SQL spawn injection.
 
 ### 2. Bootstrap library dependencies
 External libraries (SereniaBLPLib, DBCD, WoWDBDefs) are not git submodules — they are cloned on demand by the bootstrap script.
@@ -85,6 +89,22 @@ dotnet run -- path/to/game/directory
 ```
 
 The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain adapter.
+
+## SQL World Population (alpha-core)
+
+MdxViewer can inject NPC and GameObject spawns from alpha-core SQL files.
+
+- Expected root: `external/alpha-core`
+- Required files:
+  - `etc/databases/world/world.sql`
+  - `etc/databases/dbc/dbc.sql`
+
+In the viewer:
+
+1. Open **World Objects → SQL World Population**.
+2. Set SQL root (or click **Use Submodule Path**).
+3. Click **Load SQL Spawns (Current Map)**.
+4. Click a SQL GameObject in the scene to get **SQL GameObject Animation** controls in the right sidebar (play/pause, sequence, keyframe stepping, frame scrub).
 
 ### Pre-built Releases
 Download self-contained binaries from [Releases](../../releases) — no .NET SDK or library setup required.

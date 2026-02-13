@@ -1,0 +1,3 @@
+[submodule "external/alpha-core"]
+	path = external/alpha-core
+	url = https://github.com/The-Alpha-Project/alpha-core

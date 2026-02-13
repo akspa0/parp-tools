@@ -895,23 +895,35 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         if (_wmosVisible)
         {
+            float wmoCullDistanceSq = WmoCullDistance * WmoCullDistance;
             float wmoFadeStart = WmoCullDistance * WmoFadeStartFraction;
+            float wmoFadeStartSq = wmoFadeStart * wmoFadeStart;
             float wmoFadeRange = WmoCullDistance - wmoFadeStart;
+
+            // State is constant for this pass; set once to avoid per-instance churn.
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
+
             foreach (var inst in _wmoInstances)
             {
                 var wmoCenter = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
-                float wmoDist = Vector3.Distance(cameraPos, wmoCenter);
+                float wmoDistSq = Vector3.DistanceSquared(cameraPos, wmoCenter);
                 // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (wmoDist > NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                if (wmoDistSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { WmoCulledCount++; continue; }
                 // Distance cull + fade for WMOs
-                if (wmoDist > WmoCullDistance)
+                if (wmoDistSq > wmoCullDistanceSq)
                 { WmoCulledCount++; continue; }
-                float wmoFade = wmoDist > wmoFadeStart ? 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange : 1.0f;
+
+                float wmoFade = 1.0f;
+                if (wmoDistSq > wmoFadeStartSq)
+                {
+                    float wmoDist = MathF.Sqrt(wmoDistSq);
+                    wmoFade = 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange;
+                }
+
                 var renderer = _assets.GetWmo(inst.ModelKey);
                 if (renderer == null) continue;
-                _gl.Disable(EnableCap.Blend);
-                _gl.DepthMask(true);
                 renderer.RenderWithTransform(inst.Transform, view, proj,
                     fogColor, fogStart, fogEnd, cameraPos,
                     lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
@@ -924,6 +936,7 @@ public class WorldScene : ISceneRenderer
         MdxRenderedCount = 0;
         MdxCulledCount = 0;
         float mdxFadeStart = DoodadCullDistance * FadeStartFraction;
+        float mdxFadeStartSq = mdxFadeStart * mdxFadeStart;
         float mdxFadeRange = DoodadCullDistance - mdxFadeStart;
 
         // Advance animation once per unique MDX renderer before any render passes
@@ -958,18 +971,21 @@ public class WorldScene : ISceneRenderer
                 // Use placement position (transform translation) for distance — more reliable
                 // than AABB center when rotation transforms are imprecise
                 var placementPos = inst.Transform.Translation;
-                float dist = Vector3.Distance(cameraPos, placementPos);
+                float distSq = Vector3.DistanceSquared(cameraPos, placementPos);
                 // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (dist > NoCullRadius && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { MdxCulledCount++; continue; }
                 // Distance cull small doodads (with fade)
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
-                if (diag < DoodadSmallThreshold && dist > DoodadCullDistance)
+                if (diag < DoodadSmallThreshold && distSq > DoodadCullDistanceSq)
                 { MdxCulledCount++; continue; }
                 // Compute fade factor for objects near cull boundary
                 float fade = 1.0f;
-                if (diag < DoodadSmallThreshold && dist > mdxFadeStart)
+                if (diag < DoodadSmallThreshold && distSq > mdxFadeStartSq)
+                {
+                    float dist = MathF.Sqrt(distSq);
                     fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
+                }
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);

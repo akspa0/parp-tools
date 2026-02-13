@@ -234,6 +234,8 @@ public partial class ViewerApp : IDisposable
         style.Colors[(int)ImGuiCol.WindowBg] = new Vector4(0.12f, 0.12f, 0.14f, 0.95f);
         style.Colors[(int)ImGuiCol.MenuBarBg] = new Vector4(0.15f, 0.15f, 0.18f, 1.0f);
 
+        TryAutoPopulateAlphaCoreRoot();
+
         // Mouse input for viewport (not consumed by ImGui)
         foreach (var mouse in _input.Mice)
         {
@@ -279,6 +281,114 @@ public partial class ViewerApp : IDisposable
         {
             LoadFileFromDisk(initialArgs[0]);
         }
+    }
+
+    private void TryAutoPopulateAlphaCoreRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
+            return;
+
+        string[] candidates =
+        {
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "external", "alpha-core")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "external", "alpha-core"))
+        };
+
+        foreach (var candidate in candidates)
+        {
+            string worldDir = Path.Combine(candidate, "etc", "databases", "world");
+            string dbcDir = Path.Combine(candidate, "etc", "databases", "dbc");
+            if (Directory.Exists(worldDir) && Directory.Exists(dbcDir))
+            {
+                _sqlAlphaCoreRoot = candidate;
+                _sqlSpawnStatus = $"Auto-detected alpha-core SQL root: {candidate}";
+                return;
+            }
+        }
+    }
+
+    private void DrawSelectedSqlGameObjectAnimationControls()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return;
+        if (_worldScene.SelectedObjectType != Terrain.ObjectType.Mdx)
+            return;
+        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
+            return;
+
+        var inst = _worldScene.SelectedInstance.Value;
+        var spawn = _sqlMapSpawnsCache.FirstOrDefault(s =>
+            s.SpawnType == WorldSpawnType.GameObject &&
+            s.SpawnId == inst.UniqueId &&
+            (string.IsNullOrEmpty(s.ModelPath) || string.Equals(Path.GetFileName(s.ModelPath), inst.ModelName, StringComparison.OrdinalIgnoreCase)));
+        if (spawn == null)
+            return;
+
+        var mdxRenderer = _worldScene.Assets.GetMdx(inst.ModelKey);
+        var animator = mdxRenderer?.Animator;
+
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.85f, 1f, 0.85f, 1f), "SQL GameObject Animation");
+        ImGui.TextDisabled($"SpawnId: {spawn.SpawnId}  Entry: {spawn.EntryId}  Type: {spawn.GameObjectType}");
+
+        if (animator == null || !animator.HasAnimation || animator.Sequences.Count == 0)
+        {
+            ImGui.TextDisabled("This gameobject model has no animation sequences.");
+            return;
+        }
+
+        int currentSeq = animator.CurrentSequence;
+        string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
+            ? animator.Sequences[currentSeq].Name
+            : "None";
+        if (string.IsNullOrWhiteSpace(currentSeqName))
+            currentSeqName = $"Sequence {currentSeq}";
+
+        if (ImGui.BeginCombo("##sqlgo_anim_seq", currentSeqName))
+        {
+            for (int s = 0; s < animator.Sequences.Count; s++)
+            {
+                bool selected = s == currentSeq;
+                string seqName = animator.Sequences[s].Name;
+                if (string.IsNullOrWhiteSpace(seqName))
+                    seqName = $"Sequence {s}";
+                if (ImGui.Selectable(seqName, selected))
+                    animator.SetSequence(s);
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        bool isPlaying = animator.IsPlaying;
+        if (ImGui.Button(isPlaying ? "Pause GO Anim" : "Play GO Anim"))
+            animator.IsPlaying = !isPlaying;
+
+        ImGui.SameLine();
+        if (ImGui.Button("Prev Key"))
+        {
+            animator.IsPlaying = false;
+            animator.StepToPrevKeyframe();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Next Key"))
+        {
+            animator.IsPlaying = false;
+            animator.StepToNextKeyframe();
+        }
+
+        var seq = animator.Sequences[animator.CurrentSequence];
+        float seqStart = seq.Time.Start;
+        float seqEnd = seq.Time.End;
+        float currentFrame = Math.Clamp(animator.CurrentFrame, seqStart, seqEnd);
+        if (ImGui.SliderFloat("GO Frame", ref currentFrame, seqStart, seqEnd, "%.0f"))
+        {
+            animator.IsPlaying = false;
+            animator.CurrentFrame = currentFrame;
+        }
+
+        ImGui.TextDisabled("Note: this affects all visible instances using the same MDX model renderer.");
     }
 
     private void OnUpdate(double dt)
@@ -2001,6 +2111,7 @@ void main() {
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
                 ImGui.Separator();
                 ImGui.TextWrapped(_selectedObjectInfo);
+                DrawSelectedSqlGameObjectAnimationControls();
                 ImGui.Spacing();
             }
 
@@ -2309,7 +2420,16 @@ void main() {
 
         ImGui.Separator();
         ImGui.Text("SQL World Population");
-        ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (etc/databases/...)", ref _sqlAlphaCoreRoot, 1024);
+        ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("MdxViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Use Submodule Path"))
+        {
+            string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
+            _sqlAlphaCoreRoot = candidate;
+        }
         bool sqlSettingsChanged = false;
         sqlSettingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
         ImGui.SameLine();
