@@ -13,6 +13,7 @@ public class MdxAnimator
     private readonly MdxFile _mdx;
     private readonly Matrix4x4[] _boneMatrices;
     private readonly Dictionary<int, MdlBone> _bonesByObjectId = new();
+    private readonly Dictionary<int, int> _objectIdToListIndex = new();
     private readonly Dictionary<int, List<int>> _childrenByParent = new();
     private readonly List<int> _rootBoneIds = new();
 
@@ -170,9 +171,11 @@ public class MdxAnimator
         _boneMatrices = new Matrix4x4[Math.Max(mdx.Bones.Count, 1)];
 
         // Index bones by ObjectId and build parent-child hierarchy
-        foreach (var bone in mdx.Bones)
+        for (int i = 0; i < mdx.Bones.Count; i++)
         {
+            var bone = mdx.Bones[i];
             _bonesByObjectId[bone.ObjectId] = bone;
+            _objectIdToListIndex[bone.ObjectId] = i;
         }
 
         foreach (var bone in mdx.Bones)
@@ -336,8 +339,7 @@ public class MdxAnimator
         var worldMatrix = localMatrix * parentMatrix;
 
         // Store in bone matrices array (indexed by bone list position)
-        int boneIndex = _mdx.Bones.IndexOf(bone);
-        if (boneIndex >= 0 && boneIndex < _boneMatrices.Length)
+        if (_objectIdToListIndex.TryGetValue(objectId, out int boneIndex) && boneIndex < _boneMatrices.Length)
             _boneMatrices[boneIndex] = worldMatrix;
 
         // Recurse to children

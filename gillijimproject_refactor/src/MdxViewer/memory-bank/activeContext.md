@@ -2,21 +2,62 @@
 
 ## Current Focus
 
-**Asset Catalog Enhancement + MDX Animation + Lighting** — The Asset Catalog is functional (SQL dump parser, no MySQL needed). Next priorities are:
-1. Per-object output folders with multi-angle screenshots
-2. MDX animation system
+**MDX Animation Working + Particle System Next** — MDX skeletal animation is fully functional in both standalone model viewer and terrain WorldScene. Next priorities are:
+1. Particle system (PRE2/RIBB) — fixes remaining magenta quads
+2. Per-object output folders with multi-angle screenshots
 3. Lighting improvements
 
 ## Immediate Next Steps
 
-1. **Per-object output folders** — Restructure AssetExporter to create `{entryId}_{name}/` folders containing `metadata.json`, `model.glb`, and multiple angle screenshots
-2. **Multi-angle screenshots** — Capture each object from 6+ angles: front, back, left, right, top, 3/4 view. Save as individual PNGs in the object folder
-3. **MDX animation system** — Implement keyframe interpolation, bone transforms, geoset animation, playback controls
-4. **Lighting** — DBC light data integration, improved per-vertex lighting, ambient light
+1. **Particle system (PRE2/RIBB)** — Implement particle emitters to fix magenta quads on MDX doodads
+2. **Per-object output folders** — Restructure AssetExporter to create `{entryId}_{name}/` folders containing `metadata.json`, `model.glb`, and multiple angle screenshots
+3. **Lighting** — DBC light data integration, improved per-vertex lighting, ambient light
 
 ## MDX Magenta Textures — DEFERRED
 
 Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MDX files). The magenta quads are particle emitter geometry that references particle textures, not regular model textures. Defer until particle system implementation.
+
+## Session 2026-02-13 Summary — MDX Animation System Complete
+
+### Three Bugs Fixed
+
+1. **KGRT Compressed Quaternion Parsing** (`MdxFile.cs`, `MdxTypes.cs`)
+   - Rotation keys use `C4QuaternionCompressed` (8 bytes packed), not float4 (16 bytes)
+   - Ghidra-verified decompression: 21-bit signed components, W reconstructed from unit norm
+   - Added `C4QuaternionCompressed` struct with `Decompress()` method
+
+2. **Animation Never Updated** (`ModelRenderer.cs`, `ViewerApp.cs`)
+   - `ViewerApp` called `RenderWithTransform()` directly, bypassing `Render()` which was the only place `_animator.Update()` was called
+   - Fix: Extracted `UpdateAnimation()` as public method, called from ViewerApp before render
+
+3. **PIVT Chunk Order — All Pivots Were (0,0,0)** (`MdxFile.cs`)
+   - PIVT chunk comes AFTER BONE in MDX files. Inline pivot assignment during `ReadBone()` found 0 pivots
+   - Fix: Deferred pivot assignment in `MdxFile.Load()` after all chunks are parsed
+   - This caused "horror movie" deformation — bones rotating around world origin instead of joints
+
+### Terrain Animation Added (`WorldScene.cs`)
+- Added `UpdateAnimation()` calls for all unique MDX renderers before opaque/transparent render passes
+- Uses `HashSet<string>` to ensure each renderer is updated exactly once per frame
+
+### Other Improvements
+- `MdxAnimator`: `_objectIdToListIndex` dictionary replaces O(n) `IndexOf` calls
+- `GNDX`/`MTGC` chunks now stored in `MdlGeoset` for vertex-to-bone skinning
+- MATS values remapped from ObjectIds to bone list indices via dictionary lookup
+
+### Key Architecture (MDX Animation)
+- `MdxAnimator` — Evaluates bone hierarchy per-frame, stores matrices in `_boneMatrices[]` by list position
+- `ModelRenderer.UpdateAnimation()` — Public method to advance animation clock
+- `BuildBoneWeights()` — Converts GNDX/MTGC/MATS to 4-bone skinning format
+- Bone transform: `T(-pivot) * S * R * T(pivot) * T(translation) * parentWorld`
+- Shader: `uBones[128]` uniform array, vertex attributes for bone indices + weights
+
+### Files Modified
+- `MdxTypes.cs` — Added `C4QuaternionCompressed` struct
+- `MdxFile.cs` — Fixed `ReadQuatTrack`, stored GNDX/MTGC, deferred pivot assignment
+- `MdxAnimator.cs` — `_objectIdToListIndex` dict, cleaned diagnostics
+- `ModelRenderer.cs` — Extracted `UpdateAnimation()`, ObjectId→listIndex remapping in `BuildBoneWeights`
+- `ViewerApp.cs` — Added `mdxR.UpdateAnimation()` before standalone MDX render
+- `WorldScene.cs` — Added per-frame animation update for unique MDX doodad renderers
 
 ## Session 2026-02-09 Summary
 
@@ -143,8 +184,9 @@ Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MD
 | Terrain alpha map debug view | ✅ (Show Alpha Masks toggle) |
 | Async tile streaming | ✅ (background parse, render-thread GPU upload) |
 | Standalone MDX rendering | ✅ (MirrorX, front-facing) |
+| MDX skeletal animation | ✅ (standalone + terrain, compressed quats, GPU skinning) |
 | MDX pivot offset correction | ✅ (bounding box center pre-translation) |
-| MDX doodads in WorldScene | ⚠️ Position fixed, textures still broken |
+| MDX doodads in WorldScene | ✅ Position + animation working. Magenta = unimplemented particles |
 | WMO v14 rendering + textures | ✅ (BLP per-batch) |
 | WMO v17 rendering | ❌ Not implemented yet |
 | M2 model rendering | ❌ Not implemented yet |

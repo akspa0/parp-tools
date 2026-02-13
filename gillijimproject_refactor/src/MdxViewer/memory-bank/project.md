@@ -21,9 +21,9 @@
 
 ### Rendering Pipeline
 - OpenGL via Silk.NET
-- Model rendering with vertex buffers
+- Model rendering with vertex buffers + GPU skinning (bone matrices)
 - Texture support for BLP format
-- Animation system for models
+- Skeletal animation system (MdxAnimator — keyframe interpolation, bone hierarchy, compressed quaternions)
 
 ## Key File Formats
 
@@ -55,7 +55,8 @@
 | `ViewerApp` | Main application entry point |
 | `MpqDataSource` | MPQ file access and file list building |
 | `FileBrowser` | File navigation UI |
-| `ModelRenderer` | 3D model rendering |
+| `ModelRenderer` | 3D model rendering + GPU skinning |
+| `MdxAnimator` | Skeletal animation (bone hierarchy, keyframe interpolation) |
 
 ## Known Issues & Solutions
 
@@ -77,6 +78,21 @@
 - **Symptom**: Standalone MDX models appear inside-out/mirrored
 - **Fix**: Apply `MirrorX = Matrix4x4.CreateScale(-1, 1, 1)` in `Render()` model matrix only
 - **Note**: WorldScene uses `RenderWithTransform()` directly — no mirror needed
+
+### MDX Animation — PIVT Chunk Order
+- **Symptom**: Horror-movie deformation — bones rotate around world origin instead of joints
+- **Cause**: PIVT chunk comes AFTER BONE in MDX files. Inline pivot assignment during `ReadBone()` found 0 pivots.
+- **Fix**: Deferred pivot assignment in `MdxFile.Load()` after all chunks are parsed.
+
+### MDX Animation — UpdateAnimation() Call Site
+- **Symptom**: Bones never move despite correct parsing
+- **Cause**: `ViewerApp` calls `RenderWithTransform()` directly, bypassing `Render()` which was the only place `_animator.Update()` was called
+- **Fix**: Extracted `UpdateAnimation()` as public method on `MdxRenderer`. Called from `ViewerApp` (standalone) and `WorldScene` (terrain doodads).
+
+### MDX KGRT Compressed Quaternions
+- **Symptom**: Rotation data parsed incorrectly, wrong animation poses
+- **Cause**: KGRT keys use `C4QuaternionCompressed` (8 bytes packed), not float4 (16 bytes)
+- **Fix**: Added `C4QuaternionCompressed` struct with Ghidra-verified decompression (21-bit signed components, W from unit norm)
 
 ### MDX Bounding Box Pivot Offset
 - **Symptom**: MDX doodads appear displaced from their MDDF placement positions
@@ -165,11 +181,11 @@ See `renderer_plan.md` for the full itemized 40-task implementation plan across 
 - [x] BLP2 texture loading
 - [x] Phase 0: Foundation
 - [x] Phase 3: Terrain (WDT/ADT loading, mesh gen, texture layering, lighting, shadow fix, alpha debug, async streaming)
-- [x] Phase 4: World Scene (WMOs ✅, MDX pivot ✅, MDX textures ❌)
+- [x] Phase 4: World Scene (WMOs ✅, MDX pivot ✅, MDX textures ✅ except particles)
 - [x] VLM: Dataset loading, minimap, generator UI, async streaming
 - [x] Asset Catalog: SQL dump reader, browse/filter UI, JSON+GLB+screenshot export
+- [x] Phase 1: MDX Animation (compressed quats, GPU skinning, standalone + terrain doodads)
 - [ ] Asset Catalog: Per-object folders + multi-angle screenshots
-- [ ] Phase 1: MDX Animation (keyframes, bones, geoset animation, playback UI)
 - [ ] Lighting improvements (DBC light data, per-vertex, ambient)
 - [ ] Phase 2: Particle System (emitters, physics, billboard rendering)
 - [ ] Phase 5: Liquid Rendering — lava type mapping still broken (green)

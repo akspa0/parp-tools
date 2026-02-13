@@ -872,6 +872,21 @@ public class WorldScene : ISceneRenderer
         MdxCulledCount = 0;
         float mdxFadeStart = DoodadCullDistance * FadeStartFraction;
         float mdxFadeRange = DoodadCullDistance - mdxFadeStart;
+
+        // Advance animation once per unique MDX renderer before any render passes
+        if (_doodadsVisible)
+        {
+            var updatedRenderers = new HashSet<string>();
+            foreach (var inst in _mdxInstances)
+            {
+                if (updatedRenderers.Add(inst.ModelKey))
+                {
+                    var r = _assets.GetMdx(inst.ModelKey);
+                    r?.UpdateAnimation();
+                }
+            }
+        }
+
         if (_doodadsVisible)
         {
             foreach (var inst in _mdxInstances)

@@ -98,9 +98,20 @@ jobs:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: MdxViewer ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## MdxViewer — WoW World Viewer
+            ## MdxViewer v0.1.3-alpha — MDX Skeletal Animation
 
             High-performance .NET 10 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
+
+            ### What's New
+            - **MDX Skeletal Animation** — Full bone hierarchy, keyframe interpolation, GPU skinning
+            - **Compressed Quaternion Support** — Ghidra-verified C4QuaternionCompressed decompression for KGRT rotation tracks
+            - **Terrain Doodad Animation** — MDX doodads in WorldScene now animate (trees sway, creatures idle, etc.)
+            - **Animation Sequence Selection** — UI panel to browse and switch between animation sequences
+
+            ### Bug Fixes
+            - Fixed PIVT chunk order — bone pivots were all (0,0,0) due to PIVT being parsed after BONE
+            - Fixed animation update — standalone MDX viewer was not calling animator Update()
+            - Fixed KGRT parsing — rotation keys are 8-byte compressed, not 16-byte float4
 
             ### Quick Start
             1. Extract the ZIP for your platform

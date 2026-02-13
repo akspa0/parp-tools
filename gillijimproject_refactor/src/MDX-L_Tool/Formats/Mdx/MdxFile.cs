@@ -143,6 +143,15 @@ public class MdxFile
             }
         }
 
+        // Deferred pivot assignment: PIVT chunk typically comes AFTER BONE/HELP in MDX files,
+        // so pivots may not be available when bones are first parsed.
+        for (int i = 0; i < mdx.Bones.Count; i++)
+        {
+            var bone = mdx.Bones[i];
+            if (bone.ObjectId >= 0 && bone.ObjectId < mdx.PivotPoints.Count)
+                bone.Pivot = mdx.PivotPoints[bone.ObjectId];
+        }
+
         return mdx;
     }
 
@@ -1016,10 +1025,6 @@ public class MdxFile
                     bone.GeosetAnimId = br.ReadInt32();
                 }
 
-                // Assign pivot from PIVT chunk
-                if (bone.ObjectId >= 0 && bone.ObjectId < pivots.Count)
-                    bone.Pivot = pivots[bone.ObjectId];
-
                 bones.Add(bone);
             }
             catch (Exception ex)
@@ -1057,9 +1062,6 @@ public class MdxFile
                     GeosetId = -1,
                     GeosetAnimId = -1
                 };
-
-                if (bone.ObjectId >= 0 && bone.ObjectId < pivots.Count)
-                    bone.Pivot = pivots[bone.ObjectId];
 
                 bones.Add(bone);
             }

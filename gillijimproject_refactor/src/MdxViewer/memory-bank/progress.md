@@ -1,6 +1,6 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: Asset Catalog Enhancement + Animation/Lighting Next
+## Status: MDX Animation Complete — Particles + Catalog Enhancement Next
 
 ## What Works Today
 
@@ -13,10 +13,11 @@
 | Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain) |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
+| **MDX skeletal animation** | ✅ Compressed quats, GPU skinning, standalone + terrain |
 | MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
 | MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
 | MDX fog blending | ✅ Models blend into fog like terrain |
-| MDX doodads in WorldScene | ⚠️ Position correct, magenta = unimplemented particles (PRE2/RIBB) |
+| MDX doodads in WorldScene | ✅ Position + animation working. Magenta = unimplemented particles |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO fog blending | ✅ WMOs blend into fog like terrain |
 | WMO liquid rendering (MLIQ) | ✅ Semi-transparent water surfaces |
@@ -58,11 +59,22 @@
 | Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering, lazy-load UI) |
 | Loading | Loading Screen | ✅ Complete |
 | Catalog | Asset Catalog | ✅ SQL dump reader, ImGui browse/filter, JSON+GLB+screenshot export |
+| 1 | **MDX Animation** | ✅ Complete (compressed quats, GPU skinning, terrain doodads) |
 | — | **Per-object folders + multi-angle screenshots** | 🔧 Next up |
-| 1 | MDX Animation | ⏳ Not started |
 | 2 | Particles (PRE2/RIBB) | ⏳ Not started — causes magenta on some MDX geosets |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |
 | MCP | MCP Server | ⏳ Designed — GLB terrain, NPC spawn, click-to-chat, audio |
+
+## 2026-02-13 — MDX Animation System Complete
+
+**Three bugs fixed:**
+1. **KGRT Compressed Quaternions** — Rotation keys are 8-byte `C4QuaternionCompressed`, not 16-byte float4. Ghidra-verified decompression formula.
+2. **Animation Never Updated** — `ViewerApp` called `RenderWithTransform()` directly, bypassing `Render()` which contained `Update()`. Extracted `UpdateAnimation()` as public method.
+3. **PIVT Chunk Order** — PIVT comes after BONE in MDX files. All bone pivots were (0,0,0). Added deferred pivot assignment after all chunks parsed.
+
+**Terrain animation** — Added `UpdateAnimation()` for unique MDX renderers in `WorldScene.cs` before render passes.
+
+**Key files:** `MdxTypes.cs`, `MdxFile.cs`, `MdxAnimator.cs`, `ModelRenderer.cs`, `ViewerApp.cs`, `WorldScene.cs`
 
 ## MDX Magenta Textures — DEFERRED (Root Cause: Particles)
 
