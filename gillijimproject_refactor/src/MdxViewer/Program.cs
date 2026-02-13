@@ -28,6 +28,13 @@ class Program
             ViewerLog.Verbose = true;
             MdxFile.Verbose = true;
         }
+        else
+        {
+            // Suppress Console.Out to avoid perf hit from library Console.WriteLine spam.
+            // Windows console output is synchronous and extremely slow (~1ms per line).
+            // ViewerLog buffers messages internally for the UI log panel regardless.
+            Console.SetOut(TextWriter.Null);
+        }
 
         using var app = new ViewerApp();
         app.FullLoadMode = fullLoad;

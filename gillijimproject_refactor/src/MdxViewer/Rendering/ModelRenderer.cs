@@ -71,13 +71,15 @@ public class MdxRenderer : ISceneRenderer
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
 
-    private uint _shaderProgram;
-    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
-    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
-    private int _uLightDir, _uLightColor, _uAmbientColor;
-    private int _uSphereEnvMap;
-    private int _uBones; // Bone matrix array uniform location
-    private int _uHasBones; // Enable skinning flag
+    // ── Shared shader program (all MdxRenderers use identical shader source) ──
+    private static uint _shaderProgram;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
+    private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
+    private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private static int _uSphereEnvMap;
+    private static int _uBones; // Bone matrix array uniform location
+    private static int _uHasBones; // Enable skinning flag
+    private static bool _shaderInitialized;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -192,6 +194,69 @@ public class MdxRenderer : ISceneRenderer
         RenderWithTransform(MirrorX, view, proj, RenderPass.Transparent);
     }
 
+    // ── Batched rendering for WorldScene (avoids redundant per-instance state setup) ──
+
+    /// <summary>Shader program handle for batch rendering coordination.</summary>
+    public uint ShaderProgram => _shaderProgram;
+
+    /// <summary>
+    /// Set up shared per-frame state (shader, view/proj, fog, lighting).
+    /// Call once before rendering multiple instances of different MDX models.
+    /// All MdxRenderers share the same shader, so this only needs to be called once per frame per pass.
+    /// </summary>
+    public unsafe void BeginBatch(Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        _gl.UseProgram(_shaderProgram);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        _gl.Uniform3(_uFogColor, fogColor.X, fogColor.Y, fogColor.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cameraPos.X, cameraPos.Y, cameraPos.Z);
+
+        _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
+        _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
+        _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    /// <summary>
+    /// Lightweight per-instance render — only uploads model matrix, bones, and draws.
+    /// Assumes BeginBatch() was called earlier this frame to set shared state.
+    /// Safe because all MdxRenderers share a single static shader program + uniform locations.
+    /// </summary>
+    public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
+    {
+        var model = modelMatrix;
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+
+        // Upload bone matrices if animated
+        if (_animator != null && _animator.HasAnimation)
+        {
+            _gl.Uniform1(_uHasBones, 1);
+            var matrices = _animator.BoneMatrices;
+            int boneCount = Math.Min(matrices.Length, 128);
+            fixed (Matrix4x4* ptr = matrices)
+            {
+                _gl.UniformMatrix4(_uBones, (uint)boneCount, false, (float*)ptr);
+            }
+        }
+        else
+        {
+            _gl.Uniform1(_uHasBones, 0);
+        }
+
+        RenderGeosets(pass, fadeAlpha);
+    }
+
     /// <summary>
     /// Render this model with a custom world transform (for doodad instancing).
     /// Pass = Opaque renders only opaque layers (depth write ON).
@@ -222,21 +287,15 @@ public class MdxRenderer : ISceneRenderer
             var matrices = _animator.BoneMatrices;
             int boneCount = Math.Min(matrices.Length, 128);
             
-            for (int i = 0; i < boneCount; i++)
+            // Batch upload all bone matrices in a single GL call
+            fixed (Matrix4x4* ptr = matrices)
             {
-                var m = matrices[i];
-                _gl.UniformMatrix4(_uBones + i, 1, false, (float*)&m);
+                _gl.UniformMatrix4(_uBones, (uint)boneCount, false, (float*)ptr);
             }
-            if (matrices.Length > 128)
-                ViewerLog.Important(ViewerLog.Category.Mdx, $"Model has {matrices.Length} bones, only uploading first 128");
         }
         else
         {
             _gl.Uniform1(_uHasBones, 0);
-            
-            // Upload identity matrix for bone 0 as fallback for non-animated models
-            var identity = Matrix4x4.Identity;
-            _gl.UniformMatrix4(_uBones, 1, false, (float*)&identity);
         }
 
         // Fog uniforms (match terrain fog for seamless blending)
@@ -260,6 +319,14 @@ public class MdxRenderer : ISceneRenderer
         else
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
+        RenderGeosets(pass, fadeAlpha);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
+    private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha)
+    {
         for (int i = 0; i < _geosets.Count; i++)
         {
             var gb = _geosets[i];
@@ -409,6 +476,7 @@ public class MdxRenderer : ISceneRenderer
 
     private void InitShaders()
     {
+        if (_shaderInitialized) return; // Shared across all MdxRenderer instances
         string vertSrc = @"
 #version 330 core
 layout(location = 0) in vec3 aPos;
@@ -566,6 +634,7 @@ void main() {
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);
+        _shaderInitialized = true;
     }
 
     private uint CompileShader(ShaderType type, string source)
@@ -1259,7 +1328,7 @@ void main() {
         foreach (var tex in _textures.Values)
             _gl.DeleteTexture(tex);
 
-        _gl.DeleteProgram(_shaderProgram);
+        // Don't delete the shared static shader program — other renderers still use it
     }
 
     private class GeosetBuffers

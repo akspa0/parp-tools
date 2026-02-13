@@ -889,6 +889,17 @@ public class WorldScene : ISceneRenderer
 
         if (_doodadsVisible)
         {
+            // Set up shared per-frame state once (shader, view/proj, fog, lighting).
+            // Safe because all MdxRenderers share a single static shader program.
+            MdxRenderer? batchRenderer = null;
+            foreach (var inst in _mdxInstances)
+            {
+                batchRenderer = _assets.GetMdx(inst.ModelKey);
+                if (batchRenderer != null) break;
+            }
+            batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+
             foreach (var inst in _mdxInstances)
             {
                 // Use placement position (transform translation) for distance — more reliable
@@ -908,11 +919,7 @@ public class WorldScene : ISceneRenderer
                     fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
                 if (renderer == null) continue;
-                _gl.Disable(EnableCap.Blend);
-                _gl.DepthMask(true);
-                renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
-                    fogColor, fogStart, fogEnd, cameraPos,
-                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
                 MdxRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
@@ -953,9 +960,8 @@ public class WorldScene : ISceneRenderer
                 if (tDiag < DoodadSmallThreshold && tDist > mdxFadeStart)
                     tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
                 var renderer = _assets.GetMdx(inst.ModelKey);
-                renderer!.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
-                    fogColor, fogStart, fogEnd, cameraPos,
-                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                if (renderer == null) continue;
+                renderer.RenderInstance(inst.Transform, RenderPass.Transparent, tFade);
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }

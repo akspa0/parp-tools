@@ -72,9 +72,9 @@ public static class ViewerLog
 
         string prefix = $"[{cat}]";
         if (level == Level.Error)
-            Console.WriteLine($"{prefix} ERROR: {message}");
+            Console.Error.WriteLine($"{prefix} ERROR: {message}");
         else
-            Console.WriteLine($"{prefix} {message}");
+            Console.Error.WriteLine($"{prefix} {message}");
     }
 
     public static void Debug(Category cat, string msg) => Log(cat, Level.Debug, msg);
@@ -85,7 +85,7 @@ public static class ViewerLog
     /// <summary>Write to console only if --verbose is active. No category/history overhead.</summary>
     public static void Trace(string msg)
     {
-        if (_verbose) Console.WriteLine(msg);
+        if (_verbose) Console.Error.WriteLine(msg);
     }
 
     /// <summary>

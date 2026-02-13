@@ -202,6 +202,7 @@ public partial class ViewerApp : IDisposable
         opts.Size = new Vector2D<int>(1600, 900);
         opts.Title = "WoW Model Viewer";
         opts.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
+        opts.VSync = false; // Disable VSync — let the GPU run uncapped for profiling
 
         _window = Window.Create(opts);
         _window.Load += () => OnLoad(initialArgs);
