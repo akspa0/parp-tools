@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using MdxViewer.Logging;
 
 namespace MdxViewer.Catalog;
@@ -21,6 +22,8 @@ public class AlphaCoreDbReader : IDisposable
 {
     private readonly string _worldSqlPath;
     private readonly string _dbcSqlPath;
+    private readonly string _worldUpdatesSqlPath;
+    private SpawnUpdatesOverlay? _spawnUpdatesOverlay;
 
     /// <summary>
     /// Create a reader pointing at the alpha-core repository root.
@@ -29,6 +32,7 @@ public class AlphaCoreDbReader : IDisposable
     {
         _worldSqlPath = Path.Combine(alphaCoreRoot, "etc", "databases", "world", "world.sql");
         _dbcSqlPath = Path.Combine(alphaCoreRoot, "etc", "databases", "dbc", "dbc.sql");
+        _worldUpdatesSqlPath = Path.Combine(alphaCoreRoot, "etc", "databases", "world", "updates", "updates.sql");
     }
 
     /// <summary>
@@ -216,38 +220,81 @@ public class AlphaCoreDbReader : IDisposable
         var byEntry = creatures.Where(c => c.Type == AssetType.Creature)
             .ToDictionary(c => c.EntryId);
         if (byEntry.Count == 0) return;
+        var updates = GetSpawnUpdatesOverlay();
+        var seenSpawnIds = new HashSet<int>();
 
         // Columns: spawn_id(0), spawn_entry1(1), spawn_entry2(2), spawn_entry3(3), spawn_entry4(4),
         //          map(5), position_x(6), position_y(7), position_z(8), orientation(9), ...
         int count = 0;
+        int totalRows = 0;
+        int ignoredRows = 0;
+        int variantRows = 0;
+        int unmatchedEntries = 0;
         await foreach (var row in ParseInsertRowsAsync(_worldSqlPath, "spawns_creatures"))
         {
             if (row.Count < 10) continue;
+            totalRows++;
 
             // Schema: ignored at index 18
             if (row.Count > 18 && ParseInt(row[18]) != 0)
+            {
+                ignoredRows++;
                 continue;
+            }
 
             int spawnId = ParseInt(row[0]);
+            seenSpawnIds.Add(spawnId);
+
+            int entry1 = ParseInt(row[1]);
+            int entry2 = row.Count > 2 ? ParseInt(row[2]) : 0;
+            int entry3 = row.Count > 3 ? ParseInt(row[3]) : 0;
+            int entry4 = row.Count > 4 ? ParseInt(row[4]) : 0;
             int mapId = ParseInt(row[5]);
             float x = ParseFloat(row[6]);
             float y = ParseFloat(row[7]);
             float z = ParseFloat(row[8]);
             float o = ParseFloat(row[9]);
+            int ignored = row.Count > 18 ? ParseInt(row[18]) : 0;
+
+            if (updates.CreatureBySpawnId.TryGetValue(spawnId, out var patch))
+            {
+                if (patch.SpawnEntry1.HasValue) entry1 = patch.SpawnEntry1.Value;
+                if (patch.SpawnEntry2.HasValue) entry2 = patch.SpawnEntry2.Value;
+                if (patch.SpawnEntry3.HasValue) entry3 = patch.SpawnEntry3.Value;
+                if (patch.SpawnEntry4.HasValue) entry4 = patch.SpawnEntry4.Value;
+                if (patch.MapId.HasValue) mapId = patch.MapId.Value;
+                if (patch.X.HasValue) x = patch.X.Value;
+                if (patch.Y.HasValue) y = patch.Y.Value;
+                if (patch.Z.HasValue) z = patch.Z.Value;
+                if (patch.Orientation.HasValue) o = patch.Orientation.Value;
+                if (patch.Ignored.HasValue) ignored = patch.Ignored.Value;
+            }
+
+            if (ignored != 0)
+            {
+                ignoredRows++;
+                continue;
+            }
 
             int[] entries =
             {
-                ParseInt(row[1]),
-                row.Count > 2 ? ParseInt(row[2]) : 0,
-                row.Count > 3 ? ParseInt(row[3]) : 0,
-                row.Count > 4 ? ParseInt(row[4]) : 0
+                entry1,
+                entry2,
+                entry3,
+                entry4
             };
 
             var uniqueEntries = new HashSet<int>(entries.Where(e => e > 0));
+            if (uniqueEntries.Count > 1)
+                variantRows++;
+
             foreach (int entry in uniqueEntries)
             {
                 if (!byEntry.TryGetValue(entry, out var creature))
+                {
+                    unmatchedEntries++;
                     continue;
+                }
 
                 creature.Spawns.Add(new SpawnLocation
                 {
@@ -257,7 +304,38 @@ public class AlphaCoreDbReader : IDisposable
                 count++;
             }
         }
-        ViewerLog.Trace($"[AssetCatalog] Loaded {count} creature spawns");
+
+        // Apply inserted creature spawns from updates.sql
+        foreach (var inserted in updates.CreatureInserts)
+        {
+            if (inserted.Ignored != 0) continue;
+            if (!seenSpawnIds.Add(inserted.SpawnId)) continue;
+
+            int[] entries = { inserted.SpawnEntry1, inserted.SpawnEntry2, inserted.SpawnEntry3, inserted.SpawnEntry4 };
+            var uniqueEntries = new HashSet<int>(entries.Where(e => e > 0));
+
+            foreach (int entry in uniqueEntries)
+            {
+                if (!byEntry.TryGetValue(entry, out var creature))
+                {
+                    unmatchedEntries++;
+                    continue;
+                }
+
+                creature.Spawns.Add(new SpawnLocation
+                {
+                    SpawnId = inserted.SpawnId,
+                    MapId = inserted.MapId,
+                    X = inserted.X,
+                    Y = inserted.Y,
+                    Z = inserted.Z,
+                    Orientation = inserted.Orientation
+                });
+                count++;
+            }
+        }
+
+        ViewerLog.Trace($"[AssetCatalog] Loaded {count} creature spawn links from {totalRows} rows ({ignoredRows} ignored, {variantRows} variant rows, {unmatchedEntries} unmatched entries)");
     }
 
     /// <summary>
@@ -268,25 +346,57 @@ public class AlphaCoreDbReader : IDisposable
         var byEntry = gameObjects.Where(g => g.Type == AssetType.GameObject)
             .ToDictionary(g => g.EntryId);
         if (byEntry.Count == 0) return;
+        var updates = GetSpawnUpdatesOverlay();
+        var seenSpawnIds = new HashSet<int>();
 
         // Columns: spawn_id(0), spawn_entry(1), spawn_map(2),
         //          spawn_positionX(3), spawn_positionY(4), spawn_positionZ(5), spawn_orientation(6), ...
         int count = 0;
+        int totalRows = 0;
+        int ignoredRows = 0;
+        int unmatchedEntries = 0;
         await foreach (var row in ParseInsertRowsAsync(_worldSqlPath, "spawns_gameobjects"))
         {
             if (row.Count < 7) continue;
+            totalRows++;
 
             // Schema: ignored at index 17
             if (row.Count > 17 && ParseInt(row[17]) != 0)
+            {
+                ignoredRows++;
                 continue;
+            }
 
             int spawnId = ParseInt(row[0]);
+            seenSpawnIds.Add(spawnId);
+
             int entry = ParseInt(row[1]);
             int mapId = ParseInt(row[2]);
             float x = ParseFloat(row[3]);
             float y = ParseFloat(row[4]);
             float z = ParseFloat(row[5]);
             float o = ParseFloat(row[6]);
+            int ignored = row.Count > 17 ? ParseInt(row[17]) : 0;
+
+            if (updates.GameObjectBySpawnId.TryGetValue(spawnId, out var patch))
+            {
+                if (patch.SpawnEntry.HasValue) entry = patch.SpawnEntry.Value;
+                if (patch.MapId.HasValue) mapId = patch.MapId.Value;
+                if (patch.X.HasValue) x = patch.X.Value;
+                if (patch.Y.HasValue) y = patch.Y.Value;
+                if (patch.Z.HasValue) z = patch.Z.Value;
+                if (patch.Orientation.HasValue) o = patch.Orientation.Value;
+                if (patch.Ignored.HasValue) ignored = patch.Ignored.Value;
+            }
+
+            if (updates.GameObjectIgnoredByEntry.TryGetValue(entry, out int ignoredByEntry) && ignoredByEntry != 0)
+                ignored = ignoredByEntry;
+
+            if (ignored != 0)
+            {
+                ignoredRows++;
+                continue;
+            }
 
             if (byEntry.TryGetValue(entry, out var go))
             {
@@ -297,8 +407,40 @@ public class AlphaCoreDbReader : IDisposable
                 });
                 count++;
             }
+            else
+            {
+                unmatchedEntries++;
+            }
         }
-        ViewerLog.Trace($"[AssetCatalog] Loaded {count} gameobject spawns");
+
+        foreach (var inserted in updates.GameObjectInserts)
+        {
+            if (inserted.Ignored != 0) continue;
+            if (!seenSpawnIds.Add(inserted.SpawnId)) continue;
+
+            if (updates.GameObjectIgnoredByEntry.TryGetValue(inserted.SpawnEntry, out int ignoredByEntry) && ignoredByEntry != 0)
+                continue;
+
+            if (byEntry.TryGetValue(inserted.SpawnEntry, out var go))
+            {
+                go.Spawns.Add(new SpawnLocation
+                {
+                    SpawnId = inserted.SpawnId,
+                    MapId = inserted.MapId,
+                    X = inserted.X,
+                    Y = inserted.Y,
+                    Z = inserted.Z,
+                    Orientation = inserted.Orientation
+                });
+                count++;
+            }
+            else
+            {
+                unmatchedEntries++;
+            }
+        }
+
+        ViewerLog.Trace($"[AssetCatalog] Loaded {count} gameobject spawns from {totalRows} rows ({ignoredRows} ignored, {unmatchedEntries} unmatched entries)");
     }
 
     /// <summary>
@@ -324,6 +466,358 @@ public class AlphaCoreDbReader : IDisposable
     }
 
     public void Dispose() { }
+
+    private SpawnUpdatesOverlay GetSpawnUpdatesOverlay()
+    {
+        if (_spawnUpdatesOverlay != null)
+            return _spawnUpdatesOverlay;
+
+        var overlay = new SpawnUpdatesOverlay();
+        if (!File.Exists(_worldUpdatesSqlPath))
+        {
+            _spawnUpdatesOverlay = overlay;
+            return overlay;
+        }
+
+        string sql = File.ReadAllText(_worldUpdatesSqlPath, Encoding.UTF8);
+
+        ParseCreatureSpawnUpdates(sql, overlay);
+        ParseGameObjectSpawnUpdates(sql, overlay);
+        ParseCreatureSpawnInserts(sql, overlay);
+        ParseGameObjectSpawnInserts(sql, overlay);
+
+        ViewerLog.Trace($"[AssetCatalog] updates.sql overlay: {overlay.CreatureBySpawnId.Count} creature updates, {overlay.GameObjectBySpawnId.Count} gameobject updates, {overlay.CreatureInserts.Count} creature inserts, {overlay.GameObjectInserts.Count} gameobject inserts, {overlay.GameObjectIgnoredByEntry.Count} entry-level GO ignores");
+
+        _spawnUpdatesOverlay = overlay;
+        return overlay;
+    }
+
+    private static void ParseCreatureSpawnUpdates(string sql, SpawnUpdatesOverlay overlay)
+    {
+        var re = new Regex(@"UPDATE\s+`spawns_creatures`\s+SET\s+(?<set>.*?)\s+WHERE\s+(?<where>.*?);", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        foreach (Match match in re.Matches(sql))
+        {
+            var setValues = ParseSetClause(match.Groups["set"].Value);
+            var patch = new CreatureSpawnPatch
+            {
+                SpawnEntry1 = GetInt(setValues, "spawn_entry1"),
+                SpawnEntry2 = GetInt(setValues, "spawn_entry2"),
+                SpawnEntry3 = GetInt(setValues, "spawn_entry3"),
+                SpawnEntry4 = GetInt(setValues, "spawn_entry4"),
+                MapId = GetInt(setValues, "map"),
+                X = GetFloat(setValues, "position_x"),
+                Y = GetFloat(setValues, "position_y"),
+                Z = GetFloat(setValues, "position_z"),
+                Orientation = GetFloat(setValues, "orientation"),
+                Ignored = GetInt(setValues, "ignored")
+            };
+
+            foreach (int spawnId in ParseSpawnIdsFromWhere(match.Groups["where"].Value))
+                overlay.CreatureBySpawnId[spawnId] = patch;
+        }
+    }
+
+    private static void ParseGameObjectSpawnUpdates(string sql, SpawnUpdatesOverlay overlay)
+    {
+        var re = new Regex(@"UPDATE\s+`spawns_gameobjects`\s+SET\s+(?<set>.*?)\s+WHERE\s+(?<where>.*?);", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        foreach (Match match in re.Matches(sql))
+        {
+            var setValues = ParseSetClause(match.Groups["set"].Value);
+            var patch = new GameObjectSpawnPatch
+            {
+                SpawnEntry = GetInt(setValues, "spawn_entry"),
+                MapId = GetInt(setValues, "spawn_map"),
+                X = GetFloat(setValues, "spawn_positionx"),
+                Y = GetFloat(setValues, "spawn_positiony"),
+                Z = GetFloat(setValues, "spawn_positionz"),
+                Orientation = GetFloat(setValues, "spawn_orientation"),
+                Ignored = GetInt(setValues, "ignored")
+            };
+
+            string where = match.Groups["where"].Value;
+            foreach (int spawnId in ParseSpawnIdsFromWhere(where))
+                overlay.GameObjectBySpawnId[spawnId] = patch;
+
+            foreach (int entry in ParseEntryIdsFromWhere(where, "spawn_entry"))
+            {
+                if (patch.Ignored.HasValue)
+                    overlay.GameObjectIgnoredByEntry[entry] = patch.Ignored.Value;
+            }
+        }
+    }
+
+    private static void ParseCreatureSpawnInserts(string sql, SpawnUpdatesOverlay overlay)
+    {
+        var re = new Regex(@"INSERT\s+INTO\s+`spawns_creatures`\s*\((?<cols>[^)]*)\)\s*VALUES\s*(?<vals>.*?);", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        foreach (Match match in re.Matches(sql))
+        {
+            var cols = SplitCsv(match.Groups["cols"].Value).Select(NormalizeSqlIdentifier).ToList();
+            foreach (var tuple in ExtractTuples(match.Groups["vals"].Value))
+            {
+                var values = ParseTupleValues(tuple);
+                if (values.Count == 0 || values.Count != cols.Count) continue;
+
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < cols.Count; i++)
+                    map[cols[i]] = values[i];
+
+                var inserted = new CreatureSpawnInserted
+                {
+                    SpawnId = GetInt(map, "spawn_id") ?? 0,
+                    SpawnEntry1 = GetInt(map, "spawn_entry1") ?? 0,
+                    SpawnEntry2 = GetInt(map, "spawn_entry2") ?? 0,
+                    SpawnEntry3 = GetInt(map, "spawn_entry3") ?? 0,
+                    SpawnEntry4 = GetInt(map, "spawn_entry4") ?? 0,
+                    MapId = GetInt(map, "map") ?? 0,
+                    X = GetFloat(map, "position_x") ?? 0,
+                    Y = GetFloat(map, "position_y") ?? 0,
+                    Z = GetFloat(map, "position_z") ?? 0,
+                    Orientation = GetFloat(map, "orientation") ?? 0,
+                    Ignored = GetInt(map, "ignored") ?? 0
+                };
+
+                if (inserted.SpawnId > 0)
+                    overlay.CreatureInserts.Add(inserted);
+            }
+        }
+    }
+
+    private static void ParseGameObjectSpawnInserts(string sql, SpawnUpdatesOverlay overlay)
+    {
+        var re = new Regex(@"INSERT\s+INTO\s+`spawns_gameobjects`\s*\((?<cols>[^)]*)\)\s*VALUES\s*(?<vals>.*?);", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        foreach (Match match in re.Matches(sql))
+        {
+            var cols = SplitCsv(match.Groups["cols"].Value).Select(NormalizeSqlIdentifier).ToList();
+            foreach (var tuple in ExtractTuples(match.Groups["vals"].Value))
+            {
+                var values = ParseTupleValues(tuple);
+                if (values.Count == 0 || values.Count != cols.Count) continue;
+
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < cols.Count; i++)
+                    map[cols[i]] = values[i];
+
+                var inserted = new GameObjectSpawnInserted
+                {
+                    SpawnId = GetInt(map, "spawn_id") ?? 0,
+                    SpawnEntry = GetInt(map, "spawn_entry") ?? 0,
+                    MapId = GetInt(map, "spawn_map") ?? 0,
+                    X = GetFloat(map, "spawn_positionx") ?? 0,
+                    Y = GetFloat(map, "spawn_positiony") ?? 0,
+                    Z = GetFloat(map, "spawn_positionz") ?? 0,
+                    Orientation = GetFloat(map, "spawn_orientation") ?? 0,
+                    Ignored = GetInt(map, "ignored") ?? 0
+                };
+
+                if (inserted.SpawnId > 0)
+                    overlay.GameObjectInserts.Add(inserted);
+            }
+        }
+    }
+
+    private static Dictionary<string, string> ParseSetClause(string setClause)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string part in SplitCsv(setClause))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string key = NormalizeSqlIdentifier(part[..eq]);
+            string val = part[(eq + 1)..].Trim();
+            val = TrimSqlLiteral(val);
+            result[key] = val;
+        }
+        return result;
+    }
+
+    private static IEnumerable<int> ParseSpawnIdsFromWhere(string whereClause)
+    {
+        var ids = new HashSet<int>();
+        foreach (Match m in Regex.Matches(whereClause, @"spawn_id`?\s*=\s*'?(?<id>-?\d+)'?", RegexOptions.IgnoreCase))
+            ids.Add(ParseInt(m.Groups["id"].Value));
+
+        foreach (Match m in Regex.Matches(whereClause, @"spawn_id`?\s+in\s*\((?<list>[^)]*)\)", RegexOptions.IgnoreCase))
+        {
+            foreach (Match n in Regex.Matches(m.Groups["list"].Value, @"-?\d+"))
+                ids.Add(ParseInt(n.Value));
+        }
+        return ids;
+    }
+
+    private static IEnumerable<int> ParseEntryIdsFromWhere(string whereClause, string columnName)
+    {
+        var ids = new HashSet<int>();
+        string esc = Regex.Escape(columnName);
+
+        foreach (Match m in Regex.Matches(whereClause, $@"{esc}`?\s*=\s*'?(?<id>-?\d+)'?", RegexOptions.IgnoreCase))
+            ids.Add(ParseInt(m.Groups["id"].Value));
+
+        foreach (Match m in Regex.Matches(whereClause, $@"{esc}`?\s+in\s*\((?<list>[^)]*)\)", RegexOptions.IgnoreCase))
+        {
+            foreach (Match n in Regex.Matches(m.Groups["list"].Value, @"-?\d+"))
+                ids.Add(ParseInt(n.Value));
+        }
+
+        return ids;
+    }
+
+    private static List<string> SplitCsv(string input)
+    {
+        var result = new List<string>();
+        var current = new StringBuilder();
+        bool inQuote = false;
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            char c = input[i];
+            if (c == '\'' && (i == 0 || input[i - 1] != '\\'))
+                inQuote = !inQuote;
+
+            if (c == ',' && !inQuote)
+            {
+                result.Add(current.ToString().Trim());
+                current.Clear();
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+
+        if (current.Length > 0)
+            result.Add(current.ToString().Trim());
+
+        return result;
+    }
+
+    private static List<string> ExtractTuples(string valuesClause)
+    {
+        var tuples = new List<string>();
+        int depth = 0;
+        int start = -1;
+        bool inQuote = false;
+
+        for (int i = 0; i < valuesClause.Length; i++)
+        {
+            char c = valuesClause[i];
+            if (c == '\'' && (i == 0 || valuesClause[i - 1] != '\\'))
+                inQuote = !inQuote;
+
+            if (inQuote) continue;
+
+            if (c == '(')
+            {
+                if (depth == 0) start = i;
+                depth++;
+            }
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0 && start >= 0)
+                {
+                    tuples.Add(valuesClause[start..(i + 1)]);
+                    start = -1;
+                }
+            }
+        }
+
+        return tuples;
+    }
+
+    private static List<string> ParseTupleValues(string tuple)
+    {
+        var sb = new StringBuilder(tuple.Trim());
+        var row = ParseRowTuple(sb, out _);
+        return row ?? new List<string>();
+    }
+
+    private static string NormalizeSqlIdentifier(string raw)
+    {
+        return raw.Trim().Trim('`').Trim().ToLowerInvariant();
+    }
+
+    private static string TrimSqlLiteral(string raw)
+    {
+        string value = raw.Trim();
+        if (value.StartsWith("(") && value.EndsWith(")"))
+            value = value[1..^1].Trim();
+        if (value.StartsWith("'") && value.EndsWith("'"))
+            value = value[1..^1];
+        return value.Trim();
+    }
+
+    private static int? GetInt(Dictionary<string, string> values, string key)
+    {
+        if (!values.TryGetValue(key, out string? raw)) return null;
+        return ParseInt(raw);
+    }
+
+    private static float? GetFloat(Dictionary<string, string> values, string key)
+    {
+        if (!values.TryGetValue(key, out string? raw)) return null;
+        return ParseFloat(raw);
+    }
+
+    private sealed class SpawnUpdatesOverlay
+    {
+        public Dictionary<int, CreatureSpawnPatch> CreatureBySpawnId { get; } = new();
+        public Dictionary<int, GameObjectSpawnPatch> GameObjectBySpawnId { get; } = new();
+        public Dictionary<int, int> GameObjectIgnoredByEntry { get; } = new();
+        public List<CreatureSpawnInserted> CreatureInserts { get; } = new();
+        public List<GameObjectSpawnInserted> GameObjectInserts { get; } = new();
+    }
+
+    private sealed class CreatureSpawnPatch
+    {
+        public int? SpawnEntry1 { get; init; }
+        public int? SpawnEntry2 { get; init; }
+        public int? SpawnEntry3 { get; init; }
+        public int? SpawnEntry4 { get; init; }
+        public int? MapId { get; init; }
+        public float? X { get; init; }
+        public float? Y { get; init; }
+        public float? Z { get; init; }
+        public float? Orientation { get; init; }
+        public int? Ignored { get; init; }
+    }
+
+    private sealed class GameObjectSpawnPatch
+    {
+        public int? SpawnEntry { get; init; }
+        public int? MapId { get; init; }
+        public float? X { get; init; }
+        public float? Y { get; init; }
+        public float? Z { get; init; }
+        public float? Orientation { get; init; }
+        public int? Ignored { get; init; }
+    }
+
+    private sealed class CreatureSpawnInserted
+    {
+        public int SpawnId { get; init; }
+        public int SpawnEntry1 { get; init; }
+        public int SpawnEntry2 { get; init; }
+        public int SpawnEntry3 { get; init; }
+        public int SpawnEntry4 { get; init; }
+        public int MapId { get; init; }
+        public float X { get; init; }
+        public float Y { get; init; }
+        public float Z { get; init; }
+        public float Orientation { get; init; }
+        public int Ignored { get; init; }
+    }
+
+    private sealed class GameObjectSpawnInserted
+    {
+        public int SpawnId { get; init; }
+        public int SpawnEntry { get; init; }
+        public int MapId { get; init; }
+        public float X { get; init; }
+        public float Y { get; init; }
+        public float Z { get; init; }
+        public float Orientation { get; init; }
+        public int Ignored { get; init; }
+    }
 
     // ─── SQL Dump Parser ───────────────────────────────────────────────
 

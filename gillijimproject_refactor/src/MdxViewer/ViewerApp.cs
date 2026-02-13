@@ -49,6 +49,10 @@ public class ViewerApp : IDisposable
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
+    private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
+    private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
+    private bool _minimapDragging = false;
+    private Vector2 _minimapDragStart = Vector2.Zero;
     private Rendering.LoadingScreen? _loadingScreen;
 
     // Output directories (next to the executable)
@@ -307,10 +311,20 @@ public class ViewerApp : IDisposable
             _worldScene.ClearExternalSpawns();
     }
 
+    private bool _mKeyWasPressed = false;
+
     private void HandleKeyboardInput(float dt)
     {
         if (_input.Keyboards.Count == 0) return;
         var kb = _input.Keyboards[0];
+
+        // M key toggles fullscreen minimap (only when terrain is loaded)
+        bool mPressed = kb.IsKeyPressed(Key.M);
+        if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
+        {
+            _fullscreenMinimap = !_fullscreenMinimap;
+        }
+        _mKeyWasPressed = mPressed;
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
         bool shift = kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight);
@@ -544,11 +558,11 @@ void main() {
         if (_showRightSidebar)
             DrawRightSidebar();
 
-        // Minimap floats independently (bottom-left or bottom-right depending on sidebars)
-        if (_worldScene != null || _vlmTerrainManager != null)
-            DrawMinimap();
-
         DrawStatusBar();
+        
+        // Fullscreen minimap overlay (M key toggle)
+        if (_fullscreenMinimap && (_worldScene != null || _vlmTerrainManager != null))
+            DrawFullscreenMinimap();
 
         // Asset Catalog (floating window)
         _catalogView?.Draw();
@@ -1875,6 +1889,15 @@ void main() {
         if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
+            // ── Minimap section (top of sidebar, always visible when terrain is loaded) ──
+            if (_terrainManager != null || _vlmTerrainManager != null)
+            {
+                DrawMinimapInSidebar();
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+            }
+
             // ── Selected Object section (always visible when something is selected) ──
             if (!string.IsNullOrEmpty(_selectedObjectInfo))
             {
@@ -2459,7 +2482,243 @@ void main() {
         ImGui.PopStyleVar();
     }
 
-    private void DrawMinimap()
+    private void DrawMinimapInSidebar()
+    {
+        // Gather tile data
+        List<(int tx, int ty)>? existingTiles = null;
+        Func<int, int, bool>? isTileLoaded = null;
+        int loadedTileCount = 0;
+        string? mapName = null;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
+            mapName = _terrainManager.MapName;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+            mapName = _vlmTerrainManager.MapName;
+        }
+        else return;
+
+        var io = ImGui.GetIO();
+        float mapSize = SidebarWidth - 12f; // Fit within sidebar padding
+
+        var cursorPos = ImGui.GetCursorScreenPos();
+
+        // Scroll-wheel zoom
+        if (ImGui.IsWindowHovered())
+        {
+            float wheel = io.MouseWheel;
+            if (wheel != 0)
+                _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+        }
+
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+
+        MinimapHelpers.RenderMinimapContent(
+            cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+            camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+            out float viewMinTx, out float viewMinTy, out float cellSize);
+
+        // Handle click-and-drag panning or click-to-teleport
+        var mousePos = ImGui.GetMousePos();
+        bool isInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + mapSize &&
+                          mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + mapSize;
+
+        if (isInBounds)
+        {
+            // Start drag on mouse down
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _minimapDragging = true;
+                _minimapDragStart = mousePos;
+            }
+            // Continue drag while mouse is down
+            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 delta = mousePos - _minimapDragStart;
+                float dragThreshold = 3f; // Minimum pixels to count as drag
+                if (delta.Length() > dragThreshold)
+                {
+                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
+                    _minimapDragStart = mousePos;
+                }
+            }
+            // Mouse released - check if it was a click or drag
+            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 delta = mousePos - _minimapDragStart;
+                if (delta.Length() <= 3f) // Was a click, not a drag
+                {
+                    // Teleport on single click
+                    float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+                    float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
+                    if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
+                    {
+                        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+                        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+                        _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
+                    }
+                }
+                _minimapDragging = false;
+            }
+        }
+        else if (_minimapDragging)
+        {
+            _minimapDragging = false;
+        }
+
+        // Advance cursor past minimap
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 4);
+
+        // Info text
+        int ctX = (int)MathF.Floor(camTileX);
+        int ctY = (int)MathF.Floor(camTileY);
+        ImGui.Text($"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x");
+        ImGui.Text($"Loaded: {loadedTileCount}");
+        if (_minimapPanOffset != Vector2.Zero)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Reset Pan"))
+                _minimapPanOffset = Vector2.Zero;
+        }
+    }
+
+    private void DrawFullscreenMinimap()
+    {
+        // Gather tile data
+        List<(int tx, int ty)>? existingTiles = null;
+        Func<int, int, bool>? isTileLoaded = null;
+        int loadedTileCount = 0;
+        string? mapName = null;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
+            mapName = _terrainManager.MapName;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+            mapName = _vlmTerrainManager.MapName;
+        }
+        else return;
+
+        var io = ImGui.GetIO();
+        float mapSize = MathF.Min(io.DisplaySize.X * 0.8f, io.DisplaySize.Y * 0.8f);
+        float padding = (io.DisplaySize.X - mapSize) * 0.5f;
+        float topPadding = (io.DisplaySize.Y - mapSize) * 0.5f;
+
+        ImGui.SetNextWindowPos(Vector2.Zero);
+        ImGui.SetNextWindowSize(io.DisplaySize);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0, 0, 0, 0.85f));
+        
+        if (ImGui.Begin("##FullscreenMinimap", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar))
+        {
+            ImGui.SetCursorPos(new Vector2(padding, topPadding));
+            var cursorPos = ImGui.GetCursorScreenPos();
+
+            // Scroll-wheel zoom
+            if (ImGui.IsWindowHovered())
+            {
+                float wheel = io.MouseWheel;
+                if (wheel != 0)
+                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+            }
+
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+
+            MinimapHelpers.RenderMinimapContent(
+                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+                out float viewMinTx, out float viewMinTy, out float cellSize);
+
+            // Handle click-and-drag panning or click-to-teleport
+            var mousePos = ImGui.GetMousePos();
+            bool isInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + mapSize &&
+                              mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + mapSize;
+
+            if (isInBounds)
+            {
+                // Start drag on mouse down
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    _minimapDragging = true;
+                    _minimapDragStart = mousePos;
+                }
+                // Continue drag while mouse is down
+                else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
+                {
+                    Vector2 delta = mousePos - _minimapDragStart;
+                    float dragThreshold = 3f; // Minimum pixels to count as drag
+                    if (delta.Length() > dragThreshold)
+                    {
+                        _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
+                        _minimapDragStart = mousePos;
+                    }
+                }
+                // Mouse released - check if it was a click or drag
+                else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
+                {
+                    Vector2 delta = mousePos - _minimapDragStart;
+                    if (delta.Length() <= 3f) // Was a click, not a drag
+                    {
+                        // Teleport on single click
+                        float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+                        float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
+                        if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
+                        {
+                            float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+                            float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+                            _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
+                        }
+                    }
+                    _minimapDragging = false;
+                }
+            }
+            else if (_minimapDragging)
+            {
+                _minimapDragging = false;
+            }
+
+            // Info overlay
+            ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
+            int ctX = (int)MathF.Floor(camTileX);
+            int ctY = (int)MathF.Floor(camTileY);
+            ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Double-click to teleport");
+            
+            if (_minimapPanOffset != Vector2.Zero)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Reset Pan"))
+                    _minimapPanOffset = Vector2.Zero;
+            }
+        }
+        ImGui.End();
+        ImGui.PopStyleColor();
+        ImGui.PopStyleVar();
+    }
+
+    private void DrawMinimap_OLD()
     {
         // Gather tile data from whichever terrain manager is active
         List<(int tx, int ty)>? existingTiles = null;
