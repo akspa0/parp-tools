@@ -74,6 +74,11 @@ public class WorldScene : ISceneRenderer
     private readonly SkyDomeRenderer _skyDome;
     public SkyDomeRenderer SkyDome => _skyDome;
 
+    // WDL low-res terrain (far terrain background)
+    private WdlTerrainRenderer? _wdlTerrain;
+    public WdlTerrainRenderer? WdlTerrain => _wdlTerrain;
+    public bool ShowWdlTerrain { get; set; } = true;
+
     // Bounding box debug rendering
     private bool _showBoundingBoxes = false;
     private BoundingBoxRenderer? _bbRenderer;
@@ -298,10 +303,28 @@ public class WorldScene : ISceneRenderer
         }
         else
         {
-            // Terrain maps: stream everything via AOI — tiles, placements, and models
-            // load incrementally as the camera moves.
+            // Terrain maps: load WDL low-res mesh first for instant overview,
+            // then stream detailed ADT tiles via AOI as the camera moves.
+            if (_dataSource != null)
+            {
+                onStatus?.Invoke("Loading WDL terrain...");
+                _wdlTerrain = new WdlTerrainRenderer(_gl);
+                if (!_wdlTerrain.Load(_dataSource, _terrainManager.MapName))
+                {
+                    _wdlTerrain.Dispose();
+                    _wdlTerrain = null;
+                }
+            }
+
             _terrainManager.OnTileLoaded += OnTileLoaded;
             _terrainManager.OnTileUnloaded += OnTileUnloaded;
+
+            // Hide WDL tiles for any tiles already loaded by the terrain manager
+            if (_wdlTerrain != null)
+            {
+                foreach (var (tx, ty) in _terrainManager.LoadedTiles)
+                    _wdlTerrain.HideTile(tx, ty);
+            }
             onStatus?.Invoke("World loaded (tiles stream as you move).");
         }
         
@@ -581,6 +604,9 @@ public class WorldScene : ISceneRenderer
         _tileWmoInstances[(tileX, tileY)] = tileWmo;
         _instancesDirty = true;
 
+        // Hide WDL low-res tile now that detailed ADT is loaded
+        _wdlTerrain?.HideTile(tileX, tileY);
+
         if (tileMdx.Count > 0 || tileWmo.Count > 0)
             ViewerLog.Info(ViewerLog.Category.Terrain, $"Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileWmo.Count} WMO instances");
     }
@@ -593,6 +619,9 @@ public class WorldScene : ISceneRenderer
         _tileMdxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
         _instancesDirty = true;
+
+        // Show WDL low-res tile again now that ADT is unloaded
+        _wdlTerrain?.ShowTile(tileX, tileY);
     }
 
     /// <summary>
@@ -772,6 +801,10 @@ public class WorldScene : ISceneRenderer
 
         // Also set clear color to horizon color so any gaps match the sky
         _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
+
+        // 0. Render WDL low-res terrain (far background — hidden tiles replaced by detailed ADTs)
+        if (ShowWdlTerrain && _wdlTerrain != null)
+            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller);
 
         // 1. Render terrain (with frustum culling)
         _terrainManager.Render(view, proj, camPos, _frustumCuller);
@@ -1292,6 +1325,7 @@ public class WorldScene : ISceneRenderer
         _terrainManager.OnTileLoaded -= OnTileLoaded;
         _terrainManager.OnTileUnloaded -= OnTileUnloaded;
         _terrainManager.Dispose();
+        _wdlTerrain?.Dispose();
         _assets.Dispose();
         _bbRenderer?.Dispose();
         _skyDome.Dispose();

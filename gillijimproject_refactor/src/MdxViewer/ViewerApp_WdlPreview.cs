@@ -10,9 +10,30 @@ public partial class ViewerApp
 {
     private void DrawWdlPreviewDialog()
     {
-        if (_selectedMapForPreview == null || _wdlPreviewRenderer == null || !_wdlPreviewRenderer.HasPreview)
+        if (_selectedMapForPreview == null || _wdlPreviewRenderer == null)
         {
             _showWdlPreview = false;
+            return;
+        }
+
+        // Show error dialog if preview failed to load
+        if (!_wdlPreviewRenderer.HasPreview)
+        {
+            ImGui.SetNextWindowSize(new Vector2(400, 150), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowPos(new Vector2(
+                ImGui.GetIO().DisplaySize.X / 2 - 200,
+                ImGui.GetIO().DisplaySize.Y / 2 - 75), ImGuiCond.FirstUseEver);
+
+            if (ImGui.Begin($"WDL Preview Error - {_selectedMapForPreview.Name}", ref _showWdlPreview))
+            {
+                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Failed to load WDL preview.");
+                if (_wdlPreviewRenderer.LastError != null)
+                    ImGui.TextWrapped(_wdlPreviewRenderer.LastError);
+                ImGui.Separator();
+                if (ImGui.Button("Close"))
+                    _showWdlPreview = false;
+            }
+            ImGui.End();
             return;
         }
 

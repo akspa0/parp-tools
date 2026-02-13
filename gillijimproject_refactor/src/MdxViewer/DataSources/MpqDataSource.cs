@@ -85,7 +85,7 @@ public class MpqDataSource : IDataSource
 
     /// <summary>
     /// Scans for Alpha 0.5.3 listfile-less .ext.MPQ archives (WMO, WDT, WDL).
-    /// These files wrap a single data file as file 0 inside an individual MPQ archive.
+    /// These files wrap a single data file as file ID 1 inside an individual MPQ archive.
     /// Builds a virtual path → disk path cache for fast reads.
     /// </summary>
     private void ScanAlphaNestedMpqArchives(string gamePath)
@@ -285,9 +285,24 @@ public class MpqDataSource : IDataSource
 
     public bool FileExists(string virtualPath)
     {
-        // Check loose files first (faster), then MPQ
+        // Check loose files first (faster), then alpha MPQ cache, then file set, then StormLib
         if (TryResolveLoosePath(virtualPath) != null)
             return true;
+
+        var normalized = virtualPath.Replace('/', '\\');
+
+        // Alpha 0.5.3: .ext.MPQ archives (WMO, WDT, WDL) are indexed in _alphaMpqCache
+        if (_alphaMpqCache.ContainsKey(normalized) || _alphaMpqCache.ContainsKey(virtualPath))
+            return true;
+
+        // Also try with .mpq suffix (e.g. "development.wdt" → "development.wdt.mpq" in cache)
+        if (_alphaMpqCache.ContainsKey(normalized + ".mpq") || _alphaMpqCache.ContainsKey(virtualPath + ".mpq"))
+            return true;
+
+        // Check the master file set (includes all discovered files)
+        if (_fileSet.Contains(normalized) || _fileSet.Contains(virtualPath))
+            return true;
+
         return _mpq.FileExists(virtualPath);
     }
 
@@ -320,21 +335,29 @@ public class MpqDataSource : IDataSource
             return File.ReadAllBytes(loosePath);
         }
 
-        // Try Alpha nested .ext.MPQ cache (WMO, WDT, WDL — file 0 inside individual MPQ)
+        // Try Alpha nested .ext.MPQ cache (WMO, WDT, WDL — file ID 1 inside individual MPQ)
         var normalized = virtualPath.Replace('/', '\\');
-        if (_alphaMpqCache.TryGetValue(normalized, out var alphaMpqPath))
+        string? alphaMpqPath = null;
+        string? alphaMpqKey = null;
+
+        // Try exact match, then with .mpq suffix stripped (caller may pass "foo.wdt.mpq")
+        if (_alphaMpqCache.TryGetValue(normalized, out alphaMpqPath))
+            alphaMpqKey = normalized;
+        else if (_alphaMpqCache.TryGetValue(virtualPath, out alphaMpqPath))
+            alphaMpqKey = virtualPath;
+        else if (normalized.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) &&
+                 _alphaMpqCache.TryGetValue(normalized[..^4], out alphaMpqPath))
+            alphaMpqKey = normalized[..^4];
+        else if (virtualPath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) &&
+                 _alphaMpqCache.TryGetValue(virtualPath[..^4], out alphaMpqPath))
+            alphaMpqKey = virtualPath[..^4];
+
+        if (alphaMpqPath != null && alphaMpqKey != null)
         {
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ: {alphaMpqPath}");
-            var data = ReadFromAlphaMpq(alphaMpqPath, normalized);
+            var data = ReadFromAlphaMpq(alphaMpqPath, alphaMpqKey);
             if (data != null) return data;
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
-        }
-        // Also try original path if different
-        if (!normalized.Equals(virtualPath, StringComparison.OrdinalIgnoreCase) &&
-            _alphaMpqCache.TryGetValue(virtualPath, out var alphaMpqPath2))
-        {
-            var data = ReadFromAlphaMpq(alphaMpqPath2, virtualPath);
-            if (data != null) return data;
         }
 
         // Try standard MPQ archives (large MPQs with listfiles — MDX, BLP, etc.)

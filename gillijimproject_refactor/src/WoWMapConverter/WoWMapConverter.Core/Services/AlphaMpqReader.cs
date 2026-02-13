@@ -302,7 +302,12 @@ public static class AlphaMpqReader
             }
         }
 
-        // No name match — fall back to the largest block (actual data, not MD5 checksum)
+        // No name match — prefer block index 1 (Alpha 0.5.3 per-asset MPQs store data at file ID 1,
+        // file ID 0 is typically the MD5 checksum), then fall back to the largest block.
+        if (blockTable.Length > 1 && blockTable[1].FileSize > 0)
+            return blockTable[1];
+
+        // Fall back to the largest block (actual data, not MD5 checksum)
         BlockEntry? largestBlock = null;
         foreach (var block in blockTable)
         {

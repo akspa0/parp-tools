@@ -61,6 +61,7 @@ public class TerrainManager : ISceneRenderer
     public int LoadedTileCount => _loadedTiles.Count;
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
+    public IEnumerable<(int tileX, int tileY)> LoadedTiles => _loadedTiles.Keys;
     /// <summary>True while background tile loads or pending GPU uploads remain.</summary>
     public bool IsStreaming => !_loadingTiles.IsEmpty || !_pendingTiles.IsEmpty;
     public TerrainLighting Lighting => _terrainRenderer.Lighting;

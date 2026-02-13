@@ -21,10 +21,13 @@ public class WmoRenderer : ISceneRenderer
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
 
-    private uint _shaderProgram;
-    private int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
-    private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
-    private int _uLightDir, _uLightColor, _uAmbientColor;
+    // Shared static shader program — prevents race condition when multiple WmoRenderers
+    // exist and one is disposed (same fix as MdxRenderer)
+    private static uint _shaderProgram;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest;
+    private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos;
+    private static int _uLightDir, _uLightColor, _uAmbientColor;
+    private static int _shaderRefCount;
 
     private readonly List<GroupBuffers> _groups = new();
     private bool _wireframe;
@@ -46,8 +49,9 @@ public class WmoRenderer : ISceneRenderer
 
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
-    private uint _liquidShader;
-    private int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
+    private static uint _liquidShader;
+    private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
+    private static int _liquidShaderRefCount;
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
@@ -357,7 +361,9 @@ public class WmoRenderer : ISceneRenderer
 
     private void InitShaders()
     {
-        // Same shader as MdxRenderer — shared basic lit shader
+        _shaderRefCount++;
+        if (_shaderProgram != 0) return; // Already initialized by another instance
+
         string vertSrc = @"
 #version 330 core
 layout(location = 0) in vec3 aPos;
@@ -859,6 +865,9 @@ void main() {
 
     private void InitLiquidShader()
     {
+        _liquidShaderRefCount++;
+        if (_liquidShader != 0) return; // Already initialized by another instance
+
         string vertSrc = @"
 #version 330 core
 layout(location = 0) in vec3 aPos;
@@ -1142,8 +1151,21 @@ void main() {
         _doodadModelCache.Clear();
         _doodadInstances.Clear();
 
-        _gl.DeleteProgram(_shaderProgram);
-        _gl.DeleteProgram(_liquidShader);
+        _shaderRefCount--;
+        if (_shaderRefCount <= 0 && _shaderProgram != 0)
+        {
+            _gl.DeleteProgram(_shaderProgram);
+            _shaderProgram = 0;
+            _shaderRefCount = 0;
+        }
+
+        _liquidShaderRefCount--;
+        if (_liquidShaderRefCount <= 0 && _liquidShader != 0)
+        {
+            _gl.DeleteProgram(_liquidShader);
+            _liquidShader = 0;
+            _liquidShaderRefCount = 0;
+        }
     }
 
     private class GroupBuffers

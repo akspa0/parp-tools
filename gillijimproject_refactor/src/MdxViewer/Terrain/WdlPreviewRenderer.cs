@@ -1,8 +1,9 @@
 using System.Numerics;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
-using WoWRollback.Core.Services.Parsers;
+using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer.Terrain;
 
@@ -33,24 +34,38 @@ public class WdlPreviewRenderer : IDisposable
     /// <summary>
     /// Load and render a WDL file as a preview texture.
     /// </summary>
+    public string? LastError { get; private set; }
+
     public bool LoadWdl(IDataSource dataSource, string mapDirectory)
     {
         _mapDirectory = mapDirectory;
+        LastError = null;
         string wdlPath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}.wdl";
 
         try
         {
             byte[]? wdlData = dataSource.ReadFile(wdlPath);
+
+            // Alpha 0.5.3: WDL stored as .wdl.mpq
             if (wdlData == null || wdlData.Length == 0)
             {
-                ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] No WDL data for {mapDirectory}");
+                wdlData = dataSource.ReadFile(wdlPath + ".mpq");
+            }
+
+            if (wdlData == null || wdlData.Length == 0)
+            {
+                LastError = $"No WDL data found for {mapDirectory}";
+                ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
                 return false;
             }
+
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Read {wdlData.Length} bytes, first4=0x{(wdlData.Length >= 4 ? BitConverter.ToUInt32(wdlData, 0) : 0):X8}");
 
             _wdlData = WdlParser.Parse(wdlData);
             if (_wdlData == null)
             {
-                ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] Failed to parse WDL for {mapDirectory}");
+                LastError = $"Failed to parse WDL for {mapDirectory} (invalid format or version)";
+                ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
                 return false;
             }
 
@@ -58,13 +73,20 @@ public class WdlPreviewRenderer : IDisposable
             int tilesWithData = _wdlData.Tiles.Count(t => t?.HasData == true);
             ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Loaded {mapDirectory}.wdl: {tilesWithData}/4096 tiles");
 
+            if (tilesWithData == 0)
+            {
+                LastError = $"WDL parsed but contains 0 tiles with data";
+                return false;
+            }
+
             // Generate preview texture
             GeneratePreviewTexture();
             return true;
         }
         catch (Exception ex)
         {
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] Error loading {mapDirectory}: {ex.Message}");
+            LastError = $"Error loading {mapDirectory}: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
             return false;
         }
     }
@@ -220,13 +242,10 @@ public class WdlPreviewRenderer : IDisposable
     /// </summary>
     public Vector3 TileToWorldPosition(int tileX, int tileY)
     {
-        const float MapOrigin = 17066.666f;
-        const float TileSize = 533.33333f;
-
         // WDL tile (0,0) is top-left, corresponds to ADT (63,63) in world space
         // Transform: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
-        float rendererX = MapOrigin - (tileY * TileSize);
-        float rendererY = MapOrigin - (tileX * TileSize);
+        float rendererX = WoWConstants.MapOrigin - (tileY * WoWConstants.TileSize);
+        float rendererY = WoWConstants.MapOrigin - (tileX * WoWConstants.TileSize);
 
         // Get height at tile center if available
         float height = 0f;

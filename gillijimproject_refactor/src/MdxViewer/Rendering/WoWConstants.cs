@@ -45,6 +45,9 @@ public static class WoWConstants
     /// <summary>Tiles per map edge (64×64 = 4096 tiles per map).</summary>
     public const int TilesPerMapEdge = 64;
 
+    /// <summary>World units per ADT tile (16 chunks × 533.3333 = 8533.3333).</summary>
+    public const float TileSize = ChunksPerTileEdge * ChunkSize;
+
     /// <summary>Map origin offset: world coordinate of tile (0,0) corner.</summary>
     public const float MapOrigin = 17066.66666f;
 
