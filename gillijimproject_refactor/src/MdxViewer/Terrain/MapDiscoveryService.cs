@@ -6,7 +6,7 @@ using MdxViewer.Logging;
 
 namespace MdxViewer.Terrain;
 
-public record MapDefinition(int Id, string Directory, string Name, bool HasWdt);
+public record MapDefinition(int Id, string Directory, string Name, bool HasWdt, bool HasWdl);
 
 public class MapDiscoveryService
 {
@@ -71,7 +71,11 @@ public class MapDiscoveryService
             string wdtPath = $"World\\Maps\\{dir}\\{dir}.wdt";
             bool hasWdt = _dataSource.FileExists(wdtPath);
 
-            maps.Add(new MapDefinition(id, dir, name, hasWdt));
+            // Check if WDL exists (Alpha 0.5.3 stores as .wdl.mpq)
+            string wdlPath = $"World\\Maps\\{dir}\\{dir}.wdl";
+            bool hasWdl = _dataSource.FileExists(wdlPath);
+
+            maps.Add(new MapDefinition(id, dir, name, hasWdt, hasWdl));
         }
 
         return maps.OrderBy(m => m.Name).ToList();

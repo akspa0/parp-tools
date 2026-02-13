@@ -108,13 +108,14 @@ public class WlLiquidLoader
             // (index 15 = lower-right corner first in file)
             // WL files store vertices in absolute world coordinates (not tile-relative)
             // WoW coords: X=North, Y=West, Z=Up
-            // Renderer coords: swap X↔Y to match terrain coordinate system
+            // Renderer coords: need to match terrain coordinate system
+            // Fix: negate both X and Y, then swap to match terrain transform
             for (int i = 0; i < 16; i++)
             {
                 var v = block.Vertices[i];
-                // WL vertices are already in world space - just swap X/Y axes
-                float rendererX = v.Y;
-                float rendererY = v.X;
+                // Negate both coordinates and swap
+                float rendererX = -v.Y;
+                float rendererY = -v.X;
                 float rendererZ = v.Z;
                 allVertices.Add(new Vector3(rendererX, rendererY, rendererZ));
             }

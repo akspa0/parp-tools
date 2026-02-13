@@ -23,7 +23,7 @@ namespace MdxViewer;
 /// Main viewer application. Owns window, GL context, ImGui, camera, renderer.
 /// Provides menu bar, file browser, model info panel, and 3D viewport.
 /// </summary>
-public class ViewerApp : IDisposable
+public partial class ViewerApp : IDisposable
 {
     private IWindow _window = null!;
     private GL _gl = null!;
@@ -48,6 +48,10 @@ public class ViewerApp : IDisposable
     private List<MapDefinition> _discoveredMaps = new();
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
+    private WdlPreviewRenderer? _wdlPreviewRenderer;
+    private bool _showWdlPreview = false;
+    private MapDefinition? _selectedMapForPreview;
+    private Vector2? _selectedSpawnTile; // WDL tile coordinates (0-63)
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
@@ -87,6 +91,7 @@ public class ViewerApp : IDisposable
     private bool _showModelInfo = true;
     private bool _showTerrainControls = true;
     private bool _showDemoWindow = false;
+    private bool _showLogViewer = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -119,6 +124,7 @@ public class ViewerApp : IDisposable
     private bool _sqlIncludeCreatures = true;
     private bool _sqlIncludeGameObjects = true;
     private int _sqlMaxSpawns = 2000;
+    private float _sqlGameObjectMdxScaleMultiplier = 1.0f;
     private bool _sqlUseAoiFilter = true;
     private int _sqlAoiTileRadius = 3;
     private bool _sqlStreamWithCamera = true;
@@ -567,6 +573,14 @@ void main() {
         // Asset Catalog (floating window)
         _catalogView?.Draw();
 
+        // Log Viewer (floating window)
+        if (_showLogViewer)
+            DrawLogViewer();
+
+        // WDL Preview (floating window)
+        if (_showWdlPreview)
+            DrawWdlPreviewDialog();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -640,6 +654,7 @@ void main() {
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
+                ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
@@ -1787,6 +1802,7 @@ void main() {
             foreach (var map in _discoveredMaps)
             {
                 bool hasWdt = map.HasWdt;
+                bool hasWdl = map.HasWdl;
                 string label = $"[{map.Id:D3}] {map.Name}";
                 if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
 
@@ -1801,11 +1817,31 @@ void main() {
 
                 if (!hasWdt) ImGui.PopStyleColor();
 
+                // Show WDL preview button if map has WDL
+                if (hasWdl)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"Preview##{map.Id}"))
+                    {
+                        _selectedMapForPreview = map;
+                        _showWdlPreview = true;
+                        _selectedSpawnTile = null;
+                        
+                        // Load WDL preview
+                        if (_wdlPreviewRenderer == null)
+                            _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
+                        _wdlPreviewRenderer.LoadWdl(_dataSource!, map.Directory);
+                    }
+                }
+
                 if (ImGui.IsItemHovered())
                 {
                     ImGui.BeginTooltip();
                     ImGui.Text($"Directory: {map.Directory}");
-                    ImGui.Text($"Status: {(hasWdt ? "WDT Found" : "WDT Missing")}");
+                    ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
+                    ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
+                    if (hasWdl)
+                        ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "Click 'Preview' to select spawn point");
                     ImGui.EndTooltip();
                 }
             }
@@ -2072,6 +2108,8 @@ void main() {
             sqlSettingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
         sqlSettingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
         sqlSettingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
+        sqlSettingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
+        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
 
         bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
         if (!canLoadSql)
@@ -2158,6 +2196,27 @@ void main() {
         else if (_worldScene.WlLoadAttempted && (_worldScene.WlLoader == null || !_worldScene.WlLoader.HasData))
         {
             ImGui.TextDisabled("WL Liquids: none found");
+        }
+
+        // AreaTriggers — lazy-loaded on first request
+        if (_worldScene.AreaTriggerLoader != null && _worldScene.AreaTriggerLoader.Count > 0)
+        {
+            bool showTriggers = _worldScene.ShowAreaTriggers;
+            if (ImGui.Checkbox($"AreaTriggers ({_worldScene.AreaTriggerLoader.Count})", ref showTriggers))
+                _worldScene.ShowAreaTriggers = showTriggers;
+            if (_worldScene.ShowAreaTriggers && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Instance portals, event markers, and script triggers.\nGreen spheres/boxes from AreaTrigger.dbc");
+        }
+        else if (!_worldScene.AreaTriggerLoadAttempted)
+        {
+            if (ImGui.Button("Load AreaTriggers"))
+                _worldScene.ShowAreaTriggers = true; // triggers lazy load
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Load AreaTrigger.dbc to visualize instance portals,\nevent markers, and script trigger zones.");
+        }
+        else if (_worldScene.AreaTriggerLoadAttempted && (_worldScene.AreaTriggerLoader == null || _worldScene.AreaTriggerLoader.Count == 0))
+        {
+            ImGui.TextDisabled("AreaTriggers: none found");
         }
 
         // WMO placements
@@ -2389,6 +2448,8 @@ void main() {
         if (_worldScene == null)
             return;
 
+        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
+
         IReadOnlyList<WorldSpawnRecord> finalSpawns = mapSpawns;
         if (_sqlUseAoiFilter)
             finalSpawns = FilterSpawnsToCameraAoi(mapSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
@@ -2508,8 +2569,7 @@ void main() {
         else return;
 
         var io = ImGui.GetIO();
-        float mapSize = SidebarWidth - 12f; // Fit within sidebar padding
-
+        float mapSize = SidebarWidth - 12f; // Square minimap fitting sidebar width
         var cursorPos = ImGui.GetCursorScreenPos();
 
         // Scroll-wheel zoom
@@ -2549,8 +2609,7 @@ void main() {
             else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
             {
                 Vector2 delta = mousePos - _minimapDragStart;
-                float dragThreshold = 3f; // Minimum pixels to count as drag
-                if (delta.Length() > dragThreshold)
+                if (delta.LengthSquared() > 0.01f) // Any movement counts as drag
                 {
                     _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
                     _minimapDragStart = mousePos;
@@ -2675,8 +2734,7 @@ void main() {
                 else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
                 {
                     Vector2 delta = mousePos - _minimapDragStart;
-                    float dragThreshold = 3f; // Minimum pixels to count as drag
-                    if (delta.Length() > dragThreshold)
+                    if (delta.LengthSquared() > 0.01f) // Any movement counts as drag
                     {
                         _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
                         _minimapDragStart = mousePos;
@@ -2712,7 +2770,7 @@ void main() {
             int ctY = (int)MathF.Floor(camTileY);
             ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Double-click to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click to teleport");
             
             if (_minimapPanOffset != Vector2.Zero)
             {

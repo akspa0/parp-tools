@@ -59,6 +59,7 @@ public class WorldScene : ISceneRenderer
     public int ExternalSpawnMdxCount => _externalMdxInstances.Count;
     public int ExternalSpawnWmoCount => _externalWmoInstances.Count;
     public int ExternalSpawnInstanceCount => ExternalSpawnMdxCount + ExternalSpawnWmoCount;
+    public float SqlGameObjectMdxScaleMultiplier { get; set; } = 1.0f;
     public TerrainManager Terrain => _terrainManager;
     public WorldAssetManager Assets => _assets;
     public bool IsWmoBased => _terrainManager.Adapter.IsWmoBased;
@@ -115,6 +116,18 @@ public class WorldScene : ISceneRenderer
     }
     public TaxiPathLoader? TaxiLoader => _taxiLoader;
     public bool TaxiLoadAttempted => _taxiLoadAttempted;
+
+    // AreaTriggers (lazy-loaded on first toggle)
+    private AreaTriggerLoader? _areaTriggerLoader;
+    private bool _showAreaTriggers = false;
+    private bool _areaTriggerLoadAttempted = false;
+    public bool ShowAreaTriggers
+    {
+        get => _showAreaTriggers;
+        set { _showAreaTriggers = value; if (value && !_areaTriggerLoadAttempted) LazyLoadAreaTriggers(); }
+    }
+    public AreaTriggerLoader? AreaTriggerLoader => _areaTriggerLoader;
+    public bool AreaTriggerLoadAttempted => _areaTriggerLoadAttempted;
 
     // WL loose liquid files (lazy-loaded on first toggle)
     private WlLiquidLoader? _wlLoader;
@@ -205,6 +218,14 @@ public class WorldScene : ISceneRenderer
         _taxiLoader = new TaxiPathLoader();
         var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
         _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
+    }
+
+    private void LazyLoadAreaTriggers()
+    {
+        _areaTriggerLoadAttempted = true;
+        if (_dbcProvider == null || _dbdDir == null || _dbcBuild == null || _mapId < 0) return;
+        _areaTriggerLoader = new AreaTriggerLoader();
+        _areaTriggerLoader.Load(_dbcProvider, _dbdDir, _dbcBuild, _mapId);
     }
 
     /// <summary>
@@ -609,7 +630,13 @@ public class WorldScene : ISceneRenderer
 
             string key = WorldAssetManager.NormalizeKey(modelPath);
             float orientationRadians = spawn.OrientationWowRadians;
-            float orientationDegrees = orientationRadians * (180f / MathF.PI);
+            float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
+            float finalYawRadians = orientationRadians + yawOffsetRadians;
+            float finalYawDegrees = finalYawRadians * (180f / MathF.PI);
+            float baseScale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
+            float mdxScale = baseScale;
+            if (spawn.SpawnType == WorldSpawnType.GameObject)
+                mdxScale *= SqlGameObjectMdxScaleMultiplier > 0 ? SqlGameObjectMdxScaleMultiplier : 1.0f;
 
             var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
 
@@ -617,7 +644,7 @@ public class WorldScene : ISceneRenderer
             {
                 _assets.EnsureWmoLoaded(key);
 
-                var transform = Matrix4x4.CreateRotationZ(orientationRadians)
+                var transform = Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 localMin, localMax, worldMin, worldMax;
@@ -643,7 +670,7 @@ public class WorldScene : ISceneRenderer
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     PlacementPosition = pos,
-                    PlacementRotation = new Vector3(0f, 0f, orientationDegrees),
+                    PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = 1.0f,
                     UniqueId = spawn.SpawnId
                 });
@@ -652,10 +679,8 @@ public class WorldScene : ISceneRenderer
             {
                 _assets.EnsureMdxLoaded(key);
 
-                float scale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
-
-                var transform = Matrix4x4.CreateScale(scale)
-                    * Matrix4x4.CreateRotationZ(orientationRadians)
+                var transform = Matrix4x4.CreateScale(mdxScale)
+                    * Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 bbMin, bbMax;
@@ -676,8 +701,8 @@ public class WorldScene : ISceneRenderer
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     PlacementPosition = pos,
-                    PlacementRotation = new Vector3(0f, 0f, orientationDegrees),
-                    PlacementScale = scale,
+                    PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
+                    PlacementScale = mdxScale,
                     UniqueId = spawn.SpawnId
                 });
             }
@@ -996,6 +1021,88 @@ public class WorldScene : ISceneRenderer
                     if (!IsTaxiRouteVisible(route)) continue;
                     for (int i = 0; i < route.Waypoints.Count - 1; i++)
                         _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], lineColor);
+                }
+            }
+
+            // AreaTriggers (green wireframe shapes for portals and event markers)
+            if (_showAreaTriggers && _areaTriggerLoader != null && _areaTriggerLoader.Count > 0)
+            {
+                var triggerColor = new Vector3(0f, 1f, 0f); // Green
+                foreach (var trigger in _areaTriggerLoader.Triggers)
+                {
+                    if (trigger.IsSphere && trigger.Radius > 0f)
+                    {
+                        // Render sphere triggers as simple wireframe circles (3 orthogonal rings)
+                        int segments = 16;
+                        float r = trigger.Radius;
+                        var c = trigger.Position;
+                        
+                        // XY plane circle
+                        for (int i = 0; i < segments; i++)
+                        {
+                            float a1 = (i / (float)segments) * MathF.PI * 2f;
+                            float a2 = ((i + 1) / (float)segments) * MathF.PI * 2f;
+                            var p1 = c + new Vector3(MathF.Cos(a1) * r, MathF.Sin(a1) * r, 0f);
+                            var p2 = c + new Vector3(MathF.Cos(a2) * r, MathF.Sin(a2) * r, 0f);
+                            _bbRenderer.BatchLine(p1, p2, triggerColor);
+                        }
+                        
+                        // XZ plane circle
+                        for (int i = 0; i < segments; i++)
+                        {
+                            float a1 = (i / (float)segments) * MathF.PI * 2f;
+                            float a2 = ((i + 1) / (float)segments) * MathF.PI * 2f;
+                            var p1 = c + new Vector3(MathF.Cos(a1) * r, 0f, MathF.Sin(a1) * r);
+                            var p2 = c + new Vector3(MathF.Cos(a2) * r, 0f, MathF.Sin(a2) * r);
+                            _bbRenderer.BatchLine(p1, p2, triggerColor);
+                        }
+                        
+                        // YZ plane circle
+                        for (int i = 0; i < segments; i++)
+                        {
+                            float a1 = (i / (float)segments) * MathF.PI * 2f;
+                            float a2 = ((i + 1) / (float)segments) * MathF.PI * 2f;
+                            var p1 = c + new Vector3(0f, MathF.Cos(a1) * r, MathF.Sin(a1) * r);
+                            var p2 = c + new Vector3(0f, MathF.Cos(a2) * r, MathF.Sin(a2) * r);
+                            _bbRenderer.BatchLine(p1, p2, triggerColor);
+                        }
+                    }
+                    else if (trigger.BoxLength > 0f && trigger.BoxWidth > 0f && trigger.BoxHeight > 0f)
+                    {
+                        // Render box triggers as wireframe boxes (12 edges)
+                        float halfL = trigger.BoxLength / 2f;
+                        float halfW = trigger.BoxWidth / 2f;
+                        float h = trigger.BoxHeight;
+                        var c = trigger.Position;
+                        
+                        // 8 corners of the box
+                        var v0 = c + new Vector3(-halfL, -halfW, 0f);
+                        var v1 = c + new Vector3( halfL, -halfW, 0f);
+                        var v2 = c + new Vector3( halfL,  halfW, 0f);
+                        var v3 = c + new Vector3(-halfL,  halfW, 0f);
+                        var v4 = c + new Vector3(-halfL, -halfW, h);
+                        var v5 = c + new Vector3( halfL, -halfW, h);
+                        var v6 = c + new Vector3( halfL,  halfW, h);
+                        var v7 = c + new Vector3(-halfL,  halfW, h);
+                        
+                        // Bottom face
+                        _bbRenderer.BatchLine(v0, v1, triggerColor);
+                        _bbRenderer.BatchLine(v1, v2, triggerColor);
+                        _bbRenderer.BatchLine(v2, v3, triggerColor);
+                        _bbRenderer.BatchLine(v3, v0, triggerColor);
+                        
+                        // Top face
+                        _bbRenderer.BatchLine(v4, v5, triggerColor);
+                        _bbRenderer.BatchLine(v5, v6, triggerColor);
+                        _bbRenderer.BatchLine(v6, v7, triggerColor);
+                        _bbRenderer.BatchLine(v7, v4, triggerColor);
+                        
+                        // Vertical edges
+                        _bbRenderer.BatchLine(v0, v4, triggerColor);
+                        _bbRenderer.BatchLine(v1, v5, triggerColor);
+                        _bbRenderer.BatchLine(v2, v6, triggerColor);
+                        _bbRenderer.BatchLine(v3, v7, triggerColor);
+                    }
                 }
             }
 
