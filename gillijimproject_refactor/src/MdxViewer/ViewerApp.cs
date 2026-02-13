@@ -489,6 +489,7 @@ public partial class ViewerApp : IDisposable
                 float fogStart = farPlane * 0.5f;
                 float fogEnd = farPlane;
                 var scale = Matrix4x4.CreateScale(-1f, 1f, 1f); // MirrorX for standalone
+                mdxR.UpdateAnimation(); // Advance skeletal animation before rendering
                 _gl.Disable(EnableCap.Blend);
                 mdxR.RenderWithTransform(scale, view, proj, RenderPass.Opaque, 1.0f,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);

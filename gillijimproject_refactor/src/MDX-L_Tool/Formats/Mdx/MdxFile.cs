@@ -641,10 +641,12 @@ public class MdxFile
                         geo.Indices.Add(br.ReadUInt16());
                     break;
                 case "GNDX":
-                    br.ReadBytes((int)count); 
+                    for (int i = 0; i < count; i++)
+                        geo.VertexGroups.Add(br.ReadByte());
                     break;
                 case "MTGC":
-                    br.ReadBytes((int)count * 4); 
+                    for (int i = 0; i < count; i++)
+                        geo.MatrixGroups.Add(br.ReadUInt32());
                     break;
                 case "MATS":
                     // MATS = Matrix Indices (bone matrix refs for skinning), NOT MaterialId!
@@ -939,7 +941,7 @@ public class MdxFile
         return track;
     }
 
-    /// <summary>Read a quaternion animation track (KGRT)</summary>
+    /// <summary>Read a quaternion animation track (KGRT) — uses C4QuaternionCompressed (8 bytes per quat)</summary>
     static MdlAnimTrack<C4Quaternion> ReadQuatTrack(BinaryReader br, uint keyCount)
     {
         var track = new MdlAnimTrack<C4Quaternion>();
@@ -953,11 +955,21 @@ public class MdxFile
         {
             var key = new MdlTrackKey<C4Quaternion>();
             key.Frame = br.ReadInt32();
-            key.Value = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+            // KGRT keys are C4QuaternionCompressed (64-bit packed), not float4
+            // Linear stride: 0x0C (4 time + 8 compressed quat)
+            // Hermite/Bezier stride: 0x1C (4 time + 8*3 compressed quats)
+            var compressed = new C4QuaternionCompressed
+            {
+                Data0 = br.ReadUInt32(),
+                Data1 = br.ReadUInt32()
+            };
+            key.Value = compressed.Decompress();
             if (hasTangents)
             {
-                key.InTan = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
-                key.OutTan = new C4Quaternion(br.ReadSingle(), br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                var inTanC = new C4QuaternionCompressed { Data0 = br.ReadUInt32(), Data1 = br.ReadUInt32() };
+                var outTanC = new C4QuaternionCompressed { Data0 = br.ReadUInt32(), Data1 = br.ReadUInt32() };
+                key.InTan = inTanC.Decompress();
+                key.OutTan = outTanC.Decompress();
             }
             track.Keys.Add(key);
         }

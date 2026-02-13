@@ -170,9 +170,9 @@ public class MdxRenderer : ISceneRenderer
     /// </summary>
     private static readonly Matrix4x4 MirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
 
-    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
+    /// <summary>Advance animation by wall-clock delta. Call once per frame before any RenderWithTransform calls.</summary>
+    public void UpdateAnimation()
     {
-        // Advance animation each frame
         if (_animator != null && _animator.HasAnimation)
         {
             var now = DateTime.UtcNow;
@@ -180,6 +180,11 @@ public class MdxRenderer : ISceneRenderer
             _lastFrameTime = now;
             _animator.Update(Math.Clamp(deltaMs, 0f, 100f)); // Cap to avoid huge jumps
         }
+    }
+
+    public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
+    {
+        UpdateAnimation();
 
         // Two-pass rendering: opaque first (depth write ON), then transparent (depth write OFF)
         // This prevents alpha/blended geosets from occluding opaque geometry behind them.
@@ -216,6 +221,7 @@ public class MdxRenderer : ISceneRenderer
             
             var matrices = _animator.BoneMatrices;
             int boneCount = Math.Min(matrices.Length, 128);
+            
             for (int i = 0; i < boneCount; i++)
             {
                 var m = matrices[i];
@@ -584,7 +590,7 @@ void main() {
     /// Convert MDX bone weight structure to standard 4-bone skinning format.
     /// MDX uses VertexGroups (group index per vertex) + MatrixGroups (bone count per group) + MatrixIndices (flattened bone array).
     /// </summary>
-    private (Vector4[] indices, Vector4[] weights) BuildBoneWeights(MdlGeoset geoset)
+    private (Vector4[] indices, Vector4[] weights) BuildBoneWeights(MdlGeoset geoset, int geosetIdx)
     {
         int vertCount = geoset.Vertices.Count;
         var indices = new Vector4[vertCount];
@@ -600,6 +606,11 @@ void main() {
             }
             return (indices, weights);
         }
+        
+        // Build ObjectId → bone list index mapping for MATS values
+        var objectIdToBoneIndex = new Dictionary<uint, int>();
+        for (int bi = 0; bi < _mdx.Bones.Count; bi++)
+            objectIdToBoneIndex[(uint)_mdx.Bones[bi].ObjectId] = bi;
         
         // Build group offset lookup table
         var groupOffsets = new int[geoset.MatrixGroups.Count];
@@ -633,7 +644,21 @@ void main() {
             {
                 if (matrixOffset + b < geoset.MatrixIndices.Count)
                 {
-                    idx[b] = geoset.MatrixIndices[matrixOffset + b];
+                    uint matsValue = geoset.MatrixIndices[matrixOffset + b];
+                    // MATS may contain ObjectIds — remap to bone list index
+                    if (objectIdToBoneIndex.TryGetValue(matsValue, out int boneListIdx))
+                    {
+                        idx[b] = boneListIdx;
+                    }
+                    else if (matsValue < (uint)_mdx.Bones.Count)
+                    {
+                        // Already a valid list index
+                        idx[b] = matsValue;
+                    }
+                    else
+                    {
+                        idx[b] = 0; // Fallback
+                    }
                     wt[b] = 1.0f / boneCount; // Equal weights
                 }
             }
@@ -656,7 +681,7 @@ void main() {
             var gb = new GeosetBuffers { GeosetIndex = i };
 
             // Build bone weight data
-            var (boneIndices, boneWeights) = BuildBoneWeights(geoset);
+            var (boneIndices, boneWeights) = BuildBoneWeights(geoset, i);
 
             // Interleave: pos(3) + normal(3) + uv(2) + boneIdx(4) + boneWt(4) = 16 floats per vertex
             int vertCount = geoset.Vertices.Count;

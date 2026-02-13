@@ -36,6 +36,41 @@ public struct C4Quaternion
     public C4Quaternion(float x, float y, float z, float w) { X = x; Y = y; Z = z; W = w; }
 }
 
+/// <summary>
+/// NTempest::C4QuaternionCompressed - 64-bit packed quaternion used in KGRT tracks.
+/// Ghidra-verified decompression from 0x0074d690 / 0x0075ba30 / 0x0075bad0.
+/// Three signed components packed as 21-bit integers; W reconstructed from unit norm.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct C4QuaternionCompressed
+{
+    public uint Data0; // low 32 bits
+    public uint Data1; // high 32 bits
+
+    /// <summary>Decompress to full C4Quaternion (X,Y,Z,W floats)</summary>
+    public C4Quaternion Decompress()
+    {
+        // Arithmetic right shifts on signed reinterpretation
+        int xq = ((int)Data1) >> 10;
+        int yq = ((int)((Data1 << 22) | (Data0 >> 10))) >> 11;
+        int zq = ((int)(Data0 << 11)) >> 11;
+
+        // Scale: x uses 2^-21, y and z use 2^-20
+        const float scaleX = 1.0f / (1 << 21); // 2^-21
+        const float scaleYZ = 1.0f / (1 << 20); // 2^-20
+
+        float x = xq * scaleX;
+        float y = yq * scaleYZ;
+        float z = zq * scaleYZ;
+
+        // Reconstruct W from unit quaternion constraint
+        float s = x * x + y * y + z * z;
+        float w = (MathF.Abs(s - 1.0f) < scaleYZ) ? 0.0f : MathF.Sqrt(1.0f - s);
+
+        return new C4Quaternion(x, y, z, w);
+    }
+}
+
 /// <summary>CAaBox - axis-aligned bounding box</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct CAaBox
