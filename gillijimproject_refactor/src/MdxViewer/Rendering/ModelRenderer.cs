@@ -8,6 +8,46 @@ using Silk.NET.OpenGL;
 namespace MdxViewer.Rendering;
 
 /// <summary>
+/// Diagnostic logger for MDX texture issues
+/// </summary>
+internal static class MdxTextureDiagnosticLogger
+{
+    private static StreamWriter? _logWriter;
+    private static readonly object _lock = new();
+
+    public static void Initialize(string mdxName)
+    {
+        lock (_lock)
+        {
+            _logWriter?.Dispose();
+            var logPath = Path.Combine("output", $"mdx_texture_diagnostic_{mdxName}_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            _logWriter = new StreamWriter(logPath, false) { AutoFlush = true };
+            _logWriter.WriteLine($"=== MDX Texture Diagnostic Log: {mdxName} ===");
+            _logWriter.WriteLine($"Started: {DateTime.Now}");
+            _logWriter.WriteLine();
+        }
+    }
+
+    public static void Log(string message)
+    {
+        lock (_lock)
+        {
+            _logWriter?.WriteLine(message);
+        }
+    }
+
+    public static void Close()
+    {
+        lock (_lock)
+        {
+            _logWriter?.Dispose();
+            _logWriter = null;
+        }
+    }
+}
+
+/// <summary>
 /// Controls which material layers are rendered in a given draw call.
 /// Used for two-pass rendering: opaque first (depth write ON), then transparent (back-to-front).
 /// </summary>
@@ -58,6 +98,9 @@ public class MdxRenderer : ISceneRenderer
         _mdx = mdx;
         _modelDir = modelDir;
         _dataSource = dataSource;
+        
+        var mdxName = Path.GetFileNameWithoutExtension(modelDir);
+        MdxTextureDiagnosticLogger.Initialize(mdxName);
         _texResolver = texResolver;
         _modelVirtualPath = modelVirtualPath;
 
@@ -512,7 +555,9 @@ void main() {
                     if (uv.U < uMin) uMin = uv.U; if (uv.U > uMax) uMax = uv.U;
                     if (uv.V < vMin) vMin = uv.V; if (uv.V > vMax) vMax = uv.V;
                 }
-                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]");
+                var uvRangeMsg = $"Geoset {i}: {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]";
+                ViewerLog.Trace($"[ModelRenderer] {uvRangeMsg}");
+                MdxTextureDiagnosticLogger.Log(uvRangeMsg);
             }
 
             float[] vertexData = new float[vertCount * 8];
@@ -774,14 +819,20 @@ void main() {
 
             if (blpData != null && blpData.Length > 0)
             {
-                // Determine wrap mode from texture flags
-                bool clamp = (tex.Flags & 0x1) != 0; // WrapWidth clamp
-                bool clampV = (tex.Flags & 0x2) != 0; // WrapHeight clamp
-                uint glTex = LoadTextureFromBlp(blpData, texPath, clamp || clampV);
+                // Determine wrap mode from texture flags (per-axis)
+                bool clampS = (tex.Flags & 0x1) != 0; // WrapWidth clamp
+                bool clampT = (tex.Flags & 0x2) != 0; // WrapHeight clamp
+                
+                MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
+                MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
+                MdxTextureDiagnosticLogger.Log($"  Source: {loadSource}, Size: {blpData.Length} bytes");
+                
+                uint glTex = LoadTextureFromBlp(blpData, texPath, clampS, clampT);
                 if (glTex != 0)
                 {
                     _textures[i] = glTex;
-                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}){(clamp ? " [clamped]" : "")}");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource})" +
+                        (clampS || clampT ? $" [clamp S={clampS} T={clampT}]" : ""));
                     loaded++;
                 }
                 else
@@ -798,6 +849,7 @@ void main() {
         }
 
         ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
+        MdxTextureDiagnosticLogger.Close();
     }
 
     /// <summary>
@@ -943,7 +995,7 @@ void main() {
         return null;
     }
 
-    private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clamp = false)
+    private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clampS = false, bool clampT = false)
     {
         try
         {
@@ -982,7 +1034,7 @@ void main() {
             }
             bmp.Dispose();
 
-            return UploadTexture(pixels, (uint)w, (uint)h, clamp);
+            return UploadTexture(pixels, (uint)w, (uint)h, clampS, clampT);
         }
         catch (Exception ex)
         {
@@ -998,7 +1050,7 @@ void main() {
             using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(path);
             var pixels = new byte[image.Width * image.Height * 4];
             image.CopyPixelDataTo(pixels);
-            return UploadTexture(pixels, (uint)image.Width, (uint)image.Height);
+            return UploadTexture(pixels, (uint)image.Width, (uint)image.Height, clampS: false, clampT: false);
         }
         catch (Exception ex)
         {
@@ -1007,7 +1059,7 @@ void main() {
         }
     }
 
-    private unsafe uint UploadTexture(byte[] pixels, uint width, uint height, bool clamp = false)
+    private unsafe uint UploadTexture(byte[] pixels, uint width, uint height, bool clampS = false, bool clampT = false)
     {
         uint tex = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, tex);
@@ -1020,9 +1072,10 @@ void main() {
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
 
-        var wrapMode = clamp ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)wrapMode);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)wrapMode);
+        var wrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        var wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)wrapS);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)wrapT);
         _gl.GenerateMipmap(TextureTarget.Texture2D);
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);

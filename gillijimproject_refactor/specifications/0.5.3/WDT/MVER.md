@@ -1,7 +1,7 @@
 # MVER — Version Chunk
 
 ## Summary
-Root-level version chunk validated by the 0.5.3 client parser before WDT body parsing.
+Root-level version chunk validated early in the 0.5.3 WDT parse sequence.
 
 ## Parent Chunk
 Root-level (WDT file)
@@ -9,7 +9,7 @@ Root-level (WDT file)
 ## Builds Analyzed
 | Build | Size | Notes |
 |-------|------|-------|
-| 0.5.3.3368 | 4 bytes (expected) | Assertion string references `iffChunk.token == 'MVER'` and `iffChunk.token=='MVER'` |
+| 0.5.3.3368 | 4 bytes (expected) | Assertion strings `iffChunk.token == 'MVER'` and `iffChunk.token=='MVER'` in root-token cluster |
 
 ## Structure — Build 0.5.3.3368
 | Offset | Type | Name | Description |
@@ -21,8 +21,8 @@ Root-level (WDT file)
 
 ## Ghidra Notes
 - **Function address**: `???` (string-backed assertion located at `0x0089FC2C` and `0x0089FC84`)
-- **Parser pattern**: `iffChunk.token == 'MVER'` style validation before consuming body
-- **Key observations**: this is one of the few chunk checks explicitly emitted as assertion text in 0.5.3.
+- **Parser pattern**: strict root-token validation, grouped with `MAIN`, `MPHD`, `MDNM`, `MONM`, and alpha-era `MARE`/`MAOF`
+- **Key observations**: confirms that version gating is part of the same assertion-driven WDT root parser stage.
 
 ## Confidence
 - **Medium** (chunk identity and validation path confirmed; exact function body still unresolved)

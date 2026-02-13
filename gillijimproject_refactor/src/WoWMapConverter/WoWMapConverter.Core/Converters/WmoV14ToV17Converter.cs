@@ -5,6 +5,47 @@ using WoWMapConverter.Core.Services;
 namespace WoWMapConverter.Core.Converters;
 
 /// <summary>
+/// Diagnostic logger for WMO parsing issues
+/// </summary>
+internal static class WmoDiagnosticLogger
+{
+    private static StreamWriter? _logWriter;
+    private static readonly object _lock = new();
+
+    public static void Initialize(string wmoName)
+    {
+        lock (_lock)
+        {
+            _logWriter?.Dispose();
+            var logPath = Path.Combine("output", $"wmo_diagnostic_{wmoName}_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            _logWriter = new StreamWriter(logPath, false) { AutoFlush = true };
+            _logWriter.WriteLine($"=== WMO Diagnostic Log: {wmoName} ===");
+            _logWriter.WriteLine($"Started: {DateTime.Now}");
+            _logWriter.WriteLine();
+        }
+    }
+
+    public static void Log(string message)
+    {
+        lock (_lock)
+        {
+            _logWriter?.WriteLine(message);
+            Console.WriteLine(message);
+        }
+    }
+
+    public static void Close()
+    {
+        lock (_lock)
+        {
+            _logWriter?.Dispose();
+            _logWriter = null;
+        }
+    }
+}
+
+/// <summary>
 /// Converts WMO v14/v16 (Alpha 0.5.3 / 0.6.0) to WMO v17 (LK 3.3.5) format.
 /// Handles monolithic Alpha WMO → split root + group files.
 /// v14 (0.5.3): Uses MOMO container wrapping header chunks
@@ -33,10 +74,15 @@ public class WmoV14ToV17Converter
     /// </summary>
     public List<string> ConvertFromBytes(byte[] wmoData, string outputPath)
     {
+        var wmoName = Path.GetFileNameWithoutExtension(outputPath);
+        WmoDiagnosticLogger.Initialize(wmoName);
+        
         using var ms = new MemoryStream(wmoData);
         using var reader = new BinaryReader(ms);
 
         var data = ParseWmoV14Internal(reader);
+        
+        WmoDiagnosticLogger.Close();
         
         // Ensure output directory exists (including group files)
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
@@ -764,6 +810,7 @@ public class WmoV14ToV17Converter
 
     private void ParseMogp(BinaryReader reader, uint size, WmoV14Data data)
     {
+        int groupIndex = data.Groups.Count;
         var group = new WmoGroupData();
         var startPos = reader.BaseStream.Position;
         var endPos = startPos + size;
@@ -787,32 +834,62 @@ public class WmoV14ToV17Converter
         // We've now read 0x38 (56) bytes.
         
         // ADAPTIVE HEADER SKIP:
-        // Check for subchunk magic at offset 0x44 (68 bytes) vs 0x80 (128 bytes)
-        long currentPos = reader.BaseStream.Position;
-        
-        // Peek at offset 0x44 (current + (0x44 - 0x38) = current + 12)
-        reader.BaseStream.Seek(currentPos + (0x44 - 0x38), SeekOrigin.Begin);
-        byte[] magicPeek = reader.ReadBytes(4);
-        string magicStr = new string(magicPeek.Select(b => (char)b).Reverse().ToArray());
-
-        bool isShortHeader = (magicStr == "MOPY" || magicStr == "MOVI" || magicStr == "MOVT");
-        
-        // Reset and skip properly
-        reader.BaseStream.Seek(currentPos, SeekOrigin.Begin);
-
-        if (isShortHeader)
+        // Some WMOs use variant MOGP header layouts. Instead of assuming 0x44 or 0x80,
+        // scan for the first known sub-chunk magic within the group bounds.
+        var known = new HashSet<string>
         {
-             // Skip to 0x44 (68 bytes)
-             reader.ReadBytes(0x44 - 0x38);
-             Console.WriteLine($"[DEBUG] Detected SHORT MOGP Header (68 bytes) for group {group.NameOffset}, groupLiquid={group.GroupLiquid}");
+            "MOPY","MOVT","MOVI","MOIN","MOTV","MONR","MOBA","MOCV","MOLV","MOLD","MOLM","MLIQ","MODR"
+        };
+
+        static string PeekMagicAt(BinaryReader r, long pos)
+        {
+            long save = r.BaseStream.Position;
+            r.BaseStream.Position = pos;
+            byte[] b = r.ReadBytes(4);
+            r.BaseStream.Position = save;
+            if (b.Length < 4) return "";
+            return new string(b.Select(x => (char)x).Reverse().ToArray());
+        }
+
+        long? firstChunkPos = null;
+        foreach (int headerEnd in new[] { 0x44, 0x80 })
+        {
+            long p = startPos + headerEnd;
+            if (p + 8 <= endPos)
+            {
+                string m = PeekMagicAt(reader, p);
+                if (known.Contains(m))
+                {
+                    firstChunkPos = p;
+                    break;
+                }
+            }
+        }
+
+        if (firstChunkPos == null)
+        {
+            for (long p = startPos + 0x38; p + 8 <= endPos; p += 4)
+            {
+                string m = PeekMagicAt(reader, p);
+                if (known.Contains(m))
+                {
+                    firstChunkPos = p;
+                    break;
+                }
+            }
+        }
+
+        if (firstChunkPos != null)
+        {
+            int headerBytes = (int)(firstChunkPos.Value - startPos);
+            Console.WriteLine($"[DEBUG] MOGP header size={headerBytes} bytes (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid})");
+            reader.BaseStream.Position = firstChunkPos.Value;
         }
         else
         {
-             // Skip to 0x80 (128 bytes) - Standard Alpha
-             reader.ReadBytes(0x80 - 0x38);
-             Console.WriteLine($"[DEBUG] Detected LONG MOGP Header (128 bytes) for group {group.NameOffset}, groupLiquid={group.GroupLiquid}");
+            Console.WriteLine($"[WARN] Failed to locate first subchunk in MOGP; falling back to 0x80 header (groupIndex={groupIndex}, nameOff={group.NameOffset}, liquid={group.GroupLiquid})");
+            reader.BaseStream.Position = startPos + 0x80;
         }
-
 
         // Parse sub-chunks
         while (reader.BaseStream.Position < endPos - 8)
@@ -830,30 +907,19 @@ public class WmoV14ToV17Converter
                     // Heuristic: if 4-byte entries produce a reasonable face count, prefer 4
                     // v17-style 2-byte entries would be flags(1)+matId(1) with no padding
                     int faceCount = (int)(chunkSize / mopyEntrySize);
-                    Console.WriteLine($"[DEBUG] MOPY: {chunkSize} bytes, {faceCount} faces (entrySize={mopyEntrySize})");
-                    
-                    // Histogram for debugging geometry assignment
-                    var matCounts = new Dictionary<byte, int>();
-                    
+                    WmoDiagnosticLogger.Log($"[Group {groupIndex}] MOPY: {chunkSize} bytes, {faceCount} faces (entrySize={mopyEntrySize})");
+                    group.FaceMaterials = new List<byte>(faceCount);
+                    var materialCounts = new Dictionary<byte, int>();
                     for (int i = 0; i < faceCount; i++)
                     {
-                        var flag = reader.ReadByte(); 
-                        byte matId = reader.ReadByte(); 
-                        
-                        // Track counts
-                        if (!matCounts.ContainsKey(matId)) matCounts[matId] = 0;
-                        matCounts[matId]++;
-
-                        // REVERTED remapping for diagnosis - trusting native
-                        group.FaceMaterials.Add(matId); 
-                        
+                        byte flag = reader.ReadByte();
+                        byte matId = reader.ReadByte();
+                        group.FaceMaterials.Add(matId);
+                        materialCounts[matId] = materialCounts.GetValueOrDefault(matId) + 1;
                         if (mopyEntrySize == 4)
                             reader.ReadBytes(2); // padding (v14 style)
                     }
-                    
-                    Console.WriteLine("[DEBUG] MOPY Material Histogram:");
-                    foreach(var kvp in matCounts.OrderBy(k => k.Key))
-                        Console.WriteLine($"  Mat {kvp.Key}: {kvp.Value} faces");
+                    WmoDiagnosticLogger.Log($"[Group {groupIndex}] Material distribution: {string.Join(", ", materialCounts.Select(kv => $"mat{kv.Key}={kv.Value}"))}");
                     break;
 
                 case "MOVT":
@@ -890,24 +956,29 @@ public class WmoV14ToV17Converter
                     {
                         // First MOTV = diffuse texture UVs (keep these)
                         group.UVs = new List<Vector2>(uvCount);
+                        float minU = float.MaxValue, maxU = float.MinValue;
+                        float minV = float.MaxValue, maxV = float.MinValue;
                         for (int i = 0; i < uvCount; i++)
                         {
                             var u = reader.ReadSingle();
                             var v = reader.ReadSingle();
                             group.UVs.Add(new Vector2(u, v));
+                            minU = Math.Min(minU, u); maxU = Math.Max(maxU, u);
+                            minV = Math.Min(minV, v); maxV = Math.Max(maxV, v);
                         }
-                        Console.WriteLine($"[DEBUG] MOTV (diffuse): {uvCount} UVs");
+                        WmoDiagnosticLogger.Log($"[Group {groupIndex}] MOTV (diffuse): {uvCount} UVs, range U=[{minU:F3}, {maxU:F3}] V=[{minV:F3}, {maxV:F3}]");
                     }
                     else
                     {
-                        // Second MOTV = lightmap or secondary UV set — skip, don't overwrite diffuse
-                        Console.WriteLine($"[DEBUG] MOTV (secondary): {uvCount} UVs — skipping (keeping diffuse)");
+                        // Second MOTV = lightmap or secondary UV set — skip bytes to prevent misalignment
+                        WmoDiagnosticLogger.Log($"[Group {groupIndex}] MOTV (secondary): {uvCount} UVs — SKIPPING (keeping diffuse)");
+                        reader.BaseStream.Position += chunkSize;
                     }
                     break;
 
                 case "MOBA":
                     int batchCount = (int)(chunkSize / 24);
-                    Console.WriteLine($"[DEBUG] MOBA chunk: {chunkSize} bytes, {batchCount} batches");
+                    WmoDiagnosticLogger.Log($"[Group {groupIndex}] MOBA chunk: {chunkSize} bytes, {batchCount} batches");
                     
                     // v16 split group files use a different MOBA layout than v14 monolithic:
                     // v16: 12 bytes bbox (6 x int16) + uint32 startIndex + uint16 indexCount + ... (no material ID)
@@ -919,11 +990,12 @@ public class WmoV14ToV17Converter
                     if (isV16MobaFormat)
                     {
                         // v16 MOBA has no material ID — skip and let RebuildBatches handle it from MOPY
-                        Console.WriteLine($"[DEBUG] v16 MOBA: skipping {batchCount} batches (no material ID), will rebuild from MOPY");
+                        WmoDiagnosticLogger.Log($"[Group {groupIndex}] v16 MOBA: skipping {batchCount} batches (no material ID), will rebuild from MOPY");
                         reader.BaseStream.Position += chunkSize;
                     }
                     else
                     {
+                        WmoDiagnosticLogger.Log($"[Group {groupIndex}] Parsing v14 MOBA batches:");
                         for (int b = 0; b < batchCount; b++)
                         {
                             byte unknown0 = reader.ReadByte(); // 0x00
@@ -948,7 +1020,7 @@ public class WmoV14ToV17Converter
                             byte flags = reader.ReadByte();        // 0x16
                             byte unknown3 = reader.ReadByte();     // 0x17
                             
-                            Console.WriteLine($"[DEBUG] v14 Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags={flags}");
+                            WmoDiagnosticLogger.Log($"  Batch {b}: Mat={matId}, Start={startIndex}, Count={indexCount}, Flags=0x{flags:X2}");
                             
                             group.Batches.Add(new WmoBatch
                             {

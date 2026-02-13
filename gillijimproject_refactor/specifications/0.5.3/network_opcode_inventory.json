@@ -1,0 +1,890 @@
+[
+  {
+    "opcode": "CMSG_AUTH_SRP6_BEGIN",
+    "handler": "AuthSessionHandler.handle_srp6_begin"
+  },
+  {
+    "opcode": "CMSG_AUTH_SRP6_PROOF",
+    "handler": "AuthSessionHandler.handle_srp6_proof"
+  },
+  {
+    "opcode": "CMSG_AUTH_SESSION",
+    "handler": "AuthSessionHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PING",
+    "handler": "PingHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHAR_ENUM",
+    "handler": "CharEnumHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHAR_CREATE",
+    "handler": "CharCreateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHAR_DELETE",
+    "handler": "CharDeleteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_MESSAGECHAT",
+    "handler": "ChatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PLAYER_LOGIN",
+    "handler": "PlayerLoginHandler.handle"
+  },
+  {
+    "opcode": "CMSG_NAME_QUERY",
+    "handler": "NameQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUERY_TIME",
+    "handler": "TimeQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOGOUT_REQUEST",
+    "handler": "LogoutRequestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PLAYER_LOGOUT",
+    "handler": "PlayerLogoutHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOGOUT_CANCEL",
+    "handler": "LogoutCancelHandler.handle"
+  },
+  {
+    "opcode": "CMSG_WORLD_TELEPORT",
+    "handler": "WorldTeleportHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_TELEPORT_CHEAT",
+    "handler": "WorldTeleportHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_TELEPORT_ACK",
+    "handler": "WorldTeleportHandler.handle_ack"
+  },
+  {
+    "opcode": "MSG_MOVE_WORLDPORT_ACK",
+    "handler": "WorldTeleportHandler.handle_ack"
+  },
+  {
+    "opcode": "CMSG_AREATRIGGER",
+    "handler": "AreaTriggerHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_RUN_SPEED_CHEAT",
+    "handler": "SpeedCheatHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_SWIM_SPEED_CHEAT",
+    "handler": "SpeedCheatHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_ALL_SPEED_CHEAT",
+    "handler": "SpeedCheatHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_WALK_SPEED_CHEAT",
+    "handler": "SpeedCheatHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_TURN_RATE_CHEAT",
+    "handler": "SpeedCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ZONEUPDATE",
+    "handler": "ZoneUpdateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BUG",
+    "handler": "BugHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TEXT_EMOTE",
+    "handler": "TextEmoteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PLAYED_TIME",
+    "handler": "PlayedTimeHandler.handle"
+  },
+  {
+    "opcode": "MSG_LOOKING_FOR_GROUP",
+    "handler": "LookingForGroupHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_LOOKING_FOR_GROUP",
+    "handler": "LookingForGroupHandler.handle_set"
+  },
+  {
+    "opcode": "CMSG_WHO",
+    "handler": "WhoHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ITEM_QUERY_SINGLE",
+    "handler": "ItemQuerySingleHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ITEM_QUERY_MULTIPLE",
+    "handler": "ItemQueryMultipleHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PLAYER_MACRO",
+    "handler": "PlayerMacroHandler.handle"
+  },
+  {
+    "opcode": "CMSG_STANDSTATECHANGE",
+    "handler": "StandStateChangeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_MOUNTSPECIAL_ANIM",
+    "handler": "MountSpecialAnimHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SETWEAPONMODE",
+    "handler": "SetWeaponModeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PAGE_TEXT_QUERY",
+    "handler": "PageTextQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_READ_ITEM",
+    "handler": "ReadItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_OPEN_ITEM",
+    "handler": "OpenItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SWAP_INV_ITEM",
+    "handler": "SwapInvItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SWAP_ITEM",
+    "handler": "SwapItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DESTROYITEM",
+    "handler": "DestroyItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_WRAP_ITEM",
+    "handler": "WrapItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GAMEOBJECT_QUERY",
+    "handler": "GameObjectQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GAMEOBJ_USE",
+    "handler": "GameobjUseHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CREATURE_QUERY",
+    "handler": "CreatureQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_SELECTION",
+    "handler": "SetSelectionHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_TARGET",
+    "handler": "SetTargetHandler.handle"
+  },
+  {
+    "opcode": "MSG_TABARDVENDOR_ACTIVATE",
+    "handler": "TabardVendorActivateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BINDER_ACTIVATE",
+    "handler": "BinderActivateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PETITION_SHOWLIST",
+    "handler": "PetitionShowlistHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PETITION_BUY",
+    "handler": "PetitionBuyHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PETITION_SHOW_SIGNATURES",
+    "handler": "PetitionShowSignaturesHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PETITION_QUERY",
+    "handler": "PetitionQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_OFFER_PETITION",
+    "handler": "PetitionOfferHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PETITION_SIGN",
+    "handler": "PetitionSignHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TURN_IN_PETITION",
+    "handler": "PetitionTurnInHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LIST_INVENTORY",
+    "handler": "ListInventoryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BUY_ITEM",
+    "handler": "BuyItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BUY_ITEM_IN_SLOT",
+    "handler": "BuyItemInSlotHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ATTACKSWING",
+    "handler": "AttackSwingHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ATTACKSTOP",
+    "handler": "AttackSwingHandler.handle_stop"
+  },
+  {
+    "opcode": "CMSG_SELL_ITEM",
+    "handler": "SellItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_REPOP_REQUEST",
+    "handler": "RepopRequestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SPLIT_ITEM",
+    "handler": "SplitItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_AUTOSTORE_BAG_ITEM",
+    "handler": "AutostoreBagItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_AUTOEQUIP_ITEM",
+    "handler": "AutoequipItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_INITIATE_TRADE",
+    "handler": "InitiateTradeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BEGIN_TRADE",
+    "handler": "BeginTradeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CANCEL_TRADE",
+    "handler": "CancelTradeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_UNACCEPT_TRADE",
+    "handler": "UnacceptTradeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_TRADE_GOLD",
+    "handler": "SetTradeGoldHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_TRADE_ITEM",
+    "handler": "SetTradeItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CLEAR_TRADE_ITEM",
+    "handler": "ClearTradeItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ACCEPT_TRADE",
+    "handler": "AcceptTradeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_INSPECT",
+    "handler": "InspectHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TRAINER_LIST",
+    "handler": "TrainerListHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TRAINER_BUY_SPELL",
+    "handler": "TrainerBuySpellHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TAXIQUERYAVAILABLENODES",
+    "handler": "TaxiQueryNodesHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TAXINODE_STATUS_QUERY",
+    "handler": "TaxiNodeStatusQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ACTIVATETAXI",
+    "handler": "ActivateTaxiHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CAST_SPELL",
+    "handler": "CastSpellHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CANCEL_AURA",
+    "handler": "CancelAuraHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CANCEL_CAST",
+    "handler": "CancelCastHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CANCEL_CHANNELLING",
+    "handler": "CancelChannellingHandler.handle"
+  },
+  {
+    "opcode": "CMSG_USE_ITEM",
+    "handler": "UseItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOOT",
+    "handler": "LootRequestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOOT_RELEASE",
+    "handler": "LootReleaseHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOOT_MONEY",
+    "handler": "LootMoneyHandler.handle"
+  },
+  {
+    "opcode": "CMSG_AUTOSTORE_LOOT_ITEM",
+    "handler": "AutostoreLootItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_STATUS_QUERY",
+    "handler": "QuestGiverStatusHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_HELLO",
+    "handler": "QuestGiverHelloHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_QUERY_QUEST",
+    "handler": "QuestGiverQueryQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_ACCEPT_QUEST",
+    "handler": "QuestGiverAcceptQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_COMPLETE_QUEST",
+    "handler": "QuestGiverCompleteQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_REQUEST_REWARD",
+    "handler": "QuestGiverRequestReward.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTGIVER_CHOOSE_REWARD",
+    "handler": "QuestGiverChooseRewardHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUESTLOG_REMOVE_QUEST",
+    "handler": "QuestGiverRemoveQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUEST_CONFIRM_ACCEPT",
+    "handler": "QuestConfirmAcceptHandler.handle"
+  },
+  {
+    "opcode": "CMSG_QUEST_QUERY",
+    "handler": "QuestQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_INVITE",
+    "handler": "GroupInviteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_ACCEPT",
+    "handler": "GroupInviteAcceptHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_DISBAND",
+    "handler": "GroupDisbandHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_DECLINE",
+    "handler": "GroupInviteDeclineHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_UNINVITE",
+    "handler": "GroupUnInviteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_UNINVITE_GUID",
+    "handler": "GroupUnInviteGuidHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GROUP_SET_LEADER",
+    "handler": "GroupSetLeaderHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LOOT_METHOD",
+    "handler": "GroupLootMethodHandler.handle"
+  },
+  {
+    "opcode": "MSG_MINIMAP_PING",
+    "handler": "MinimapPingHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_CREATE",
+    "handler": "GuildCreateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_QUERY",
+    "handler": "GuildQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_INFO",
+    "handler": "GuildInfoHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_ROSTER",
+    "handler": "GuildRosterHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_INVITE",
+    "handler": "GuildInviteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_ACCEPT",
+    "handler": "GuildInviteAcceptHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_DECLINE",
+    "handler": "GuildInviteDeclineHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_REMOVE",
+    "handler": "GuildRemoveMemberHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_MOTD",
+    "handler": "GuildMOTDHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_PROMOTE",
+    "handler": "GuildPromoteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_DEMOTE",
+    "handler": "GuildDemoteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_LEAVE",
+    "handler": "GuildLeaveHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_LEADER",
+    "handler": "GuildLeaderHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GUILD_DISBAND",
+    "handler": "GuildDisbandHandler.handle"
+  },
+  {
+    "opcode": "MSG_SAVE_GUILD_EMBLEM",
+    "handler": "GuildSaveEmblemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_FRIEND_LIST",
+    "handler": "FriendsListHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ADD_FRIEND",
+    "handler": "FriendAddHandler.handle"
+  },
+  {
+    "opcode": "CMSG_ADD_IGNORE",
+    "handler": "FriendIgnoreHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DEL_FRIEND",
+    "handler": "FriendDeleteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DEL_IGNORE",
+    "handler": "FriendDeleteIgnoreHandler.handle"
+  },
+  {
+    "opcode": "CMSG_JOIN_CHANNEL",
+    "handler": "ChannelJoinHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LEAVE_CHANNEL",
+    "handler": "ChannelLeaveHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_INVITE",
+    "handler": "ChannelInviteHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_KICK",
+    "handler": "ChannelKickHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_BAN",
+    "handler": "ChannelBanHandler.handle_ban"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_UNBAN",
+    "handler": "ChannelBanHandler.handle_unban"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_MODERATOR",
+    "handler": "ChannelModeratorHandler.handle_add_mod"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_UNMODERATOR",
+    "handler": "ChannelModeratorHandler.handle_remove_mod"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_MODERATE",
+    "handler": "ChannelModeratorHandler.handle_moderate"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_MUTE",
+    "handler": "ChannelMuteHandler.handle_mute"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_UNMUTE",
+    "handler": "ChannelMuteHandler.handle_unmute"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_ANNOUNCEMENTS",
+    "handler": "ChannelAnnounceHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_OWNER",
+    "handler": "ChannelOwnerHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_SET_OWNER",
+    "handler": "ChannelOwnerHandler.handle_set_owner"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_PASSWORD",
+    "handler": "ChannelPasswordHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHANNEL_LIST",
+    "handler": "ChannelListHandler.handle"
+  },
+  {
+    "opcode": "MSG_RANDOM_ROLL",
+    "handler": "RandomRollHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DUEL_ACCEPTED",
+    "handler": "DuelAcceptHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DUEL_CANCELLED",
+    "handler": "DuelCanceledHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TRIGGER_CINEMATIC_CHEAT",
+    "handler": "TriggerCinematicCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BEASTMASTER",
+    "handler": "CheatBeastMasterHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GODMODE",
+    "handler": "GodModeHandler.handle"
+  },
+  {
+    "opcode": "MSG_GM_SUMMON",
+    "handler": "GMSummonHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TELEPORT_TO_PLAYER",
+    "handler": "TeleportToPlayerHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CHEAT_SETMONEY",
+    "handler": "CheatSetMoneyHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LEVEL_CHEAT",
+    "handler": "LevelCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_FLAG_QUEST",
+    "handler": "FlagQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_FLAG_QUEST_FINISH",
+    "handler": "FlagQuestFinishHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CLEAR_QUEST",
+    "handler": "ClearQuestHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LEVELUP_CHEAT",
+    "handler": "LevelUpCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_LEVEL_CHEAT",
+    "handler": "PetLevelCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TAXIENABLEALLNODES",
+    "handler": "TaxiEnableAllNodesHandler.handle"
+  },
+  {
+    "opcode": "CMSG_TAXICLEARALLNODES",
+    "handler": "TaxiClearAllNodesHandler.handle"
+  },
+  {
+    "opcode": "CMSG_LEARN_SPELL",
+    "handler": "LearnSpellCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CREATEMONSTER",
+    "handler": "CreateMonsterHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DESTROYMONSTER",
+    "handler": "DestroyMonsterHandler.handle"
+  },
+  {
+    "opcode": "CMSG_MAKEMONSTERATTACKME",
+    "handler": "MakeMonsterAttackMeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_COOLDOWN_CHEAT",
+    "handler": "CooldownCheatHandler.handle"
+  },
+  {
+    "opcode": "CMSG_CREATEITEM",
+    "handler": "CreateItemHandler.handle"
+  },
+  {
+    "opcode": "CMSG_RECHARGE",
+    "handler": "RechargeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DEBUG_AISTATE",
+    "handler": "DebugAIStateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BANKER_ACTIVATE",
+    "handler": "BankerActivateHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BUY_BANK_SLOT",
+    "handler": "BuyBankSlotHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SET_ACTION_BUTTON",
+    "handler": "SetActionButtonHandler.handle"
+  },
+  {
+    "opcode": "CMSG_NEW_SPELL_SLOT",
+    "handler": "NewSpellSlotHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SETDEATHBINDPOINT",
+    "handler": "SetDeathBindPointHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GETDEATHBINDZONE",
+    "handler": "GetDeathBindPointHandler.handle"
+  },
+  {
+    "opcode": "CMSG_BOOTME",
+    "handler": "BootMeHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_ACTION",
+    "handler": "PetActionHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_SET_ACTION",
+    "handler": "PetSetActionHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_ABANDON",
+    "handler": "PetAbandonHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_RENAME",
+    "handler": "PetRenameHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PET_NAME_QUERY",
+    "handler": "PetNameQueryHandler.handle"
+  },
+  {
+    "opcode": "CMSG_RESURRECT_RESPONSE",
+    "handler": "ResurrectResponseHandler.handle"
+  },
+  {
+    "opcode": "CMSG_PVP_PORT",
+    "handler": "PvPPortHandler.handle"
+  },
+  {
+    "opcode": "CMSG_RECLAIM_CORPSE",
+    "handler": "ResurrectResponseHandler.handle_reclaim_corpse"
+  },
+  {
+    "opcode": "CMSG_GM_INVIS",
+    "handler": "InvisHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GHOST",
+    "handler": "GhostHandler.handle"
+  },
+  {
+    "opcode": "CMSG_GM_NUKE",
+    "handler": "NukeHandler.handle"
+  },
+  {
+    "opcode": "MSG_GM_BIND_OTHER",
+    "handler": "BindOtherHandler.handle"
+  },
+  {
+    "opcode": "MSG_GM_SHOWLABEL",
+    "handler": "ShowLabelHandler.handle"
+  },
+  {
+    "opcode": "CMSG_DBLOOKUP",
+    "handler": "DBLookupHandler.handle"
+  },
+  {
+    "opcode": "MSG_MOVE_HEARTBEAT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_UNROOT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_ROOT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_PITCH",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_FACING",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_STOP_SWIM",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_SWIM",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_WALK_MODE",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_SET_RUN_MODE",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_STOP_PITCH",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_PITCH_DOWN",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_PITCH_UP",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_STOP_TURN",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_TURN_LEFT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_TURN_RIGHT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_JUMP",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_STOP_STRAFE",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_STRAFE_RIGHT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_STRAFE_LEFT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_STOP",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_BACKWARD",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_START_FORWARD",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_COLLIDE_REDIRECT",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "MSG_MOVE_COLLIDE_STUCK",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "CMSG_FORCE_MOVE_ROOT_ACK",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "CMSG_FORCE_MOVE_UNROOT_ACK",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "CMSG_FORCE_SPEED_CHANGE_ACK",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "CMSG_FORCE_SWIM_SPEED_CHANGE_ACK",
+    "handler": "MovementHandler.handle_movement_status"
+  },
+  {
+    "opcode": "CMSG_TUTORIAL_CLEAR",
+    "handler": "NullHandler.handle"
+  },
+  {
+    "opcode": "CMSG_SCREENSHOT",
+    "handler": "NullHandler.handle"
+  }
+]

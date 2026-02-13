@@ -46,13 +46,15 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 
 ### Known Issues / Next Steps
 
-1. **3.3.5 ADT loading freeze** — needs investigation
-2. **WMO culling too aggressive** — objects outside WMO not visible from inside
-3. **GPU skinning** — bone matrices computed but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
-4. **Animation UI** — sequence selection combo box in ImGui panel
-5. **Proper lighting** — terrain + object shading improvements
-6. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
-7. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
+1. **WMO semi-transparent window materials** — ❌ CRITICAL: Stormwind WMO maps glass textures to wrong geometry (columns instead of windows). Attempted fix: skip secondary MOTV chunk bytes to prevent MOBA parsing misalignment — **FAILED**. Root cause still unknown.
+2. **MDX cylindrical texture stretching** — ❌ CRITICAL: Barrels, tree trunks show single stretched plank instead of tiled texture. Attempted fix: per-axis texture wrap mode (clampS/clampT) — **FAILED**. Root cause still unknown.
+3. **3.3.5 ADT loading freeze** — needs investigation
+4. **WMO culling too aggressive** — objects outside WMO not visible from inside
+5. **GPU skinning** — bone matrices computed but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
+6. **Animation UI** — sequence selection combo box in ImGui panel
+7. **Proper lighting** — terrain + object shading improvements
+8. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
+9. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
 
 ---
 

@@ -1,6 +1,7 @@
 using System.Numerics;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Population;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
 
@@ -27,6 +28,8 @@ public class WorldScene : ISceneRenderer
     // Per-tile instance storage for lazy load/unload
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
+    private readonly List<ObjectInstance> _externalMdxInstances = new();
+    private readonly List<ObjectInstance> _externalWmoInstances = new();
     private bool _instancesDirty = false;
 
     private bool _objectsVisible = true;
@@ -53,6 +56,9 @@ public class WorldScene : ISceneRenderer
     public int WmoInstanceCount => _wmoInstances.Count;
     public int UniqueMdxModels => _assets.MdxModelsLoaded;
     public int UniqueWmoModels => _assets.WmoModelsLoaded;
+    public int ExternalSpawnMdxCount => _externalMdxInstances.Count;
+    public int ExternalSpawnWmoCount => _externalWmoInstances.Count;
+    public int ExternalSpawnInstanceCount => ExternalSpawnMdxCount + ExternalSpawnWmoCount;
     public TerrainManager Terrain => _terrainManager;
     public WorldAssetManager Assets => _assets;
     public bool IsWmoBased => _terrainManager.Adapter.IsWmoBased;
@@ -571,10 +577,120 @@ public class WorldScene : ISceneRenderer
         _mdxInstances.Clear();
         foreach (var list in _tileMdxInstances.Values)
             _mdxInstances.AddRange(list);
+        _mdxInstances.AddRange(_externalMdxInstances);
+
         _wmoInstances.Clear();
         foreach (var list in _tileWmoInstances.Values)
             _wmoInstances.AddRange(list);
+        _wmoInstances.AddRange(_externalWmoInstances);
+
         _instancesDirty = false;
+    }
+
+    public void ClearExternalSpawns()
+    {
+        _externalMdxInstances.Clear();
+        _externalWmoInstances.Clear();
+        _instancesDirty = true;
+    }
+
+    public void SetExternalSpawns(IEnumerable<WorldSpawnRecord> spawns)
+    {
+        _externalMdxInstances.Clear();
+        _externalWmoInstances.Clear();
+
+        var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
+
+        foreach (var spawn in spawns)
+        {
+            if (string.IsNullOrWhiteSpace(spawn.ModelPath))
+                continue;
+
+            string modelPath = spawn.ModelPath.Replace('/', '\\');
+            bool isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
+
+            string key = WorldAssetManager.NormalizeKey(modelPath);
+            float orientationRadians = spawn.OrientationWowRadians;
+            float orientationDegrees = orientationRadians * (180f / MathF.PI);
+
+            var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
+
+            if (isWmo)
+            {
+                _assets.EnsureWmoLoaded(key);
+
+                var transform = rot180Z
+                    * Matrix4x4.CreateRotationZ(orientationRadians)
+                    * Matrix4x4.CreateTranslation(pos);
+
+                Vector3 localMin, localMax, worldMin, worldMax;
+                if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+                {
+                    TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
+                }
+                else
+                {
+                    localMin = localMax = Vector3.Zero;
+                    worldMin = pos - new Vector3(2f);
+                    worldMax = pos + new Vector3(2f);
+                }
+
+                _externalWmoInstances.Add(new ObjectInstance
+                {
+                    ModelKey = key,
+                    Transform = transform,
+                    BoundsMin = worldMin,
+                    BoundsMax = worldMax,
+                    LocalBoundsMin = localMin,
+                    LocalBoundsMax = localMax,
+                    ModelName = Path.GetFileName(modelPath),
+                    ModelPath = modelPath,
+                    PlacementPosition = pos,
+                    PlacementRotation = new Vector3(0f, 0f, orientationDegrees),
+                    PlacementScale = 1.0f,
+                    UniqueId = spawn.SpawnId
+                });
+            }
+            else
+            {
+                _assets.EnsureMdxLoaded(key);
+
+                float scale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
+
+                var transform = rot180Z
+                    * Matrix4x4.CreateScale(scale)
+                    * Matrix4x4.CreateRotationZ(orientationRadians)
+                    * Matrix4x4.CreateTranslation(pos);
+
+                Vector3 bbMin, bbMax;
+                if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+                    TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+                else
+                {
+                    bbMin = pos - new Vector3(2f);
+                    bbMax = pos + new Vector3(2f);
+                }
+
+                _externalMdxInstances.Add(new ObjectInstance
+                {
+                    ModelKey = key,
+                    Transform = transform,
+                    BoundsMin = bbMin,
+                    BoundsMax = bbMax,
+                    ModelName = Path.GetFileName(modelPath),
+                    ModelPath = modelPath,
+                    PlacementPosition = pos,
+                    PlacementRotation = new Vector3(0f, 0f, orientationDegrees),
+                    PlacementScale = scale,
+                    UniqueId = spawn.SpawnId
+                });
+            }
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Terrain,
+            $"SQL spawns injected: {_externalMdxInstances.Count} MDX, {_externalWmoInstances.Count} WMO");
+
+        _instancesDirty = true;
     }
 
     /// <summary>
@@ -1032,6 +1148,8 @@ public class WorldScene : ISceneRenderer
         _wmoInstances.Clear();
         _tileMdxInstances.Clear();
         _tileWmoInstances.Clear();
+        _externalMdxInstances.Clear();
+        _externalWmoInstances.Clear();
     }
 }
 

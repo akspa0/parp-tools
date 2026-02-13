@@ -223,16 +223,32 @@ public class AlphaCoreDbReader : IDisposable
         await foreach (var row in ParseInsertRowsAsync(_worldSqlPath, "spawns_creatures"))
         {
             if (row.Count < 10) continue;
+
+            // Schema: ignored at index 18
+            if (row.Count > 18 && ParseInt(row[18]) != 0)
+                continue;
+
             int spawnId = ParseInt(row[0]);
-            int entry1 = ParseInt(row[1]);
             int mapId = ParseInt(row[5]);
             float x = ParseFloat(row[6]);
             float y = ParseFloat(row[7]);
             float z = ParseFloat(row[8]);
             float o = ParseFloat(row[9]);
 
-            if (byEntry.TryGetValue(entry1, out var creature))
+            int[] entries =
             {
+                ParseInt(row[1]),
+                row.Count > 2 ? ParseInt(row[2]) : 0,
+                row.Count > 3 ? ParseInt(row[3]) : 0,
+                row.Count > 4 ? ParseInt(row[4]) : 0
+            };
+
+            var uniqueEntries = new HashSet<int>(entries.Where(e => e > 0));
+            foreach (int entry in uniqueEntries)
+            {
+                if (!byEntry.TryGetValue(entry, out var creature))
+                    continue;
+
                 creature.Spawns.Add(new SpawnLocation
                 {
                     SpawnId = spawnId, MapId = mapId,
@@ -259,6 +275,11 @@ public class AlphaCoreDbReader : IDisposable
         await foreach (var row in ParseInsertRowsAsync(_worldSqlPath, "spawns_gameobjects"))
         {
             if (row.Count < 7) continue;
+
+            // Schema: ignored at index 17
+            if (row.Count > 17 && ParseInt(row[17]) != 0)
+                continue;
+
             int spawnId = ParseInt(row[0]);
             int entry = ParseInt(row[1]);
             int mapId = ParseInt(row[2]);

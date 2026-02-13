@@ -58,6 +58,22 @@
 
 ## ❌ Known Issues
 
+### MdxViewer Rendering Bugs (Feb 12, 2026)
+
+#### WMO Semi-Transparent Window Materials
+- **Symptom**: Stormwind WMO maps blue/gold stained glass textures to white marble columns instead of window frames
+- **Hypothesis 1**: Secondary MOTV chunk not skipped → MOBA batch parsing misalignment
+- **Fix Attempt 1**: Added `reader.BaseStream.Position += chunkSize;` when secondary MOTV encountered in `WmoV14ToV17Converter.ParseMogp` (line 922)
+- **Result**: ❌ FAILED — window materials still map to wrong geometry
+- **Status**: Root cause still unknown. May not be MOTV-related. Need to check console logs to verify if secondary MOTV is even present in Stormwind groups.
+
+#### MDX Cylindrical Texture Stretching
+- **Symptom**: Barrels, tree trunks show single wood plank stretched around entire circumference instead of tiled texture
+- **Hypothesis 1**: Texture wrap mode incorrectly clamping both S and T axes when only one should clamp
+- **Fix Attempt 1**: Changed `ModelRenderer.LoadTextures` to use per-axis clamp flags (clampS/clampT) based on `tex.Flags & 0x1` and `tex.Flags & 0x2` (lines 778-779)
+- **Result**: ❌ FAILED — textures still stretched on cylindrical objects
+- **Status**: Root cause still unknown. May not be wrap mode related. Need to check console logs to verify texture flags and investigate UV coordinates.
+
 ### AdtModfInjector
 - **Problem**: Appends MWMO/MODF chunks to end of file; result is Noggit-incompatible.
 

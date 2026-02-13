@@ -7,6 +7,7 @@ using MdxViewer.Export;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using MdxViewer.Catalog;
+using MdxViewer.Population;
 using MdxViewer.Terrain;
 using Silk.NET.Input;
 using Silk.NET.Maths;
@@ -54,6 +55,8 @@ public class ViewerApp : IDisposable
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
     private static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
+    private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
+    private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
 
     // File browser state
     private List<string> _filteredFiles = new();
@@ -84,6 +87,7 @@ public class ViewerApp : IDisposable
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
     private bool _wantExportGlb = false;
+    private bool _wantExportGlbCollision = false;
 
     // Sidebar layout
     private bool _showLeftSidebar = true;
@@ -106,6 +110,20 @@ public class ViewerApp : IDisposable
     private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
     private string _selectedObjectType = "";
     private string _selectedObjectInfo = "";
+    private string _sqlAlphaCoreRoot = "";
+    private SqlWorldPopulationService? _sqlPopulationService;
+    private bool _sqlIncludeCreatures = true;
+    private bool _sqlIncludeGameObjects = true;
+    private int _sqlMaxSpawns = 2000;
+    private bool _sqlUseAoiFilter = true;
+    private int _sqlAoiTileRadius = 3;
+    private bool _sqlStreamWithCamera = true;
+    private string _sqlSpawnStatus = "Not loaded";
+    private string _sqlServiceRoot = "";
+    private List<WorldSpawnRecord>? _sqlMapSpawnsCache;
+    private int _sqlMapSpawnsCacheMapId = -1;
+    private (int tileX, int tileY)? _sqlLastCameraTile;
+    private bool _sqlForceStreamRefresh;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -140,6 +158,19 @@ public class ViewerApp : IDisposable
     private bool _mapConvertScrollToBottom = false;
     private string? _mapConvertError = null;
     private bool _mapConvertDone = false;
+
+    // WMO Converter state
+    private bool _showWmoConverterDialog = false;
+    private int _wmoConvertDirection = 0; // 0 = Alpha(v14/v16)→LK(v17), 1 = LK(v17)→Alpha(v14)
+    private bool _wmoConvertExtended = false;
+    private string _wmoConvertSourcePath = "";
+    private string _wmoConvertOutputPath = "";
+    private bool _wmoConvertCopyTextures = true;
+    private bool _wmoConverting = false;
+    private readonly List<string> _wmoConvertLog = new();
+    private bool _wmoConvertScrollToBottom = false;
+    private string? _wmoConvertError = null;
+    private bool _wmoConvertDone = false;
 
     // VLM Dataset Generator state
     private bool _showVlmExportDialog = false;
@@ -239,6 +270,41 @@ public class ViewerApp : IDisposable
     {
         _imGui.Update((float)dt);
         HandleKeyboardInput((float)dt);
+        UpdateSqlSpawnStreaming();
+    }
+
+    private void UpdateSqlSpawnStreaming()
+    {
+        if (_worldScene == null || !_sqlStreamWithCamera || !_sqlUseAoiFilter)
+            return;
+
+        if (_sqlMapSpawnsCache == null || _sqlMapSpawnsCacheMapId != _currentMapId)
+            return;
+
+        var camTile = GetCameraTile();
+        if (_sqlForceStreamRefresh || _sqlLastCameraTile == null || _sqlLastCameraTile.Value != camTile)
+        {
+            _sqlLastCameraTile = camTile;
+            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: false);
+            _sqlForceStreamRefresh = false;
+        }
+    }
+
+    private (int tileX, int tileY) GetCameraTile()
+    {
+        int tileX = (int)((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+        int tileY = (int)((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+        return (tileX, tileY);
+    }
+
+    private void ResetSqlSpawnStreamingState(bool clearSceneSpawns)
+    {
+        _sqlMapSpawnsCache = null;
+        _sqlMapSpawnsCacheMapId = -1;
+        _sqlLastCameraTile = null;
+        _sqlForceStreamRefresh = false;
+        if (clearSceneSpawns && _worldScene != null)
+            _worldScene.ClearExternalSpawns();
     }
 
     private void HandleKeyboardInput(float dt)
@@ -496,6 +562,8 @@ void main() {
             DrawVlmExportDialog();
         if (_showMapConverterDialog)
             DrawMapConverterDialog();
+        if (_showWmoConverterDialog)
+            DrawWmoConverterDialog();
     }
 
     private void DrawMenuBar()
@@ -524,10 +592,15 @@ void main() {
                 if (ImGui.MenuItem("Map Converter..."))
                     _showMapConverterDialog = true;
 
+                if (ImGui.MenuItem("WMO Converter..."))
+                    _showWmoConverterDialog = true;
+
                 ImGui.Separator();
 
                 if (ImGui.MenuItem("Export GLB...", _renderer != null))
                     _wantExportGlb = true;
+                if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
+                    _wantExportGlbCollision = true;
 
                 ImGui.Separator();
 
@@ -634,6 +707,43 @@ void main() {
                 LoadVlmProject(vlmPath);
         }
 
+        if (_wantExportGlbCollision)
+        {
+            _wantExportGlbCollision = false;
+            if (_loadedFilePath != null)
+            {
+                Directory.CreateDirectory(ExportDir);
+                string glbPath = Path.Combine(ExportDir, Path.ChangeExtension(_loadedFileName!, ".collision.glb"));
+                try
+                {
+                    string dir = Path.GetDirectoryName(_loadedFilePath) ?? ".";
+                    if (_loadedWmo != null)
+                    {
+                        GlbExporter.ExportWmoCollision(_loadedWmo, dir, glbPath);
+                    }
+                    else
+                    {
+                        var ext = Path.GetExtension(_loadedFilePath).ToLowerInvariant();
+                        if (ext == ".wmo")
+                        {
+                            var converter = new WmoV14ToV17Converter();
+                            var wmo = converter.ParseWmoV14(_loadedFilePath);
+                            GlbExporter.ExportWmoCollision(wmo, dir, glbPath);
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("Collision-only GLB export is currently supported for WMO only.");
+                        }
+                    }
+                    _statusMessage = $"Exported: {glbPath}";
+                }
+                catch (Exception ex)
+                {
+                    _statusMessage = $"Export failed: {ex.Message}";
+                }
+            }
+        }
+
         if (_wantExportGlb)
         {
             _wantExportGlb = false;
@@ -665,7 +775,7 @@ void main() {
                         {
                             var converter = new WmoV14ToV17Converter();
                             var wmo = converter.ParseWmoV14(_loadedFilePath);
-                            GlbExporter.ExportWmo(wmo, dir, glbPath, _dataSource);
+                            GlbExporter.ExportWmoWithDoodads(wmo, dir, glbPath, _dataSource);
                         }
                     }
                     _statusMessage = $"Exported: {glbPath}";
@@ -988,6 +1098,290 @@ void main() {
             }
         }
         ImGui.End();
+    }
+
+    private void DrawWmoConverterDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(580, 520), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(
+            ImGui.GetIO().DisplaySize.X / 2 - 290,
+            ImGui.GetIO().DisplaySize.Y / 2 - 260), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("WMO Converter", ref _showWmoConverterDialog))
+        {
+            ImGui.TextWrapped("Convert WMO objects between Alpha 0.5.3 (v14/v16) and LK 3.3.5 (v17) formats.");
+            ImGui.Spacing();
+
+            ImGui.Text("Direction:");
+            ImGui.RadioButton("Alpha WMO → LK WMO", ref _wmoConvertDirection, 0);
+            ImGui.SameLine();
+            ImGui.RadioButton("LK WMO → Alpha WMO", ref _wmoConvertDirection, 1);
+            ImGui.Spacing();
+
+            ImGui.Text("Mode:");
+            bool isBasic = !_wmoConvertExtended;
+            if (ImGui.RadioButton("Basic", isBasic)) _wmoConvertExtended = false;
+            ImGui.SameLine();
+            bool isExtended = _wmoConvertExtended;
+            if (ImGui.RadioButton("Extended", isExtended)) _wmoConvertExtended = true;
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Auto-select currently loaded WMO
+            if (!string.IsNullOrEmpty(_loadedFilePath)
+                && string.Equals(Path.GetExtension(_loadedFilePath), ".wmo", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrEmpty(_wmoConvertSourcePath))
+            {
+                _wmoConvertSourcePath = _loadedFilePath;
+            }
+
+            ImGui.Text("Source WMO:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##wmo_src", ref _wmoConvertSourcePath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##wmo_src"))
+            {
+                string? initDir = !string.IsNullOrEmpty(_wmoConvertSourcePath) ? Path.GetDirectoryName(_wmoConvertSourcePath) : null;
+                var picked = ShowFileDialogSTA("Select WMO file", "WMO Files (*.wmo)|*.wmo|All Files (*.*)|*.*", initDir);
+                if (picked != null) _wmoConvertSourcePath = picked;
+            }
+
+            string outputBaseDir = (_wmoConvertDirection == 0) ? WmoV14ToV17OutputDir : WmoV17ToV14OutputDir;
+            string outputRootPath = "";
+            if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath))
+            {
+                string baseName = Path.GetFileNameWithoutExtension(_wmoConvertSourcePath);
+                string suffix = (_wmoConvertDirection == 0) ? ".v17.wmo" : ".v14.wmo";
+                outputRootPath = Path.Combine(outputBaseDir, baseName + suffix);
+            }
+
+            ImGui.Text("Output Root Path:");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.BeginDisabled();
+            ImGui.InputText("##wmo_out", ref outputRootPath, 512);
+            ImGui.EndDisabled();
+
+            ImGui.Spacing();
+            ImGui.Checkbox("Copy referenced textures (best-effort)", ref _wmoConvertCopyTextures);
+            ImGui.Spacing();
+
+            bool canConvert = !_wmoConverting
+                && !string.IsNullOrWhiteSpace(_wmoConvertSourcePath)
+                && !string.IsNullOrWhiteSpace(outputRootPath);
+
+            if (!canConvert) ImGui.BeginDisabled();
+            if (ImGui.Button(_wmoConverting ? "Converting..." : "Convert", new Vector2(120, 0)))
+            {
+                _wmoConvertLog.Clear();
+                _wmoConvertError = null;
+                _wmoConvertDone = false;
+                _wmoConverting = true;
+
+                string srcPath = _wmoConvertSourcePath;
+                string outPath = outputRootPath;
+                int direction = _wmoConvertDirection;
+                bool extendedMode = _wmoConvertExtended;
+                bool copyTextures = _wmoConvertCopyTextures;
+                var dataSource = _dataSource;
+
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        var origOut = Console.Out;
+                        var sw = new StringWriter();
+                        Console.SetOut(sw);
+
+                        List<string> textures = new();
+                        List<string> writtenFiles = new();
+                        if (direction == 0)
+                        {
+                            if (extendedMode)
+                            {
+                                var converter = new WmoV14ToV17ExtendedConverter();
+                                textures = converter.Convert(srcPath, outPath);
+                            }
+                            else
+                            {
+                                var converter = new WmoV14ToV17Converter();
+                                textures = converter.Convert(srcPath, outPath);
+                            }
+
+                            writtenFiles.Add(outPath);
+                            string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".";
+                            string baseName = Path.GetFileNameWithoutExtension(outPath);
+                            for (int gi = 0; gi < 2048; gi++)
+                            {
+                                string gp = Path.Combine(outDir, $"{baseName}_{gi:D3}.wmo");
+                                if (!File.Exists(gp)) break;
+                                writtenFiles.Add(gp);
+                            }
+                        }
+                        else
+                        {
+                            var converter = new WmoV17ToV14Converter();
+                            converter.Convert(srcPath, outPath);
+                            writtenFiles.Add(outPath);
+                        }
+
+                        Console.SetOut(origOut);
+                        var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                        lock (_wmoConvertLog) _wmoConvertLog.AddRange(lines);
+                        lock (_wmoConvertLog)
+                        {
+                            _wmoConvertLog.Add("\n=== SUCCESS ===");
+                            foreach (var f in writtenFiles)
+                                _wmoConvertLog.Add($"Wrote: {f}");
+                        }
+
+                        if (copyTextures && textures.Count > 0 && direction == 0)
+                        {
+                            CopyWmoTexturesPreservePaths(srcPath, outPath, textures, dataSource);
+                            lock (_wmoConvertLog) _wmoConvertLog.Add($"Copied textures: {textures.Count}");
+                        }
+
+                        _wmoConvertScrollToBottom = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _wmoConvertError = ex.Message;
+                        lock (_wmoConvertLog)
+                            _wmoConvertLog.Add($"\n=== EXCEPTION: {ex.Message} ===");
+                        _wmoConvertScrollToBottom = true;
+                    }
+                    finally
+                    {
+                        _wmoConvertDone = true;
+                        _wmoConverting = false;
+                        _wmoConvertScrollToBottom = true;
+                    }
+                });
+            }
+            if (!canConvert) ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(120, 0)))
+                _showWmoConverterDialog = false;
+
+            ImGui.Spacing();
+            if (_wmoConvertDone)
+            {
+                if (_wmoConvertError != null)
+                    ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), $"Error: {_wmoConvertError}");
+                else
+                    ImGui.TextColored(new Vector4(0.3f, 1, 0.3f, 1), "Done.");
+            }
+
+            ImGui.Separator();
+
+            float logHeight = ImGui.GetContentRegionAvail().Y - 4;
+            if (ImGui.BeginChild("##wmoconv_log", new Vector2(-1, logHeight), true))
+            {
+                lock (_wmoConvertLog)
+                {
+                    foreach (var line in _wmoConvertLog)
+                        ImGui.TextUnformatted(line);
+                }
+                if (_wmoConvertScrollToBottom)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    _wmoConvertScrollToBottom = false;
+                }
+                ImGui.EndChild();
+            }
+        }
+        ImGui.End();
+    }
+
+    private static void CopyWmoTexturesPreservePaths(string inputWmoPath, string outputWmoPath, List<string> textures, IDataSource? dataSource)
+    {
+        if (textures.Count == 0) return;
+        string outputDir = Path.GetDirectoryName(Path.GetFullPath(outputWmoPath)) ?? ".";
+        
+        foreach (var tex in textures)
+        {
+            var cleanTex = tex.Replace('/', '\\');
+            byte[]? blpData = null;
+
+            // Try to read from data source (MPQ) first for version-correct assets
+            if (dataSource != null)
+            {
+                blpData = dataSource.ReadFile(tex);
+                if (blpData == null)
+                {
+                    // Try normalized path
+                    blpData = dataSource.ReadFile(cleanTex);
+                }
+            }
+
+            if (blpData != null && blpData.Length > 0)
+            {
+                // Write preserving original folder structure
+                var destPath = Path.Combine(outputDir, cleanTex);
+                Directory.CreateDirectory(Path.GetDirectoryName(destPath) ?? outputDir);
+                File.WriteAllBytes(destPath, blpData);
+            }
+            else
+            {
+                // Fallback to best-effort filesystem copy
+                CopyWmoTexturesBestEffort(inputWmoPath, outputWmoPath, new List<string> { tex });
+            }
+        }
+    }
+
+    private static void CopyWmoTexturesBestEffort(string inputWmoPath, string outputWmoPath, List<string> textures)
+    {
+        if (textures.Count == 0) return;
+        string inputDir = Path.GetDirectoryName(Path.GetFullPath(inputWmoPath)) ?? ".";
+        string outputDir = Path.GetDirectoryName(Path.GetFullPath(outputWmoPath)) ?? ".";
+        foreach (var tex in textures)
+        {
+            var cleanTex = tex.Replace('/', '\\');
+            string? srcPath = null;
+
+            var p1 = Path.Combine(inputDir, cleanTex);
+            if (File.Exists(p1)) srcPath = p1;
+            else
+            {
+                var curr = new DirectoryInfo(inputDir);
+                DirectoryInfo? rootDir = null;
+                for (int i = 0; i < 5 && curr != null; i++)
+                {
+                    var p2 = Path.Combine(curr.FullName, cleanTex);
+                    if (File.Exists(p2))
+                    {
+                        srcPath = p2;
+                        break;
+                    }
+                    if (Directory.Exists(Path.Combine(curr.FullName, "DUNGEONS"))
+                        || Directory.Exists(Path.Combine(curr.FullName, "World"))
+                        || Directory.Exists(Path.Combine(curr.FullName, "Textures")))
+                    {
+                        rootDir = curr;
+                    }
+                    curr = curr.Parent;
+                }
+
+                if (srcPath == null)
+                {
+                    var searchRoot = rootDir ?? new DirectoryInfo(inputDir).Parent?.Parent;
+                    if (searchRoot != null && searchRoot.Exists)
+                    {
+                        var filename = Path.GetFileName(cleanTex);
+                        srcPath = Directory.EnumerateFiles(searchRoot.FullName, filename, SearchOption.AllDirectories)
+                            .FirstOrDefault();
+                    }
+                }
+            }
+
+            if (srcPath == null) continue;
+            string targetRelPath = cleanTex;
+            var destPath = Path.Combine(outputDir, targetRelPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destPath) ?? outputDir);
+            File.Copy(srcPath, destPath, true);
+        }
     }
 
     private void DrawVlmExportDialog()
@@ -1643,6 +2037,45 @@ void main() {
     {
         if (_worldScene == null) return;
 
+        ImGui.Separator();
+        ImGui.Text("SQL World Population");
+        ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (etc/databases/...)", ref _sqlAlphaCoreRoot, 1024);
+        bool sqlSettingsChanged = false;
+        sqlSettingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
+        ImGui.SameLine();
+        sqlSettingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
+        sqlSettingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
+        if (_sqlUseAoiFilter)
+            sqlSettingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
+        sqlSettingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
+        sqlSettingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
+
+        bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
+        if (!canLoadSql)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Load SQL Spawns (Current Map)"))
+            LoadSqlSpawnsForCurrentMap();
+        if (!canLoadSql)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear SQL Spawns"))
+        {
+            ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+            _sqlSpawnStatus = "Cleared SQL spawns.";
+        }
+
+        if (sqlSettingsChanged && _sqlMapSpawnsCache != null)
+        {
+            _sqlForceStreamRefresh = true;
+            if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
+                ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+        }
+
+        ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
+        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
+        ImGui.Separator();
+
         // POI toggle — lazy-loaded on first request
         if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
         {
@@ -1868,6 +2301,118 @@ void main() {
             }
             ImGui.TreePop();
         }
+    }
+
+    private void LoadSqlSpawnsForCurrentMap()
+    {
+        if (_worldScene == null)
+        {
+            _sqlSpawnStatus = "No world loaded.";
+            return;
+        }
+
+        if (_currentMapId < 0)
+        {
+            _sqlSpawnStatus = "Current map ID unavailable.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot))
+        {
+            _sqlSpawnStatus = "Enter alpha-core root path first.";
+            return;
+        }
+
+        try
+        {
+            if (_sqlPopulationService == null ||
+                !string.Equals(_sqlServiceRoot, _sqlAlphaCoreRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                _sqlPopulationService?.Dispose();
+                _sqlPopulationService = new SqlWorldPopulationService(_sqlAlphaCoreRoot);
+                _sqlServiceRoot = _sqlAlphaCoreRoot;
+            }
+
+            var (ok, message) = _sqlPopulationService.Validate();
+            if (!ok)
+            {
+                _sqlSpawnStatus = message;
+                return;
+            }
+
+            _sqlSpawnStatus = "Parsing SQL and building spawn list...";
+
+            int requestedMax = (_sqlUseAoiFilter || _sqlStreamWithCamera) ? 0 : _sqlMaxSpawns;
+            var mapSpawns = _sqlPopulationService
+                .LoadMapSpawnsAsync(_currentMapId, requestedMax, _sqlIncludeCreatures, _sqlIncludeGameObjects)
+                .GetAwaiter()
+                .GetResult();
+
+            _sqlMapSpawnsCache = mapSpawns.ToList();
+            _sqlMapSpawnsCacheMapId = _currentMapId;
+            _sqlLastCameraTile = null;
+            _sqlForceStreamRefresh = true;
+
+            ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+        }
+        catch (Exception ex)
+        {
+            _sqlSpawnStatus = $"Error: {ex.Message}";
+        }
+    }
+
+    private void ApplySqlSpawnsToScene(IReadOnlyList<WorldSpawnRecord> mapSpawns, bool updateStatus)
+    {
+        if (_worldScene == null)
+            return;
+
+        IReadOnlyList<WorldSpawnRecord> finalSpawns = mapSpawns;
+        if (_sqlUseAoiFilter)
+            finalSpawns = FilterSpawnsToCameraAoi(mapSpawns, _sqlAoiTileRadius, _sqlMaxSpawns);
+        else if (_sqlMaxSpawns > 0 && mapSpawns.Count > _sqlMaxSpawns)
+            finalSpawns = mapSpawns.Take(_sqlMaxSpawns).ToList();
+
+        _worldScene.SetExternalSpawns(finalSpawns);
+
+        if (updateStatus)
+        {
+            _sqlSpawnStatus = _sqlUseAoiFilter
+                ? $"Loaded {finalSpawns.Count}/{mapSpawns.Count} SQL spawns for map {_currentMapId} (AOI radius {_sqlAoiTileRadius} tiles{(_sqlStreamWithCamera ? ", streaming" : "")})."
+                : $"Loaded {finalSpawns.Count} SQL spawns for map {_currentMapId}.";
+        }
+    }
+
+    private List<WorldSpawnRecord> FilterSpawnsToCameraAoi(IReadOnlyList<WorldSpawnRecord> spawns, int tileRadius, int maxCount)
+    {
+        if (spawns.Count == 0) return new List<WorldSpawnRecord>();
+
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+
+        var inRange = new List<(WorldSpawnRecord spawn, float distSq)>();
+        foreach (var spawn in spawns)
+        {
+            var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
+            float spawnTileX = (WoWConstants.MapOrigin - pos.X) / WoWConstants.ChunkSize;
+            float spawnTileY = (WoWConstants.MapOrigin - pos.Y) / WoWConstants.ChunkSize;
+
+            if (MathF.Abs(spawnTileX - camTileX) > tileRadius || MathF.Abs(spawnTileY - camTileY) > tileRadius)
+                continue;
+
+            float dx = pos.X - _camera.Position.X;
+            float dy = pos.Y - _camera.Position.Y;
+            float dz = pos.Z - _camera.Position.Z;
+            inRange.Add((spawn, dx * dx + dy * dy + dz * dz));
+        }
+
+        inRange.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+
+        int take = maxCount > 0 ? Math.Min(maxCount, inRange.Count) : inRange.Count;
+        var result = new List<WorldSpawnRecord>(take);
+        for (int i = 0; i < take; i++)
+            result.Add(inRange[i].spawn);
+
+        return result;
     }
 
     private void DrawStatusBar()
@@ -3049,6 +3594,7 @@ void main() {
         _terrainManager = null;
         _vlmTerrainManager?.Dispose();
         _vlmTerrainManager = null;
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
 
         // Show loading screen (replicates Alpha client's EnableLoadingScreen)
         _loadingScreen?.Enable(_dataSource);
@@ -3124,6 +3670,7 @@ void main() {
             var curMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = curMapDef?.Id ?? -1;
+            _sqlForceStreamRefresh = true;
 
             // Store DBC credentials for lazy loading (POI + Taxi deferred until user toggles them on)
             // Only Lighting is loaded eagerly since it affects rendering immediately.
@@ -3319,6 +3866,7 @@ void main() {
         _disposed = true;
 
         _loadingScreen?.Dispose();
+        _sqlPopulationService?.Dispose();
         _renderer?.Dispose();
         _worldScene?.Dispose();
         _terrainManager?.Dispose();

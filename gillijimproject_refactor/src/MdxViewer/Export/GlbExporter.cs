@@ -22,6 +22,12 @@ using VERTEX = VertexBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>;
 /// </summary>
 public static class GlbExporter
 {
+    private enum WmoExportMeshMode
+    {
+        Visual,
+        CollisionOnly
+    }
+
     /// <summary>
     /// Export an MDX model to GLB with per-geoset materials.
     /// </summary>
@@ -87,6 +93,21 @@ public static class GlbExporter
     /// </summary>
     public static void ExportWmo(WmoV14ToV17Converter.WmoV14Data wmo, string modelDir, string outputPath, IDataSource? dataSource = null)
     {
+        ExportWmoInternal(wmo, modelDir, outputPath, dataSource, WmoExportMeshMode.Visual);
+    }
+
+    public static void ExportWmoCollision(WmoV14ToV17Converter.WmoV14Data wmo, string modelDir, string outputPath)
+    {
+        ExportWmoInternal(wmo, modelDir, outputPath, dataSource: null, WmoExportMeshMode.CollisionOnly);
+    }
+
+    private static void ExportWmoInternal(
+        WmoV14ToV17Converter.WmoV14Data wmo,
+        string modelDir,
+        string outputPath,
+        IDataSource? dataSource,
+        WmoExportMeshMode meshMode)
+    {
         var scene = new SceneBuilder();
 
         // Build material lookup from WMO materials
@@ -131,6 +152,10 @@ public static class GlbExporter
         defaultMat.WithBaseColor(new Vector4(0.6f, 0.6f, 0.6f, 1.0f));
         defaultMat.WithDoubleSide(true);
 
+        var collisionMat = new MaterialBuilder("wmo_collision");
+        collisionMat.WithBaseColor(new Vector4(0.85f, 0.15f, 0.15f, 1.0f));
+        collisionMat.WithDoubleSide(true);
+
         for (int gi = 0; gi < wmo.Groups.Count; gi++)
         {
             var group = wmo.Groups[gi];
@@ -144,7 +169,6 @@ public static class GlbExporter
             var normals = GenerateNormals(group);
             bool hasUVs = group.UVs.Count == group.Vertices.Count;
 
-            // Build triangles grouped by face material
             int faceCount = group.Indices.Count / 3;
             for (int f = 0; f < faceCount; f++)
             {
@@ -160,7 +184,17 @@ public static class GlbExporter
 
                 // Get material for this face
                 byte matId = f < group.FaceMaterials.Count ? group.FaceMaterials[f] : (byte)0;
-                var mat = materials.GetValueOrDefault(matId, defaultMat);
+
+                // Convention: matId 255 is typically "hidden" / collision-only faces.
+                bool isCollisionFace = matId == 0xFF;
+                if (meshMode == WmoExportMeshMode.Visual && isCollisionFace)
+                    continue;
+                if (meshMode == WmoExportMeshMode.CollisionOnly && !isCollisionFace)
+                    continue;
+
+                var mat = (meshMode == WmoExportMeshMode.CollisionOnly)
+                    ? collisionMat
+                    : materials.GetValueOrDefault(matId, defaultMat);
                 var prim = mesh.UsePrimitive(mat);
 
                 var v0 = MakeWmoVertex(group, i0, normals, hasUVs);
@@ -175,7 +209,7 @@ public static class GlbExporter
 
         var model = scene.ToGltf2();
         model.SaveGLB(outputPath);
-        ViewerLog.Trace($"  GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials exported");
+        ViewerLog.Trace($"  GLB: {wmo.Groups.Count} groups, {wmo.Materials.Count} materials exported ({meshMode})");
     }
 
     /// <summary>
@@ -255,6 +289,8 @@ public static class GlbExporter
                     continue;
 
                 byte matId = f < group.FaceMaterials.Count ? group.FaceMaterials[f] : (byte)0;
+                if (matId == 0xFF)
+                    continue;
                 var mat = materials.GetValueOrDefault(matId, defaultMat);
                 var prim = mesh.UsePrimitive(mat);
 

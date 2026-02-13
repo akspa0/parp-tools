@@ -197,6 +197,7 @@ public static class Program
         string? inputPath = null;
         string? outputPath = null;
         bool extended = false;
+        string? mode = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -210,6 +211,9 @@ public static class Program
                 case "-o":
                     if (i + 1 < args.Length) outputPath = args[++i];
                     break;
+                case "--mode":
+                    if (i + 1 < args.Length) mode = args[++i];
+                    break;
                 case "--extended":
                     extended = true;
                     break;
@@ -217,6 +221,23 @@ public static class Program
                     if (!args[i].StartsWith("-") && inputPath == null)
                         inputPath = args[i];
                     break;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(mode))
+        {
+            mode = mode.Trim().ToLowerInvariant();
+            switch (mode)
+            {
+                case "basic":
+                    extended = false;
+                    break;
+                case "extended":
+                    extended = true;
+                    break;
+                default:
+                    Console.Error.WriteLine($"Error: invalid --mode '{mode}'. Expected: basic|extended");
+                    return 1;
             }
         }
 
@@ -232,6 +253,7 @@ public static class Program
         Console.WriteLine("=======================");
         Console.WriteLine($"Input:  {Path.GetFullPath(inputPath)}");
         Console.WriteLine($"Output: {Path.GetFullPath(outputPath)}");
+        Console.WriteLine($"Mode:   {(extended ? "extended" : "basic")}");
 
         try
         {
