@@ -18,7 +18,7 @@ public class WlLiquidLoader
     {
         public bool Enabled { get; set; } = true;
         public bool SwapXYBeforeRotation { get; set; } = false;
-        public Vector3 RotationDegrees { get; set; } = new(90f, 0f, 0f);
+        public Vector3 RotationDegrees { get; set; } = Vector3.Zero;
         public Vector3 Translation { get; set; } = Vector3.Zero;
     }
 

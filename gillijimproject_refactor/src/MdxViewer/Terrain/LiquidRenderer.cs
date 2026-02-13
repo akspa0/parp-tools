@@ -79,7 +79,9 @@ public class LiquidRenderer : IDisposable
     /// </summary>
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, TerrainLighting lighting, float deltaTime)
     {
-        if (!ShowLiquid || _meshes.Count == 0) return;
+        bool renderTerrainLiquids = ShowLiquid && _meshes.Count > 0;
+        bool renderWlLiquids = ShowWlLiquids && _wlMeshes.Count > 0;
+        if (!renderTerrainLiquids && !renderWlLiquids) return;
 
         _time += deltaTime;
 
@@ -102,17 +104,20 @@ public class LiquidRenderer : IDisposable
         _gl.DepthMask(false); // Don't write to depth buffer
         _gl.Disable(EnableCap.CullFace);
 
-        foreach (var mesh in _meshes)
+        if (renderTerrainLiquids)
         {
-            var (r, g, b, a) = GetLiquidColor(mesh.Type);
-            _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
+            foreach (var mesh in _meshes)
+            {
+                var (r, g, b, a) = GetLiquidColor(mesh.Type);
+                _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
 
-            _gl.BindVertexArray(mesh.Vao);
-            _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedShort, null);
+                _gl.BindVertexArray(mesh.Vao);
+                _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedShort, null);
+            }
         }
 
         // Render WL liquid bodies (loose project files)
-        if (ShowWlLiquids)
+        if (renderWlLiquids)
         {
             foreach (var mesh in _wlMeshes)
             {

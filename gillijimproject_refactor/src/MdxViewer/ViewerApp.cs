@@ -1912,6 +1912,14 @@ void main() {
                     bool showLiquid = liquidRenderer.ShowLiquid;
                     if (ImGui.Checkbox($"Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
                         liquidRenderer.ShowLiquid = showLiquid;
+
+                    if (_worldScene != null)
+                    {
+                        ImGui.SameLine();
+                        bool showWlTop = _worldScene.ShowWlLiquids;
+                        if (ImGui.Checkbox($"WL* ({liquidRenderer.WlMeshCount})", ref showWlTop))
+                            _worldScene.ShowWlLiquids = showWlTop;
+                    }
                 }
 
                 if (_worldScene != null)
@@ -2530,11 +2538,11 @@ void main() {
                     ts.SwapXYBeforeRotation = swapXY;
 
                 var rot = ts.RotationDegrees;
-                if (ImGui.SliderFloat3("Rotation (deg)", ref rot, -180f, 180f, "%.1f"))
+                if (ImGui.InputFloat3("Rotation (deg)", ref rot, "%.3f"))
                     ts.RotationDegrees = rot;
 
                 var tr = ts.Translation;
-                if (ImGui.SliderFloat3("Translation", ref tr, -20000f, 20000f, "%.1f"))
+                if (ImGui.InputFloat3("Translation", ref tr, "%.3f"))
                     ts.Translation = tr;
 
                 if (ImGui.Button("Apply + Reload WL"))

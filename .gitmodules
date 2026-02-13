@@ -1,3 +1,43 @@
+[submodule "PM4Tool/docs/apps/gillijimproject"]
+	path = PM4Tool/docs/apps/gillijimproject
+	url = https://github.com/mjollna-wow/gillijimproject
+
+[submodule "PM4Tool/docs/apps/noggit-red"]
+	path = PM4Tool/docs/apps/noggit-red
+	url = https://github.com/wowdev/noggit-red
+
+[submodule "PM4Tool/lib/DBCD"]
+	path = PM4Tool/lib/DBCD
+	url = https://github.com/wowdev/DBCD
+
+[submodule "PM4Tool/lib/Warcraft.NET"]
+	path = PM4Tool/lib/Warcraft.NET
+	url = https://github.com/wowdev/Warcraft.NET
+
+[submodule "gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3/Depth-Anything-3"]
+	path = gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/DepthAnything3/Depth-Anything-3
+	url = https://github.com/DepthAnything/Depth-Anything-3
+
+[submodule "parpToolbox/PM4Tool/docs/apps/gillijimproject"]
+	path = parpToolbox/PM4Tool/docs/apps/gillijimproject
+	url = https://github.com/mjollna-wow/gillijimproject
+
+[submodule "parpToolbox/PM4Tool/docs/apps/noggit-red"]
+	path = parpToolbox/PM4Tool/docs/apps/noggit-red
+	url = https://github.com/wowdev/noggit-red
+
+[submodule "parpToolbox/PM4Tool/docs/apps/wow.export"]
+	path = parpToolbox/PM4Tool/docs/apps/wow.export
+	url = https://github.com/wowdev/wow.export
+
 [submodule "parpToolbox/PM4Tools/docs/apps/gillijimproject"]
 	path = parpToolbox/PM4Tools/docs/apps/gillijimproject
 	url = https://github.com/mjollna-wow/gillijimproject
+
+[submodule "parpToolbox/src/lib/wow.tools.local"]
+	path = parpToolbox/src/lib/wow.tools.local
+	url = https://github.com/wowdev/wow.tools.local
+
+[submodule "external/alpha-core"]
+	path = gillijimproject_refactor/external/alpha-core
+	url = https://github.com/The-Alpha-Project/alpha-core
