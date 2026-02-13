@@ -92,6 +92,7 @@ public partial class ViewerApp : IDisposable
     private bool _showTerrainControls = true;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
+    private bool _showMinimapWindow = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -139,6 +140,8 @@ public partial class ViewerApp : IDisposable
     private float _cameraSpeed = 50f;
     // Field of view in degrees (adjustable via UI)
     private float _fovDegrees = 45f;
+
+    private bool _autoFrameModelOnLoad = true;
 
     // Sky gradient for standalone model viewing
     private uint _skyVao, _skyVbo, _skyShader;
@@ -318,6 +321,9 @@ public partial class ViewerApp : IDisposable
     }
 
     private bool _mKeyWasPressed = false;
+    private bool _leftArrowWasPressed = false;
+    private bool _rightArrowWasPressed = false;
+    private bool _spaceWasPressed = false;
 
     private void HandleKeyboardInput(float dt)
     {
@@ -331,6 +337,46 @@ public partial class ViewerApp : IDisposable
             _fullscreenMinimap = !_fullscreenMinimap;
         }
         _mKeyWasPressed = mPressed;
+
+        // Arrow keys and spacebar for MDX animation control
+        if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
+        {
+            var animator = mdxR.Animator;
+            int currentSeq = animator.CurrentSequence;
+            
+            if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
+            {
+                var seq = animator.Sequences[currentSeq];
+                float duration = seq.Time.End - seq.Time.Start;
+                float currentFrame = animator.CurrentFrame;
+                
+                // Left arrow: step backward
+                bool leftPressed = kb.IsKeyPressed(Key.Left);
+                if (leftPressed && !_leftArrowWasPressed)
+                {
+                    animator.IsPlaying = false;
+                    animator.StepToPrevKeyframe();
+                }
+                _leftArrowWasPressed = leftPressed;
+                
+                // Right arrow: step forward
+                bool rightPressed = kb.IsKeyPressed(Key.Right);
+                if (rightPressed && !_rightArrowWasPressed)
+                {
+                    animator.IsPlaying = false;
+                    animator.StepToNextKeyframe();
+                }
+                _rightArrowWasPressed = rightPressed;
+                
+                // Spacebar: toggle play/pause
+                bool spacePressed = kb.IsKeyPressed(Key.Space);
+                if (spacePressed && !_spaceWasPressed)
+                {
+                    animator.IsPlaying = !animator.IsPlaying;
+                }
+                _spaceWasPressed = spacePressed;
+            }
+        }
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
         bool shift = kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight);
@@ -416,11 +462,16 @@ public partial class ViewerApp : IDisposable
                 var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
                 if (chunk != null && chunk.AreaId != 0)
                 {
-                    // Simple direct lookup — AreaID from MCNK maps to AreaTable row key
-                    var name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
-                    if (name != _currentAreaName && name.StartsWith("Unknown"))
-                        ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={chunk.AreaId} → {name}  (table has {_areaTableService.Count} entries)");
-                    _currentAreaName = name;
+                    // Filter by MapID to avoid showing areas from other continents
+                    var name = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId);
+                    if (name == null)
+                    {
+                        // Fallback if MapID filtering fails
+                        name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                        if (name.StartsWith("Unknown"))
+                            ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={chunk.AreaId}, MapId={_currentMapId} → {name}  (table has {_areaTableService.Count} entries)");
+                    }
+                    _currentAreaName = name ?? "";
                 }
                 else
                     _currentAreaName = "";
@@ -581,6 +632,10 @@ void main() {
         if (_showWdlPreview)
             DrawWdlPreviewDialog();
 
+        // Minimap (floating window)
+        if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
+            DrawMinimapWindow();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -654,6 +709,7 @@ void main() {
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
+                ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
@@ -1830,7 +1886,10 @@ void main() {
                         // Load WDL preview
                         if (_wdlPreviewRenderer == null)
                             _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
-                        _wdlPreviewRenderer.LoadWdl(_dataSource!, map.Directory);
+                        
+                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Attempting to load WDL for {map.Directory}");
+                        bool loaded = _wdlPreviewRenderer.LoadWdl(_dataSource!, map.Directory);
+                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Load result: {loaded}, HasPreview: {_wdlPreviewRenderer.HasPreview}");
                     }
                 }
 
@@ -1925,15 +1984,6 @@ void main() {
         if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
-            // ── Minimap section (top of sidebar, always visible when terrain is loaded) ──
-            if (_terrainManager != null || _vlmTerrainManager != null)
-            {
-                DrawMinimapInSidebar();
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-            }
-
             // ── Selected Object section (always visible when something is selected) ──
             if (!string.IsNullOrEmpty(_selectedObjectInfo))
             {
@@ -1947,6 +1997,14 @@ void main() {
             if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 DrawModelInfoContent();
+            }
+
+            // ── Camera section ──
+            if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
+                ImGui.Text("Hold Shift for 5x boost");
+                ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
             }
 
             // ── Terrain Controls section ──
@@ -1981,6 +2039,14 @@ void main() {
 
         ImGui.TextWrapped(_modelInfo);
 
+        if (_renderer is MdxRenderer || _renderer is WmoRenderer)
+        {
+            ImGui.Separator();
+            ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
+            if (ImGui.Button("Frame Model"))
+                FrameCurrentModel();
+        }
+
         // DoodadSet selection (WMO only)
         if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
         {
@@ -1998,6 +2064,108 @@ void main() {
                     if (selected) ImGui.SetItemDefaultFocus();
                 }
                 ImGui.EndCombo();
+            }
+        }
+
+        // Animation sequence selection (MDX only)
+        if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
+        {
+            ImGui.Separator();
+            ImGui.Text("Animation:");
+            
+            var animator = mdxR.Animator;
+            int currentSeq = animator.CurrentSequence;
+            string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count 
+                ? animator.Sequences[currentSeq].Name 
+                : "None";
+            
+            if (ImGui.BeginCombo("##AnimSequence", currentSeqName))
+            {
+                for (int s = 0; s < animator.Sequences.Count; s++)
+                {
+                    bool selected = s == currentSeq;
+                    string seqName = animator.Sequences[s].Name;
+                    if (string.IsNullOrEmpty(seqName))
+                        seqName = $"Sequence {s}";
+                    
+                    if (ImGui.Selectable(seqName, selected))
+                        animator.SetSequence(s);
+                    if (selected) ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+            
+            // Timeline controls
+            if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
+            {
+                var seq = animator.Sequences[currentSeq];
+                float seqStart = seq.Time.Start;
+                float seqEnd = seq.Time.End;
+                float duration = seqEnd - seqStart;
+                float currentAbs = animator.CurrentFrame;
+                float currentRel = currentAbs - seqStart;
+                
+                // Play/Pause button
+                bool isPlaying = animator.IsPlaying;
+                if (ImGui.Button(isPlaying ? "⏸ Pause" : "▶ Play"))
+                    animator.IsPlaying = !isPlaying;
+                
+                ImGui.SameLine();
+                
+                // Step backward button
+                if (ImGui.Button("◀"))
+                {
+                    animator.IsPlaying = false;
+                    animator.StepToPrevKeyframe();
+                }
+                
+                ImGui.SameLine();
+                
+                // Step forward button
+                if (ImGui.Button("▶"))
+                {
+                    animator.IsPlaying = false;
+                    animator.StepToNextKeyframe();
+                }
+                
+                // Frame slider
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
+                {
+                    animator.IsPlaying = false;
+                    animator.CurrentFrame = seqStart + currentRel;
+                }
+                
+                // Duration info
+                ImGui.Text($"Duration: {duration:F0}ms ({duration / 1000.0f:F2}s)");
+
+                if (ImGui.TreeNode("Animation Debug"))
+                {
+                    ImGui.Text($"Current Seq: {currentSeq}");
+                    ImGui.Text($"Current Abs Frame: {currentAbs:F2}");
+                    ImGui.Text($"Seq Range: [{seqStart}, {seqEnd}]");
+
+                    var stats = animator.GetTrackDebugStatsForCurrentSequence();
+                    ImGui.Text($"T keys total/in-range: {stats.TranslationKeysTotal}/{stats.TranslationKeysInSequence}");
+                    ImGui.Text($"R keys total/in-range: {stats.RotationKeysTotal}/{stats.RotationKeysInSequence}");
+                    ImGui.Text($"S keys total/in-range: {stats.ScalingKeysTotal}/{stats.ScalingKeysInSequence}");
+
+                    string minKey = stats.MinKeyTime?.ToString() ?? "n/a";
+                    string maxKey = stats.MaxKeyTime?.ToString() ?? "n/a";
+                    ImGui.Text($"All key range: [{minKey}, {maxKey}]");
+
+                    ImGui.Separator();
+                    ImGui.Text("Sequences (first 12):");
+                    int previewCount = Math.Min(12, animator.Sequences.Count);
+                    for (int i = 0; i < previewCount; i++)
+                    {
+                        var s = animator.Sequences[i];
+                        string name = string.IsNullOrWhiteSpace(s.Name) ? "<empty>" : s.Name;
+                        ImGui.Text($"{i}: {name} [{s.Time.Start}-{s.Time.End}]");
+                    }
+
+                    ImGui.TreePop();
+                }
             }
         }
 
@@ -2022,6 +2190,36 @@ void main() {
                     _renderer.SetSubObjectVisible(i, vis);
             }
         }
+    }
+
+    private void FrameCurrentModel()
+    {
+        if (_renderer is MdxRenderer mdxR)
+        {
+            var bmin = mdxR.BoundsMin;
+            var bmax = mdxR.BoundsMax;
+            FrameBounds(bmin, bmax, mdxMirrorX: true);
+        }
+        else if (_renderer is WmoRenderer wmoR)
+        {
+            FrameBounds(wmoR.BoundsMin, wmoR.BoundsMax, mdxMirrorX: false);
+        }
+    }
+
+    private void FrameBounds(Vector3 boundsMin, Vector3 boundsMax, bool mdxMirrorX)
+    {
+        var center = (boundsMin + boundsMax) * 0.5f;
+        var extent = boundsMax - boundsMin;
+        float radius = MathF.Max(extent.Length() * 0.5f, 1f);
+
+        // MDX standalone rendering applies a MirrorX scale at draw time. Keep the previous convention.
+        if (mdxMirrorX)
+            center.X = -center.X;
+
+        float dist = MathF.Max(radius * 3.0f, 10f);
+        _camera.Position = center + new Vector3(-dist, 0, radius * 0.6f);
+        _camera.Yaw = 0f;
+        _camera.Pitch = -15f;
     }
 
     private void DrawTerrainControlsContent()
@@ -2543,7 +2741,7 @@ void main() {
         ImGui.PopStyleVar();
     }
 
-    private void DrawMinimapInSidebar()
+    private void DrawMinimapWindow()
     {
         // Gather tile data
         List<(int tx, int ty)>? existingTiles = null;
@@ -2569,7 +2767,24 @@ void main() {
         else return;
 
         var io = ImGui.GetIO();
-        float mapSize = SidebarWidth - 12f; // Square minimap fitting sidebar width
+        
+        // Position in top-right, but accounting for right sidebar if visible
+        float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
+        ImGui.SetNextWindowSize(new Vector2(420, 500), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 420 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+        
+        if (!ImGui.Begin("Minimap", ref _showMinimapWindow, ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            return;
+        }
+        
+        // Calculate available space for minimap (square, fitting in window)
+        var windowSize = ImGui.GetWindowSize();
+        float availableWidth = windowSize.X - 20;
+        float availableHeight = windowSize.Y - 120; // Leave room for controls
+        float mapSize = MathF.Min(availableWidth, availableHeight);
+        
         var cursorPos = ImGui.GetCursorScreenPos();
 
         // Scroll-wheel zoom
@@ -2653,6 +2868,8 @@ void main() {
             if (ImGui.SmallButton("Reset Pan"))
                 _minimapPanOffset = Vector2.Zero;
         }
+        
+        ImGui.End();
     }
 
     private void DrawFullscreenMinimap()
@@ -3800,22 +4017,8 @@ void main() {
 
         _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath);
 
-        // Position camera to view model from a good angle
-        // MirrorX in Render() negates X, so camera sees mirrored model.
-        // Camera at -X with yaw=0 looks toward +X → sees the model's front (which is at -X after mirror).
-        var bmin = mdx.Model.Bounds.Extent.Min;
-        var bmax = mdx.Model.Bounds.Extent.Max;
-        var center = new System.Numerics.Vector3(
-            -(bmin.X + bmax.X) * 0.5f,
-            (bmin.Y + bmax.Y) * 0.5f,
-            (bmin.Z + bmax.Z) * 0.5f);
-        var extent = new System.Numerics.Vector3(
-            bmax.X - bmin.X, bmax.Y - bmin.Y, bmax.Z - bmin.Z);
-
-        float dist = Math.Max(extent.Length() * 1.5f, 50f);
-        _camera.Position = center + new System.Numerics.Vector3(-dist, 0, extent.Z * 0.3f);
-        _camera.Yaw = 0f;
-        _camera.Pitch = -10f; // Slight downward angle
+        if (_autoFrameModelOnLoad)
+            FrameCurrentModel();
 
         _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +
                      $"Version: {mdx.Version}\n" +
@@ -3857,6 +4060,9 @@ void main() {
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 
         _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver);
+
+        if (_autoFrameModelOnLoad)
+            FrameCurrentModel();
 
         var wmoCenter = (wmo.BoundsMin + wmo.BoundsMax) * 0.5f;
         var wmoExtent = wmo.BoundsMax - wmo.BoundsMin;
@@ -4092,6 +4298,11 @@ void main() {
                          $"MDX names: {loader.MdxModelNames.Count}\n" +
                          $"WMO names: {loader.WmoModelNames.Count}\n" +
                          $"\nCamera: ({startPos.X:F0}, {startPos.Y:F0}, {startPos.Z:F0})\n";
+
+            // Set MapID for AreaTable lookups
+            var vlmMapDef = _discoveredMaps.FirstOrDefault(m =>
+                string.Equals(m.Directory, loader.MapName, StringComparison.OrdinalIgnoreCase));
+            _currentMapId = vlmMapDef?.Id ?? -1;
 
             _statusMessage = $"Loaded VLM project: {loader.MapName} ({loader.TileCoords.Count} tiles)";
         }

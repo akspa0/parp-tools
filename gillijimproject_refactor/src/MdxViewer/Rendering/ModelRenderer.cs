@@ -76,6 +76,8 @@ public class MdxRenderer : ISceneRenderer
     private int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private int _uLightDir, _uLightColor, _uAmbientColor;
     private int _uSphereEnvMap;
+    private int _uBones; // Bone matrix array uniform location
+    private int _uHasBones; // Enable skinning flag
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -206,6 +208,30 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        // Upload bone matrices if animated
+        if (_animator != null && _animator.HasAnimation)
+        {
+            _gl.Uniform1(_uHasBones, 1);
+            
+            var matrices = _animator.BoneMatrices;
+            int boneCount = Math.Min(matrices.Length, 128);
+            for (int i = 0; i < boneCount; i++)
+            {
+                var m = matrices[i];
+                _gl.UniformMatrix4(_uBones + i, 1, false, (float*)&m);
+            }
+            if (matrices.Length > 128)
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"Model has {matrices.Length} bones, only uploading first 128");
+        }
+        else
+        {
+            _gl.Uniform1(_uHasBones, 0);
+            
+            // Upload identity matrix for bone 0 as fallback for non-animated models
+            var identity = Matrix4x4.Identity;
+            _gl.UniformMatrix4(_uBones, 1, false, (float*)&identity);
+        }
 
         // Fog uniforms (match terrain fog for seamless blending)
         var fc = fogColor ?? new Vector3(0.6f, 0.7f, 0.85f);
@@ -382,10 +408,14 @@ public class MdxRenderer : ISceneRenderer
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
+layout(location = 3) in vec4 aBoneIndices;
+layout(location = 4) in vec4 aBoneWeights;
 
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProj;
+uniform mat4 uBones[128];
+uniform int uHasBones;
 
 out vec3 vNormal;
 out vec2 vTexCoord;
@@ -393,9 +423,24 @@ out vec3 vFragPos;
 out vec3 vViewNormal;
 
 void main() {
-    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    vec4 position = vec4(aPos, 1.0);
+    vec3 normal = aNormal;
+    
+    // Apply bone skinning if enabled
+    if (uHasBones > 0) {
+        mat4 boneTransform = mat4(0.0);
+        boneTransform += uBones[int(aBoneIndices.x)] * aBoneWeights.x;
+        boneTransform += uBones[int(aBoneIndices.y)] * aBoneWeights.y;
+        boneTransform += uBones[int(aBoneIndices.z)] * aBoneWeights.z;
+        boneTransform += uBones[int(aBoneIndices.w)] * aBoneWeights.w;
+        
+        position = boneTransform * position;
+        normal = mat3(boneTransform) * normal;
+    }
+    
+    vec4 worldPos = uModel * position;
     vFragPos = worldPos.xyz;
-    vNormal = mat3(transpose(inverse(uModel))) * aNormal;
+    vNormal = mat3(transpose(inverse(uModel))) * normal;
     vViewNormal = mat3(uView) * vNormal;
     vTexCoord = aTexCoord;
     gl_Position = uProj * uView * worldPos;
@@ -510,6 +555,8 @@ void main() {
         _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uSphereEnvMap = _gl.GetUniformLocation(_shaderProgram, "uSphereEnvMap");
+        _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
+        _uHasBones = _gl.GetUniformLocation(_shaderProgram, "uHasBones");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);
@@ -525,10 +572,77 @@ void main() {
         if (status == 0)
         {
             string log = _gl.GetShaderInfoLog(shader);
+            ViewerLog.Error(ViewerLog.Category.Shader, $"MDX {type} shader compile error: {log}");
+            ViewerLog.Error(ViewerLog.Category.Shader, $"Shader source:\n{source}");
             throw new Exception($"Shader compile error ({type}): {log}");
         }
 
         return shader;
+    }
+
+    /// <summary>
+    /// Convert MDX bone weight structure to standard 4-bone skinning format.
+    /// MDX uses VertexGroups (group index per vertex) + MatrixGroups (bone count per group) + MatrixIndices (flattened bone array).
+    /// </summary>
+    private (Vector4[] indices, Vector4[] weights) BuildBoneWeights(MdlGeoset geoset)
+    {
+        int vertCount = geoset.Vertices.Count;
+        var indices = new Vector4[vertCount];
+        var weights = new Vector4[vertCount];
+        
+        if (geoset.VertexGroups.Count == 0 || geoset.MatrixGroups.Count == 0)
+        {
+            // No bone weights - return identity (all vertices use bone 0 with weight 1.0)
+            for (int v = 0; v < vertCount; v++)
+            {
+                indices[v] = new Vector4(0, 0, 0, 0);
+                weights[v] = new Vector4(1, 0, 0, 0);
+            }
+            return (indices, weights);
+        }
+        
+        // Build group offset lookup table
+        var groupOffsets = new int[geoset.MatrixGroups.Count];
+        int offset = 0;
+        for (int g = 0; g < geoset.MatrixGroups.Count; g++)
+        {
+            groupOffsets[g] = offset;
+            offset += (int)geoset.MatrixGroups[g];
+        }
+        
+        // Process each vertex
+        for (int v = 0; v < vertCount; v++)
+        {
+            byte groupIdx = geoset.VertexGroups[v];
+            if (groupIdx >= geoset.MatrixGroups.Count)
+            {
+                // Invalid group index - use identity
+                indices[v] = new Vector4(0, 0, 0, 0);
+                weights[v] = new Vector4(1, 0, 0, 0);
+                continue;
+            }
+            
+            uint boneCount = geoset.MatrixGroups[groupIdx];
+            int matrixOffset = groupOffsets[groupIdx];
+            
+            var idx = new float[4];
+            var wt = new float[4];
+            
+            // Get up to 4 bones for this vertex
+            for (int b = 0; b < Math.Min(boneCount, 4); b++)
+            {
+                if (matrixOffset + b < geoset.MatrixIndices.Count)
+                {
+                    idx[b] = geoset.MatrixIndices[matrixOffset + b];
+                    wt[b] = 1.0f / boneCount; // Equal weights
+                }
+            }
+            
+            indices[v] = new Vector4(idx[0], idx[1], idx[2], idx[3]);
+            weights[v] = new Vector4(wt[0], wt[1], wt[2], wt[3]);
+        }
+        
+        return (indices, weights);
     }
 
     private unsafe void InitBuffers()
@@ -541,7 +655,10 @@ void main() {
 
             var gb = new GeosetBuffers { GeosetIndex = i };
 
-            // Interleave: pos(3) + normal(3) + uv(2) = 8 floats per vertex
+            // Build bone weight data
+            var (boneIndices, boneWeights) = BuildBoneWeights(geoset);
+
+            // Interleave: pos(3) + normal(3) + uv(2) + boneIdx(4) + boneWt(4) = 16 floats per vertex
             int vertCount = geoset.Vertices.Count;
             bool hasNormals = geoset.Normals.Count == vertCount;
             bool hasUVs = geoset.TexCoords.Count == vertCount;
@@ -560,35 +677,51 @@ void main() {
                 MdxTextureDiagnosticLogger.Log(uvRangeMsg);
             }
 
-            float[] vertexData = new float[vertCount * 8];
+            float[] vertexData = new float[vertCount * 16];
             for (int v = 0; v < vertCount; v++)
             {
-                // Pass through raw WoW model-local coords.
+                int offset = v * 16;
+                
+                // Position (0-2)
                 var pos = geoset.Vertices[v];
-                vertexData[v * 8 + 0] = pos.X;
-                vertexData[v * 8 + 1] = pos.Y;
-                vertexData[v * 8 + 2] = pos.Z;
+                vertexData[offset + 0] = pos.X;
+                vertexData[offset + 1] = pos.Y;
+                vertexData[offset + 2] = pos.Z;
 
+                // Normal (3-5)
                 if (hasNormals)
                 {
                     var n = geoset.Normals[v];
-                    vertexData[v * 8 + 3] = n.X;
-                    vertexData[v * 8 + 4] = n.Y;
-                    vertexData[v * 8 + 5] = n.Z;
+                    vertexData[offset + 3] = n.X;
+                    vertexData[offset + 4] = n.Y;
+                    vertexData[offset + 5] = n.Z;
                 }
                 else
                 {
-                    vertexData[v * 8 + 3] = 0f;
-                    vertexData[v * 8 + 4] = 1f;
-                    vertexData[v * 8 + 5] = 0f;
+                    vertexData[offset + 3] = 0f;
+                    vertexData[offset + 4] = 1f;
+                    vertexData[offset + 5] = 0f;
                 }
 
+                // TexCoord (6-7)
                 if (hasUVs)
                 {
                     var uv = geoset.TexCoords[v];
-                    vertexData[v * 8 + 6] = uv.U;
-                    vertexData[v * 8 + 7] = uv.V;
+                    vertexData[offset + 6] = uv.U;
+                    vertexData[offset + 7] = uv.V;
                 }
+                
+                // Bone indices (8-11)
+                vertexData[offset + 8] = boneIndices[v].X;
+                vertexData[offset + 9] = boneIndices[v].Y;
+                vertexData[offset + 10] = boneIndices[v].Z;
+                vertexData[offset + 11] = boneIndices[v].W;
+                
+                // Bone weights (12-15)
+                vertexData[offset + 12] = boneWeights[v].X;
+                vertexData[offset + 13] = boneWeights[v].Y;
+                vertexData[offset + 14] = boneWeights[v].Z;
+                vertexData[offset + 15] = boneWeights[v].W;
             }
 
             // Create VAO/VBO/EBO
@@ -609,16 +742,22 @@ void main() {
             fixed (ushort* ptr = indices)
                 _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
-            uint stride = 8 * sizeof(float);
-            // Position
+            uint stride = 16 * sizeof(float);
+            // Position (location 0)
             _gl.EnableVertexAttribArray(0);
             _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
-            // Normal
+            // Normal (location 1)
             _gl.EnableVertexAttribArray(1);
             _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
-            // TexCoord
+            // TexCoord (location 2)
             _gl.EnableVertexAttribArray(2);
             _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+            // Bone indices (location 3)
+            _gl.EnableVertexAttribArray(3);
+            _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
+            // Bone weights (location 4)
+            _gl.EnableVertexAttribArray(4);
+            _gl.VertexAttribPointer(4, 4, VertexAttribPointerType.Float, false, stride, (void*)(12 * sizeof(float)));
 
             _gl.BindVertexArray(0);
 

@@ -20,6 +20,19 @@ public class MdxAnimator
     private float _currentFrame;
     private float[] _globalSeqFrames;
 
+    private int _cachedKeyframeSeqIndex = -1;
+    private int[]? _cachedKeyframes;
+
+    public readonly record struct AnimTrackDebugStats(
+        int TranslationKeysTotal,
+        int RotationKeysTotal,
+        int ScalingKeysTotal,
+        int TranslationKeysInSequence,
+        int RotationKeysInSequence,
+        int ScalingKeysInSequence,
+        int? MinKeyTime,
+        int? MaxKeyTime);
+
     /// <summary>Number of bones in the skeleton</summary>
     public int BoneCount => _mdx.Bones.Count;
 
@@ -36,7 +49,120 @@ public class MdxAnimator
     public int CurrentSequence => _sequenceIndex;
 
     /// <summary>Current frame within the sequence</summary>
-    public float CurrentFrame => _currentFrame;
+    public float CurrentFrame
+    {
+        get => _currentFrame;
+        set => _currentFrame = value;
+    }
+
+    /// <summary>Whether animation is currently playing</summary>
+    public bool IsPlaying { get; set; } = true;
+
+    public AnimTrackDebugStats GetTrackDebugStatsForCurrentSequence()
+    {
+        if (_mdx.Sequences.Count == 0)
+            return new AnimTrackDebugStats(0, 0, 0, 0, 0, 0, null, null);
+
+        var seq = _mdx.Sequences[_sequenceIndex];
+        int from = seq.Time.Start;
+        int to = seq.Time.End;
+
+        int tTotal = 0, rTotal = 0, sTotal = 0;
+        int tIn = 0, rIn = 0, sIn = 0;
+        int min = int.MaxValue, max = int.MinValue;
+        bool hasAny = false;
+
+        foreach (var bone in _mdx.Bones)
+        {
+            if (bone.TranslationTrack?.Keys != null)
+            {
+                tTotal += bone.TranslationTrack.Keys.Count;
+                foreach (var k in bone.TranslationTrack.Keys)
+                {
+                    if (k.Frame >= from && k.Frame <= to) tIn++;
+                    if (k.Frame < min) min = k.Frame;
+                    if (k.Frame > max) max = k.Frame;
+                    hasAny = true;
+                }
+            }
+
+            if (bone.RotationTrack?.Keys != null)
+            {
+                rTotal += bone.RotationTrack.Keys.Count;
+                foreach (var k in bone.RotationTrack.Keys)
+                {
+                    if (k.Frame >= from && k.Frame <= to) rIn++;
+                    if (k.Frame < min) min = k.Frame;
+                    if (k.Frame > max) max = k.Frame;
+                    hasAny = true;
+                }
+            }
+
+            if (bone.ScalingTrack?.Keys != null)
+            {
+                sTotal += bone.ScalingTrack.Keys.Count;
+                foreach (var k in bone.ScalingTrack.Keys)
+                {
+                    if (k.Frame >= from && k.Frame <= to) sIn++;
+                    if (k.Frame < min) min = k.Frame;
+                    if (k.Frame > max) max = k.Frame;
+                    hasAny = true;
+                }
+            }
+        }
+
+        return new AnimTrackDebugStats(
+            tTotal, rTotal, sTotal,
+            tIn, rIn, sIn,
+            hasAny ? min : null,
+            hasAny ? max : null);
+    }
+
+    public float StepToNextKeyframe()
+    {
+        if (_mdx.Sequences.Count == 0) return _currentFrame;
+        var seq = _mdx.Sequences[_sequenceIndex];
+        int from = seq.Time.Start;
+        int to = seq.Time.End;
+        var keys = GetCachedKeyframes(from, to);
+        if (keys.Length == 0)
+        {
+            _currentFrame = Math.Clamp(_currentFrame, from, to);
+            return _currentFrame;
+        }
+
+        float frame = Math.Clamp(_currentFrame, from, to);
+        int needle = (int)MathF.Floor(frame) + 1;
+        int idx = Array.BinarySearch(keys, needle);
+        if (idx < 0) idx = ~idx;
+        if (idx >= keys.Length) idx = keys.Length - 1;
+
+        _currentFrame = Math.Clamp(keys[idx], from, to);
+        return _currentFrame;
+    }
+
+    public float StepToPrevKeyframe()
+    {
+        if (_mdx.Sequences.Count == 0) return _currentFrame;
+        var seq = _mdx.Sequences[_sequenceIndex];
+        int from = seq.Time.Start;
+        int to = seq.Time.End;
+        var keys = GetCachedKeyframes(from, to);
+        if (keys.Length == 0)
+        {
+            _currentFrame = Math.Clamp(_currentFrame, from, to);
+            return _currentFrame;
+        }
+
+        float frame = Math.Clamp(_currentFrame, from, to);
+        int needle = (int)MathF.Ceiling(frame) - 1;
+        int idx = Array.BinarySearch(keys, needle);
+        if (idx < 0) idx = (~idx) - 1;
+        if (idx < 0) idx = 0;
+
+        _currentFrame = Math.Clamp(keys[idx], from, to);
+        return _currentFrame;
+    }
 
     public MdxAnimator(MdxFile mdx)
     {
@@ -90,12 +216,58 @@ public class MdxAnimator
         if (index < 0 || index >= _mdx.Sequences.Count) return;
         _sequenceIndex = index;
         _currentFrame = _mdx.Sequences[index].Time.Start;
+        _cachedKeyframeSeqIndex = -1;
+        _cachedKeyframes = null;
+    }
+
+    private int[] GetCachedKeyframes(int from, int to)
+    {
+        if (_cachedKeyframes != null && _cachedKeyframeSeqIndex == _sequenceIndex)
+            return _cachedKeyframes;
+
+        var set = new HashSet<int>();
+        foreach (var bone in _mdx.Bones)
+        {
+            if (bone.TranslationTrack?.Keys != null)
+                foreach (var k in bone.TranslationTrack.Keys)
+                    if (k.Frame >= from && k.Frame <= to) set.Add(k.Frame);
+
+            if (bone.RotationTrack?.Keys != null)
+                foreach (var k in bone.RotationTrack.Keys)
+                    if (k.Frame >= from && k.Frame <= to) set.Add(k.Frame);
+
+            if (bone.ScalingTrack?.Keys != null)
+                foreach (var k in bone.ScalingTrack.Keys)
+                    if (k.Frame >= from && k.Frame <= to) set.Add(k.Frame);
+        }
+
+        if (set.Count == 0)
+        {
+            _cachedKeyframes = Array.Empty<int>();
+        }
+        else
+        {
+            var arr = set.ToArray();
+            Array.Sort(arr);
+            _cachedKeyframes = arr;
+        }
+
+        _cachedKeyframeSeqIndex = _sequenceIndex;
+        return _cachedKeyframes;
     }
 
     /// <summary>Advance animation by deltaMs milliseconds and recompute bone matrices</summary>
     public void Update(float deltaMs)
     {
         if (!HasAnimation || _mdx.Sequences.Count == 0) return;
+        
+        // If paused, just recalculate bones at current frame without advancing time
+        if (!IsPlaying)
+        {
+            foreach (int rootId in _rootBoneIds)
+                UpdateBone(rootId, Matrix4x4.Identity);
+            return;
+        }
 
         var seq = _mdx.Sequences[_sequenceIndex];
         _currentFrame += deltaMs;

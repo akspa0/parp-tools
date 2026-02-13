@@ -488,22 +488,7 @@ void main() {
             int vertCount = group.Vertices.Count;
             bool hasUVs = group.UVs.Count == vertCount;
             if (!hasUVs)
-                ViewerLog.Error(ViewerLog.Category.Wmo, $"[WmoRenderer] Group {gi} '{group.Name}': UV count mismatch! Verts={vertCount}, UVs={group.UVs.Count}");
-            else if (group.UVs.Count > 0)
-            {
-                float uMin = float.MaxValue, uMax = float.MinValue, vMin = float.MaxValue, vMax = float.MinValue;
-                int outOfRange = 0;
-                foreach (var uv in group.UVs)
-                {
-                    if (uv.X < uMin) uMin = uv.X; if (uv.X > uMax) uMax = uv.X;
-                    if (uv.Y < vMin) vMin = uv.Y; if (uv.Y > vMax) vMax = uv.Y;
-                    if (uv.X < 0f || uv.X > 1f || uv.Y < 0f || uv.Y > 1f) outOfRange++;
-                }
-                string rangeWarning = (uMin < 0f || uMax > 1f || vMin < 0f || vMax > 1f) ? " [OUT OF 0-1 RANGE]" : "";
-                ViewerLog.Important(ViewerLog.Category.Wmo, $"[WmoRenderer] Group {gi} '{group.Name}': {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]{rangeWarning}");
-                if (outOfRange > 0)
-                    ViewerLog.Error(ViewerLog.Category.Wmo, $"[WmoRenderer] Group {gi}: {outOfRange}/{vertCount} UVs outside [0,1] range - texture may stretch/clamp");
-            }
+                ViewerLog.Trace($"[WmoRenderer] Group {gi} '{group.Name}': UV count mismatch! Verts={vertCount}, UVs={group.UVs.Count}");
 
             // Interleave: pos(3) + normal(3) + uv(2) = 8 floats
             float[] vertexData = new float[vertCount * 8];

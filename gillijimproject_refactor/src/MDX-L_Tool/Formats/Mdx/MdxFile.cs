@@ -201,28 +201,101 @@ public class MdxFile
 
     static void ReadSeqs(BinaryReader br, uint size, List<MdlSequence> sequences)
     {
-        uint count = size / 132;
-        for (uint i = 0; i < count; i++)
+        long startPos = br.BaseStream.Position;
+
+        // WoW Alpha SEQS variants observed in the wild:
+        //   uint32 count + count * entrySize
+        // where entrySize is commonly 140 (Alpha), but 136/132 variants also exist.
+        // Core fields always begin with:
+        //   name[80], intervalStart, intervalEnd, moveSpeed, flags, frequency
+        if (size >= 4)
+        {
+            int count = br.ReadInt32();
+            if (count > 0)
+            {
+                uint remaining = size - 4;
+                if (remaining % (uint)count == 0)
+                {
+                    uint entrySize = remaining / (uint)count;
+                    if (entrySize is 132 or 136 or 140)
+                    {
+                        for (int i = 0; i < count; i++)
+                        {
+                            long entryStart = br.BaseStream.Position;
+
+                            var seq = new MdlSequence();
+                            seq.Name = ReadFixedString(br, 0x50);
+
+                            uint intervalStart = br.ReadUInt32();
+                            uint intervalEnd = br.ReadUInt32();
+                            seq.Time = new CiRange
+                            {
+                                Start = unchecked((int)intervalStart),
+                                End = unchecked((int)intervalEnd)
+                            };
+
+                            seq.MoveSpeed = br.ReadSingle();
+                            seq.Flags = br.ReadUInt32();
+                            seq.Frequency = br.ReadSingle();
+
+                            // Variants differ in the next metadata fields:
+                            // 132: syncPoint (uint)
+                            // 136: replayStart/replayEnd (2x int)
+                            // 140: replayStart/replayEnd + blendTime (int)
+                            if (entrySize == 132)
+                            {
+                                uint syncPoint = br.ReadUInt32();
+                                seq.Replay = new CiRange { Start = unchecked((int)syncPoint), End = 0 };
+                            }
+                            else
+                            {
+                                int replayStart = br.ReadInt32();
+                                int replayEnd = br.ReadInt32();
+                                seq.Replay = new CiRange { Start = replayStart, End = replayEnd };
+                                if (entrySize == 140)
+                                    seq.BlendTime = br.ReadUInt32();
+                            }
+
+                            var bounds = new CMdlBounds();
+                            bounds.Radius = br.ReadSingle();
+                            bounds.Extent.Min = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                            bounds.Extent.Max = new C3Vector(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+                            seq.Bounds = bounds;
+
+                            // Ensure alignment to declared entry size even if there are extra unknown bytes
+                            br.BaseStream.Position = entryStart + entrySize;
+
+                            sequences.Add(seq);
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Fallback legacy parsing: assume chunk is raw array of 132-byte entries with no leading count
+        br.BaseStream.Position = startPos;
+        uint legacyCount = size / 132;
+        for (uint i = 0; i < legacyCount; i++)
         {
             var seq = new MdlSequence();
             seq.Name = ReadFixedString(br, 0x50);
-            
+
             var time = new CiRange();
             time.Start = br.ReadInt32();
             time.End = br.ReadInt32();
             seq.Time = time;
-            
+
             seq.MoveSpeed = br.ReadSingle();
             seq.Flags = br.ReadUInt32();
-            
+
             seq.Frequency = br.ReadSingle();
             var replay = new CiRange();
             replay.Start = br.ReadInt32();
             replay.End = br.ReadInt32();
             seq.Replay = replay;
-            
-            // Extent
-            br.ReadBytes(28); 
+
+            br.ReadBytes(28);
             sequences.Add(seq);
         }
     }

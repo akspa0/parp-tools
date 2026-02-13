@@ -129,9 +129,9 @@ public class WorldScene : ISceneRenderer
     public AreaTriggerLoader? AreaTriggerLoader => _areaTriggerLoader;
     public bool AreaTriggerLoadAttempted => _areaTriggerLoadAttempted;
 
-    // WL loose liquid files (lazy-loaded on first toggle)
+    // WL loose liquid files (auto-loaded on scene init)
     private WlLiquidLoader? _wlLoader;
-    private bool _showWlLiquids = false;
+    private bool _showWlLiquids = true; // Auto-enable by default
     private bool _wlLoadAttempted = false;
     private IDataSource? _dataSource;
     public bool ShowWlLiquids
@@ -303,6 +303,12 @@ public class WorldScene : ISceneRenderer
             _terrainManager.OnTileLoaded += OnTileLoaded;
             _terrainManager.OnTileUnloaded += OnTileUnloaded;
             onStatus?.Invoke("World loaded (tiles stream as you move).");
+        }
+        
+        // Auto-load WL liquids if enabled
+        if (_showWlLiquids && !_wlLoadAttempted)
+        {
+            LazyLoadWlLiquids();
         }
     }
 
