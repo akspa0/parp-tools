@@ -599,8 +599,6 @@ public class WorldScene : ISceneRenderer
         _externalMdxInstances.Clear();
         _externalWmoInstances.Clear();
 
-        var rot180Z = Matrix4x4.CreateRotationZ(MathF.PI);
-
         foreach (var spawn in spawns)
         {
             if (string.IsNullOrWhiteSpace(spawn.ModelPath))
@@ -619,8 +617,7 @@ public class WorldScene : ISceneRenderer
             {
                 _assets.EnsureWmoLoaded(key);
 
-                var transform = rot180Z
-                    * Matrix4x4.CreateRotationZ(orientationRadians)
+                var transform = Matrix4x4.CreateRotationZ(orientationRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 localMin, localMax, worldMin, worldMax;
@@ -657,8 +654,7 @@ public class WorldScene : ISceneRenderer
 
                 float scale = spawn.EffectiveScale > 0 ? spawn.EffectiveScale : 1.0f;
 
-                var transform = rot180Z
-                    * Matrix4x4.CreateScale(scale)
+                var transform = Matrix4x4.CreateScale(scale)
                     * Matrix4x4.CreateRotationZ(orientationRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
