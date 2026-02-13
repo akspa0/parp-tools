@@ -55,7 +55,7 @@ A high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3
 - **Terrain**: WDT, ADT (Alpha 0.5.3 monolithic, 0.6.0+ split)
 - **Models**: WMO (v14/v16/v17), MDX (v1300), M2 (v264+)
 - **Textures**: BLP (v0/v1), with DBC replaceable texture resolution
-- **Data**: DBC files, Alpha-Core SQL dumps, minimap tiles
+- **Data**: DBC files, Alpha-Core SQL dumps, minimap tiles, Installed game clients (0.5.3-0.8.0)
 
 ---
 

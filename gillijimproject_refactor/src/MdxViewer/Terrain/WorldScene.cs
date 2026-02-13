@@ -1053,18 +1053,39 @@ public class WorldScene : ISceneRenderer
         ObjectType bestType = ObjectType.None;
         int bestIndex = -1;
 
+        var hits = new List<(string type, int index, float dist, string name)>();
+
         // Test WMO bounding boxes
         for (int i = 0; i < _wmoInstances.Count; i++)
         {
             float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin, _wmoInstances[i].BoundsMax);
-            if (t >= 0 && t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
+            if (t >= 0)
+            {
+                hits.Add(("WMO", i, t, _wmoInstances[i].ModelName));
+                if (t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
+            }
         }
 
         // Test MDX bounding boxes
         for (int i = 0; i < _mdxInstances.Count; i++)
         {
             float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin, _mdxInstances[i].BoundsMax);
-            if (t >= 0 && t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
+            if (t >= 0)
+            {
+                hits.Add(("MDX", i, t, _mdxInstances[i].ModelName));
+                if (t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
+            }
+        }
+
+        // Debug: log all hits sorted by distance
+        if (hits.Count > 0)
+        {
+            var sorted = hits.OrderBy(h => h.dist).ToList();
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"[ObjectPick] Ray hit {hits.Count} objects:");
+            foreach (var h in sorted.Take(5))
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"  {h.type}[{h.index}] {h.name} @ dist={h.dist:F1}");
+            if (sorted.Count > 5)
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"  ... and {sorted.Count - 5} more");
         }
 
         _selectedObjectType = bestType;

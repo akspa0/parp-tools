@@ -2528,12 +2528,16 @@ void main() {
             camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
             out float viewMinTx, out float viewMinTy, out float cellSize);
 
+        // Make minimap area interactive with invisible button overlay
+        ImGui.SetCursorScreenPos(cursorPos);
+        ImGui.InvisibleButton("##minimapInteraction", new Vector2(mapSize, mapSize));
+        bool isHovered = ImGui.IsItemHovered();
+        bool isActive = ImGui.IsItemActive();
+
         // Handle click-and-drag panning or click-to-teleport
         var mousePos = ImGui.GetMousePos();
-        bool isInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + mapSize &&
-                          mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + mapSize;
 
-        if (isInBounds)
+        if (isHovered || isActive)
         {
             // Start drag on mouse down
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -2650,12 +2654,16 @@ void main() {
                 camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
                 out float viewMinTx, out float viewMinTy, out float cellSize);
 
+            // Make minimap area interactive with invisible button overlay
+            ImGui.SetCursorPos(new Vector2(padding, topPadding));
+            ImGui.InvisibleButton("##fullscreenMinimapInteraction", new Vector2(mapSize, mapSize));
+            bool isHovered = ImGui.IsItemHovered();
+            bool isActive = ImGui.IsItemActive();
+
             // Handle click-and-drag panning or click-to-teleport
             var mousePos = ImGui.GetMousePos();
-            bool isInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + mapSize &&
-                              mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + mapSize;
 
-            if (isInBounds)
+            if (isHovered || isActive)
             {
                 // Start drag on mouse down
                 if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
