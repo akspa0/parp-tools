@@ -21,6 +21,7 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -51,7 +52,8 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore
-        run: dotnet restore ${{ env.PROJECT }}
+        shell: pwsh
+        run: dotnet restore ${{ env.PROJECT }} -p:TargetFramework=${{ matrix.tfm }} --runtime ${{ matrix.rid }}
 
       - name: Publish (${{ matrix.os_label }})
         shell: pwsh
@@ -59,6 +61,7 @@ jobs:
           dotnet publish ${{ env.PROJECT }} `
             -c Release `
             -f ${{ matrix.tfm }} `
+            -p:TargetFramework=${{ matrix.tfm }} `
             -r ${{ matrix.rid }} `
             --self-contained true `
             -p:PublishSingleFile=false `
