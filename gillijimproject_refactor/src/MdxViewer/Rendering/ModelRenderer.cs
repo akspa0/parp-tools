@@ -77,6 +77,7 @@ public class MdxRenderer : ISceneRenderer
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
+    private static int _uUvSet;
     private static int _uBones; // Bone matrix array uniform location
     private static int _uHasBones; // Enable skinning flag
     private static bool _shaderInitialized;
@@ -374,6 +375,12 @@ public class MdxRenderer : ISceneRenderer
                     // SphereEnvMap (0x2): generate UVs from view-space normals for reflective surfaces
                     _gl.Uniform1(_uSphereEnvMap, geoFlags.HasFlag(MdlGeoFlags.SphereEnvMap) ? 1 : 0);
 
+                    // Select UV set for this layer (CoordId).
+                    // Current shader path supports UV0/UV1; higher CoordId falls back to UV0.
+                    int requestedUvSet = layer.CoordId >= 0 ? layer.CoordId : 0;
+                    int activeUvSet = requestedUvSet == 1 && gb.UvSetCount > 1 ? 1 : 0;
+                    _gl.Uniform1(_uUvSet, activeUvSet);
+
                     if (isAlphaCutout)
                     {
                         // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
@@ -464,6 +471,7 @@ public class MdxRenderer : ISceneRenderer
             if (!anyLayerRendered && pass != RenderPass.Transparent)
             {
                 _gl.Uniform1(_uHasTexture, 0);
+                _gl.Uniform1(_uUvSet, 0);
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
                 _gl.BindVertexArray(gb.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -481,9 +489,10 @@ public class MdxRenderer : ISceneRenderer
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
-layout(location = 2) in vec2 aTexCoord;
-layout(location = 3) in vec4 aBoneIndices;
-layout(location = 4) in vec4 aBoneWeights;
+layout(location = 2) in vec2 aTexCoord0;
+layout(location = 3) in vec2 aTexCoord1;
+layout(location = 4) in vec4 aBoneIndices;
+layout(location = 5) in vec4 aBoneWeights;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -492,7 +501,8 @@ uniform mat4 uBones[128];
 uniform int uHasBones;
 
 out vec3 vNormal;
-out vec2 vTexCoord;
+out vec2 vTexCoord0;
+out vec2 vTexCoord1;
 out vec3 vFragPos;
 out vec3 vViewNormal;
 
@@ -516,7 +526,8 @@ void main() {
     vFragPos = worldPos.xyz;
     vNormal = mat3(transpose(inverse(uModel))) * normal;
     vViewNormal = mat3(uView) * vNormal;
-    vTexCoord = aTexCoord;
+    vTexCoord0 = aTexCoord0;
+    vTexCoord1 = aTexCoord1;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -524,7 +535,8 @@ void main() {
         string fragSrc = @"
 #version 330 core
 in vec3 vNormal;
-in vec2 vTexCoord;
+in vec2 vTexCoord0;
+in vec2 vTexCoord1;
 in vec3 vFragPos;
 in vec3 vViewNormal;
 
@@ -534,6 +546,7 @@ uniform int uAlphaTest;
 uniform float uAlphaThreshold;
 uniform int uUnshaded;
 uniform int uSphereEnvMap;
+uniform int uUvSet;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -547,7 +560,7 @@ out vec4 FragColor;
 
 void main() {
     // Sphere environment map: generate UVs from view-space normals
-    vec2 texCoord = vTexCoord;
+    vec2 texCoord = (uUvSet == 1) ? vTexCoord1 : vTexCoord0;
     if (uSphereEnvMap == 1) {
         vec3 vn = normalize(vViewNormal);
         texCoord = vn.xy * 0.5 + 0.5;
@@ -629,6 +642,7 @@ void main() {
         _uLightColor = _gl.GetUniformLocation(_shaderProgram, "uLightColor");
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uSphereEnvMap = _gl.GetUniformLocation(_shaderProgram, "uSphereEnvMap");
+        _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
         _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
         _uHasBones = _gl.GetUniformLocation(_shaderProgram, "uHasBones");
 
@@ -752,29 +766,38 @@ void main() {
             // Build bone weight data
             var (boneIndices, boneWeights) = BuildBoneWeights(geoset, i);
 
-            // Interleave: pos(3) + normal(3) + uv(2) + boneIdx(4) + boneWt(4) = 16 floats per vertex
+            // Interleave: pos(3) + normal(3) + uv0(2) + uv1(2) + boneIdx(4) + boneWt(4) = 18 floats per vertex
             int vertCount = geoset.Vertices.Count;
             bool hasNormals = geoset.Normals.Count == vertCount;
-            bool hasUVs = geoset.TexCoords.Count == vertCount;
-            if (!hasUVs)
-                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: UV count mismatch! Verts={vertCount}, UVs={geoset.TexCoords.Count}");
+            int uvCount = geoset.TexCoords.Count;
+            int uvSetCount = vertCount > 0 ? uvCount / vertCount : 0;
+            bool uvCountAligned = vertCount > 0 && (uvCount % vertCount == 0);
+            bool hasUVSet0 = uvSetCount >= 1;
+            bool hasUVSet1 = uvSetCount >= 2;
+            gb.UvSetCount = uvSetCount;
+
+            if (!hasUVSet0)
+                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: UV count mismatch! Verts={vertCount}, UVs={uvCount}");
+            else if (!uvCountAligned)
+                ViewerLog.Trace($"[ModelRenderer] Geoset {i}: UV count not aligned to vertex count. Verts={vertCount}, UVs={uvCount}, inferredSets={uvSetCount}");
             else if (geoset.TexCoords.Count > 0)
             {
                 float uMin = float.MaxValue, uMax = float.MinValue, vMin = float.MaxValue, vMax = float.MinValue;
-                foreach (var uv in geoset.TexCoords)
+                for (int uvIdx = 0; uvIdx < vertCount; uvIdx++)
                 {
+                    var uv = geoset.TexCoords[uvIdx];
                     if (uv.U < uMin) uMin = uv.U; if (uv.U > uMax) uMax = uv.U;
                     if (uv.V < vMin) vMin = uv.V; if (uv.V > vMax) vMax = uv.V;
                 }
-                var uvRangeMsg = $"Geoset {i}: {vertCount} verts, UV range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]";
+                var uvRangeMsg = $"Geoset {i}: {vertCount} verts, uvSets={uvSetCount}, UV0 range U=[{uMin:F3},{uMax:F3}] V=[{vMin:F3},{vMax:F3}]";
                 ViewerLog.Trace($"[ModelRenderer] {uvRangeMsg}");
                 MdxTextureDiagnosticLogger.Log(uvRangeMsg);
             }
 
-            float[] vertexData = new float[vertCount * 16];
+            float[] vertexData = new float[vertCount * 18];
             for (int v = 0; v < vertCount; v++)
             {
-                int offset = v * 16;
+                int offset = v * 18;
                 
                 // Position (0-2)
                 var pos = geoset.Vertices[v];
@@ -797,25 +820,39 @@ void main() {
                     vertexData[offset + 5] = 0f;
                 }
 
-                // TexCoord (6-7)
-                if (hasUVs)
+                // TexCoord0 (6-7)
+                C2Vector uv0 = default;
+                if (hasUVSet0)
                 {
-                    var uv = geoset.TexCoords[v];
-                    vertexData[offset + 6] = uv.U;
-                    vertexData[offset + 7] = uv.V;
+                    uv0 = geoset.TexCoords[v];
                 }
+
+                vertexData[offset + 6] = uv0.U;
+                vertexData[offset + 7] = uv0.V;
+
+                // TexCoord1 (8-9)
+                C2Vector uv1 = uv0;
+                if (hasUVSet1)
+                {
+                    int uv1Index = v + vertCount;
+                    if (uv1Index < geoset.TexCoords.Count)
+                        uv1 = geoset.TexCoords[uv1Index];
+                }
+
+                vertexData[offset + 8] = uv1.U;
+                vertexData[offset + 9] = uv1.V;
                 
-                // Bone indices (8-11)
-                vertexData[offset + 8] = boneIndices[v].X;
-                vertexData[offset + 9] = boneIndices[v].Y;
-                vertexData[offset + 10] = boneIndices[v].Z;
-                vertexData[offset + 11] = boneIndices[v].W;
+                // Bone indices (10-13)
+                vertexData[offset + 10] = boneIndices[v].X;
+                vertexData[offset + 11] = boneIndices[v].Y;
+                vertexData[offset + 12] = boneIndices[v].Z;
+                vertexData[offset + 13] = boneIndices[v].W;
                 
-                // Bone weights (12-15)
-                vertexData[offset + 12] = boneWeights[v].X;
-                vertexData[offset + 13] = boneWeights[v].Y;
-                vertexData[offset + 14] = boneWeights[v].Z;
-                vertexData[offset + 15] = boneWeights[v].W;
+                // Bone weights (14-17)
+                vertexData[offset + 14] = boneWeights[v].X;
+                vertexData[offset + 15] = boneWeights[v].Y;
+                vertexData[offset + 16] = boneWeights[v].Z;
+                vertexData[offset + 17] = boneWeights[v].W;
             }
 
             // Create VAO/VBO/EBO
@@ -836,22 +873,25 @@ void main() {
             fixed (ushort* ptr = indices)
                 _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
-            uint stride = 16 * sizeof(float);
+            uint stride = 18 * sizeof(float);
             // Position (location 0)
             _gl.EnableVertexAttribArray(0);
             _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
             // Normal (location 1)
             _gl.EnableVertexAttribArray(1);
             _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
-            // TexCoord (location 2)
+            // TexCoord0 (location 2)
             _gl.EnableVertexAttribArray(2);
             _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
-            // Bone indices (location 3)
+            // TexCoord1 (location 3)
             _gl.EnableVertexAttribArray(3);
-            _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
-            // Bone weights (location 4)
+            _gl.VertexAttribPointer(3, 2, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
+            // Bone indices (location 4)
             _gl.EnableVertexAttribArray(4);
-            _gl.VertexAttribPointer(4, 4, VertexAttribPointerType.Float, false, stride, (void*)(12 * sizeof(float)));
+            _gl.VertexAttribPointer(4, 4, VertexAttribPointerType.Float, false, stride, (void*)(10 * sizeof(float)));
+            // Bone weights (location 5)
+            _gl.EnableVertexAttribArray(5);
+            _gl.VertexAttribPointer(5, 4, VertexAttribPointerType.Float, false, stride, (void*)(14 * sizeof(float)));
 
             _gl.BindVertexArray(0);
 
@@ -1052,9 +1092,11 @@ void main() {
 
             if (blpData != null && blpData.Length > 0)
             {
-                // Determine wrap mode from texture flags (per-axis)
-                bool clampS = (tex.Flags & 0x1) != 0; // WrapWidth clamp
-                bool clampT = (tex.Flags & 0x2) != 0; // WrapHeight clamp
+                // Determine wrap mode from texture flags (per-axis).
+                // WrapWidth/WrapHeight are 0x4/0x8 in MDX flags.
+                var texFlags = (MdlGeoFlags)tex.Flags;
+                bool clampS = texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+                bool clampT = texFlags.HasFlag(MdlGeoFlags.WrapHeight);
                 
                 MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
                 MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
@@ -1336,6 +1378,7 @@ void main() {
         public int GeosetIndex;
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
+        public int UvSetCount = 0;
         public bool Visible = true;
     }
 }

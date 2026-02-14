@@ -1899,14 +1899,15 @@ void main() {
                     bool showLiquid = liquidRenderer.ShowLiquid;
                     if (ImGui.Checkbox($"Liquid Terrain ({liquidRenderer.MeshCount})", ref showLiquid))
                         liquidRenderer.ShowLiquid = showLiquid;
+                }
 
-                    if (_worldScene != null)
-                    {
-                        ImGui.SameLine();
-                        bool showWlTop = _worldScene.ShowWlLiquids;
-                        if (ImGui.Checkbox($"WL* ({liquidRenderer.WlMeshCount})", ref showWlTop))
-                            _worldScene.ShowWlLiquids = showWlTop;
-                    }
+                if (_worldScene != null)
+                {
+                    ImGui.SameLine();
+                    int wlCount = liquidRenderer?.WlMeshCount ?? 0;
+                    bool showWlTop = _worldScene.ShowWlLiquids;
+                    if (ImGui.Checkbox($"WL* ({wlCount})", ref showWlTop))
+                        _worldScene.ShowWlLiquids = showWlTop;
                 }
 
                 if (_worldScene != null)

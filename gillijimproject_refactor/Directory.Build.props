@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <!-- Exclude SDK artifacts output trees from implicit Compile globbing.
+         Prevents duplicate AssemblyInfo/TargetFramework attributes when projects
+         generate files under artifacts/obj in addition to obj. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/artifacts/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Guard against any explicit wildcard Compile Include (in nested projects/props)
+         accidentally pulling generated source from intermediate/output folders. -->
+    <Compile Remove="**/obj/**/*.cs;**/bin/**/*.cs;**/artifacts/**/*.cs" />
+  </ItemGroup>
+</Project>
