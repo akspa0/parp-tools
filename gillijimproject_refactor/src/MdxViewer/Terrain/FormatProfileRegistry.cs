@@ -29,6 +29,26 @@ public sealed class MdxProfile
     public required bool GeosetHardFailIfMissing { get; init; }
 }
 
+public enum ModelRootMagic
+{
+    MD20
+}
+
+public sealed class M2Profile
+{
+    public required string ProfileId { get; init; }
+    public required ModelRootMagic RequiredRootMagic { get; init; }
+    public required int MinSupportedVersion { get; init; }
+    public required int MaxSupportedVersion { get; init; }
+    public required bool UseTypedOffsetCountTable { get; init; }
+    public required bool StrictSpanValidation { get; init; }
+    public required int VersionSplitThreshold { get; init; }
+    public required int SkinLikeAStride { get; init; }
+    public required int SkinLikeBStride { get; init; }
+    public required int EffectLikeAStride { get; init; }
+    public required int EffectLikeBStride { get; init; }
+}
+
 public static class FormatProfileRegistry
 {
     public static readonly AdtProfile AdtProfile060070Baseline = new()
@@ -48,6 +68,30 @@ public static class FormatProfileRegistry
         ProfileId = "AdtProfile_091_3810",
         McinEntrySize = 0x10,
         MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = false
+    };
+
+    public static readonly AdtProfile AdtProfile3018303 = new()
+    {
+        ProfileId = "AdtProfile_301_8303",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = false
+    };
+
+    public static readonly AdtProfile AdtProfile0703694 = new()
+    {
+        ProfileId = "AdtProfile_070_3694",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x2D4,
         MclqTileFlagsOffset = 0x290,
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
@@ -82,6 +126,22 @@ public static class FormatProfileRegistry
     public static readonly WmoProfile WmoProfile0913810 = new()
     {
         ProfileId = "WmoProfile_091_3810",
+        StrictGroupChunkOrder = true,
+        EnableMliqGroupLiquids = true,
+        EnablePortalOptionalBlocks = true
+    };
+
+    public static readonly WmoProfile WmoProfile3018303 = new()
+    {
+        ProfileId = "WmoProfile_301_8303",
+        StrictGroupChunkOrder = true,
+        EnableMliqGroupLiquids = true,
+        EnablePortalOptionalBlocks = true
+    };
+
+    public static readonly WmoProfile WmoProfile0703694 = new()
+    {
+        ProfileId = "WmoProfile_070_3694",
         StrictGroupChunkOrder = true,
         EnableMliqGroupLiquids = true,
         EnablePortalOptionalBlocks = true
@@ -128,6 +188,15 @@ public static class FormatProfileRegistry
         GeosetHardFailIfMissing = false
     };
 
+    public static readonly MdxProfile MdxProfile0703694 = new()
+    {
+        ProfileId = "MdxProfile_070_3694",
+        RequiresMdlxMagic = true,
+        TextureRecordSize = 0x10C,
+        TextureSectionSizeStrict = true,
+        GeosetHardFailIfMissing = false
+    };
+
     public static readonly MdxProfile MdxProfile0803734Provisional = new()
     {
         ProfileId = "MdxProfile_080_3734_Provisional",
@@ -164,6 +233,36 @@ public static class FormatProfileRegistry
         GeosetHardFailIfMissing = false
     };
 
+    public static readonly M2Profile M2Profile3018303 = new()
+    {
+        ProfileId = "M2Profile_301_8303",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        MinSupportedVersion = 0x104,
+        MaxSupportedVersion = 0x108,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
+    public static readonly M2Profile M2Profile30xUnknown = new()
+    {
+        ProfileId = "M2Profile_30x_Unknown",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        MinSupportedVersion = 0x104,
+        MaxSupportedVersion = 0x108,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
     public static readonly AdtProfile AdtProfile090xUnknown = new()
     {
         ProfileId = "AdtProfile_090x_Unknown",
@@ -188,9 +287,29 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false
     };
 
+    public static readonly AdtProfile AdtProfile30xUnknown = new()
+    {
+        ProfileId = "AdtProfile_30x_Unknown",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = false
+    };
+
     public static readonly WmoProfile WmoProfile080xUnknown = new()
     {
         ProfileId = "WmoProfile_080x_Unknown",
+        StrictGroupChunkOrder = true,
+        EnableMliqGroupLiquids = true,
+        EnablePortalOptionalBlocks = true
+    };
+
+    public static readonly WmoProfile WmoProfile30xUnknown = new()
+    {
+        ProfileId = "WmoProfile_30x_Unknown",
         StrictGroupChunkOrder = true,
         EnableMliqGroupLiquids = true,
         EnablePortalOptionalBlocks = true
@@ -210,6 +329,12 @@ public static class FormatProfileRegistry
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return AdtProfile0913810;
 
+        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+            return AdtProfile3018303;
+
+        if (string.Equals(buildVersion, "0.7.0.3694", StringComparison.OrdinalIgnoreCase))
+            return AdtProfile0703694;
+
         if (string.Equals(buildVersion, "0.8.0.3734", StringComparison.OrdinalIgnoreCase))
             return AdtProfile0803734;
 
@@ -220,6 +345,9 @@ public static class FormatProfileRegistry
         {
             if (major == 0 && minor == 9)
                 return AdtProfile090xUnknown;
+
+            if (major == 3 && minor == 0)
+                return AdtProfile30xUnknown;
 
             if (major == 0 && minor == 8)
                 return AdtProfile080xUnknown;
@@ -236,6 +364,12 @@ public static class FormatProfileRegistry
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return WmoProfile0913810;
 
+        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+            return WmoProfile3018303;
+
+        if (string.Equals(buildVersion, "0.7.0.3694", StringComparison.OrdinalIgnoreCase))
+            return WmoProfile0703694;
+
         if (string.Equals(buildVersion, "0.8.0.3734", StringComparison.OrdinalIgnoreCase))
             return WmoProfile0803734;
 
@@ -246,6 +380,9 @@ public static class FormatProfileRegistry
         {
             if (major == 0 && minor == 9)
                 return WmoProfile090xUnknown;
+
+            if (major == 3 && minor == 0)
+                return WmoProfile30xUnknown;
 
             if (major == 0 && minor == 8)
                 return WmoProfile080xUnknown;
@@ -261,6 +398,9 @@ public static class FormatProfileRegistry
     {
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return MdxProfile0913810;
+
+        if (string.Equals(buildVersion, "0.7.0.3694", StringComparison.OrdinalIgnoreCase))
+            return MdxProfile0703694;
 
         if (string.Equals(buildVersion, "0.8.0.3734", StringComparison.OrdinalIgnoreCase))
             return MdxProfile0803734Provisional;
@@ -281,6 +421,20 @@ public static class FormatProfileRegistry
         }
 
         return MdxProfile060070Baseline;
+    }
+
+    public static M2Profile? ResolveModelProfile(string? buildVersion)
+    {
+        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+            return M2Profile3018303;
+
+        if (TryParseBuild(buildVersion, out int major, out int minor, out _, out _))
+        {
+            if (major == 3 && minor == 0)
+                return M2Profile30xUnknown;
+        }
+
+        return null;
     }
 
     private static bool TryParseBuild(string? buildVersion, out int major, out int minor, out int patch, out int build)

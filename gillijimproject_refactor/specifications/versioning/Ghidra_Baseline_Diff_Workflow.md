@@ -41,7 +41,7 @@ If build is already fully covered by existing docs, stop.
 
 ## Step 2: Function anchor map (addresses only)
 Find native functions equivalent to baseline parser chain:
-- ADT root/create, MCIN, MCNK, MCLQ/MH2O, placements
+- Large WDT or ADT root/create, MCIN, MCNK, MCLQ/MH2O, placements
 - WMO root/group/liquids
 - MDX geometry/material/animation/texture load
 
