@@ -220,6 +220,10 @@ public class WmoRenderer : ISceneRenderer
         // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount
         if (_doodadsVisible && _doodadInstances.Count > 0)
         {
+            // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
+            // Update once per model to avoid redundant work when many instances share the same MDX.
+            var updatedDoodadModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             // Build list of visible doodads with world-space distance to camera
             var visibleDoodads = new List<(int idx, float distSq)>();
             float cullDistSq = DoodadCullDistance * DoodadCullDistance;
@@ -227,6 +231,10 @@ public class WmoRenderer : ISceneRenderer
             {
                 var inst = _doodadInstances[di];
                 if (!inst.Visible || inst.Renderer == null) continue;
+
+                if (updatedDoodadModels.Add(inst.ModelPath))
+                    inst.Renderer.UpdateAnimation();
+
                 // Transform local position to world space
                 var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
                 float distSq = Vector3.DistanceSquared(cp, worldPos);

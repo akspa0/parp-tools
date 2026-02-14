@@ -19,11 +19,21 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            tfm: net10.0
+            os_label: Linux x64
+          - os: macos-latest
+            rid: osx-x64
+            tfm: net10.0
+            os_label: macOS x64
           - rid: win-x64
+            os: windows-latest
+            tfm: net10.0-windows
             os_label: Windows x64
 
     steps:
@@ -32,6 +42,7 @@ jobs:
 
       - name: Bootstrap library dependencies
         working-directory: gillijimproject_refactor
+        shell: pwsh
         run: ./setup-libs.ps1
 
       - name: Setup .NET 10
@@ -43,9 +54,11 @@ jobs:
         run: dotnet restore ${{ env.PROJECT }}
 
       - name: Publish (${{ matrix.os_label }})
+        shell: pwsh
         run: |
           dotnet publish ${{ env.PROJECT }} `
             -c Release `
+            -f ${{ matrix.tfm }} `
             -r ${{ matrix.rid }} `
             --self-contained true `
             -p:PublishSingleFile=false `
@@ -54,6 +67,7 @@ jobs:
             -o publish/MdxViewer-${{ matrix.rid }}
 
       - name: Verify definitions bundled
+        shell: pwsh
         run: |
           $pubDir = "publish/MdxViewer-${{ matrix.rid }}"
           if (!(Test-Path "$pubDir/definitions/AreaTable.dbd")) {
@@ -64,12 +78,14 @@ jobs:
           Write-Host "Bundled $count .dbd definition files"
 
       - name: Bundle README and user guide
+        shell: pwsh
         run: |
           $pubDir = "publish/MdxViewer-${{ matrix.rid }}"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/USERGUIDE.md" "$pubDir/USERGUIDE.md"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/README.md" "$pubDir/README.md"
 
       - name: Create ZIP archive
+        shell: pwsh
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
           $zipName = "MdxViewer-${version}-${{ matrix.rid }}.zip"
@@ -98,7 +114,7 @@ jobs:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: MdxViewer ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## MdxViewer v0.1.3-alpha — MDX Skeletal Animation
+            ## MdxViewer ${{ github.event.inputs.version || github.ref_name }}
 
             High-performance .NET 10 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
 
@@ -106,6 +122,7 @@ jobs:
             - **MDX Skeletal Animation** — Full bone hierarchy, keyframe interpolation, GPU skinning
             - **Compressed Quaternion Support** — Ghidra-verified C4QuaternionCompressed decompression for KGRT rotation tracks
             - **Terrain Doodad Animation** — MDX doodads in WorldScene now animate (trees sway, creatures idle, etc.)
+            - **WMO Animated Doodads** — Animated MDX doodads embedded in WMOs now update/render correctly
             - **Animation Sequence Selection** — UI panel to browse and switch between animation sequences
 
             ### Bug Fixes

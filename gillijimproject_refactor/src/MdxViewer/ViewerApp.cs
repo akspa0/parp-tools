@@ -885,22 +885,10 @@ void main() {
         {
             _wantOpenVlmProject = false;
 
-            using var vlmDialog = new System.Windows.Forms.FolderBrowserDialog
-            {
-                Description = "Select VLM Project folder (containing dataset/ with JSON files)",
-                UseDescriptionForTitle = true,
-                ShowNewFolderButton = false
-            };
-
-            string? vlmPath = null;
-            var vlmThread = new System.Threading.Thread(() =>
-            {
-                if (vlmDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-                    vlmPath = vlmDialog.SelectedPath;
-            });
-            vlmThread.SetApartmentState(System.Threading.ApartmentState.STA);
-            vlmThread.Start();
-            vlmThread.Join();
+            string? vlmPath = ShowFolderDialogSTA(
+                "Select VLM Project folder (containing dataset/ with JSON files)",
+                initialDir: null,
+                showNewFolderButton: false);
 
             if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
                 LoadVlmProject(vlmPath);
@@ -994,27 +982,10 @@ void main() {
         // Use WinForms folder browser for native experience
         _showFolderInput = false;
 
-        using var dialog = new System.Windows.Forms.FolderBrowserDialog
-        {
-            Description = "Select WoW game folder (containing Data/ with MPQs)",
-            UseDescriptionForTitle = true,
-            ShowNewFolderButton = false
-        };
-
-        if (!string.IsNullOrEmpty(_folderInputBuf))
-            dialog.InitialDirectory = _folderInputBuf;
-
-        // Run dialog on STA thread
-        string? selectedPath = null;
-        var thread = new System.Threading.Thread(() =>
-        {
-            var result = dialog.ShowDialog();
-            if (result == System.Windows.Forms.DialogResult.OK)
-                selectedPath = dialog.SelectedPath;
-        });
-        thread.SetApartmentState(System.Threading.ApartmentState.STA);
-        thread.Start();
-        thread.Join();
+        string? selectedPath = ShowFolderDialogSTA(
+            "Select WoW game folder (containing Data/ with MPQs)",
+            initialDir: string.IsNullOrEmpty(_folderInputBuf) ? null : _folderInputBuf,
+            showNewFolderButton: false);
 
         if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
         {
@@ -1727,16 +1698,20 @@ void main() {
     /// <summary>
     /// Show a native folder picker on an STA thread to avoid deadlocking the GLFW render thread.
     /// </summary>
-    private static string? ShowFolderDialogSTA(string description)
+    private static string? ShowFolderDialogSTA(string description, string? initialDir = null, bool showNewFolderButton = false)
     {
+#if WINDOWS
         string? result = null;
         var thread = new Thread(() =>
         {
             using var dialog = new System.Windows.Forms.FolderBrowserDialog
             {
                 Description = description,
-                UseDescriptionForTitle = true
+                UseDescriptionForTitle = true,
+                ShowNewFolderButton = showNewFolderButton
             };
+            if (!string.IsNullOrEmpty(initialDir) && Directory.Exists(initialDir))
+                dialog.InitialDirectory = initialDir;
             if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                 result = dialog.SelectedPath;
         });
@@ -1744,6 +1719,9 @@ void main() {
         thread.Start();
         thread.Join();
         return result;
+#else
+        return null;
+#endif
     }
 
     /// <summary>
@@ -1751,6 +1729,7 @@ void main() {
     /// </summary>
     private static string? ShowFileDialogSTA(string title, string filter, string? initialDir = null)
     {
+#if WINDOWS
         string? result = null;
         var thread = new Thread(() =>
         {
@@ -1769,6 +1748,9 @@ void main() {
         thread.Start();
         thread.Join();
         return result;
+#else
+        return null;
+#endif
     }
 
     /// <summary>
@@ -1776,6 +1758,7 @@ void main() {
     /// </summary>
     private static string? ShowSaveFileDialogSTA(string title, string filter, string? initialDir = null, string? defaultFileName = null)
     {
+#if WINDOWS
         string? result = null;
         var thread = new Thread(() =>
         {
@@ -1796,6 +1779,9 @@ void main() {
         thread.Start();
         thread.Join();
         return result;
+#else
+        return null;
+#endif
     }
 
     private void StartVlmExport()
