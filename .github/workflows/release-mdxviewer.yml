@@ -15,7 +15,6 @@ permissions:
 
 env:
   DOTNET_VERSION: '10.0.x'
-  PROJECT: gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj
 
 jobs:
   build:
@@ -27,14 +26,17 @@ jobs:
           - os: ubuntu-latest
             rid: linux-x64
             tfm: net10.0
+            project: gillijimproject_refactor/src/MdxViewer/MdxViewer.CrossPlatform.csproj
             os_label: Linux x64
           - os: macos-latest
             rid: osx-x64
             tfm: net10.0
+            project: gillijimproject_refactor/src/MdxViewer/MdxViewer.CrossPlatform.csproj
             os_label: macOS x64
           - rid: win-x64
             os: windows-latest
             tfm: net10.0-windows
+            project: gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj
             os_label: Windows x64
 
     steps:
@@ -53,12 +55,12 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore ${{ env.PROJECT }} -p:TargetFramework=${{ matrix.tfm }} --runtime ${{ matrix.rid }}
+        run: dotnet restore ${{ matrix.project }} -p:TargetFramework=${{ matrix.tfm }} --runtime ${{ matrix.rid }}
 
       - name: Publish (${{ matrix.os_label }})
         shell: pwsh
         run: |
-          dotnet publish ${{ env.PROJECT }} `
+          dotnet publish ${{ matrix.project }} `
             -c Release `
             -f ${{ matrix.tfm }} `
             -p:TargetFramework=${{ matrix.tfm }} `

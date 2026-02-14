@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>MdxViewer</AssemblyName>
+    <RootNamespace>MdxViewer</RootNamespace>
+    <Version>0.1.0</Version>
+    <Description>WoW World Viewer for Alpha 0.5.3, 0.6.0, and LK 3.3.5 (cross-platform publish target)</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET" Version="2.21.0" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="2.21.0" />
+    <PackageReference Include="Silk.NET.Windowing" Version="2.21.0" />
+    <PackageReference Include="Silk.NET.Input" Version="2.21.0" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.2" />
+    <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.21.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MDX-L_Tool\MDX-L_Tool.csproj" />
+    <ProjectReference Include="..\WoWMapConverter\WoWMapConverter.Core\WoWMapConverter.Core.csproj" />
+    <ProjectReference Include="..\..\lib\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
+  </ItemGroup>
+
+  <!-- Bundle WoWDBDefs definitions with the output (required for DBC parsing via DBCD) -->
+  <ItemGroup>
+    <Content Include="..\..\lib\WoWDBDefs\definitions\**\*.dbd" Link="definitions\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>
