@@ -8,6 +8,12 @@ This folder contains chunk-format findings from direct Ghidra analysis of the ma
 - `ADT_Unknown_Field_Resolution_0.9.1.3810.md`
 - `WMO_MOGP_MOTV_MLIQ_0.9.1.3810.md`
 - `WMO_Root_Chunk_Order_0.9.1.3810.md`
+- `Map_Load_Freeze_Analysis_0.9.1.3810.md`
+- `Parser_Profile_0.9.1.3810_Binary.md`
+- `Parser_Profile_0.9.1.3810_Field_Map.md`
+- `WMO_Group_MLIQ_Contract_0.9.1.3810_Binary.md`
+- `MDX_Binary_Contract_0.9.1.3810.md`
+- `Parser_Profile_0.9.1.3810_KnownUnknowns.md`
 
 ## Highlights
 - `MCLQ` is active in ADT and wired through `CMapChunk::CreateLiquids`.

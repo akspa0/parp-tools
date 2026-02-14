@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Numerics;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
@@ -37,8 +38,10 @@ public class TerrainManager : ISceneRenderer
 
     // AOI: how many tiles around the camera to keep loaded
     private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
+    private const int UnloadRadius = AoiRadius + 1; // Keep one extra ring to prevent aggressive edge pop-out
     private const int AoiForwardExtra = 3; // Extra tiles ahead of camera heading
-    private const int MaxGpuUploadsPerFrame = 8; // Cached tiles are cheap; upload more per frame
+    private const int MaxGpuUploadsPerFrame = 4; // Avoid large upload bursts that can stall render thread
+    private const double MaxGpuUploadBudgetMs = 5.0; // Native-like per-frame prep budget for non-priority work
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
     private readonly SemaphoreSlim _mpqReadSemaphore = new(MaxConcurrentMpqReads);
 
@@ -190,12 +193,26 @@ public class TerrainManager : ISceneRenderer
             }
         }
 
-        // Unload tiles no longer in AOI — dispose GPU meshes but keep parsed data in cache.
+        // Build a wider retention set for unloading. This hysteresis avoids dropping tiles
+        // that are still near/in-view right when camera crosses tile boundaries.
+        var unloadKeepTiles = new HashSet<(int, int)>();
+        for (int dy = -UnloadRadius; dy <= UnloadRadius; dy++)
+        {
+            for (int dx = -UnloadRadius; dx <= UnloadRadius; dx++)
+            {
+                int tx = tileX + dx;
+                int ty = tileY + dy;
+                if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64 && _adapter.TileExists(tx, ty))
+                    unloadKeepTiles.Add((tx, ty));
+            }
+        }
+
+        // Unload tiles outside retention radius — dispose GPU meshes but keep parsed data in cache.
         // Reuse a scratch list to avoid per-update LINQ/ToList allocations.
         _unloadScratch.Clear();
         foreach (var key in _loadedTiles.Keys)
         {
-            if (!desiredTiles.Contains(key))
+            if (!unloadKeepTiles.Contains(key))
                 _unloadScratch.Add(key);
         }
 
@@ -283,8 +300,15 @@ public class TerrainManager : ISceneRenderer
     private void SubmitPendingTiles()
     {
         int uploaded = 0;
-        while (uploaded < MaxGpuUploadsPerFrame && _pendingTiles.TryDequeue(out var pending))
+        var uploadBudget = Stopwatch.StartNew();
+        while (uploaded < MaxGpuUploadsPerFrame)
         {
+            if (uploaded > 0 && uploadBudget.Elapsed.TotalMilliseconds >= MaxGpuUploadBudgetMs)
+                break;
+
+            if (!_pendingTiles.TryDequeue(out var pending))
+                break;
+
             var (tx, ty, result) = pending;
 
             if (_loadedTiles.ContainsKey((tx, ty)))

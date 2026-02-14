@@ -4405,7 +4405,7 @@ void main() {
                 }
 
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
-                var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource);
+                var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
                 _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver,
                     onStatus: OnLoadStatus);

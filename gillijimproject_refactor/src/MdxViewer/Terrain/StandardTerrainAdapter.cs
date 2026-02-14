@@ -22,6 +22,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly HashSet<int> _existingTileSet;
     private readonly uint _mphdFlags;
     private readonly bool _useBigAlpha;
+    private readonly string? _buildVersion;
+    private readonly AdtProfile _adtProfile;
 
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
     public IReadOnlyList<string> MdxModelNames => _mdxNames;
@@ -38,11 +40,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
 
-    public StandardTerrainAdapter(byte[] wdtBytes, string mapName, IDataSource dataSource)
+    public StandardTerrainAdapter(byte[] wdtBytes, string mapName, IDataSource dataSource, string? buildVersion = null)
     {
         _dataSource = dataSource;
         _mapName = mapName;
         _mapDir = $"World\\Maps\\{mapName}";
+        _buildVersion = buildVersion;
+        _adtProfile = FormatProfileRegistry.ResolveAdtProfile(buildVersion);
 
         // Parse MPHD
         _mphdFlags = ReadMphdFlags(wdtBytes);
@@ -57,6 +61,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"Standard WDT: {_existingTiles.Count} tiles, MPHD=0x{_mphdFlags:X}, bigAlpha={_useBigAlpha}");
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"Standard ADT profile: {_adtProfile.ProfileId} (build={_buildVersion ?? "unknown"})");
 
         // For WMO-only maps, parse MWMO + MODF from the WDT itself (same as Alpha WDT)
         if (IsWmoBased)
@@ -136,33 +142,40 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return;
         }
 
-        // Scan for MTEX (texture names still needed for terrain layers)
-        for (int i = 0; i + 8 <= adtBytes.Length;)
+        var mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
+        int mhdrStart = mhdrOffset + 8;
+
+        if (_adtProfile.UseMhdrOffsetsOnly)
         {
-            string fcc = Encoding.ASCII.GetString(adtBytes, i, 4);
-            int sz = BitConverter.ToInt32(adtBytes, i + 4);
-            if (sz < 0) break;
-            int dataStart = i + 8;
-            int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
-            if (dataStart + sz > adtBytes.Length) break;
-
-            if (fcc == "XETM") // MTEX reversed
+            textures.AddRange(ParseMtexViaMhdr(adtBytes, mhdrStart, mhdr));
+        }
+        else
+        {
+            // Legacy best-effort MTEX scan.
+            for (int i = 0; i + 8 <= adtBytes.Length;)
             {
-                textures.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
-                break; // Only need MTEX
-            }
+                string fcc = Encoding.ASCII.GetString(adtBytes, i, 4);
+                int sz = BitConverter.ToInt32(adtBytes, i + 4);
+                if (sz < 0) break;
+                int dataStart = i + 8;
+                int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
+                if (dataStart + sz > adtBytes.Length) break;
 
-            if (next <= i) break;
-            i = next;
+                if (fcc == "XETM") // MTEX reversed
+                {
+                    textures.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
+                    break; // Only need MTEX
+                }
+
+                if (next <= i) break;
+                i = next;
+            }
         }
 
-        // Store textures for this tile
         if (textures.Count > 0)
             TileTextures.TryAdd((tileX, tileY), textures);
 
         // Use MHDR to find MCIN
-        var mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
-        int mhdrStart = mhdrOffset + 8;
         int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
         if (mcinOff == 0)
         {
@@ -177,6 +190,27 @@ public class StandardTerrainAdapter : ITerrainAdapter
             string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
+
+            int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
+            if (mcinSig != "NICM")
+            {
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"MCIN signature mismatch in ADT ({tileX},{tileY}): '{mcinSig}'");
+                return;
+            }
+
+            if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
+            {
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"MCIN size invalid in ADT ({tileX},{tileY}): size={mcinSize}, file={adtBytes.Length}");
+                return;
+            }
+
+            if ((mcinSize % _adtProfile.McinEntrySize) != 0)
+            {
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"MCIN size misaligned in ADT ({tileX},{tileY}): size={mcinSize}, entrySize={_adtProfile.McinEntrySize}");
+            }
         }
 
         var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
@@ -185,38 +219,58 @@ public class StandardTerrainAdapter : ITerrainAdapter
         float chunkSmall = WoWConstants.ChunkSize / 16f;
         var chunks = new List<TerrainChunkData>(256);
 
-        // Diagnostic: log first 3 MCIN offsets
-        ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"MCIN offsets[0..2]: {mcnkOffsets[0]}, {mcnkOffsets[1]}, {mcnkOffsets[2]} (fileLen={adtBytes.Length})");
+        if (mcnkOffsets.Count != 256)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"ADT ({tileX},{tileY}) MCIN entries={mcnkOffsets.Count} (expected 256); parsing available entries only");
+        }
 
-        for (int ci = 0; ci < 256 && ci < mcnkOffsets.Count; ci++)
+        int invalidOffsetCount = 0;
+        int invalidSignatureCount = 0;
+        int invalidSizeCount = 0;
+
+        // Diagnostic: log first up-to-3 MCIN offsets
+        string mcinOffsetPreview = mcnkOffsets.Count switch
+        {
+            >= 3 => $"{mcnkOffsets[0]}, {mcnkOffsets[1]}, {mcnkOffsets[2]}",
+            2 => $"{mcnkOffsets[0]}, {mcnkOffsets[1]}",
+            1 => $"{mcnkOffsets[0]}",
+            _ => "<none>"
+        };
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"MCIN offsets: {mcinOffsetPreview} (fileLen={adtBytes.Length})");
+
+        int mcnkEntryCount = Math.Min(256, mcnkOffsets.Count);
+        for (int ci = 0; ci < mcnkEntryCount; ci++)
         {
             int off = mcnkOffsets[ci];
             if (off <= 0) continue;
 
             try
             {
-                // Read MCNK size
-                int mcnkSize = 0;
-                if (off + 8 <= adtBytes.Length)
+                // Strict MCNK guardrails: skip malformed chunks immediately (no truncation fallback).
+                if (off < 0 || off + 8 > adtBytes.Length)
                 {
-                    string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
-                    if (sig == "KNCM") // MCNK reversed
-                        mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
-                    else if (ci == 0)
-                        ViewerLog.Important(ViewerLog.Category.Terrain,
-                            $"Chunk 0 at off={off}: sig='{sig}' (expected 'KNCM')");
+                    invalidOffsetCount++;
+                    continue;
                 }
-                if (mcnkSize <= 0)
+
+                string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
+                if (sig != "KNCM") // MCNK reversed
                 {
-                    if (ci == 0)
-                        ViewerLog.Important(ViewerLog.Category.Terrain,
-                            $"Chunk 0: mcnkSize={mcnkSize}, off={off}, off+8<len={off + 8 <= adtBytes.Length}");
+                    invalidSignatureCount++;
+                    continue;
+                }
+
+                int mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
+                if (mcnkSize <= 0 || off + 8 + mcnkSize > adtBytes.Length)
+                {
+                    invalidSizeCount++;
                     continue;
                 }
 
                 // Extract MCNK data (skip the 8-byte chunk header)
-                int dataLen = Math.Min(mcnkSize, adtBytes.Length - off - 8);
+                int dataLen = mcnkSize;
                 if (dataLen < 128) continue;
                 var mcnkData = new byte[dataLen];
                 Array.Copy(adtBytes, off + 8, mcnkData, 0, dataLen);
@@ -279,7 +333,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 {
                     liquid = ExtractMclq(mcnk.MclqData, mcnkFlagsRaw,
                         tileX, tileY, chunkX, chunkY,
-                        new Vector3(worldX, worldY, 0f), baseZ);
+                        new Vector3(worldX, worldY, 0f), baseZ,
+                        _adtProfile.MclqLayerStride, _adtProfile.MclqTileFlagsOffset);
                 }
                 // Diagnostic: log first few chunks with liquid flags
                 if (hasLiquidFlags && ci < 4)
@@ -325,6 +380,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
             }
         }
 
+        if (invalidOffsetCount > 0 || invalidSignatureCount > 0 || invalidSizeCount > 0)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"ADT ({tileX},{tileY}) skipped malformed MCNKs: invalidOff={invalidOffsetCount}, invalidSig={invalidSignatureCount}, invalidSize={invalidSizeCount}");
+        }
+
         int mclqCount = chunks.Count(c => c.Liquid != null);
         if (chunks.Count > 0)
             ViewerLog.Important(ViewerLog.Category.Terrain,
@@ -336,8 +397,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         result.Chunks.AddRange(chunks);
 
         // Ghidra-verified (FUN_007d6ef0): MH2O located via MHDR offset +0x28.
-        // Only parse MH2O if no MCLQ liquid was already found (0.6.0 has MCLQ, not MH2O).
-        if (mclqCount == 0)
+        // Profile-gated to avoid incompatible fallback in builds where MCLQ is the primary path.
+        if (_adtProfile.EnableMh2oFallbackWhenNoMclq && mclqCount == 0)
             ParseMh2o(adtBytes, mhdrStart, mhdr, tileX, tileY, chunkSmall, result);
 
         // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
@@ -484,7 +545,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     /// 3.3.5: single instance (8 + 81×8 + 64 = 720 bytes).
     /// </summary>
     private static LiquidChunkData? ExtractMclq(byte[] mclqData, uint mcnkFlags,
-        int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos, float baseHeight)
+        int tileX, int tileY, int chunkX, int chunkY, Vector3 worldPos, float baseHeight,
+        int layerStride, int tileFlagsOffset)
     {
         if (mclqData == null || mclqData.Length < 8)
             return null;
@@ -502,9 +564,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (instanceCount == 0)
             return null;
 
-        // Try to parse packed instances (0x2D4 each)
+        // Try to parse packed instances (profile-specific layer stride)
         // If data is large enough for packed format, use it; otherwise fall back to single-instance
-        int packedSize = instanceCount * 0x2D4;
+        int packedSize = instanceCount * layerStride;
         bool usePacked = mclqData.Length >= packedSize && instanceCount > 0;
 
         // For single-instance (3.3.5 or single liquid type), also accept 720-byte format
@@ -554,8 +616,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 Array.Fill(heights, maxHeight);
             }
 
-            // Read 64 tile flags at offset + 0x290 (packed) or offset + 8 + 81*8 (legacy)
-            int tileFlagsOff = usePacked ? (offset + 0x290) : (offset + 8 + 81 * 8);
+            // Read 64 tile flags at profile tile-flags offset (packed) or legacy packed tail.
+            int tileFlagsOff = usePacked ? (offset + tileFlagsOffset) : (offset + 8 + 81 * 8);
             byte[] tileFlags = null;
             if (tileFlagsOff + 64 <= mclqData.Length)
             {
@@ -591,7 +653,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 };
             }
 
-            if (usePacked) offset += 0x2D4;
+            if (usePacked) offset += layerStride;
             else break; // single instance, done
         }
 
@@ -850,8 +912,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int mddfSize = BitConverter.ToInt32(adt, mddfAbs + 4);
             int mddfDataStart = mddfAbs + 8;
-            if (mddfSize >= 36 && mddfDataStart + mddfSize <= adt.Length)
-                ParseMddfViaMmid(adt, mddfDataStart, mddfSize, mmdxData, mmidEntries, result);
+            if (mddfSize >= _adtProfile.MddfRecordSize && mddfDataStart + mddfSize <= adt.Length)
+                ParseMddfViaMmid(adt, mddfDataStart, mddfSize, mmdxData, mmidEntries, result, _adtProfile.MddfRecordSize);
         }
 
         // Parse MODF
@@ -859,8 +921,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         {
             int modfSize = BitConverter.ToInt32(adt, modfAbs + 4);
             int modfDataStart = modfAbs + 8;
-            if (modfSize >= 64 && modfDataStart + modfSize <= adt.Length)
-                ParseModfViaMwid(adt, modfDataStart, modfSize, mwmoData, mwidEntries, result);
+            if (modfSize >= _adtProfile.ModfRecordSize && modfDataStart + modfSize <= adt.Length)
+                ParseModfViaMwid(adt, modfDataStart, modfSize, mwmoData, mwidEntries, result, _adtProfile.ModfRecordSize);
         }
 
         ViewerLog.Important(ViewerLog.Category.Terrain,
@@ -888,9 +950,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     }
 
     private void ParseMddfViaMmid(byte[] data, int offset, int size,
-        byte[]? mmdxData, List<uint>? mmidEntries, TileLoadResult result)
+        byte[]? mmdxData, List<uint>? mmidEntries, TileLoadResult result, int entrySize)
     {
-        int entrySize = 36; // 0x24
         int count = size / entrySize;
 
         for (int i = 0; i < count; i++)
@@ -936,9 +997,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     }
 
     private void ParseModfViaMwid(byte[] data, int offset, int size,
-        byte[]? mwmoData, List<uint>? mwidEntries, TileLoadResult result)
+        byte[]? mwmoData, List<uint>? mwidEntries, TileLoadResult result, int entrySize)
     {
-        int entrySize = 64; // 0x40
         int count = size / entrySize;
 
         for (int i = 0; i < count; i++)
@@ -1165,6 +1225,28 @@ public class StandardTerrainAdapter : ITerrainAdapter
             i = next;
         }
         return -1;
+    }
+
+    private static List<string> ParseMtexViaMhdr(byte[] adtBytes, int mhdrStart, GillijimProject.WowFiles.Mhdr mhdr)
+    {
+        int mtexOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.MtexOffset);
+        if (mtexOff == 0)
+            return new List<string>();
+
+        int mtexAbs = mhdrStart + mtexOff;
+        if (mtexAbs + 8 > adtBytes.Length)
+            return new List<string>();
+
+        string mtexSig = Encoding.ASCII.GetString(adtBytes, mtexAbs, 4);
+        if (mtexSig != "XETM")
+            return new List<string>();
+
+        int mtexSize = BitConverter.ToInt32(adtBytes, mtexAbs + 4);
+        int mtexData = mtexAbs + 8;
+        if (mtexSize <= 0 || mtexData + mtexSize > adtBytes.Length)
+            return new List<string>();
+
+        return ParseNullStrings(adtBytes, mtexData, mtexSize);
     }
 
     private static List<string> ParseNullStrings(byte[] data, int offset, int size)
