@@ -20,6 +20,7 @@ public class LiquidRenderer : IDisposable
 
     // WL liquid body meshes (from loose WLW/WLQ/WLM files)
     private readonly List<LiquidMesh> _wlMeshes = new();
+    private readonly HashSet<string> _hiddenWlBodies = new(StringComparer.OrdinalIgnoreCase);
 
     // Global toggles
     public bool ShowLiquid { get; set; } = true;
@@ -30,6 +31,37 @@ public class LiquidRenderer : IDisposable
 
     public int MeshCount => _meshes.Count;
     public int WlMeshCount => _wlMeshes.Count;
+
+    public bool IsWlBodyVisible(string sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return true;
+        return !_hiddenWlBodies.Contains(sourcePath);
+    }
+
+    public void SetWlBodyVisible(string sourcePath, bool visible)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return;
+
+        if (visible)
+            _hiddenWlBodies.Remove(sourcePath);
+        else
+            _hiddenWlBodies.Add(sourcePath);
+    }
+
+    public void SetAllWlBodiesVisible(bool visible)
+    {
+        _hiddenWlBodies.Clear();
+        if (!visible)
+        {
+            foreach (var mesh in _wlMeshes)
+            {
+                if (!string.IsNullOrWhiteSpace(mesh.WlSourcePath))
+                    _hiddenWlBodies.Add(mesh.WlSourcePath);
+            }
+        }
+    }
 
     public LiquidRenderer(GL gl)
     {
@@ -121,6 +153,9 @@ public class LiquidRenderer : IDisposable
         {
             foreach (var mesh in _wlMeshes)
             {
+                if (!string.IsNullOrWhiteSpace(mesh.WlSourcePath) && _hiddenWlBodies.Contains(mesh.WlSourcePath))
+                    continue;
+
                 var (r, g, b, a) = GetLiquidColor(mesh.Type);
                 _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
 
@@ -384,7 +419,8 @@ void main() {
                 TileX = -1, // WL bodies are not tile-specific
                 TileY = -1,
                 UseUint32Indices = true,
-                WlBodyName = body.Name
+                WlBodyName = body.Name,
+                WlSourcePath = body.SourcePath
             });
             added++;
 
@@ -402,6 +438,7 @@ void main() {
         foreach (var mesh in _wlMeshes)
             mesh.Dispose(_gl);
         _wlMeshes.Clear();
+        _hiddenWlBodies.Clear();
     }
 
     public void Dispose()
@@ -430,6 +467,7 @@ internal class LiquidMesh
     public int TileY { get; init; }
     public bool UseUint32Indices { get; init; }
     public string? WlBodyName { get; init; }
+    public string? WlSourcePath { get; init; }
 
     public void Dispose(GL gl)
     {

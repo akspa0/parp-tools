@@ -135,6 +135,7 @@ public partial class ViewerApp : IDisposable
     private int _sqlMapSpawnsCacheMapId = -1;
     private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _sqlForceStreamRefresh;
+    private string _wlLayerSelectedSourcePath = "";
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -1910,7 +1911,7 @@ void main() {
                 {
                     ImGui.SameLine();
                     bool showLiquid = liquidRenderer.ShowLiquid;
-                    if (ImGui.Checkbox($"Liquid ({liquidRenderer.MeshCount})", ref showLiquid))
+                    if (ImGui.Checkbox($"Liquid Terrain ({liquidRenderer.MeshCount})", ref showLiquid))
                         liquidRenderer.ShowLiquid = showLiquid;
 
                     if (_worldScene != null)
@@ -2426,6 +2427,8 @@ void main() {
     {
         if (_worldScene == null) return;
 
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+
         ImGui.Separator();
         ImGui.Text("SQL World Population");
         ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
@@ -2524,6 +2527,74 @@ void main() {
                 _worldScene.ShowWlLiquids = showWl;
             if (_worldScene.ShowWlLiquids && ImGui.IsItemHovered())
                 ImGui.SetTooltip("Loose WLW/WLQ/WLM liquid project files.\nContains water data for deleted/missing tiles.");
+
+            if (liquidRenderer != null && ImGui.TreeNode("WL Layers"))
+            {
+                int visibleCount = 0;
+                foreach (var b in _worldScene.WlLoader.Bodies)
+                {
+                    if (liquidRenderer.IsWlBodyVisible(b.SourcePath))
+                        visibleCount++;
+                }
+
+                if (ImGui.SmallButton("Show All"))
+                    liquidRenderer.SetAllWlBodiesVisible(true);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Hide All"))
+                    liquidRenderer.SetAllWlBodiesVisible(false);
+                ImGui.SameLine();
+                bool hasSelected = !string.IsNullOrWhiteSpace(_wlLayerSelectedSourcePath);
+                if (!hasSelected)
+                    ImGui.BeginDisabled();
+                if (ImGui.SmallButton("Solo Selected"))
+                {
+                    liquidRenderer.SetAllWlBodiesVisible(false);
+                    liquidRenderer.SetWlBodyVisible(_wlLayerSelectedSourcePath, true);
+                }
+                if (!hasSelected)
+                    ImGui.EndDisabled();
+
+                ImGui.TextDisabled($"Visible: {visibleCount}/{_worldScene.WlLoader.Bodies.Count}");
+
+                if (ImGui.BeginTable("##wl_layers", 3, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+                {
+                    ImGui.TableSetupColumn("V", ImGuiTableColumnFlags.WidthFixed, 24f);
+                    ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 48f);
+                    ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableHeadersRow();
+
+                    for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
+                    {
+                        var body = _worldScene.WlLoader.Bodies[i];
+                        ImGui.TableNextRow();
+
+                        ImGui.TableSetColumnIndex(0);
+                        bool visible = liquidRenderer.IsWlBodyVisible(body.SourcePath);
+                        if (ImGui.Checkbox($"##wl_vis_{i}", ref visible))
+                            liquidRenderer.SetWlBodyVisible(body.SourcePath, visible);
+
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextUnformatted(body.FileType.ToString());
+
+                        ImGui.TableSetColumnIndex(2);
+                        bool isSelected = string.Equals(_wlLayerSelectedSourcePath, body.SourcePath, StringComparison.OrdinalIgnoreCase);
+                        string label = $"{body.Name}##wl_layer_{i}";
+                        if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.SpanAllColumns))
+                            _wlLayerSelectedSourcePath = body.SourcePath;
+                        if (ImGui.IsItemHovered())
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(body.SourcePath);
+                            ImGui.Text($"Blocks: {body.BlockCount}  Verts: {body.Vertices.Length}");
+                            ImGui.EndTooltip();
+                        }
+                    }
+
+                    ImGui.EndTable();
+                }
+
+                ImGui.TreePop();
+            }
 
             if (ImGui.TreeNode("WL Transform Tuning"))
             {

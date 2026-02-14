@@ -38,7 +38,7 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 1500f; // Max distance for small doodads (matches fog end)
+    private const float DoodadCullDistance = 5000f; // Max distance for small doodads; raised to prevent long-range tree pop-out
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
