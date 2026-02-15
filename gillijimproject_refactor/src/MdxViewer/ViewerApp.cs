@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.RegularExpressions;
+using System.Text.Json;
 using ImGuiNET;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
@@ -70,6 +71,8 @@ public partial class ViewerApp : IDisposable
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
     private static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
+    private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
+    private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
     private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
 
@@ -150,6 +153,7 @@ public partial class ViewerApp : IDisposable
     private float _fovDegrees = 45f;
 
     private bool _autoFrameModelOnLoad = true;
+    private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
 
     // Sky gradient for standalone model viewing
     private uint _skyVao, _skyVbo, _skyShader;
@@ -243,6 +247,7 @@ public partial class ViewerApp : IDisposable
         style.Colors[(int)ImGuiCol.MenuBarBg] = new Vector4(0.15f, 0.15f, 0.18f, 1.0f);
 
         TryAutoPopulateAlphaCoreRoot();
+        LoadViewerSettings();
 
         // Mouse input for viewport (not consumed by ImGui)
         foreach (var mouse in _input.Mice)
@@ -2192,6 +2197,12 @@ void main() {
             }
         }
 
+        if (_renderer is WmoRenderer)
+        {
+            ImGui.Separator();
+            DrawWmoLiquidRotationControls("standalone");
+        }
+
         // Animation sequence selection (MDX only)
         if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
         {
@@ -2422,6 +2433,10 @@ void main() {
         if (_worldScene == null) return;
 
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+
+        ImGui.Separator();
+        ImGui.Text("WMO Liquid Tuning");
+        DrawWmoLiquidRotationControls("world");
 
         ImGui.Separator();
         ImGui.Text("SQL World Population");
@@ -2825,6 +2840,27 @@ void main() {
         }
     }
 
+    private static void DrawWmoLiquidRotationControls(string idSuffix)
+    {
+        int quarterTurns = WmoRenderer.MliqRotationQuarterTurns;
+        string currentLabel = WmoLiquidRotationLabels[Math.Clamp(quarterTurns, 0, WmoLiquidRotationLabels.Length - 1)];
+
+        if (ImGui.BeginCombo($"WMO MLIQ Rotation##{idSuffix}", currentLabel))
+        {
+            for (int i = 0; i < WmoLiquidRotationLabels.Length; i++)
+            {
+                bool selected = i == quarterTurns;
+                if (ImGui.Selectable(WmoLiquidRotationLabels[i], selected))
+                    WmoRenderer.MliqRotationQuarterTurns = i;
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled("Applies to all WMO MLIQ surfaces. Changes are live.");
+    }
+
     private void LoadSqlSpawnsForCurrentMap()
     {
         if (_worldScene == null)
@@ -2988,7 +3024,6 @@ void main() {
         // Gather tile data
         List<(int tx, int ty)>? existingTiles = null;
         Func<int, int, bool>? isTileLoaded = null;
-        int loadedTileCount = 0;
         string? mapName = null;
 
         if (_terrainManager != null)
@@ -2996,14 +3031,12 @@ void main() {
             var adapter = _terrainManager.Adapter;
             existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
             isTileLoaded = _terrainManager.IsTileLoaded;
-            loadedTileCount = _terrainManager.LoadedTileCount;
             mapName = _terrainManager.MapName;
         }
         else if (_vlmTerrainManager != null)
         {
             existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
             isTileLoaded = _vlmTerrainManager.IsTileLoaded;
-            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
             mapName = _vlmTerrainManager.MapName;
         }
         else return;
@@ -3012,33 +3045,47 @@ void main() {
         
         // Position in top-right, but accounting for right sidebar if visible
         float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
-        ImGui.SetNextWindowSize(new Vector2(420, 500), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 420 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
-        
-        if (!ImGui.Begin("Minimap", ref _showMinimapWindow, ImGuiWindowFlags.NoCollapse))
+        ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
+            ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
             ImGui.End();
             return;
         }
-        
-        // Calculate available space for minimap (square, fitting in window)
-        var windowSize = ImGui.GetWindowSize();
-        float availableWidth = windowSize.X - 20;
-        float availableHeight = windowSize.Y - 120; // Leave room for controls
-        float mapSize = MathF.Min(availableWidth, availableHeight);
+
+        // Compact controls: tile readout + zoom in/out (+ wheel zoom while hovered).
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+        int ctX = (int)MathF.Floor(camTileX);
+        int ctY = (int)MathF.Floor(camTileY);
+
+        ImGui.Text($"Tile: ({ctX},{ctY})");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-##minimapZoomOut"))
+            _minimapZoom = Math.Clamp(_minimapZoom + 0.5f, 1f, 32f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+##minimapZoomIn"))
+            _minimapZoom = Math.Clamp(_minimapZoom - 0.5f, 1f, 32f);
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Zoom {_minimapZoom:F1}x");
+
+        float controlsHeight = ImGui.GetCursorPosY() + 8f;
+        float mapAvailableWidth = ImGui.GetContentRegionAvail().X;
+        float mapAvailableHeight = ImGui.GetContentRegionAvail().Y - 4f;
+        float mapSize = MathF.Max(64f, MathF.Min(mapAvailableWidth, mapAvailableHeight));
         
         var cursorPos = ImGui.GetCursorScreenPos();
 
-        // Scroll-wheel zoom
-        if (ImGui.IsWindowHovered())
+        // Scroll-wheel zoom (map region only)
+        if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
         {
             float wheel = io.MouseWheel;
             if (wheel != 0)
                 _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
         }
-
-        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
 
         MinimapHelpers.RenderMinimapContent(
             cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
@@ -3096,21 +3143,9 @@ void main() {
             _minimapDragging = false;
         }
 
-        // Advance cursor past minimap
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 4);
+        // Keep cursor aligned under map to avoid adding overflow content that creates scrollbars.
+        ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
 
-        // Info text
-        int ctX = (int)MathF.Floor(camTileX);
-        int ctY = (int)MathF.Floor(camTileY);
-        ImGui.Text($"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x");
-        ImGui.Text($"Loaded: {loadedTileCount}");
-        if (_minimapPanOffset != Vector2.Zero)
-        {
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Reset Pan"))
-                _minimapPanOffset = Vector2.Zero;
-        }
-        
         ImGui.End();
     }
 
@@ -3787,8 +3822,7 @@ void main() {
     }
 
     /// <summary>
-    /// Load an M2 model from disk by converting it to MDX in-memory, then rendering with MdxRenderer.
-    /// Also attempts to load the companion .skin file for geometry data.
+    /// Load an M2 model from disk using Warcraft.NET parser + companion .skin geometry.
     /// </summary>
     private void LoadM2FromDisk(string filePath, string dir)
     {
@@ -3797,56 +3831,61 @@ void main() {
     }
 
     /// <summary>
-    /// Load an M2 model from raw bytes by converting to MDX in-memory.
+    /// Load an M2 model from raw bytes using Warcraft.NET model/skin support.
     /// </summary>
     private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
     {
-        // Try to find companion .skin file
-        byte[]? skinBytes = null;
-        string baseName = Path.GetFileNameWithoutExtension(originalPath);
-        string skinDir = Path.GetDirectoryName(originalPath)?.Replace('/', '\\') ?? "";
-        var skinCandidates = new List<string>(8);
-        for (int i = 0; i < 4; i++)
+        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(originalPath));
+
+        if (_dataSource != null)
         {
-            string suffix = i.ToString("D2");
-            skinCandidates.Add(Path.ChangeExtension(originalPath, $"{suffix}.skin"));
-            skinCandidates.Add(string.IsNullOrEmpty(skinDir)
-                ? $"{baseName}{suffix}.skin"
-                : $"{skinDir}\\{baseName}{suffix}.skin");
+            var bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(originalPath, _dataSource.GetFileList(".skin"));
+            if (!string.IsNullOrWhiteSpace(bestSkinPath))
+                candidatePaths.Add(bestSkinPath);
         }
 
-        foreach (var skinPath in skinCandidates)
+        Exception? lastError = null;
+        bool anySkinFound = false;
+
+        foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            byte[]? skinBytes = null;
+
             if (File.Exists(skinPath))
-            {
                 skinBytes = File.ReadAllBytes(skinPath);
-                ViewerLog.Trace($"[M2] Loaded skin file: {skinPath} ({skinBytes.Length} bytes)");
-                break;
-            }
-        }
 
-        if (skinBytes == null && _dataSource != null)
-        {
-            foreach (var skinPath in skinCandidates)
-            {
+            if (skinBytes == null && _dataSource != null)
                 skinBytes = _dataSource.ReadFile(skinPath);
-                if (skinBytes != null)
-                {
-                    ViewerLog.Trace($"[M2] Loaded skin from data source: {skinPath} ({skinBytes.Length} bytes)");
-                    break;
-                }
+
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            anySkinFound = true;
+
+            try
+            {
+                ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+                var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, originalPath);
+                LoadMdxModel(mdx, dir, originalPath);
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"[M2] Skin candidate failed for {Path.GetFileName(originalPath)}: {skinPath} ({ex.Message})");
             }
         }
 
-        var converter = new M2ToMdxConverter();
-        byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes);
-        ViewerLog.Trace($"[M2] Converted M2 ({m2Bytes.Length} bytes) → MDX ({mdxBytes.Length} bytes)");
+        if (!anySkinFound)
+            throw new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
 
-        using var ms = new MemoryStream(mdxBytes);
-        using var br = new BinaryReader(ms);
-        var mdx = MdxFile.Load(br);
-        LoadMdxModel(mdx, dir, originalPath);
-        _statusMessage = $"Loaded M2 (converted): {Path.GetFileName(originalPath)}";
+        throw new InvalidDataException(
+            $"Failed to adapt M2 with available .skin candidates: {Path.GetFileName(originalPath)}",
+            lastError);
     }
 
     private static ModelContainerKind DetectModelContainer(byte[] modelBytes)
@@ -4732,6 +4771,50 @@ void main() {
         _gl.Viewport(size);
     }
 
+    private void LoadViewerSettings()
+    {
+        try
+        {
+            if (!File.Exists(ViewerSettingsPath))
+                return;
+
+            string json = File.ReadAllText(ViewerSettingsPath);
+            var settings = JsonSerializer.Deserialize<ViewerSettings>(json);
+            if (settings == null)
+                return;
+
+            WmoRenderer.MliqRotationQuarterTurns = settings.WmoMliqRotationQuarterTurns;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[ViewerSettings] Failed to load settings: {ex.Message}");
+        }
+    }
+
+    private void SaveViewerSettings()
+    {
+        try
+        {
+            Directory.CreateDirectory(SettingsDir);
+
+            var settings = new ViewerSettings
+            {
+                WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns
+            };
+
+            string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+
+            File.WriteAllText(ViewerSettingsPath, json);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[ViewerSettings] Failed to save settings: {ex.Message}");
+        }
+    }
+
     private bool _disposed;
 
     private void OnClose()
@@ -4743,6 +4826,8 @@ void main() {
     {
         if (_disposed) return;
         _disposed = true;
+
+        SaveViewerSettings();
 
         _loadingScreen?.Dispose();
         _sqlPopulationService?.Dispose();
@@ -4761,5 +4846,10 @@ void main() {
         _imGui?.Dispose();
         _input?.Dispose();
         _gl?.Dispose();
+    }
+
+    private sealed class ViewerSettings
+    {
+        public int WmoMliqRotationQuarterTurns { get; set; }
     }
 }

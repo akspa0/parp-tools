@@ -322,11 +322,55 @@ public class WorldAssetManager : IDisposable
                 return null;
             }
 
-            // Detect M2 format (magic 0x3032444D = "MD20") and convert to MDX
-            if (data.Length >= 4 && BitConverter.ToUInt32(data, 0) == 0x3032444D)
+            // Detect M2 format (magic 0x3032444D = "MD20") and adapt directly via Warcraft.NET + .skin
+            if (WarcraftNetM2Adapter.IsMd20(data))
             {
-                data = ConvertM2ToMdx(data, normalizedKey);
-                if (data == null) return null;
+                var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey));
+                if (_dataSource != null)
+                {
+                    var bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(normalizedKey, _dataSource.GetFileList(".skin"));
+                    if (!string.IsNullOrWhiteSpace(bestSkinPath))
+                        candidatePaths.Add(bestSkinPath);
+                }
+
+                Exception? lastSkinError = null;
+                bool anySkinFound = false;
+
+                foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    var skinBytes = ReadFileData(skinPath);
+                    if (skinBytes == null || skinBytes.Length == 0)
+                        continue;
+
+                    anySkinFound = true;
+
+                    try
+                    {
+                        ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, normalizedKey);
+                        string adaptedModelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                            $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, normalizedKey);
+                    }
+                    catch (Exception ex)
+                    {
+                        lastSkinError = ex;
+                        ViewerLog.Debug(ViewerLog.Category.Mdx,
+                            $"[M2] Skin candidate failed for {Path.GetFileName(normalizedKey)}: {skinPath} ({ex.Message})");
+                    }
+                }
+
+                if (!anySkinFound)
+                {
+                    ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
+                    return null;
+                }
+
+                if (lastSkinError != null)
+                    throw new InvalidDataException($"All .skin candidates failed for M2: {Path.GetFileName(normalizedKey)}", lastSkinError);
+
+                return null;
             }
 
             using var ms = new MemoryStream(data);
@@ -338,48 +382,6 @@ public class WorldAssetManager : IDisposable
         {
             if (_mdxLoadFailCount++ < 5)
                 ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)}\n{ex}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Convert M2 model bytes to MDX format. Attempts to load companion .skin file.
-    /// </summary>
-    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey)
-    {
-        try
-        {
-            // Try to find companion .skin file (ModelName00.skin)
-            byte[]? skinBytes = null;
-            string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
-            string dir = Path.GetDirectoryName(normalizedKey) ?? "";
-            var skinCandidates = new List<string>(8);
-            for (int i = 0; i < 4; i++)
-            {
-                string suffix = i.ToString("D2");
-                skinCandidates.Add(Path.ChangeExtension(normalizedKey, $"{suffix}.skin"));
-                skinCandidates.Add(string.IsNullOrEmpty(dir)
-                    ? $"{baseName}{suffix}.skin"
-                    : $"{dir}\\{baseName}{suffix}.skin");
-            }
-            foreach (var skinPath in skinCandidates)
-            {
-                skinBytes = ReadFileData(skinPath);
-                if (skinBytes != null)
-                {
-                    ViewerLog.Trace($"[M2] Loaded skin for {Path.GetFileName(normalizedKey)} ({skinBytes.Length} bytes)");
-                    break;
-                }
-            }
-
-            var converter = new M2ToMdxConverter();
-            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes);
-            ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} → {mdxBytes.Length} bytes");
-            return mdxBytes;
-        }
-        catch (Exception ex)
-        {
-            ViewerLog.Error(ViewerLog.Category.Mdx, $"M2→MDX convert failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
     }

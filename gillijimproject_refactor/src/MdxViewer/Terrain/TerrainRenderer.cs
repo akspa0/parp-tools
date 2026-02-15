@@ -218,6 +218,7 @@ public class TerrainRenderer : IDisposable
             for (int layer = 1; layer < chunk.Layers.Length && layer < 4; layer++)
             {
                 if (!layerVisible[layer]) continue;
+                if (!chunk.AlphaTextures.ContainsKey(layer)) continue;
                 RenderChunkPass(chunk, layer, isBaseLayer: false);
             }
 
@@ -452,14 +453,6 @@ public class TerrainRenderer : IDisposable
             int size = 64;
             if (alphaData.Length < size * size)
                 continue;
-
-            // Noggit fix: duplicate last row/column so edge texels have valid data
-            for (int i = 0; i < 64; i++)
-            {
-                alphaData[i * 64 + 63] = alphaData[i * 64 + 62];
-                alphaData[63 * 64 + i] = alphaData[62 * 64 + i];
-            }
-            alphaData[63 * 64 + 63] = alphaData[62 * 64 + 62];
 
             uint tex = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, tex);

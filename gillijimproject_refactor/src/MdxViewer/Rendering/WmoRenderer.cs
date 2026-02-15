@@ -34,6 +34,9 @@ public class WmoRenderer : ISceneRenderer
 
     // Material textures: materialIndex → GL texture handle
     private readonly Dictionary<int, uint> _materialTextures = new();
+    private readonly HashSet<string> _materialFallbackLogKeys = new(StringComparer.OrdinalIgnoreCase);
+    private int _materialFallbackLogCount;
+    private const int MaxMaterialFallbackLogs = 200;
 
     // Doodad support
     private readonly Dictionary<string, MdxRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
@@ -52,6 +55,25 @@ public class WmoRenderer : ISceneRenderer
     private static uint _liquidShader;
     private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
     private static int _liquidShaderRefCount;
+    private static int _mliqRotationQuarterTurns;
+    private static int _mliqRotationRevision;
+    private int _builtMliqRotationRevision = -1;
+
+    public static int MliqRotationQuarterTurns
+    {
+        get => _mliqRotationQuarterTurns;
+        set
+        {
+            int normalized = ((value % 4) + 4) % 4;
+            if (_mliqRotationQuarterTurns == normalized)
+                return;
+
+            _mliqRotationQuarterTurns = normalized;
+            _mliqRotationRevision++;
+            ViewerLog.Important(ViewerLog.Category.Wmo,
+                $"[WmoRenderer] MLIQ rotation override set to {normalized * 90}°");
+        }
+    }
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
@@ -156,6 +178,8 @@ public class WmoRenderer : ISceneRenderer
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
+        EnsureLiquidMeshesUpToDate();
+
         // Two-pass WMO rendering: Opaque → Doodads → Liquids → Transparent
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
@@ -202,7 +226,7 @@ public class WmoRenderer : ISceneRenderer
             {
                 foreach (var batch in group.Batches)
                 {
-                    int matId = batch.MaterialId;
+                    int matId = ResolveBatchMaterialId(group, batch);
                     uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
                     if (blendMode != 0) continue; // Skip transparent batches
 
@@ -306,7 +330,7 @@ public class WmoRenderer : ISceneRenderer
             {
                 foreach (var batch in group.Batches)
                 {
-                    int matId = batch.MaterialId;
+                    int matId = ResolveBatchMaterialId(group, batch);
                     uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
                     if (blendMode == 0) continue; // Skip opaque batches (already drawn)
 
@@ -569,7 +593,7 @@ void main() {
         for (int i = 0; i < _wmo.Materials.Count; i++)
         {
             var mat = _wmo.Materials[i];
-            string? texName = mat.Texture1Name;
+            string? texName = ResolveMaterialTextureName(mat);
             if (string.IsNullOrEmpty(texName)) continue;
 
             // Ensure .blp extension
@@ -614,6 +638,76 @@ void main() {
             }
         }
         ViewerLog.Trace($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+    }
+
+    private int ResolveBatchMaterialId(WmoV14ToV17Converter.WmoGroupData group, WmoV14ToV17Converter.WmoBatch batch)
+    {
+        int originalMaterialId = batch.MaterialId;
+        int materialId = originalMaterialId;
+        if ((uint)materialId < (uint)_wmo.Materials.Count)
+            return materialId;
+
+        int firstFace = (int)(batch.FirstIndex / 3u);
+        if ((uint)firstFace < (uint)group.FaceMaterials.Count)
+        {
+            int faceMaterial = group.FaceMaterials[firstFace];
+            if ((uint)faceMaterial < (uint)_wmo.Materials.Count)
+            {
+                LogMaterialFallback(group, batch, originalMaterialId, faceMaterial, "MOPY");
+                return faceMaterial;
+            }
+        }
+
+        int defaultMaterial = _wmo.Materials.Count > 0 ? 0 : -1;
+        LogMaterialFallback(group, batch, originalMaterialId, defaultMaterial, "DEFAULT");
+        return defaultMaterial;
+    }
+
+    private void LogMaterialFallback(WmoV14ToV17Converter.WmoGroupData group, WmoV14ToV17Converter.WmoBatch batch,
+        int originalMaterialId, int resolvedMaterialId, string source)
+    {
+        if (_materialFallbackLogCount >= MaxMaterialFallbackLogs)
+            return;
+
+        string groupName = string.IsNullOrWhiteSpace(group.Name) ? "<unnamed>" : group.Name;
+        string key = $"{groupName}|{batch.FirstIndex}|{batch.IndexCount}|{originalMaterialId}|{resolvedMaterialId}|{source}";
+        if (!_materialFallbackLogKeys.Add(key))
+            return;
+
+        _materialFallbackLogCount++;
+        ViewerLog.Info(ViewerLog.Category.Wmo,
+            $"[WMO-MAT] Fallback source={source} group='{groupName}' firstIndex={batch.FirstIndex} indexCount={batch.IndexCount} material {originalMaterialId} -> {resolvedMaterialId}");
+    }
+
+    private string? ResolveMaterialTextureName(WmoV14ToV17Converter.WmoMaterial material)
+    {
+        string? textureName = material.Texture1Name;
+        if (!string.IsNullOrWhiteSpace(textureName))
+            return textureName;
+
+        if (_wmo.MotxRaw.Length == 0)
+            return null;
+
+        textureName = ResolveStringFromRaw(_wmo.MotxRaw, material.Texture1Offset);
+        if (string.IsNullOrWhiteSpace(textureName) && material.Texture1Offset >= 8)
+            textureName = ResolveStringFromRaw(_wmo.MotxRaw, material.Texture1Offset - 8);
+
+        return textureName;
+    }
+
+    private static string? ResolveStringFromRaw(byte[] raw, uint offset)
+    {
+        if (raw.Length == 0 || offset >= raw.Length)
+            return null;
+
+        int start = (int)offset;
+        int end = Array.IndexOf(raw, (byte)0, start);
+        if (end < 0)
+            end = raw.Length;
+        if (end <= start)
+            return null;
+
+        return Encoding.ASCII.GetString(raw, start, end - start).Trim();
     }
 
     private unsafe uint LoadWmoTexture(byte[] blpData, string name)
@@ -986,13 +1080,12 @@ void main() {
                 // WMO MLIQ tile size = 1/8th of a map chunk = UNIT_SIZE/2 ≈ 4.16666
                 float liquidTileSize = 4.16666f;
 
-                // Build vertex positions in WMO-local space (raw file coords, Z-up)
-                // Our renderer uses raw file coords with Camera up = UnitZ.
-                // MLIQ data has an inherent 90° CW misrotation (wowdev wiki note).
-                // Fix: apply 90° CCW rotation on XY plane: (-j, +i)
-                //   axis0 = cornerX - j * tileSize
-                //   axis1 = cornerY + i * tileSize
-                //   axis2 = heights[idx]  (Z = up = liquid surface height)
+                // Build vertex positions in WMO-local space (raw file coords, Z-up).
+                // 3.3.5 assets are not consistent about apparent MLIQ XY orientation,
+                // so choose the best mapping by fitting the liquid quad bounds to the
+                // owning group's bounds instead of forcing one hard-coded rotation.
+                int liquidOrientation = SelectBestLiquidOrientation(group, cornerX, cornerY, xverts, yverts, liquidTileSize);
+                int effectiveOrientation = (liquidOrientation + _mliqRotationQuarterTurns) & 3;
                 int nverts = xverts * yverts;
                 var vertices = new float[nverts * 3];
                 for (int j = 0; j < yverts; j++)
@@ -1000,10 +1093,16 @@ void main() {
                     for (int i = 0; i < xverts; i++)
                     {
                         int idx = j * xverts + i;
-                        vertices[idx * 3 + 0] = cornerX - j * liquidTileSize;
-                        vertices[idx * 3 + 1] = cornerY + i * liquidTileSize;
+                        var p = MapLiquidVertex(effectiveOrientation, cornerX, cornerY, liquidTileSize, i, j);
+                        vertices[idx * 3 + 0] = p.X;
+                        vertices[idx * 3 + 1] = p.Y;
                         vertices[idx * 3 + 2] = heights[idx];
                     }
+                }
+
+                if (liquidOrientation != 2 || _mliqRotationQuarterTurns != 0)
+                {
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: orientation={effectiveOrientation} (auto={liquidOrientation}, userRot={_mliqRotationQuarterTurns * 90}°)");
                 }
 
                 // Build indices: one quad per visible tile
@@ -1128,6 +1227,108 @@ void main() {
 
         if (_liquidMeshes.Count > 0)
             ViewerLog.Trace($"[WmoRenderer] Built {_liquidMeshes.Count} liquid meshes");
+
+        _builtMliqRotationRevision = _mliqRotationRevision;
+    }
+
+    private void EnsureLiquidMeshesUpToDate()
+    {
+        if (_builtMliqRotationRevision == _mliqRotationRevision)
+            return;
+
+        DisposeLiquidMeshes();
+        BuildLiquidMeshes();
+    }
+
+    private void DisposeLiquidMeshes()
+    {
+        foreach (var liq in _liquidMeshes)
+        {
+            _gl.DeleteVertexArray(liq.Vao);
+            _gl.DeleteBuffer(liq.Vbo);
+            _gl.DeleteBuffer(liq.Ebo);
+        }
+
+        _liquidMeshes.Clear();
+    }
+
+    private static Vector2 MapLiquidVertex(int orientation, float cornerX, float cornerY, float tileSize, int i, int j)
+    {
+        return orientation switch
+        {
+            // No rotation
+            0 => new Vector2(cornerX + i * tileSize, cornerY + j * tileSize),
+            // 90° CW
+            1 => new Vector2(cornerX + j * tileSize, cornerY - i * tileSize),
+            // 90° CCW (legacy behavior)
+            2 => new Vector2(cornerX - j * tileSize, cornerY + i * tileSize),
+            // 180°
+            3 => new Vector2(cornerX - i * tileSize, cornerY - j * tileSize),
+            _ => new Vector2(cornerX - j * tileSize, cornerY + i * tileSize)
+        };
+    }
+
+    private static int SelectBestLiquidOrientation(
+        WmoV14ToV17Converter.WmoGroupData group,
+        float cornerX,
+        float cornerY,
+        int xverts,
+        int yverts,
+        float tileSize)
+    {
+        int maxI = Math.Max(0, xverts - 1);
+        int maxJ = Math.Max(0, yverts - 1);
+
+        var groupMin = group.BoundsMin;
+        var groupMax = group.BoundsMax;
+        float groupCenterX = (groupMin.X + groupMax.X) * 0.5f;
+        float groupCenterY = (groupMin.Y + groupMax.Y) * 0.5f;
+
+        // Keep legacy mapping as tie-break default.
+        int bestOrientation = 2;
+        float bestScore = float.MaxValue;
+
+        for (int orientation = 0; orientation < 4; orientation++)
+        {
+            var p00 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, 0, 0);
+            var p10 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, maxI, 0);
+            var p01 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, 0, maxJ);
+            var p11 = MapLiquidVertex(orientation, cornerX, cornerY, tileSize, maxI, maxJ);
+
+            float minX = MathF.Min(MathF.Min(p00.X, p10.X), MathF.Min(p01.X, p11.X));
+            float maxX = MathF.Max(MathF.Max(p00.X, p10.X), MathF.Max(p01.X, p11.X));
+            float minY = MathF.Min(MathF.Min(p00.Y, p10.Y), MathF.Min(p01.Y, p11.Y));
+            float maxY = MathF.Max(MathF.Max(p00.Y, p10.Y), MathF.Max(p01.Y, p11.Y));
+
+            float overflow = 0f;
+            if (minX < groupMin.X) overflow += groupMin.X - minX;
+            if (maxX > groupMax.X) overflow += maxX - groupMax.X;
+            if (minY < groupMin.Y) overflow += groupMin.Y - minY;
+            if (maxY > groupMax.Y) overflow += maxY - groupMax.Y;
+
+            float centerX = (minX + maxX) * 0.5f;
+            float centerY = (minY + maxY) * 0.5f;
+            float centerDx = centerX - groupCenterX;
+            float centerDy = centerY - groupCenterY;
+            float centerDistance = MathF.Sqrt(centerDx * centerDx + centerDy * centerDy);
+
+            // Prioritize staying inside group bounds, then center proximity.
+            float score = overflow * 1000f + centerDistance;
+
+            if (orientation == bestOrientation)
+            {
+                bestScore = score;
+                continue;
+            }
+
+            if (score + 0.001f < bestScore)
+            {
+                bestScore = score;
+                bestOrientation = orientation;
+            }
+        }
+
+        return bestOrientation;
     }
 
     public void Dispose()
@@ -1145,13 +1346,7 @@ void main() {
         _materialTextures.Clear();
 
         // Dispose liquid meshes
-        foreach (var liq in _liquidMeshes)
-        {
-            _gl.DeleteVertexArray(liq.Vao);
-            _gl.DeleteBuffer(liq.Vbo);
-            _gl.DeleteBuffer(liq.Ebo);
-        }
-        _liquidMeshes.Clear();
+        DisposeLiquidMeshes();
 
         // Dispose cached doodad renderers
         foreach (var renderer in _doodadModelCache.Values)
