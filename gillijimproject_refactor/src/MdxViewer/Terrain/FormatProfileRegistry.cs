@@ -75,6 +75,30 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false
     };
 
+    public static readonly AdtProfile AdtProfile0103892Provisional = new()
+    {
+        ProfileId = "AdtProfile_010_3892_Provisional",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = false
+    };
+
+    public static readonly AdtProfile AdtProfile33512340 = new()
+    {
+        ProfileId = "AdtProfile_335_12340",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = false
+    };
+
     public static readonly AdtProfile AdtProfile3018303 = new()
     {
         ProfileId = "AdtProfile_301_8303",
@@ -131,9 +155,25 @@ public static class FormatProfileRegistry
         EnablePortalOptionalBlocks = true
     };
 
+    public static readonly WmoProfile WmoProfile0103892Provisional = new()
+    {
+        ProfileId = "WmoProfile_010_3892_Provisional",
+        StrictGroupChunkOrder = true,
+        EnableMliqGroupLiquids = true,
+        EnablePortalOptionalBlocks = true
+    };
+
     public static readonly WmoProfile WmoProfile3018303 = new()
     {
         ProfileId = "WmoProfile_301_8303",
+        StrictGroupChunkOrder = true,
+        EnableMliqGroupLiquids = true,
+        EnablePortalOptionalBlocks = true
+    };
+
+    public static readonly WmoProfile WmoProfile33512340 = new()
+    {
+        ProfileId = "WmoProfile_335_12340",
         StrictGroupChunkOrder = true,
         EnableMliqGroupLiquids = true,
         EnablePortalOptionalBlocks = true
@@ -182,6 +222,15 @@ public static class FormatProfileRegistry
     public static readonly MdxProfile MdxProfile0913810 = new()
     {
         ProfileId = "MdxProfile_091_3810",
+        RequiresMdlxMagic = true,
+        TextureRecordSize = 0x10C,
+        TextureSectionSizeStrict = true,
+        GeosetHardFailIfMissing = false
+    };
+
+    public static readonly MdxProfile MdxProfile0103892Provisional = new()
+    {
+        ProfileId = "MdxProfile_010_3892_Provisional",
         RequiresMdlxMagic = true,
         TextureRecordSize = 0x10C,
         TextureSectionSizeStrict = true,
@@ -238,6 +287,21 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_301_8303",
         RequiredRootMagic = ModelRootMagic.MD20,
         MinSupportedVersion = 0x104,
+        MaxSupportedVersion = 0x108,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
+    public static readonly M2Profile M2Profile33512340 = new()
+    {
+        ProfileId = "M2Profile_335_12340",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        MinSupportedVersion = 0x108,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
         StrictSpanValidation = true,
@@ -326,8 +390,14 @@ public static class FormatProfileRegistry
 
     public static AdtProfile ResolveAdtProfile(string? buildVersion)
     {
+        if (string.Equals(buildVersion, "0.10.3892", StringComparison.OrdinalIgnoreCase))
+            return AdtProfile0103892Provisional;
+
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return AdtProfile0913810;
+
+        if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
+            return AdtProfile33512340;
 
         if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
             return AdtProfile3018303;
@@ -361,8 +431,14 @@ public static class FormatProfileRegistry
 
     public static WmoProfile ResolveWmoProfile(string? buildVersion)
     {
+        if (string.Equals(buildVersion, "0.10.3892", StringComparison.OrdinalIgnoreCase))
+            return WmoProfile0103892Provisional;
+
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return WmoProfile0913810;
+
+        if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
+            return WmoProfile33512340;
 
         if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
             return WmoProfile3018303;
@@ -396,6 +472,9 @@ public static class FormatProfileRegistry
 
     public static MdxProfile ResolveMdxProfile(string? buildVersion)
     {
+        if (string.Equals(buildVersion, "0.10.3892", StringComparison.OrdinalIgnoreCase))
+            return MdxProfile0103892Provisional;
+
         if (string.Equals(buildVersion, "0.9.1.3810", StringComparison.OrdinalIgnoreCase))
             return MdxProfile0913810;
 
@@ -425,6 +504,9 @@ public static class FormatProfileRegistry
 
     public static M2Profile? ResolveModelProfile(string? buildVersion)
     {
+        if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
+            return M2Profile33512340;
+
         if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
             return M2Profile3018303;
 

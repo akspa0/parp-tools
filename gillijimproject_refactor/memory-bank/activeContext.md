@@ -1,10 +1,18 @@
 # Active Context
 
-## Current Focus: MdxViewer — Multi-Version World Viewer (Feb 11, 2026)
+## Current Focus: MDX Compatibility Port + Rendering Parity (Feb 14, 2026)
 
 MdxViewer is the **primary project** in the tooling suite. It is a high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data.
 
-### Recently Completed (Feb 11-12)
+### Recently Completed (Feb 14)
+
+- **GEOS Port (wow-mdx-viewer parity)**: ✅ `MdxFile.ReadGeosets` now routes by version with strict paths for v1300/v1400 and v1500, with guarded fallback.
+- **SEQS Name Recovery**: ✅ Counted 0x8C named-record detection broadened so playable models no longer fall into `Seq_{animId}` fallback names in many cases.
+- **PRE2 Parser Expansion**: ✅ Particle emitter v2 parser now reads full scalar payload layout, spline block, and skips known anim-vector tails safely for alignment.
+- **RIBB Parser Expansion**: ✅ Ribbon parser now processes known tail anim-vector chunks safely for alignment.
+- **Specular/Env Orientation Fix (shader)**: ✅ MDX fragment shader now flips normals/view-normals on backfaces before sphere-env UV and lighting/specular, targeting inside-out dome reflections.
+
+### Previously Completed (Feb 11-12)
 
 - **Full-Load Mode**: ✅ `--full-load` (default) / `--partial-load` CLI flags — loads all tiles at startup
 - **Specular Highlights**: ✅ Blinn-Phong specular in ModelRenderer fragment shader (shininess=32, intensity=0.3)
@@ -46,15 +54,13 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 
 ### Known Issues / Next Steps
 
-1. **WMO semi-transparent window materials** — ❌ CRITICAL: Stormwind WMO maps glass textures to wrong geometry (columns instead of windows). Attempted fix: skip secondary MOTV chunk bytes to prevent MOBA parsing misalignment — **FAILED**. Root cause still unknown.
-2. **MDX cylindrical texture stretching** — ❌ CRITICAL: Barrels, tree trunks show single stretched plank instead of tiled texture. Attempted fix: per-axis texture wrap mode (clampS/clampT) — **FAILED**. Root cause still unknown.
-3. **3.3.5 ADT loading freeze** — needs investigation
-4. **WMO culling too aggressive** — objects outside WMO not visible from inside
-5. **GPU skinning** — bone matrices computed but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
-6. **Animation UI** — sequence selection combo box in ImGui panel
-7. **Proper lighting** — terrain + object shading improvements
-8. **Vulkan RenderManager** — research `IRenderBackend` abstraction for Silk.NET Vulkan
-9. **Remove diagnostic logging** — cleanup temp logging in Mcnk.cs, StandardTerrainAdapter.cs
+1. **Runtime validation pending (critical handoff item)** — verify PRE2/RIBB-heavy models visually after parser expansion.
+2. **Specular/env dome check pending** — confirm Dalaran dome-like materials now reflect outward after backface normal correction.
+3. **Residual SEQS/material parity work** — continue porting edge-case behavior from `lib/wow-mdx-viewer` if specific models still diverge.
+4. **WMO semi-transparent window materials** — Stormwind glass still maps to wrong geometry (root cause unknown).
+5. **MDX cylindrical texture stretching** — barrels/tree trunks still show stretched planks on some assets.
+6. **3.3.5 ADT loading freeze** — needs investigation.
+7. **WMO culling too aggressive** — objects outside WMO not visible from inside.
 
 ---
 

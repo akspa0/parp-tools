@@ -9,6 +9,17 @@ namespace WoWMapConverter.Core.Converters;
 /// </summary>
 public class WmoV17ToV14Converter
 {
+    private static readonly string[] RootRequiredChunkOrder090 =
+    {
+        "MVER", "MOHD", "MOTX", "MOMT", "MOGN", "MOGI", "MOSB", "MOPV", "MOPT", "MOPR",
+        "MOVV", "MOVB", "MOLT", "MODS", "MODN", "MODD", "MFOG"
+    };
+
+    private static readonly string[] GroupRequiredChunkOrder090 =
+    {
+        "MOPY", "MOVI", "MOVT", "MONR", "MOTV", "MOBA"
+    };
+
     /// <summary>
     /// Convert a v17 WMO (root + groups) to v14 monolithic format.
     /// </summary>
@@ -316,81 +327,126 @@ public class WmoV17ToV14Converter
     private WmoV17Data ParseWmoV17RootFromReader(BinaryReader reader)
     {
         var data = new WmoV17Data();
+        int expectedRootChunkIndex = 0;
+        bool sawOptionalMcvp = false;
 
         while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = Math.Min(reader.BaseStream.Position + size, reader.BaseStream.Length);
+            long payloadStart = reader.BaseStream.Position;
+            var chunkEnd = Math.Min(payloadStart + size, reader.BaseStream.Length);
+            uint effectiveSize = (uint)Math.Max(0, chunkEnd - payloadStart);
 
             // Reverse for comparison (chunks stored reversed on disk)
             var chunkId = new string(magic.Reverse().ToArray());
 
+            if (expectedRootChunkIndex < RootRequiredChunkOrder090.Length)
+            {
+                string expected = RootRequiredChunkOrder090[expectedRootChunkIndex];
+                if (chunkId != expected)
+                    throw new InvalidDataException(
+                        $"WMO root chunk order mismatch at offset 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expected}'.");
+                expectedRootChunkIndex++;
+            }
+            else
+            {
+                if (chunkId == "MCVP" && !sawOptionalMcvp)
+                {
+                    sawOptionalMcvp = true;
+                }
+                else
+                {
+                    throw new InvalidDataException(
+                        $"Unexpected trailing WMO root chunk '{chunkId}' at offset 0x{payloadStart - 8:X}.");
+                }
+            }
+
             switch (chunkId)
             {
                 case "MVER":
+                    if (effectiveSize < 4)
+                        throw new InvalidDataException("Invalid WMO MVER chunk size: expected at least 4 bytes.");
+
                     data.Version = reader.ReadUInt32();
+                    if (data.Version != 0x11)
+                        throw new InvalidDataException($"Unsupported WMO version 0x{data.Version:X}; expected 0x11 for 0.9.x profile.");
                     break;
                 case "MOHD":
-                    ParseMohd(reader, data);
+                    ParseMohd(reader, effectiveSize, data);
                     break;
                 case "MOTX":
                     {
                         long pos = reader.BaseStream.Position;
-                        data.TextureNamesRaw = reader.ReadBytes((int)size);
+                        data.TextureNamesRaw = reader.ReadBytes((int)effectiveSize);
                         reader.BaseStream.Position = pos;
-                        data.TextureNames = ReadStringTable(reader, size);
+                        data.TextureNames = ReadStringTable(reader, effectiveSize);
                     }
                     break;
                 case "MOMT":
-                    data.Materials = ReadMaterials(reader, size);
+                    data.Materials = ReadMaterials(reader, effectiveSize);
                     break;
                 case "MOGN":
                     {
                         long pos = reader.BaseStream.Position;
-                        data.GroupNamesRaw = reader.ReadBytes((int)size);
+                        data.GroupNamesRaw = reader.ReadBytes((int)effectiveSize);
                         reader.BaseStream.Position = pos;
-                        data.GroupNames = ReadStringTable(reader, size);
+                        data.GroupNames = ReadStringTable(reader, effectiveSize);
                     }
                     break;
                 case "MOGI":
-                    data.GroupInfos = ReadGroupInfos(reader, size);
+                    data.GroupInfos = ReadGroupInfos(reader, effectiveSize);
                     break;
                 case "MOSB":
-                    data.SkyboxName = ReadNullTermString(reader, size);
+                    data.SkyboxName = ReadNullTermString(reader, effectiveSize);
                     break;
                 case "MOPV":
-                    data.PortalVertices = ReadVector3Array(reader, size);
+                    data.PortalVertices = ReadVector3Array(reader, effectiveSize);
                     break;
                 case "MOPT":
-                    data.PortalInfos = ReadPortalInfos(reader, size);
+                    data.PortalInfos = ReadPortalInfos(reader, effectiveSize);
                     break;
                 case "MOPR":
-                    data.PortalRefs = ReadPortalRefs(reader, size);
+                    data.PortalRefs = ReadPortalRefs(reader, effectiveSize);
+                    break;
+                case "MOVV":
+                    data.MovvRaw = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MOVB":
+                    data.MovbRaw = reader.ReadBytes((int)effectiveSize);
                     break;
                 case "MOLT":
-                    data.Lights = ReadLights(reader, size);
+                    data.Lights = ReadLights(reader, effectiveSize);
                     break;
                 case "MODS":
-                    data.DoodadSets = ReadDoodadSets(reader, size);
+                    data.DoodadSets = ReadDoodadSets(reader, effectiveSize);
                     break;
                 case "MODN":
                     {
                         long pos = reader.BaseStream.Position;
-                        data.DoodadNamesRaw = reader.ReadBytes((int)size);
+                        data.DoodadNamesRaw = reader.ReadBytes((int)effectiveSize);
                         reader.BaseStream.Position = pos;
-                        data.DoodadNames = ReadStringTable(reader, size);
+                        data.DoodadNames = ReadStringTable(reader, effectiveSize);
                     }
                     break;
                 case "MODD":
-                    data.DoodadDefs = ReadDoodadDefs(reader, size);
+                    data.DoodadDefs = ReadDoodadDefs(reader, effectiveSize);
                     break;
                 case "MFOG":
-                    data.Fogs = ReadFogs(reader, size);
+                    data.Fogs = ReadFogs(reader, effectiveSize);
+                    break;
+                case "MCVP":
+                    data.McvpRaw = reader.ReadBytes((int)effectiveSize);
                     break;
             }
 
             reader.BaseStream.Position = chunkEnd;
+        }
+
+        if (expectedRootChunkIndex != RootRequiredChunkOrder090.Length)
+        {
+            throw new InvalidDataException(
+                $"WMO root terminated early: parsed {expectedRootChunkIndex}/{RootRequiredChunkOrder090.Length} required chunks.");
         }
 
         return data;
@@ -406,33 +462,64 @@ public class WmoV17ToV14Converter
     private WmoV17GroupData ParseWmoV17GroupFromReader(BinaryReader reader)
     {
         var data = new WmoV17GroupData();
+        int expectedTopChunkIndex = 0;
 
         while (reader.BaseStream.Position + 8 <= reader.BaseStream.Length)
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = Math.Min(reader.BaseStream.Position + size, reader.BaseStream.Length);
+            long payloadStart = reader.BaseStream.Position;
+            var chunkEnd = Math.Min(payloadStart + size, reader.BaseStream.Length);
+            uint effectiveSize = (uint)Math.Max(0, chunkEnd - payloadStart);
             var chunkId = new string(magic.Reverse().ToArray());
+
+            if (expectedTopChunkIndex == 0)
+            {
+                if (chunkId != "MVER")
+                    throw new InvalidDataException(
+                        $"WMO group chunk order mismatch at offset 0x{payloadStart - 8:X}: expected 'MVER', got '{chunkId}'.");
+                expectedTopChunkIndex = 1;
+            }
+            else if (expectedTopChunkIndex == 1)
+            {
+                if (chunkId != "MOGP")
+                    throw new InvalidDataException(
+                        $"WMO group chunk order mismatch at offset 0x{payloadStart - 8:X}: expected 'MOGP', got '{chunkId}'.");
+                expectedTopChunkIndex = 2;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    $"Unexpected trailing WMO group chunk '{chunkId}' at offset 0x{payloadStart - 8:X}.");
+            }
 
             switch (chunkId)
             {
                 case "MVER":
+                    if (effectiveSize < 4)
+                        throw new InvalidDataException("Invalid WMO group MVER chunk size: expected at least 4 bytes.");
+
                     data.Version = reader.ReadUInt32();
+                    if (data.Version != 0x10 && data.Version != 0x11)
+                        throw new InvalidDataException($"Unsupported WMO group version 0x{data.Version:X}; expected 0x10 or 0x11.");
                     break;
                 case "MOGP":
-                    ParseMogp(reader, size, data);
+                    ParseMogp(reader, effectiveSize, data);
                     break;
             }
 
             reader.BaseStream.Position = chunkEnd;
         }
 
+        if (expectedTopChunkIndex != 2)
+            throw new InvalidDataException("WMO group terminated early: expected MVER followed by MOGP.");
+
         return data;
     }
 
-    private void ParseMohd(BinaryReader reader, WmoV17Data data)
+    private void ParseMohd(BinaryReader reader, uint size, WmoV17Data data)
     {
-        long remaining = reader.BaseStream.Length - reader.BaseStream.Position;
+        long remaining = Math.Min(size, reader.BaseStream.Length - reader.BaseStream.Position);
         if (remaining < 60) return; // Need at least 60 bytes for core MOHD fields
         data.MaterialCount = reader.ReadUInt32();
         data.GroupCount = reader.ReadUInt32();
@@ -474,55 +561,211 @@ public class WmoV17ToV14Converter
         data.Flags2 = reader.ReadUInt32();
         reader.ReadUInt32(); // unused
 
-        // Parse subchunks within MOGP
+        // Parse subchunks within MOGP:
+        // - required chain is strict and ordered
+        // - optional flagged chunks are strict-per-token but order-tolerant
+        int expectedRequiredSubchunkIndex = 0;
+        var allowedOptionalSubchunks = BuildAllowedOptionalMogpSubchunks(data.Flags);
+        var seenOptionalSubchunks = new HashSet<string>(StringComparer.Ordinal);
         while (reader.BaseStream.Position + 8 <= mogpEnd)
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
             var size = reader.ReadUInt32();
-            var chunkEnd = Math.Min(reader.BaseStream.Position + size, mogpEnd);
+            long payloadStart = reader.BaseStream.Position;
+            var chunkEnd = Math.Min(payloadStart + size, mogpEnd);
+            uint effectiveSize = (uint)Math.Max(0, chunkEnd - payloadStart);
             var chunkId = new string(magic.Reverse().ToArray());
+
+            if (expectedRequiredSubchunkIndex < GroupRequiredChunkOrder090.Length)
+            {
+                string expectedSubchunk = GroupRequiredChunkOrder090[expectedRequiredSubchunkIndex];
+                if (chunkId != expectedSubchunk)
+                {
+                    throw new InvalidDataException(
+                        $"MOGP required subchunk order mismatch at 0x{payloadStart - 8:X}: got '{chunkId}', expected '{expectedSubchunk}'. Flags=0x{data.Flags:X}.");
+                }
+                expectedRequiredSubchunkIndex++;
+            }
+            else
+            {
+                if (Array.IndexOf(GroupRequiredChunkOrder090, chunkId) >= 0)
+                {
+                    throw new InvalidDataException(
+                        $"Unexpected repeated required MOGP subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
+                }
+
+                if (!allowedOptionalSubchunks.Contains(chunkId))
+                {
+                    throw new InvalidDataException(
+                        $"Unexpected ungated MOGP optional subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
+                }
+
+                if (!seenOptionalSubchunks.Add(chunkId))
+                {
+                    throw new InvalidDataException(
+                        $"Duplicate MOGP optional subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
+                }
+
+                ValidateOptionalMogpDependency(chunkId, seenOptionalSubchunks, payloadStart, data.Flags);
+            }
 
             switch (chunkId)
             {
                 case "MOPY":
-                    data.MaterialInfo = reader.ReadBytes((int)size);
+                    data.MaterialInfo = reader.ReadBytes((int)effectiveSize);
                     break;
                 case "MOVI":
-                    data.Indices = ReadUInt16Array(reader, size);
+                    data.Indices = ReadUInt16Array(reader, effectiveSize);
                     break;
                 case "MOVT":
-                    data.Vertices = ReadVector3Array(reader, size);
+                    data.Vertices = ReadVector3Array(reader, effectiveSize);
                     break;
                 case "MONR":
-                    data.Normals = ReadVector3Array(reader, size);
+                    data.Normals = ReadVector3Array(reader, effectiveSize);
                     break;
                 case "MOTV":
-                    data.TexCoords = ReadVector2Array(reader, size);
+                    data.TexCoords = ReadVector2Array(reader, effectiveSize);
                     break;
                 case "MOBA":
-                    data.Batches = ReadBatches(reader, size);
+                    data.Batches = ReadBatches(reader, effectiveSize);
                     break;
                 case "MOLR":
-                    data.LightRefs = ReadUInt16Array(reader, size);
+                    data.LightRefs = ReadUInt16Array(reader, effectiveSize);
+                    break;
+                case "MPBV":
+                    data.MpbvData = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MPBP":
+                    data.MpbpData = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MPBI":
+                    data.MpbiData = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MPBG":
+                    data.MpbgData = reader.ReadBytes((int)effectiveSize);
                     break;
                 case "MODR":
-                    data.DoodadRefs = ReadUInt16Array(reader, size);
+                    data.DoodadRefs = ReadUInt16Array(reader, effectiveSize);
                     break;
                 case "MOBN":
-                    data.BspNodes = reader.ReadBytes((int)size);
+                    data.BspNodes = reader.ReadBytes((int)effectiveSize);
                     break;
                 case "MOBR":
-                    data.BspFaceIndices = ReadUInt16Array(reader, size);
+                    data.BspFaceIndices = ReadUInt16Array(reader, effectiveSize);
                     break;
                 case "MOCV":
-                    data.VertexColors = reader.ReadBytes((int)size);
+                    data.VertexColors = reader.ReadBytes((int)effectiveSize);
                     break;
                 case "MLIQ":
-                    data.LiquidData = reader.ReadBytes((int)size);
+                    data.LiquidData = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MORI":
+                    data.MoriData = reader.ReadBytes((int)effectiveSize);
+                    break;
+                case "MORB":
+                    data.MorbData = reader.ReadBytes((int)effectiveSize);
                     break;
             }
 
             reader.BaseStream.Position = chunkEnd;
+        }
+
+        if (expectedRequiredSubchunkIndex != GroupRequiredChunkOrder090.Length)
+        {
+            throw new InvalidDataException(
+                $"MOGP missing required subchunks: parsed {expectedRequiredSubchunkIndex}/{GroupRequiredChunkOrder090.Length}. Flags=0x{data.Flags:X}.");
+        }
+
+        EnsureAllFlaggedOptionalMogpSubchunksPresent(seenOptionalSubchunks, data.Flags);
+    }
+
+    private static HashSet<string> BuildAllowedOptionalMogpSubchunks(uint flags)
+    {
+        var optional = new HashSet<string>(StringComparer.Ordinal);
+
+        if ((flags & 0x0001) != 0)
+        {
+            optional.Add("MOBN");
+            optional.Add("MOBR");
+        }
+
+        if ((flags & 0x0004) != 0)
+            optional.Add("MOCV");
+        if ((flags & 0x0200) != 0)
+            optional.Add("MOLR");
+
+        if ((flags & 0x0400) != 0)
+        {
+            optional.Add("MPBV");
+            optional.Add("MPBP");
+            optional.Add("MPBI");
+            optional.Add("MPBG");
+        }
+
+        if ((flags & 0x0800) != 0)
+            optional.Add("MODR");
+        if ((flags & 0x1000) != 0)
+            optional.Add("MLIQ");
+
+        if ((flags & 0x20000) != 0)
+        {
+            optional.Add("MORI");
+            optional.Add("MORB");
+        }
+
+        return optional;
+    }
+
+    private static void ValidateOptionalMogpDependency(string chunkId, HashSet<string> seenOptionalSubchunks, long payloadStart, uint flags)
+    {
+        if (chunkId == "MOBR" && !seenOptionalSubchunks.Contains("MOBN"))
+        {
+            throw new InvalidDataException(
+                $"MOGP optional dependency mismatch at 0x{payloadStart - 8:X}: 'MOBR' requires prior 'MOBN'. Flags=0x{flags:X}.");
+        }
+
+        if (chunkId == "MPBP" && !seenOptionalSubchunks.Contains("MPBV"))
+        {
+            throw new InvalidDataException(
+                $"MOGP optional dependency mismatch at 0x{payloadStart - 8:X}: 'MPBP' requires prior 'MPBV'. Flags=0x{flags:X}.");
+        }
+
+        if (chunkId == "MPBI" && !seenOptionalSubchunks.Contains("MPBP"))
+        {
+            throw new InvalidDataException(
+                $"MOGP optional dependency mismatch at 0x{payloadStart - 8:X}: 'MPBI' requires prior 'MPBP'. Flags=0x{flags:X}.");
+        }
+
+        if (chunkId == "MPBG" && !seenOptionalSubchunks.Contains("MPBI"))
+        {
+            throw new InvalidDataException(
+                $"MOGP optional dependency mismatch at 0x{payloadStart - 8:X}: 'MPBG' requires prior 'MPBI'. Flags=0x{flags:X}.");
+        }
+
+        if (chunkId == "MORB" && !seenOptionalSubchunks.Contains("MORI"))
+        {
+            throw new InvalidDataException(
+                $"MOGP optional dependency mismatch at 0x{payloadStart - 8:X}: 'MORB' requires prior 'MORI'. Flags=0x{flags:X}.");
+        }
+    }
+
+    private static void EnsureAllFlaggedOptionalMogpSubchunksPresent(HashSet<string> seenOptionalSubchunks, uint flags)
+    {
+        var expectedOptional = BuildAllowedOptionalMogpSubchunks(flags);
+        if (expectedOptional.Count == 0)
+            return;
+
+        var missing = new List<string>();
+        foreach (var token in expectedOptional)
+        {
+            if (!seenOptionalSubchunks.Contains(token))
+                missing.Add(token);
+        }
+
+        if (missing.Count > 0)
+        {
+            throw new InvalidDataException(
+                $"MOGP missing flagged optional subchunks ({string.Join(", ", missing)}). Flags=0x{flags:X}.");
         }
     }
 
@@ -871,7 +1114,6 @@ public class WmoV17ToV14Converter
             result.Add(new WmoDoodadDef
             {
                 NameOfs = r.ReadUInt32(),
-                Flags = r.ReadUInt32(),
                 Position = ReadVector3(r),
                 Rotation = new float[4]
             });
@@ -1103,7 +1345,6 @@ public class WmoV17ToV14Converter
         foreach (var d in defs)
         {
             w.Write(d.NameOfs);
-            w.Write(d.Flags);
             WriteVector3(w, d.Position);
             foreach (var r in d.Rotation)
                 w.Write(r);
@@ -1173,12 +1414,15 @@ public class WmoV17ToV14Converter
         public Vector3[] PortalVertices = Array.Empty<Vector3>();
         public List<WmoPortalInfo> PortalInfos = new();
         public List<WmoPortalRef> PortalRefs = new();
+        public byte[] MovvRaw = Array.Empty<byte>();
+        public byte[] MovbRaw = Array.Empty<byte>();
         public List<WmoLight> Lights = new();
         public List<WmoDoodadSet> DoodadSets = new();
         public List<string> DoodadNames = new();
         public byte[] DoodadNamesRaw = Array.Empty<byte>(); // Raw MODN blob for byte-offset resolution
         public List<WmoDoodadDef> DoodadDefs = new();
         public List<WmoFog> Fogs = new();
+        public byte[] McvpRaw = Array.Empty<byte>();
         public List<WmoV17GroupData> Groups = new();
     }
 
@@ -1212,6 +1456,12 @@ public class WmoV17ToV14Converter
         public ushort[]? BspFaceIndices;
         public byte[]? VertexColors;
         public byte[]? LiquidData;
+        public byte[]? MpbvData;
+        public byte[]? MpbpData;
+        public byte[]? MpbiData;
+        public byte[]? MpbgData;
+        public byte[]? MoriData;
+        public byte[]? MorbData;
     }
 
     private class WmoMaterial

@@ -112,6 +112,13 @@ Fallback policy:
 ## BuildRange
 - `0.9.1.3810` only (provisional profile).
 
+## Container identity policy (critical for `0.9+`)
+- `.mdx` extension is not a sufficient parser selector in this era.
+- Parser family must be selected by binary container identity first:
+  - `MDLX` => classic chunk-seek MDX contract
+  - `MD20`/M2-family => typed offset/count table contract
+- If extension and root magic disagree, log diagnostics and continue with magic-selected contract.
+
 ## GeometryPolicy
 - `GEOS` section is consumed in binary load path.
 - Evidence:

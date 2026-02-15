@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text;
+using WoWMapConverter.Core.Diagnostics;
 
 namespace WoWMapConverter.Core.Converters;
 
@@ -14,28 +15,36 @@ public class M2ToMdxConverter
     /// </summary>
     public void Convert(string m2Path, string mdxOutputPath)
     {
-        Console.WriteLine($"[INFO] Converting M2 → MDX: {Path.GetFileName(m2Path)}");
-
-        using var m2Stream = File.OpenRead(m2Path);
-        using var reader = new BinaryReader(m2Stream);
-
-        var m2Data = ParseM2(reader);
-
-        // Try to load .skin file
-        var skinPath = Path.ChangeExtension(m2Path, "00.skin");
-        if (File.Exists(skinPath))
+        try
         {
-            using var skinStream = File.OpenRead(skinPath);
-            using var skinReader = new BinaryReader(skinStream);
-            ParseSkin(skinReader, m2Data);
+            Console.WriteLine($"[INFO] Converting M2 → MDX: {Path.GetFileName(m2Path)}");
+
+            using var m2Stream = File.OpenRead(m2Path);
+            using var reader = new BinaryReader(m2Stream);
+
+            var m2Data = ParseM2(reader);
+
+            // Try to load .skin file
+            var skinPath = Path.ChangeExtension(m2Path, "00.skin");
+            if (File.Exists(skinPath))
+            {
+                using var skinStream = File.OpenRead(skinPath);
+                using var skinReader = new BinaryReader(skinStream);
+                ParseSkin(skinReader, m2Data);
+            }
+
+            // Write MDX
+            using var mdxStream = File.Create(mdxOutputPath);
+            using var writer = new BinaryWriter(mdxStream);
+            WriteMdx(writer, m2Data);
+
+            Console.WriteLine($"[SUCCESS] Converted to MDX: {mdxOutputPath}");
         }
-
-        // Write MDX
-        using var mdxStream = File.Create(mdxOutputPath);
-        using var writer = new BinaryWriter(mdxStream);
-        WriteMdx(writer, m2Data);
-
-        Console.WriteLine($"[SUCCESS] Converted to MDX: {mdxOutputPath}");
+        catch
+        {
+            Build335Diagnostics.Increment("M2ConversionFailureCount");
+            throw;
+        }
     }
 
     /// <summary>
@@ -43,23 +52,31 @@ public class M2ToMdxConverter
     /// </summary>
     public byte[] ConvertToBytes(byte[] m2Bytes, byte[]? skinBytes = null)
     {
-        using var m2Stream = new MemoryStream(m2Bytes);
-        using var reader = new BinaryReader(m2Stream);
-        
-        var m2Data = ParseM2(reader);
-
-        if (skinBytes != null)
+        try
         {
-            using var skinStream = new MemoryStream(skinBytes);
-            using var skinReader = new BinaryReader(skinStream);
-            ParseSkin(skinReader, m2Data);
+            using var m2Stream = new MemoryStream(m2Bytes);
+            using var reader = new BinaryReader(m2Stream);
+
+            var m2Data = ParseM2(reader);
+
+            if (skinBytes != null)
+            {
+                using var skinStream = new MemoryStream(skinBytes);
+                using var skinReader = new BinaryReader(skinStream);
+                ParseSkin(skinReader, m2Data);
+            }
+
+            using var mdxStream = new MemoryStream();
+            using var writer = new BinaryWriter(mdxStream);
+            WriteMdx(writer, m2Data);
+
+            return mdxStream.ToArray();
         }
-
-        using var mdxStream = new MemoryStream();
-        using var writer = new BinaryWriter(mdxStream);
-        WriteMdx(writer, m2Data);
-
-        return mdxStream.ToArray();
+        catch
+        {
+            Build335Diagnostics.Increment("M2ConversionFailureCount");
+            throw;
+        }
     }
 
     private M2Data ParseM2(BinaryReader reader)
@@ -172,6 +189,7 @@ public class M2ToMdxConverter
         // Read actual data arrays
         if (vertexCount > 0 && vertexOfs > 0)
         {
+            ValidateTableRange("vertices", vertexCount, vertexOfs, 0x30, reader.BaseStream.Length);
             reader.BaseStream.Position = vertexOfs;
             data.Vertices = new M2Vertex[vertexCount];
             for (int i = 0; i < vertexCount; i++)
@@ -191,6 +209,7 @@ public class M2ToMdxConverter
 
         if (textureCount > 0 && textureOfs > 0)
         {
+            ValidateTableRange("textures", textureCount, textureOfs, 0x10, reader.BaseStream.Length);
             reader.BaseStream.Position = textureOfs;
             data.Textures = new M2Texture[textureCount];
             for (int i = 0; i < textureCount; i++)
@@ -214,6 +233,7 @@ public class M2ToMdxConverter
 
         if (animCount > 0 && animOfs > 0)
         {
+            ValidateTableRange("animations", animCount, animOfs, 0x40, reader.BaseStream.Length);
             reader.BaseStream.Position = animOfs;
             data.Animations = new M2Animation[animCount];
             for (int i = 0; i < animCount; i++)
@@ -241,6 +261,7 @@ public class M2ToMdxConverter
 
         if (boneCount > 0 && boneOfs > 0)
         {
+            ValidateTableRange("bones", boneCount, boneOfs, 0x58, reader.BaseStream.Length);
             reader.BaseStream.Position = boneOfs;
             data.Bones = new M2Bone[boneCount];
             for (int i = 0; i < boneCount; i++)
@@ -287,6 +308,7 @@ public class M2ToMdxConverter
         // Read indices
         if (indexCount > 0 && indexOfs > 0)
         {
+            ValidateTableRange("skin.indices", indexCount, indexOfs, 2, reader.BaseStream.Length);
             reader.BaseStream.Position = indexOfs;
             data.SkinIndices = new ushort[indexCount];
             for (int i = 0; i < indexCount; i++)
@@ -296,6 +318,7 @@ public class M2ToMdxConverter
         // Read triangles
         if (triangleCount > 0 && triangleOfs > 0)
         {
+            ValidateTableRange("skin.triangles", triangleCount, triangleOfs, 2, reader.BaseStream.Length);
             reader.BaseStream.Position = triangleOfs;
             data.SkinTriangles = new ushort[triangleCount];
             for (int i = 0; i < triangleCount; i++)
@@ -305,6 +328,7 @@ public class M2ToMdxConverter
         // Read submeshes
         if (submeshCount > 0 && submeshOfs > 0)
         {
+            ValidateTableRange("skin.submeshes", submeshCount, submeshOfs, 0x30, reader.BaseStream.Length);
             reader.BaseStream.Position = submeshOfs;
             data.Submeshes = new M2Submesh[submeshCount];
             for (int i = 0; i < submeshCount; i++)
@@ -331,6 +355,7 @@ public class M2ToMdxConverter
         // Read texture units
         if (texUnitCount > 0 && texUnitOfs > 0)
         {
+            ValidateTableRange("skin.textureUnits", texUnitCount, texUnitOfs, 0x18, reader.BaseStream.Length);
             reader.BaseStream.Position = texUnitOfs;
             data.TextureUnits = new M2TextureUnit[texUnitCount];
             for (int i = 0; i < texUnitCount; i++)
@@ -355,8 +380,30 @@ public class M2ToMdxConverter
         }
     }
 
+    private static void ValidateTableRange(string tableName, uint count, uint offset, uint stride, long streamLength)
+    {
+        if (count == 0 || offset == 0)
+            return;
+
+        if (count > 1_000_000)
+        {
+            Build335Diagnostics.Increment("M2TableValidationRejectCount");
+            throw new InvalidDataException($"M2 table '{tableName}' count too large: {count}");
+        }
+
+        ulong total = (ulong)count * stride;
+        ulong end = (ulong)offset + total;
+        if (offset >= streamLength || end > (ulong)streamLength || end < offset)
+        {
+            Build335Diagnostics.Increment("M2TableValidationRejectCount");
+            throw new InvalidDataException($"M2 table '{tableName}' out of range: count={count}, ofs={offset}, stride={stride}, len={streamLength}");
+        }
+    }
+
     private void WriteMdx(BinaryWriter writer, M2Data data)
     {
+        var mdxTriangles = BuildMdxTriangleIndices(data);
+
         // MDLX magic
         writer.Write(Encoding.ASCII.GetBytes("MDLX"));
 
@@ -383,16 +430,16 @@ public class M2ToMdxConverter
                 w.Write(data.Animations.Length);
                 foreach (var anim in data.Animations)
                 {
-                    WriteFixedString(w, $"Anim{anim.AnimationId}", 80);
+                    WriteFixedString(w, GetAnimationSequenceName(anim.AnimationId, anim.SubAnimationId), 80);
                     w.Write(0u); // Start
                     w.Write(anim.Length); // End
                     w.Write(anim.MoveSpeed);
-                    w.Write(0u); // Flags
-                    w.Write(0f); // Rarity
+                    w.Write(anim.Flags); // Flags
+                    w.Write(1f); // Frequency
                     w.Write(0u); // SyncPoint
+                    w.Write(anim.BoundRadius);
                     WriteVector3(w, anim.MinExtent);
                     WriteVector3(w, anim.MaxExtent);
-                    w.Write(anim.BoundRadius);
                 }
             });
         }
@@ -412,12 +459,12 @@ public class M2ToMdxConverter
         }
 
         // GEOS chunk (geosets/geometry)
-        if (data.Vertices?.Length > 0 && data.SkinTriangles?.Length > 0)
+        if (data.Vertices?.Length > 0 && mdxTriangles.Length > 0)
         {
             WriteChunk(writer, "GEOS", w =>
             {
                 // Write as single geoset for simplicity
-                var geosetSize = CalculateGeosetSize(data);
+                var geosetSize = CalculateGeosetSize(data, (uint)mdxTriangles.Length);
                 w.Write(geosetSize);
 
                 // VRTX (vertices)
@@ -440,12 +487,12 @@ public class M2ToMdxConverter
                 // PCNT (primitive counts)
                 w.Write(Encoding.ASCII.GetBytes("PCNT"));
                 w.Write(1);
-                w.Write(data.SkinTriangles.Length);
+                w.Write(mdxTriangles.Length);
 
                 // PVTX (primitive vertices/indices)
                 w.Write(Encoding.ASCII.GetBytes("PVTX"));
-                w.Write(data.SkinTriangles.Length);
-                foreach (var idx in data.SkinTriangles)
+                w.Write(mdxTriangles.Length);
+                foreach (var idx in mdxTriangles)
                     w.Write(idx);
 
                 // GNDX (group indices)
@@ -524,14 +571,130 @@ public class M2ToMdxConverter
         }
     }
 
-    private uint CalculateGeosetSize(M2Data data)
+    private static ushort[] BuildMdxTriangleIndices(M2Data data)
+    {
+        if (data.SkinTriangles == null || data.SkinTriangles.Length == 0)
+            return Array.Empty<ushort>();
+
+        var triangles = data.SkinTriangles;
+        var vertices = data.Vertices;
+
+        // M2 skin triangles index into SkinIndices; remap to vertex indices.
+        if (data.SkinIndices != null && data.SkinIndices.Length > 0)
+        {
+            var remapped = new ushort[triangles.Length];
+            int written = 0;
+
+            for (int i = 0; i < triangles.Length; i++)
+            {
+                ushort skinIndex = triangles[i];
+                if (skinIndex >= data.SkinIndices.Length)
+                    continue;
+
+                ushort vertexIndex = data.SkinIndices[skinIndex];
+                if (vertices != null && vertexIndex >= vertices.Length)
+                    continue;
+
+                remapped[written++] = vertexIndex;
+            }
+
+            written -= written % 3; // keep complete triangles only
+            if (written <= 0)
+                return Array.Empty<ushort>();
+
+            if (written == remapped.Length)
+                return remapped;
+
+            Array.Resize(ref remapped, written);
+            return remapped;
+        }
+
+        // If no skin index table exists, treat SkinTriangles as direct vertex indices.
+        var direct = new ushort[triangles.Length];
+        int directWritten = 0;
+        for (int i = 0; i < triangles.Length; i++)
+        {
+            ushort vertexIndex = triangles[i];
+            if (vertices != null && vertexIndex >= vertices.Length)
+                continue;
+            direct[directWritten++] = vertexIndex;
+        }
+
+        directWritten -= directWritten % 3;
+        if (directWritten <= 0)
+            return Array.Empty<ushort>();
+
+        if (directWritten == direct.Length)
+            return direct;
+
+        Array.Resize(ref direct, directWritten);
+        return direct;
+    }
+
+    private static string GetAnimationSequenceName(ushort animationId, ushort subAnimationId)
+    {
+        string baseName = animationId switch
+        {
+            0 => "Stand",
+            1 => "Death",
+            2 => "Spell",
+            3 => "Stop",
+            4 => "Walk",
+            5 => "Run",
+            6 => "Dead",
+            7 => "Rise",
+            8 => "StandWound",
+            9 => "CombatWound",
+            10 => "CombatCritical",
+            11 => "ShuffleLeft",
+            12 => "ShuffleRight",
+            13 => "WalkBackwards",
+            14 => "Stun",
+            15 => "HandsClosed",
+            16 => "AttackUnarmed",
+            17 => "Attack1H",
+            18 => "Attack2H",
+            19 => "Attack2HL",
+            20 => "ParryUnarmed",
+            21 => "Parry1H",
+            22 => "Parry2H",
+            23 => "Parry2HL",
+            24 => "ShieldBlock",
+            25 => "ReadyUnarmed",
+            26 => "Ready1H",
+            27 => "Ready2H",
+            28 => "Ready2HL",
+            29 => "ReadyBow",
+            30 => "Dodge",
+            31 => "SpellPrecast",
+            32 => "SpellCast",
+            33 => "SpellCastArea",
+            34 => "NPCWelcome",
+            35 => "NPCGoodbye",
+            36 => "Block",
+            37 => "JumpStart",
+            38 => "Jump",
+            39 => "JumpEnd",
+            40 => "Fall",
+            41 => "SwimIdle",
+            42 => "Swim",
+            43 => "SwimLeft",
+            44 => "SwimRight",
+            45 => "SwimBackwards",
+            _ => $"Anim{animationId}"
+        };
+
+        return subAnimationId == 0 ? baseName : $"{baseName}_{subAnimationId}";
+    }
+
+    private uint CalculateGeosetSize(M2Data data, uint triangleIndexCount)
     {
         uint size = 0;
         size += 4 + 4 + (uint)(data.Vertices?.Length ?? 0) * 12; // VRTX
         size += 4 + 4 + (uint)(data.Vertices?.Length ?? 0) * 12; // NRMS
         size += 4 + 4 + 4; // PTYP
         size += 4 + 4 + 4; // PCNT
-        size += 4 + 4 + (uint)(data.SkinTriangles?.Length ?? 0) * 2; // PVTX
+        size += 4 + 4 + triangleIndexCount * 2; // PVTX
         size += 4 + 4 + (uint)(data.Vertices?.Length ?? 0); // GNDX
         size += 4 + 4 + 4; // MTGC
         size += 4 + 4 + 4; // MATS

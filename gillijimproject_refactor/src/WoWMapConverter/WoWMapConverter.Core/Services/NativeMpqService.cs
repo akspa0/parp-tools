@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Linq;
+using WoWMapConverter.Core.Diagnostics;
 
 namespace WoWMapConverter.Core.Services;
 
@@ -488,6 +489,7 @@ public class NativeMpqService : IDisposable
                 // Check if file is deleted (0 size in patches)
                 if (block.FileSize == 0)
                 {
+                    Build335Diagnostics.Increment("MpqPatchedDeleteHitCount");
                     Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → found in {Path.GetFileName(archive.Path)} but FileSize=0 (patched out)");
                     continue; // File was "patched out", try base archives
                 }
@@ -751,6 +753,31 @@ public class NativeMpqService : IDisposable
             
         var sectorOffsets = new uint[sectorCount + 1];
         Buffer.BlockCopy(offsetBytes, 0, sectorOffsets, 0, offsetBytes.Length);
+
+        // Sanity checks for malformed sector tables.
+        if (sectorOffsets.Length == 0)
+        {
+            Build335Diagnostics.Increment("MpqSectorTableInvalidCount");
+            return null;
+        }
+
+        uint previous = sectorOffsets[0];
+        if (previous > block.BlockSize)
+        {
+            Build335Diagnostics.Increment("MpqSectorTableInvalidCount");
+            return null;
+        }
+
+        for (int si = 1; si < sectorOffsets.Length; si++)
+        {
+            uint current = sectorOffsets[si];
+            if (current < previous || current > block.BlockSize)
+            {
+                Build335Diagnostics.Increment("MpqSectorTableInvalidCount");
+                return null;
+            }
+            previous = current;
+        }
         
         using var output = new MemoryStream();
         
@@ -758,8 +785,20 @@ public class NativeMpqService : IDisposable
         {
             uint sectorStart = sectorOffsets[i];
             uint sectorEnd = sectorOffsets[i + 1];
+            if (sectorEnd < sectorStart)
+            {
+                Build335Diagnostics.Increment("MpqSectorTableInvalidCount");
+                return null;
+            }
             uint compressedSize = sectorEnd - sectorStart;
             uint uncompressedSize = Math.Min(sectorSize, block.FileSize - (i * sectorSize));
+
+            if (fileBaseOffset + sectorStart > reader.BaseStream.Length ||
+                fileBaseOffset + sectorEnd > reader.BaseStream.Length)
+            {
+                Build335Diagnostics.Increment("MpqSectorTableInvalidCount");
+                return null;
+            }
             
             // Seek to exact sector location (skipping potential CRC tables or gaps)
             reader.BaseStream.Position = fileBaseOffset + sectorStart;

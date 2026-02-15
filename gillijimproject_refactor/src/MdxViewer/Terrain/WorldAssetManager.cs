@@ -337,7 +337,7 @@ public class WorldAssetManager : IDisposable
         catch (Exception ex)
         {
             if (_mdxLoadFailCount++ < 5)
-                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
     }
@@ -353,10 +353,15 @@ public class WorldAssetManager : IDisposable
             byte[]? skinBytes = null;
             string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
             string dir = Path.GetDirectoryName(normalizedKey) ?? "";
-            string[] skinCandidates = {
-                Path.ChangeExtension(normalizedKey, "00.skin"),
-                string.IsNullOrEmpty(dir) ? $"{baseName}00.skin" : $"{dir}\\{baseName}00.skin",
-            };
+            var skinCandidates = new List<string>(8);
+            for (int i = 0; i < 4; i++)
+            {
+                string suffix = i.ToString("D2");
+                skinCandidates.Add(Path.ChangeExtension(normalizedKey, $"{suffix}.skin"));
+                skinCandidates.Add(string.IsNullOrEmpty(dir)
+                    ? $"{baseName}{suffix}.skin"
+                    : $"{dir}\\{baseName}{suffix}.skin");
+            }
             foreach (var skinPath in skinCandidates)
             {
                 skinBytes = ReadFileData(skinPath);
@@ -374,7 +379,7 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            ViewerLog.Error(ViewerLog.Category.Mdx, $"M2→MDX convert failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Mdx, $"M2→MDX convert failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
     }
@@ -459,7 +464,7 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)} - {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
     }

@@ -70,6 +70,7 @@ public class MdxRenderer : ISceneRenderer
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
+    private readonly bool _mdxDebugFocus;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -108,6 +109,11 @@ public class MdxRenderer : ISceneRenderer
         MdxTextureDiagnosticLogger.Initialize(mdxName);
         _texResolver = texResolver;
         _modelVirtualPath = modelVirtualPath;
+        string modelDebugName = _modelVirtualPath ?? modelDir;
+        string debugFilter = Environment.GetEnvironmentVariable("PARP_MDX_DEBUG") ?? "";
+        _mdxDebugFocus = modelDebugName.Contains("kelthuzad", StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(debugFilter)
+                && modelDebugName.Contains(debugFilter, StringComparison.OrdinalIgnoreCase));
 
         InitShaders();
         InitBuffers();
@@ -559,11 +565,17 @@ uniform vec3 uAmbientColor;
 out vec4 FragColor;
 
 void main() {
+    vec3 norm = normalize(vNormal);
+    vec3 viewNorm = normalize(vViewNormal);
+    if (!gl_FrontFacing) {
+        norm = -norm;
+        viewNorm = -viewNorm;
+    }
+
     // Sphere environment map: generate UVs from view-space normals
     vec2 texCoord = (uUvSet == 1) ? vTexCoord1 : vTexCoord0;
     if (uSphereEnvMap == 1) {
-        vec3 vn = normalize(vViewNormal);
-        texCoord = vn.xy * 0.5 + 0.5;
+        texCoord = viewNorm.xy * 0.5 + 0.5;
     }
 
     vec4 texColor;
@@ -577,7 +589,6 @@ void main() {
     // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
     vec3 litColor = texColor.rgb;
     if (uUnshaded == 0) {
-        vec3 norm = normalize(vNormal);
         vec3 lightDir = normalize(uLightDir);
         float diff = max(dot(norm, lightDir), 0.0);
         vec3 diffuse = uLightColor * diff;
@@ -776,6 +787,12 @@ void main() {
             bool hasUVSet1 = uvSetCount >= 2;
             gb.UvSetCount = uvSetCount;
 
+            if (_mdxDebugFocus)
+            {
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[MDX-FOCUS] Geoset {i}: materialId={geoset.MaterialId}, materials={_mdx.Materials.Count}, verts={vertCount}, indices={geoset.Indices.Count}, normals={geoset.Normals.Count}, texCoords={geoset.TexCoords.Count}, uvSets={uvSetCount}");
+            }
+
             if (!hasUVSet0)
                 ViewerLog.Trace($"[ModelRenderer] Geoset {i}: UV count mismatch! Verts={vertCount}, UVs={uvCount}");
             else if (!uvCountAligned)
@@ -867,6 +884,26 @@ void main() {
             gb.Ebo = _gl.GenBuffer();
             _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, gb.Ebo);
             var indices = geoset.Indices.ToArray();
+
+            if (indices.Length > 0)
+            {
+                int maxIndex = indices.Max(idx => (int)idx);
+                if (maxIndex >= vertCount)
+                {
+                    ViewerLog.Error(ViewerLog.Category.Mdx,
+                        $"[ModelRenderer] Geoset {i} skipped: index out of range (maxIndex={maxIndex}, vertCount={vertCount}, indexCount={indices.Length})");
+                    if (_mdxDebugFocus)
+                    {
+                        ViewerLog.Error(ViewerLog.Category.Mdx,
+                            $"[MDX-FOCUS] Geoset {i} reject detail: materialId={geoset.MaterialId}, materials={_mdx.Materials.Count}, seqs={_mdx.Sequences.Count}, model={_modelVirtualPath ?? _modelDir}");
+                    }
+                    _gl.DeleteBuffer(gb.Vbo);
+                    _gl.DeleteBuffer(gb.Ebo);
+                    _gl.DeleteVertexArray(gb.Vao);
+                    continue;
+                }
+            }
+
             // Reverse triangle winding: WoW/D3D uses CW front faces, OpenGL uses CCW.
             for (int t = 0; t + 2 < indices.Length; t += 3)
                 (indices[t + 1], indices[t + 2]) = (indices[t + 2], indices[t + 1]);

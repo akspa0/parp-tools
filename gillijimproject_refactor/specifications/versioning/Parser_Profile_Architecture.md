@@ -11,6 +11,7 @@ Define a build-level parser architecture so ADT/WMO/MDX readers can diverge safe
 2. Stable baseline profile: `0.6.x/0.7.x`.
 3. Post-0.7 profiles are isolated until proven schema-compatible.
 4. Unknown/unstable fields must be surfaced via diagnostics; never silently coerced.
+5. For `0.9+`, filename extension is advisory only: `.mdx` may contain non-`MDLX` model containers (e.g., `MD20` family). Format identity must come from binary signature + version gates.
 
 ---
 
@@ -94,6 +95,10 @@ Implementation targets:
 ```text
 IMdxProfile
   BuildRange
+  ContainerIdentityPolicy
+    - ExtensionIsAdvisory
+    - RequiredRootMagic
+    - AcceptedVersionRange
   GeometryPolicy
     - GEOS/vertex layout assumptions
   MaterialPolicy
@@ -109,6 +114,11 @@ Implementation targets:
 - `src/MdxViewer/Formats/Mdx/*`
 - `src/MdxViewer/Rendering/MdxRenderer.cs`
 - `src/MdxViewer/Rendering/MdxAnimator.cs`
+
+For `0.9+` contracts, add an explicit discriminator rule:
+- Do not route by extension alone.
+- Probe container magic first (`MDLX` vs `MD20`/M2 family), then apply the matching profile contract.
+- If extension and container disagree, emit diagnostics and continue with container-selected profile.
 
 ---
 

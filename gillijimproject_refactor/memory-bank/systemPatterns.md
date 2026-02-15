@@ -40,6 +40,16 @@ Both produce `TileLoadResult` with `TerrainChunkData` + `MddfPlacement` + `ModfP
 - **Padding Aware**: Always scan for 4-byte UTF-8 tags.
 - **Null Safety**: Avoid fixed-offset jumps between sub-chunks. Padding can be 0-12 bytes.
 - **UVAS (v1300)**: Count=1 contains raw UV data directly. No `UVBS` tag.
+- **Version-Routed GEOS Strategy**: Prefer strict parser routes by MDX version (`v1300/v1400` classic tagged layout, `v1500` packed two-pass layout), then fall back to adaptive parser only on strict-parse failure.
+
+### PRE2 / RIBB Parsing Pattern
+- Read full fixed scalar payload blocks first (including known extended fields) to keep stream alignment stable.
+- Parse/skip known animation-vector tails by keyword (`KP2*`, `KVIS`, `KR*`) instead of jumping blindly to emitter end.
+- Preserve compatibility by safely skipping unknown tail chunks at emitter boundary.
+
+### Two-Sided Reflective Shading Pattern
+- For sphere env map + specular on two-sided geometry, flip normals on backfaces in fragment shader (`!gl_FrontFacing`) before env UV generation and lighting.
+- Use face-corrected view-space normal for env UV derivation to avoid inward-facing reflections on dome-like meshes.
 
 ### Texture Resolution (DBC + Fallback)
 - **Primary Source**: `DbcService` (Resolves `ModelID` → `TextureVariation` via `CreatureDisplayInfo`).

@@ -1,11 +1,11 @@
 # Tech Context
 
 ## Stack
-- **Runtime**: .NET 9, C#
+- **Runtime**: .NET 10, C#
 - **Build**: `dotnet build` / `dotnet run`
 - **Graphics**: OpenGL 3.3 via Silk.NET
 - **UI**: ImGui via ImGui.NET
-- **MPQ**: StormLib (native DLL)
+- **MPQ**: Native C# MPQ service in active viewer path (StormLib remains present in broader repo tooling)
 
 ## Key Projects
 
@@ -51,6 +51,7 @@
 - **SixLabors.ImageSharp**: Image processing
 - **StormLib**: MPQ reading (native DLL)
 - **DBCD**: DBC parsing via `lib/wow.tools.local`
+- **wow-mdx-viewer (reference implementation)**: `lib/wow-mdx-viewer` cloned as behavioral source-of-truth for MDX version-compat parser parity (GEOS/PRE2/RIBB/SEQS routing).
 
 ## Test Data Locations
 - `test_data/0.5.3/` — Alpha 0.5.3 Reference Assets (MDX, BLP, DBC)

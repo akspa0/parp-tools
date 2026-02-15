@@ -12,6 +12,9 @@
 - **WMO doodad culling**: ✅ Distance (500u) + cap (64) + nearest-first sort + fog passthrough
 - **WMO doodad loading**: ✅ FindInFileSet case-insensitive + mdx/mdl swap → 100% load rate
 - **MDX rendering**: ✅ Two-pass opaque/transparent, alpha cutout, specular highlights, sphere env map
+- **MDX GEOS version compatibility**: ✅ Ported version-routed GEOS parser behavior from `wow-mdx-viewer` (v1300/v1400 strict path + v1500 strict path + guarded fallback)
+- **MDX SEQS name compatibility**: ✅ Counted 0x8C named-record detection broadened to reduce fallback `Seq_{animId}` names on playable models
+- **MDX PRE2/RIBB parsing parity**: ✅ Expanded parser coverage for PRE2 and RIBB payload/tail animation chunks (runtime visual verification pending)
 - **MDX animation engine**: ✅ BONE/PIVT/HELP parsing, keyframe interpolation, bone hierarchy (Feb 12)
 - **Full-load mode**: ✅ `--full-load` (default) loads all tiles at startup with progress (Feb 11)
 - **MCSH shadow maps**: ✅ 64×64 bitmask applied to all terrain layers
@@ -42,7 +45,7 @@
 - **MDX GPU skinning**: Bone matrices computed per-frame but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
 - **MDX animation UI**: Sequence selection combo box in ImGui panel not yet wired
 - **MDX per-geoset color/alpha**: Only static alpha used; animated GeosetAnims not wired
-- **MDX particles/ribbons**: Not implemented
+- **MDX particles/ribbons**: Parser coverage expanded; runtime behavior verification still pending on effect-heavy assets
 - **MDX texture UV animation**: Not implemented
 - **MDX billboard bones**: Not implemented
 - **WMO lighting**: v14-16 grayscale lightmap + v17 MOCV vertex colors not implemented
@@ -59,6 +62,11 @@
 ## ❌ Known Issues
 
 ### MdxViewer Rendering Bugs (Feb 12, 2026)
+
+#### MDX Sphere Env / Specular Orientation (Feb 14, 2026)
+- **Symptom**: Reflective/specular surfaces (e.g., dome-like geometry) appeared inward-facing on some two-sided materials.
+- **Fix Applied**: Fragment shader now flips normals/view-space normals on backfaces before env UV generation and lighting/specular.
+- **Status**: 🔧 Patched in code, pending visual confirmation on Dalaran dome repro.
 
 #### WMO Semi-Transparent Window Materials
 - **Symptom**: Stormwind WMO maps blue/gold stained glass textures to white marble columns instead of window frames

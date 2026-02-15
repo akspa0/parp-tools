@@ -4,6 +4,7 @@ using System.Text;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
+using WoWMapConverter.Core.Diagnostics;
 using WoWMapConverter.Core.Formats.LichKing;
 
 namespace MdxViewer.Terrain;
@@ -151,6 +152,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
         else
         {
+            Build335Diagnostics.Increment("UnsupportedProfileFallbackCount");
             // Legacy best-effort MTEX scan.
             for (int i = 0; i + 8 <= adtBytes.Length;)
             {
@@ -179,6 +181,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
         if (mcinOff == 0)
         {
+            Build335Diagnostics.Increment("MissingRequiredChunkCount");
             ViewerLog.Info(ViewerLog.Category.Terrain, $"MCIN offset zero in ADT ({tileX},{tileY})");
             return;
         }
@@ -194,6 +197,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
             int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
             if (mcinSig != "NICM")
             {
+                Build335Diagnostics.Increment("InvalidChunkSignatureCount");
                 ViewerLog.Info(ViewerLog.Category.Terrain,
                     $"MCIN signature mismatch in ADT ({tileX},{tileY}): '{mcinSig}'");
                 return;
@@ -201,6 +205,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
             {
+                Build335Diagnostics.Increment("InvalidChunkSizeCount");
                 ViewerLog.Info(ViewerLog.Category.Terrain,
                     $"MCIN size invalid in ADT ({tileX},{tileY}): size={mcinSize}, file={adtBytes.Length}");
                 return;
@@ -208,6 +213,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
             if ((mcinSize % _adtProfile.McinEntrySize) != 0)
             {
+                Build335Diagnostics.Increment("UnknownFieldUsageCount");
                 ViewerLog.Important(ViewerLog.Category.Terrain,
                     $"MCIN size misaligned in ADT ({tileX},{tileY}): size={mcinSize}, entrySize={_adtProfile.McinEntrySize}");
             }
@@ -382,6 +388,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         if (invalidOffsetCount > 0 || invalidSignatureCount > 0 || invalidSizeCount > 0)
         {
+            if (invalidSignatureCount > 0)
+                Build335Diagnostics.Increment("InvalidChunkSignatureCount", invalidSignatureCount);
+            if (invalidSizeCount > 0)
+                Build335Diagnostics.Increment("InvalidChunkSizeCount", invalidSizeCount);
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"ADT ({tileX},{tileY}) skipped malformed MCNKs: invalidOff={invalidOffsetCount}, invalidSig={invalidSignatureCount}, invalidSize={invalidSizeCount}");
         }

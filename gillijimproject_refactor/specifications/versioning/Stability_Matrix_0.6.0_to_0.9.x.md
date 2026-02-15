@@ -21,8 +21,8 @@ This matrix is used to drive per-build parser profiles in MdxViewer.
 | 0.6.x | baseline | baseline | unknown/legacy mix | baseline-ish | stable (working assumption) |
 | 0.7.x | baseline-compatible | baseline-compatible | unknown/legacy mix | baseline-ish | stable (working assumption) |
 | 0.8.0.3734 | partially unstable on some maps | confirmed stride `0x2D4`, unresolved lanes remain | unknown | unknown | unstable/partial |
-| 0.9.0.x | unstable/unknown | unknown (must verify, do not assume 0.9.1 parity) | unknown | unknown | unknown/high risk |
-| 0.9.1.3810 | unstable/unknown on some maps | confirmed stride `0x324`, flow block expanded | likely still moving target | likely still moving target | unstable/partial |
+| 0.9.0.x | unstable/unknown | unknown (must verify, do not assume 0.9.1 parity) | unknown | **extension/container divergence starts: `.mdx` not sufficient discriminator** | unknown/high risk |
+| 0.9.1.3810 | unstable/unknown on some maps | confirmed stride `0x324`, flow block expanded | likely still moving target | **mixed parser era: profile must branch by binary signature/version, not extension** | unstable/partial |
 
 ---
 
@@ -54,6 +54,7 @@ This matrix is used to drive per-build parser profiles in MdxViewer.
 3. WMOv17 group/root chunk schema drift across 0.8->0.9.x.
 4. MDX skeletal/animation/material chunk drift across 0.8->0.9.x.
 5. Any byteswap/endianness mode gates that changed between these builds.
+6. Exact adoption point where `.mdx` extension begins carrying `MD20`-family content in this branch.
 
 ---
 
@@ -67,6 +68,7 @@ For each build candidate (`0.8.0`, `0.9.0`, `0.9.1`):
 5. Placement chain (`MMID/MWID`, `MDDF/MODF`) with record sizes.
 6. WMO root/group parse contract (required chunks and optional gates).
 7. MDX parse contract (core geometry/material/anim chunks consumed).
+8. Extension/container discriminator proof (`.mdx`/`.mdl` path vs root magic gate and version gate).
 
 ---
 

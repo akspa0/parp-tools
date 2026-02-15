@@ -25,6 +25,13 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp : IDisposable
 {
+    private enum ModelContainerKind
+    {
+        Unknown,
+        Mdlx,
+        Md20
+    }
+
     private IWindow _window = null!;
     private GL _gl = null!;
     private IInputContext _input = null!;
@@ -3754,12 +3761,9 @@ void main() {
             switch (ext)
             {
                 case ".mdx":
-                    var mdx = MdxFile.Load(filePath);
-                    LoadMdxModel(mdx, dir);
-                    break;
-
                 case ".m2":
-                    LoadM2FromDisk(filePath, dir);
+                    var modelBytes = File.ReadAllBytes(filePath);
+                    LoadModelFromBytesWithContainerProbe(modelBytes, filePath, dir, "Disk");
                     break;
 
                 case ".wmo":
@@ -3799,29 +3803,38 @@ void main() {
     {
         // Try to find companion .skin file
         byte[]? skinBytes = null;
-        string skinPath = Path.ChangeExtension(originalPath, "00.skin");
-        if (File.Exists(skinPath))
+        string baseName = Path.GetFileNameWithoutExtension(originalPath);
+        string skinDir = Path.GetDirectoryName(originalPath)?.Replace('/', '\\') ?? "";
+        var skinCandidates = new List<string>(8);
+        for (int i = 0; i < 4; i++)
         {
-            skinBytes = File.ReadAllBytes(skinPath);
-            ViewerLog.Trace($"[M2] Loaded skin file: {skinPath} ({skinBytes.Length} bytes)");
+            string suffix = i.ToString("D2");
+            skinCandidates.Add(Path.ChangeExtension(originalPath, $"{suffix}.skin"));
+            skinCandidates.Add(string.IsNullOrEmpty(skinDir)
+                ? $"{baseName}{suffix}.skin"
+                : $"{skinDir}\\{baseName}{suffix}.skin");
         }
-        else
+
+        foreach (var skinPath in skinCandidates)
         {
-            // Try from data source
-            if (_dataSource != null)
+            if (File.Exists(skinPath))
             {
-                string virtualSkin = Path.ChangeExtension(originalPath, "00.skin");
-                skinBytes = _dataSource.ReadFile(virtualSkin);
-                if (skinBytes == null)
-                {
-                    // Try ModelName00.skin pattern
-                    string baseName = Path.GetFileNameWithoutExtension(originalPath);
-                    string skinDir = Path.GetDirectoryName(originalPath)?.Replace('/', '\\') ?? "";
-                    string altSkin = string.IsNullOrEmpty(skinDir) ? $"{baseName}00.skin" : $"{skinDir}\\{baseName}00.skin";
-                    skinBytes = _dataSource.ReadFile(altSkin);
-                }
+                skinBytes = File.ReadAllBytes(skinPath);
+                ViewerLog.Trace($"[M2] Loaded skin file: {skinPath} ({skinBytes.Length} bytes)");
+                break;
+            }
+        }
+
+        if (skinBytes == null && _dataSource != null)
+        {
+            foreach (var skinPath in skinCandidates)
+            {
+                skinBytes = _dataSource.ReadFile(skinPath);
                 if (skinBytes != null)
-                    ViewerLog.Trace($"[M2] Loaded skin from data source ({skinBytes.Length} bytes)");
+                {
+                    ViewerLog.Trace($"[M2] Loaded skin from data source: {skinPath} ({skinBytes.Length} bytes)");
+                    break;
+                }
             }
         }
 
@@ -3834,6 +3847,80 @@ void main() {
         var mdx = MdxFile.Load(br);
         LoadMdxModel(mdx, dir, originalPath);
         _statusMessage = $"Loaded M2 (converted): {Path.GetFileName(originalPath)}";
+    }
+
+    private static ModelContainerKind DetectModelContainer(byte[] modelBytes)
+    {
+        if (modelBytes.Length < 4) return ModelContainerKind.Unknown;
+
+        uint magic = BitConverter.ToUInt32(modelBytes, 0);
+        if (magic == MdxHeaders.MAGIC) return ModelContainerKind.Mdlx;
+        if (magic == 0x3032444D) return ModelContainerKind.Md20; // "MD20"
+
+        return ModelContainerKind.Unknown;
+    }
+
+    private static string GetModelMagicLabel(byte[] modelBytes)
+    {
+        if (modelBytes.Length < 4) return "<short>";
+
+        uint magic = BitConverter.ToUInt32(modelBytes, 0);
+        return magic switch
+        {
+            MdxHeaders.MAGIC => "MDLX",
+            0x3032444D => "MD20",
+            _ => $"0x{magic:X8}"
+        };
+    }
+
+    private static string GetMd20VersionLabel(byte[] modelBytes)
+    {
+        if (modelBytes.Length < 8 || BitConverter.ToUInt32(modelBytes, 0) != 0x3032444D)
+            return "n/a";
+
+        uint version = BitConverter.ToUInt32(modelBytes, 4);
+        return $"0x{version:X}";
+    }
+
+    private void LogModelRouteProbe(string entrypoint, string sourcePath, string ext, byte[] modelBytes, ModelContainerKind container)
+    {
+        ViewerLog.Trace(
+            $"[ModelRouting] probe build={_dbcBuild ?? "unknown"} entrypoint={entrypoint} file={sourcePath} ext={ext} magic={GetModelMagicLabel(modelBytes)} md20Version={GetMd20VersionLabel(modelBytes)} container={container}");
+    }
+
+    private void LoadModelFromBytesWithContainerProbe(byte[] modelBytes, string sourcePath, string dir, string entrypoint)
+    {
+        var container = DetectModelContainer(modelBytes);
+        string ext = Path.GetExtension(sourcePath).ToLowerInvariant();
+        LogModelRouteProbe(entrypoint, sourcePath, ext, modelBytes, container);
+
+        switch (container)
+        {
+            case ModelContainerKind.Mdlx:
+                if (ext != ".mdx")
+                    ViewerLog.Important(ViewerLog.Category.Mdx,
+                        $"[ModelRouting] Extension/container mismatch: '{ext}' with MDLX root. Routing as MDX: {Path.GetFileName(sourcePath)}");
+
+                using (var ms = new MemoryStream(modelBytes))
+                using (var br = new BinaryReader(ms))
+                {
+                    var mdx = MdxFile.Load(br);
+                    LoadMdxModel(mdx, dir, sourcePath);
+                }
+                return;
+
+            case ModelContainerKind.Md20:
+                if (ext == ".mdx" || ext == ".mdl")
+                    ViewerLog.Important(ViewerLog.Category.Mdx,
+                        $"[ModelRouting] Extension/container mismatch: '{ext}' with MD20 root. Routing as M2-family: {Path.GetFileName(sourcePath)}");
+
+                LoadM2FromBytes(modelBytes, sourcePath, dir);
+                return;
+
+            default:
+                throw new InvalidDataException(
+                    $"Unsupported model root magic ({GetModelMagicLabel(modelBytes)}) for '{Path.GetFileName(sourcePath)}'. Expected MDLX or MD20.");
+        }
     }
 
     /// <summary>
@@ -4163,11 +4250,7 @@ void main() {
             }
             else
             {
-                // MDX: parse from memory
-                using var ms = new MemoryStream(data);
-                using var br = new BinaryReader(ms);
-                var mdx = MdxFile.Load(br);
-                LoadMdxModel(mdx, dir, resolvedPath);
+                LoadModelFromBytesWithContainerProbe(data, resolvedPath, dir, "Catalog");
             }
 
             _window.Title = $"WoW Viewer - {entry.Name} ({_loadedFileName})";
@@ -4211,12 +4294,8 @@ void main() {
             switch (ext)
             {
                 case ".mdx":
-                    var mdx = MdxFile.Load(cachePath);
-                    LoadMdxModel(mdx, CacheDir, virtualPath);
-                    break;
-
                 case ".m2":
-                    LoadM2FromBytes(data, virtualPath, CacheDir);
+                    LoadModelFromBytesWithContainerProbe(data, virtualPath, CacheDir, "DataSource");
                     break;
 
                 case ".wmo":
