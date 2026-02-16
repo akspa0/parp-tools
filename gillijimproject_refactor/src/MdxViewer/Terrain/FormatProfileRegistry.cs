@@ -96,7 +96,7 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = true
     };
 
     public static readonly AdtProfile AdtProfile3018303 = new()
@@ -108,7 +108,7 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = true
     };
 
     public static readonly AdtProfile AdtProfile0703694 = new()

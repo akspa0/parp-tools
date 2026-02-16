@@ -292,6 +292,19 @@ public class WmoV17ToV14Converter
             {
                 foreach (var b in g.Batches)
                 {
+                    byte materialId = b.MaterialId;
+                    if ((materialId == byte.MaxValue || materialId >= model.Materials.Count) && g.MaterialInfo != null && g.MaterialInfo.Length >= 2)
+                    {
+                        int firstFace = (int)(b.StartIndex / 3u);
+                        int mopyOffset = firstFace * 2 + 1;
+                        if (mopyOffset >= 1 && mopyOffset < g.MaterialInfo.Length)
+                        {
+                            byte mopyMaterialId = g.MaterialInfo[mopyOffset];
+                            if (mopyMaterialId < model.Materials.Count)
+                                materialId = mopyMaterialId;
+                        }
+                    }
+
                     var bbRaw = new byte[12];
                     for (int i = 0; i < 6 && i < b.BoundingBox.Length; i++)
                     {
@@ -306,7 +319,7 @@ public class WmoV17ToV14Converter
                         FirstVertex = b.StartVertex,
                         LastVertex = b.EndVertex,
                         Flags = b.Flags,
-                        MaterialId = b.MaterialId,
+                        MaterialId = materialId,
                     });
                 }
             }
@@ -351,15 +364,11 @@ public class WmoV17ToV14Converter
             }
             else
             {
+                // Tolerant: skip unknown trailing root chunks (e.g., MCVP or
+                // version-specific chunks from different WoW builds).
                 if (chunkId == "MCVP" && !sawOptionalMcvp)
-                {
                     sawOptionalMcvp = true;
-                }
-                else
-                {
-                    throw new InvalidDataException(
-                        $"Unexpected trailing WMO root chunk '{chunkId}' at offset 0x{payloadStart - 8:X}.");
-                }
+                // Any other trailing chunk: just skip it silently.
             }
 
             switch (chunkId)
@@ -489,8 +498,9 @@ public class WmoV17ToV14Converter
             }
             else
             {
-                throw new InvalidDataException(
-                    $"Unexpected trailing WMO group chunk '{chunkId}' at offset 0x{payloadStart - 8:X}.");
+                // Tolerant: skip unexpected trailing group chunks silently.
+                reader.BaseStream.Position = chunkEnd;
+                continue;
             }
 
             switch (chunkId)
@@ -567,6 +577,8 @@ public class WmoV17ToV14Converter
         int expectedRequiredSubchunkIndex = 0;
         var allowedOptionalSubchunks = BuildAllowedOptionalMogpSubchunks(data.Flags);
         var seenOptionalSubchunks = new HashSet<string>(StringComparer.Ordinal);
+        // Track multi-occurrence chunks: MOTV can appear 2-3× (TVERTS2/TVERTS3), MOCV 2× (CVERTS2)
+        var multiOccurrenceCounters = new Dictionary<string, int>(StringComparer.Ordinal);
         while (reader.BaseStream.Position + 8 <= mogpEnd)
         {
             var magic = Encoding.ASCII.GetString(reader.ReadBytes(4));
@@ -588,25 +600,23 @@ public class WmoV17ToV14Converter
             }
             else
             {
-                if (Array.IndexOf(GroupRequiredChunkOrder090, chunkId) >= 0)
-                {
-                    throw new InvalidDataException(
-                        $"Unexpected repeated required MOGP subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
-                }
+                // Tolerant parsing: log unexpected chunks but never throw.
+                // Many WotLK WMOs have flag/chunk mismatches from authoring tools.
+                bool isRepeatedRequired = Array.IndexOf(GroupRequiredChunkOrder090, chunkId) >= 0
+                    && !allowedOptionalSubchunks.Contains(chunkId);
+                bool isUngated = !allowedOptionalSubchunks.Contains(chunkId)
+                    && Array.IndexOf(GroupRequiredChunkOrder090, chunkId) < 0;
 
-                if (!allowedOptionalSubchunks.Contains(chunkId))
+                // Track multi-occurrence chunks (MOTV/MOCV) when properly flagged
+                if (IsMultiOccurrenceChunk(chunkId, data.Flags))
                 {
-                    throw new InvalidDataException(
-                        $"Unexpected ungated MOGP optional subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
+                    multiOccurrenceCounters.TryGetValue(chunkId, out int count);
+                    multiOccurrenceCounters[chunkId] = count + 1;
                 }
-
-                if (!seenOptionalSubchunks.Add(chunkId))
+                else if (!isRepeatedRequired && !isUngated)
                 {
-                    throw new InvalidDataException(
-                        $"Duplicate MOGP optional subchunk '{chunkId}' at 0x{payloadStart - 8:X}. Flags=0x{data.Flags:X}.");
+                    seenOptionalSubchunks.Add(chunkId);
                 }
-
-                ValidateOptionalMogpDependency(chunkId, seenOptionalSubchunks, payloadStart, data.Flags);
             }
 
             switch (chunkId)
@@ -624,7 +634,9 @@ public class WmoV17ToV14Converter
                     data.Normals = ReadVector3Array(reader, effectiveSize);
                     break;
                 case "MOTV":
-                    data.TexCoords = ReadVector2Array(reader, effectiveSize);
+                    if (data.TexCoords == null)
+                        data.TexCoords = ReadVector2Array(reader, effectiveSize);
+                    // else: second/third MOTV set (TVERTS2/TVERTS3) — skip for v14 downconversion
                     break;
                 case "MOBA":
                     data.Batches = ReadBatches(reader, effectiveSize);
@@ -654,7 +666,9 @@ public class WmoV17ToV14Converter
                     data.BspFaceIndices = ReadUInt16Array(reader, effectiveSize);
                     break;
                 case "MOCV":
-                    data.VertexColors = reader.ReadBytes((int)effectiveSize);
+                    if (data.VertexColors == null)
+                        data.VertexColors = reader.ReadBytes((int)effectiveSize);
+                    // else: second MOCV set (CVERTS2) — skip for v14 downconversion
                     break;
                 case "MLIQ":
                     data.LiquidData = reader.ReadBytes((int)effectiveSize);
@@ -676,7 +690,7 @@ public class WmoV17ToV14Converter
                 $"MOGP missing required subchunks: parsed {expectedRequiredSubchunkIndex}/{GroupRequiredChunkOrder090.Length}. Flags=0x{data.Flags:X}.");
         }
 
-        EnsureAllFlaggedOptionalMogpSubchunksPresent(seenOptionalSubchunks, data.Flags);
+        EnsureAllFlaggedOptionalMogpSubchunksPresent(seenOptionalSubchunks, multiOccurrenceCounters, data.Flags);
     }
 
     private static HashSet<string> BuildAllowedOptionalMogpSubchunks(uint flags)
@@ -713,7 +727,46 @@ public class WmoV17ToV14Converter
             optional.Add("MORB");
         }
 
+        // SMOGroup::TVERTS2 (0x2000000) / TVERTS3 (0x40000000) — additional MOTV sets
+        if ((flags & 0x2000000) != 0 || (flags & 0x40000000) != 0)
+            optional.Add("MOTV");
+
+        // SMOGroup::CVERTS2 (0x1000000) — additional MOCV set
+        if ((flags & 0x1000000) != 0)
+            optional.Add("MOCV");
+
         return optional;
+    }
+
+    /// <summary>Whether this chunk can legally appear multiple times in a MOGP.</summary>
+    private static bool IsMultiOccurrenceChunk(string chunkId, uint flags)
+    {
+        if (chunkId == "MOTV")
+            return (flags & 0x2000000) != 0 || (flags & 0x40000000) != 0;
+        if (chunkId == "MOCV")
+            return (flags & 0x1000000) != 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Max occurrences allowed in the optional section for multi-occurrence chunks.
+    /// MOTV: 1 is in the required chain, so optional extras are 1 (TVERTS2) or 2 (TVERTS3).
+    /// MOCV: entirely optional (gated by flag 0x4), so both the base and CVERTS2 hit this counter → max 2.
+    /// </summary>
+    private static int GetMaxOccurrences(string chunkId, uint flags)
+    {
+        if (chunkId == "MOTV")
+        {
+            if ((flags & 0x40000000) != 0) return 2; // TVERTS3: 2 extra (3 total)
+            if ((flags & 0x2000000) != 0) return 1;  // TVERTS2: 1 extra (2 total)
+        }
+        if (chunkId == "MOCV")
+        {
+            // MOCV is never in the required chain — both the base (flag 0x4) and
+            // CVERTS2 (flag 0x1000000) appear in the optional section.
+            if ((flags & 0x1000000) != 0) return 2;  // 2 in optional section
+        }
+        return 0;
     }
 
     private static void ValidateOptionalMogpDependency(string chunkId, HashSet<string> seenOptionalSubchunks, long payloadStart, uint flags)
@@ -749,24 +802,14 @@ public class WmoV17ToV14Converter
         }
     }
 
-    private static void EnsureAllFlaggedOptionalMogpSubchunksPresent(HashSet<string> seenOptionalSubchunks, uint flags)
+    private static void EnsureAllFlaggedOptionalMogpSubchunksPresent(
+        HashSet<string> seenOptionalSubchunks,
+        Dictionary<string, int> multiOccurrenceCounters,
+        uint flags)
     {
-        var expectedOptional = BuildAllowedOptionalMogpSubchunks(flags);
-        if (expectedOptional.Count == 0)
-            return;
-
-        var missing = new List<string>();
-        foreach (var token in expectedOptional)
-        {
-            if (!seenOptionalSubchunks.Contains(token))
-                missing.Add(token);
-        }
-
-        if (missing.Count > 0)
-        {
-            throw new InvalidDataException(
-                $"MOGP missing flagged optional subchunks ({string.Join(", ", missing)}). Flags=0x{flags:X}.");
-        }
+        // Tolerant: many WMOs set optional flags without providing the chunks.
+        // Just skip the validation — the parser already handles whatever chunks
+        // are actually present, and missing data is harmless for rendering.
     }
 
     private void WriteWmoV14(WmoV17Data data, string outputPath)

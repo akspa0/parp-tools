@@ -6,7 +6,6 @@ using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using WoWMapConverter.Core.Diagnostics;
 using WoWMapConverter.Core.Formats.LichKing;
-using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer.Terrain;
 
@@ -52,7 +51,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         // Parse MPHD
         _mphdFlags = ReadMphdFlags(wdtBytes);
-        _useBigAlpha = (_mphdFlags & (0x4u | 0x80u)) != 0;
+        _useBigAlpha = (_mphdFlags & 0x4u) != 0;
 
         // Parse MAIN chunk to enumerate tiles
         _existingTiles = ReadMainChunk(wdtBytes);
@@ -408,8 +407,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
         result.Chunks.AddRange(chunks);
 
         // Ghidra-verified (FUN_007d6ef0): MH2O located via MHDR offset +0x28.
-        // Profile-gated to avoid incompatible fallback in builds where MCLQ is the primary path.
-        if (_adtProfile.EnableMh2oFallbackWhenNoMclq && mclqCount == 0)
+        // For WotLK+, MH2O is the primary liquid system and should always be parsed.
+        // MH2O supplements MCLQ; chunks that already have MCLQ liquid are not overwritten.
+        if (_adtProfile.EnableMh2oFallbackWhenNoMclq)
             ParseMh2o(adtBytes, mhdrStart, mhdr, tileX, tileY, chunkSmall, result);
 
         // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
@@ -468,86 +468,40 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mcnk.TextureLayers == null || mcnk.TextureLayers.Count <= 1)
             return maps;
 
-        if (mcnk.McalRawData == null || mcnk.McalRawData.Length == 0)
-            return maps;
-
-        const uint DoNotFixAlphaMapFlag = 0x8; // MCNK do_not_fix_alpha_map
-        bool doNotFixAlphaMap = (((uint)mcnk.Header.Flags) & DoNotFixAlphaMapFlag) != 0;
-        int extraLayerCount = Math.Max(1, mcnk.TextureLayers.Count - 1);
-        bool likely8BitByTotal = mcnk.McalRawData.Length >= (extraLayerCount * 4096);
-
-        // Unified decode path via AlphaMapService (Noggit-compatible):
-        // - Compressed alpha if MCLY flag 0x200
-        // - Big alpha if MPHD says so or if per-layer span from MCLY offsets indicates 4096 bytes
-        // - Otherwise packed 4-bit alpha
-        bool decodedAny = false;
-        for (int layerIndex = 1; layerIndex < mcnk.TextureLayers.Count && layerIndex < 4; layerIndex++)
+        // Detect format: if any layer has UseAlpha (0x100) or CompressedAlpha (0x200),
+        // use 3.3.5 flag-based decode via Mcal. Otherwise use Alpha-style sequential 4-bit.
+        bool hasLkFlags = false;
+        for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
         {
-            try
+            if ((mcnk.TextureLayers[i].Flags & (MclyFlags.UseAlpha | MclyFlags.CompressedAlpha)) != 0)
             {
-                var layer = mcnk.TextureLayers[layerIndex];
-                bool hasAlphaMap = (layer.Flags & MclyFlags.UseAlpha) != 0;
-                if (!hasAlphaMap)
-                    continue;
-
-                int offset = (int)layer.AlphaMapOffset;
-                if (offset < 0 || offset >= mcnk.McalRawData.Length)
-                    continue;
-
-                bool isCompressed = (layer.Flags & MclyFlags.CompressedAlpha) != 0;
-                int nextOffset = ResolveNextAlphaOffset(mcnk.TextureLayers, layerIndex, mcnk.McalRawData.Length);
-                int layerSpan = Math.Max(0, nextOffset - offset);
-                bool spanSuggestsBig = !isCompressed && layerSpan >= 4096;
-                bool spanSuggestsPacked = !isCompressed && layerSpan >= 2048 && layerSpan < 4096;
-                bool inferredBigPayload = !isCompressed && (spanSuggestsBig || (layerSpan == 0 && likely8BitByTotal));
-                bool useBigForLayer = !isCompressed && (spanSuggestsPacked ? false : (useBigAlpha || inferredBigPayload));
-
-                int maxLayerBytes;
-                if (isCompressed)
-                    maxLayerBytes = layerSpan > 0 ? layerSpan : (mcnk.McalRawData.Length - offset);
-                else
-                    maxLayerBytes = layerSpan > 0 ? layerSpan : (useBigForLayer ? 4096 : 2048);
-
-                var alpha = AlphaMapService.ReadAlpha(
-                    mcnk.McalRawData,
-                    offset,
-                    (uint)layer.Flags,
-                    useBigForLayer,
-                    doNotFixAlphaMap,
-                    maxLayerBytes);
-
-                if (isCompressed && layerSpan > 0 && IsAllZero(alpha))
-                {
-                    alpha = AlphaMapService.ReadAlpha(
-                        mcnk.McalRawData,
-                        offset,
-                        (uint)layer.Flags,
-                        useBigForLayer,
-                        doNotFixAlphaMap,
-                        mcnk.McalRawData.Length - offset);
-                }
-
-                if (alpha.Length == 64 * 64)
-                {
-                    maps[layerIndex] = alpha;
-                    decodedAny = true;
-                }
-            }
-            catch
-            {
-                // Keep parsing remaining layers
+                hasLkFlags = true;
+                break;
             }
         }
 
-        if (!decodedAny)
+        if (hasLkFlags && mcnk.AlphaMaps != null)
+        {
+            // 3.3.5 path: per-layer offsets + flags (compressed, big alpha, etc.)
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            {
+                try
+                {
+                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayer(mcnk.TextureLayers[i], useBigAlpha);
+                    if (alpha != null && alpha.Length > 0)
+                        maps[i] = alpha;
+                }
+                catch { }
+            }
+        }
+        else if (mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
         {
             // Alpha-style (0.5.3/0.6.0): sequential 4-bit nibbles, 2048 bytes per layer
             int offset = 0;
             int nLayers = mcnk.TextureLayers.Count;
-            bool sequentialLikely8Bit = mcnk.McalRawData.Length >= (Math.Max(1, Math.Min(3, nLayers - 1)) * 4096);
             for (int layer = 1; layer < nLayers && layer < 4; layer++)
             {
-                int alphaSize = sequentialLikely8Bit ? 4096 : 2048;
+                int alphaSize = 2048; // 4-bit: 64×64 / 2
                 if (offset + alphaSize > mcnk.McalRawData.Length)
                 {
                     alphaSize = mcnk.McalRawData.Length - offset;
@@ -555,19 +509,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 }
 
                 var alpha = new byte[4096]; // 64×64 output
-                if (sequentialLikely8Bit)
+                for (int j = 0; j < Math.Min(2048, alphaSize); j++)
                 {
-                    int copyLen = Math.Min(4096, alphaSize);
-                    Array.Copy(mcnk.McalRawData, offset, alpha, 0, copyLen);
-                }
-                else
-                {
-                    for (int j = 0; j < Math.Min(2048, alphaSize); j++)
-                    {
-                        byte packed = mcnk.McalRawData[offset + j];
-                        alpha[j * 2] = (byte)((packed & 0x0F) * 17);
-                        alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);
-                    }
+                    byte packed = mcnk.McalRawData[offset + j];
+                    alpha[j * 2] = (byte)((packed & 0x0F) * 17);
+                    alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);
                 }
 
                 maps[layer] = alpha;
@@ -576,32 +522,6 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
-    }
-
-    private static int ResolveNextAlphaOffset(List<MclyEntry> layers, int currentLayerIndex, int mcalLength)
-    {
-        int currentOffset = (int)layers[currentLayerIndex].AlphaMapOffset;
-        int nextOffset = mcalLength;
-
-        for (int i = currentLayerIndex + 1; i < layers.Count; i++)
-        {
-            int candidate = (int)layers[i].AlphaMapOffset;
-            if (candidate > currentOffset && candidate < nextOffset)
-                nextOffset = candidate;
-        }
-
-        return nextOffset;
-    }
-
-    private static bool IsAllZero(byte[] data)
-    {
-        for (int i = 0; i < data.Length; i++)
-        {
-            if (data[i] != 0)
-                return false;
-        }
-
-        return true;
     }
 
     private static byte[]? ExtractShadowMap(byte[]? mcshData)

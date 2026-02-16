@@ -560,15 +560,18 @@ internal static class WarcraftNetM2Adapter
 
     private static MdlTexOp MapBlendMode(ushort blendMode)
     {
+        // WoW M2 blend modes differ from MDX's texop names; we map them to the closest MDX renderer behavior.
+        // Reference semantics (wowdev): 0=Opaque, 1=AlphaKey (cutout), 2=Alpha (blend), 3=Add, 4=Mod, 5=Mod2x.
+        // Modes beyond that are engine-/version-specific; default to Blend.
         return blendMode switch
         {
-            0 => MdlTexOp.Load,
-            1 => MdlTexOp.Transparent,
-            2 => MdlTexOp.Blend,
-            3 => MdlTexOp.Add,
-            4 => MdlTexOp.AddAlpha,
-            5 => MdlTexOp.Modulate,
-            6 => MdlTexOp.Modulate2X,
+            0 => MdlTexOp.Load,          // Opaque
+            1 => MdlTexOp.Transparent,   // AlphaKey (cutout)
+            2 => MdlTexOp.Blend,         // Alpha blend
+            3 => MdlTexOp.Add,           // Add
+            4 => MdlTexOp.Modulate,      // Modulate
+            5 => MdlTexOp.Modulate2X,    // Mod2x
+            6 => MdlTexOp.AddAlpha,      // Commonly treated as additive-with-alpha
             _ => MdlTexOp.Blend,
         };
     }
@@ -583,6 +586,23 @@ internal static class WarcraftNetM2Adapter
             flags |= MdlGeoFlags.Unfogged;
         if ((renderFlags & 0x4) != 0)
             flags |= MdlGeoFlags.TwoSided;
+
+        // Depth flags:
+        // Some client/version combinations don't reliably populate these bits.
+        // Default to depth-test/write ON unless the file explicitly provides depth bits.
+        // This prevents common world doodads (trees, rocks) from rendering "on top" of terrain.
+        const ushort M2DepthTest = 0x8;
+        const ushort M2DepthWrite = 0x10;
+        bool hasExplicitDepthBits = (renderFlags & (M2DepthTest | M2DepthWrite)) != 0;
+        if (hasExplicitDepthBits)
+        {
+            // MDX renderer expects inverse flags (disables)
+            if ((renderFlags & M2DepthTest) == 0)
+                flags |= MdlGeoFlags.NoDepthTest;
+            if ((renderFlags & M2DepthWrite) == 0)
+                flags |= MdlGeoFlags.NoDepthSet;
+        }
+
         if (textureFlags.HasFlag(TextureFlags.Flag_0x1_WrapX))
             flags |= MdlGeoFlags.WrapWidth;
         if (textureFlags.HasFlag(TextureFlags.Flag_0x2_WrapY))

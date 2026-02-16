@@ -56,23 +56,24 @@ public class AreaTriggerLoader
         }
 
         int loaded = 0;
+        int errors = 0;
         foreach (var row in storage.Values)
         {
             try
             {
                 int id = Convert.ToInt32(row["ID"]);
-                int rowMapId = Convert.ToInt32(row["ContinentID"] ?? row["MapID"] ?? row["Map"]);
+                int rowMapId = GetInt(row, "ContinentID", "MapID", "Map");
                 
                 // Only load triggers for this map
                 if (rowMapId != mapId) continue;
 
-                float wowX = Convert.ToSingle(row["Pos_X"] ?? row["X"]);
-                float wowY = Convert.ToSingle(row["Pos_Y"] ?? row["Y"]);
-                float wowZ = Convert.ToSingle(row["Pos_Z"] ?? row["Z"]);
+                // DBCD array fields: Pos[3] in the DBD → accessed as "Pos[0]", "Pos[1]", "Pos[2]"
+                float wowX = GetFloat(row, "Pos[0]", "Pos_X", "X");
+                float wowY = GetFloat(row, "Pos[1]", "Pos_Y", "Y");
+                float wowZ = GetFloat(row, "Pos[2]", "Pos_Z", "Z");
 
                 // Transform WoW coords to renderer coords (same as terrain)
                 const float MapOrigin = 17066.666f;
-                const float ChunkSize = 533.33333f;
                 float rendererX = MapOrigin - wowY;
                 float rendererY = MapOrigin - wowX;
                 float rendererZ = wowZ;
@@ -83,11 +84,11 @@ public class AreaTriggerLoader
                     MapId = rowMapId,
                     WoWPosition = new Vector3(wowX, wowY, wowZ),
                     Position = new Vector3(rendererX, rendererY, rendererZ),
-                    Radius = Convert.ToSingle(row["Radius"] ?? 0f),
-                    BoxLength = Convert.ToSingle(row["Box_Length"] ?? row["BoxLength"] ?? 0f),
-                    BoxWidth = Convert.ToSingle(row["Box_Width"] ?? row["BoxWidth"] ?? 0f),
-                    BoxHeight = Convert.ToSingle(row["Box_Height"] ?? row["BoxHeight"] ?? 0f),
-                    BoxOrientation = Convert.ToSingle(row["Box_Yaw"] ?? row["BoxOrientation"] ?? 0f)
+                    Radius = GetFloat(row, "Radius"),
+                    BoxLength = GetFloat(row, "Box_Length", "BoxLength"),
+                    BoxWidth = GetFloat(row, "Box_Width", "BoxWidth"),
+                    BoxHeight = GetFloat(row, "Box_Height", "BoxHeight"),
+                    BoxOrientation = GetFloat(row, "Box_Yaw", "BoxOrientation")
                 };
 
                 _triggers.Add(entry);
@@ -95,11 +96,36 @@ public class AreaTriggerLoader
             }
             catch (Exception ex)
             {
-                ViewerLog.Trace($"[AreaTrigger] Failed to parse row: {ex.Message}");
+                if (errors++ < 3)
+                    ViewerLog.Trace($"[AreaTrigger] Failed to parse row: {ex.Message}");
             }
         }
 
+        if (errors > 0)
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"[AreaTrigger] {errors} rows failed to parse");
         ViewerLog.Info(ViewerLog.Category.Terrain, $"[AreaTrigger] Loaded {loaded} triggers for map {mapId}");
+    }
+
+    /// <summary>Try multiple field names, returning the first that resolves.</summary>
+    private static int GetInt(dynamic row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            try { return Convert.ToInt32(row[name]); }
+            catch (KeyNotFoundException) { }
+        }
+        return 0;
+    }
+
+    /// <summary>Try multiple field names, returning the first that resolves.</summary>
+    private static float GetFloat(dynamic row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            try { return Convert.ToSingle(row[name]); }
+            catch (KeyNotFoundException) { }
+        }
+        return 0f;
     }
 
     /// <summary>

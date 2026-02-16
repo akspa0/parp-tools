@@ -5,8 +5,8 @@ namespace WoWMapConverter.Core.VLM;
 
 /// <summary>
 /// MCAL alpha map service - handles reading, writing, and PNG generation.
-/// Based on Noggit-Red's Alphamap.cpp implementation.
-/// Supports: RLE compressed, 4-bit packed, big (uncompressed 4096).
+/// Ported from Warcraft.NET's MCAL implementation for WotLK 3.3.5.
+/// Supports: RLE compressed, 4-bit packed (2048), big alpha (4096).
 /// </summary>
 public static class AlphaMapService
 {
@@ -20,24 +20,33 @@ public static class AlphaMapService
     /// <param name="useBigAlphamaps">MPHD flag 0x0004</param>
     /// <param name="doNotFixAlphaMap">MCNK flag</param>
     /// <returns>64×64 alpha values</returns>
-    public static byte[] ReadAlpha(byte[] data, int offset, uint flags, bool useBigAlphamaps, bool doNotFixAlphaMap)
+    public static byte[] ReadAlpha(byte[] data, int offset, uint flags, bool useBigAlphamaps, bool doNotFixAlphaMap, int maxLength = -1)
     {
         var amap = new byte[AlphaSize];
+        int dataEnd = data.Length;
+        if (maxLength > 0)
+            dataEnd = Math.Min(data.Length, offset + maxLength);
 
-        // Check for compression flag (0x200) regardless of MPHD setting
-        // WotLK often uses compressed alpha maps without the BigAlpha flag in MPHD
-        if ((flags & 0x200) != 0)
+        if (offset < 0 || offset >= dataEnd)
+            return amap;
+
+        // Noggit / 3.3.5 client behavior:
+        // - If MPHD says big alpha, alpha data is 4096 bytes (optionally RLE-compressed when MCLY 0x200 is set)
+        // - Otherwise alpha data is 4-bit packed (2048 bytes) and NOT RLE-compressed.
+        if (useBigAlphamaps)
         {
-            ReadCompressed(data, offset, amap);
-        }
-        else if (useBigAlphamaps)
-        {
-            ReadBigAlpha(data, offset, amap);
+            if ((flags & 0x200) != 0)
+                ReadCompressed(data, offset, dataEnd, amap);
+            else
+                ReadBigAlpha(data, offset, dataEnd, amap);
         }
         else
         {
-            ReadNotCompressed(data, offset, amap, doNotFixAlphaMap);
+            ReadNotCompressed(data, offset, dataEnd, amap);
         }
+
+        if (!doNotFixAlphaMap)
+            ApplyLegacyEdgeFix(amap);
 
         return amap;
     }
@@ -45,12 +54,12 @@ public static class AlphaMapService
     /// <summary>
     /// Read RLE compressed alpha data.
     /// </summary>
-    private static void ReadCompressed(byte[] data, int offset, byte[] amap)
+    private static void ReadCompressed(byte[] data, int offset, int dataEnd, byte[] amap)
     {
         int readPos = offset;
         int writePos = 0;
 
-        while (writePos < AlphaSize && readPos < data.Length)
+        while (writePos < AlphaSize && readPos < dataEnd)
         {
             byte header = data[readPos++];
             int count = header & 0x7F;
@@ -62,14 +71,14 @@ public static class AlphaMapService
             if (isFill)
             {
                 // Fill mode: repeat value[0] count times
-                byte value = readPos < data.Length ? data[readPos++] : (byte)0;
+                byte value = readPos < dataEnd ? data[readPos++] : (byte)0;
                 for (int i = 0; i < count; i++)
                     amap[writePos++] = value;
             }
             else
             {
                 // Copy mode: copy count bytes
-                for (int i = 0; i < count && readPos < data.Length; i++)
+                for (int i = 0; i < count && readPos < dataEnd; i++)
                     amap[writePos++] = data[readPos++];
             }
         }
@@ -77,43 +86,56 @@ public static class AlphaMapService
 
     /// <summary>
     /// Read uncompressed big alpha (4096 bytes direct copy).
+    /// Ported from Warcraft.NET ReadBigAlpha.
     /// </summary>
-    private static void ReadBigAlpha(byte[] data, int offset, byte[] amap)
+    private static void ReadBigAlpha(byte[] data, int offset, int dataEnd, byte[] amap)
     {
-        int copyLen = Math.Min(AlphaSize, data.Length - offset);
+        int copyLen = Math.Min(AlphaSize, Math.Max(0, dataEnd - offset));
         if (copyLen > 0)
             Array.Copy(data, offset, amap, 0, copyLen);
     }
 
     /// <summary>
     /// Read 4-bit packed alpha (2048 bytes → 4096 bytes).
+    /// Ported from Warcraft.NET ReadUncompressedAlpha: row-major, 32 bytes per row.
+    /// Each byte encodes two columns: low nibble first, high nibble second.
+    /// Special case: at column 31 (last byte of each row), the high nibble is
+    /// ignored and the low nibble value is duplicated for the final column.
     /// </summary>
-    private static void ReadNotCompressed(byte[] data, int offset, byte[] amap, bool doNotFixAlphaMap)
+    private static void ReadNotCompressed(byte[] data, int offset, int dataEnd, byte[] amap)
     {
-        // 4-bit packed: lower 4 bits, upper 4 bits
-        for (int x = 0; x < 64 && offset < data.Length; x++)
+        int writePos = 0;
+        for (int row = 0; row < 64; row++)
         {
-            for (int y = 0; y < 64; y += 2)
+            for (int col = 0; col < 32; col++)
             {
-                if (offset >= data.Length) break;
-                byte packed = data[offset++];
-                byte lower = (byte)((packed & 0x0F) | ((packed & 0x0F) << 4));
-                byte upper = (byte)((packed >> 4) | (packed & 0xF0));
-                amap[x * 64 + y] = lower;
-                amap[x * 64 + y + 1] = upper;
-            }
-        }
+                if (offset >= dataEnd)
+                    break;
 
-        // Fix last row/column (Noggit legacy fix)
-        if (!doNotFixAlphaMap)
-        {
-            for (int i = 0; i < 64; i++)
-            {
-                amap[i * 64 + 63] = amap[i * 64 + 62];
-                amap[63 * 64 + i] = amap[62 * 64 + i];
+                byte packed = data[offset++];
+                byte lowVal = (byte)((packed & 0x0F) * 17);  // normalize 0-15 → 0-255
+                byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+
+                amap[writePos++] = lowVal;
+
+                // Warcraft.NET: at the last column pair (col=31), duplicate the
+                // low nibble instead of using the high nibble
+                if (col != 31)
+                    amap[writePos++] = highVal;
+                else
+                    amap[writePos++] = lowVal;
             }
-            amap[63 * 64 + 63] = amap[62 * 64 + 62];
         }
+    }
+
+    private static void ApplyLegacyEdgeFix(byte[] amap)
+    {
+        for (int i = 0; i < 64; i++)
+        {
+            amap[i * 64 + 63] = amap[i * 64 + 62];
+            amap[63 * 64 + i] = amap[62 * 64 + i];
+        }
+        amap[63 * 64 + 63] = amap[62 * 64 + 62];
     }
 
     /// <summary>

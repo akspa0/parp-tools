@@ -55,7 +55,9 @@ public class WmoRenderer : ISceneRenderer
     private static uint _liquidShader;
     private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
     private static int _liquidShaderRefCount;
-    private static int _mliqRotationQuarterTurns;
+    // 3.3.5: WMO MLIQ XY mapping matches the client at a 270° rotation.
+    // Kept as an override (user-configurable) because some assets can still be inconsistent.
+    private static int _mliqRotationQuarterTurns = 3;
     private static int _mliqRotationRevision;
     private int _builtMliqRotationRevision = -1;
 

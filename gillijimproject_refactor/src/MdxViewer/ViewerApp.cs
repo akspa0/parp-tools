@@ -2435,10 +2435,6 @@ void main() {
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
         ImGui.Separator();
-        ImGui.Text("WMO Liquid Tuning");
-        DrawWmoLiquidRotationControls("world");
-
-        ImGui.Separator();
         ImGui.Text("SQL World Population");
         ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
         if (ImGui.IsItemHovered())
@@ -4776,7 +4772,11 @@ void main() {
         try
         {
             if (!File.Exists(ViewerSettingsPath))
+            {
+                // First run: default WMO liquid rotation for 3.3.5.
+                WmoRenderer.MliqRotationQuarterTurns = 3;
                 return;
+            }
 
             string json = File.ReadAllText(ViewerSettingsPath);
             var settings = JsonSerializer.Deserialize<ViewerSettings>(json);
