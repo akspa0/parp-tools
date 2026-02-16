@@ -1,6 +1,9 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## Status: WDL/WL Stabilization In Progress — Core parser/render fixes landed
+## Status: v0.4.0 Released — 0.5.3 Rendering Improvements + 3.3.5 Groundwork (In Progress)
+
+**Supported client versions: 0.5.3 through 0.12** — fully usable
+**3.3.5 WotLK: IN PROGRESS** — scaffolding exists but MH2O liquid and terrain texturing are broken
 
 ## What Works Today
 
@@ -10,7 +13,8 @@
 | Terrain MCSH shadow maps | ✅ Applied on ALL layers (not just base) |
 | Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
 | Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
-| Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain) |
+| Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain + MH2O) |
+| **WotLK 3.3.5 terrain support** | 🔧 In progress — split ADT, MPHD flags parsed. **MH2O broken, texturing broken** |
 | WDL parser (MVER/MAOF/MARE, v0x12) | ✅ Strict parsing + version validation |
 | WDL terrain tile scale | ✅ Uses TileSize (8533.3333), not ChunkSize |
 | WDL preview window reliability | ✅ Error reporting + `.wdl.mpq` fallback |
@@ -21,7 +25,12 @@
 | MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
 | MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
 | MDX fog blending | ✅ Models blend into fog like terrain |
-| MDX doodads in WorldScene | ✅ Position + animation working. Magenta = unimplemented particles |
+| MDX doodads in WorldScene | ✅ Position + animation + particles working |
+| **MDX particle effects (PRE2)** | ✅ Billboard quads, texture atlas, bone-following, per-emitter blend |
+| **Geoset animation alpha (ATSQ)** | ✅ Per-frame keyframe evaluation, alpha modulation |
+| **M2 (MD20) model loading** | ✅ WarcraftNetM2Adapter: MD20→MdxFile conversion |
+| **Half-Lambert lighting** | ✅ Softer shading on MDX + WMO (no harsh black shadows) |
+| **Improved ambient lighting** | ✅ Day/night with WoW-like brightness levels |
 | WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
 | WMO fog blending | ✅ WMOs blend into fog like terrain |
 | WMO liquid rendering (MLIQ) | ✅ Semi-transparent water surfaces |
@@ -66,10 +75,38 @@
 | Catalog | Asset Catalog | ✅ SQL dump reader, ImGui browse/filter, JSON+GLB+screenshot export |
 | 1 | **MDX Animation** | ✅ Complete (compressed quats, GPU skinning, terrain doodads) |
 | — | **Per-object folders + multi-angle screenshots** | 🔧 Next up |
-| 2 | Particles (PRE2/RIBB) | ⏳ Not started — causes magenta on some MDX geosets |
+| 2 | Particles (PRE2/RIBB) | ✅ PRE2 complete — billboard quads, texture atlas, blend modes. RIBB still pending. |
 | WL | WL loose liquids transform alignment | 🔧 In progress — matrix tuning UI added, values not finalized |
+| LK | **WotLK 3.3.5 Support** | 🔧 In progress — scaffolding exists. MH2O + texturing broken. **Not usable yet** |
 | 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |
 | MCP | MCP Server | ⏳ Designed — GLB terrain, NPC spawn, click-to-chat, audio |
+
+## 2026-02-15 — v0.4.0 Release: 0.5.3 Rendering Improvements + 3.3.5 Groundwork
+
+**Rendering improvements for 0.5.3. Initial 3.3.5 scaffolding added (NOT ready for use).**
+
+**3.3.5 WotLK support (IN PROGRESS — NOT USABLE):**
+- StandardTerrainAdapter: split ADT loading, MPHD bigAlpha flag — but **MH2O broken, texturing broken**
+- WarcraftNetM2Adapter: MD20→MdxFile conversion for M2 models (works in isolation)
+- WMO v17: multi-MOTV/MOCV, strict validation
+- Fixed terrain regression from initial 3.3.5 commit (surgical revert of shared renderer code)
+- **Only client versions 0.5.3 through 0.12 are currently usable**
+
+**Lighting overhaul:**
+- Half-Lambert diffuse shading on MDX + WMO (wraps light, no harsh black shadows)
+- Raised ambient: day 0.4→0.55, night 0.08→0.25 (WoW-like brightness)
+- WMO shader: proper vec3 lighting instead of lossy scalar average
+- Reduced specular intensity (0.3→0.15)
+
+**Particle system (PRE2):**
+- Rewrote ParticleRenderer with per-particle uniforms + texture atlas + per-emitter blend
+- Wired into MdxRenderer: emitters created from parsed data, bone-following, transparent pass
+
+**Geoset animation alpha (ATSQ):**
+- Per-frame alpha keyframe evaluation with global sequence support
+- Alpha modulates layer alpha in RenderGeosets; invisible geosets skipped
+
+**Key files:** TerrainLighting.cs, ModelRenderer.cs, WmoRenderer.cs, ParticleRenderer.cs, StandardTerrainAdapter.cs, TerrainRenderer.cs, WarcraftNetM2Adapter.cs, WorldAssetManager.cs
 
 ## 2026-02-13 — MDX Animation System Complete
 
@@ -101,9 +138,9 @@
 - Added UI controls and hot-reload path (`Apply + Reload WL`) for rapid empirical alignment.
 - Final transform values not yet locked/hard-wired.
 
-## MDX Magenta Textures — DEFERRED (Root Cause: Particles)
+## MDX Magenta Textures — RESOLVED (Particle System Implemented)
 
-The magenta quads on MDX doodads are **unimplemented particle emitter geometry** (PRE2/RIBB chunks). These are separate geosets that reference particle textures. Regular model textures load fine. This will be fixed when the particle system is implemented (Phase 2).
+The magenta quads on MDX doodads were unimplemented particle emitter geometry (PRE2 chunks). Now resolved: ParticleRenderer rewritten, emitters wired into MdxRenderer, particles render with proper textures, atlas UV mapping, and per-emitter blend modes.
 
 ## Upcoming: MCP Server for LLM-Orchestrated 3D
 

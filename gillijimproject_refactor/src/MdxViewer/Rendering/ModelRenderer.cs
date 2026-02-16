@@ -89,6 +89,17 @@ public class MdxRenderer : ISceneRenderer
     private MdxAnimator? _animator;
     private DateTime _lastFrameTime = DateTime.UtcNow;
 
+    // ── Particle system ──
+    private readonly List<ParticleEmitter> _particleEmitters = new();
+    private static ParticleRenderer? _particleRenderer;
+
+    // ── Geoset animation alpha cache (evaluated per-frame) ──
+    private readonly Dictionary<int, float> _geosetAlphaOverrides = new();
+
+    // ── Cached view/proj for particle rendering after batch ──
+    private Matrix4x4 _cachedView, _cachedProj;
+    private Vector3 _cachedCameraPos;
+
     /// <summary>Model-space bounding box min corner.</summary>
     public Vector3 BoundsMin => new(_mdx.Model.Bounds.Extent.Min.X, _mdx.Model.Bounds.Extent.Min.Y, _mdx.Model.Bounds.Extent.Min.Z);
     /// <summary>Model-space bounding box max corner.</summary>
@@ -125,6 +136,23 @@ public class MdxRenderer : ISceneRenderer
             _animator = new MdxAnimator(mdx);
             if (_animator.HasAnimation)
                 ViewerLog.Info(ViewerLog.Category.Mdx, $"Animation: {mdx.Bones.Count} bones, {mdx.Sequences.Count} sequences");
+        }
+
+        // Initialize particle emitters from PRE2 chunk data
+        if (mdx.ParticleEmitters2.Count > 0)
+        {
+            // Ensure shared particle renderer exists
+            _particleRenderer ??= new ParticleRenderer(gl);
+
+            foreach (var pe2 in mdx.ParticleEmitters2)
+            {
+                var emitter = new ParticleEmitter(pe2);
+                // Set initial transform from emitter position
+                emitter.Transform = Matrix4x4.CreateTranslation(
+                    pe2.Position.X, pe2.Position.Y, pe2.Position.Z);
+                _particleEmitters.Add(emitter);
+            }
+            ViewerLog.Info(ViewerLog.Category.Mdx, $"Particles: {_particleEmitters.Count} emitters");
         }
 
         // Log material→texture mapping for debugging
@@ -182,13 +210,40 @@ public class MdxRenderer : ISceneRenderer
     /// <summary>Advance animation by wall-clock delta. Call once per frame before any RenderWithTransform calls.</summary>
     public void UpdateAnimation()
     {
+        var now = DateTime.UtcNow;
+        float deltaMs = (float)(now - _lastFrameTime).TotalMilliseconds;
+        _lastFrameTime = now;
+        float dt = Math.Clamp(deltaMs, 0f, 100f);
+
+        // Skeletal animation
         if (_animator != null && _animator.HasAnimation)
+            _animator.Update(dt);
+
+        // Particle simulation
+        float deltaSec = dt / 1000f;
+        foreach (var emitter in _particleEmitters)
         {
-            var now = DateTime.UtcNow;
-            float deltaMs = (float)(now - _lastFrameTime).TotalMilliseconds;
-            _lastFrameTime = now;
-            _animator.Update(Math.Clamp(deltaMs, 0f, 100f)); // Cap to avoid huge jumps
+            // If emitter's parent bone exists, update transform from bone matrix
+            var def = emitter.Definition;
+            if (def.ParentId >= 0 && _animator != null)
+            {
+                // Find bone index by ObjectId
+                int boneIndex = -1;
+                for (int i = 0; i < _mdx.Bones.Count; i++)
+                {
+                    if (_mdx.Bones[i].ObjectId == def.ParentId) { boneIndex = i; break; }
+                }
+                if (boneIndex >= 0 && boneIndex < _animator.BoneMatrices.Length)
+                {
+                    emitter.Transform = Matrix4x4.CreateTranslation(
+                        def.Position.X, def.Position.Y, def.Position.Z) * _animator.BoneMatrices[boneIndex];
+                }
+            }
+            emitter.Update(deltaSec);
         }
+
+        // Evaluate geoset animation alpha for current frame
+        UpdateGeosetAnimationAlpha();
     }
 
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
@@ -215,6 +270,10 @@ public class MdxRenderer : ISceneRenderer
         Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
         Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
     {
+        _cachedView = view;
+        _cachedProj = proj;
+        _cachedCameraPos = cameraPos;
+
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
@@ -262,6 +321,15 @@ public class MdxRenderer : ISceneRenderer
         }
 
         RenderGeosets(pass, fadeAlpha);
+
+        // Render particles during transparent pass
+        if (pass == RenderPass.Transparent && _particleEmitters.Count > 0 && _particleRenderer != null)
+        {
+            _particleRenderer.Render(_particleEmitters, _cachedView, _cachedProj,
+                _cachedCameraPos, _textures, _mdx.Textures);
+            // Re-activate model shader since particle renderer uses its own
+            _gl.UseProgram(_shaderProgram);
+        }
     }
 
     /// <summary>
@@ -328,6 +396,14 @@ public class MdxRenderer : ISceneRenderer
 
         RenderGeosets(pass, fadeAlpha);
 
+        // Render particles during transparent pass (standalone path)
+        if (pass == RenderPass.Transparent && _particleEmitters.Count > 0 && _particleRenderer != null)
+        {
+            var cp2 = cameraPos ?? Vector3.Zero;
+            _particleRenderer.Render(_particleEmitters, view, proj, cp2, _textures, _mdx.Textures);
+            _gl.UseProgram(_shaderProgram);
+        }
+
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 
@@ -338,6 +414,10 @@ public class MdxRenderer : ISceneRenderer
         {
             var gb = _geosets[i];
             if (!gb.Visible) continue;
+
+            // Skip geosets hidden by geoset animation (alpha ≈ 0)
+            if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float gaAlpha) && gaAlpha < 0.01f)
+                continue;
 
             // Render each material layer for this geoset
             bool anyLayerRendered = false;
@@ -451,6 +531,9 @@ public class MdxRenderer : ISceneRenderer
                     }
 
                     float alpha = layer.StaticAlpha * fadeAlpha;
+                    // Apply geoset animation alpha override if present
+                    if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float geoAlpha))
+                        alpha *= geoAlpha;
                     _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, alpha);
 
                     _gl.BindVertexArray(gb.Vao);
@@ -486,6 +569,102 @@ public class MdxRenderer : ISceneRenderer
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    /// <summary>
+    /// Evaluate geoset animation alpha for the current animation frame.
+    /// Updates _geosetAlphaOverrides so RenderGeosets can apply per-geoset alpha/visibility.
+    /// </summary>
+    private void UpdateGeosetAnimationAlpha()
+    {
+        _geosetAlphaOverrides.Clear();
+        if (_mdx.GeosetAnimations.Count == 0) return;
+
+        float frame = _animator?.CurrentFrame ?? 0f;
+        int seqIdx = _animator?.CurrentSequence ?? 0;
+        float seqStart = 0, seqEnd = 0;
+        if (_mdx.Sequences.Count > seqIdx)
+        {
+            seqStart = _mdx.Sequences[seqIdx].Time.Start;
+            seqEnd   = _mdx.Sequences[seqIdx].Time.End;
+        }
+
+        foreach (var ga in _mdx.GeosetAnimations)
+        {
+            float alpha = ga.DefaultAlpha;
+
+            // Evaluate alpha keyframe track if present
+            if (ga.AlphaKeys.Count > 0)
+            {
+                alpha = EvaluateFloatTrack(ga.AlphaKeys, ga.AlphaInterpolation,
+                    ga.AlphaGlobalSeqId, frame, seqStart, seqEnd);
+            }
+
+            _geosetAlphaOverrides[(int)ga.GeosetId] = Math.Clamp(alpha, 0f, 1f);
+        }
+    }
+
+    /// <summary>Evaluate a float animation track (used for geoset animation alpha).</summary>
+    private float EvaluateFloatTrack(
+        List<MdlAnimKey<float>> keys,
+        MdlAnimInterpolation interp,
+        int globalSeqId,
+        float frame, float seqStart, float seqEnd)
+    {
+        if (keys.Count == 0) return 1f;
+
+        // Determine frame range
+        float evalFrame = frame;
+        float from = seqStart, to = seqEnd;
+        if (globalSeqId >= 0 && _mdx.GlobalSequences.Count > globalSeqId)
+        {
+            // Global sequence: use wrapping time
+            float gsDuration = _mdx.GlobalSequences[globalSeqId];
+            if (gsDuration > 0)
+            {
+                // animator should be tracking global seq frames, but we approximate here
+                evalFrame = frame % gsDuration;
+                from = 0;
+                to = gsDuration;
+            }
+        }
+
+        // Find surrounding keyframes
+        int leftIdx = -1;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (keys[i].Time <= evalFrame && keys[i].Time >= from)
+                leftIdx = i;
+            else if (keys[i].Time > evalFrame)
+                break;
+        }
+
+        if (leftIdx < 0)
+        {
+            // Before first key — use first key value if in range
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (keys[i].Time >= from && keys[i].Time <= to)
+                    return keys[i].Value;
+            }
+            return 1f;
+        }
+
+        var left = keys[leftIdx];
+        if (leftIdx + 1 >= keys.Count || keys[leftIdx + 1].Time > to)
+            return left.Value;
+
+        var right = keys[leftIdx + 1];
+        if (left.Time == right.Time) return left.Value;
+
+        float t = (evalFrame - left.Time) / (right.Time - left.Time);
+        t = Math.Clamp(t, 0f, 1f);
+
+        return interp switch
+        {
+            MdlAnimInterpolation.None => left.Value,
+            _ => left.Value + (right.Value - left.Value) * t, // Linear (and fallback)
+        };
     }
 
     private void InitShaders()
@@ -590,14 +769,18 @@ void main() {
     vec3 litColor = texColor.rgb;
     if (uUnshaded == 0) {
         vec3 lightDir = normalize(uLightDir);
-        float diff = max(dot(norm, lightDir), 0.0);
+        // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
+        // WoW models don't have harsh black shadows — this approximates that look
+        float NdotL = dot(norm, lightDir);
+        float diff = NdotL * 0.5 + 0.5; // remap [-1,1] to [0,1]
+        diff = diff * diff; // squared for slightly sharper falloff while staying soft
         vec3 diffuse = uLightColor * diff;
 
-        // Blinn-Phong specular
+        // Blinn-Phong specular (subtle)
         vec3 viewDir = normalize(uCameraPos - vFragPos);
         vec3 halfDir = normalize(lightDir + viewDir);
         float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
-        vec3 specular = uLightColor * spec * 0.3;
+        vec3 specular = uLightColor * spec * 0.15;
 
         litColor = texColor.rgb * (uAmbientColor + diffuse) + specular;
     }

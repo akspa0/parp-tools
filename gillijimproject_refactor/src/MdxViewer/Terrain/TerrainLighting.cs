@@ -48,21 +48,23 @@ public class TerrainLighting
         float dayFactor = MathF.Max(0, sunHeight); // 0 at night, 1 at noon
 
         // Light color: warm yellow during day, cool blue at night
+        // WoW uses relatively high directional intensity with strong ambient fill
         LightColor = Vector3.Lerp(
-            new Vector3(0.15f, 0.15f, 0.3f),  // night: dim blue
-            new Vector3(1.0f, 0.95f, 0.85f),   // day: warm white
+            new Vector3(0.2f, 0.2f, 0.35f),    // night: dim blue
+            new Vector3(0.8f, 0.78f, 0.7f),    // day: warm white (moderated to avoid blow-out with high ambient)
             dayFactor);
 
-        // Ambient: darker at night, brighter during day
+        // Ambient: WoW ambient is high — objects are always well-lit even in shadow.
+        // Real WoW uses hemisphere lighting + Light.dbc; these values approximate the look.
         AmbientColor = Vector3.Lerp(
-            new Vector3(0.08f, 0.08f, 0.15f),  // night
-            new Vector3(0.4f, 0.4f, 0.45f),     // day
+            new Vector3(0.25f, 0.25f, 0.35f),  // night: still visible, blue-tinted
+            new Vector3(0.55f, 0.55f, 0.6f),   // day: strong ambient fill
             dayFactor);
 
         // Fog color follows sky color
         FogColor = Vector3.Lerp(
-            new Vector3(0.05f, 0.05f, 0.1f),   // night: dark
-            new Vector3(0.6f, 0.7f, 0.85f),     // day: sky blue
+            new Vector3(0.08f, 0.08f, 0.15f),  // night: dark blue
+            new Vector3(0.6f, 0.7f, 0.85f),    // day: sky blue
             dayFactor);
     }
 }

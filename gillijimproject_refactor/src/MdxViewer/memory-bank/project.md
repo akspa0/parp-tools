@@ -2,13 +2,15 @@
 
 ## Project Overview
 
-**Purpose**: World of Warcraft Alpha 0.5.3 model viewer application.
+**Purpose**: World of Warcraft model/world viewer. Fully supports Alpha 0.5.3 through 0.12 client data. WotLK 3.3.5 support is in progress (MH2O + texturing broken, not usable yet).
 
 **Key Technologies**:
-- .NET 9.0 Windows Forms
-- Silk.NET for OpenGL rendering
+- .NET 10.0 Windows
+- Silk.NET for OpenGL 3.3 rendering
 - SixLabors.ImageSharp for image processing
 - DBCD for DBC database access
+- SereniaBLPLib for BLP texture loading
+- ImGuiNET for UI overlay
 
 ## Architecture
 
@@ -28,10 +30,16 @@
 ## Key File Formats
 
 ### MDX (Alpha Model Format)
-- Binary 3D model format used in Alpha 0.5.3
+- Binary 3D model format used in Alpha 0.5.3 (MDLX magic)
 - Contains vertices, faces, textures, animations
-- Uses C3Color type for color values
-- Supports geoset animations
+- PRE2 particle emitters with texture atlas + segment colors
+- Supports geoset animations (ATSQ alpha/color tracks)
+- Skeletal animation with compressed quaternion rotation keys
+
+### M2/MD20 (Standard Model Format)
+- Binary 3D model format used in WotLK 3.3.5+ (MD20 magic)
+- Loaded via WarcraftNetM2Adapter which converts to MdxFile runtime format
+- Supports render flags, blend modes, textures, bones
 
 ### WMO (World Map Object)
 - Indoor/outdoor building models
@@ -44,9 +52,10 @@
 - Palette-based for older versions
 
 ### ADT/WDT (Terrain)
-- Alpha client terrain format
-- 16x16 chunks (MCNK)
-- Supports alpha maps, heightmaps
+- Alpha client: monolithic WDT with embedded terrain data
+- Standard (WotLK): MPHD/MAIN WDT + split ADT files per tile
+- 16x16 chunks (MCNK) with alpha maps, heightmaps
+- MH2O liquid chunks (WotLK format)
 
 ### WDL (Low-Detail Far Terrain)
 - Optional low-detail terrain layer (64x64 tile grid)
@@ -61,8 +70,11 @@
 | `ViewerApp` | Main application entry point |
 | `MpqDataSource` | MPQ file access and file list building |
 | `FileBrowser` | File navigation UI |
-| `ModelRenderer` | 3D model rendering + GPU skinning |
+| `ModelRenderer` | 3D model rendering + GPU skinning + particles + geoset anim |
 | `MdxAnimator` | Skeletal animation (bone hierarchy, keyframe interpolation) |
+| `ParticleRenderer` | Billboard particle rendering with texture atlas + blend modes |
+| `WarcraftNetM2Adapter` | MD20→MdxFile converter for WotLK M2 models |
+| `TerrainLighting` | Day/night cycle with half-Lambert lighting |
 
 ## Known Issues & Solutions
 

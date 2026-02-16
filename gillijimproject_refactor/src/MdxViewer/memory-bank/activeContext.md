@@ -2,17 +2,24 @@
 
 ## Current Focus
 
-**WDL/WL Stabilization + Remaining Render Bugs** — WDL parsing/rendering correctness and WL transform tooling were advanced this session, plus WMO shader race fix. Current focus is now validation + lock-in:
-1. WDL overlap behavior validation in live scenes (using new WDL UI toggle)
-2. WL liquid 3D transform tuning in UI, then hard-wire final transform
-3. MDX UV/texturing stretch investigation (Ghidra prompts prepared)
+**v0.4.0 Release — 0.5.3 Rendering Improvements + Initial 3.3.5 Groundwork** — Major rendering improvements for Alpha 0.5.3 (lighting, particles, geoset animations). Initial 3.3.5 WotLK support scaffolding added but **NOT ready for use** — MH2O liquid and terrain texturing are broken. Only client versions 0.5.3 through 0.12 are currently usable.
+
+## 3.3.5 WotLK Status: IN PROGRESS (NOT USABLE)
+
+**Known broken:**
+- MH2O liquid rendering — parsing exists but rendering is broken
+- Terrain texturing — alpha map decode not working correctly for LK format
+- These must be fixed before 3.3.5 data can be used
 
 ## Immediate Next Steps
 
-1. **WDL overlap root-cause pass** — Use new UI WDL toggle to isolate whether artifact is WDL mesh, ordering, or ADT coverage gaps
-2. **WL transform lock-in** — Tune in `WL Transform Tuning` UI, log final values, then hard-code configuration
-3. **MDX stretched texture bug** — Validate vertex stride / UV channel / TextureCoordId behavior via Ghidra
-4. **Particle system (PRE2/RIBB)** — Still needed for magenta particle quads
+1. **Fix 3.3.5 MH2O liquid rendering** — Parsing exists but output is broken
+2. **Fix 3.3.5 terrain texturing** — Alpha map decode for LK format not working
+3. **3.3.5 terrain alpha maps** — Current LK path uses basic Mcal decode; needs full `AlphaMapService` integration without breaking 0.5.3
+4. **Light.dbc / LightData.dbc integration** — Replace hardcoded TerrainLighting values with real game lighting data per zone
+5. **Skybox rendering** — Not yet implemented; needed for proper atmosphere
+6. **Ribbon emitters (RIBB)** — Parsed but no rendering code yet
+7. **M2 particle emitters** — WarcraftNetM2Adapter doesn't map PRE2/particles to MdxFile format yet
 
 ## Session 2026-02-13 Summary — WDL/WL/WMO Fixes
 
@@ -41,9 +48,67 @@
    - Added `WL Transform Tuning` controls in UI and `Apply + Reload WL`
    - Added `WorldScene.ReloadWlLiquids()` for fast iteration
 
-## MDX Magenta Textures — DEFERRED
+## MDX Particle System — IMPLEMENTED (2026-02-15)
 
-Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MDX files). The magenta quads are particle emitter geometry that references particle textures, not regular model textures. Defer until particle system implementation.
+Previously deferred issue now resolved. ParticleRenderer rewritten with per-particle uniforms, texture atlas support, and per-emitter blend modes. Wired into MdxRenderer — emitters created from PRE2 data, updated each frame with bone-following transforms, rendered during transparent pass. Fire, glow, and spell effects now visible.
+
+## Session 2026-02-15 Summary — Multi-Version Support + Lighting/Particle Overhaul
+
+### Completed
+
+1. **Partial WotLK 3.3.5 terrain scaffolding** (StandardTerrainAdapter) — **NOT USABLE**
+   - Split ADT file loading via MPQ data source
+   - MPHD flags detection for `bigAlpha` (0x4)
+   - MH2O liquid chunk parsing — **BROKEN, not rendering correctly**
+   - LK alpha maps via `hasLkFlags` detection — **texturing BROKEN**
+   - Surgical revert of shared renderer code was needed to restore 0.5.3
+
+2. **M2 (MD20) model loading** (WarcraftNetM2Adapter)
+   - Converts MD20 format models to MdxFile runtime format
+   - Maps render flags (Unshaded, Unfogged, TwoSided), blend modes
+   - Texture loading from M2 texture definitions
+   - Bone/animation data mapping
+
+3. **Terrain regression fix** (surgical revert)
+   - Commit e172907 broke 0.5.3 terrain rendering (grid pattern artifacts)
+   - Root cause: `AlphaTextures.ContainsKey` guard skipping overlay layers + edge fix removal in TerrainRenderer.cs
+   - Plus StandardTerrainAdapter ExtractAlphaMaps rewrite with broken `spanSuggestsPacked` logic
+   - Surgical revert restored 0.5.3 terrain while preserving M2/WMO improvements
+
+4. **Lighting improvements** (TerrainLighting, ModelRenderer, WmoRenderer)
+   - Raised ambient values: day (0.4→0.55), night (0.08→0.25) — no more pitch black
+   - Half-Lambert diffuse shading: `dot * 0.5 + 0.5` squared — wraps light around surfaces
+   - WMO shader: replaced lossy scalar lighting `(r+g+b)/3.0` with proper `vec3` lighting
+   - MDX shader: half-Lambert + reduced specular (0.3→0.15)
+   - Moderated day directional light (1.0→0.8) to avoid blow-out with higher ambient
+
+5. **Particle system wired into pipeline** (ParticleRenderer, ModelRenderer)
+   - Rewrote ParticleRenderer: per-particle uniforms, texture atlas (rows×columns), per-emitter blend mode
+   - MdxRenderer creates ParticleEmitter instances from MdxFile.ParticleEmitters2
+   - Emitter transforms follow parent bone matrices when animated
+   - Particles rendered during transparent pass after geosets
+   - Supports Additive, Blend, Modulate, AlphaKey filter modes
+
+6. **Geoset animation alpha** (ModelRenderer)
+   - `UpdateGeosetAnimationAlpha()` evaluates ATSQ alpha keyframe tracks per frame
+   - Alpha multiplied into layer alpha during RenderGeosets
+   - Geosets with alpha ≈ 0 skipped entirely
+   - Supports global sequences and linear interpolation
+
+7. **WMO fixes from 3.3.5 work** (preserved)
+   - Multi-MOTV/MOCV chunk handling for ICC-style WMOs
+   - Strict WMO validation preventing Northrend loading hangs
+   - WMO liquid rotation fixes
+
+### Files Modified
+- `TerrainRenderer.cs` — Reverted edge fix + ContainsKey guard
+- `StandardTerrainAdapter.cs` — Reverted ExtractAlphaMaps to clean hasLkFlags path
+- `TerrainLighting.cs` — Raised ambient/light values, better night visibility
+- `ModelRenderer.cs` — Half-Lambert shader, particle wiring, geoset animation alpha
+- `WmoRenderer.cs` — vec3 lighting instead of scalar, half-Lambert diffuse
+- `ParticleRenderer.cs` — Complete rewrite with working per-particle rendering
+- `WarcraftNetM2Adapter.cs` — MD20→MdxFile adapter (from e172907, preserved)
+- `WorldAssetManager.cs` — MD20 detection + adapter routing (from e172907, preserved)
 
 ## Session 2026-02-13 Summary — MDX Animation System Complete
 
@@ -207,17 +272,19 @@ Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MD
 | Feature | Status |
 |---------|--------|
 | Alpha WDT terrain rendering + AOI | ✅ |
-| Standard WDT+ADT terrain (LK/Cata) | ✅ (terrain only, needs M2/WMOv17 readers for objects) |
+| **Standard WDT+ADT terrain (WotLK 3.3.5)** | ✅ Partial — terrain + M2 models + WMO loading |
 | Terrain MCSH shadow maps | ✅ (all layers, not just base) |
 | Terrain alpha map debug view | ✅ (Show Alpha Masks toggle) |
 | Async tile streaming | ✅ (background parse, render-thread GPU upload) |
 | Standalone MDX rendering | ✅ (MirrorX, front-facing) |
 | MDX skeletal animation | ✅ (standalone + terrain, compressed quats, GPU skinning) |
 | MDX pivot offset correction | ✅ (bounding box center pre-translation) |
-| MDX doodads in WorldScene | ✅ Position + animation working. Magenta = unimplemented particles |
+| MDX doodads in WorldScene | ✅ Position + animation + particles working |
 | WMO v14 rendering + textures | ✅ (BLP per-batch) |
-| WMO v17 rendering | ❌ Not implemented yet |
-| M2 model rendering | ❌ Not implemented yet |
+| WMO v17 rendering | ✅ Partial (groups + textures, multi-MOTV/MOCV) |
+| M2 model rendering | ✅ MD20→MdxFile adapter (WarcraftNetM2Adapter) |
+| Particle effects (PRE2) | ✅ Billboard quads, texture atlas, bone-following |
+| Geoset animation alpha (ATSQ) | ✅ Per-frame keyframe evaluation |
 | WMO rotation/facing in WorldScene | ✅ |
 | WMO doodad sets | ✅ |
 | MDDF/MODF placements | ✅ (position + pivot correct) |
@@ -236,6 +303,8 @@ Root cause identified: **unimplemented particle system** (PRE2/RIBB chunks in MD
 | Left/right sidebar layout | ✅ (docked panels) |
 | Ghidra RE prompts (5+2 versions) | ✅ (specifications/ghidra/) |
 | 0.6.0 MPQ file extraction | ❌ PKWARE DCL (0x08) decompression fails |
+| Half-Lambert lighting | ✅ Softer shading on MDX + WMO models |
+| Improved ambient lighting | ✅ Day/night cycle with WoW-like brightness |
 
 ## Key Files
 

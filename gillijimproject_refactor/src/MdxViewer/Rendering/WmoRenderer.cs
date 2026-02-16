@@ -443,9 +443,12 @@ out vec4 FragColor;
 
 void main() {
     vec3 norm = normalize(vNormal);
-    float diff = abs(dot(norm, normalize(uLightDir)));
-    vec3 lit = uAmbientColor + uLightColor * diff;
-    float lighting = (lit.r + lit.g + lit.b) / 3.0;
+    // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
+    // Prevents harsh black shadows that don't match WoW's look
+    float NdotL = dot(norm, normalize(uLightDir));
+    float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
+    diff = diff * diff; // square for slightly sharper falloff
+    vec3 lighting = uAmbientColor + uLightColor * diff;
 
     vec4 texColor;
     if (uHasTexture == 1) {
