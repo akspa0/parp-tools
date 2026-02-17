@@ -50,6 +50,32 @@ public class VlmTerrainManager : ISceneRenderer
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
 
+    /// <summary>
+    /// Rebuild a loaded tile's GPU mesh from the provided chunk data.
+    /// Call on the render thread.
+    /// </summary>
+    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
+    {
+        var key = (tileX, tileY);
+        if (_loadedTiles.TryGetValue(key, out var oldMesh))
+        {
+            _terrainRenderer.RemoveTile(tileX, tileY);
+            _liquidRenderer.RemoveChunksForTile(tileX, tileY);
+            oldMesh.Dispose();
+            _loadedTiles.Remove(key);
+        }
+
+        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, newChunks);
+        if (tileMesh == null)
+            return;
+
+        _loadedTiles[key] = tileMesh;
+        if (!_loader.TileTextures.TryGetValue(key, out var texNames))
+            texNames = new List<string>();
+        _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
+        _liquidRenderer.AddChunks(newChunks);
+    }
+
     public VlmTerrainManager(GL gl, string projectRoot)
     {
         _gl = gl;

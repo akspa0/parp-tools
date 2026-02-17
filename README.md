@@ -40,14 +40,17 @@ A high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3
 - **MDX/M2 Rendering**: Animated models with textures, specular, environment maps
 - **Format Conversion**: WMO v14↔v17, MDX↔M2 bidirectional conversion
 - **GLB Export**: Visual and collision mesh export with materials
+- **Terrain Export/Import**: Alpha/shadow mask atlases and 16-bit (257×257) heightmaps with JSON sidecars
 - **Asset Catalog**: Browse/export creatures and gameobjects with screenshots
 - **Alpha-Core Integration**: NPC/GameObject spawn visualization from SQL dumps
 
 ### Export Options
 
-- **File > Export GLB (Visual)** - Export WMO with textures (excludes collision)
-- **File > Export GLB (Collision Only)** - Export collision/portal meshes only
-- **Tools > WMO Converter** - Convert between v14 and v17 formats
+- **Export > GLB > Export GLB...** - Export WMO/MDX with textures
+- **Export > GLB > Export GLB (Collision Only)...** - Export WMO collision/portal meshes only
+- **Export > Terrain** - Export alpha mask atlases and heightmaps
+- **Import > Terrain** - Import alpha mask atlases and heightmaps
+- **Tools > WMO Converter...** - Convert between v14 and v17 formats
 - **View > Asset Catalog** - Batch export creatures/gameobjects with screenshots
 
 ### Supported File Formats

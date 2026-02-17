@@ -1,6 +1,6 @@
 # MdxViewer — WoW World Viewer
 
-A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3**, **0.6.0**, and **Lich King 3.3.5** game data. Renders terrain, WMO world objects, MDX/M2 models, liquids, and DBC-driven overlays with high fidelity.
+A high-performance .NET 10 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3**, **0.6.0**, and **Lich King 3.3.5** game data. Renders terrain, WMO world objects, MDX/M2 models, liquids, and DBC-driven overlays with high fidelity.
 
 ## Key Features
 
@@ -89,6 +89,43 @@ dotnet run -- path/to/game/directory
 ```
 
 The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain adapter.
+
+## Terrain Tools (Export/Import)
+
+MdxViewer includes editor-style terrain IO workflows via the main menu bar:
+
+- **Export → Terrain → Alpha Masks**
+  - **Current Tile Atlas (PNG)...**
+  - **Current Tile Chunks Folder...**
+  - **Loaded Tiles Folder...**
+  - **Whole Map Folder...**
+
+- **Import → Terrain → Alpha Masks → From Folder of Tile Atlases...**
+  - Prompts for scope (current tile / loaded tiles / whole map) before applying.
+
+Alpha mask atlases are written as **1024×1024 PNG** containers where each channel is an independent 8-bit mask:
+
+- **R/G/B**: terrain alpha layers 1/2/3
+- **A**: **shadow mask** (MCSH)
+
+Important: treat these PNGs as *data*, not art. Avoid resizing, filtering, “optimize for web”, or any pipeline that rewrites alpha.
+
+### Heightmaps (257×257, 16-bit)
+
+- **Export → Terrain → Heightmaps**
+  - **Current Tile (257x257 L16 PNG + JSON)...**
+  - **Loaded Tiles Folder (per-tile)...**
+  - **Whole Map Folder (per-map)...**
+
+- **Import → Terrain → Heightmaps → From Folder of Tile Heightmaps...**
+  - Prompts for scope (current tile / loaded tiles / whole map) before applying.
+
+Heightmaps are exported as:
+
+- **257×257 16-bit grayscale PNG** (`L16`) containing per-vertex heights
+- a **JSON sidecar** containing at least the min/max range used for normalization
+
+On import, the viewer applies the heightmap back to the authoritative MCNK vertex samples and rebuilds the affected tile mesh in-place (including regenerated normals).
 
 ## SQL World Population (alpha-core)
 

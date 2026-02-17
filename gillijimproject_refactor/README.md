@@ -1,6 +1,6 @@
 # Parp Tools — Gillijim Project (C# refactor)
 
-WoW format preservation, analysis, and visualization tooling. The **primary project** is [MdxViewer](src/MdxViewer/) — a high-performance .NET 9 / OpenGL 3.3 world viewer supporting **Alpha 0.5.3**, **0.6.0**, and **LK 3.3.5** game data.
+WoW format preservation, analysis, and visualization tooling. The **primary project** is [MdxViewer](src/MdxViewer/) — a high-performance .NET 10 / OpenGL 3.3 world viewer supporting **Alpha 0.5.3**, **0.6.0**, and **LK 3.3.5** game data.
 
 ## Quick Start — MdxViewer
 
@@ -13,6 +13,11 @@ dotnet run -- path/to/game/directory
 The viewer auto-detects the WoW build version from the game path and loads terrain, WMOs, MDX models, liquids, and DBC overlays.
 
 See [`src/MdxViewer/README.md`](src/MdxViewer/README.md) for full documentation.
+
+Recent terrain tooling highlights:
+
+- Export/import **alpha mask atlases** (RGBA PNG container; **A = shadow**) for current tile, loaded tiles, or whole map.
+- Export/import **257×257 16-bit heightmaps** (`L16` PNG + JSON sidecar) with per-tile or per-map normalization.
 
 ---
 

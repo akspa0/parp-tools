@@ -127,12 +127,18 @@ public partial class ViewerApp : IDisposable
         AlphaCurrentTileChunksFolder = 2,
         AlphaLoadedTilesFolder = 3,
         AlphaWholeMapFolder = 4,
+
+        Heightmap257CurrentTilePerTile = 10,
+        Heightmap257LoadedTilesFolderPerTile = 11,
+        Heightmap257WholeMapFolderPerMap = 12,
     }
 
     private enum TerrainImportKind
     {
         None = 0,
         AlphaFolder = 1,
+
+        Heightmap257Folder = 10,
     }
 
     private bool _wantTerrainExport;
@@ -141,9 +147,19 @@ public partial class ViewerApp : IDisposable
     private bool _wantTerrainImport;
     private TerrainImportKind _terrainImportKind = TerrainImportKind.None;
     private bool _showAlphaFolderImportScope;
+    private bool _showHeightmapFolderImportScope;
     private TerrainTileScope _terrainTileScope = TerrainTileScope.LoadedTiles;
     private string _terrainImportFolder = "";
     private string _terrainCustomTilesText = "";
+
+    private sealed class HeightmapMetadata
+    {
+        public int Version { get; set; } = 1;
+        public int Resolution { get; set; } = TerrainHeightmapIo.TileHeightmapSize;
+        public float MinHeight { get; set; }
+        public float MaxHeight { get; set; }
+        public string Normalization { get; set; } = "per_tile";
+    }
 
     // Sidebar layout
     private bool _showLeftSidebar = true;
@@ -819,6 +835,8 @@ void main() {
             DrawListfileInputDialog();
         if (_showAlphaFolderImportScope)
             DrawAlphaFolderImportScopeDialog();
+        if (_showHeightmapFolderImportScope)
+            DrawHeightmapFolderImportScopeDialog();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
         if (_showMapConverterDialog)
@@ -949,6 +967,29 @@ void main() {
                         ImGui.EndMenu();
                     }
 
+                    if (ImGui.BeginMenu("Heightmaps"))
+                    {
+                        if (ImGui.MenuItem("Current Tile (257x257 L16 PNG + JSON)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                        }
+
+                        if (ImGui.MenuItem("Loaded Tiles Folder (per-tile)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257LoadedTilesFolderPerTile;
+                        }
+
+                        if (ImGui.MenuItem("Whole Map Folder (per-map)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257WholeMapFolderPerMap;
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
                     ImGui.EndMenu();
                 }
 
@@ -967,6 +1008,16 @@ void main() {
                         {
                             _wantTerrainImport = true;
                             _terrainImportKind = TerrainImportKind.AlphaFolder;
+                        }
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Heightmaps"))
+                    {
+                        if (ImGui.MenuItem("From Folder of Tile Heightmaps...", hasTerrain))
+                        {
+                            _wantTerrainImport = true;
+                            _terrainImportKind = TerrainImportKind.Heightmap257Folder;
                         }
                         ImGui.EndMenu();
                     }
@@ -1135,6 +1186,16 @@ void main() {
                 case TerrainExportKind.AlphaWholeMapFolder:
                     ExportAlphaTilesFolder(wholeMap: true);
                     break;
+
+                case TerrainExportKind.Heightmap257CurrentTilePerTile:
+                    ExportHeightmap257CurrentTilePerTile();
+                    break;
+                case TerrainExportKind.Heightmap257LoadedTilesFolderPerTile:
+                    ExportHeightmap257TilesFolderPerTile(wholeMap: false);
+                    break;
+                case TerrainExportKind.Heightmap257WholeMapFolderPerMap:
+                    ExportHeightmap257TilesFolderPerMap();
+                    break;
             }
         }
         catch (Exception ex)
@@ -1155,6 +1216,10 @@ void main() {
             {
                 case TerrainImportKind.AlphaFolder:
                     BeginAlphaFolderImport();
+                    break;
+
+                case TerrainImportKind.Heightmap257Folder:
+                    BeginHeightmapFolderImport();
                     break;
             }
         }
@@ -1447,6 +1512,256 @@ void main() {
         }
 
         _statusMessage = $"Imported alpha masks for {applied} tiles.";
+    }
+
+    private void ExportHeightmap257CurrentTilePerTile()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        Directory.CreateDirectory(ExportDir);
+        string defaultName = $"tile_{tx}_{ty}_height_257.png";
+        var picked = ShowSaveFileDialogSTA(
+            "Save Heightmap (257x257 L16)",
+            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+        if (string.IsNullOrEmpty(picked))
+            return;
+
+        var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+        using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+        img.SaveAsPng(picked);
+
+        var meta = new HeightmapMetadata
+        {
+            MinHeight = tile.MinHeight,
+            MaxHeight = tile.MaxHeight,
+            Normalization = "per_tile",
+        };
+        string jsonPath = Path.ChangeExtension(picked, ".json");
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+
+        _statusMessage = $"Exported: {picked}";
+    }
+
+    private void ExportHeightmap257TilesFolderPerTile(bool wholeMap)
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for tile heightmaps",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = wholeMap
+            ? GetTileScopeList(TerrainTileScope.WholeMap)
+            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+            img.SaveAsPng(pngPath);
+
+            var meta = new HeightmapMetadata
+            {
+                MinHeight = tile.MinHeight,
+                MaxHeight = tile.MaxHeight,
+                Normalization = "per_tile",
+            };
+            string jsonPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
+            File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles: {folder}";
+    }
+
+    private void ExportHeightmap257TilesFolderPerMap()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for map-normalized tile heightmaps",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = GetTileScopeList(TerrainTileScope.WholeMap);
+        if (tiles.Count == 0)
+        {
+            _statusMessage = "No tiles available.";
+            return;
+        }
+
+        float gMin = float.MaxValue;
+        float gMax = float.MinValue;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            if (tile.MinHeight < gMin) gMin = tile.MinHeight;
+            if (tile.MaxHeight > gMax) gMax = tile.MaxHeight;
+        }
+        if (gMin == float.MaxValue || gMax == float.MinValue)
+        {
+            gMin = 0f;
+            gMax = 0f;
+        }
+
+        var mapMeta = new HeightmapMetadata
+        {
+            MinHeight = gMin,
+            MaxHeight = gMax,
+            Normalization = "per_map",
+        };
+        string mapJson = Path.Combine(folder, "heightmap_257_map.json");
+        File.WriteAllText(mapJson, JsonSerializer.Serialize(mapMeta, new JsonSerializerOptions { WriteIndented = true }));
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, gMin, gMax);
+            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+            img.SaveAsPng(pngPath);
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles (per-map): {folder}";
+    }
+
+    private void BeginHeightmapFolderImport()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select folder containing tile heightmaps",
+            initialDir: null,
+            showNewFolderButton: false);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        _terrainImportFolder = folder;
+        _showHeightmapFolderImportScope = true;
+    }
+
+    private void DrawHeightmapFolderImportScopeDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Import Heightmaps", ref _showHeightmapFolderImportScope, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text("Apply imported heightmaps to:");
+        ImGui.Separator();
+
+        int scope = (int)_terrainTileScope;
+        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
+        _terrainTileScope = (TerrainTileScope)scope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Import"))
+        {
+            ApplyHeightmapFolderImport(_terrainImportFolder, _terrainTileScope);
+            _terrainImportFolder = "";
+            _showHeightmapFolderImportScope = false;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _terrainImportFolder = "";
+            _showHeightmapFolderImportScope = false;
+        }
+
+        ImGui.End();
+    }
+
+    private void ApplyHeightmapFolderImport(string folder, TerrainTileScope scope)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        var targets = new HashSet<(int tileX, int tileY)>(GetTileScopeList(scope));
+        if (targets.Count == 0)
+        {
+            _statusMessage = "No target tiles selected.";
+            return;
+        }
+
+        HeightmapMetadata? mapMeta = null;
+        string mapMetaPath = Path.Combine(folder, "heightmap_257_map.json");
+        if (File.Exists(mapMetaPath))
+        {
+            try { mapMeta = JsonSerializer.Deserialize<HeightmapMetadata>(File.ReadAllText(mapMetaPath)); }
+            catch { mapMeta = null; }
+        }
+
+        int applied = 0;
+        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
+        {
+            if (!TryParseTileCoordsFromFileName(file, out int tx, out int ty))
+                continue;
+            if (!targets.Contains((tx, ty)))
+                continue;
+
+            // Only apply to tiles currently resident on GPU.
+            if (_terrainManager != null && !_terrainManager.IsTileLoaded(tx, ty))
+                continue;
+            if (_vlmTerrainManager != null && !_vlmTerrainManager.IsTileLoaded(tx, ty))
+                continue;
+
+            HeightmapMetadata? meta = null;
+            string perTileJson = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
+            if (File.Exists(perTileJson))
+            {
+                try { meta = JsonSerializer.Deserialize<HeightmapMetadata>(File.ReadAllText(perTileJson)); }
+                catch { meta = null; }
+            }
+            meta ??= mapMeta;
+            if (meta == null)
+                continue;
+
+            using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.L16>(file);
+            var tileHeights = TerrainHeightmapIo.DecodeL16(img, meta.MinHeight, meta.MaxHeight);
+
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null)
+                continue;
+
+            var newChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(chunks, tileHeights);
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+
+            applied++;
+        }
+
+        _statusMessage = $"Imported heightmaps for {applied} tiles.";
     }
 
     private void DrawPerfWindow()

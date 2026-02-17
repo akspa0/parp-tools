@@ -78,6 +78,41 @@ public class TerrainManager : ISceneRenderer
     public ITerrainAdapter Adapter => _adapter;
 
     /// <summary>
+    /// Replace a tile's parsed chunk list in the cache and rebuild its GPU tile mesh if loaded.
+    /// Call on the render thread.
+    /// </summary>
+    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
+    {
+        if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
+        {
+            cached = _adapter.LoadTileWithPlacements(tileX, tileY);
+            _tileCache[(tileX, tileY)] = cached;
+        }
+
+        cached.Chunks.Clear();
+        cached.Chunks.AddRange(newChunks);
+
+        var key = (tileX, tileY);
+        if (_loadedTiles.TryGetValue(key, out var oldMesh))
+        {
+            _terrainRenderer.RemoveTile(tileX, tileY);
+            _liquidRenderer.RemoveChunksForTile(tileX, tileY);
+            oldMesh.Dispose();
+            _loadedTiles.Remove(key);
+        }
+
+        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, cached.Chunks);
+        if (tileMesh == null)
+            return;
+
+        _loadedTiles[key] = tileMesh;
+        if (!_adapter.TileTextures.TryGetValue(key, out var texNames))
+            texNames = new List<string>();
+        _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
+        _liquidRenderer.AddChunks(cached.Chunks);
+    }
+
+    /// <summary>
     /// Try to get parsed tile data from the persistent cache (does not require the tile to be GPU-loaded).
     /// </summary>
     public bool TryGetTileLoadResult(int tileX, int tileY, out TileLoadResult result)

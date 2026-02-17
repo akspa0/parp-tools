@@ -81,6 +81,46 @@ Terrain features:
 - Chunk and tile grid overlays (toggle in UI)
 - Topographical contour lines (toggle in UI, adjustable interval)
 
+### 3.1 Terrain Import/Export (Alpha Masks + Heightmaps)
+
+MdxViewer provides editor-style terrain IO under the main menu bar:
+
+#### Alpha Masks (RGBA atlas containers)
+
+- **Export → Terrain → Alpha Masks**
+  - **Current Tile Atlas (PNG)...** exports a single 1024×1024 atlas for the current tile.
+  - **Current Tile Chunks Folder...** exports per-chunk images for the current tile.
+  - **Loaded Tiles Folder...** exports atlases for all currently loaded tiles.
+  - **Whole Map Folder...** exports atlases for all tiles in the map.
+
+- **Import → Terrain → Alpha Masks → From Folder of Tile Atlases...**
+  - Choose a folder containing tile atlas PNGs.
+  - Select import scope (current tile / loaded tiles / whole map) and apply.
+
+**Channel conventions (lossless if treated as raw bytes):**
+
+- **R/G/B** = terrain alpha layers 1/2/3
+- **A** = **shadow mask** (MCSH), not “alpha4”
+
+Practical guidance:
+
+- Keep the atlas dimensions exactly the same.
+- Avoid image editors or pipelines that resize, blur, color-correct, premultiply, or “optimize” alpha.
+- If you want to edit only terrain blend and keep shadows untouched, preserve the **A** channel.
+
+#### Heightmaps (257×257, 16-bit)
+
+- **Export → Terrain → Heightmaps**
+  - **Current Tile (257x257 L16 PNG + JSON)...** exports one tile using per-tile normalization.
+  - **Loaded Tiles Folder (per-tile)...** exports each loaded tile using its own min/max.
+  - **Whole Map Folder (per-map)...** exports all tiles using one shared min/max for the map.
+
+- **Import → Terrain → Heightmaps → From Folder of Tile Heightmaps...**
+  - Folder should contain `*.png` tile heightmaps and their `*.json` sidecars.
+  - Select import scope and apply.
+
+Heightmaps are stored as 16-bit grayscale PNG (`L16`) plus a JSON sidecar (min/max range). On import, MdxViewer rebuilds the affected tile mesh so changes are visible immediately.
+
 ### 4. WMO Rendering (Buildings & Structures)
 
 World Map Objects are rendered with full fidelity:
