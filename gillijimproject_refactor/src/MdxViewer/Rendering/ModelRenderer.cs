@@ -746,7 +746,11 @@ out vec4 FragColor;
 void main() {
     vec3 norm = normalize(vNormal);
     vec3 viewNorm = normalize(vViewNormal);
-    if (!gl_FrontFacing) {
+    // NOTE: Some legacy assets have mixed/incorrect triangle winding.
+    // Flipping normals unconditionally on backfaces can cause random dark polygons.
+    // Only flip when sphere env mapping is active (the primary case where we need
+    // consistent outward-facing normals for reflection UV generation).
+    if (uSphereEnvMap == 1 && !gl_FrontFacing) {
         norm = -norm;
         viewNorm = -viewNorm;
     }

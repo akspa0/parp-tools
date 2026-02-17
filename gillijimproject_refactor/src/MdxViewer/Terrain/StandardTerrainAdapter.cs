@@ -375,7 +375,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     AlphaMaps = alphaMaps,
                     ShadowMap = shadowMap,
                     Liquid = liquid,
-                    WorldPosition = new Vector3(worldX, worldY, 0f)
+                    WorldPosition = new Vector3(worldX, worldY, 0f),
+                    AreaId = (int)mcnk.Header.AreaId,
+                    McnkFlags = (int)mcnkFlagsRaw
                 });
 
                 LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));

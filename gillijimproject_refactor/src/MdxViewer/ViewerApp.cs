@@ -103,6 +103,7 @@ public partial class ViewerApp : IDisposable
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
+    private bool _showPerfWindow = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -584,17 +585,27 @@ public partial class ViewerApp : IDisposable
             // Update current area name from chunk under camera (throttled to avoid per-frame overhead)
             if (_areaTableService != null && _terrainManager != null && _frameCount == 0)
             {
-                var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
-                if (chunk != null && chunk.AreaId != 0)
+                int areaId = 0;
+                var chunkInfo = _terrainManager.Renderer.GetChunkInfoAt(_camera.Position.X, _camera.Position.Y);
+                if (chunkInfo.HasValue)
+                    areaId = chunkInfo.Value.AreaId;
+                else
+                {
+                    var chunk = _terrainManager.Renderer.GetChunkAt(_camera.Position.X, _camera.Position.Y);
+                    if (chunk != null)
+                        areaId = chunk.AreaId;
+                }
+
+                if (areaId != 0)
                 {
                     // Filter by MapID to avoid showing areas from other continents
-                    var name = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId);
+                    var name = _areaTableService.GetAreaDisplayNameForMap(areaId, _currentMapId);
                     if (name == null)
                     {
                         // Fallback if MapID filtering fails
-                        name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
+                        name = _areaTableService.GetAreaDisplayName(areaId);
                         if (name.StartsWith("Unknown"))
-                            ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={chunk.AreaId}, MapId={_currentMapId} → {name}  (table has {_areaTableService.Count} entries)");
+                            ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={areaId}, MapId={_currentMapId} → {name}  (table has {_areaTableService.Count} entries)");
                     }
                     _currentAreaName = name ?? "";
                 }
@@ -762,6 +773,10 @@ void main() {
         if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
             DrawMinimapWindow();
 
+        // Perf (floating window)
+        if (_showPerfWindow)
+            DrawPerfWindow();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -837,6 +852,7 @@ void main() {
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
+                ImGui.MenuItem("Perf", "", ref _showPerfWindow);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
@@ -985,6 +1001,34 @@ void main() {
                 }
             }
         }
+    }
+
+    private void DrawPerfWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (terrainRenderer == null)
+        {
+            ImGui.Text("No terrain loaded.");
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
+        ImGui.Text($"Draw calls: {terrainRenderer.LastFrameDrawCalls}");
+        ImGui.Separator();
+        ImGui.Text($"ActiveTexture: {terrainRenderer.LastFrameActiveTextureCalls} calls, {terrainRenderer.LastFrameActiveTextureSkips} skipped");
+        ImGui.Text($"BindTexture: {terrainRenderer.LastFrameBindTextureCalls} calls, {terrainRenderer.LastFrameBindTextureSkips} skipped");
+        ImGui.Text($"Uniform1 (uHas*): {terrainRenderer.LastFrameUniform1Calls}");
+        ImGui.TextDisabled("Stats are for the last terrain Render() call.");
+
+        ImGui.End();
     }
 
     private void DrawFolderInputDialog()
@@ -1897,6 +1941,22 @@ void main() {
                 // Debug overlays
                 bool alphaMask = renderer.ShowAlphaMask;
                 if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+
+                if (renderer.ShowAlphaMask)
+                {
+                    ImGui.SameLine();
+                    int chan = renderer.AlphaMaskChannel;
+                    chan = Math.Clamp(chan, 0, 3);
+                    ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(4, 0));
+                    ImGui.RadioButton("A1", ref chan, 1);
+                    ImGui.SameLine();
+                    ImGui.RadioButton("A2", ref chan, 2);
+                    ImGui.SameLine();
+                    ImGui.RadioButton("A3", ref chan, 3);
+                    ImGui.PopStyleVar();
+                    renderer.AlphaMaskChannel = chan;
+                }
+
                 ImGui.SameLine();
                 bool shadowMap = renderer.ShowShadowMap;
                 if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;

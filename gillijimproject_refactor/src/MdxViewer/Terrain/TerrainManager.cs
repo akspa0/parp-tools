@@ -18,13 +18,13 @@ public class TerrainManager : ISceneRenderer
 {
     private readonly GL _gl;
     private readonly ITerrainAdapter _adapter;
-    private readonly TerrainMeshBuilder _meshBuilder;
+    private readonly TerrainTileMeshBuilder _tileMeshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
     private readonly LiquidRenderer _liquidRenderer;
     private readonly IDataSource? _dataSource;
 
-    // Loaded tiles: (tileX, tileY) → list of chunk meshes (GPU-resident)
-    private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
+    // Loaded tiles: (tileX, tileY) → batched tile mesh (GPU-resident)
+    private readonly Dictionary<(int, int), TerrainTileMesh> _loadedTiles = new();
 
     // Persistent cache: parsed tile data stays in memory forever to avoid re-parsing from disk
     private readonly ConcurrentDictionary<(int, int), TileLoadResult> _tileCache = new();
@@ -84,8 +84,9 @@ public class TerrainManager : ISceneRenderer
         MapName = Path.GetFileNameWithoutExtension(wdtPath);
 
         _adapter = new AlphaTerrainAdapter(wdtPath);
-        _meshBuilder = new TerrainMeshBuilder(gl);
+        _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
+        _terrainRenderer.UseWorldUvForDiffuse = false;
         _liquidRenderer = new LiquidRenderer(gl);
 
         // Find the center of populated tiles for initial camera placement
@@ -102,8 +103,9 @@ public class TerrainManager : ISceneRenderer
         MapName = mapName;
 
         _adapter = adapter;
-        _meshBuilder = new TerrainMeshBuilder(gl);
+        _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, dataSource, new TerrainLighting());
+        _terrainRenderer.UseWorldUvForDiffuse = adapter is not AlphaTerrainAdapter;
         _liquidRenderer = new LiquidRenderer(gl);
 
         FindInitialCameraPosition(out _cameraPos);
@@ -218,11 +220,10 @@ public class TerrainManager : ISceneRenderer
 
         foreach (var key in _unloadScratch)
         {
-            var meshes = _loadedTiles[key];
-            _terrainRenderer.RemoveChunks(meshes);
+            var tileMesh = _loadedTiles[key];
+            _terrainRenderer.RemoveTile(key.Item1, key.Item2);
             _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
-            foreach (var chunk in meshes)
-                chunk.Dispose();
+            tileMesh.Dispose();
             _loadedTiles.Remove(key);
             // NOTE: _tileCache retains the parsed data so re-entry is instant
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
@@ -314,16 +315,14 @@ public class TerrainManager : ISceneRenderer
             if (_loadedTiles.ContainsKey((tx, ty)))
                 continue;
 
-            var meshes = new List<TerrainChunkMesh>();
-            foreach (var chunkData in result.Chunks)
-            {
-                var mesh = _meshBuilder.BuildChunkMesh(chunkData);
-                if (mesh != null)
-                    meshes.Add(mesh);
-            }
+            var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tx, ty, result.Chunks);
+            if (tileMesh == null)
+                continue;
 
-            _loadedTiles[(tx, ty)] = meshes;
-            _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+            _loadedTiles[(tx, ty)] = tileMesh;
+            if (!_adapter.TileTextures.TryGetValue((tx, ty), out var texNames))
+                texNames = new List<string>();
+            _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
             _liquidRenderer.AddChunks(result.Chunks);
 
             // Notify listeners (WorldScene) about the new tile's placements
@@ -361,17 +360,15 @@ public class TerrainManager : ISceneRenderer
     {
         var result = _adapter.LoadTileWithPlacements(tileX, tileY);
         _tileCache[(tileX, tileY)] = result; // Cache for consistency with AOI path
-        var meshes = new List<TerrainChunkMesh>();
 
-        foreach (var chunkData in result.Chunks)
-        {
-            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
-            if (mesh != null)
-                meshes.Add(mesh);
-        }
+        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, result.Chunks);
+        if (tileMesh == null)
+            return;
 
-        _loadedTiles[(tileX, tileY)] = meshes;
-        _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+        _loadedTiles[(tileX, tileY)] = tileMesh;
+        if (!_adapter.TileTextures.TryGetValue((tileX, tileY), out var texNames))
+            texNames = new List<string>();
+        _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
         _liquidRenderer.AddChunks(result.Chunks);
 
         OnTileLoaded?.Invoke(tileX, tileY, result);
@@ -462,9 +459,8 @@ public class TerrainManager : ISceneRenderer
         _mpqReadSemaphore.Dispose();
         _liquidRenderer.Dispose();
         _terrainRenderer.Dispose();
-        foreach (var meshes in _loadedTiles.Values)
-            foreach (var mesh in meshes)
-                mesh.Dispose();
+        foreach (var mesh in _loadedTiles.Values)
+            mesh.Dispose();
         _loadedTiles.Clear();
     }
 }

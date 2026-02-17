@@ -15,12 +15,12 @@ public class VlmTerrainManager : ISceneRenderer
 {
     private readonly GL _gl;
     private readonly VlmProjectLoader _loader;
-    private readonly TerrainMeshBuilder _meshBuilder;
+    private readonly TerrainTileMeshBuilder _tileMeshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
     private readonly LiquidRenderer _liquidRenderer;
 
-    // Loaded tiles: (tileX, tileY) → list of chunk meshes
-    private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
+    // Loaded tiles: (tileX, tileY) → batched tile mesh
+    private readonly Dictionary<(int, int), TerrainTileMesh> _loadedTiles = new();
 
     // Async streaming: background-parsed tiles waiting for GPU upload
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
@@ -54,7 +54,7 @@ public class VlmTerrainManager : ISceneRenderer
     {
         _gl = gl;
         _loader = new VlmProjectLoader(projectRoot);
-        _meshBuilder = new TerrainMeshBuilder(gl);
+        _tileMeshBuilder = new TerrainTileMeshBuilder(gl);
         _terrainRenderer = new TerrainRenderer(gl, null, new TerrainLighting(),
             texturePathResolver: _loader.ResolveTexturePath);
         _liquidRenderer = new LiquidRenderer(gl);
@@ -99,11 +99,10 @@ public class VlmTerrainManager : ISceneRenderer
         var toUnload = _loadedTiles.Keys.Where(k => !desiredTiles.Contains(k)).ToList();
         foreach (var key in toUnload)
         {
-            var meshes = _loadedTiles[key];
-            _terrainRenderer.RemoveChunks(meshes);
+            var tileMesh = _loadedTiles[key];
+            _terrainRenderer.RemoveTile(key.Item1, key.Item2);
             _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
-            foreach (var chunk in meshes)
-                chunk.Dispose();
+            tileMesh.Dispose();
             _loadedTiles.Remove(key);
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }
@@ -152,16 +151,14 @@ public class VlmTerrainManager : ISceneRenderer
             if (_loadedTiles.ContainsKey((tx, ty)))
                 continue;
 
-            var meshes = new List<TerrainChunkMesh>();
-            foreach (var chunkData in result.Chunks)
-            {
-                var mesh = _meshBuilder.BuildChunkMesh(chunkData);
-                if (mesh != null)
-                    meshes.Add(mesh);
-            }
+            var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tx, ty, result.Chunks);
+            if (tileMesh == null)
+                continue;
 
-            _loadedTiles[(tx, ty)] = meshes;
-            _terrainRenderer.AddChunks(meshes, _loader.TileTextures);
+            _loadedTiles[(tx, ty)] = tileMesh;
+            if (!_loader.TileTextures.TryGetValue((tx, ty), out var texNames))
+                texNames = new List<string>();
+            _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
             _liquidRenderer.AddChunks(result.Chunks);
             OnTileLoaded?.Invoke(tx, ty, result);
             uploaded++;
@@ -233,9 +230,8 @@ public class VlmTerrainManager : ISceneRenderer
         while (_pendingTiles.TryDequeue(out _)) { }
         _liquidRenderer.Dispose();
         _terrainRenderer.Dispose();
-        foreach (var meshes in _loadedTiles.Values)
-            foreach (var mesh in meshes)
-                mesh.Dispose();
+        foreach (var mesh in _loadedTiles.Values)
+            mesh.Dispose();
         _loadedTiles.Clear();
     }
 }
