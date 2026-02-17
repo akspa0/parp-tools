@@ -15,6 +15,8 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
 
@@ -109,6 +111,39 @@ public partial class ViewerApp : IDisposable
     private bool _wantOpenFolder = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
+
+    private enum TerrainTileScope
+    {
+        CurrentTile = 0,
+        LoadedTiles = 1,
+        WholeMap = 2,
+        CustomList = 3,
+    }
+
+    private enum TerrainExportKind
+    {
+        None = 0,
+        AlphaCurrentTileAtlas = 1,
+        AlphaCurrentTileChunksFolder = 2,
+        AlphaLoadedTilesFolder = 3,
+        AlphaWholeMapFolder = 4,
+    }
+
+    private enum TerrainImportKind
+    {
+        None = 0,
+        AlphaFolder = 1,
+    }
+
+    private bool _wantTerrainExport;
+    private TerrainExportKind _terrainExportKind = TerrainExportKind.None;
+
+    private bool _wantTerrainImport;
+    private TerrainImportKind _terrainImportKind = TerrainImportKind.None;
+    private bool _showAlphaFolderImportScope;
+    private TerrainTileScope _terrainTileScope = TerrainTileScope.LoadedTiles;
+    private string _terrainImportFolder = "";
+    private string _terrainCustomTilesText = "";
 
     // Sidebar layout
     private bool _showLeftSidebar = true;
@@ -782,6 +817,8 @@ void main() {
             DrawFolderInputDialog();
         if (_showListfileInput)
             DrawListfileInputDialog();
+        if (_showAlphaFolderImportScope)
+            DrawAlphaFolderImportScopeDialog();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
         if (_showMapConverterDialog)
@@ -818,13 +855,6 @@ void main() {
 
                 if (ImGui.MenuItem("WMO Converter..."))
                     _showWmoConverterDialog = true;
-
-                ImGui.Separator();
-
-                if (ImGui.MenuItem("Export GLB...", _renderer != null))
-                    _wantExportGlb = true;
-                if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
-                    _wantExportGlbCollision = true;
 
                 ImGui.Separator();
 
@@ -875,6 +905,78 @@ void main() {
                 ImGui.EndMenu();
             }
 
+            if (ImGui.BeginMenu("Export"))
+            {
+                if (ImGui.BeginMenu("GLB"))
+                {
+                    if (ImGui.MenuItem("Export GLB...", _renderer != null))
+                        _wantExportGlb = true;
+                    if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
+                        _wantExportGlbCollision = true;
+                    ImGui.EndMenu();
+                }
+
+                if (ImGui.BeginMenu("Terrain"))
+                {
+                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                    if (ImGui.BeginMenu("Alpha Masks"))
+                    {
+                        if (ImGui.MenuItem("Current Tile Atlas (PNG)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+                        }
+
+                        if (ImGui.MenuItem("Current Tile Chunks Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileChunksFolder;
+                        }
+
+                        if (ImGui.MenuItem("Loaded Tiles Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaLoadedTilesFolder;
+                        }
+
+                        if (ImGui.MenuItem("Whole Map Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaWholeMapFolder;
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Import"))
+            {
+                if (ImGui.BeginMenu("Terrain"))
+                {
+                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                    if (ImGui.BeginMenu("Alpha Masks"))
+                    {
+                        if (ImGui.MenuItem("From Folder of Tile Atlases...", hasTerrain))
+                        {
+                            _wantTerrainImport = true;
+                            _terrainImportKind = TerrainImportKind.AlphaFolder;
+                        }
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
             ImGui.EndMainMenuBar();
         }
 
@@ -920,6 +1022,18 @@ void main() {
 
             if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
                 LoadVlmProject(vlmPath);
+        }
+
+        if (_wantTerrainExport)
+        {
+            _wantTerrainExport = false;
+            RunTerrainExport();
+        }
+
+        if (_wantTerrainImport)
+        {
+            _wantTerrainImport = false;
+            RunTerrainImport();
         }
 
         if (_wantExportGlbCollision)
@@ -1001,6 +1115,338 @@ void main() {
                 }
             }
         }
+    }
+
+    private void RunTerrainExport()
+    {
+        try
+        {
+            switch (_terrainExportKind)
+            {
+                case TerrainExportKind.AlphaCurrentTileAtlas:
+                    ExportAlphaCurrentTileAtlas();
+                    break;
+                case TerrainExportKind.AlphaCurrentTileChunksFolder:
+                    ExportAlphaCurrentTileChunksFolder();
+                    break;
+                case TerrainExportKind.AlphaLoadedTilesFolder:
+                    ExportAlphaTilesFolder(wholeMap: false);
+                    break;
+                case TerrainExportKind.AlphaWholeMapFolder:
+                    ExportAlphaTilesFolder(wholeMap: true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Terrain export failed: {ex.Message}";
+        }
+        finally
+        {
+            _terrainExportKind = TerrainExportKind.None;
+        }
+    }
+
+    private void RunTerrainImport()
+    {
+        try
+        {
+            switch (_terrainImportKind)
+            {
+                case TerrainImportKind.AlphaFolder:
+                    BeginAlphaFolderImport();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Terrain import failed: {ex.Message}";
+        }
+        finally
+        {
+            _terrainImportKind = TerrainImportKind.None;
+        }
+    }
+
+    private static bool TryParseTileCoordsFromFileName(string filePath, out int tileX, out int tileY)
+    {
+        tileX = 0;
+        tileY = 0;
+        string name = Path.GetFileNameWithoutExtension(filePath);
+
+        var matches = Regex.Matches(name, @"\d+");
+        if (matches.Count < 2)
+            return false;
+
+        var candidates = new List<int>(matches.Count);
+        foreach (Match m in matches)
+        {
+            if (int.TryParse(m.Value, out int v) && v >= 0 && v < 64)
+                candidates.Add(v);
+        }
+
+        if (candidates.Count < 2)
+            return false;
+
+        tileX = candidates[^2];
+        tileY = candidates[^1];
+        return true;
+    }
+
+    private static IEnumerable<(int tileX, int tileY)> ParseCustomTileList(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            yield break;
+
+        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) continue;
+            if (!int.TryParse(parts[0], out int x)) continue;
+            if (!int.TryParse(parts[1], out int y)) continue;
+            if ((uint)x >= 64u || (uint)y >= 64u) continue;
+            yield return (x, y);
+        }
+    }
+
+    private IReadOnlyList<(int tileX, int tileY)> GetTileScopeList(TerrainTileScope scope)
+    {
+        if (scope == TerrainTileScope.CurrentTile)
+        {
+            var cam = GetCameraTile();
+            return new List<(int, int)> { cam };
+        }
+
+        if (scope == TerrainTileScope.CustomList)
+            return ParseCustomTileList(_terrainCustomTilesText).Distinct().ToList();
+
+        if (_terrainManager != null)
+        {
+            if (scope == TerrainTileScope.LoadedTiles)
+                return _terrainManager.LoadedTiles.ToList();
+
+            if (scope == TerrainTileScope.WholeMap)
+                return _terrainManager.Adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (scope == TerrainTileScope.LoadedTiles)
+                return _vlmTerrainManager.Loader.TileCoords
+                    .Where(t => _vlmTerrainManager.IsTileLoaded(t.tileX, t.tileY))
+                    .ToList();
+
+            if (scope == TerrainTileScope.WholeMap)
+                return _vlmTerrainManager.Loader.TileCoords.ToList();
+        }
+
+        return new List<(int, int)>();
+    }
+
+    private void ExportAlphaCurrentTileAtlas()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        Directory.CreateDirectory(ExportDir);
+        string defaultName = $"tile_{tx}_{ty}_alpha.png";
+        var picked = ShowSaveFileDialogSTA(
+            "Save Alpha Mask Atlas",
+            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+        if (string.IsNullOrEmpty(picked))
+            return;
+
+        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+        atlas.SaveAsPng(picked);
+        _statusMessage = $"Exported: {picked}";
+    }
+
+    private void ExportAlphaCurrentTileChunksFolder()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for chunk alpha masks",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+        var chunkImages = TerrainImageIo.BuildAlphaChunkImagesFromAtlas(atlas);
+        foreach (var kvp in chunkImages)
+        {
+            var (cx, cy) = kvp.Key;
+            string path = Path.Combine(folder, $"tile_{tx}_{ty}_chunk_{cx}_{cy}_alpha.png");
+            kvp.Value.SaveAsPng(path);
+            kvp.Value.Dispose();
+        }
+
+        _statusMessage = $"Exported chunks: {folder}";
+    }
+
+    private void ExportAlphaTilesFolder(bool wholeMap)
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for tile alpha atlases",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = wholeMap
+            ? GetTileScopeList(TerrainTileScope.WholeMap)
+            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+            string path = Path.Combine(folder, $"tile_{tx}_{ty}_alpha.png");
+            atlas.SaveAsPng(path);
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles: {folder}";
+    }
+
+    private IReadOnlyList<TerrainChunkData>? LoadTileChunksForExport(int tileX, int tileY)
+    {
+        if (_terrainManager != null)
+        {
+            if (_terrainManager.TryGetTileLoadResult(tileX, tileY, out var cached))
+                return cached.Chunks;
+
+            if (_terrainManager.Adapter.TileExists(tileX, tileY))
+                return _terrainManager.Adapter.LoadTileWithPlacements(tileX, tileY).Chunks;
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (_vlmTerrainManager.Loader.TileCoords.Contains((tileX, tileY)))
+                return _vlmTerrainManager.Loader.LoadTile(tileX, tileY).Chunks;
+        }
+
+        return null;
+    }
+
+    private void BeginAlphaFolderImport()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select folder containing tile alpha atlases",
+            initialDir: null,
+            showNewFolderButton: false);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        _terrainImportFolder = folder;
+        _showAlphaFolderImportScope = true;
+    }
+
+    private void DrawAlphaFolderImportScopeDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Import Alpha Masks", ref _showAlphaFolderImportScope, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text("Apply imported alpha masks to:");
+        ImGui.Separator();
+
+        int scope = (int)_terrainTileScope;
+        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
+        _terrainTileScope = (TerrainTileScope)scope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Import"))
+        {
+            ApplyAlphaFolderImport(_terrainImportFolder, _terrainTileScope);
+            _terrainImportFolder = "";
+            _showAlphaFolderImportScope = false;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _terrainImportFolder = "";
+            _showAlphaFolderImportScope = false;
+        }
+
+        ImGui.End();
+    }
+
+    private void ApplyAlphaFolderImport(string folder, TerrainTileScope scope)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        var targets = new HashSet<(int tileX, int tileY)>(GetTileScopeList(scope));
+        if (targets.Count == 0)
+        {
+            _statusMessage = "No target tiles selected.";
+            return;
+        }
+
+        // Ensure tiles are resident if user chose whole-map (Alpha/Standard path).
+        if (scope == TerrainTileScope.WholeMap && _terrainManager != null)
+            _terrainManager.LoadAllTiles();
+
+        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            _statusMessage = "No terrain renderer.";
+            return;
+        }
+
+        int applied = 0;
+        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
+        {
+            if (!TryParseTileCoordsFromFileName(file, out int tx, out int ty))
+                continue;
+
+            if (!targets.Contains((tx, ty)))
+                continue;
+
+            // Only apply to tiles currently resident on GPU.
+            if (_terrainManager != null && !_terrainManager.IsTileLoaded(tx, ty))
+                continue;
+            if (_vlmTerrainManager != null && !_vlmTerrainManager.IsTileLoaded(tx, ty))
+                continue;
+
+            using var atlas = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(file);
+            var alphaShadow = TerrainImageIo.DecodeAlphaShadowArrayFromAtlas(atlas);
+            renderer.ReplaceTileAlphaShadowArray(tx, ty, alphaShadow);
+            applied++;
+        }
+
+        _statusMessage = $"Imported alpha masks for {applied} tiles.";
     }
 
     private void DrawPerfWindow()
@@ -1999,6 +2445,12 @@ void main() {
                     bool showBB = _worldScene.ShowBoundingBoxes;
                     if (ImGui.Checkbox("BBs", ref showBB))
                         _worldScene.ShowBoundingBoxes = showBB;
+
+                    ImGui.SameLine();
+                    bool showGroundFx = _worldScene.ShowGroundEffects;
+                    int gfxCount = _worldScene.GroundEffectInstanceCount;
+                    if (ImGui.Checkbox($"GroundFX ({gfxCount})", ref showGroundFx))
+                        _worldScene.ShowGroundEffects = showGroundFx;
                 }
             }
         }
@@ -2457,6 +2909,13 @@ void main() {
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
         }
+
+        ImGui.Separator();
+        bool crispAlpha = renderer.UseNearestForAlphaSampling;
+        if (ImGui.Checkbox("Crisp Alpha Masks", ref crispAlpha))
+            renderer.UseNearestForAlphaSampling = crispAlpha;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Switch alpha/shadow sampling between Linear (default) and Nearest (crisper edges).");
 
         // Contour interval (only when contours enabled via toolbar)
         if (renderer.ShowContours)

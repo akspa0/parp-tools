@@ -77,6 +77,21 @@ public class TerrainManager : ISceneRenderer
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
     public ITerrainAdapter Adapter => _adapter;
 
+    /// <summary>
+    /// Try to get parsed tile data from the persistent cache (does not require the tile to be GPU-loaded).
+    /// </summary>
+    public bool TryGetTileLoadResult(int tileX, int tileY, out TileLoadResult result)
+    {
+        if (_tileCache.TryGetValue((tileX, tileY), out var cached))
+        {
+            result = cached;
+            return true;
+        }
+
+        result = new TileLoadResult();
+        return false;
+    }
+
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)
     {
         _gl = gl;

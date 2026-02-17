@@ -4,6 +4,7 @@ using MdxViewer.Logging;
 using MdxViewer.Population;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
+using WoWMapConverter.Core.Services;
 
 namespace MdxViewer.Terrain;
 
@@ -28,6 +29,7 @@ public class WorldScene : ISceneRenderer
     // Per-tile instance storage for lazy load/unload
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
+    private readonly Dictionary<(int, int), List<ObjectInstance>> _tileGroundMdxInstances = new();
     private readonly List<ObjectInstance> _externalMdxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private bool _instancesDirty = false;
@@ -35,6 +37,12 @@ public class WorldScene : ISceneRenderer
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
+
+    // Ground effects (terrain layer EffectId -> ground effect doodads)
+    private bool _groundEffectsVisible = false; // default disabled: extra MDX/M2 draw calls
+    private readonly GroundEffectService _groundEffectService = new();
+    private bool _groundEffectsLoadAttempted = false;
+    public int GroundEffectInstanceCount { get; private set; } = 0;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -69,6 +77,27 @@ public class WorldScene : ISceneRenderer
     public TerrainManager Terrain => _terrainManager;
     public WorldAssetManager Assets => _assets;
     public bool IsWmoBased => _terrainManager.Adapter.IsWmoBased;
+
+    public bool ShowGroundEffects
+    {
+        get => _groundEffectsVisible;
+        set
+        {
+            if (_groundEffectsVisible == value) return;
+            _groundEffectsVisible = value;
+
+            if (!_groundEffectsVisible)
+            {
+                _tileGroundMdxInstances.Clear();
+                GroundEffectInstanceCount = 0;
+                _instancesDirty = true;
+                return;
+            }
+
+            // Enabling: (re)build for currently loaded tiles
+            BuildGroundEffectsForLoadedTiles();
+        }
+    }
 
     // Expose raw placement data for UI object list
     public IReadOnlyList<MddfPlacement> MddfPlacements => _terrainManager.Adapter.MddfPlacements;
@@ -625,6 +654,14 @@ public class WorldScene : ISceneRenderer
 
         _tileMdxInstances[(tileX, tileY)] = tileMdx;
         _tileWmoInstances[(tileX, tileY)] = tileWmo;
+
+        if (_groundEffectsVisible)
+        {
+            var tileGround = BuildGroundEffectInstancesForTile(tileX, tileY, result.Chunks);
+            _tileGroundMdxInstances[(tileX, tileY)] = tileGround;
+            GroundEffectInstanceCount += tileGround.Count;
+        }
+
         _instancesDirty = true;
 
         // Hide WDL low-res tile now that detailed ADT is loaded
@@ -641,6 +678,12 @@ public class WorldScene : ISceneRenderer
     {
         _tileMdxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
+
+        if (_tileGroundMdxInstances.Remove((tileX, tileY), out var removedGround))
+        {
+            GroundEffectInstanceCount = Math.Max(0, GroundEffectInstanceCount - removedGround.Count);
+        }
+
         _instancesDirty = true;
     }
 
@@ -653,6 +696,13 @@ public class WorldScene : ISceneRenderer
         _mdxInstances.Clear();
         foreach (var list in _tileMdxInstances.Values)
             _mdxInstances.AddRange(list);
+
+        if (_groundEffectsVisible)
+        {
+            foreach (var list in _tileGroundMdxInstances.Values)
+                _mdxInstances.AddRange(list);
+        }
+
         _mdxInstances.AddRange(_externalMdxInstances);
 
         _wmoInstances.Clear();
@@ -661,6 +711,239 @@ public class WorldScene : ISceneRenderer
         _wmoInstances.AddRange(_externalWmoInstances);
 
         _instancesDirty = false;
+    }
+
+    private void BuildGroundEffectsForLoadedTiles()
+    {
+        _tileGroundMdxInstances.Clear();
+        GroundEffectInstanceCount = 0;
+
+        foreach (var (tileX, tileY) in _terrainManager.LoadedTiles)
+        {
+            if (!_terrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
+                continue;
+
+            var list = BuildGroundEffectInstancesForTile(tileX, tileY, tile.Chunks);
+            if (list.Count == 0) continue;
+            _tileGroundMdxInstances[(tileX, tileY)] = list;
+            GroundEffectInstanceCount += list.Count;
+        }
+
+        _instancesDirty = true;
+    }
+
+    private bool EnsureGroundEffectDbcLoaded()
+    {
+        if (_groundEffectsLoadAttempted) return true;
+        _groundEffectsLoadAttempted = true;
+
+        try
+        {
+            if (_dataSource is MpqDataSource mpqDs)
+            {
+                // MPQ-backed load: prefers DBFilesClient\*.dbc, falls back internally
+                _groundEffectService.Load(Array.Empty<string>(), mpqDs.MpqService);
+            }
+            else
+            {
+                // Disk-only: only works if caller has placed DBCs in a known folder.
+                // Keep minimal: try current directory.
+                _groundEffectService.Load(new[] { Environment.CurrentDirectory });
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain, $"GroundEffects load failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    private List<ObjectInstance> BuildGroundEffectInstancesForTile(int tileX, int tileY, IReadOnlyList<TerrainChunkData> chunks)
+    {
+        var instances = new List<ObjectInstance>();
+        if (chunks.Count == 0) return instances;
+        if (!EnsureGroundEffectDbcLoaded()) return instances;
+
+        // Conservative density: keep draw calls sane even when enabled
+        const int baseSpawnsPerChunkLayer = 2;
+        const int maxSpawnsPerChunkLayer = 6;
+        const float alphaThreshold = 0.50f;
+
+        foreach (var chunk in chunks)
+        {
+            if (chunk.Layers == null || chunk.Layers.Length == 0) continue;
+
+            for (int layerIndex = 0; layerIndex < chunk.Layers.Length; layerIndex++)
+            {
+                uint effectId = chunk.Layers[layerIndex].EffectId;
+                if (effectId == 0) continue;
+
+                var models = _groundEffectService.GetDoodadsEffect(effectId);
+                if (models == null || models.Length == 0) continue;
+
+                byte[]? alpha = null;
+                if (layerIndex > 0)
+                    chunk.AlphaMaps.TryGetValue(layerIndex, out alpha);
+
+                float coverage = EstimateLayerCoverage(alpha);
+                if (layerIndex > 0 && coverage <= 0.01f) continue;
+
+                int spawnCount = (int)MathF.Round(baseSpawnsPerChunkLayer * MathF.Max(coverage, 0.25f));
+                spawnCount = Math.Clamp(spawnCount, 1, maxSpawnsPerChunkLayer);
+
+                int seed = HashCode.Combine(tileX, tileY, chunk.ChunkX, chunk.ChunkY, (int)effectId, layerIndex);
+                var rng = new Random(seed);
+
+                for (int s = 0; s < spawnCount; s++)
+                {
+                    if (!TryPickSpawnPoint(rng, chunk, alpha, alphaThreshold, out float localX, out float localY, out float z))
+                        continue;
+
+                    string modelPath = models[rng.Next(models.Length)];
+                    string key = WorldAssetManager.NormalizeKey(modelPath);
+                    _assets.EnsureMdxLoaded(key);
+
+                    float yaw = (float)(rng.NextDouble() * MathF.Tau);
+                    float scale = 0.8f + (float)rng.NextDouble() * 0.4f;
+                    var worldPos = new Vector3(chunk.WorldPosition.X - localY, chunk.WorldPosition.Y - localX, z);
+
+                    var transform = Matrix4x4.CreateScale(scale)
+                        * Matrix4x4.CreateRotationZ(yaw)
+                        * Matrix4x4.CreateTranslation(worldPos);
+
+                    Vector3 bbMin, bbMax;
+                    if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+                        TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+                    else
+                    {
+                        bbMin = worldPos - new Vector3(0.5f);
+                        bbMax = worldPos + new Vector3(0.5f);
+                    }
+
+                    instances.Add(new ObjectInstance
+                    {
+                        ModelKey = key,
+                        Transform = transform,
+                        BoundsMin = bbMin,
+                        BoundsMax = bbMax,
+                        ModelName = Path.GetFileName(modelPath),
+                        ModelPath = modelPath,
+                        PlacementPosition = worldPos,
+                        PlacementRotation = new Vector3(0f, 0f, yaw * (180f / MathF.PI)),
+                        PlacementScale = scale,
+                        UniqueId = unchecked((int)0x8000_0000u) + (seed & 0x7FFF_FFFF)
+                    });
+                }
+            }
+        }
+
+        return instances;
+    }
+
+    private static float EstimateLayerCoverage(byte[]? alpha)
+    {
+        if (alpha == null || alpha.Length < 64 * 64) return 1.0f;
+        // Sample a small grid to estimate coverage cheaply
+        int step = 8;
+        float sum = 0;
+        int count = 0;
+        for (int y = 0; y < 64; y += step)
+        {
+            int row = y * 64;
+            for (int x = 0; x < 64; x += step)
+            {
+                sum += alpha[row + x] / 255f;
+                count++;
+            }
+        }
+        return count > 0 ? (sum / count) : 1.0f;
+    }
+
+    private static bool TryPickSpawnPoint(Random rng, TerrainChunkData chunk, byte[]? alpha, float alphaThreshold,
+        out float localX, out float localY, out float z)
+    {
+        const int attempts = 12;
+        float chunkSize = WoWConstants.ChunkSize;
+        for (int a = 0; a < attempts; a++)
+        {
+            localX = (float)rng.NextDouble() * (chunkSize - 1e-3f);
+            localY = (float)rng.NextDouble() * (chunkSize - 1e-3f);
+
+            if (alpha != null && alpha.Length >= 64 * 64)
+            {
+                int ax = Math.Clamp((int)(localX / chunkSize * 63f), 0, 63);
+                int ay = Math.Clamp((int)(localY / chunkSize * 63f), 0, 63);
+                float av = alpha[ay * 64 + ax] / 255f;
+                if (av < alphaThreshold) continue;
+            }
+
+            z = SampleHeightOuterGrid(chunk, localX, localY) + 0.02f;
+            return true;
+        }
+
+        localX = localY = z = 0;
+        return false;
+    }
+
+    private static float SampleHeightOuterGrid(TerrainChunkData chunk, float localX, float localY)
+    {
+        // Approximate terrain height from the 9x9 outer vertex grid.
+        // This is intentionally cheap; it avoids depending on inner vertices.
+        if (chunk.Heights == null || chunk.Heights.Length < 145) return chunk.WorldPosition.Z;
+
+        float cellSize = WoWConstants.ChunkSize / 16f;
+        float subCellSize = cellSize / 8f;
+
+        Span<float> grid = stackalloc float[9 * 9];
+        grid.Clear();
+
+        for (int i = 0; i < 145; i++)
+        {
+            GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
+            if (isInner) continue;
+            int gy = row / 2;
+            if ((uint)gy >= 9u || (uint)col >= 9u) continue;
+            grid[gy * 9 + col] = chunk.Heights[i];
+        }
+
+        float gx = localX / subCellSize;
+        float gyf = localY / subCellSize;
+        int ix = Math.Clamp((int)MathF.Floor(gx), 0, 7);
+        int iy = Math.Clamp((int)MathF.Floor(gyf), 0, 7);
+        float fx = Math.Clamp(gx - ix, 0f, 1f);
+        float fy = Math.Clamp(gyf - iy, 0f, 1f);
+
+        float h00 = grid[iy * 9 + ix];
+        float h10 = grid[iy * 9 + (ix + 1)];
+        float h01 = grid[(iy + 1) * 9 + ix];
+        float h11 = grid[(iy + 1) * 9 + (ix + 1)];
+
+        float h0 = h00 + (h10 - h00) * fx;
+        float h1 = h01 + (h11 - h01) * fx;
+        return h0 + (h1 - h0) * fy;
+    }
+
+    private static void GetChunkVertexPosition(int index, out int row, out int col, out bool isInner)
+    {
+        int remaining = index;
+        row = 0;
+        col = 0;
+        isInner = false;
+
+        for (int r = 0; r < 17; r++)
+        {
+            int rowSize = (r % 2 == 0) ? 9 : 8;
+            if (remaining < rowSize)
+            {
+                row = r;
+                col = remaining;
+                isInner = (r % 2 != 0);
+                return;
+            }
+            remaining -= rowSize;
+        }
     }
 
     public void ClearExternalSpawns()

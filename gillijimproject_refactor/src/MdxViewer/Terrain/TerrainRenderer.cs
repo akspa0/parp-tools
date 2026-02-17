@@ -82,6 +82,20 @@ public class TerrainRenderer : IDisposable
     // MCSH shadow map overlay
     public bool ShowShadowMap { get; set; } = false;
 
+    // Alpha/shadow sampling: WoW-like linear by default; optional nearest for crisper mask edges.
+    private bool _useNearestForAlphaSampling;
+    private bool _alphaSamplingDirty = true;
+    public bool UseNearestForAlphaSampling
+    {
+        get => _useNearestForAlphaSampling;
+        set
+        {
+            if (_useNearestForAlphaSampling == value) return;
+            _useNearestForAlphaSampling = value;
+            _alphaSamplingDirty = true;
+        }
+    }
+
     // Topographical contour lines
     public bool ShowContours { get; set; } = false;
     public float ContourInterval { get; set; } = 2.0f;
@@ -408,6 +422,9 @@ public class TerrainRenderer : IDisposable
     {
         if (_tiles.Count == 0 && _chunks.Count == 0) return;
 
+        if (_alphaSamplingDirty)
+            ApplyAlphaSamplingMode();
+
         LastFrameDrawCalls = 0;
         LastFrameUniform1Calls = 0;
         LastFrameActiveTextureCalls = 0;
@@ -488,6 +505,66 @@ public class TerrainRenderer : IDisposable
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private void ApplyAlphaSamplingMode()
+    {
+        _alphaSamplingDirty = false;
+        int filter = _useNearestForAlphaSampling ? (int)TextureMinFilter.Nearest : (int)TextureMinFilter.Linear;
+        int magFilter = _useNearestForAlphaSampling ? (int)TextureMagFilter.Nearest : (int)TextureMagFilter.Linear;
+
+        // Per-chunk path
+        foreach (var chunk in _chunks)
+        {
+            foreach (var tex in chunk.AlphaTextures.Values)
+            {
+                if (tex == 0) continue;
+                _gl.BindTexture(TextureTarget.Texture2D, tex);
+                _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, filter);
+                _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magFilter);
+            }
+            if (chunk.ShadowTexture != 0)
+            {
+                _gl.BindTexture(TextureTarget.Texture2D, chunk.ShadowTexture);
+                _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, filter);
+                _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, magFilter);
+            }
+        }
+
+        // Batched tile path
+        foreach (var tile in _tiles)
+        {
+            if (tile.AlphaShadowArrayTexture == 0) continue;
+            _gl.BindTexture(TextureTarget.Texture2DArray, tile.AlphaShadowArrayTexture);
+            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMinFilter, filter);
+            _gl.TexParameter(TextureTarget.Texture2DArray, TextureParameterName.TextureMagFilter, magFilter);
+        }
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+    }
+
+    public unsafe void ReplaceTileAlphaShadowArray(int tileX, int tileY, byte[] alphaShadowRgba)
+    {
+        if (!_tileMap.TryGetValue((tileX, tileY), out var tile))
+            return;
+        if (tile.AlphaShadowArrayTexture == 0)
+            return;
+        if (alphaShadowRgba == null || alphaShadowRgba.Length < 64 * 64 * 4 * 256)
+            return;
+
+        _gl.BindTexture(TextureTarget.Texture2DArray, tile.AlphaShadowArrayTexture);
+        fixed (byte* ptr = alphaShadowRgba)
+        {
+            _gl.TexSubImage3D(TextureTarget.Texture2DArray, 0,
+                0, 0, 0,
+                64, 64, 256,
+                PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+        }
+        _gl.BindTexture(TextureTarget.Texture2DArray, 0);
+
+        // Keep sampling mode consistent if user toggled it.
+        _alphaSamplingDirty = true;
     }
 
     private unsafe void RenderTiles(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum)

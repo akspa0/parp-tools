@@ -323,6 +323,11 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 // Shadow map
                 byte[]? shadowMap = ExtractShadowMap(mcnk.McshData);
 
+                // MCCV vertex colors (WotLK+)
+                byte[]? mccvColors = null;
+                if (mcnk.MccvData != null && mcnk.MccvData.Length >= 145 * 4)
+                    mccvColors = mcnk.MccvData;
+
                 // Hole mask
                 int holeMask = (int)mcnk.Header.Holes;
 
@@ -374,6 +379,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Layers = layers,
                     AlphaMaps = alphaMaps,
                     ShadowMap = shadowMap,
+                    MccvColors = mccvColors,
                     Liquid = liquid,
                     WorldPosition = new Vector3(worldX, worldY, 0f),
                     AreaId = (int)mcnk.Header.AreaId,
