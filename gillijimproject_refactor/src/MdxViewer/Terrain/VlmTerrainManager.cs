@@ -3,6 +3,7 @@ using System.Numerics;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
+using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer.Terrain;
 
@@ -21,6 +22,12 @@ public class VlmTerrainManager : ISceneRenderer
 
     // Loaded tiles: (tileX, tileY) → batched tile mesh
     private readonly Dictionary<(int, int), TerrainTileMesh> _loadedTiles = new();
+
+    // Parsed tile results for loaded tiles (kept for editor-like operations).
+    private readonly Dictionary<(int, int), TileLoadResult> _loadedTileResults = new();
+
+    // Editor persistence: tiles rebuilt via ReplaceTileChunksAndRebuild are considered dirty.
+    private readonly HashSet<(int tileX, int tileY)> _dirtyTiles = new();
 
     // Async streaming: background-parsed tiles waiting for GPU upload
     private readonly ConcurrentQueue<(int tx, int ty, TileLoadResult result)> _pendingTiles = new();
@@ -51,6 +58,21 @@ public class VlmTerrainManager : ISceneRenderer
     public VlmProjectLoader Loader => _loader;
 
     /// <summary>
+    /// Try to get parsed tile data for a currently loaded tile.
+    /// </summary>
+    public bool TryGetTileLoadResult(int tileX, int tileY, out TileLoadResult result)
+    {
+        if (_loadedTileResults.TryGetValue((tileX, tileY), out var cached))
+        {
+            result = cached;
+            return true;
+        }
+
+        result = new TileLoadResult();
+        return false;
+    }
+
+    /// <summary>
     /// Rebuild a loaded tile's GPU mesh from the provided chunk data.
     /// Call on the render thread.
     /// </summary>
@@ -70,10 +92,97 @@ public class VlmTerrainManager : ISceneRenderer
             return;
 
         _loadedTiles[key] = tileMesh;
+
+        // Update cached parsed data for editor operations.
+        if (!_loadedTileResults.TryGetValue(key, out var cached))
+            cached = new TileLoadResult();
+        cached.Chunks.Clear();
+        cached.Chunks.AddRange(newChunks);
+        _loadedTileResults[key] = cached;
+
         if (!_loader.TileTextures.TryGetValue(key, out var texNames))
             texNames = new List<string>();
         _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
         _liquidRenderer.AddChunks(newChunks);
+
+        _dirtyTiles.Add((tileX, tileY));
+    }
+
+    public int SaveDirtyTiles()
+    {
+        if (_dirtyTiles.Count == 0)
+            return 0;
+
+        int saved = 0;
+        var tiles = _dirtyTiles.ToArray();
+        foreach (var (tileX, tileY) in tiles)
+        {
+            if (!TryGetTileLoadResult(tileX, tileY, out var result))
+                continue;
+
+            if (TrySaveTileHeights(tileX, tileY, result.Chunks))
+            {
+                saved++;
+                _dirtyTiles.Remove((tileX, tileY));
+            }
+        }
+
+        return saved;
+    }
+
+    private bool TrySaveTileHeights(int tileX, int tileY, List<TerrainChunkData> chunks)
+    {
+        if (!_loader.TryLoadRawSample(tileX, tileY, out var sample))
+            return false;
+
+        if (sample.TerrainData == null || sample.TerrainData.Heights == null)
+            return false;
+
+        bool wantInterleaved = sample.TerrainData.IsInterleaved;
+
+        var editedByIndex = new Dictionary<int, float[]>(256);
+        foreach (var c in chunks)
+        {
+            int idx = c.ChunkY * 16 + c.ChunkX;
+            editedByIndex[idx] = wantInterleaved ? c.Heights : ReorderFromInterleaved(c.Heights);
+        }
+
+        var updatedHeights = sample.TerrainData.Heights
+            .Select(h => editedByIndex.TryGetValue(h.ChunkIndex, out var hh)
+                ? new VlmChunkHeights(h.ChunkIndex, hh)
+                : h)
+            .ToArray();
+
+        var updatedTerrain = sample.TerrainData with { Heights = updatedHeights };
+        var updatedSample = sample with { TerrainData = updatedTerrain };
+        return _loader.TrySaveEditedSample(tileX, tileY, updatedSample);
+    }
+
+    private static float[] ReorderFromInterleaved(float[] src)
+    {
+        if (src.Length != 145)
+            return src;
+
+        var dst = new float[145];
+        int si = 0;
+
+        for (int row = 0; row < 17; row++)
+        {
+            if ((row & 1) == 0)
+            {
+                int outerRow = row / 2;
+                for (int col = 0; col < 9; col++)
+                    dst[outerRow * 9 + col] = src[si++];
+            }
+            else
+            {
+                int innerRow = row / 2;
+                for (int col = 0; col < 8; col++)
+                    dst[81 + innerRow * 8 + col] = src[si++];
+            }
+        }
+
+        return dst;
     }
 
     public VlmTerrainManager(GL gl, string projectRoot)
@@ -130,6 +239,7 @@ public class VlmTerrainManager : ISceneRenderer
             _liquidRenderer.RemoveChunksForTile(key.Item1, key.Item2);
             tileMesh.Dispose();
             _loadedTiles.Remove(key);
+            _loadedTileResults.Remove(key);
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }
 
@@ -182,6 +292,10 @@ public class VlmTerrainManager : ISceneRenderer
                 continue;
 
             _loadedTiles[(tx, ty)] = tileMesh;
+
+            // Keep parsed tile data for editor operations.
+            _loadedTileResults[(tx, ty)] = result;
+
             if (!_loader.TileTextures.TryGetValue((tx, ty), out var texNames))
                 texNames = new List<string>();
             _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);

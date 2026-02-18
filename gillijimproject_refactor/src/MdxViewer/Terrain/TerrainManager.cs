@@ -127,6 +127,20 @@ public class TerrainManager : ISceneRenderer
         return false;
     }
 
+    /// <summary>
+    /// Get parsed tile data from the persistent cache, loading it synchronously if needed.
+    /// Call on the render thread.
+    /// </summary>
+    public TileLoadResult GetOrLoadTileLoadResult(int tileX, int tileY)
+    {
+        if (_tileCache.TryGetValue((tileX, tileY), out var cached))
+            return cached;
+
+        cached = _adapter.LoadTileWithPlacements(tileX, tileY);
+        _tileCache[(tileX, tileY)] = cached;
+        return cached;
+    }
+
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)
     {
         _gl = gl;

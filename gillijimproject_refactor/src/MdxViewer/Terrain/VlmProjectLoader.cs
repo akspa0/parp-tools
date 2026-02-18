@@ -24,6 +24,7 @@ public class VlmProjectLoader
 {
     private readonly string _projectRoot;
     private readonly string _datasetDir;
+    private readonly string _editsDatasetDir;
 
     /// <summary>Map name inferred from JSON filenames.</summary>
     public string MapName { get; private set; } = "VLM Project";
@@ -67,16 +68,28 @@ public class VlmProjectLoader
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
 
+    private static readonly JsonSerializerOptions _jsonOptionsIndented = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        WriteIndented = true
+    };
+
     public VlmProjectLoader(string projectRoot)
     {
         _projectRoot = projectRoot;
         _datasetDir = Path.Combine(projectRoot, "dataset");
+        _editsDatasetDir = Path.Combine(projectRoot, "edits", "dataset");
 
         if (!Directory.Exists(_datasetDir))
             throw new DirectoryNotFoundException($"VLM dataset directory not found: {_datasetDir}");
 
         ScanTiles();
     }
+
+    public string ProjectRoot => _projectRoot;
+    public string DatasetDir => _datasetDir;
+    public string EditsDatasetDir => _editsDatasetDir;
 
     private void ScanTiles()
     {
@@ -121,7 +134,7 @@ public class VlmProjectLoader
     {
         var result = new TileLoadResult();
 
-        if (!_tileJsonPaths.TryGetValue((tileX, tileY), out var jsonPath))
+        if (!TryGetEffectiveTileJsonPath(tileX, tileY, out var jsonPath))
             return result;
 
         VlmTrainingSample? sample;
@@ -186,6 +199,76 @@ public class VlmProjectLoader
         }
 
         return result;
+    }
+
+    public bool TryGetEffectiveTileJsonPath(int tileX, int tileY, out string jsonPath)
+    {
+        jsonPath = string.Empty;
+        if (!_tileJsonPaths.TryGetValue((tileX, tileY), out var basePath))
+            return false;
+
+        var editPath = Path.Combine(_editsDatasetDir, Path.GetFileName(basePath));
+        jsonPath = File.Exists(editPath) ? editPath : basePath;
+        return true;
+    }
+
+    public bool TryGetEditTileJsonPath(int tileX, int tileY, out string jsonPath)
+    {
+        jsonPath = string.Empty;
+        if (!_tileJsonPaths.TryGetValue((tileX, tileY), out var basePath))
+            return false;
+
+        jsonPath = Path.Combine(_editsDatasetDir, Path.GetFileName(basePath));
+        return true;
+    }
+
+    public bool TryGetTileJsonPath(int tileX, int tileY, out string jsonPath)
+    {
+        return _tileJsonPaths.TryGetValue((tileX, tileY), out jsonPath!);
+    }
+
+    public bool TryLoadRawSample(int tileX, int tileY, out VlmTrainingSample sample)
+    {
+        sample = default!;
+
+        if (!TryGetEffectiveTileJsonPath(tileX, tileY, out var jsonPath))
+            return false;
+
+        try
+        {
+            var json = File.ReadAllText(jsonPath);
+            var parsed = JsonSerializer.Deserialize<VlmTrainingSample>(json, _jsonOptions);
+            if (parsed?.TerrainData == null)
+                return false;
+            sample = parsed;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Save an edited tile sample to the edits folder (never overwrites source dataset JSON).
+    /// </summary>
+    public bool TrySaveEditedSample(int tileX, int tileY, VlmTrainingSample sample)
+    {
+        if (!TryGetEditTileJsonPath(tileX, tileY, out var jsonPath))
+            return false;
+
+        try
+        {
+            Directory.CreateDirectory(_editsDatasetDir);
+            var json = JsonSerializer.Serialize(sample, _jsonOptionsIndented);
+            File.WriteAllText(jsonPath, json);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Error(ViewerLog.Category.Vlm, $"Failed to save tile ({tileX},{tileY}) JSON: {ex.Message}");
+            return false;
+        }
     }
 
     private TerrainChunkData? ConvertChunk(VlmChunkHeights chunkHeights, VlmTerrainData data, int tileX, int tileY)

@@ -165,6 +165,11 @@ public class TerrainRenderer : IDisposable
         return best;
     }
 
+    public bool TryGetChunkInfo(int tileX, int tileY, int chunkX, int chunkY, out TerrainChunkInfo info)
+    {
+        return _chunkInfoByKey.TryGetValue((tileX, tileY, chunkX, chunkY), out info);
+    }
+
     private static bool TryGetTileKey(float worldX, float worldY, out (int tileX, int tileY) tileKey)
     {
         tileKey = default;
