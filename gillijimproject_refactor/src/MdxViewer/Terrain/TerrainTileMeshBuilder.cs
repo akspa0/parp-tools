@@ -24,7 +24,7 @@ public sealed class TerrainTileMeshBuilder
         if (chunks.Count == 0) return (null, chunkInfos);
 
         const int vertsPerChunk = 145;
-        const int floatsPerVert = 8; // pos3, normal3, uv2
+        const int floatsPerVert = 12; // pos3, normal3, uv2, color4
 
         int vertexCount = chunks.Count * vertsPerChunk;
         var vertices = new float[vertexCount * floatsPerVert];
@@ -39,15 +39,15 @@ public sealed class TerrainTileMeshBuilder
         var tileMax = new Vector3(float.MinValue);
 
         // AlphaShadow array: 64x64x256 RGBA
-        // Default: alpha channels 255 (opaque) for overlays; shadow 0.
+        // Default: alpha channels 0 (transparent) for overlays; shadow 0.
         const int alphaSize = 64;
         const int sliceCount = 256;
         var alphaShadow = new byte[alphaSize * alphaSize * 4 * sliceCount];
         for (int i = 0; i < alphaShadow.Length; i += 4)
         {
-            alphaShadow[i + 0] = 255;
-            alphaShadow[i + 1] = 255;
-            alphaShadow[i + 2] = 255;
+            alphaShadow[i + 0] = 0;
+            alphaShadow[i + 1] = 0;
+            alphaShadow[i + 2] = 0;
             alphaShadow[i + 3] = 0;
         }
 
@@ -106,6 +106,23 @@ public sealed class TerrainTileMeshBuilder
                     vertices[vBase + 7] = (row / 2 + 0.5f) / 8f;
                 }
 
+                float r = 1f, g = 1f, b = 1f, a = 1f;
+                if (chunk.MccvColors != null)
+                {
+                    int cBase = i * 4;
+                    if (cBase + 3 < chunk.MccvColors.Length)
+                    {
+                        r = chunk.MccvColors[cBase + 0] / 255f;
+                        g = chunk.MccvColors[cBase + 1] / 255f;
+                        b = chunk.MccvColors[cBase + 2] / 255f;
+                        a = chunk.MccvColors[cBase + 3] / 255f;
+                    }
+                }
+                vertices[vBase + 8] = r;
+                vertices[vBase + 9] = g;
+                vertices[vBase + 10] = b;
+                vertices[vBase + 11] = a;
+
                 int vIdx = chunkIndex * vertsPerChunk + i;
                 chunkSlice[vIdx] = (byte)slice;
 
@@ -161,13 +178,15 @@ public sealed class TerrainTileMeshBuilder
         fixed (float* ptr = vertices)
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(vertices.Length * sizeof(float)), ptr, BufferUsageARB.StaticDraw);
 
-        uint stride = 8 * sizeof(float);
+        uint stride = 12 * sizeof(float);
         _gl.EnableVertexAttribArray(0);
         _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
         _gl.EnableVertexAttribArray(1);
         _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
         _gl.EnableVertexAttribArray(2);
         _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+        _gl.EnableVertexAttribArray(5);
+        _gl.VertexAttribPointer(5, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
 
         // VBO1: chunk slice (uint8)
         uint vbo1 = _gl.GenBuffer();
@@ -249,17 +268,34 @@ public sealed class TerrainTileMeshBuilder
         // Alpha maps for layers 1..3
         for (int layer = 1; layer <= 3; layer++)
         {
-            if (!chunk.AlphaMaps.TryGetValue(layer, out var alpha) || alpha == null || alpha.Length < size * size)
-                continue;
-
             int channel = layer - 1; // 0=R,1=G,2=B
-            for (int y = 0; y < size; y++)
+            bool hasLayer = layer < chunk.Layers.Length;
+            bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
+
+            if (chunk.AlphaMaps.TryGetValue(layer, out var alpha) && alpha != null && alpha.Length >= size * size)
             {
-                for (int x = 0; x < size; x++)
+                for (int y = 0; y < size; y++)
                 {
-                    int dst = y * size + x;
-                    int src = EdgeFixedIndex(x, y);
-                    alphaShadow[sliceBase + dst * 4 + channel] = alpha[src];
+                    for (int x = 0; x < size; x++)
+                    {
+                        int dst = y * size + x;
+                        int src = EdgeFixedIndex(x, y);
+                        alphaShadow[sliceBase + dst * 4 + channel] = alpha[src];
+                    }
+                }
+                continue;
+            }
+
+            // Layer exists but has no explicit alpha map: treat as full-opacity overlay.
+            if (hasLayer && !usesAlphaMap)
+            {
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        int dst = y * size + x;
+                        alphaShadow[sliceBase + dst * 4 + channel] = 255;
+                    }
                 }
             }
         }

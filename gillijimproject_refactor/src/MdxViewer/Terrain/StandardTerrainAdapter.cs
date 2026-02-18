@@ -51,7 +51,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         // Parse MPHD
         _mphdFlags = ReadMphdFlags(wdtBytes);
-        _useBigAlpha = (_mphdFlags & 0x4u) != 0;
+        // wowdev.wiki: MPHD flag 0x4 OR 0x80 both indicate bigAlpha (4096-byte 8-bit alpha maps).
+        _useBigAlpha = (_mphdFlags & (0x4u | 0x80u)) != 0;
 
         // Parse MAIN chunk to enumerate tiles
         _existingTiles = ReadMainChunk(wdtBytes);
@@ -313,8 +314,14 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 var mcnk = new Mcnk(mcnkData);
 
-                int chunkX = (int)mcnk.Header.IndexX;
-                int chunkY = (int)mcnk.Header.IndexY;
+                // Use MCIN slot as canonical chunk coordinate (stable 16x16 layout).
+                // Some legacy/converted ADTs have inconsistent MCNK header indices; using MCIN
+                // avoids quadrant/group misassignment of texture/alpha data.
+                int chunkX = ci % 16;
+                int chunkY = ci / 16;
+
+                int headerChunkX = (int)mcnk.Header.IndexX;
+                int headerChunkY = (int)mcnk.Header.IndexY;
 
                 // Diagnostic: log first chunk of each tile
                 if (ci == 0)
@@ -324,7 +331,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                         ? $"Z={pos[0]:F1}, X={pos[1]:F1}, Y={pos[2]:F1}"
                         : "null";
                     ViewerLog.Important(ViewerLog.Category.Terrain,
-                        $"  Tile({tileX},{tileY}) chunk0: idx=({chunkX},{chunkY}), pos=[{posStr}], baseZ={((pos != null && pos.Length >= 1) ? pos[0] : 0f):F1}");
+                        $"  Tile({tileX},{tileY}) chunk0: mcinIdx=({chunkX},{chunkY}) headerIdx=({headerChunkX},{headerChunkY}), pos=[{posStr}], baseZ={((pos != null && pos.Length >= 1) ? pos[0] : 0f):F1}");
                 }
 
                 // Heights (already interleaved in LK format)
@@ -351,8 +358,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 var layers = ExtractLayers(layerSource.TextureLayers);
 
-                // Alpha maps
-                var alphaMaps = ExtractAlphaMaps(layerSource, _useBigAlpha);
+        // Alpha maps — DoNotFixAlphaMap flag must come from the same MCNK that holds the alpha data
+                // (layerSource = texMcnk for split ADTs, otherwise mcnk).
+                var alphaMaps = ExtractAlphaMaps(layerSource, _useBigAlpha, (layerSource.Header.Flags & McnkFlags.DoNotFixAlphaMap) != 0);
 
                 // Shadow map
                 byte[]? shadowMap = ExtractShadowMap(layerSource.McshData ?? mcnk.McshData);
@@ -374,12 +382,30 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 LiquidChunkData? liquid = null;
                 uint mcnkFlagsRaw = (uint)mcnk.Header.Flags;
                 bool hasLiquidFlags = (mcnkFlagsRaw & 0x3C) != 0;
-                if (mcnk.MclqData != null && mcnk.MclqData.Length >= 8)
+                if (hasLiquidFlags && mcnk.MclqData != null && mcnk.MclqData.Length >= 8)
                 {
                     liquid = ExtractMclq(mcnk.MclqData, mcnkFlagsRaw,
                         tileX, tileY, chunkX, chunkY,
                         new Vector3(worldX, worldY, 0f), baseZ,
                         _adtProfile.MclqLayerStride, _adtProfile.MclqTileFlagsOffset);
+
+                    // Guard against false-positive MCLQ parses (random payload interpreted as liquid).
+                    if (liquid != null)
+                    {
+                        float minH = liquid.MinHeight;
+                        float maxH = liquid.MaxHeight;
+                        bool finite = !float.IsNaN(minH) && !float.IsNaN(maxH)
+                                      && !float.IsInfinity(minH) && !float.IsInfinity(maxH);
+
+                        // Keep a broad but sane world-height window and reject absurd height spans.
+                        if (!finite
+                            || minH < -20000f || maxH > 20000f
+                            || maxH < minH
+                            || (maxH - minH) > 2000f)
+                        {
+                            liquid = null;
+                        }
+                    }
                 }
                 // Diagnostic: log first few chunks with liquid flags
                 if (hasLiquidFlags && ci < 4)
@@ -526,8 +552,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
             Array.Copy(adtBytes, off + 8, mcnkData, 0, mcnkSize);
 
             var mcnk = new Mcnk(mcnkData);
-            int chunkX = (int)mcnk.Header.IndexX;
-            int chunkY = (int)mcnk.Header.IndexY;
+            int chunkX = ci % 16;
+            int chunkY = ci / 16;
             mcnkByIndex[(chunkX, chunkY)] = mcnk;
         }
 
@@ -579,7 +605,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return layers;
     }
 
-    private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, bool useBigAlpha)
+    private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, bool useBigAlpha, bool doNotFixAlphaMap = false)
     {
         var maps = new Dictionary<int, byte[]>();
         if (mcnk.TextureLayers == null || mcnk.TextureLayers.Count <= 1)
@@ -594,6 +620,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
             int layerCount = mcnk.TextureLayers.Count;
             for (int i = 1; i < layerCount && i < 4; i++)
             {
+                // Note: do NOT gate on UseAlpha here. GetAlphaMapForLayerRelaxed is the "relaxed" path
+                // specifically for handling mis-set MCLY flags. The UseAlpha check is inside Mcal.GetAlphaMapForLayer
+                // (the strict path) but NOT in the relaxed path — by design.
+
                 int offset = unchecked((int)mcnk.TextureLayers[i].AlphaMapOffset);
                 if (offset < 0 || offset >= mcnk.McalRawData.Length)
                     continue;
@@ -609,9 +639,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     }
                 }
 
+                // For the last overlay layer there is often no "next" offset marker.
+                // Provide an expected span so relaxed decode doesn't misclassify 4-bit data as 8-bit.
+                if (!nextOffset.HasValue)
+                {
+                    int expectedSpan = bigAlpha ? 4096 : 2048;
+                    int expectedNext = offset + expectedSpan;
+                    if (expectedNext > offset && expectedNext <= mcnk.McalRawData.Length)
+                        nextOffset = expectedNext;
+                }
+
                 try
                 {
-                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayerRelaxed(mcnk.TextureLayers[i], nextOffset, bigAlpha);
+                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayerRelaxed(mcnk.TextureLayers[i], nextOffset, bigAlpha, doNotFixAlphaMap);
                     if (alpha != null && alpha.Length > 0)
                         maps[i] = alpha;
                 }
@@ -637,11 +677,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 }
 
                 var alpha = new byte[4096]; // 64×64 output
-                for (int j = 0; j < Math.Min(2048, alphaSize); j++)
+                int packedCount = Math.Min(2048, alphaSize);
+                int readPos = 0;
+                int writePos = 0;
+                for (int row = 0; row < 64 && readPos < packedCount; row++)
                 {
-                    byte packed = mcnk.McalRawData[offset + j];
-                    alpha[j * 2] = (byte)((packed & 0x0F) * 17);
-                    alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);
+                    for (int col = 0; col < 32 && readPos < packedCount; col++)
+                    {
+                        byte packed = mcnk.McalRawData[offset + readPos++];
+                        byte lowVal = (byte)((packed & 0x0F) * 17);
+                        byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+                        alpha[writePos++] = lowVal;
+                        alpha[writePos++] = (col == 31) ? lowVal : highVal;
+                    }
                 }
 
                 maps[layer] = alpha;
@@ -662,7 +710,18 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (alphaLayerCount == 0)
             return false;
 
-        // Prefer MCNK header sizeAlpha when present.
+        // wowdev.wiki: RLE-compressed alpha (MCLY 0x200) ONLY exists alongside MPHD bigAlpha.
+        // If any overlay layer announces compression, this is a bigAlpha-format chunk.
+        if (mcnk.TextureLayers != null)
+        {
+            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            {
+                if ((mcnk.TextureLayers[i].Flags & MclyFlags.CompressedAlpha) != 0)
+                    return true;
+            }
+        }
+
+        // Prefer MCNK header SizeMcal when present.
         uint sizeAlpha = mcnk.Header.SizeMcal;
         if (sizeAlpha != 0)
         {
@@ -671,7 +730,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 return true;
 
             // Uncompressed 4-bit alpha: 2048 bytes per alpha layer.
-            if (sizeAlpha % 2048u == 0 && (sizeAlpha / 2048u) >= (uint)alphaLayerCount)
+            if (sizeAlpha % 2048u == 0 && (sizeAlpha / 2048u) == (uint)alphaLayerCount)
                 return false;
 
             // Heuristic: if the alpha block is large enough to plausibly be 8-bit, treat as big.

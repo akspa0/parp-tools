@@ -18,13 +18,19 @@ namespace WoWMapConverter.Core.Formats.LichKing
         /// Decodes the alpha map for a single MCLY layer.
         /// Returns null when the layer does not use an alpha map.
         ///
-        /// Notes (3.3.5 client behavior, Ghidra):
-        /// - Uncompressed (4-bit) alpha is stored as 2048 bytes (nibbles) and expanded to 64x64.
-        /// - Big alpha uses 4096 bytes (8-bit) and is used when MPHD bigAlpha flag is set.
-        /// - Compressed alpha uses an RLE stream (high bit = fill) that expands to 4096 bytes.
-        /// - The client duplicates the last row/column to avoid seams; we apply the same edge fix.
+        /// Notes (3.3.5 client behavior, Ghidra / wowdev.wiki):
+        /// - BigAlpha (MPHD 0x4|0x80): 4096 bytes, 8-bit per pixel.  Already 64×64 — NO edge fix.
+        /// - Compressed (MCLY 0x200): RLE stream that expands to 4096 bytes. Already 64×64 — NO edge fix.
+        /// - 4-bit (default): 2048 nibble bytes, expanded to 64×64.
+        ///     If MCNK FLAG_DO_NOT_FIX_ALPHA_MAP (0x8000) is NOT set, the data is the 63×63 unfixed
+        ///     variant and the last row/column must be duplicated (edge fix).
+        ///     If the flag IS set, the data is already 64×64 — NO edge fix.
         /// </summary>
-        public byte[]? GetAlphaMapForLayer(MclyEntry mclyEntry, bool bigAlpha = false)
+        /// <param name="doNotFixAlphaMap">
+        /// Pass true when MCNK header flag 0x8000 (DoNotFixAlphaMap) is set. Suppresses the
+        /// edge-duplication fix for 4-bit alpha maps that are already stored in 64×64 form.
+        /// </param>
+        public byte[]? GetAlphaMapForLayer(MclyEntry mclyEntry, bool bigAlpha = false, bool doNotFixAlphaMap = false)
         {
             if ((_data == null || _data.Length == 0) || (mclyEntry.Flags & MclyFlags.UseAlpha) == 0)
                 return null;
@@ -36,18 +42,19 @@ namespace WoWMapConverter.Core.Formats.LichKing
             bool compressed = (mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0;
             if (compressed)
             {
-                // RLE stream length is not explicitly known; decode until 4096 output bytes are produced.
-                return ApplyEdgeFix(ReadCompressedAlpha(_data, offset));
+                // RLE decompresses to exactly 4096 bytes (64×64) — edge fix never needed.
+                return ReadCompressedAlpha(_data, offset);
             }
 
             if (bigAlpha)
             {
-                // 4096 bytes (64x64)
-                return ApplyEdgeFix(ReadBigAlpha(_data, offset));
+                // 4096 bytes (64×64) — edge fix never needed.
+                return ReadBigAlpha(_data, offset);
             }
 
-            // 2048 bytes (4-bit, nibbles)
-            return ApplyEdgeFix(ReadUncompressedAlpha4Bit(_data, offset));
+            // 2048 bytes (4-bit nibbles) — edge fix only when 63×63 unfixed format.
+            var result = ReadUncompressedAlpha4Bit(_data, offset);
+            return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
         }
 
         /// <summary>
@@ -55,7 +62,11 @@ namespace WoWMapConverter.Core.Formats.LichKing
         /// are still valid. Uses next-layer offset (when provided) to infer whether the alpha is
         /// likely 2048-byte 4-bit vs 4096-byte 8-bit.
         /// </summary>
-        public byte[]? GetAlphaMapForLayerRelaxed(MclyEntry mclyEntry, int? nextLayerAlphaOffset, bool bigAlphaDefault = false)
+        /// <param name="doNotFixAlphaMap">
+        /// Pass true when MCNK header flag 0x8000 (DoNotFixAlphaMap) is set. Suppresses the
+        /// edge-duplication fix for 4-bit alpha maps that are already stored in 64×64 form.
+        /// </param>
+        public byte[]? GetAlphaMapForLayerRelaxed(MclyEntry mclyEntry, int? nextLayerAlphaOffset, bool bigAlphaDefault = false, bool doNotFixAlphaMap = false)
         {
             if (_data == null || _data.Length == 0)
                 return null;
@@ -66,7 +77,10 @@ namespace WoWMapConverter.Core.Formats.LichKing
 
             bool compressed = (mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0;
             if (compressed)
-                return ApplyEdgeFix(ReadCompressedAlpha(_data, offset));
+            {
+                // RLE decompresses to 4096 bytes (64×64) — edge fix never needed.
+                return ReadCompressedAlpha(_data, offset);
+            }
 
             int available = _data.Length - offset;
             int inferredSpan = available;
@@ -77,23 +91,34 @@ namespace WoWMapConverter.Core.Formats.LichKing
                     inferredSpan = Math.Min(inferredSpan, next - offset);
             }
 
-            // If the WDT bigAlpha flag is set, prefer 8-bit.
+            // If the WDT bigAlpha flag is set, prefer 8-bit (4096 bytes, already 64×64).
             if (bigAlphaDefault)
-                return ApplyEdgeFix(ReadBigAlpha(_data, offset));
+                return ReadBigAlpha(_data, offset);
 
             // Infer 8-bit when the layer span clearly supports it.
             if (inferredSpan >= 4096)
-                return ApplyEdgeFix(ReadBigAlpha(_data, offset));
+                return ReadBigAlpha(_data, offset);
 
             // Default to 4-bit for 3.3.5 when not bigAlpha.
             if (inferredSpan >= 2048)
-                return ApplyEdgeFix(ReadUncompressedAlpha4Bit(_data, offset));
+            {
+                var result = ReadUncompressedAlpha4Bit(_data, offset);
+                return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
+            }
 
             // Last resort: try compressed decode (some chunks have odd spans/padding).
-            return ApplyEdgeFix(ReadCompressedAlpha(_data, offset));
+            // Compressed always decompresses to 64×64 — no edge fix.
+            return ReadCompressedAlpha(_data, offset);
         }
 
-        private static byte[] ReadCompressedAlpha(byte[] src, int offset)
+        public static byte[] ReadCompressedAlpha(byte[] src, int offset)
+            => ReadCompressedAlphaWithSize(src, offset).Data;
+
+        /// <summary>
+        /// RLE-decompress a WotLK MCAL compressed-alpha stream starting at <paramref name="offset"/>.
+        /// Returns the decompressed 64×64 data and the number of source bytes consumed.
+        /// </summary>
+        public static (byte[] Data, int BytesConsumed) ReadCompressedAlphaWithSize(byte[] src, int offset)
         {
             var dst = new byte[64 * 64];
             int srcPos = offset;
@@ -133,7 +158,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 }
             }
 
-            return dst;
+            return (dst, srcPos - offset);
         }
 
         private static byte[] ReadBigAlpha(byte[] src, int offset)
@@ -149,14 +174,24 @@ namespace WoWMapConverter.Core.Formats.LichKing
         {
             var dst = new byte[64 * 64];
 
-            // 2048 bytes input (nibbles) -> 4096 bytes output
-            int maxBytes = Math.Min(2048, src.Length - offset);
-            for (int i = 0; i < maxBytes; i++)
+            // 2048 bytes input (nibbles) -> 4096 bytes output.
+            // Warcraft/Noggit behavior: for the last packed byte in each row (col=31),
+            // duplicate low nibble into both output texels instead of using high nibble.
+            int readPos = offset;
+            int dataEnd = src.Length;
+            int writePos = 0;
+
+            for (int row = 0; row < 64 && readPos < dataEnd; row++)
             {
-                byte packed = src[offset + i];
-                int outIndex = i * 2;
-                dst[outIndex] = (byte)((packed & 0x0F) * 17);
-                dst[outIndex + 1] = (byte)(((packed >> 4) & 0x0F) * 17);
+                for (int col = 0; col < 32 && readPos < dataEnd; col++)
+                {
+                    byte packed = src[readPos++];
+                    byte lowVal = (byte)((packed & 0x0F) * 17);
+                    byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+
+                    dst[writePos++] = lowVal;
+                    dst[writePos++] = (col == 31) ? lowVal : highVal;
+                }
             }
 
             return dst;

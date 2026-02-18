@@ -537,7 +537,7 @@ public class NativeMpqService : IDisposable
                 }
                 
                 Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → found in {Path.GetFileName(archive.Path)}, block: offset={block.BlockOffset}, size={block.BlockSize}, fileSize={block.FileSize}, flags=0x{block.Flags:X8}");
-                var data = ReadFileFromArchive(archive, block, Path.GetFileName(normalized));
+                var data = ReadFileFromArchive(archive, block, normalized);
                 if (data != null && data.Length > 0)
                 {
                     Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → extracted {data.Length} bytes");
@@ -650,7 +650,26 @@ public class NativeMpqService : IDisposable
             
             var baseOffset = archive.HeaderOffset + block.BlockOffset;
             fs.Position = baseOffset;
-            return ReadFileData(reader, block, archive.Header.SectorSize, filename, baseOffset);
+
+            // Primary attempt: use full normalized path for encrypted-key derivation.
+            var data = ReadFileData(reader, block, archive.Header.SectorSize, filename, baseOffset);
+            if (data != null && data.Length > 0)
+                return data;
+
+            // Fallback for MPQ variants that derive encrypted keys from basename only.
+            if ((block.Flags & FLAG_ENCRYPTED) != 0)
+            {
+                string baseName = Path.GetFileName(filename);
+                if (!string.Equals(baseName, filename, StringComparison.OrdinalIgnoreCase))
+                {
+                    fs.Position = baseOffset;
+                    data = ReadFileData(reader, block, archive.Header.SectorSize, baseName, baseOffset);
+                    if (data != null && data.Length > 0)
+                        return data;
+                }
+            }
+
+            return data;
         }
         catch (Exception ex)
         {
@@ -763,7 +782,7 @@ public class NativeMpqService : IDisposable
         uint key = 0;
         if ((block.Flags & FLAG_ENCRYPTED) != 0)
         {
-            key = HashString(Path.GetFileName(filename), HASH_FILE_KEY);
+            key = HashString(filename.Replace('/', '\\'), HASH_FILE_KEY);
             if ((block.Flags & FLAG_FIX_KEY) != 0)
                 key = (key + block.BlockOffset) ^ block.FileSize;
         }

@@ -3,6 +3,7 @@ using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
+using WoWMapConverter.Core.Formats.LichKing;
 
 namespace MdxViewer.Terrain;
 
@@ -601,36 +602,45 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             uint flags = BitConverter.ToUInt32(mclyData, layer * 16 + 4);
             bool isCompressed = (flags & 0x200) != 0;
 
-            // Alpha 0.5.3 typically uses uncompressed 4-bit alpha (2048 bytes = 64×64 / 2)
-            int alphaSize = isCompressed ? 4096 : 2048;
-            if (offset + alphaSize > mcalData.Length)
-            {
-                // Try remaining data
-                alphaSize = mcalData.Length - offset;
-                if (alphaSize <= 0) break;
-            }
-
             byte[] alpha;
-            if (alphaSize == 2048)
+            if (isCompressed)
             {
-                // 4-bit alpha: expand to 8-bit (64×64)
-                alpha = new byte[4096];
-                for (int j = 0; j < Math.Min(2048, alphaSize); j++)
-                {
-                    byte packed = mcalData[offset + j];
-                    alpha[j * 2] = (byte)((packed & 0x0F) * 17);     // low nibble → 0-255
-                    alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);   // high nibble → 0-255
-                }
+                // RLE-compressed alpha (MCLY flag 0x200): variable-length source, always decompresses to 64×64.
+                if (offset >= mcalData.Length) break;
+                var (data, bytesConsumed) = Mcal.ReadCompressedAlphaWithSize(mcalData, offset);
+                alpha = data;
+                offset += bytesConsumed;
             }
             else
             {
-                // 8-bit alpha: copy directly
-                alpha = new byte[alphaSize];
-                Array.Copy(mcalData, offset, alpha, 0, alphaSize);
+                // 4-bit alpha: 2048 packed bytes → expand to 8-bit 64×64
+                int alphaSize = 2048;
+                if (offset + alphaSize > mcalData.Length)
+                {
+                    alphaSize = mcalData.Length - offset;
+                    if (alphaSize <= 0) break;
+                }
+
+                alpha = new byte[4096];
+                int packedCount = alphaSize;
+                int readPos = 0;
+                int writePos = 0;
+                for (int row = 0; row < 64 && readPos < packedCount; row++)
+                {
+                    for (int col = 0; col < 32 && readPos < packedCount; col++)
+                    {
+                        byte packed = mcalData[offset + readPos++];
+                        byte lowVal = (byte)((packed & 0x0F) * 17);
+                        byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+                        alpha[writePos++] = lowVal;
+                        alpha[writePos++] = (col == 31) ? lowVal : highVal;
+                    }
+                }
+
+                offset += alphaSize;
             }
 
             maps[layer] = alpha;
-            offset += alphaSize;
         }
 
         return maps;

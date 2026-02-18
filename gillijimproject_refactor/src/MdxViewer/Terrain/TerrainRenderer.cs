@@ -29,6 +29,7 @@ public class TerrainRenderer : IDisposable
 
     private readonly int[] _uHasTexLoc = new int[4];
     private readonly int[] _uHasAlphaLoc = new int[4]; // 1..3
+    private readonly int[] _uImplicitAlphaLoc = new int[4]; // 1..3
     private readonly int _uHasShadowLoc;
 
     // Track GL state to avoid redundant driver calls (big win when drawing hundreds/thousands of chunks).
@@ -319,6 +320,8 @@ public class TerrainRenderer : IDisposable
         _uHasShadowLoc = _shader.GetUniformLocation("uHasShadowMap");
         for (int i = 0; i < 4; i++)
             _uHasTexLoc[i] = _shader.GetUniformLocation($"uHasTex{i}");
+        for (int i = 1; i < 4; i++)
+            _uImplicitAlphaLoc[i] = _shader.GetUniformLocation($"uImplicitAlpha{i}");
         for (int i = 1; i < 4; i++)
             _uHasAlphaLoc[i] = _shader.GetUniformLocation($"uHasAlpha{i}");
 
@@ -1014,12 +1017,17 @@ public class TerrainRenderer : IDisposable
         // Alpha maps for overlay layers 1..3
         for (int layer = 1; layer < 4; layer++)
         {
+            bool hasLayer = layer < chunk.Layers.Length;
+            bool usesAlphaMap = hasLayer && (chunk.Layers[layer].Flags & 0x100u) != 0;
+            bool implicitFullAlpha = hasLayer && !usesAlphaMap;
+
             bool hasAlpha = chunk.AlphaTextures.TryGetValue(layer, out uint alphaTex) && alphaTex != 0;
             if (hasAlpha)
             {
                 BindTexture2D(3 + layer, alphaTex); // layer 1->unit4, 2->unit5, 3->unit6
             }
             Uniform1Counted(_uHasAlphaLoc[layer], hasAlpha ? 1 : 0);
+            Uniform1Counted(_uImplicitAlphaLoc[layer], implicitFullAlpha ? 1 : 0);
         }
 
         // Shadow map
@@ -1207,13 +1215,11 @@ public class TerrainRenderer : IDisposable
             if (alphaData.Length < size * size)
                 continue;
 
-            // Noggit fix: duplicate last row/column so edge texels have valid data
-            for (int i = 0; i < 64; i++)
-            {
-                alphaData[i * 64 + 63] = alphaData[i * 64 + 62];
-                alphaData[63 * 64 + i] = alphaData[62 * 64 + i];
-            }
-            alphaData[63 * 64 + 63] = alphaData[62 * 64 + 62];
+            // NOTE: Edge-fix (duplicate last row/column) is now applied correctly in Mcal.cs:
+            //   - BigAlpha (4096-byte 8-bit): already 64×64 — no fix applied.
+            //   - Compressed (RLE→4096 bytes): already 64×64 — no fix applied.
+            //   - 4-bit (2048-byte nibbles): fix applied unless MCNK DoNotFixAlphaMap flag is set.
+            // Do NOT re-apply the fix here — it would corrupt the last row/column of big-alpha maps.
 
             uint tex = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, tex);
@@ -1263,6 +1269,7 @@ public class TerrainRenderer : IDisposable
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
+layout(location = 5) in vec4 aVertexColor;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -1271,12 +1278,14 @@ uniform mat4 uProj;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec2 vTexCoord;
+out vec4 vVertexColor;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vNormal = mat3(uModel) * aNormal;
     vTexCoord = aTexCoord;
+    vVertexColor = aVertexColor;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -1286,6 +1295,7 @@ void main() {
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec2 vTexCoord;
+in vec4 vVertexColor;
 
 uniform sampler2D uDiffuse0;
 uniform sampler2D uDiffuse1;
@@ -1306,6 +1316,9 @@ uniform int uHasTex3;
 uniform int uHasAlpha1;
 uniform int uHasAlpha2;
 uniform int uHasAlpha3;
+uniform int uImplicitAlpha1;
+uniform int uImplicitAlpha2;
+uniform int uImplicitAlpha3;
 uniform int uHasShadowMap;
 
 uniform int uShowLayer0;
@@ -1346,9 +1359,9 @@ void main() {
 
     // Sample alpha maps.
     // Alpha maps are 64x64 with Noggit edge fix applied, sampled with ClampToEdge.
-    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : 1.0;
-    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : 1.0;
-    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : 1.0;
+    float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : ((uImplicitAlpha1 == 1) ? 1.0 : 0.0);
+    float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : ((uImplicitAlpha2 == 1) ? 1.0 : 0.0);
+    float a3Raw = (uHasAlpha3 == 1) ? texture(uAlpha3, vTexCoord).r : ((uImplicitAlpha3 == 1) ? 1.0 : 0.0);
 
     // Apply layer toggles to blending only.
     float a1 = (uShowLayer1 == 1) ? a1Raw : 0.0;
@@ -1400,6 +1413,9 @@ void main() {
         vec3 l3 = c3.rgb * lighting;
         result = mix(result, l3, a3);
     }
+
+    // MCCV vertex color tint
+    result *= clamp(vVertexColor.rgb, 0.0, 1.0);
 
     // MCSH shadow map overlay (all layers - shadows must persist through alpha-blended overlays)
     if (uShowShadowMap == 1 && uHasShadowMap == 1) {
@@ -1502,6 +1518,7 @@ layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in uint aChunkSlice;
 layout(location = 4) in uvec4 aTexIdx;
+layout(location = 5) in vec4 aVertexColor;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -1510,6 +1527,7 @@ uniform mat4 uProj;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec2 vTexCoord;
+out vec4 vVertexColor;
 flat out uint vChunkSlice;
 flat out uvec4 vTexIdx;
 
@@ -1518,6 +1536,7 @@ void main() {
     vWorldPos = worldPos.xyz;
     vNormal = mat3(uModel) * aNormal;
     vTexCoord = aTexCoord;
+    vVertexColor = aVertexColor;
     vChunkSlice = aChunkSlice;
     vTexIdx = aTexIdx;
     gl_Position = uProj * uView * worldPos;
@@ -1529,6 +1548,7 @@ void main() {
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec2 vTexCoord;
+in vec4 vVertexColor;
 flat in uint vChunkSlice;
 flat in uvec4 vTexIdx;
 
@@ -1618,6 +1638,9 @@ void main() {
         vec4 c3 = texture(uDiffuseArray, vec3(diffuseUV, float(vTexIdx.w)));
         result = mix(result, c3.rgb * lighting, a3);
     }
+
+    // MCCV vertex color tint
+    result *= clamp(vVertexColor.rgb, 0.0, 1.0);
 
     if (uShowShadowMap == 1) {
         float shadow = alphaShadow.a;

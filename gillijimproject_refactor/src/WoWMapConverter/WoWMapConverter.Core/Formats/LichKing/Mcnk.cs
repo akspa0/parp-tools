@@ -320,6 +320,12 @@ namespace WoWMapConverter.Core.Formats.LichKing
         HasMagma = 0x10,
         HasSlime = 0x20,
         HasMccv = 0x40,
+        /// <summary>
+        /// If set, the MCAL alpha maps are already in 64×64 "fixed" format and must NOT have the
+        /// edge-duplication fix applied. If NOT set, 4-bit alpha maps are stored as 63×63 (unfixed)
+        /// and the decoder must duplicate the last row/column (wowdev.wiki FLAG_DO_NOT_FIX_ALPHA_MAP).
+        /// </summary>
+        DoNotFixAlphaMap = 0x8000,
         HasBakedShadows = 0x20000
     }
 }
