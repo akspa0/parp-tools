@@ -11,6 +11,10 @@
 - Terrain texturing — alpha map decode not working correctly for LK format
 - These must be fixed before 3.3.5 data can be used
 
+### Patch MPQ priority / overlapping DBCs (2026-02-17)
+- Patches (patch.mpq, patch-2, patch-A..Z, locale variants) now load with deterministic priority; reads walk archives in reverse order so the last patch (e.g., patch-Z) wins for overlapping DBCs.
+- MPQ decompression updated to treat the compression byte as a bitmask and added BZip2 support, covering custom patch chains that mix Zlib/BZip2.
+
 ## Immediate Next Steps
 
 1. **Fix 3.3.5 MH2O liquid rendering** — Parsing exists but output is broken

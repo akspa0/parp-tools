@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Linq;
 using WoWMapConverter.Core.Diagnostics;
+using ICSharpCode.SharpZipLib.BZip2;
 
 namespace WoWMapConverter.Core.Services;
 
@@ -414,18 +415,59 @@ public class NativeMpqService : IDisposable
     private static int GetMpqPriority(string filename)
     {
         var lower = filename.ToLowerInvariant();
-        
-        // Patches get highest priority (loaded last = searched first)
-        if (lower.StartsWith("patch"))
+
+        // Patches get highest priority (loaded last = searched first).
+        // Support:
+        //   patch.mpq
+        //   patch-2.mpq, patch-3.mpq, ...
+        //   patch-A.mpq .. patch-Z.mpq (custom/hobbyist patches)
+        //   patch-enUS.mpq, patch-enUS-2.mpq, patch-enUS-A.mpq, ...
+        if (lower.StartsWith("patch", StringComparison.OrdinalIgnoreCase))
         {
-            if (lower == "patch.mpq") return 1000;
-            if (lower.StartsWith("patch-"))
+            var nameNoExt = lower;
+            if (nameNoExt.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+                nameNoExt = nameNoExt[..^4];
+
+            var parts = nameNoExt.Split('-', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 1 && parts[0] == "patch")
             {
-                var numPart = lower.Replace("patch-", "").Replace(".mpq", "");
-                if (int.TryParse(numPart, out int num))
-                    return 1000 + num;
+                bool isLocale = false;
+                int suffixIndex = 1;
+                if (parts.Length >= 2 && parts[1].Length == 4 && parts[1].All(char.IsLetter))
+                {
+                    // e.g. patch-enus, patch-enus-2
+                    isLocale = true;
+                    suffixIndex = 2;
+                }
+
+                string? suffix = parts.Length > suffixIndex ? parts[suffixIndex] : null;
+                int suffixRank = 0;
+
+                if (!string.IsNullOrEmpty(suffix))
+                {
+                    if (int.TryParse(suffix, out int n))
+                    {
+                        // patch-2.mpq => 2
+                        suffixRank = Math.Clamp(n, 0, 499);
+                    }
+                    else if (suffix.Length == 1 && suffix[0] >= 'a' && suffix[0] <= 'z')
+                    {
+                        // patch-a.mpq .. patch-z.mpq => after numeric patches
+                        suffixRank = 500 + (suffix[0] - 'a' + 1);
+                    }
+                    else
+                    {
+                        // Other patch naming schemes (unknown)
+                        suffixRank = 900;
+                    }
+                }
+
+                // Global patches: 1000.., locale patches: 2000.. so locale overrides global.
+                return (isLocale ? 2000 : 1000) + suffixRank;
             }
-            return 1099;
+
+            // Any other file that starts with patch
+            return 2900;
         }
         
         if (lower.Contains("enus") || lower.Contains("engb") || lower.Contains("dede") || lower.Contains("locale"))
@@ -863,31 +905,78 @@ public class NativeMpqService : IDisposable
     {
         if (data.Length == 0)
             return null;
-        
-        byte compressionType = data[0];
-        var compressedData = new byte[data.Length - 1];
-        Array.Copy(data, 1, compressedData, 0, compressedData.Length);
-        
-        switch (compressionType)
+
+        // MPQ per-sector compression uses a bitmask (not a single enum). Common bits:
+        // 0x02 = ZLIB, 0x08 = PKWARE (implode), 0x10 = BZip2. Custom patches often use 0x12 (ZLIB|BZip2).
+        const byte MPQ_COMP_HUFFMAN = 0x01;
+        const byte MPQ_COMP_ZLIB    = 0x02;
+        const byte MPQ_COMP_PKWARE  = 0x08;
+        const byte MPQ_COMP_BZIP2   = 0x10;
+        const byte MPQ_COMP_LZMA    = 0x80;
+
+        byte mask = data[0];
+        var payload = new byte[data.Length - 1];
+        Array.Copy(data, 1, payload, 0, payload.Length);
+
+        byte unsupported = (byte)(mask & ~(MPQ_COMP_HUFFMAN | MPQ_COMP_ZLIB | MPQ_COMP_PKWARE | MPQ_COMP_BZIP2 | MPQ_COMP_LZMA));
+        if (unsupported != 0)
         {
-            case 0x02: // ZLIB
-                return DecompressZlib(compressedData);
-            
-            case 0x08: // PKWARE DCL (implode)
-                Console.WriteLine($"[NativeMpqService] PKWARE: first bytes after type: {(compressedData.Length >= 8 ? BitConverter.ToString(compressedData, 0, Math.Min(16, compressedData.Length)) : "too short")} ({compressedData.Length} bytes → {expectedSize})");
-                return PkwareExplode.Decompress(compressedData, expectedSize);
-            
-            case 0x10: // BZip2
-                Console.WriteLine($"[NativeMpqService] BZip2 compression not implemented ({data.Length} bytes)");
+            Console.WriteLine($"[NativeMpqService] Unsupported MPQ compression bits: 0x{unsupported:X2} (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        if ((mask & MPQ_COMP_LZMA) != 0)
+        {
+            Console.WriteLine($"[NativeMpqService] LZMA MPQ compression not implemented (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        if ((mask & MPQ_COMP_HUFFMAN) != 0)
+        {
+            Console.WriteLine($"[NativeMpqService] Huffman MPQ compression not implemented (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        // Decompress in a stable order; keep PKWARE last because it needs expectedSize.
+        byte[] current = payload;
+
+        if ((mask & MPQ_COMP_BZIP2) != 0)
+        {
+            var bz = DecompressBzip2(current);
+            if (bz == null)
                 return null;
-            
-            case 0x12: // ZLIB + PKWARE combo (seen in some MPQs)
-                Console.WriteLine($"[NativeMpqService] ZLIB+PKWARE combo compression ({data.Length} bytes)");
-                return DecompressZlib(compressedData);
-            
-            default:
-                Console.WriteLine($"[NativeMpqService] Unknown compression type 0x{compressionType:X2} ({data.Length} bytes)");
-                return data;
+            current = bz;
+        }
+
+        if ((mask & MPQ_COMP_ZLIB) != 0)
+        {
+            var z = DecompressZlib(current);
+            if (z == null)
+                return null;
+            current = z;
+        }
+
+        if ((mask & MPQ_COMP_PKWARE) != 0)
+        {
+            current = PkwareExplode.Decompress(current, expectedSize);
+        }
+
+        return current;
+    }
+
+    private static byte[]? DecompressBzip2(byte[] data)
+    {
+        try
+        {
+            using var input = new MemoryStream(data, writable: false);
+            using var bz = new BZip2InputStream(input);
+            using var output = new MemoryStream();
+            bz.CopyTo(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
         }
     }
 

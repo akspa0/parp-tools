@@ -39,6 +39,8 @@ public partial class ViewerApp : IDisposable
     private GL _gl = null!;
     private IInputContext _input = null!;
     private ImGuiController _imGui = null!;
+
+    private string? _imguiIniPath;
     private Camera _camera = new();
     private ISceneRenderer? _renderer;
 
@@ -106,6 +108,7 @@ public partial class ViewerApp : IDisposable
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
+    private bool _showManipulationTools = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -344,6 +347,31 @@ public partial class ViewerApp : IDisposable
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
+
+        // Enable ImGui docking so panels can be rearranged and persisted.
+        var io = ImGui.GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+        // Persist ImGui layout to a user-writable location.
+        try
+        {
+            _imguiIniPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "parp-tools",
+                "MdxViewer",
+                "imgui.ini");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(_imguiIniPath) ?? ".");
+
+            if (File.Exists(_imguiIniPath))
+            {
+                ImGui.LoadIniSettingsFromDisk(_imguiIniPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[ImGui] Failed to load ini settings: {ex.Message}");
+            _imguiIniPath = null;
+        }
 
         _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
         _gl.Enable(EnableCap.DepthTest);
@@ -903,6 +931,12 @@ void main() {
 
     private void DrawUI()
     {
+        // Docking host (panels can be docked and layout is saved in imgui.ini)
+        if ((ImGui.GetIO().ConfigFlags & ImGuiConfigFlags.DockingEnable) != 0)
+        {
+            ImGui.DockSpaceOverViewport(ImGui.GetMainViewport(), ImGuiDockNodeFlags.PassthruCentralNode);
+        }
+
         DrawMenuBar();
 
         // Top toolbar with visibility checkboxes (only when terrain is loaded)
@@ -914,6 +948,10 @@ void main() {
             DrawLeftSidebar();
         if (_showRightSidebar)
             DrawRightSidebar();
+
+        // Manipulation tools (dockable window)
+        if (_showManipulationTools)
+            DrawManipulationToolsWindow();
 
         DrawStatusBar();
         
@@ -1011,6 +1049,7 @@ void main() {
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
+                ImGui.MenuItem("Manipulation Tools", "", ref _showManipulationTools);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
                 ImGui.Separator();
@@ -2961,11 +3000,10 @@ void main() {
         var io = ImGui.GetIO();
         float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(0, topOffset));
-        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+        ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        if (ImGui.Begin("Browser"))
         {
             // ── File Browser section ──
             if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", ImGuiTreeNodeFlags.DefaultOpen))
@@ -3117,11 +3155,10 @@ void main() {
         var io = ImGui.GetIO();
         float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset));
-        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        if (ImGui.Begin("Inspector"))
         {
             // ── Selected Object section (always visible when something is selected) ──
             if (!string.IsNullOrEmpty(_selectedObjectInfo))
@@ -3443,10 +3480,34 @@ void main() {
         {
             ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
         }
+    }
 
-        // Chunk clipboard
-        ImGui.Separator();
+    private void DrawManipulationToolsWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(420, 520), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Manipulation Tools", ref _showManipulationTools))
+        {
+            ImGui.End();
+            return;
+        }
+
+        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            ImGui.TextWrapped("No terrain loaded.");
+            ImGui.End();
+            return;
+        }
+
+        DrawChunkClipboardTools(renderer);
+        ImGui.End();
+    }
+
+    private void DrawChunkClipboardTools(TerrainRenderer renderer)
+    {
         ImGui.Text("Chunk Clipboard");
+        ImGui.Separator();
+
         ImGui.Checkbox("Enable Chunk Tool", ref _chunkToolEnabled);
         ImGui.SameLine();
         ImGui.Checkbox("Show Overlay", ref _chunkClipboardShowOverlay);
@@ -6948,6 +7009,17 @@ void main() {
         _disposed = true;
 
         SaveViewerSettings();
+        if (!string.IsNullOrWhiteSpace(_imguiIniPath))
+        {
+            try
+            {
+                ImGui.SaveIniSettingsToDisk(_imguiIniPath);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Trace($"[ImGui] Failed to save ini settings: {ex.Message}");
+            }
+        }
 
         _loadingScreen?.Dispose();
         _sqlPopulationService?.Dispose();

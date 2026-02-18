@@ -50,6 +50,49 @@ namespace WoWMapConverter.Core.Formats.LichKing
             return ApplyEdgeFix(ReadUncompressedAlpha4Bit(_data, offset));
         }
 
+        /// <summary>
+        /// Relaxed decoder for cases where MCLY flags are missing/mis-set but MCAL + AlphaMapOffset
+        /// are still valid. Uses next-layer offset (when provided) to infer whether the alpha is
+        /// likely 2048-byte 4-bit vs 4096-byte 8-bit.
+        /// </summary>
+        public byte[]? GetAlphaMapForLayerRelaxed(MclyEntry mclyEntry, int? nextLayerAlphaOffset, bool bigAlphaDefault = false)
+        {
+            if (_data == null || _data.Length == 0)
+                return null;
+
+            int offset = unchecked((int)mclyEntry.AlphaMapOffset);
+            if (offset < 0 || offset >= _data.Length)
+                return null;
+
+            bool compressed = (mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0;
+            if (compressed)
+                return ApplyEdgeFix(ReadCompressedAlpha(_data, offset));
+
+            int available = _data.Length - offset;
+            int inferredSpan = available;
+            if (nextLayerAlphaOffset.HasValue)
+            {
+                int next = nextLayerAlphaOffset.Value;
+                if (next > offset)
+                    inferredSpan = Math.Min(inferredSpan, next - offset);
+            }
+
+            // If the WDT bigAlpha flag is set, prefer 8-bit.
+            if (bigAlphaDefault)
+                return ApplyEdgeFix(ReadBigAlpha(_data, offset));
+
+            // Infer 8-bit when the layer span clearly supports it.
+            if (inferredSpan >= 4096)
+                return ApplyEdgeFix(ReadBigAlpha(_data, offset));
+
+            // Default to 4-bit for 3.3.5 when not bigAlpha.
+            if (inferredSpan >= 2048)
+                return ApplyEdgeFix(ReadUncompressedAlpha4Bit(_data, offset));
+
+            // Last resort: try compressed decode (some chunks have odd spans/padding).
+            return ApplyEdgeFix(ReadCompressedAlpha(_data, offset));
+        }
+
         private static byte[] ReadCompressedAlpha(byte[] src, int offset)
         {
             var dst = new byte[64 * 64];

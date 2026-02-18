@@ -41,6 +41,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 throw new InvalidDataException("MCNK data too short for header");
 
             Header = ReadHeader(data);
+
             ScanSubchunks(data);
         }
 
@@ -229,7 +230,9 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 h.OfsMcly = BitConverter.ToUInt32(data, 0x1C);
                 h.OfsMcrf = BitConverter.ToUInt32(data, 0x20);
                 h.OfsMcal = BitConverter.ToUInt32(data, 0x24);
+                h.SizeMcal = BitConverter.ToUInt32(data, 0x28);
                 h.OfsMcsh = BitConverter.ToUInt32(data, 0x2C);
+                h.SizeMcsh = BitConverter.ToUInt32(data, 0x30);
                 h.OfsMcse = BitConverter.ToUInt32(data, 0x58);
                 h.OfsMclq = BitConverter.ToUInt32(data, 0x60);
                 h.SizeMclq = BitConverter.ToUInt32(data, 0x64);
@@ -299,7 +302,9 @@ namespace WoWMapConverter.Core.Formats.LichKing
         public uint OfsMcly;  // 0x1c
         public uint OfsMcrf;  // 0x20
         public uint OfsMcal;  // 0x24
+        public uint SizeMcal; // 0x28 (sizeAlpha)
         public uint OfsMcsh;  // 0x2c
+        public uint SizeMcsh; // 0x30 (sizeShadow)
         public uint OfsMcse;  // 0x58
         public uint OfsMclq;  // 0x60
         public uint SizeMclq; // 0x64 (size of MCLQ data, from 0.5.3 header)

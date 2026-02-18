@@ -93,11 +93,14 @@ public static class MapGlbExporter
             float ry = -p.Rotation.X * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
+            // Placement positions are already in renderer coords (Z-up), consistent with terrain chunk WorldPosition.
+            var pos = p.Position;
+
             var transformZup = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+                * Matrix4x4.CreateTranslation(pos);
 
             scene.AddRigidMesh(mdxMesh, ConvertTransformZupToYup(transformZup));
         }
@@ -121,10 +124,13 @@ public static class MapGlbExporter
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
 
+            // Placement positions are already in renderer coords (Z-up), consistent with terrain chunk WorldPosition.
+            var pos = p.Position;
+
             var transformZup = Matrix4x4.CreateRotationX(rx)
                 * Matrix4x4.CreateRotationY(ry)
                 * Matrix4x4.CreateRotationZ(rz)
-                * Matrix4x4.CreateTranslation(p.Position);
+                * Matrix4x4.CreateTranslation(pos);
 
             scene.AddRigidMesh(wmoMesh, ConvertTransformZupToYup(transformZup));
         }
@@ -292,7 +298,7 @@ public static class MapGlbExporter
                 (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
             }
 
-            using var image = Image.LoadPixelData<Rgba32>(pixels, w, h);
+            using var image = SixLabors.ImageSharp.Image.LoadPixelData<Rgba32>(pixels, w, h);
             using var output = new MemoryStream();
             image.SaveAsPng(output);
             return output.ToArray();
@@ -527,7 +533,7 @@ public static class MapGlbExporter
         }
 
         // material → primitive cache so we don't call UsePrimitive repeatedly.
-        var primCache = new Dictionary<MaterialBuilder, MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>.PrimitiveBuilder>();
+        var primCache = new Dictionary<MaterialBuilder, PrimitiveBuilder<MaterialBuilder, VertexPositionNormal, VertexTexture1, VertexEmpty>>();
 
         for (int gi = 0; gi < wmo.Groups.Count; gi++)
         {

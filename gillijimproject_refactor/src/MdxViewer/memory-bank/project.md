@@ -78,6 +78,10 @@
 
 ## Known Issues & Solutions
 
+### Patch MPQs (A..Z) and overlapping files
+- **Symptom**: 3.3.5 data can hang when multiple patch MPQs contain the same DBC.
+- **Fix**: Patches load with deterministic priority and reads walk archives in reverse order so the last patch (e.g., patch-Z.mpq) wins. MPQ decompression now supports bitmask combos including BZip2 used by custom patch chains.
+
 ### MPQ File Discovery
 - **Symptom**: Only BLP/WMO files show, no MDX/M2
 - **Fix**: Call `_mpq.GetAllKnownFiles()` and add to `_fileSet`

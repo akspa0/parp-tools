@@ -135,6 +135,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Parse top-level MTEX chunk for texture names
         var textures = new List<string>();
 
+        // If this tile uses split ADTs, textures/alphas may live in *_tex0.adt and placements in *_obj0.adt.
+        // We still read geometry (heights/normals/holes/liquid) from the root ADT.
+        Dictionary<(int x, int y), Mcnk>? texMcnkByIndex = null;
+        GillijimProject.WowFiles.Mhdr? texMhdr = null;
+        int texMhdrStart = 0;
+        if (texBytes != null && texBytes.Length >= 16)
+        {
+            if (TryBuildMcnkIndexMap(texBytes, out texMcnkByIndex, out texMhdrStart, out texMhdr))
+            {
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"  Tile({tileX},{tileY}) split: parsed {texMcnkByIndex.Count} texture MCNKs from _tex0.adt");
+            }
+            else
+            {
+                texMcnkByIndex = null;
+            }
+        }
+
         // Find MHDR — all other chunks located via MHDR offsets (Ghidra-verified)
         int mhdrOffset = FindChunk(adtBytes, "MHDR");
         if (mhdrOffset < 0)
@@ -171,6 +189,18 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 if (next <= i) break;
                 i = next;
+            }
+        }
+
+        // Split ADTs: MTEX ordering typically matches *_tex0.adt, not the root ADT.
+        // Prefer *_tex0.adt MTEX when available to keep MCLY.textureID indices consistent.
+        if (texBytes != null && texMhdr != null && texMhdrStart > 0)
+        {
+            var tex0Textures = ParseMtexViaMhdr(texBytes, texMhdrStart, texMhdr);
+            if (tex0Textures.Count > 0)
+            {
+                textures.Clear();
+                textures.AddRange(tex0Textures);
             }
         }
 
@@ -315,13 +345,17 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 var normals = ExtractNormals(mcnk.McnrData);
 
                 // Layers
-                var layers = ExtractLayers(mcnk.TextureLayers);
+                var layerSource = (texMcnkByIndex != null && texMcnkByIndex.TryGetValue((chunkX, chunkY), out var texMcnk))
+                    ? texMcnk
+                    : mcnk;
+
+                var layers = ExtractLayers(layerSource.TextureLayers);
 
                 // Alpha maps
-                var alphaMaps = ExtractAlphaMaps(mcnk, _useBigAlpha);
+                var alphaMaps = ExtractAlphaMaps(layerSource, _useBigAlpha);
 
                 // Shadow map
-                byte[]? shadowMap = ExtractShadowMap(mcnk.McshData);
+                byte[]? shadowMap = ExtractShadowMap(layerSource.McshData ?? mcnk.McshData);
 
                 // MCCV vertex colors (WotLK+)
                 byte[]? mccvColors = null;
@@ -422,7 +456,82 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
         // NOT by linear scan. Name resolution: MDDF.nameId → MMID[nameId] → byte offset into MMDX.
-        CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
+        if (objBytes != null && objBytes.Length >= 16 && TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr))
+            CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+        else
+            CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
+    }
+
+    private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)
+    {
+        mhdrStart = 0;
+        mhdr = default!;
+
+        int mhdrOffset = FindChunk(adtBytes, "MHDR");
+        if (mhdrOffset < 0 || mhdrOffset + 8 > adtBytes.Length)
+            return false;
+
+        mhdr = new GillijimProject.WowFiles.Mhdr(adtBytes, mhdrOffset);
+        mhdrStart = mhdrOffset + 8;
+        return true;
+    }
+
+    private static bool TryBuildMcnkIndexMap(
+        byte[] adtBytes,
+        out Dictionary<(int x, int y), Mcnk> mcnkByIndex,
+        out int mhdrStart,
+        out GillijimProject.WowFiles.Mhdr mhdr)
+    {
+        mcnkByIndex = new Dictionary<(int x, int y), Mcnk>();
+        mhdrStart = 0;
+        mhdr = default!;
+
+        if (!TryGetMhdr(adtBytes, out mhdrStart, out mhdr))
+            return false;
+
+        int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
+        if (mcinOff == 0)
+            return false;
+
+        int mcinAbsPos = mhdrStart + mcinOff;
+        if (mcinAbsPos + 8 > adtBytes.Length)
+            return false;
+
+        string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
+        if (mcinSig != "NICM")
+            return false;
+
+        int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
+        if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
+            return false;
+
+        var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
+        var offsets = mcin.GetMcnkOffsets();
+        int entryCount = Math.Min(256, offsets.Count);
+
+        for (int ci = 0; ci < entryCount; ci++)
+        {
+            int off = offsets[ci];
+            if (off <= 0) continue;
+            if (off < 0 || off + 8 > adtBytes.Length) continue;
+
+            string sig = Encoding.ASCII.GetString(adtBytes, off, 4);
+            if (sig != "KNCM") continue;
+
+            int mcnkSize = BitConverter.ToInt32(adtBytes, off + 4);
+            if (mcnkSize <= 0 || off + 8 + mcnkSize > adtBytes.Length) continue;
+            if (mcnkSize < 128) continue;
+
+            var mcnkData = new byte[mcnkSize];
+            Array.Copy(adtBytes, off + 8, mcnkData, 0, mcnkSize);
+
+            var mcnk = new Mcnk(mcnkData);
+            int chunkX = (int)mcnk.Header.IndexX;
+            int chunkY = (int)mcnk.Header.IndexY;
+            mcnkByIndex[(chunkX, chunkY)] = mcnk;
+        }
+
+        return mcnkByIndex.Count > 0;
     }
 
     private Vector3[] ExtractNormals(byte[]? mcnrData)
@@ -476,33 +585,44 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mcnk.TextureLayers == null || mcnk.TextureLayers.Count <= 1)
             return maps;
 
-        // Detect format: if any layer has UseAlpha (0x100) or CompressedAlpha (0x200),
-        // use 3.3.5 flag-based decode via Mcal. Otherwise use Alpha-style sequential 4-bit.
-        bool hasLkFlags = false;
-        for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
-        {
-            if ((mcnk.TextureLayers[i].Flags & (MclyFlags.UseAlpha | MclyFlags.CompressedAlpha)) != 0)
-            {
-                hasLkFlags = true;
-                break;
-            }
-        }
+        bool bigAlpha = InferBigAlphaForChunk(mcnk, useBigAlpha);
 
-        if (hasLkFlags && mcnk.AlphaMaps != null)
+        // Prefer LK-style decode when MCAL is present, even if MCLY flags are missing/mis-set.
+        // We use AlphaMapOffset + next-layer offset to infer 4-bit vs 8-bit stride.
+        if (mcnk.AlphaMaps != null && mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
         {
-            // 3.3.5 path: per-layer offsets + flags (compressed, big alpha, etc.)
-            for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+            int layerCount = mcnk.TextureLayers.Count;
+            for (int i = 1; i < layerCount && i < 4; i++)
             {
+                int offset = unchecked((int)mcnk.TextureLayers[i].AlphaMapOffset);
+                if (offset < 0 || offset >= mcnk.McalRawData.Length)
+                    continue;
+
+                int? nextOffset = null;
+                for (int j = i + 1; j < layerCount; j++)
+                {
+                    int candidate = unchecked((int)mcnk.TextureLayers[j].AlphaMapOffset);
+                    if (candidate > offset && candidate <= mcnk.McalRawData.Length)
+                    {
+                        nextOffset = candidate;
+                        break;
+                    }
+                }
+
                 try
                 {
-                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayer(mcnk.TextureLayers[i], useBigAlpha);
+                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayerRelaxed(mcnk.TextureLayers[i], nextOffset, bigAlpha);
                     if (alpha != null && alpha.Length > 0)
                         maps[i] = alpha;
                 }
-                catch { }
+                catch
+                {
+                    // ignore per-layer decode errors; fallback below
+                }
             }
         }
-        else if (mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
+
+        if (maps.Count == 0 && mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
         {
             // Alpha-style (0.5.3/0.6.0): sequential 4-bit nibbles, 2048 bytes per layer
             int offset = 0;
@@ -530,6 +650,41 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
+    }
+
+    private static bool InferBigAlphaForChunk(Mcnk mcnk, bool wdtBigAlpha)
+    {
+        if (wdtBigAlpha)
+            return true;
+
+        int layerCount = mcnk.TextureLayers?.Count ?? (int)mcnk.Header.Layers;
+        int alphaLayerCount = Math.Max(0, layerCount - 1);
+        if (alphaLayerCount == 0)
+            return false;
+
+        // Prefer MCNK header sizeAlpha when present.
+        uint sizeAlpha = mcnk.Header.SizeMcal;
+        if (sizeAlpha != 0)
+        {
+            // Uncompressed bigAlpha: 4096 bytes per alpha layer.
+            if (sizeAlpha % 4096u == 0 && (sizeAlpha / 4096u) >= (uint)alphaLayerCount)
+                return true;
+
+            // Uncompressed 4-bit alpha: 2048 bytes per alpha layer.
+            if (sizeAlpha % 2048u == 0 && (sizeAlpha / 2048u) >= (uint)alphaLayerCount)
+                return false;
+
+            // Heuristic: if the alpha block is large enough to plausibly be 8-bit, treat as big.
+            if (sizeAlpha >= 4096u)
+                return true;
+        }
+
+        // Fallback to MCAL payload length for simple uncompressed cases.
+        int mcalLen = mcnk.McalRawData?.Length ?? 0;
+        if (mcalLen >= 4096 && (mcalLen % 4096) == 0 && (mcalLen / 4096) >= alphaLayerCount)
+            return true;
+
+        return false;
     }
 
     private static byte[]? ExtractShadowMap(byte[]? mcshData)
