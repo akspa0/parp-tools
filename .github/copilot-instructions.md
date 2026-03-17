@@ -43,3 +43,17 @@ Use these workspace agents (`.github/agents/`) for multi-step integration work:
 - **@commit-analyzer** — Pre-integration commit analysis. Breaks down commits into file-level risk classifications and extraction recommendations.
 
 Typical integration workflow: `@commit-analyzer` → `@cherry-pick` → `@build-check` → `@terrain-validator`. Use `@feature-impl` for features with no existing code to cherry-pick (see `gillijimproject_refactor/src/MdxViewer/memory-bank/implementation_prompts.md`).
+
+
+## Complex Task Execution (CRITICAL — avoid context loss)
+- **Decompose aggressively**: Break multi-file or multi-step work into small, independent subagent tasks. Each subagent should own one bounded piece of work (e.g. one module, one endpoint, one test file).
+- **Save early, save often**: After every meaningful unit of progress (a working function, a passing test, a completed module), immediately update `memory-bank/activeContext.md` and/or `memory-bank/progress.md` with what was done, what files changed, and what's next. Do NOT wait until the end of a session.
+- **Checkpoint before large operations**: Before starting a batch of changes that could fill the context window, write a session checkpoint to memory-bank summarizing current state, plan, and any partial results.
+- **Subagent result capture**: When a subagent completes, record its key outputs (files created/modified, test results, decisions made) to the memory bank before moving to the next subagent task.
+- **Prefer many small subagents over one large task**: A 10-step plan should be 10 subagent calls with memory-bank saves between each, not one monolithic implementation pass.
+- **Recovery-first mindset**: Write memory-bank state as if the next message could be a fresh context window that needs to pick up where you left off.
+- **Always use the questions tool first for prompt/spec work**: For any task driven by `.github/prompts/*.prompt.md`, `memory-bank` plans, artifact plans, or any work with more than 3 meaningful steps, use the questions tool before implementation to confirm scope, acceptance gates, execution order, and blockers.
+- **Always use Plan mode for prompt plans**: For complex prompt-planning documents and spec-driven tool or workflow improvements, the questions tool must be used in plan mode so implementation starts from a verified spec rather than assumptions.
+- **Use spec-based flows for prompt planning documents**: Treat prompt plans as specs to verify against the live codebase, not as truth. Audit implementation status first, then trim or rewrite stale prompt docs into remaining-work docs before coding when needed.
+- **Always use prompt plans**: For any task with more than 3 steps, create or update a detailed prompt plan that breaks the work into bounded subagent tasks and maps phases to files, tests, and acceptance gates.
+- **Keep phase completion honest**: For prompt/spec-driven work, do not mark a phase complete until the code path, focused test, or real-data validation is actually proven.
