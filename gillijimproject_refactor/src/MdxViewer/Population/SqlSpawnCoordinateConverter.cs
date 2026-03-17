@@ -1,5 +1,4 @@
 using System.Numerics;
-using MdxViewer.Rendering;
 
 namespace MdxViewer.Population;
 

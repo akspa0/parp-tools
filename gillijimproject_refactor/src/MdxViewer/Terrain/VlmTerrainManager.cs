@@ -56,6 +56,7 @@ public class VlmTerrainManager : ISceneRenderer
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
+    public bool HideTerrainHoles => !_tileMeshBuilder.IgnoreHoleMask;
 
     /// <summary>
     /// Try to get parsed tile data for a currently loaded tile.
@@ -76,8 +77,9 @@ public class VlmTerrainManager : ISceneRenderer
     /// Rebuild a loaded tile's GPU mesh from the provided chunk data.
     /// Call on the render thread.
     /// </summary>
-    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
+    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks, bool markDirty = true)
     {
+        var chunkSnapshot = newChunks.ToArray();
         var key = (tileX, tileY);
         if (_loadedTiles.TryGetValue(key, out var oldMesh))
         {
@@ -87,7 +89,7 @@ public class VlmTerrainManager : ISceneRenderer
             _loadedTiles.Remove(key);
         }
 
-        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, newChunks);
+        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, chunkSnapshot);
         if (tileMesh == null)
             return;
 
@@ -97,15 +99,38 @@ public class VlmTerrainManager : ISceneRenderer
         if (!_loadedTileResults.TryGetValue(key, out var cached))
             cached = new TileLoadResult();
         cached.Chunks.Clear();
-        cached.Chunks.AddRange(newChunks);
+        cached.Chunks.AddRange(chunkSnapshot);
         _loadedTileResults[key] = cached;
 
         if (!_loader.TileTextures.TryGetValue(key, out var texNames))
             texNames = new List<string>();
         _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
-        _liquidRenderer.AddChunks(newChunks);
+        _liquidRenderer.AddChunks(chunkSnapshot);
 
-        _dirtyTiles.Add((tileX, tileY));
+        if (markDirty)
+            _dirtyTiles.Add((tileX, tileY));
+    }
+
+    public void SetHideTerrainHoles(bool hideTerrainHoles)
+    {
+        bool ignoreHoleMask = !hideTerrainHoles;
+        if (_tileMeshBuilder.IgnoreHoleMask == ignoreHoleMask)
+            return;
+
+        _tileMeshBuilder.IgnoreHoleMask = ignoreHoleMask;
+        RebuildLoadedTilesForHoleMode();
+    }
+
+    private void RebuildLoadedTilesForHoleMode()
+    {
+        var loadedKeys = _loadedTiles.Keys.ToList();
+        foreach (var (tileX, tileY) in loadedKeys)
+        {
+            if (!_loadedTileResults.TryGetValue((tileX, tileY), out var cached))
+                continue;
+
+            ReplaceTileChunksAndRebuild(tileX, tileY, cached.Chunks, markDirty: false);
+        }
     }
 
     public int SaveDirtyTiles()

@@ -328,7 +328,9 @@ Based on `06_Detail_Doodads.md`.
 
 ### 7.3 Additional Features
 - [ ] WDL low-res heightmap for distant terrain
-- [ ] Skybox rendering
+- [~] Skybox rendering
+  - Procedural sky dome exists and later-client `Environments/Stars/*` / `SkyBox` M2 assets now route through a dedicated backdrop pass.
+  - Remaining work is first-class skybox metadata support (DBC/WMO/MOSB/light-driven selection) rather than treating everything through placement heuristics.
 - [ ] Collision detection visualization
 - [ ] Screenshot/video capture
 

@@ -17,10 +17,10 @@ public class WdlPreviewRenderer : IDisposable
     private uint _textureId;
     private int _textureWidth;
     private int _textureHeight;
-    private WdlParser.WdlData? _wdlData;
+    private WdlPreviewData? _previewData;
     private string _mapDirectory = "";
 
-    public bool HasPreview => _textureId != 0 && _wdlData != null;
+    public bool HasPreview => _textureId != 0 && _previewData != null;
     public uint TextureId => _textureId;
     public int Width => _textureWidth;
     public int Height => _textureHeight;
@@ -34,168 +34,55 @@ public class WdlPreviewRenderer : IDisposable
     /// <summary>
     /// Load and render a WDL file as a preview texture.
     /// </summary>
-    public string? LastError { get; private set; }
+    public string? LastError { get; internal set; }
 
     public bool LoadWdl(IDataSource dataSource, string mapDirectory)
     {
-        _mapDirectory = mapDirectory;
-        LastError = null;
-        string wdlPath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}.wdl";
-
-        try
+        if (!WdlPreviewDataBuilder.TryBuild(dataSource, mapDirectory, out var previewData, out var error))
         {
-            byte[]? wdlData = dataSource.ReadFile(wdlPath);
-
-            // Alpha 0.5.3: WDL stored as .wdl.mpq
-            if (wdlData == null || wdlData.Length == 0)
-            {
-                wdlData = dataSource.ReadFile(wdlPath + ".mpq");
-            }
-
-            if (wdlData == null || wdlData.Length == 0)
-            {
-                LastError = $"No WDL data found for {mapDirectory}";
-                ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
-                return false;
-            }
-
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Read {wdlData.Length} bytes, first4=0x{(wdlData.Length >= 4 ? BitConverter.ToUInt32(wdlData, 0) : 0):X8}");
-
-            _wdlData = WdlParser.Parse(wdlData);
-            if (_wdlData == null)
-            {
-                LastError = $"Failed to parse WDL for {mapDirectory} (invalid format or version)";
-                ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
-                return false;
-            }
-
-            // Count tiles with data
-            int tilesWithData = _wdlData.Tiles.Count(t => t?.HasData == true);
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Loaded {mapDirectory}.wdl: {tilesWithData}/4096 tiles");
-
-            if (tilesWithData == 0)
-            {
-                LastError = $"WDL parsed but contains 0 tiles with data";
-                return false;
-            }
-
-            // Generate preview texture
-            GeneratePreviewTexture();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LastError = $"Error loading {mapDirectory}: {ex.Message}";
+            LastError = error ?? $"Failed to build WDL preview for {mapDirectory}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL Preview] {LastError}");
             return false;
         }
+
+        return LoadPreview(previewData!);
     }
 
-    /// <summary>
-    /// Generate a heightmap preview texture from WDL data.
-    /// 64x64 tiles, each rendered as a single pixel (average height).
-    /// Color-coded: blue=low, green=mid, brown=high.
-    /// </summary>
-    private void GeneratePreviewTexture()
+    internal bool LoadPreview(WdlPreviewData previewData)
     {
-        if (_wdlData == null) return;
-
-        const int tileSize = 8; // Each WDL tile rendered as 8x8 pixels for better visibility
-        _textureWidth = 64 * tileSize;
-        _textureHeight = 64 * tileSize;
-
-        byte[] pixels = new byte[_textureWidth * _textureHeight * 4]; // RGBA
-
-        // First pass: find min/max heights for normalization
-        short minHeight = short.MaxValue;
-        short maxHeight = short.MinValue;
-        foreach (var tile in _wdlData.Tiles)
+        if (previewData.PreviewRgba == null || previewData.PreviewRgba.Length == 0)
         {
-            if (tile?.HasData != true) continue;
-            for (int r = 0; r < 17; r++)
-            {
-                for (int c = 0; c < 17; c++)
-                {
-                    short h = tile.Height17[r, c];
-                    if (h < minHeight) minHeight = h;
-                    if (h > maxHeight) maxHeight = h;
-                }
-            }
+            LastError = $"Preview payload for {previewData.MapDirectory} is empty.";
+            return false;
         }
 
-        float heightRange = maxHeight - minHeight;
-        if (heightRange < 1f) heightRange = 1f;
+        _previewData = previewData;
+        _mapDirectory = previewData.MapDirectory;
+        LastError = null;
+        GeneratePreviewTexture(previewData);
+        return true;
+    }
 
-        // Second pass: render tiles
-        for (int tileY = 0; tileY < 64; tileY++)
+    public void ClearPreview()
+    {
+        _previewData = null;
+        _mapDirectory = "";
+        LastError = null;
+
+        if (_textureId != 0)
         {
-            for (int tileX = 0; tileX < 64; tileX++)
-            {
-                int tileIndex = tileY * 64 + tileX;
-                var tile = _wdlData.Tiles[tileIndex];
-
-                Vector3 color;
-                if (tile?.HasData == true)
-                {
-                    // Calculate average height for this tile
-                    float avgHeight = 0f;
-                    int count = 0;
-                    for (int r = 0; r < 17; r++)
-                    {
-                        for (int c = 0; c < 17; c++)
-                        {
-                            avgHeight += tile.Height17[r, c];
-                            count++;
-                        }
-                    }
-                    avgHeight /= count;
-
-                    // Normalize to 0-1 range
-                    float normalized = (avgHeight - minHeight) / heightRange;
-
-                    // Color gradient: blue (low) -> green (mid) -> brown (high)
-                    if (normalized < 0.33f)
-                    {
-                        // Blue to cyan
-                        float t = normalized / 0.33f;
-                        color = new Vector3(0f, t * 0.5f, 0.5f + t * 0.5f);
-                    }
-                    else if (normalized < 0.66f)
-                    {
-                        // Cyan to green
-                        float t = (normalized - 0.33f) / 0.33f;
-                        color = new Vector3(t * 0.3f, 0.5f + t * 0.5f, 1f - t);
-                    }
-                    else
-                    {
-                        // Green to brown
-                        float t = (normalized - 0.66f) / 0.34f;
-                        color = new Vector3(0.3f + t * 0.4f, 1f - t * 0.5f, t * 0.2f);
-                    }
-                }
-                else
-                {
-                    // No data - dark gray
-                    color = new Vector3(0.1f, 0.1f, 0.1f);
-                }
-
-                // Fill tileSize x tileSize block with this color
-                for (int py = 0; py < tileSize; py++)
-                {
-                    for (int px = 0; px < tileSize; px++)
-                    {
-                        int pixelX = tileX * tileSize + px;
-                        int pixelY = tileY * tileSize + py;
-                        int pixelIndex = (pixelY * _textureWidth + pixelX) * 4;
-
-                        pixels[pixelIndex + 0] = (byte)(color.X * 255);
-                        pixels[pixelIndex + 1] = (byte)(color.Y * 255);
-                        pixels[pixelIndex + 2] = (byte)(color.Z * 255);
-                        pixels[pixelIndex + 3] = 255;
-                    }
-                }
-            }
+            _gl.DeleteTexture(_textureId);
+            _textureId = 0;
         }
+
+        _textureWidth = 0;
+        _textureHeight = 0;
+    }
+
+    private void GeneratePreviewTexture(WdlPreviewData previewData)
+    {
+        _textureWidth = previewData.Width;
+        _textureHeight = previewData.Height;
 
         // Upload to GPU
         if (_textureId != 0)
@@ -203,14 +90,14 @@ public class WdlPreviewRenderer : IDisposable
 
         _textureId = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, _textureId);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
         unsafe
         {
-            fixed (byte* ptr = pixels)
+            fixed (byte* ptr = previewData.PreviewRgba)
             {
                 _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba, (uint)_textureWidth, (uint)_textureHeight,
                     0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
@@ -242,33 +129,41 @@ public class WdlPreviewRenderer : IDisposable
     /// </summary>
     public Vector3 TileToWorldPosition(int tileX, int tileY)
     {
-        // WDL tile (0,0) is top-left, corresponds to ADT (63,63) in world space
-        // Transform: rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX
-        float rendererX = WoWConstants.MapOrigin - (tileY * WoWConstants.TileSize);
-        float rendererY = WoWConstants.MapOrigin - (tileX * WoWConstants.TileSize);
+        var sourceTile = PreviewTileToSourceTile(tileX, tileY);
 
         // Get height at tile center if available
         float height = 0f;
-        if (_wdlData != null)
+        if (_previewData != null)
         {
             int tileIndex = tileY * 64 + tileX;
-            var tile = _wdlData.Tiles[tileIndex];
-            if (tile?.HasData == true)
+            if ((uint)tileIndex < _previewData.TileCenterHeights.Length &&
+                (uint)tileIndex < _previewData.TileDataMask.Length &&
+                _previewData.TileDataMask[tileIndex] != 0)
             {
-                // Use center height (8,8 in 17x17 grid)
-                height = tile.Height17[8, 8];
+                height = _previewData.TileCenterHeights[tileIndex];
             }
         }
 
-        return new Vector3(rendererX, rendererY, height + 100f); // +100 to be above terrain
+        return GetTileSpawnPosition(sourceTile.tileX, sourceTile.tileY, height);
+    }
+
+    internal static (int tileX, int tileY) PreviewTileToSourceTile(int previewTileX, int previewTileY)
+    {
+        return (previewTileY, previewTileX);
+    }
+
+    internal static Vector3 GetTileSpawnPosition(int tileX, int tileY, float height)
+    {
+        // The active viewer terrain path indexes streamed world cells on ChunkSize,
+        // not on the full ADT TileSize constant. Keep WDL preview picks on the same
+        // coordinate grid or the selected spawn point lands far outside the map bounds.
+        float rendererX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.ChunkSize);
+        float rendererY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.ChunkSize);
+        return new Vector3(rendererX, rendererY, height + 100f);
     }
 
     public void Dispose()
     {
-        if (_textureId != 0)
-        {
-            _gl.DeleteTexture(_textureId);
-            _textureId = 0;
-        }
+        ClearPreview();
     }
 }

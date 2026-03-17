@@ -576,7 +576,7 @@ internal static class WarcraftNetM2Adapter
         };
     }
 
-    private static MdlGeoFlags MapLayerFlags(ushort renderFlags, TextureFlags textureFlags)
+    internal static MdlGeoFlags MapLayerFlags(ushort renderFlags, TextureFlags textureFlags)
     {
         var flags = MdlGeoFlags.None;
 
@@ -587,21 +587,11 @@ internal static class WarcraftNetM2Adapter
         if ((renderFlags & 0x4) != 0)
             flags |= MdlGeoFlags.TwoSided;
 
-        // Depth flags:
-        // Some client/version combinations don't reliably populate these bits.
-        // Default to depth-test/write ON unless the file explicitly provides depth bits.
-        // This prevents common world doodads (trees, rocks) from rendering "on top" of terrain.
-        const ushort M2DepthTest = 0x8;
-        const ushort M2DepthWrite = 0x10;
-        bool hasExplicitDepthBits = (renderFlags & (M2DepthTest | M2DepthWrite)) != 0;
-        if (hasExplicitDepthBits)
-        {
-            // MDX renderer expects inverse flags (disables)
-            if ((renderFlags & M2DepthTest) == 0)
-                flags |= MdlGeoFlags.NoDepthTest;
-            if ((renderFlags & M2DepthWrite) == 0)
-                flags |= MdlGeoFlags.NoDepthSet;
-        }
+        // Do not infer NoDepthTest / NoDepthSet from Warcraft.NET M2 render flags here.
+        // The bit layout is not a stable match for MDX geo flags across client versions,
+        // and treating 0x8/0x10 as depth controls causes fog/cloud world M2s to ignore
+        // terrain depth and render over the map. Keep depth test/write enabled by default
+        // for placed world models unless a dedicated source of truth is added.
 
         if (textureFlags.HasFlag(TextureFlags.Flag_0x1_WrapX))
             flags |= MdlGeoFlags.WrapWidth;

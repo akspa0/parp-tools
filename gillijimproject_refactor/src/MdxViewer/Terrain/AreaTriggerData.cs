@@ -1,6 +1,7 @@
 using System.Numerics;
 using DBCD.Providers;
 using MdxViewer.Logging;
+using MdxViewer.Rendering;
 
 namespace MdxViewer.Terrain;
 
@@ -24,6 +25,58 @@ public class AreaTriggerEntry
     public bool IsSphere => Radius > 0f;
 }
 
+public static class AreaTriggerRenderMath
+{
+    public static Vector3 ToScenePosition(Vector3 wowPosition, bool useRawWorldCoordinates)
+    {
+        return useRawWorldCoordinates
+            ? wowPosition
+            : new Vector3(
+                WoWConstants.MapOrigin - wowPosition.Y,
+                WoWConstants.MapOrigin - wowPosition.X,
+                wowPosition.Z);
+    }
+
+    public static Vector3[] BuildBoxCorners(Vector3 center, float length, float width, float height, float yawRadians)
+    {
+        float halfLength = length * 0.5f;
+        float halfWidth = width * 0.5f;
+        float halfHeight = height * 0.5f;
+
+        var localCorners = new[]
+        {
+            new Vector3(-halfLength, -halfWidth, -halfHeight),
+            new Vector3( halfLength, -halfWidth, -halfHeight),
+            new Vector3( halfLength,  halfWidth, -halfHeight),
+            new Vector3(-halfLength,  halfWidth, -halfHeight),
+            new Vector3(-halfLength, -halfWidth,  halfHeight),
+            new Vector3( halfLength, -halfWidth,  halfHeight),
+            new Vector3( halfLength,  halfWidth,  halfHeight),
+            new Vector3(-halfLength,  halfWidth,  halfHeight),
+        };
+
+        if (MathF.Abs(yawRadians) < 0.0001f)
+        {
+            for (int i = 0; i < localCorners.Length; i++)
+                localCorners[i] += center;
+            return localCorners;
+        }
+
+        float cosYaw = MathF.Cos(yawRadians);
+        float sinYaw = MathF.Sin(yawRadians);
+        var worldCorners = new Vector3[localCorners.Length];
+        for (int i = 0; i < localCorners.Length; i++)
+        {
+            var local = localCorners[i];
+            float rotatedX = (local.X * cosYaw) - (local.Y * sinYaw);
+            float rotatedY = (local.X * sinYaw) + (local.Y * cosYaw);
+            worldCorners[i] = center + new Vector3(rotatedX, rotatedY, local.Z);
+        }
+
+        return worldCorners;
+    }
+}
+
 /// <summary>
 /// Loads and manages AreaTrigger data from AreaTrigger.dbc via DBCD.
 /// </summary>
@@ -37,7 +90,7 @@ public class AreaTriggerLoader
     /// <summary>
     /// Load AreaTrigger.dbc from the given DBC provider.
     /// </summary>
-    public void Load(IDBCProvider dbcProvider, string dbdDir, string build, int mapId)
+    public void Load(IDBCProvider dbcProvider, string dbdDir, string build, int mapId, bool useRawWorldCoordinates = false)
     {
         _triggers.Clear();
 
@@ -61,34 +114,33 @@ public class AreaTriggerLoader
         {
             try
             {
-                int id = Convert.ToInt32(row["ID"]);
-                int rowMapId = GetInt(row, "ContinentID", "MapID", "Map");
+                int? id = TryGetInt(row, "ID");
+                if (!id.HasValue)
+                    continue;
+
+                int? rowMapId = TryGetInt(row, "ContinentID", "MapID", "Map");
                 
                 // Only load triggers for this map
                 if (rowMapId != mapId) continue;
 
-                // DBCD array fields: Pos[3] in the DBD → accessed as "Pos[0]", "Pos[1]", "Pos[2]"
-                float wowX = GetFloat(row, "Pos[0]", "Pos_X", "X");
-                float wowY = GetFloat(row, "Pos[1]", "Pos_Y", "Y");
-                float wowZ = GetFloat(row, "Pos[2]", "Pos_Z", "Z");
-
-                // Transform WoW coords to renderer coords (same as terrain)
-                const float MapOrigin = 17066.666f;
-                float rendererX = MapOrigin - wowY;
-                float rendererY = MapOrigin - wowX;
-                float rendererZ = wowZ;
+                if (!TryGetPosition(row, out var wowPosition))
+                {
+                    if (errors++ < 3)
+                        ViewerLog.Trace($"[AreaTrigger] Skipping row {id.Value}: missing position fields for build {build}");
+                    continue;
+                }
 
                 var entry = new AreaTriggerEntry
                 {
-                    Id = id,
-                    MapId = rowMapId,
-                    WoWPosition = new Vector3(wowX, wowY, wowZ),
-                    Position = new Vector3(rendererX, rendererY, rendererZ),
-                    Radius = GetFloat(row, "Radius"),
-                    BoxLength = GetFloat(row, "Box_Length", "BoxLength"),
-                    BoxWidth = GetFloat(row, "Box_Width", "BoxWidth"),
-                    BoxHeight = GetFloat(row, "Box_Height", "BoxHeight"),
-                    BoxOrientation = GetFloat(row, "Box_Yaw", "BoxOrientation")
+                    Id = id.Value,
+                    MapId = rowMapId.Value,
+                    WoWPosition = wowPosition,
+                    Position = AreaTriggerRenderMath.ToScenePosition(wowPosition, useRawWorldCoordinates),
+                    Radius = TryGetFloat(row, "Radius") ?? 0f,
+                    BoxLength = TryGetFloat(row, "Box_length", "Box_Length", "BoxLength") ?? 0f,
+                    BoxWidth = TryGetFloat(row, "Box_width", "Box_Width", "BoxWidth") ?? 0f,
+                    BoxHeight = TryGetFloat(row, "Box_height", "Box_Height", "BoxHeight") ?? 0f,
+                    BoxOrientation = TryGetFloat(row, "Box_yaw", "Box_Yaw", "BoxOrientation") ?? 0f
                 };
 
                 _triggers.Add(entry);
@@ -107,25 +159,118 @@ public class AreaTriggerLoader
     }
 
     /// <summary>Try multiple field names, returning the first that resolves.</summary>
-    private static int GetInt(dynamic row, params string[] names)
+    private static int? TryGetInt(dynamic row, params string[] names)
     {
         foreach (var name in names)
         {
-            try { return Convert.ToInt32(row[name]); }
+            try
+            {
+                var value = row[name];
+                if (value == null)
+                    continue;
+
+                if (value is int intValue)
+                    return intValue;
+                if (value is uint uintValue)
+                    return (int)uintValue;
+                if (value is short shortValue)
+                    return shortValue;
+                if (value is ushort ushortValue)
+                    return ushortValue;
+                if (int.TryParse(value.ToString(), out int parsed))
+                    return parsed;
+            }
             catch (KeyNotFoundException) { }
         }
-        return 0;
+        return null;
     }
 
     /// <summary>Try multiple field names, returning the first that resolves.</summary>
-    private static float GetFloat(dynamic row, params string[] names)
+    private static float? TryGetFloat(dynamic row, params string[] names)
     {
         foreach (var name in names)
         {
-            try { return Convert.ToSingle(row[name]); }
+            try
+            {
+                var value = row[name];
+                if (TryConvertToSingle(value, out float parsed))
+                    return parsed;
+            }
             catch (KeyNotFoundException) { }
         }
-        return 0f;
+        return null;
+    }
+
+    private static bool TryGetPosition(dynamic row, out Vector3 position)
+    {
+        float wowX = 0f;
+        float wowY = 0f;
+        float wowZ = 0f;
+        if (TryGetIndexedFloat(row, "Pos", 0, out wowX) &&
+            TryGetIndexedFloat(row, "Pos", 1, out wowY) &&
+            TryGetIndexedFloat(row, "Pos", 2, out wowZ))
+        {
+            position = new Vector3(wowX, wowY, wowZ);
+            return true;
+        }
+
+        float? fallbackX = TryGetFloat(row, "Pos[0]", "Pos_X", "X", "Location[0]", "Location_X");
+        float? fallbackY = TryGetFloat(row, "Pos[1]", "Pos_Y", "Y", "Location[1]", "Location_Y");
+        float? fallbackZ = TryGetFloat(row, "Pos[2]", "Pos_Z", "Z", "Location[2]", "Location_Z");
+        if (fallbackX.HasValue && fallbackY.HasValue && fallbackZ.HasValue)
+        {
+            position = new Vector3(fallbackX.Value, fallbackY.Value, fallbackZ.Value);
+            return true;
+        }
+
+        position = default;
+        return false;
+    }
+
+    private static bool TryGetIndexedFloat(dynamic row, string fieldName, int index, out float value)
+    {
+        try
+        {
+            var container = row[fieldName];
+            if (container is Array array && index < array.Length)
+            {
+                if (TryConvertToSingle(array.GetValue(index), out value))
+                    return true;
+            }
+        }
+        catch (KeyNotFoundException) { }
+
+        value = 0f;
+        return false;
+    }
+
+    private static bool TryConvertToSingle(object? value, out float parsed)
+    {
+        if (value is null)
+        {
+            parsed = 0f;
+            return false;
+        }
+
+        if (value is float floatValue)
+        {
+            parsed = floatValue;
+            return true;
+        }
+
+        if (value is double doubleValue)
+        {
+            parsed = (float)doubleValue;
+            return true;
+        }
+
+        if (value is decimal decimalValue)
+        {
+            parsed = (float)decimalValue;
+            return true;
+        }
+
+        return float.TryParse(value.ToString(), out parsed);
     }
 
     /// <summary>

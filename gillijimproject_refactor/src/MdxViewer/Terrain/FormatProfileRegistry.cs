@@ -1,5 +1,11 @@
 namespace MdxViewer.Terrain;
 
+public enum TerrainAlphaDecodeMode
+{
+    LegacySequential,
+    LichKingStrict
+}
+
 public sealed class AdtProfile
 {
     public required string ProfileId { get; init; }
@@ -10,6 +16,8 @@ public sealed class AdtProfile
     public required int ModfRecordSize { get; init; }
     public required bool UseMhdrOffsetsOnly { get; init; }
     public required bool EnableMh2oFallbackWhenNoMclq { get; init; }
+    public required bool UseSplitTextureAdt { get; init; }
+    public required TerrainAlphaDecodeMode AlphaDecodeMode { get; init; }
 }
 
 public sealed class WmoProfile
@@ -60,7 +68,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = false,
-        EnableMh2oFallbackWhenNoMclq = true
+        EnableMh2oFallbackWhenNoMclq = true,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile0913810 = new()
@@ -72,7 +82,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile0103892Provisional = new()
@@ -84,7 +96,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile33512340 = new()
@@ -96,7 +110,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = true
+        EnableMh2oFallbackWhenNoMclq = true,
+        UseSplitTextureAdt = false,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 
     public static readonly AdtProfile AdtProfile3018303 = new()
@@ -108,7 +124,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = true
+        EnableMh2oFallbackWhenNoMclq = true,
+        UseSplitTextureAdt = false,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 
     public static readonly AdtProfile AdtProfile0703694 = new()
@@ -120,7 +138,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile0803734 = new()
@@ -132,7 +152,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile0903807 = new()
@@ -144,7 +166,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly WmoProfile WmoProfile0913810 = new()
@@ -336,7 +360,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile080xUnknown = new()
@@ -348,7 +374,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
     public static readonly AdtProfile AdtProfile30xUnknown = new()
@@ -360,7 +388,9 @@ public static class FormatProfileRegistry
         MddfRecordSize = 0x24,
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
-        EnableMh2oFallbackWhenNoMclq = false
+        EnableMh2oFallbackWhenNoMclq = false,
+        UseSplitTextureAdt = false,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 
     public static readonly WmoProfile WmoProfile080xUnknown = new()

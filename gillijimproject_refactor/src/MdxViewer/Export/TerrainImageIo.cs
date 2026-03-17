@@ -14,13 +14,6 @@ public static class TerrainImageIo
     // Packed RGBA convention:
     // R = alpha1, G = alpha2, B = alpha3, A = shadow
 
-    private static int EdgeFixedIndex64(int x, int y)
-    {
-        if (x >= 63) x = 62;
-        if (y >= 63) y = 62;
-        return y * 64 + x;
-    }
-
     public static Image<Rgba32> BuildAlphaAtlasFromChunks(IReadOnlyList<Terrain.TerrainChunkData> chunks)
     {
         var image = new Image<Rgba32>(TileAlphaAtlasSize, TileAlphaAtlasSize);
@@ -57,7 +50,7 @@ public static class TerrainImageIo
                     var row = accessor.GetRowSpan(dstY0 + y);
                     for (int x = 0; x < ChunkAlphaSize; x++)
                     {
-                        int src = EdgeFixedIndex64(x, y);
+                        int src = y * ChunkAlphaSize + x;
                         byte r = (a1 != null && a1.Length >= 4096) ? a1[src] : (byte)255;
                         byte g = (a2 != null && a2.Length >= 4096) ? a2[src] : (byte)255;
                         byte b = (a3 != null && a3.Length >= 4096) ? a3[src] : (byte)255;
@@ -122,11 +115,7 @@ public static class TerrainImageIo
                         var row = accessor.GetRowSpan(srcY0 + y);
                         for (int x = 0; x < 64; x++)
                         {
-                            // Apply Noggit-style edge fix even on import (duplicate 63 from 62)
-                            int fx = x >= 63 ? 62 : x;
-                            int fy = y >= 63 ? 62 : y;
-
-                            var px = row[srcX0 + fx];
+                            var px = row[srcX0 + x];
                             int dst = (y * 64 + x) * 4;
                             alphaShadow[sliceBase + dst + 0] = px.R;
                             alphaShadow[sliceBase + dst + 1] = px.G;

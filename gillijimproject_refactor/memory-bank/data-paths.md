@@ -1,5 +1,13 @@
 # Critical Data Paths - NEVER ASK WHERE DATA IS
 
+## Validation Scope Correction (Mar 17, 2026)
+
+Do not use `test_data/development` or `test_data/WoWMuseum/*` to sign off active 3.x terrain behavior.
+
+- Those repo paths are archival/reference fixtures only.
+- Active 3.x validation is against official 3.0.1-era client data selected at runtime.
+- If a fix only works on the repo fixtures, it is not a valid 3.x terrain fix.
+
 ## THE SOURCE PATH (ALWAYS)
 ```
 test_data/development/World/Maps/development

@@ -73,6 +73,7 @@ public class TerrainManager : ISceneRenderer
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName { get; }
+    public bool HideTerrainHoles => !_tileMeshBuilder.IgnoreHoleMask;
 
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
     public ITerrainAdapter Adapter => _adapter;
@@ -83,6 +84,8 @@ public class TerrainManager : ISceneRenderer
     /// </summary>
     public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
     {
+        var chunkSnapshot = newChunks.ToArray();
+
         if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
         {
             cached = _adapter.LoadTileWithPlacements(tileX, tileY);
@@ -90,7 +93,7 @@ public class TerrainManager : ISceneRenderer
         }
 
         cached.Chunks.Clear();
-        cached.Chunks.AddRange(newChunks);
+        cached.Chunks.AddRange(chunkSnapshot);
 
         var key = (tileX, tileY);
         if (_loadedTiles.TryGetValue(key, out var oldMesh))
@@ -101,7 +104,7 @@ public class TerrainManager : ISceneRenderer
             _loadedTiles.Remove(key);
         }
 
-        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, cached.Chunks);
+        var (tileMesh, chunkInfos) = _tileMeshBuilder.BuildTileMesh(tileX, tileY, chunkSnapshot);
         if (tileMesh == null)
             return;
 
@@ -109,7 +112,7 @@ public class TerrainManager : ISceneRenderer
         if (!_adapter.TileTextures.TryGetValue(key, out var texNames))
             texNames = new List<string>();
         _terrainRenderer.AddTile(tileMesh, texNames, chunkInfos);
-        _liquidRenderer.AddChunks(cached.Chunks);
+        _liquidRenderer.AddChunks(chunkSnapshot);
     }
 
     /// <summary>
@@ -139,6 +142,28 @@ public class TerrainManager : ISceneRenderer
         cached = _adapter.LoadTileWithPlacements(tileX, tileY);
         _tileCache[(tileX, tileY)] = cached;
         return cached;
+    }
+
+    public void SetHideTerrainHoles(bool hideTerrainHoles)
+    {
+        bool ignoreHoleMask = !hideTerrainHoles;
+        if (_tileMeshBuilder.IgnoreHoleMask == ignoreHoleMask)
+            return;
+
+        _tileMeshBuilder.IgnoreHoleMask = ignoreHoleMask;
+        RebuildLoadedTilesForHoleMode();
+    }
+
+    private void RebuildLoadedTilesForHoleMode()
+    {
+        var loadedKeys = _loadedTiles.Keys.ToList();
+        foreach (var (tileX, tileY) in loadedKeys)
+        {
+            if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
+                continue;
+
+            ReplaceTileChunksAndRebuild(tileX, tileY, cached.Chunks);
+        }
     }
 
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)

@@ -61,9 +61,11 @@ public partial class ViewerApp : IDisposable
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private WdlPreviewRenderer? _wdlPreviewRenderer;
+    private WdlPreviewCacheService? _wdlPreviewCacheService;
     private bool _showWdlPreview = false;
     private MapDefinition? _selectedMapForPreview;
     private Vector2? _selectedSpawnTile; // WDL tile coordinates (0-63)
+    private string _wdlPreviewWarmupStatus = string.Empty;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
@@ -106,9 +108,19 @@ public partial class ViewerApp : IDisposable
     private bool _showTerrainControls = true;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
-    private bool _showMinimapWindow = false;
+    private bool _showMinimapWindow = true;
     private bool _showPerfWindow = false;
     private bool _showManipulationTools = false;
+    private bool _showWorldDataWindow = false;
+    private bool _showWorldPopulationWindow = false;
+    private bool _showWorldPlacementsWindow = false;
+    private bool _showAreaPoiWindow = false;
+    private bool _showTaxiWindow = false;
+    private bool _showWlLiquidsWindow = false;
+    private bool _showAreaTriggersWindow = false;
+    private bool _showSubObjectWindow = false;
+    private bool _showWmoGroupsWindow = false;
+    private bool _showWmoDoodadsWindow = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -610,6 +622,31 @@ public partial class ViewerApp : IDisposable
             _worldScene.ClearExternalSpawns();
     }
 
+    private void ResetActiveSceneState()
+    {
+        var renderer = _renderer;
+        var worldScene = _worldScene;
+        var terrainManager = _terrainManager;
+        var vlmTerrainManager = _vlmTerrainManager;
+
+        _renderer = null;
+        _worldScene = null;
+        _terrainManager = null;
+        _vlmTerrainManager = null;
+        _currentMapId = -1;
+        _currentAreaName = string.Empty;
+
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _loadingScreen?.Disable();
+
+        if (!ReferenceEquals(renderer, worldScene) && !ReferenceEquals(renderer, vlmTerrainManager))
+            renderer?.Dispose();
+
+        worldScene?.Dispose();
+        terrainManager?.Dispose();
+        vlmTerrainManager?.Dispose();
+    }
+
     private bool _mKeyWasPressed = false;
     private bool _leftArrowWasPressed = false;
     private bool _rightArrowWasPressed = false;
@@ -733,19 +770,29 @@ public partial class ViewerApp : IDisposable
         // half-loaded while tiles are still streaming in.
         if (_loadingScreen != null && _loadingScreen.IsActive)
         {
+            if (_terrainManager != null)
+                _terrainManager.UpdateAOI(_camera.Position);
+
             bool isWmoOnly = _worldScene != null && _terrainManager != null && _terrainManager.Adapter.IsWmoBased;
             bool hasTiles = _terrainManager != null && _terrainManager.LoadedTileCount > 0;
             bool stillStreaming = _terrainManager != null && _terrainManager.IsStreaming;
-            // Dismiss when: WMO-only map, OR tiles are loaded AND no more streaming in progress
-            if (isWmoOnly || (hasTiles && !stillStreaming))
+            bool worldLoadCompleted = _loadingScreen.Progress >= 1.0f;
+
+            // Dismiss when:
+            // - WMO-only map, or
+            // - terrain tiles are present and streaming is finished, or
+            // - world load completed and streaming has gone idle without producing any tiles.
+            //   The last case prevents an infinite loading screen if initial streaming failed
+            //   or the camera started over an empty AOI.
+            if (isWmoOnly || (hasTiles && !stillStreaming) || (worldLoadCompleted && !stillStreaming))
             {
+                if (!isWmoOnly && !hasTiles)
+                    ViewerLog.Important(ViewerLog.Category.Terrain, "Loading screen dismissed with 0 terrain tiles loaded; streaming is idle.");
+
                 _loadingScreen.Disable();
             }
             else
             {
-                // Still loading — update AOI so tiles start streaming
-                if (_terrainManager != null)
-                    _terrainManager.UpdateAOI(_camera.Position);
                 // Update progress bar based on loaded vs expected tiles
                 if (_terrainManager != null && _terrainManager.LoadedTileCount > 0)
                     _loadingScreen.UpdateProgress(_terrainManager.LoadedTileCount, _terrainManager.LoadedTileCount + 10);
@@ -953,6 +1000,36 @@ void main() {
         if (_showManipulationTools)
             DrawManipulationToolsWindow();
 
+        if (_showWorldDataWindow && _worldScene != null)
+            DrawWorldDataWindow();
+
+        if (_showWorldPopulationWindow && _worldScene != null)
+            DrawWorldPopulationWindow();
+
+        if (_showWorldPlacementsWindow && _worldScene != null)
+            DrawWorldPlacementsWindow();
+
+        if (_showAreaPoiWindow && _worldScene != null)
+            DrawAreaPoiWindow();
+
+        if (_showTaxiWindow && _worldScene != null)
+            DrawTaxiWindow();
+
+        if (_showWlLiquidsWindow && _worldScene != null)
+            DrawWlLiquidsWindow();
+
+        if (_showAreaTriggersWindow && _worldScene != null)
+            DrawAreaTriggersWindow();
+
+        if (_showSubObjectWindow && _renderer != null && _renderer is not WmoRenderer)
+            DrawSubObjectVisibilityWindow();
+
+        if (_showWmoGroupsWindow && _renderer is WmoRenderer)
+            DrawWmoGroupsWindow();
+
+        if (_showWmoDoodadsWindow && _renderer is WmoRenderer)
+            DrawWmoDoodadsWindow();
+
         DrawStatusBar();
         
         // Fullscreen minimap overlay (M key toggle)
@@ -977,6 +1054,10 @@ void main() {
         // Perf (floating window)
         if (_showPerfWindow)
             DrawPerfWindow();
+
+        // ImGui demo/debug window
+        if (_showDemoWindow)
+            ImGui.ShowDemoWindow(ref _showDemoWindow);
 
         // Modal dialogs
         if (_showFolderInput)
@@ -1052,17 +1133,35 @@ void main() {
                 ImGui.MenuItem("Manipulation Tools", "", ref _showManipulationTools);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
-                ImGui.Separator();
-                if (ImGui.MenuItem("Asset Catalog"))
+                ImGui.MenuItem("ImGui Demo", "", ref _showDemoWindow);
+
+                if (ImGui.BeginMenu("World Panels", _worldScene != null))
                 {
-                    if (_catalogView == null)
-                    {
-                        _catalogView = new AssetCatalogView(_gl);
-                        _catalogView.SetDataSource(_dataSource);
-                        _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
-                    }
-                    _catalogView.IsVisible = !_catalogView.IsVisible;
+                    ImGui.MenuItem("World Panel Hub", "", ref _showWorldDataWindow);
+                    ImGui.MenuItem("SQL Spawns", "", ref _showWorldPopulationWindow);
+                    ImGui.MenuItem("Placements", "", ref _showWorldPlacementsWindow);
+                    ImGui.MenuItem("Area POIs", "", ref _showAreaPoiWindow);
+                    ImGui.MenuItem("Taxi", "", ref _showTaxiWindow);
+                    ImGui.MenuItem("WL Liquids", "", ref _showWlLiquidsWindow);
+                    ImGui.MenuItem("AreaTriggers", "", ref _showAreaTriggersWindow);
+                    ImGui.EndMenu();
                 }
+
+                bool canOpenSubObjects = _renderer != null && _renderer is not WmoRenderer && _renderer.SubObjectCount > 0;
+                ImGui.MenuItem("Sub-Object Visibility", "", ref _showSubObjectWindow, canOpenSubObjects);
+
+                bool canOpenWmoWindows = _renderer is WmoRenderer wmoRenderer && wmoRenderer.SubObjectCount > 0;
+                ImGui.MenuItem("WMO Groups", "", ref _showWmoGroupsWindow, canOpenWmoWindows);
+                ImGui.MenuItem("WMO Doodads", "", ref _showWmoDoodadsWindow, canOpenWmoWindows);
+
+                bool showWdlPreview = _showWdlPreview;
+                ImGui.MenuItem("WDL Preview", "", ref showWdlPreview, _selectedMapForPreview != null);
+                _showWdlPreview = showWdlPreview;
+
+                ImGui.Separator();
+                bool showAssetCatalog = _catalogView?.IsVisible ?? false;
+                ImGui.MenuItem("Asset Catalog", "", ref showAssetCatalog);
+                SetAssetCatalogVisible(showAssetCatalog);
 
                 ImGui.EndMenu();
             }
@@ -1353,6 +1452,21 @@ void main() {
                 _statusMessage = $"Map GLB export failed: {ex.Message}";
             }
         }
+    }
+
+    private void SetAssetCatalogVisible(bool isVisible)
+    {
+        if (!isVisible && _catalogView == null)
+            return;
+
+        if (_catalogView == null)
+        {
+            _catalogView = new AssetCatalogView(_gl);
+            _catalogView.SetDataSource(_dataSource);
+            _catalogView.OnLoadModelRequested = OnCatalogLoadModel;
+        }
+
+        _catalogView.IsVisible = isVisible;
     }
 
     private void RunMapGlbTilesExport()
@@ -3026,6 +3140,11 @@ void main() {
         if (_discoveredMaps.Count == 0) return;
 
         ImGui.Text($"{_discoveredMaps.Count} maps discovered");
+        var previewWarmup = GetWdlPreviewWarmupStats();
+        if (previewWarmup.total > 0)
+        {
+            ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
+        }
         ImGui.Separator();
 
         // Map list — use remaining height or fixed height
@@ -3036,6 +3155,7 @@ void main() {
             {
                 bool hasWdt = map.HasWdt;
                 bool hasWdl = map.HasWdl;
+                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
                 string label = $"[{map.Id:D3}] {map.Name}";
                 if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
 
@@ -3051,23 +3171,11 @@ void main() {
                 if (!hasWdt) ImGui.PopStyleColor();
 
                 // Show WDL preview button if map has WDL
-                if (hasWdl)
+                if (canPreview)
                 {
                     ImGui.SameLine();
                     if (ImGui.SmallButton($"Preview##{map.Id}"))
-                    {
-                        _selectedMapForPreview = map;
-                        _showWdlPreview = true;
-                        _selectedSpawnTile = null;
-                        
-                        // Load WDL preview
-                        if (_wdlPreviewRenderer == null)
-                            _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
-                        
-                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Attempting to load WDL for {map.Directory}");
-                        bool loaded = _wdlPreviewRenderer.LoadWdl(_dataSource!, map.Directory);
-                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Load result: {loaded}, HasPreview: {_wdlPreviewRenderer.HasPreview}");
-                    }
+                        OpenWdlPreview(map);
                 }
 
                 if (ImGui.IsItemHovered())
@@ -3076,8 +3184,10 @@ void main() {
                     ImGui.Text($"Directory: {map.Directory}");
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
-                    if (hasWdl)
+                    if (canPreview)
                         ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "Click 'Preview' to select spawn point");
+                    else if (hasWdl)
+                        ImGui.TextDisabled("WDL preview is currently limited to Alpha 0.5.x.");
                     ImGui.EndTooltip();
                 }
             }
@@ -3170,6 +3280,15 @@ void main() {
                 ImGui.Spacing();
             }
 
+            // ── Standalone WMO section ──
+            if (_renderer is WmoRenderer)
+            {
+                if (ImGui.CollapsingHeader("WMO Controls", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    DrawStandaloneWmoControls();
+                }
+            }
+
             // ── Model Info section ──
             if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
             {
@@ -3193,17 +3312,60 @@ void main() {
                 }
             }
 
-            // ── World Objects section ──
+            if ((_terrainManager != null || _vlmTerrainManager != null) &&
+                ImGui.CollapsingHeader("Navigation", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                DrawNavigationAccessContent();
+            }
+
             if (_worldScene != null)
             {
-                if (ImGui.CollapsingHeader("World Objects", ImGuiTreeNodeFlags.DefaultOpen))
+                if (ImGui.CollapsingHeader("World Panels", ImGuiTreeNodeFlags.DefaultOpen))
                 {
-                    DrawWorldObjectsContent();
+                    DrawWorldPanelAccessContent();
                 }
             }
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawNavigationAccessContent()
+    {
+        string minimapLabel = _showMinimapWindow ? "Minimap Window Open" : "Open Minimap Window";
+        if (ImGui.Button(minimapLabel, new Vector2(-1, 0)))
+            _showMinimapWindow = true;
+
+        if (ImGui.Button(_fullscreenMinimap ? "Close Fullscreen Minimap (M)" : "Open Fullscreen Minimap (M)", new Vector2(-1, 0)))
+            _fullscreenMinimap = !_fullscreenMinimap;
+
+        if (_minimapPanOffset != Vector2.Zero)
+        {
+            if (ImGui.Button("Reset Minimap Pan", new Vector2(-1, 0)))
+                _minimapPanOffset = Vector2.Zero;
+        }
+
+        ImGui.TextDisabled("Click minimap to teleport. Drag to pan. Mouse wheel zooms.");
+    }
+
+    private void DrawWorldPanelAccessContent()
+    {
+        if (ImGui.Button("World Panel Hub", new Vector2(-1, 0)))
+            _showWorldDataWindow = true;
+        if (ImGui.Button($"SQL Spawns ({_worldScene?.ExternalSpawnInstanceCount ?? 0})", new Vector2(-1, 0)))
+            _showWorldPopulationWindow = true;
+        if (ImGui.Button($"Placements ({(_worldScene?.ModfPlacements.Count ?? 0) + (_worldScene?.MddfPlacements.Count ?? 0)})", new Vector2(-1, 0)))
+            _showWorldPlacementsWindow = true;
+        if (ImGui.Button($"Area POIs ({_worldScene?.PoiLoader?.Entries.Count ?? 0})", new Vector2(-1, 0)))
+            _showAreaPoiWindow = true;
+        if (ImGui.Button($"Taxi ({_worldScene?.TaxiLoader?.Routes.Count ?? 0} routes)", new Vector2(-1, 0)))
+            _showTaxiWindow = true;
+        if (ImGui.Button($"WL Liquids ({_worldScene?.WlLoader?.Bodies.Count ?? 0})", new Vector2(-1, 0)))
+            _showWlLiquidsWindow = true;
+        if (ImGui.Button($"AreaTriggers ({_worldScene?.AreaTriggerLoader?.Count ?? 0})", new Vector2(-1, 0)))
+            _showAreaTriggersWindow = true;
+
+        ImGui.TextDisabled("Panels are dockable. Use the buttons above to reopen them directly.");
     }
 
     private void DrawModelInfoContent()
@@ -3222,32 +3384,6 @@ void main() {
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
             if (ImGui.Button("Frame Model"))
                 FrameCurrentModel();
-        }
-
-        // DoodadSet selection (WMO only)
-        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Doodad Set:");
-            int activeSet = wmoR.ActiveDoodadSet;
-            string currentSetName = wmoR.GetDoodadSetName(activeSet);
-            if (ImGui.BeginCombo("##DoodadSet", currentSetName))
-            {
-                for (int s = 0; s < wmoR.DoodadSetCount; s++)
-                {
-                    bool selected = s == activeSet;
-                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
-                        wmoR.SetActiveDoodadSet(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-        }
-
-        if (_renderer is WmoRenderer)
-        {
-            ImGui.Separator();
-            DrawWmoLiquidRotationControls("standalone");
         }
 
         // Animation sequence selection (MDX only)
@@ -3356,23 +3492,758 @@ void main() {
         if (_renderer != null && _renderer.SubObjectCount > 0)
         {
             ImGui.Separator();
-            ImGui.Text("Visibility:");
+            ImGui.Text("Visibility Panels:");
 
-            if (ImGui.SmallButton("All On"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, true);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("All Off"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, false);
-
-            for (int i = 0; i < _renderer.SubObjectCount; i++)
+            if (_renderer is WmoRenderer wmoRenderer)
             {
-                bool vis = _renderer.GetSubObjectVisible(i);
-                if (ImGui.Checkbox(_renderer.GetSubObjectName(i), ref vis))
-                    _renderer.SetSubObjectVisible(i, vis);
+                if (ImGui.Button($"Open WMO Groups ({wmoRenderer.GroupCount})"))
+                    _showWmoGroupsWindow = true;
+                if (wmoRenderer.DoodadCount > 0)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.Button($"Open WMO Doodads ({wmoRenderer.DoodadCount})"))
+                        _showWmoDoodadsWindow = true;
+                }
+            }
+            else if (ImGui.Button($"Open Sub-Object Visibility ({_renderer.SubObjectCount})"))
+            {
+                _showSubObjectWindow = true;
             }
         }
+    }
+
+    private void DrawStandaloneWmoControls()
+    {
+        if (_renderer is not WmoRenderer wmoRenderer)
+        {
+            ImGui.TextWrapped("No standalone WMO loaded.");
+            return;
+        }
+
+        ImGui.Text($"Active Doodad Set: {wmoRenderer.ActiveDoodadSet + 1}/{wmoRenderer.DoodadSetCount}");
+
+        if (wmoRenderer.DoodadSetCount > 0)
+        {
+            string currentSetName = wmoRenderer.GetDoodadSetName(wmoRenderer.ActiveDoodadSet);
+            if (ImGui.BeginCombo("Doodad Set", currentSetName))
+            {
+                for (int setIndex = 0; setIndex < wmoRenderer.DoodadSetCount; setIndex++)
+                {
+                    bool selected = setIndex == wmoRenderer.ActiveDoodadSet;
+                    string setName = wmoRenderer.GetDoodadSetName(setIndex);
+                    if (ImGui.Selectable(setName, selected))
+                        wmoRenderer.SetActiveDoodadSet(setIndex);
+                    if (selected)
+                        ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("This WMO has no doodad sets.");
+        }
+
+        ImGui.Separator();
+        DrawWmoLiquidRotationControls("standalone");
+
+        if (wmoRenderer.GroupCount > 0)
+        {
+            if (ImGui.Button($"Groups ({wmoRenderer.GroupCount})"))
+                _showWmoGroupsWindow = true;
+            ImGui.SameLine();
+        }
+
+        if (wmoRenderer.DoodadCount > 0)
+        {
+            if (ImGui.Button($"Doodads ({wmoRenderer.DoodadCount})"))
+                _showWmoDoodadsWindow = true;
+        }
+    }
+
+    private void DrawWorldDataWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(24f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(320f, 320f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("World Panels", ref _showWorldDataWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextWrapped("World-side data now lives in separate dockable windows. Open only the panels you need.");
+        ImGui.Separator();
+
+        if (ImGui.Button("SQL Spawns", new Vector2(-1, 0)))
+            _showWorldPopulationWindow = true;
+        if (ImGui.Button("Placements", new Vector2(-1, 0)))
+            _showWorldPlacementsWindow = true;
+        if (ImGui.Button("Area POIs", new Vector2(-1, 0)))
+            _showAreaPoiWindow = true;
+        if (ImGui.Button("Taxi", new Vector2(-1, 0)))
+            _showTaxiWindow = true;
+        if (ImGui.Button("WL Liquids", new Vector2(-1, 0)))
+            _showWlLiquidsWindow = true;
+        if (ImGui.Button("AreaTriggers", new Vector2(-1, 0)))
+            _showAreaTriggersWindow = true;
+
+        ImGui.Separator();
+        ImGui.TextDisabled($"SQL injected: {_worldScene?.ExternalSpawnInstanceCount ?? 0}");
+        ImGui.TextDisabled($"POIs: {_worldScene?.PoiLoader?.Entries.Count ?? 0}");
+        ImGui.TextDisabled($"Taxi routes: {_worldScene?.TaxiLoader?.Routes.Count ?? 0}");
+        ImGui.TextDisabled($"WL bodies: {_worldScene?.WlLoader?.Bodies.Count ?? 0}");
+        ImGui.TextDisabled($"AreaTriggers: {_worldScene?.AreaTriggerLoader?.Count ?? 0}");
+        ImGui.TextDisabled($"Placements: {(_worldScene?.ModfPlacements.Count ?? 0) + (_worldScene?.MddfPlacements.Count ?? 0)}");
+        ImGui.End();
+    }
+
+    private void DrawWorldPopulationWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(24f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(420f, 320f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("SQL Spawns", ref _showWorldPopulationWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawSqlWorldPopulationContent();
+        ImGui.End();
+    }
+
+    private void DrawWorldPlacementsWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 444f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(420f, io.DisplaySize.Y - topOffset - StatusBarHeight - 48f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Placements", ref _showWorldPlacementsWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawWorldPlacementsContent();
+        ImGui.End();
+    }
+
+    private void DrawAreaPoiWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(360f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(420f, 520f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Area POIs", ref _showAreaPoiWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawAreaPoiContent();
+        ImGui.End();
+    }
+
+    private void DrawTaxiWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(804f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(520f, 620f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Taxi", ref _showTaxiWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawTaxiContent();
+        ImGui.End();
+    }
+
+    private void DrawWlLiquidsWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X * 0.5f - 220f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(440f, 620f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("WL Liquids", ref _showWlLiquidsWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawWlLiquidsContent();
+        ImGui.End();
+    }
+
+    private void DrawAreaTriggersWindow()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X * 0.5f + 240f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(360f, 180f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("AreaTriggers", ref _showAreaTriggersWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawAreaTriggerContent();
+        ImGui.End();
+    }
+
+    private void DrawSqlWorldPopulationContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        ImGui.Text("SQL World Population");
+        ImGui.InputTextWithHint("##sqlroot", "Path to alpha-core root (example: external/alpha-core)", ref _sqlAlphaCoreRoot, 1024);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("MdxViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Use Submodule Path"))
+        {
+            string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
+            _sqlAlphaCoreRoot = candidate;
+        }
+
+        bool sqlSettingsChanged = false;
+        sqlSettingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
+        ImGui.SameLine();
+        sqlSettingsChanged |= ImGui.Checkbox("GameObject Spawns", ref _sqlIncludeGameObjects);
+        sqlSettingsChanged |= ImGui.Checkbox("AOI Tile Filter", ref _sqlUseAoiFilter);
+        if (_sqlUseAoiFilter)
+            sqlSettingsChanged |= ImGui.SliderInt("AOI Tile Radius", ref _sqlAoiTileRadius, 1, 16);
+        sqlSettingsChanged |= ImGui.Checkbox("Stream With Camera", ref _sqlStreamWithCamera);
+        sqlSettingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
+        sqlSettingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
+        _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
+
+        bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
+        if (!canLoadSql)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Load SQL Spawns (Current Map)"))
+            LoadSqlSpawnsForCurrentMap();
+        if (!canLoadSql)
+            ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Clear SQL Spawns"))
+        {
+            ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+            _sqlSpawnStatus = "Cleared SQL spawns.";
+        }
+
+        if (sqlSettingsChanged && _sqlMapSpawnsCache != null)
+        {
+            _sqlForceStreamRefresh = true;
+            if (!_sqlStreamWithCamera || !_sqlUseAoiFilter)
+                ApplySqlSpawnsToScene(_sqlMapSpawnsCache, updateStatus: true);
+        }
+
+        ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
+        ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
+    }
+
+    private void DrawAreaPoiContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0)
+        {
+            bool showPoi = _worldScene.ShowPoi;
+            if (ImGui.Checkbox($"Render Area POIs ({_worldScene.PoiLoader.Entries.Count})", ref showPoi))
+                _worldScene.ShowPoi = showPoi;
+
+            ImGui.Separator();
+            if (ImGui.BeginChild("AreaPoiList", new Vector2(0, 0), false))
+            {
+                foreach (var poi in _worldScene.PoiLoader.Entries)
+                {
+                    string label = $"[{poi.Id}] {poi.Name}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick) && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    {
+                        _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
+                        _camera.Pitch = -30f;
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
+                        ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
+                        ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
+            ImGui.EndChild();
+        }
+        else if (!_worldScene.PoiLoadAttempted)
+        {
+            if (ImGui.Button("Load Area POIs"))
+                _worldScene.ShowPoi = true;
+        }
+        else
+        {
+            ImGui.TextDisabled("Area POIs: none found");
+        }
+    }
+
+    private void DrawTaxiContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
+        {
+            bool showTaxi = _worldScene.ShowTaxi;
+            if (ImGui.Checkbox($"Render Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
+                _worldScene.ShowTaxi = showTaxi;
+            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Show All"))
+                    _worldScene.ClearTaxiSelection();
+            }
+
+            if (ImGui.CollapsingHeader($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                foreach (var node in _worldScene.TaxiLoader.Nodes)
+                {
+                    bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
+                    string label = $"[{node.Id}] {node.Name}";
+                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    {
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = node.Position + new System.Numerics.Vector3(0, 0, 50);
+                            _camera.Pitch = -30f;
+                        }
+                        else
+                        {
+                            _worldScene.SelectedTaxiNodeId = isSelected ? -1 : node.Id;
+                        }
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
+                        int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
+                        ImGui.Text($"Routes: {routeCount}");
+                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
+
+            if (ImGui.CollapsingHeader($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                foreach (var route in _worldScene.TaxiLoader.Routes)
+                {
+                    bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
+                    string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+                    string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+                    string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
+                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    {
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && route.Waypoints.Count > 0)
+                        {
+                            var mid = route.Waypoints[route.Waypoints.Count / 2];
+                            _camera.Position = mid + new System.Numerics.Vector3(0, 0, 100);
+                            _camera.Pitch = -30f;
+                        }
+                        else
+                        {
+                            _worldScene.SelectedTaxiRouteId = isSelected ? -1 : route.PathId;
+                        }
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Cost: {route.Cost}");
+                        ImGui.Text($"Waypoints: {route.Waypoints.Count}");
+                        if (route.Waypoints.Count > 0)
+                        {
+                            var first = route.Waypoints[0];
+                            var last = route.Waypoints[^1];
+                            ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
+                            ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
+                        }
+                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
+        }
+        else if (!_worldScene.TaxiLoadAttempted)
+        {
+            if (ImGui.Button("Load Taxi Paths"))
+                _worldScene.ShowTaxi = true;
+        }
+        else
+        {
+            ImGui.TextDisabled("Taxi Paths: none found");
+        }
+    }
+
+    private void DrawWlLiquidsContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+
+        if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)
+        {
+            bool showWl = _worldScene.ShowWlLiquids;
+            if (ImGui.Checkbox($"Render WL Liquids ({_worldScene.WlLoader.Bodies.Count})", ref showWl))
+                _worldScene.ShowWlLiquids = showWl;
+            if (_worldScene.ShowWlLiquids && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Loose WLW/WLQ/WLM liquid project files.\nContains water data for deleted/missing tiles.");
+
+            if (liquidRenderer != null && ImGui.CollapsingHeader("WL Layers", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                int visibleCount = 0;
+                foreach (var body in _worldScene.WlLoader.Bodies)
+                {
+                    if (liquidRenderer.IsWlBodyVisible(body.SourcePath))
+                        visibleCount++;
+                }
+
+                if (ImGui.SmallButton("Show All"))
+                    liquidRenderer.SetAllWlBodiesVisible(true);
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Hide All"))
+                    liquidRenderer.SetAllWlBodiesVisible(false);
+                ImGui.SameLine();
+                bool hasSelected = !string.IsNullOrWhiteSpace(_wlLayerSelectedSourcePath);
+                if (!hasSelected)
+                    ImGui.BeginDisabled();
+                if (ImGui.SmallButton("Solo Selected"))
+                {
+                    liquidRenderer.SetAllWlBodiesVisible(false);
+                    liquidRenderer.SetWlBodyVisible(_wlLayerSelectedSourcePath, true);
+                }
+                if (!hasSelected)
+                    ImGui.EndDisabled();
+
+                ImGui.TextDisabled($"Visible: {visibleCount}/{_worldScene.WlLoader.Bodies.Count}");
+
+                if (ImGui.BeginTable("##wl_layers", 3, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+                {
+                    ImGui.TableSetupColumn("V", ImGuiTableColumnFlags.WidthFixed, 24f);
+                    ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 48f);
+                    ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableHeadersRow();
+
+                    for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
+                    {
+                        var body = _worldScene.WlLoader.Bodies[i];
+                        ImGui.TableNextRow();
+
+                        ImGui.TableSetColumnIndex(0);
+                        bool visible = liquidRenderer.IsWlBodyVisible(body.SourcePath);
+                        if (ImGui.Checkbox($"##wl_vis_{i}", ref visible))
+                            liquidRenderer.SetWlBodyVisible(body.SourcePath, visible);
+
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextUnformatted(body.FileType.ToString());
+
+                        ImGui.TableSetColumnIndex(2);
+                        bool isSelected = string.Equals(_wlLayerSelectedSourcePath, body.SourcePath, StringComparison.OrdinalIgnoreCase);
+                        string label = $"{body.Name}##wl_layer_{i}";
+                        if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.SpanAllColumns))
+                            _wlLayerSelectedSourcePath = body.SourcePath;
+                        if (ImGui.IsItemHovered())
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(body.SourcePath);
+                            ImGui.Text($"Blocks: {body.BlockCount}  Verts: {body.Vertices.Length}");
+                            ImGui.EndTooltip();
+                        }
+                    }
+
+                    ImGui.EndTable();
+                }
+            }
+
+            if (ImGui.CollapsingHeader("WL Transform Tuning", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                var ts = WlLiquidLoader.TransformSettings;
+
+                bool enabled = ts.Enabled;
+                if (ImGui.Checkbox("Enable Transform", ref enabled))
+                    ts.Enabled = enabled;
+
+                bool swapXY = ts.SwapXYBeforeRotation;
+                if (ImGui.Checkbox("Swap XY Before Rotation", ref swapXY))
+                    ts.SwapXYBeforeRotation = swapXY;
+
+                var rot = ts.RotationDegrees;
+                if (ImGui.InputFloat3("Rotation (deg)", ref rot, "%.3f"))
+                    ts.RotationDegrees = rot;
+
+                var tr = ts.Translation;
+                if (ImGui.InputFloat3("Translation", ref tr, "%.3f"))
+                    ts.Translation = tr;
+
+                if (ImGui.Button("Apply + Reload WL"))
+                    _worldScene.ReloadWlLiquids();
+
+                ImGui.SameLine();
+                if (ImGui.Button("Print Current WL Transform"))
+                {
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"[WL Transform] Enabled={ts.Enabled} SwapXY={ts.SwapXYBeforeRotation} " +
+                        $"Rot=({ts.RotationDegrees.X:F1},{ts.RotationDegrees.Y:F1},{ts.RotationDegrees.Z:F1}) " +
+                        $"Trans=({ts.Translation.X:F1},{ts.Translation.Y:F1},{ts.Translation.Z:F1})");
+                }
+
+                ImGui.TextDisabled("Tune here, then share the printed values to hard-wire final config.");
+            }
+        }
+        else if (!_worldScene.WlLoadAttempted)
+        {
+            if (ImGui.Button("Load WL Liquids"))
+                _worldScene.ShowWlLiquids = true;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Load loose WLW/WLQ/WLM liquid project files.\nContains water heightmaps including deleted bodies of water.");
+        }
+        else
+        {
+            ImGui.TextDisabled("WL Liquids: none found");
+        }
+    }
+
+    private void DrawAreaTriggerContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.AreaTriggerLoader != null && _worldScene.AreaTriggerLoader.Count > 0)
+        {
+            bool showTriggers = _worldScene.ShowAreaTriggers;
+            if (ImGui.Checkbox($"Render AreaTriggers ({_worldScene.AreaTriggerLoader.Count})", ref showTriggers))
+                _worldScene.ShowAreaTriggers = showTriggers;
+            if (_worldScene.ShowAreaTriggers && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Instance portals, event markers, and script triggers.\nGreen spheres/boxes from AreaTrigger.dbc");
+        }
+        else if (!_worldScene.AreaTriggerLoadAttempted)
+        {
+            if (ImGui.Button("Load AreaTriggers"))
+                _worldScene.ShowAreaTriggers = true;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Load AreaTrigger.dbc to visualize instance portals,\nevent markers, and script trigger zones.");
+        }
+        else
+        {
+            ImGui.TextDisabled("AreaTriggers: none found");
+        }
+    }
+
+    private void DrawWorldPlacementsContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.ModfPlacements.Count > 0 && ImGui.CollapsingHeader($"WMO Placements ({_worldScene.ModfPlacements.Count})", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
+            {
+                var p = _worldScene.ModfPlacements[i];
+                string name = p.NameIndex < _worldScene.WmoModelNames.Count ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                string label = $"[{i}] {name}";
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick) && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                {
+                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
+                    _camera.Pitch = -30f;
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                    ImGui.Text($"Flags: 0x{p.Flags:X4}");
+                    ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
+                    ImGui.EndTooltip();
+                }
+            }
+        }
+
+        int mddfCount = _worldScene.MddfPlacements.Count;
+        int mddfShow = Math.Min(mddfCount, 200);
+        if (mddfCount > 0 && ImGui.CollapsingHeader($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            for (int i = 0; i < mddfShow; i++)
+            {
+                var p = _worldScene.MddfPlacements[i];
+                string name = p.NameIndex < _worldScene.MdxModelNames.Count ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                string label = $"[{i}] {name} s={p.Scale:F2}";
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick) && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                {
+                    _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
+                    _camera.Pitch = -30f;
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                    ImGui.Text($"Scale: {p.Scale:F3}");
+                    ImGui.EndTooltip();
+                }
+            }
+        }
+    }
+
+    private void DrawSubObjectVisibilityWindow()
+    {
+        if (_renderer == null || _renderer is WmoRenderer)
+        {
+            _showSubObjectWindow = false;
+            return;
+        }
+
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X * 0.5f - 180f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(360f, 480f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Sub-Object Visibility", ref _showSubObjectWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled($"{_renderer.SubObjectCount} sub-objects");
+        if (ImGui.SmallButton("All On"))
+            for (int i = 0; i < _renderer.SubObjectCount; i++)
+                _renderer.SetSubObjectVisible(i, true);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("All Off"))
+            for (int i = 0; i < _renderer.SubObjectCount; i++)
+                _renderer.SetSubObjectVisible(i, false);
+
+        ImGui.Separator();
+        if (ImGui.BeginChild("SubObjectList", new Vector2(0, 0), false))
+        {
+            for (int i = 0; i < _renderer.SubObjectCount; i++)
+            {
+                bool visible = _renderer.GetSubObjectVisible(i);
+                if (ImGui.Checkbox($"{_renderer.GetSubObjectName(i)}##subobject_{i}", ref visible))
+                    _renderer.SetSubObjectVisible(i, visible);
+            }
+        }
+        ImGui.EndChild();
+        ImGui.End();
+    }
+
+    private void DrawWmoGroupsWindow()
+    {
+        if (_renderer is not WmoRenderer wmoRenderer)
+        {
+            _showWmoGroupsWindow = false;
+            return;
+        }
+
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X * 0.5f - 380f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(360f, 520f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("WMO Groups", ref _showWmoGroupsWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextDisabled($"{wmoRenderer.GroupCount} groups");
+        if (ImGui.SmallButton("All On"))
+            for (int i = 0; i < wmoRenderer.GroupCount; i++)
+                wmoRenderer.SetSubObjectVisible(i, true);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("All Off"))
+            for (int i = 0; i < wmoRenderer.GroupCount; i++)
+                wmoRenderer.SetSubObjectVisible(i, false);
+
+        ImGui.Separator();
+        if (ImGui.BeginChild("WmoGroupList", new Vector2(0, 0), false))
+        {
+            for (int i = 0; i < wmoRenderer.GroupCount; i++)
+            {
+                bool visible = wmoRenderer.GetSubObjectVisible(i);
+                if (ImGui.Checkbox($"{wmoRenderer.GetSubObjectName(i)}##wmo_group_{i}", ref visible))
+                    wmoRenderer.SetSubObjectVisible(i, visible);
+            }
+        }
+        ImGui.EndChild();
+        ImGui.End();
+    }
+
+    private void DrawWmoDoodadsWindow()
+    {
+        if (_renderer is not WmoRenderer wmoRenderer)
+        {
+            _showWmoDoodadsWindow = false;
+            return;
+        }
+
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X * 0.5f + 20f, topOffset + 24f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(360f, 520f), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("WMO Doodads", ref _showWmoDoodadsWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        bool doodadsVisible = wmoRenderer.DoodadsVisible;
+        if (ImGui.Checkbox("Render Doodads", ref doodadsVisible))
+            wmoRenderer.DoodadsVisible = doodadsVisible;
+
+        ImGui.SameLine();
+        ImGui.TextDisabled($"{wmoRenderer.DoodadCount} doodads");
+
+        if (ImGui.SmallButton("All On"))
+        {
+            wmoRenderer.DoodadsVisible = true;
+            for (int i = 0; i < wmoRenderer.DoodadCount; i++)
+                wmoRenderer.SetSubObjectVisible(wmoRenderer.GroupCount + 1 + i, true);
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("All Off"))
+            for (int i = 0; i < wmoRenderer.DoodadCount; i++)
+                wmoRenderer.SetSubObjectVisible(wmoRenderer.GroupCount + 1 + i, false);
+
+        ImGui.Separator();
+        if (ImGui.BeginChild("WmoDoodadList", new Vector2(0, 0), false))
+        {
+            for (int i = 0; i < wmoRenderer.DoodadCount; i++)
+            {
+                int subObjectIndex = wmoRenderer.GroupCount + 1 + i;
+                bool visible = wmoRenderer.GetSubObjectVisible(subObjectIndex);
+                if (ImGui.Checkbox($"{wmoRenderer.GetSubObjectName(subObjectIndex)}##wmo_doodad_{i}", ref visible))
+                    wmoRenderer.SetSubObjectVisible(subObjectIndex, visible);
+            }
+        }
+        ImGui.EndChild();
+        ImGui.End();
     }
 
     private void FrameCurrentModel()
@@ -3451,6 +4322,15 @@ void main() {
             renderer.UseNearestForAlphaSampling = crispAlpha;
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Switch alpha/shadow sampling between Linear (default) and Nearest (crisper edges).");
+
+        bool hideTerrainHoles = _terrainManager?.HideTerrainHoles ?? _vlmTerrainManager?.HideTerrainHoles ?? true;
+        if (ImGui.Checkbox("Hide Terrain Holes", ref hideTerrainHoles))
+        {
+            _terrainManager?.SetHideTerrainHoles(hideTerrainHoles);
+            _vlmTerrainManager?.SetHideTerrainHoles(hideTerrainHoles);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Turn this off to render terrain that is normally hidden by the MCNK hole mask.");
 
         // Contour interval (only when contours enabled via toolbar)
         if (renderer.ShowContours)
@@ -5676,9 +6556,11 @@ void main() {
         try
         {
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
+            ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new MpqDataSource(gamePath, listfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
+            InitializeWdlPreviewSupport(gamePath);
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
@@ -5736,6 +6618,7 @@ void main() {
                         var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
                         _discoveredMaps = mapDiscovery.DiscoverMaps();
                         ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
+                        WarmDiscoveredWdlPreviews();
 
                         // Load AreaTable for area name display
                         _areaTableService = new AreaTableService();
@@ -5967,8 +6850,7 @@ void main() {
 
         try
         {
-            _renderer?.Dispose();
-            _renderer = null;
+            ResetActiveSceneState();
 
             switch (ext)
             {
@@ -6432,8 +7314,7 @@ void main() {
 
         try
         {
-            _renderer?.Dispose();
-            _renderer = null;
+            ResetActiveSceneState();
             _loadedFileName = Path.GetFileName(resolvedPath);
             _lastVirtualPath = resolvedPath;
 
@@ -6496,8 +7377,7 @@ void main() {
                 return;
             }
 
-            _renderer?.Dispose();
-            _renderer = null;
+            ResetActiveSceneState();
 
             var ext = Path.GetExtension(virtualPath).ToLowerInvariant();
 
@@ -6649,13 +7529,10 @@ void main() {
     {
         _statusMessage = $"Loading world from {Path.GetFileName(wdtPath)}...";
 
-        _worldScene?.Dispose();
-        _worldScene = null;
-        _terrainManager?.Dispose();
-        _terrainManager = null;
-        _vlmTerrainManager?.Dispose();
-        _vlmTerrainManager = null;
-        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        ResetActiveSceneState();
+        _showMinimapWindow = true;
+        _fullscreenMinimap = false;
+        _minimapPanOffset = Vector2.Zero;
 
         // Show loading screen (replicates Alpha client's EnableLoadingScreen)
         _loadingScreen?.Enable(_dataSource);
@@ -6775,10 +7652,7 @@ void main() {
             ViewerLog.Trace($"[ViewerApp] WDT load failed: {ex}");
             _statusMessage = $"Load failed: {ex.Message}";
             _modelInfo = $"WDT load error:\n{ex.Message}\n\nFile: {wdtPath}\nSize: {(File.Exists(wdtPath) ? new FileInfo(wdtPath).Length : 0)} bytes";
-            _worldScene?.Dispose();
-            _worldScene = null;
-            _terrainManager = null;
-            _loadingScreen?.Disable();
+            ResetActiveSceneState();
         }
     }
 
@@ -6800,14 +7674,10 @@ void main() {
     {
         _statusMessage = $"Loading VLM project from {projectRoot}...";
 
-        // Clean up any existing scene
-        _worldScene?.Dispose();
-        _worldScene = null;
-        _terrainManager?.Dispose();
-        _terrainManager = null;
-        _vlmTerrainManager?.Dispose();
-        _vlmTerrainManager = null;
-        _renderer = null;
+        ResetActiveSceneState();
+        _showMinimapWindow = true;
+        _fullscreenMinimap = false;
+        _minimapPanOffset = Vector2.Zero;
 
         try
         {
@@ -6841,8 +7711,7 @@ void main() {
             ViewerLog.Trace($"[ViewerApp] VLM project load failed: {ex}");
             _statusMessage = $"VLM load failed: {ex.Message}";
             _modelInfo = $"VLM load error:\n{ex.Message}\n\nPath: {projectRoot}";
-            _vlmTerrainManager?.Dispose();
-            _vlmTerrainManager = null;
+            ResetActiveSceneState();
         }
     }
 
@@ -7022,6 +7891,8 @@ void main() {
         }
 
         _loadingScreen?.Dispose();
+        _wdlPreviewCacheService?.Dispose();
+        _wdlPreviewRenderer?.Dispose();
         _sqlPopulationService?.Dispose();
         _renderer?.Dispose();
         _worldScene?.Dispose();

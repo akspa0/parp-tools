@@ -7,6 +7,7 @@
 - Loose file scanning (Dungeons, Textures, World folders)
 - MDX model loading and basic rendering
 - WMO (World Map Object) loading and basic rendering
+- WDL map preview selection with correct world spawn conversion for Alpha 0.5.3
 - Camera controls (mouse look, WASD movement)
 - File browser with extension filters and search
 - Basic shader-based rendering with directional lighting

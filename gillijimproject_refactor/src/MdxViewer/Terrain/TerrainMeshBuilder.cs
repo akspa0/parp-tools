@@ -13,6 +13,13 @@ namespace MdxViewer.Terrain;
 public class TerrainMeshBuilder
 {
     private readonly GL _gl;
+    private bool _ignoreHoleMask;
+
+    public bool IgnoreHoleMask
+    {
+        get => _ignoreHoleMask;
+        set => _ignoreHoleMask = value;
+    }
 
     public TerrainMeshBuilder(GL gl)
     {
@@ -86,27 +93,17 @@ public class TerrainMeshBuilder
                 vertices[i * 12 + 7] = (row / 2 + 0.5f) / 8f;
             }
 
-            // MCCV vertex color (RGBA, normalized). Default = white when MCCV is absent.
-            float r = 1f, g = 1f, b = 1f, a = 1f;
-            if (chunk.MccvColors != null)
-            {
-                int cBase = i * 4;
-                if (cBase + 3 < chunk.MccvColors.Length)
-                {
-                    r = chunk.MccvColors[cBase + 0] / 255f;
-                    g = chunk.MccvColors[cBase + 1] / 255f;
-                    b = chunk.MccvColors[cBase + 2] / 255f;
-                    a = chunk.MccvColors[cBase + 3] / 255f;
-                }
-            }
-            vertices[i * 12 + 8] = r;
-            vertices[i * 12 + 9] = g;
-            vertices[i * 12 + 10] = b;
-            vertices[i * 12 + 11] = a;
+            // MCCV stores BGRA bytes. The client interprets the normalized RGB as a 0..2
+            // modulation factor, with alpha ignored.
+            var mccv = MccvColorDecoder.DecodeModulation(chunk.MccvColors, i);
+            vertices[i * 12 + 8] = mccv.X;
+            vertices[i * 12 + 9] = mccv.Y;
+            vertices[i * 12 + 10] = mccv.Z;
+            vertices[i * 12 + 11] = mccv.W;
         }
 
         // Build index buffer: 8×8 cells, each split into 4 triangles via center vertex = 256 triangles
-        var indices = BuildIndices(chunk.HoleMask);
+        var indices = BuildIndices(chunk.HoleMask, _ignoreHoleMask);
 
         if (indices.Length == 0) return null;
 
@@ -162,7 +159,7 @@ public class TerrainMeshBuilder
     /// Each cell has 4 corners (outer) and 1 center (inner), forming 4 triangles.
     /// Holes are skipped based on the hole mask (4×4 groups of 2×2 cells).
     /// </summary>
-    private static ushort[] BuildIndices(int holeMask)
+    private static ushort[] BuildIndices(int holeMask, bool ignoreHoleMask)
     {
         var indices = new List<ushort>(256 * 3);
 
@@ -171,7 +168,7 @@ public class TerrainMeshBuilder
             for (int cellX = 0; cellX < 8; cellX++)
             {
                 // Check hole mask: 4×4 groups, each covering 2×2 cells
-                if (holeMask != 0)
+                if (!ignoreHoleMask && holeMask != 0)
                 {
                     int holeX = cellX / 2;
                     int holeY = cellY / 2;

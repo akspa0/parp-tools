@@ -3,7 +3,6 @@ using System.Numerics;
 using GillijimProject.WowFiles.Alpha;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
-using WoWMapConverter.Core.Formats.LichKing;
 
 namespace MdxViewer.Terrain;
 
@@ -588,7 +587,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
     /// Extract alpha maps from MCAL data. Layer 0 is always fully opaque (no alpha map).
     /// Each alpha map is 64×64 bytes (4096 bytes) for 8-bit, or 32×64 (2048 bytes) for 4-bit.
     /// </summary>
-    private static Dictionary<int, byte[]> ExtractAlphaMaps(byte[] mcalData, byte[] mclyData, int nLayers)
+    internal static Dictionary<int, byte[]> ExtractAlphaMaps(byte[] mcalData, byte[] mclyData, int nLayers)
     {
         var maps = new Dictionary<int, byte[]>();
         if (mcalData == null || mcalData.Length == 0 || nLayers <= 1)
@@ -605,16 +604,7 @@ public class AlphaTerrainAdapter : ITerrainAdapter
             byte[] alpha;
             if (isCompressed)
             {
-                // RLE-compressed alpha (MCLY flag 0x200): variable-length source, always decompresses to 64×64.
-                if (offset >= mcalData.Length) break;
-                var (data, bytesConsumed) = Mcal.ReadCompressedAlphaWithSize(mcalData, offset);
-                alpha = data;
-                offset += bytesConsumed;
-            }
-            else
-            {
-                // 4-bit alpha: 2048 packed bytes → expand to 8-bit 64×64
-                int alphaSize = 2048;
+                int alphaSize = 4096;
                 if (offset + alphaSize > mcalData.Length)
                 {
                     alphaSize = mcalData.Length - offset;
@@ -622,20 +612,22 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                 }
 
                 alpha = new byte[4096];
-                int packedCount = alphaSize;
-                int readPos = 0;
-                int writePos = 0;
-                for (int row = 0; row < 64 && readPos < packedCount; row++)
+                Array.Copy(mcalData, offset, alpha, 0, Math.Min(alpha.Length, alphaSize));
+                offset += alphaSize;
+            }
+            else
+            {
+                // Alpha 0.5.3 overlay layers use the legacy 4-bit packed format.
+                // The final byte in each row duplicates its low nibble into the last texel,
+                // then the legacy edge fix duplicates row/column 63 from 62.
+                int alphaSize = 2048;
+                if (offset + alphaSize > mcalData.Length)
                 {
-                    for (int col = 0; col < 32 && readPos < packedCount; col++)
-                    {
-                        byte packed = mcalData[offset + readPos++];
-                        byte lowVal = (byte)((packed & 0x0F) * 17);
-                        byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
-                        alpha[writePos++] = lowVal;
-                        alpha[writePos++] = (col == 31) ? lowVal : highVal;
-                    }
+                    alphaSize = mcalData.Length - offset;
+                    if (alphaSize <= 0) break;
                 }
+
+                alpha = ReadAlpha4BitWithLegacyEdgeFix(mcalData, offset, alphaSize);
 
                 offset += alphaSize;
             }
@@ -644,6 +636,44 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
+    }
+
+    private static byte[] ReadAlpha4BitWithLegacyEdgeFix(byte[] source, int offset, int alphaSize)
+    {
+        var alpha = new byte[64 * 64];
+        int readPos = offset;
+        int endPos = Math.Min(source.Length, offset + alphaSize);
+        int writePos = 0;
+
+        for (int row = 0; row < 64 && readPos < endPos; row++)
+        {
+            for (int col = 0; col < 32 && readPos < endPos; col++)
+            {
+                byte packed = source[readPos++];
+                byte lowVal = (byte)((packed & 0x0F) * 17);
+                byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+
+                alpha[writePos++] = lowVal;
+                alpha[writePos++] = col == 31 ? lowVal : highVal;
+            }
+        }
+
+        ApplyLegacyEdgeFix(alpha);
+        return alpha;
+    }
+
+    private static void ApplyLegacyEdgeFix(byte[] alpha)
+    {
+        if (alpha.Length != 64 * 64)
+            return;
+
+        for (int i = 0; i < 64; i++)
+        {
+            alpha[i * 64 + 63] = alpha[i * 64 + 62];
+            alpha[63 * 64 + i] = alpha[62 * 64 + i];
+        }
+
+        alpha[63 * 64 + 63] = alpha[62 * 64 + 62];
     }
 
     /// <summary>

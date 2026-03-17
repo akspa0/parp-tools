@@ -403,8 +403,62 @@ public class MdxRenderer : ISceneRenderer
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 
+    /// <summary>
+    /// Render this model as a camera-anchored backdrop behind the world.
+    /// Depth testing and depth writes stay disabled for every layer so terrain and world objects
+    /// always render in front of the skybox.
+    /// </summary>
+    public unsafe void RenderBackdrop(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3 fogColor, float fogStart, float fogEnd, Vector3 cameraPos,
+        Vector3 lightDir, Vector3 lightColor, Vector3 ambientColor)
+    {
+        _gl.UseProgram(_shaderProgram);
+
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Disable(EnableCap.DepthTest);
+        _gl.DepthMask(false);
+
+        var model = modelMatrix;
+        _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
+        _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
+        _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
+
+        if (_animator != null && _animator.HasAnimation)
+        {
+            _gl.Uniform1(_uHasBones, 1);
+
+            var matrices = _animator.BoneMatrices;
+            int boneCount = Math.Min(matrices.Length, 128);
+            fixed (Matrix4x4* ptr = matrices)
+            {
+                _gl.UniformMatrix4(_uBones, (uint)boneCount, false, (float*)ptr);
+            }
+        }
+        else
+        {
+            _gl.Uniform1(_uHasBones, 0);
+        }
+
+        _gl.Uniform3(_uFogColor, fogColor.X, fogColor.Y, fogColor.Z);
+        _gl.Uniform1(_uFogStart, fogStart);
+        _gl.Uniform1(_uFogEnd, fogEnd);
+        _gl.Uniform3(_uCameraPos, cameraPos.X, cameraPos.Y, cameraPos.Z);
+
+        _gl.Uniform3(_uLightDir, lightDir.X, lightDir.Y, lightDir.Z);
+        _gl.Uniform3(_uLightColor, lightColor.X, lightColor.Y, lightColor.Z);
+        _gl.Uniform3(_uAmbientColor, ambientColor.X, ambientColor.Y, ambientColor.Z);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
+
+        RenderGeosets(RenderPass.Both, 1.0f, forceBackdropState: true);
+
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+    }
+
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
-    private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha)
+    private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha, bool forceBackdropState = false)
     {
         for (int i = 0; i < _geosets.Count; i++)
         {
@@ -442,14 +496,21 @@ public class MdxRenderer : ISceneRenderer
                     // TwoSided (0x10): culling handled globally
                     _gl.Disable(EnableCap.CullFace);
 
-                    // NoDepthTest (0x40): disable depth testing entirely
-                    if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                    if (forceBackdropState)
+                    {
                         _gl.Disable(EnableCap.DepthTest);
+                    }
+                    else if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                    {
+                        _gl.Disable(EnableCap.DepthTest);
+                    }
                     else
+                    {
                         _gl.Enable(EnableCap.DepthTest);
+                    }
 
                     // NoDepthSet (0x80): disable depth writing
-                    bool noDepthWrite = geoFlags.HasFlag(MdlGeoFlags.NoDepthSet);
+                    bool noDepthWrite = forceBackdropState || geoFlags.HasFlag(MdlGeoFlags.NoDepthSet);
 
                     // Unshaded (0x1): skip lighting in shader
                     _gl.Uniform1(_uUnshaded, geoFlags.HasFlag(MdlGeoFlags.Unshaded) ? 1 : 0);
@@ -467,7 +528,7 @@ public class MdxRenderer : ISceneRenderer
                     {
                         // Alpha-tested cutout: opaque pass, depth writes ON, high discard threshold
                         _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
+                        _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);
                         _gl.Uniform1(_uAlphaThreshold, 0.75f);
                     }
@@ -541,13 +602,13 @@ public class MdxRenderer : ISceneRenderer
                     if (needsBlend)
                     {
                         _gl.Disable(EnableCap.Blend);
-                        _gl.DepthMask(true);
+                        _gl.DepthMask(!forceBackdropState);
                     }
                     else if (noDepthWrite)
                     {
-                        _gl.DepthMask(true);
+                        _gl.DepthMask(!forceBackdropState);
                     }
-                    if (geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
+                    if (!forceBackdropState && geoFlags.HasFlag(MdlGeoFlags.NoDepthTest))
                         _gl.Enable(EnableCap.DepthTest);
                 }
             }

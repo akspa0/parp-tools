@@ -12,6 +12,15 @@ namespace MdxViewer.Terrain;
 public sealed class TerrainTileMeshBuilder
 {
     private readonly GL _gl;
+    private bool _ignoreHoleMask;
+    internal const int AlphaShadowSliceSize = 64;
+    internal const int AlphaShadowSliceCount = 256;
+
+    public bool IgnoreHoleMask
+    {
+        get => _ignoreHoleMask;
+        set => _ignoreHoleMask = value;
+    }
 
     public TerrainTileMeshBuilder(GL gl)
     {
@@ -38,18 +47,7 @@ public sealed class TerrainTileMeshBuilder
         var tileMin = new Vector3(float.MaxValue);
         var tileMax = new Vector3(float.MinValue);
 
-        // AlphaShadow array: 64x64x256 RGBA
-        // Default: alpha channels 0 (transparent) for overlays; shadow 0.
-        const int alphaSize = 64;
-        const int sliceCount = 256;
-        var alphaShadow = new byte[alphaSize * alphaSize * 4 * sliceCount];
-        for (int i = 0; i < alphaShadow.Length; i += 4)
-        {
-            alphaShadow[i + 0] = 0;
-            alphaShadow[i + 1] = 0;
-            alphaShadow[i + 2] = 0;
-            alphaShadow[i + 3] = 0;
-        }
+        var alphaShadow = BuildAlphaShadowArray(chunks);
 
         for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
         {
@@ -106,22 +104,11 @@ public sealed class TerrainTileMeshBuilder
                     vertices[vBase + 7] = (row / 2 + 0.5f) / 8f;
                 }
 
-                float r = 1f, g = 1f, b = 1f, a = 1f;
-                if (chunk.MccvColors != null)
-                {
-                    int cBase = i * 4;
-                    if (cBase + 3 < chunk.MccvColors.Length)
-                    {
-                        r = chunk.MccvColors[cBase + 0] / 255f;
-                        g = chunk.MccvColors[cBase + 1] / 255f;
-                        b = chunk.MccvColors[cBase + 2] / 255f;
-                        a = chunk.MccvColors[cBase + 3] / 255f;
-                    }
-                }
-                vertices[vBase + 8] = r;
-                vertices[vBase + 9] = g;
-                vertices[vBase + 10] = b;
-                vertices[vBase + 11] = a;
+                var mccv = MccvColorDecoder.DecodeModulation(chunk.MccvColors, i);
+                vertices[vBase + 8] = mccv.X;
+                vertices[vBase + 9] = mccv.Y;
+                vertices[vBase + 10] = mccv.Z;
+                vertices[vBase + 11] = mccv.W;
 
                 int vIdx = chunkIndex * vertsPerChunk + i;
                 chunkSlice[vIdx] = (byte)slice;
@@ -150,13 +137,11 @@ public sealed class TerrainTileMeshBuilder
             chunkInfos.Add(new TerrainChunkInfo(chunk.TileX, chunk.TileY, chunk.ChunkX, chunk.ChunkY, bMin, bMax, chunk.AreaId));
 
             // Indices for this chunk
-            var chunkIndices = BuildIndices(chunk.HoleMask);
+            var chunkIndices = BuildIndices(chunk.HoleMask, _ignoreHoleMask);
             int baseVertex = chunkIndex * vertsPerChunk;
             for (int i = 0; i < chunkIndices.Length; i++)
                 indices.Add((ushort)(chunkIndices[i] + baseVertex));
 
-            // Fill alpha/shadow slice
-            FillAlphaShadowSlice(alphaShadow, slice, chunk);
         }
 
         if (indices.Count == 0) return (null, chunkInfos);
@@ -223,6 +208,7 @@ public sealed class TerrainTileMeshBuilder
             VboTexIndices = vbo2,
             Ebo = ebo,
             IndexCount = (uint)indices.Length,
+            TexIndices = texIndices,
             BoundsMin = boundsMin,
             BoundsMax = boundsMax,
             ChunkCount = chunkCount,
@@ -251,19 +237,29 @@ public sealed class TerrainTileMeshBuilder
         tileMesh.AlphaShadowArrayTexture = tex;
     }
 
+    internal static byte[] BuildAlphaShadowArray(IReadOnlyList<TerrainChunkData> chunks)
+    {
+        var alphaShadow = new byte[AlphaShadowSliceSize * AlphaShadowSliceSize * 4 * AlphaShadowSliceCount];
+
+        for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+        {
+            var chunk = chunks[chunkIndex];
+            int slice = (chunk.ChunkY * 16) + chunk.ChunkX;
+            if ((uint)slice >= AlphaShadowSliceCount)
+            {
+                slice = chunkIndex & 255;
+            }
+
+            FillAlphaShadowSlice(alphaShadow, slice, chunk);
+        }
+
+        return alphaShadow;
+    }
+
     private static void FillAlphaShadowSlice(byte[] alphaShadow, int slice, TerrainChunkData chunk)
     {
-        const int size = 64;
+        const int size = AlphaShadowSliceSize;
         int sliceBase = slice * size * size * 4;
-
-        static int EdgeFixedIndex(int x, int y)
-        {
-            // Noggit edge fix: duplicate last row/column (63) from 62.
-            // This prevents visible seams when sampling with linear filtering.
-            if (x >= 63) x = 62;
-            if (y >= 63) y = 62;
-            return y * size + x;
-        }
 
         // Alpha maps for layers 1..3
         for (int layer = 1; layer <= 3; layer++)
@@ -279,8 +275,7 @@ public sealed class TerrainTileMeshBuilder
                     for (int x = 0; x < size; x++)
                     {
                         int dst = y * size + x;
-                        int src = EdgeFixedIndex(x, y);
-                        alphaShadow[sliceBase + dst * 4 + channel] = alpha[src];
+                        alphaShadow[sliceBase + dst * 4 + channel] = alpha[dst];
                     }
                 }
                 continue;
@@ -308,8 +303,7 @@ public sealed class TerrainTileMeshBuilder
                 for (int x = 0; x < size; x++)
                 {
                     int dst = y * size + x;
-                    int src = EdgeFixedIndex(x, y);
-                    alphaShadow[sliceBase + dst * 4 + 3] = chunk.ShadowMap[src];
+                    alphaShadow[sliceBase + dst * 4 + 3] = chunk.ShadowMap[dst];
                 }
             }
         }
@@ -341,7 +335,7 @@ public sealed class TerrainTileMeshBuilder
     private static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
     private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
 
-    private static ushort[] BuildIndices(int holeMask)
+    internal static ushort[] BuildIndices(int holeMask, bool ignoreHoleMask = false)
     {
         var indices = new List<ushort>(256 * 3);
 
@@ -349,7 +343,7 @@ public sealed class TerrainTileMeshBuilder
         {
             for (int cellX = 0; cellX < 8; cellX++)
             {
-                if (holeMask != 0)
+                if (!ignoreHoleMask && holeMask != 0)
                 {
                     int holeX = cellX / 2;
                     int holeY = cellY / 2;

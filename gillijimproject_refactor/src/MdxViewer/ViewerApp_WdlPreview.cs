@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using MdxViewer.Terrain;
 
 namespace MdxViewer;
 
@@ -16,7 +17,13 @@ public partial class ViewerApp
             return;
         }
 
-        // Show error dialog if preview failed to load
+        if (!_wdlPreviewRenderer.HasPreview)
+        {
+            TryLoadSelectedWdlPreviewFromCache(_selectedMapForPreview.Directory);
+        }
+
+        var previewState = GetSelectedWdlPreviewState();
+
         if (!_wdlPreviewRenderer.HasPreview)
         {
             ImGui.SetNextWindowSize(new Vector2(400, 150), ImGuiCond.FirstUseEver);
@@ -24,11 +31,29 @@ public partial class ViewerApp
                 ImGui.GetIO().DisplaySize.X / 2 - 200,
                 ImGui.GetIO().DisplaySize.Y / 2 - 75), ImGuiCond.FirstUseEver);
 
-            if (ImGui.Begin($"WDL Preview Error - {_selectedMapForPreview.Name}", ref _showWdlPreview))
+            string title = previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued
+                ? $"Preparing Map Preview - {_selectedMapForPreview.Name}"
+                : $"WDL Preview Error - {_selectedMapForPreview.Name}";
+
+            if (ImGui.Begin(title, ref _showWdlPreview))
             {
-                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Failed to load WDL preview.");
-                if (_wdlPreviewRenderer.LastError != null)
-                    ImGui.TextWrapped(_wdlPreviewRenderer.LastError);
+                if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
+                {
+                    ImGui.TextWrapped("Preparing the WDL heightmap preview for this map.");
+                    if (!string.IsNullOrEmpty(_wdlPreviewWarmupStatus))
+                    {
+                        ImGui.Spacing();
+                        ImGui.TextWrapped(_wdlPreviewWarmupStatus);
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Failed to load WDL preview.");
+                    var error = GetSelectedWdlPreviewError();
+                    if (!string.IsNullOrEmpty(error))
+                        ImGui.TextWrapped(error);
+                }
+
                 ImGui.Separator();
                 if (ImGui.Button("Close"))
                     _showWdlPreview = false;

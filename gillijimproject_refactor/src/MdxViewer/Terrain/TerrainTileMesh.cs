@@ -15,6 +15,13 @@ public sealed class TerrainTileMesh : IDisposable
     public uint Ebo { get; init; }
     public uint IndexCount { get; init; }
 
+    /// <summary>
+    /// Per-vertex diffuse layer indices as uploaded to <see cref="VboTexIndices"/>.
+    /// The renderer may invalidate entries when a tile texture fails to load so the
+    /// batched path matches per-chunk fallback behavior.
+    /// </summary>
+    public ushort[] TexIndices { get; init; } = Array.Empty<ushort>();
+
     public int ChunkCount { get; init; }
 
     public Vector3 BoundsMin { get; init; }

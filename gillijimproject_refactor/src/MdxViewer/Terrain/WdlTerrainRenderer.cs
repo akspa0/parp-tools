@@ -68,7 +68,7 @@ public class WdlTerrainRenderer : IDisposable
         {
             for (int tileX = 0; tileX < 64; tileX++)
             {
-                int idx = tileY * 64 + tileX;
+                int idx = tileX * 64 + tileY;
                 var tile = wdlData.Tiles[idx];
                 if (tile?.HasData != true) continue;
 
@@ -90,7 +90,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void HideTile(int tileX, int tileY)
     {
-        _hiddenTiles.Add(tileY * 64 + tileX);
+        _hiddenTiles.Add(tileX * 64 + tileY);
     }
 
     /// <summary>
@@ -98,7 +98,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void ShowTile(int tileX, int tileY)
     {
-        _hiddenTiles.Remove(tileY * 64 + tileX);
+        _hiddenTiles.Remove(tileX * 64 + tileY);
     }
 
     /// <summary>

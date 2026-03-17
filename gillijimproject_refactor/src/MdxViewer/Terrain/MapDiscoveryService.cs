@@ -73,7 +73,7 @@ public class MapDiscoveryService
 
             // Check if WDL exists (Alpha 0.5.3 stores as .wdl.mpq)
             string wdlPath = $"World\\Maps\\{dir}\\{dir}.wdl";
-            bool hasWdl = _dataSource.FileExists(wdlPath);
+            bool hasWdl = _dataSource.FileExists(wdlPath) || _dataSource.FileExists(wdlPath + ".mpq");
 
             maps.Add(new MapDefinition(id, dir, name, hasWdt, hasWdl));
         }

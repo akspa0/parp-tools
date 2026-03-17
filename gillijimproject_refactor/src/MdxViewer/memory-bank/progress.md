@@ -18,6 +18,8 @@
 | WDL parser (MVER/MAOF/MARE, v0x12) | ✅ Strict parsing + version validation |
 | WDL terrain tile scale | ✅ Uses TileSize (8533.3333), not ChunkSize |
 | WDL preview window reliability | ✅ Error reporting + `.wdl.mpq` fallback |
+| WDL preview world spawn selection (Alpha 0.5.3) | ✅ Runtime-confirmed: preview orientation, clicked tile, and loaded-world spawn now agree |
+| Later-client world map opening after preview UI change | ✅ Double-click map load restored to direct WDT open; unsupported WDL previews no longer block map loading |
 | WDL runtime visibility toggle | ✅ UI checkbox for testing overlap issues |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
@@ -61,6 +63,7 @@
 | Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
 | **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
 | **Loading screen** | ✅ BLP-based with progress bar |
+| Direct Inspector access to minimap + world panels | ✅ Restored after dockable-panel regression |
 
 ## Phase Status
 
@@ -128,6 +131,33 @@
 4. WDL preview improved: `.wdl` / `.wdl.mpq` fallback + explicit failure reason
 5. WDL tile overlap mitigation: hide preloaded ADT tiles + depth polygon offset
 6. Added UI toggle to disable WDL rendering for overlap testing
+
+## 2026-03-16 — WDL Preview Spawn/Orientation Fix Verified
+
+- Fixed the remaining WDL preview click bug after the earlier out-of-bounds scale regression.
+- Root cause was not camera reset during world load; it was mismatched preview orientation and preview-to-terrain tile conversion.
+- `WdlPreviewDataBuilder` now builds the preview in the correct screen-major orientation, `WdlPreviewRenderer` converts preview tiles back into terrain tile coordinates before computing the spawn, and `WdlTerrainRenderer.HideTile/ShowTile` now matches the WDL load index convention.
+- Runtime validation is complete for Alpha 0.5.3: clicking the preview now loads the world at the intended in-map location instead of empty sky / zero-tile space.
+
+## 2026-03-16 — Later-Client Map Load Regression Fixed
+
+- The new preview-first world map flow accidentally blocked normal map loading for later clients because double-clicking a map with a WDL tried to open the Alpha-only preview dialog first.
+- Since the current `WdlParser` only handles the 0.5.3 WDL format, that produced preview parse failures for 0.6.0+ / 3.3.5 maps and prevented the expected WDT load flow.
+- Active behavior now restores direct WDT loading on map double-click for all clients and only exposes the preview button on supported Alpha 0.5.3 data.
+
+## 2026-03-17 — World Skybox M2s Routed To Backdrop Pass
+
+- Later-client skybox assets such as `Environments/Stars/IceCrownCitadelSky.m2` were being treated as ordinary MDDF doodads, so they spawned inside the map and rendered in front of terrain with other transparent/reflective model layers.
+- `WorldScene` now classifies known skybox asset families into a dedicated skybox instance list, excludes them from the normal doodad passes, and renders only the nearest active skybox as a camera-anchored backdrop before terrain.
+- `MdxRenderer` now has a dedicated backdrop path that forces depth testing and depth writes off for every layer so sky models cannot stamp the depth buffer ahead of world geometry.
+- Validation completed at build/test level: `MdxViewer.sln` builds cleanly and `MdxViewer.Tests` passes 19/19. Runtime visual validation is still required on real maps because this path depends on actual asset content and placement behavior.
+
+## 2026-03-17 — Fog/Cloud M2 Terrain Overlap Root Cause Reduced
+
+- The remaining "fog M2 renders over terrain" issue was not the new skybox backdrop path; it came from `WarcraftNetM2Adapter` inferring `NoDepthTest` / `NoDepthSet` from later-client M2 render flag bits.
+- That inference was too aggressive for world fog/cloud materials and allowed placed M2s to bypass terrain depth even when they were ordinary doodads.
+- Active behavior now keeps depth test/write enabled by default for Warcraft.NET-converted world M2s unless a dedicated source of truth for those flags is added later.
+- Validation completed at build/test level: `MdxViewer.Tests` now passes 24/24 and `MdxViewer.sln` builds cleanly. Runtime visual validation is still required on a real affected map.
 
 **WMO render reliability fix:**
 - Converted WMO main shader and liquid shader to static shared programs with ref-counted lifetime.

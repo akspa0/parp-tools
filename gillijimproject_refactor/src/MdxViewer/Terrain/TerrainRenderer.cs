@@ -792,6 +792,7 @@ public class TerrainRenderer : IDisposable
 
         int requestedLayers = textureNames.Count;
         int layerCount = Math.Max(1, Math.Min(requestedLayers, maxLayers));
+    var loadedLayers = new bool[layerCount];
 
         // Determine a target size based on available textures (cap at 256 to keep memory reasonable).
         int maxDim = 0;
@@ -820,6 +821,7 @@ public class TerrainRenderer : IDisposable
             int w, h;
             if (layer < textureNames.Count && TryLoadTerrainTexturePixels(textureNames[layer], out w, out h, out pixels))
             {
+                loadedLayers[layer] = true;
                 if (w != targetDim || h != targetDim)
                     pixels = ResampleRgbaNearest(pixels, w, h, targetDim, targetDim);
             }
@@ -844,6 +846,50 @@ public class TerrainRenderer : IDisposable
 
         tileMesh.DiffuseArrayTexture = tex;
         tileMesh.DiffuseLayerCount = layerCount;
+        RemapMissingDiffuseTextureIndices(tileMesh, loadedLayers);
+    }
+
+    internal static void RemapMissingDiffuseTextureIndices(TerrainTileMesh tileMesh, IReadOnlyList<bool> loadedLayers)
+    {
+        if (tileMesh.TexIndices.Length == 0)
+            return;
+
+        bool changed = RemapMissingDiffuseTextureIndices(tileMesh.TexIndices, loadedLayers);
+        if (!changed || tileMesh.Gl == null || tileMesh.VboTexIndices == 0)
+            return;
+
+        tileMesh.Gl.BindBuffer(BufferTargetARB.ArrayBuffer, tileMesh.VboTexIndices);
+        unsafe
+        {
+            fixed (ushort* ptr = tileMesh.TexIndices)
+            {
+                tileMesh.Gl.BufferData(
+                    BufferTargetARB.ArrayBuffer,
+                    (nuint)(tileMesh.TexIndices.Length * sizeof(ushort)),
+                    ptr,
+                    BufferUsageARB.StaticDraw);
+            }
+        }
+        tileMesh.Gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+    }
+
+    internal static bool RemapMissingDiffuseTextureIndices(ushort[] texIndices, IReadOnlyList<bool> loadedLayers)
+    {
+        bool changed = false;
+        for (int i = 0; i < texIndices.Length; i++)
+        {
+            ushort texIndex = texIndices[i];
+            if (texIndex == 0xFFFF)
+                continue;
+
+            if (texIndex >= loadedLayers.Count || !loadedLayers[(int)texIndex])
+            {
+                texIndices[i] = 0xFFFF;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private static byte[] CreateSolidRgba(int w, int h, byte r, byte g, byte b, byte a)
@@ -1414,8 +1460,9 @@ void main() {
         result = mix(result, l3, a3);
     }
 
-    // MCCV vertex color tint
-    result *= clamp(vVertexColor.rgb, 0.0, 1.0);
+    // MCCV vertex color tint. Vertex colors are pre-decoded to the client-style 0..2 range,
+    // with 1.0 as the neutral value and alpha ignored.
+    result *= clamp(vVertexColor.rgb, 0.0, 2.0);
 
     // MCSH shadow map overlay (all layers - shadows must persist through alpha-blended overlays)
     if (uShowShadowMap == 1 && uHasShadowMap == 1) {
@@ -1639,8 +1686,9 @@ void main() {
         result = mix(result, c3.rgb * lighting, a3);
     }
 
-    // MCCV vertex color tint
-    result *= clamp(vVertexColor.rgb, 0.0, 1.0);
+    // MCCV vertex color tint. Vertex colors are pre-decoded to the client-style 0..2 range,
+    // with 1.0 as the neutral value and alpha ignored.
+    result *= clamp(vVertexColor.rgb, 0.0, 2.0);
 
     if (uShowShadowMap == 1) {
         float shadow = alphaShadow.a;

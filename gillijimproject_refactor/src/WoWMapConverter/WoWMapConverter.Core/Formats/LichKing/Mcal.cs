@@ -91,23 +91,32 @@ namespace WoWMapConverter.Core.Formats.LichKing
                     inferredSpan = Math.Min(inferredSpan, next - offset);
             }
 
-            // If the WDT bigAlpha flag is set, prefer 8-bit (4096 bytes, already 64×64).
-            if (bigAlphaDefault)
+            // Exact 2048-byte spans are the unambiguous 4-bit case.
+            if (inferredSpan == 2048)
+            {
+                var result = ReadUncompressedAlpha4Bit(_data, offset);
+                return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
+            }
+
+            // Large spans are the unambiguous 8-bit case.
+            if (bigAlphaDefault || inferredSpan >= 4096)
                 return ReadBigAlpha(_data, offset);
 
-            // Infer 8-bit when the layer span clearly supports it.
-            if (inferredSpan >= 4096)
-                return ReadBigAlpha(_data, offset);
+            // Non-2048 sub-4096 spans are the strong compressed-alpha candidate.
+            // This avoids falling back to legacy 4-bit decode for LK layers whose
+            // compressed flag is missing or wrong.
+            if (inferredSpan > 0 && inferredSpan < 4096)
+            {
+                return ReadCompressedAlpha(_data, offset);
+            }
 
-            // Default to 4-bit for 3.3.5 when not bigAlpha.
+            // Last-resort fallback for malformed spans.
             if (inferredSpan >= 2048)
             {
                 var result = ReadUncompressedAlpha4Bit(_data, offset);
                 return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
             }
 
-            // Last resort: try compressed decode (some chunks have odd spans/padding).
-            // Compressed always decompresses to 64×64 — no edge fix.
             return ReadCompressedAlpha(_data, offset);
         }
 
@@ -175,8 +184,8 @@ namespace WoWMapConverter.Core.Formats.LichKing
             var dst = new byte[64 * 64];
 
             // 2048 bytes input (nibbles) -> 4096 bytes output.
-            // Warcraft/Noggit behavior: for the last packed byte in each row (col=31),
-            // duplicate low nibble into both output texels instead of using high nibble.
+            // Noggit/client behavior expands low nibble then high nibble for every packed byte,
+            // and the optional edge fix later duplicates row/column 63 from 62.
             int readPos = offset;
             int dataEnd = src.Length;
             int writePos = 0;
@@ -190,7 +199,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                     byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
 
                     dst[writePos++] = lowVal;
-                    dst[writePos++] = (col == 31) ? lowVal : highVal;
+                    dst[writePos++] = highVal;
                 }
             }
 

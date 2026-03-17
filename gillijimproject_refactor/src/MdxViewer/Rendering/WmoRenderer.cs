@@ -42,13 +42,14 @@ public class WmoRenderer : ISceneRenderer
     private readonly Dictionary<string, MdxRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
     private readonly List<string> _doodadNames = new(); // resolved from MODN
+    private readonly HashSet<string> _updatedDoodadModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<int> _visibleDoodadIndices = new();
     private int _activeDoodadSet = 0;
     private bool _doodadsVisible = true;
     private readonly string _cacheDir;
 
     // Doodad culling constants
     private const float DoodadCullDistance = 1200f;  // Max distance from camera to render WMO doodads
-    private const float DoodadMaxRenderCount = 256;  // Max doodads rendered per WMO per frame
 
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
@@ -151,8 +152,15 @@ public class WmoRenderer : ISceneRenderer
     }
 
     // DoodadSet management
+    public int GroupCount => _groups.Count;
+    public int DoodadCount => _doodadInstances.Count;
     public int DoodadSetCount => _wmo.DoodadSets.Count;
     public int ActiveDoodadSet => _activeDoodadSet;
+    public bool DoodadsVisible
+    {
+        get => _doodadsVisible;
+        set => _doodadsVisible = value;
+    }
     public string GetDoodadSetName(int index) =>
         index < _wmo.DoodadSets.Count ? (_wmo.DoodadSets[index].Name ?? $"Set {index}") : "";
 
@@ -243,38 +251,37 @@ public class WmoRenderer : ISceneRenderer
         }
 
         // Pass 2: Doodads (rendered between opaque and transparent WMO geometry)
-        // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount
+        // Keep stable distance culling, but do not hard-cap nearest objects.
+        // The old nearest-first cap starved looked-at doodads when the camera was
+        // inside a large WMO because nearby objects under/around the camera always won.
         if (_doodadsVisible && _doodadInstances.Count > 0)
         {
             // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
             // Update once per model to avoid redundant work when many instances share the same MDX.
-            var updatedDoodadModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _updatedDoodadModels.Clear();
+            _visibleDoodadIndices.Clear();
 
-            // Build list of visible doodads with world-space distance to camera
-            var visibleDoodads = new List<(int idx, float distSq)>();
+            // Build list of visible doodads with world-space distance to camera.
             float cullDistSq = DoodadCullDistance * DoodadCullDistance;
             for (int di = 0; di < _doodadInstances.Count; di++)
             {
                 var inst = _doodadInstances[di];
                 if (!inst.Visible || inst.Renderer == null) continue;
 
-                if (updatedDoodadModels.Add(inst.ModelPath))
-                    inst.Renderer.UpdateAnimation();
-
                 // Transform local position to world space
                 var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
                 float distSq = Vector3.DistanceSquared(cp, worldPos);
                 if (distSq > cullDistSq) continue; // Distance cull
-                visibleDoodads.Add((di, distSq));
+
+                if (_updatedDoodadModels.Add(inst.ModelPath))
+                    inst.Renderer.UpdateAnimation();
+
+                _visibleDoodadIndices.Add(di);
             }
 
-            // Sort nearest-first and cap at max render count
-            visibleDoodads.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-            int renderCount = Math.Min(visibleDoodads.Count, (int)DoodadMaxRenderCount);
-
-            for (int vi = 0; vi < renderCount; vi++)
+            foreach (int visibleIndex in _visibleDoodadIndices)
             {
-                var inst = _doodadInstances[visibleDoodads[vi].idx];
+                var inst = _doodadInstances[visibleIndex];
                 var doodadWorld = inst.Transform * modelMatrix;
                 inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Both, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,

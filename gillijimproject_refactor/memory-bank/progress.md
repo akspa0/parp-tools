@@ -24,6 +24,8 @@
 - **DBC Lighting**: ✅ LightService loads Light.dbc + LightData.dbc, zone-based ambient/fog/sky colors
 - **Replaceable Textures**: ✅ DBC CDI variant validation against MPQ + model dir scan fallback
 - **Minimap overlay**: ✅ From minimap tile images
+- **WDL preview map spawn selection (Alpha 0.5.3)**: ✅ Runtime-confirmed. Preview orientation, clicked tile selection, and resulting world spawn match the terrain grid.
+- **Later-client map loading after WDL preview UI change**: ✅ Direct WDT load restored. Non-0.5.x clients no longer depend on unsupported WDL preview parsing just to open a map.
 
 ### Model Parsers & Tools
 - **MDX-L_Tool**: ✅ Core parsing and Archaeology logic complete.
@@ -41,6 +43,11 @@
 
 ### MdxViewer — Rendering Quality & Performance
 - **3.3.5 ADT loading freeze**: Needs investigation
+- **Terrain alpha-mask regressions (post-343dadf baseline)**: still unresolved for active 3.x runtime rendering. Some recent MCAL-path assumptions/tests were ahead of reality; later-client terrain texturing is still visibly broken in the viewer and should not be described as signed off.
+- **Terrain debug UX regression**: the alpha-mask debug checkbox currently prevents chunk/tile overlays from being visible in the same view because the shader exits early in alpha-debug mode. This is now part of the terrain-debugging problem, not just a UI annoyance.
+- **Batched missing-texture terrain parity**: The tile-array renderer now invalidates diffuse indices for missing BLP slices before draw, so later-client overlay layers no longer blend against synthetic white fallback textures when the per-chunk path would have skipped them.
+- **Current terrain handoff**: return to direct 3.x layer decode/sourcing investigation. Runtime screenshots still show broken later-client terrain, and the debug overlay path needs to be fixed so alpha plus chunk/tile boundaries can be inspected together.
+- **WMO stream reload regression**: Cached failed WMO/MDX loads no longer block reloads after stream-out/stream-in. Runtime verification against Ironforge re-entry is still needed.
 - **WMO culling too aggressive**: Objects outside WMO not visible from inside
 - **MDX GPU skinning**: Bone matrices computed per-frame but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
 - **MDX animation UI**: Sequence selection combo box in ImGui panel not yet wired
@@ -62,6 +69,12 @@
 ## ❌ Known Issues
 
 ### MdxViewer Rendering Bugs (Feb 12, 2026)
+
+#### Terrain Alpha / Shadow Batched Upload Regression (Mar 16, 2026)
+- **Symptom**: Batched terrain path can diverge from per-chunk alpha/shadow rendering, especially on LK big-alpha and already-fixed 64x64 data.
+- **Root cause candidate**: `TerrainTileMeshBuilder.FillAlphaShadowSlice` duplicated row/column 63 from 62 for all alpha/shadow slices, while `Mcal` and the per-chunk upload path already preserve final decode output.
+- **Real-data validation**: Confirmed on Alpha `Azeroth` tile `(0,0)` and WoWMuseum 3.3.5 `development` tile `(0,0)`. The old remap would have changed 17,367 explicit alpha/shadow bytes on the Alpha tile and 5,166 on the LK tile.
+- **Status**: 🔧 Tile-array packing and `TerrainImageIo` atlas roundtrips now preserve decoded data. Re-run audit shows atlas roundtrip diffs at zero on both validation tiles. First-party regression tests now cover the fixed semantics in `src/MdxViewer.Tests`.
 
 #### MDX Sphere Env / Specular Orientation (Feb 14, 2026)
 - **Symptom**: Reflective/specular surfaces (e.g., dome-like geometry) appeared inward-facing on some two-sided materials.
@@ -86,6 +99,26 @@
 - **Problem**: Appends MWMO/MODF chunks to end of file; result is Noggit-incompatible.
 
 ## Key Technical Insights
+
+### WDL Preview Spawn Path (Mar 16, 2026)
+- The WDL preview failure was not a late camera reset in the world load path. `LoadFileFromDataSource` applies the world default camera first, and the preview dialog then overwrites it with the selected spawn.
+- The actual bug was preview-to-world conversion: preview pixels were being interpreted on a transposed tile grid, and an earlier regression had also pushed preview spawns onto the wrong world scale.
+- The current path is runtime-confirmed working for Alpha 0.5.3: preview tiles are drawn in screen-major order, converted back into terrain tile coordinates for spawning, and WDL hide/show uses the same `tileX*64 + tileY` indexing as WDL load.
+- Follow-up correction: later clients must not use that preview path yet. Their WDL files are not handled by the Alpha-only parser, so the map browser now loads WDTs directly and only exposes preview for supported Alpha 0.5.x data.
+
+### Terrain Alpha Pipeline (Mar 16, 2026)
+- Per-chunk path uploads decoded alpha/shadow data as-is; it does not add a second edge fix.
+- Batched tile path had been re-sampling texel row/column 63 from 62 inside `TerrainTileMeshBuilder`, which made tile-array rendering semantically different from per-chunk rendering.
+- Real-data audit against Alpha `Azeroth` and WoWMuseum 3.3.5 `development` confirmed that those edge texels do differ in shipped data, so the divergence was not theoretical.
+- `TerrainImageIo` atlas export/import has now been aligned with the fixed batched renderer path; the follow-up audit reports zero atlas roundtrip diffs on the validation tiles.
+- `StandardTerrainAdapter` now routes split-ADT alpha decode by explicit profile family: 0.x profiles stay legacy sequential, 3.x profiles use strict LK `Mcal` decode. `AlphaMapService` still has not been adopted as the viewer-side source of truth.
+- There is now minimal first-party automated regression coverage for the active terrain alpha path under `gillijimproject_refactor/src`, focused on batched packing parity and `TerrainImageIo` atlas roundtrips. Decode-path coverage is still missing.
+- The active viewer terrain alpha tests now also cover explicit legacy-vs-LK decode gating, the fixed-path WoWMuseum 3.3.5 tile load, and the batched missing-diffuse remap behavior. Coverage is still minimal, but it is no longer limited to packing/export parity alone.
+- The strict 3.x test seam now also guards the narrower missing-metadata behavior: `StandardTerrainAdapter_LichKingProfiles_DoNotInferAlpha_WhenUseAlphaFlagIsMissing()` ensures the viewer does not invent alpha maps when later-client flags and offsets are both absent.
+- Additional strict-path coverage now keeps relaxed decode fenced to the explicit offset-present edge case: `StandardTerrainAdapter_LichKingProfiles_RelaxedFallbackOnlyRuns_WhenOffsetExists()`.
+- Additional legacy split-ADT coverage now guards the row-end nibble behavior again: `StandardTerrainAdapter_LegacyProfiles_PreserveFinalHighNibble()` locks the viewer's sequential 4-bit decode back to baseline semantics.
+- Viewer-side MH2O handling no longer stops at the first instance in a chunk. `StandardTerrainAdapter.ParseMh2o` now uses the shared `Mh2oChunk` parser and composes visible tiles from all instances, with unit coverage for exists-bitmaps and overlap precedence.
+- The fixed-path WoWMuseum `development_0_0.adt` investigation showed raw A2/A3 bytes are present on disk and preserved through adapter decode. Remaining visual failures on that loose sample can still come from missing overlay diffuse assets, not just alpha decode.
 
 ### MCLQ Liquid Heights (Feb 11, 2026)
 - MCLQ per-vertex heights (81 entries × 8 bytes) are absolute world Z values
