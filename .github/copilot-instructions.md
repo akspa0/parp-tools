@@ -33,3 +33,13 @@
 - Preserve the existing split between `AlphaTerrainAdapter` and `StandardTerrainAdapter`.
 - Favor minimal fixes over broad refactors in the terrain pipeline.
 - If behavior, commands, or known risks materially change, update the relevant memory-bank file instead of leaving the old guidance stale.
+
+## Custom Agents
+Use these workspace agents (`.github/agents/`) for multi-step integration work:
+- **@cherry-pick** — Surgical feature extraction from post-baseline commits. Classifies files by terrain risk, extracts safe files via `git show`, blocks risky terrain hunks without explicit approval.
+- **@feature-impl** — Implements new renderer features (TXAN, ribbons, doodads, instancing, MH2O, etc.) following existing MdxViewer code patterns. Reads `implementation_prompts.md` automatically.
+- **@terrain-validator** — Read-only terrain pipeline validation. Diffs current code against baseline `343dadfa`, classifies changes as SAFE/SUSPICIOUS/REGRESSION.
+- **@build-check** — Post-merge build verification. Runs `dotnet build`, categorizes errors, suggests fixes without modifying code.
+- **@commit-analyzer** — Pre-integration commit analysis. Breaks down commits into file-level risk classifications and extraction recommendations.
+
+Typical integration workflow: `@commit-analyzer` → `@cherry-pick` → `@build-check` → `@terrain-validator`. Use `@feature-impl` for features with no existing code to cherry-pick (see `gillijimproject_refactor/src/MdxViewer/memory-bank/implementation_prompts.md`).
