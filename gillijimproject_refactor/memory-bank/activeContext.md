@@ -29,7 +29,7 @@ Runtime later-client terrain texturing is still visibly wrong. Recent MCAL/MCCV 
 - **Recovery branch**: `recovery/terrain-surgical-343dadf` in `_recovery_343dadf` worktree
 - **Safe replay**: `c1e0d29` — managers/models from `177f961` without fused terrain topology
 - **Wave 0 evidence**: `177f961` = first fused alpha+shadow tile-pass merge
-- **Version policy**: MPQ load requires explicit client version-family selection (no heuristic guessing)
+- **Version policy**: MPQ load requires explicit client build selection, now sourced from `Map.dbd` (sorted by major family) with path-based preselection hints only
 - **NEXT STEP**: Wave 1 topology rollback in `TerrainRenderer`, `TerrainTileMeshBuilder`, `TerrainTileMesh`
 - **Rule**: do NOT replay `177f961`, `d50cfe7`, `39799bf` wholesale; split-based replay with runtime gates only
 

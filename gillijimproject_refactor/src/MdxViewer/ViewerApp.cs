@@ -50,17 +50,18 @@ public partial class ViewerApp : IDisposable
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
     private string? _dbcBuild;
-    private static readonly (string Label, string BuildVersion)[] ClientBuildOptions =
+    private static readonly ClientBuildOption[] FallbackClientBuildOptions =
     {
-        ("Alpha 0.5.3", "0.5.3.3368"),
-        ("Early Split ADT 0.6-0.7", "0.7.0.3694"),
-        ("Early Split ADT 0.8", "0.8.0.3734"),
-        ("Early Split ADT 0.9.0", "0.9.0.3807"),
-        ("Early Split ADT 0.9.1", "0.9.1.3810"),
-        ("Early Split ADT 0.10 (provisional)", "0.10.3892"),
-        ("LK 3.0.1", "3.0.1.8303"),
-        ("LK 3.3.5", "3.3.5.12340")
+        new("Alpha (0.x) - 0.5.3.3368", "0.5.3.3368"),
+        new("Alpha (0.x) - 0.7.0.3694", "0.7.0.3694"),
+        new("Alpha (0.x) - 0.8.0.3734", "0.8.0.3734"),
+        new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
+        new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
+        new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
+        new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
+        new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340")
     };
+    private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
     private AreaTableService? _areaTableService;
@@ -304,6 +305,8 @@ public partial class ViewerApp : IDisposable
     private bool _showBuildSelectionDialog = false;
     private string? _pendingGameFolderPath;
     private int _selectedBuildOptionIndex = 0;
+    private string _buildSelectionFilter = "";
+    private string? _buildSelectionHint;
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
 
@@ -414,6 +417,7 @@ public partial class ViewerApp : IDisposable
         style.Colors[(int)ImGuiCol.MenuBarBg] = new Vector4(0.15f, 0.15f, 0.18f, 1.0f);
 
         TryAutoPopulateAlphaCoreRoot();
+        RefreshClientBuildOptions();
         LoadViewerSettings();
 
         // Mouse input for viewport (not consumed by ImGui)
@@ -2159,8 +2163,7 @@ void main() {
         if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
         {
             _folderInputBuf = selectedPath;
-            _pendingGameFolderPath = selectedPath;
-            _showBuildSelectionDialog = true;
+            PrepareBuildSelectionDialog(selectedPath);
         }
     }
 
@@ -2188,17 +2191,45 @@ void main() {
         if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath))
             ImGui.TextWrapped($"Folder: {_pendingGameFolderPath}");
 
+        if (!string.IsNullOrWhiteSpace(_buildSelectionHint))
+            ImGui.TextDisabled(_buildSelectionHint);
+
         ImGui.Separator();
 
-        _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, ClientBuildOptions.Length - 1);
-        string preview = ClientBuildOptions[_selectedBuildOptionIndex].Label;
+        if (_clientBuildOptions.Count == 0)
+        {
+            ImGui.TextWrapped("No build profiles are available. Ensure WoWDBDefs/definitions/Map.dbd exists.");
+            if (ImGui.Button("Cancel"))
+            {
+                _pendingGameFolderPath = null;
+                _showBuildSelectionDialog = false;
+                _buildSelectionHint = null;
+            }
+            ImGui.End();
+            return;
+        }
+
+        _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+        string preview = _clientBuildOptions[_selectedBuildOptionIndex].Label;
+
+        ImGui.InputTextWithHint("##build_filter", "Filter by build or family", ref _buildSelectionFilter, 128);
 
         if (ImGui.BeginCombo("Client version family", preview))
         {
-            for (int i = 0; i < ClientBuildOptions.Length; i++)
+            for (int i = 0; i < _clientBuildOptions.Count; i++)
             {
+                if (!string.IsNullOrWhiteSpace(_buildSelectionFilter))
+                {
+                    string filter = _buildSelectionFilter.Trim();
+                    var option = _clientBuildOptions[i];
+                    bool matches = option.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                        || option.BuildVersion.Contains(filter, StringComparison.OrdinalIgnoreCase);
+                    if (!matches)
+                        continue;
+                }
+
                 bool isSelected = i == _selectedBuildOptionIndex;
-                if (ImGui.Selectable(ClientBuildOptions[i].Label, isSelected))
+                if (ImGui.Selectable(_clientBuildOptions[i].Label, isSelected))
                     _selectedBuildOptionIndex = i;
                 if (isSelected)
                     ImGui.SetItemDefaultFocus();
@@ -2206,7 +2237,7 @@ void main() {
             ImGui.EndCombo();
         }
 
-        ImGui.TextDisabled($"Selected build alias: {ClientBuildOptions[_selectedBuildOptionIndex].BuildVersion}");
+        ImGui.TextDisabled($"Selected build: {_clientBuildOptions[_selectedBuildOptionIndex].BuildVersion}");
 
         if (ImGui.Button("Load MPQs"))
         {
@@ -2215,7 +2246,8 @@ void main() {
                 string selectedPath = _pendingGameFolderPath;
                 _pendingGameFolderPath = null;
                 _showBuildSelectionDialog = false;
-                LoadMpqDataSource(selectedPath, null, ClientBuildOptions[_selectedBuildOptionIndex].BuildVersion);
+                _buildSelectionHint = null;
+                LoadMpqDataSource(selectedPath, null, _clientBuildOptions[_selectedBuildOptionIndex].BuildVersion);
             }
             else
             {
@@ -2228,6 +2260,7 @@ void main() {
         {
             _pendingGameFolderPath = null;
             _showBuildSelectionDialog = false;
+            _buildSelectionHint = null;
         }
 
         ImGui.End();
@@ -6637,6 +6670,80 @@ void main() {
         _selectedFileIndex = -1;
     }
 
+    private void PrepareBuildSelectionDialog(string selectedPath)
+    {
+        _pendingGameFolderPath = selectedPath;
+        _buildSelectionFilter = string.Empty;
+
+        RefreshClientBuildOptions();
+        if (_clientBuildOptions.Count == 0)
+        {
+            _buildSelectionHint = "No build profiles available from Map.dbd.";
+            _selectedBuildOptionIndex = 0;
+            _showBuildSelectionDialog = true;
+            return;
+        }
+
+        if (BuildVersionCatalog.TryInferBuildIndexFromPath(_clientBuildOptions, selectedPath, out int inferredIndex))
+        {
+            _selectedBuildOptionIndex = inferredIndex;
+            _buildSelectionHint = $"Path hint matched build {_clientBuildOptions[inferredIndex].BuildVersion}. Confirm before loading.";
+        }
+        else
+        {
+            _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+            _buildSelectionHint = "No clear build token found in folder path. Select the build manually.";
+        }
+
+        _showBuildSelectionDialog = true;
+    }
+
+    private void RefreshClientBuildOptions()
+    {
+        string? previouslySelected = null;
+        if (_clientBuildOptions.Count > 0)
+        {
+            int current = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+            previouslySelected = _clientBuildOptions[current].BuildVersion;
+        }
+
+        _clientBuildOptions.Clear();
+
+        string? dbdDir = ResolveDbdDefinitionsDir();
+        if (!string.IsNullOrWhiteSpace(dbdDir))
+            _clientBuildOptions.AddRange(BuildVersionCatalog.LoadOptionsFromMapDbd(dbdDir));
+
+        if (_clientBuildOptions.Count == 0)
+            _clientBuildOptions.AddRange(FallbackClientBuildOptions);
+
+        if (!string.IsNullOrWhiteSpace(previouslySelected))
+            _selectedBuildOptionIndex = FindBuildOptionIndex(previouslySelected);
+
+        if (_clientBuildOptions.Count > 0)
+            _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+        else
+            _selectedBuildOptionIndex = 0;
+    }
+
+    private static string? ResolveDbdDefinitionsDir()
+    {
+        string[] dbdSearchPaths =
+        {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
+        };
+
+        foreach (var path in dbdSearchPaths)
+        {
+            var resolved = Path.GetFullPath(path);
+            if (Directory.Exists(resolved) && File.Exists(Path.Combine(resolved, "Map.dbd")))
+                return resolved;
+        }
+
+        return null;
+    }
+
     private void LoadMpqDataSource(string gamePath, string? listfilePath, string explicitBuildVersion)
     {
         try
@@ -6668,23 +6775,7 @@ void main() {
                 _minimapRenderer?.Dispose();
                 _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index);
 
-                // Find WoWDBDefs definitions directory
-                string[] dbdSearchPaths = {
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
-                };
-
-                string? dbdDir = null;
-                foreach (var path in dbdSearchPaths)
-                {
-                    var resolved = Path.GetFullPath(path);
-                    if (Directory.Exists(resolved) && Directory.GetFiles(resolved, "*.dbd").Length > 0)
-                    {
-                        dbdDir = resolved;
-                        break;
-                    }
-                }
+                string? dbdDir = ResolveDbdDefinitionsDir();
 
                 if (dbdDir != null)
                 {
@@ -7709,6 +7800,8 @@ void main() {
     {
         try
         {
+            RefreshClientBuildOptions();
+
             if (!File.Exists(ViewerSettingsPath))
             {
                 // First run: default WMO liquid rotation for 3.3.5.
@@ -7739,7 +7832,9 @@ void main() {
             var settings = new ViewerSettings
             {
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
-                LastSelectedBuildVersion = ClientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, ClientBuildOptions.Length - 1)].BuildVersion
+                LastSelectedBuildVersion = _clientBuildOptions.Count > 0
+                    ? _clientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1)].BuildVersion
+                    : null
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -7755,14 +7850,14 @@ void main() {
         }
     }
 
-    private static int FindBuildOptionIndex(string? buildVersion)
+    private int FindBuildOptionIndex(string? buildVersion)
     {
         if (string.IsNullOrWhiteSpace(buildVersion))
             return 0;
 
-        for (int i = 0; i < ClientBuildOptions.Length; i++)
+        for (int i = 0; i < _clientBuildOptions.Count; i++)
         {
-            if (string.Equals(ClientBuildOptions[i].BuildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_clientBuildOptions[i].BuildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
                 return i;
         }
 

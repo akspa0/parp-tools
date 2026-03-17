@@ -28,7 +28,7 @@ Runtime later-client terrain still visually wrong. Recent fixes are **not closur
 - WDL preview spawn confirmed (Alpha 0.5.3)
 - MH2O parsing improved (code-level, not runtime verified)
 - Skybox M2 backdrop pass + fog M2 depth fix
-- MPQ load requires explicit version-family selection
+- MPQ load requires explicit build selection; picker is now generated from `Map.dbd` (major-family sorted) with path-based preselection hints
 - World lifecycle cleanup on scene switch
 
 ### MH2O Update (Mar 17)
