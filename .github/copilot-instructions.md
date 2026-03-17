@@ -8,6 +8,15 @@
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md`.
 - If the task touches 3.3.5 terrain texturing, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
+## Context Lookup Workflow
+- Start with concise context indexes before broad searches:
+	- `gillijimproject_refactor/memory-bank/context-index.md`
+	- `gillijimproject_refactor/src/MdxViewer/memory-bank/context-index.md`
+- Use the local lookup tool for fragmented context:
+	- Build index: `python gillijimproject_refactor/tools/doc_lookup.py build`
+	- Query: `python gillijimproject_refactor/tools/doc_lookup.py query "your terms"`
+- Prefer lookup queries over repeated broad file scans when the same topics recur.
+
 ## Build And Validation
 - For parser and format-library work, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
 - For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
