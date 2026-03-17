@@ -15,6 +15,12 @@ Purpose: fast routing for viewer-side debugging and terrain recovery.
 - UI complexity drift reducing debugging clarity
 - Need for explicit version-family routing before terrain decode/render path selection
 
+## Implementation Prompts
+
+- src/MdxViewer/memory-bank/implementation_prompts.md — paste-ready Copilot
+  prompts for TXAN animation, animation UI, MH2O liquid, ribbon emitters,
+  detail doodads, GPU instancing, async textures, debug overlays
+
 ## Viewer High-Risk Files
 
 - src/MdxViewer/Terrain/TerrainRenderer.cs

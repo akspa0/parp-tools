@@ -1,153 +1,40 @@
-# Progress — AlphaWoW Viewer (MdxViewer)
+# Progress — MdxViewer
 
-## Status: v0.4.0 Released — 0.5.3 Rendering Improvements + 3.3.5 Groundwork (In Progress)
+## Status: v0.4.0 Released — 0.5.3 usable, 3.3.5 NOT usable
 
-**Supported client versions: 0.5.3 through 0.12** — fully usable
-**3.3.5 WotLK: IN PROGRESS** — scaffolding exists but MH2O liquid and terrain texturing are broken
+## Working Features
 
-## What Works Today
+| Category | Features |
+|----------|----------|
+| Terrain | Alpha WDT + 0.6.0 split ADT + MCSH shadows + alpha debug + fog culling |
+| Streaming | AOI 9×9, directional lookahead, persistent cache, 4 uploads/frame |
+| Liquid | MCLQ (terrain) + MLIQ (WMO) — water/lava/slime, waterfall slopes |
+| MDX | Two-pass, animation (GPU skinning, compressed quats), PRE2 particles, geoset anim, specular, sphere env, M2/MD20 adapter |
+| WMO | v14 4-pass, doodads (distance cull, no cap), shared static shaders, MLIQ |
+| DBC | Lighting, area names, replaceable textures, taxi paths, POIs |
+| WDL | Preview + spawn (0.5.3 only), later clients bypass to direct WDT |
+| World | Full-load mode, frustum culling, minimap, object picking, skybox backdrop |
+| VLM | Load + generate + minimap |
+| Catalog | SQL dump → browse/filter → JSON+GLB+screenshot |
+| Build | GitHub Actions CI, self-contained publish, WoWDBDefs bundling |
 
-| Feature | Status |
-|---------|--------|
-| Terrain rendering + AOI lazy loading | ✅ (AOI radius=3, 7×7 tiles, 4 uploads/frame) |
-| Terrain MCSH shadow maps | ✅ Applied on ALL layers (not just base) |
-| Terrain alpha map debug view | ✅ Show Alpha Masks toggle, Noggit edge fix |
-| Terrain fog-based chunk culling | ✅ Skip chunks beyond FogEnd+200 |
-| Terrain liquid rendering | ✅ Water/lava/slime (WMO MLIQ + terrain + MH2O) |
-| **WotLK 3.3.5 terrain support** | 🔧 In progress — split ADT, MPHD flags parsed. **MH2O broken, texturing broken** |
-| WDL parser (MVER/MAOF/MARE, v0x12) | ✅ Strict parsing + version validation |
-| WDL terrain tile scale | ✅ Uses TileSize (8533.3333), not ChunkSize |
-| WDL preview window reliability | ✅ Error reporting + `.wdl.mpq` fallback |
-| WDL preview world spawn selection (Alpha 0.5.3) | ✅ Runtime-confirmed: preview orientation, clicked tile, and loaded-world spawn now agree |
-| Later-client world map opening after preview UI change | ✅ Double-click map load restored to direct WDT open; unsupported WDL previews no longer block map loading |
-| WDL runtime visibility toggle | ✅ UI checkbox for testing overlap issues |
-| Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
-| Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
-| **MDX skeletal animation** | ✅ Compressed quats, GPU skinning, standalone + terrain |
-| MDX pivot offset correction | ✅ BB center pre-translation for correct placement |
-| MDX blend modes + depth mask | ✅ Transparent layers don't write depth |
-| MDX fog blending | ✅ Models blend into fog like terrain |
-| MDX doodads in WorldScene | ✅ Position + animation + particles working |
-| **MDX particle effects (PRE2)** | ✅ Billboard quads, texture atlas, bone-following, per-emitter blend |
-| **Geoset animation alpha (ATSQ)** | ✅ Per-frame keyframe evaluation, alpha modulation |
-| **M2 (MD20) model loading** | ✅ WarcraftNetM2Adapter: MD20→MdxFile conversion |
-| **Half-Lambert lighting** | ✅ Softer shading on MDX + WMO (no harsh black shadows) |
-| **Improved ambient lighting** | ✅ Day/night with WoW-like brightness levels |
-| WMO v14 loading + rendering | ✅ Groups, BLP textures per-batch |
-| WMO fog blending | ✅ WMOs blend into fog like terrain |
-| WMO liquid rendering (MLIQ) | ✅ Semi-transparent water surfaces |
-| WMO intermittent render race | ✅ Fixed via shared static shaders + ref counting |
-| WMO doodad sets | ✅ Loaded and rendered with WMO modelMatrix |
-| WMO rotation/facing in WorldScene | ✅ Fixed — `-rz` negation for handedness |
-| MDDF/MODF placements | ✅ Position + pivot correct |
-| Bounding boxes | ✅ Actual MODF extents with correct min/max swap |
-| Batched overlay rendering | ✅ POI pins + taxi paths in single draw call |
-| Minimap zoom (4 tiles around camera) | ✅ |
-| TaxiPath visualization | ✅ DBC-loaded flight paths as 3D lines |
-| Taxi path selection (sidebar) | ✅ |
-| POI + Taxi lazy-load UI | ✅ Load buttons → toggle checkboxes after load |
-| AreaID/MapID-aware area names | ✅ Filters by current map, warns on mismatch |
-| NoCullRadius (150 units) | ✅ Nearby objects skip frustum cull |
-| VLM terrain loading | ✅ JSON dataset → renderer |
-| VLM minimap | ✅ Works for VLM projects |
-| VLM dataset generator | ✅ File > Generate VLM Dataset (background export) |
-| BLP2 texture loading | ✅ DXT1/3/5, palette, JPEG |
-| MPQ data source | ✅ Listfile, nested WMO/WDT/WDL archives |
-| DBC integration | ✅ DBCD, CreatureModelData, CreatureDisplayInfo, TaxiPath, AreaPOI, AreaTable |
-| Camera | ✅ Free-fly WASD + mouse look |
-| ImGui UI | ✅ File browser, model info, visibility toggles |
-| Live minimap + click-to-teleport | ✅ WDT + VLM |
-| AreaPOI system | ✅ DBC loading, 3D markers, minimap markers, UI list |
-| Object picking/selection | ✅ |
-| GLB export | ✅ MDX + WMO, Z-up → Y-up conversion |
-| Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
-| **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
-| **Loading screen** | ✅ BLP-based with progress bar |
-| Direct Inspector access to minimap + world panels | ✅ Restored after dockable-panel regression |
+## 3.3.5 (Broken)
+- Split ADT loading + MPHD flags: parsed
+- MH2O: code-level fix, NOT runtime verified
+- Terrain texturing: BROKEN at runtime
+- Patch MPQ priority + BZip2: working
 
-## Phase Status
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 0 | Foundation | ✅ Complete |
-| 3 | Terrain | ✅ Complete (shadow fix, alpha seam fix, async streaming, fog culling) |
-| 4 | World Scene | ✅ WMOs, MDX placement, rotation. Particles deferred. |
-| VLM | VLM Dataset Support | ✅ Load + Generate + Minimap |
-| Overlays | POI, Taxi, Minimap Zoom | ✅ Complete (batched rendering, lazy-load UI) |
-| Loading | Loading Screen | ✅ Complete |
-| Catalog | Asset Catalog | ✅ SQL dump reader, ImGui browse/filter, JSON+GLB+screenshot export |
-| 1 | **MDX Animation** | ✅ Complete (compressed quats, GPU skinning, terrain doodads) |
-| — | **Per-object folders + multi-angle screenshots** | 🔧 Next up |
-| 2 | Particles (PRE2/RIBB) | ✅ PRE2 complete — billboard quads, texture atlas, blend modes. RIBB still pending. |
-| WL | WL loose liquids transform alignment | 🔧 In progress — matrix tuning UI added, values not finalized |
-| LK | **WotLK 3.3.5 Support** | 🔧 In progress — scaffolding exists. MH2O + texturing broken. **Not usable yet** |
-| 5-7 | Liquids, Detail Doodads, Polish | ⏳ Lava type mapping still broken (green) |
-| MCP | MCP Server | ⏳ Designed — GLB terrain, NPC spawn, click-to-chat, audio |
-
-## 2026-02-15 — v0.4.0 Release: 0.5.3 Rendering Improvements + 3.3.5 Groundwork
-
-**Rendering improvements for 0.5.3. Initial 3.3.5 scaffolding added (NOT ready for use).**
-
-**3.3.5 WotLK support (IN PROGRESS — NOT USABLE):**
-- StandardTerrainAdapter: split ADT loading, MPHD bigAlpha flag — but **MH2O broken, texturing broken**
-- WarcraftNetM2Adapter: MD20→MdxFile conversion for M2 models (works in isolation)
-- WMO v17: multi-MOTV/MOCV, strict validation
-- Fixed terrain regression from initial 3.3.5 commit (surgical revert of shared renderer code)
-- **Only client versions 0.5.3 through 0.12 are currently usable**
-
-**Lighting overhaul:**
-- Half-Lambert diffuse shading on MDX + WMO (wraps light, no harsh black shadows)
-- Raised ambient: day 0.4→0.55, night 0.08→0.25 (WoW-like brightness)
-- WMO shader: proper vec3 lighting instead of lossy scalar average
-- Reduced specular intensity (0.3→0.15)
-
-**Particle system (PRE2):**
-- Rewrote ParticleRenderer with per-particle uniforms + texture atlas + per-emitter blend
-- Wired into MdxRenderer: emitters created from parsed data, bone-following, transparent pass
-
-**Geoset animation alpha (ATSQ):**
-- Per-frame alpha keyframe evaluation with global sequence support
-- Alpha modulates layer alpha in RenderGeosets; invisible geosets skipped
-
-**Key files:** TerrainLighting.cs, ModelRenderer.cs, WmoRenderer.cs, ParticleRenderer.cs, StandardTerrainAdapter.cs, TerrainRenderer.cs, WarcraftNetM2Adapter.cs, WorldAssetManager.cs
-
-## 2026-02-13 — MDX Animation System Complete
-
-**Three bugs fixed:**
-1. **KGRT Compressed Quaternions** — Rotation keys are 8-byte `C4QuaternionCompressed`, not 16-byte float4. Ghidra-verified decompression formula.
-2. **Animation Never Updated** — `ViewerApp` called `RenderWithTransform()` directly, bypassing `Render()` which contained `Update()`. Extracted `UpdateAnimation()` as public method.
-3. **PIVT Chunk Order** — PIVT comes after BONE in MDX files. All bone pivots were (0,0,0). Added deferred pivot assignment after all chunks parsed.
-
-**Terrain animation** — Added `UpdateAnimation()` for unique MDX renderers in `WorldScene.cs` before render passes.
-
-**Key files:** `MdxTypes.cs`, `MdxFile.cs`, `MdxAnimator.cs`, `ModelRenderer.cs`, `ViewerApp.cs`, `WorldScene.cs`
-
-## 2026-02-13 — WDL/WL/WMO Rendering Fix Pass
-
-**WDL parser + rendering fixes:**
-1. `WdlParser` rewritten for strict chunk parsing and version check (`0x12`)
-2. `MARE` chunk header handling corrected before reading 545 heights
-3. WDL renderer now uses `WoWConstants.TileSize` (8533.3333)
-4. WDL preview improved: `.wdl` / `.wdl.mpq` fallback + explicit failure reason
-5. WDL tile overlap mitigation: hide preloaded ADT tiles + depth polygon offset
-6. Added UI toggle to disable WDL rendering for overlap testing
-
-## 2026-03-16 — WDL Preview Spawn/Orientation Fix Verified
-
-- Fixed the remaining WDL preview click bug after the earlier out-of-bounds scale regression.
-- Root cause was not camera reset during world load; it was mismatched preview orientation and preview-to-terrain tile conversion.
-- `WdlPreviewDataBuilder` now builds the preview in the correct screen-major orientation, `WdlPreviewRenderer` converts preview tiles back into terrain tile coordinates before computing the spawn, and `WdlTerrainRenderer.HideTile/ShowTile` now matches the WDL load index convention.
-- Runtime validation is complete for Alpha 0.5.3: clicking the preview now loads the world at the intended in-map location instead of empty sky / zero-tile space.
-
-## 2026-03-16 — Later-Client Map Load Regression Fixed
-
-- The new preview-first world map flow accidentally blocked normal map loading for later clients because double-clicking a map with a WDL tried to open the Alpha-only preview dialog first.
-- Since the current `WdlParser` only handles the 0.5.3 WDL format, that produced preview parse failures for 0.6.0+ / 3.3.5 maps and prevented the expected WDT load flow.
-- Active behavior now restores direct WDT loading on map double-click for all clients and only exposes the preview button on supported Alpha 0.5.3 data.
-
-## 2026-03-17 — World Skybox M2s Routed To Backdrop Pass
-
-- Later-client skybox assets such as `Environments/Stars/IceCrownCitadelSky.m2` were being treated as ordinary MDDF doodads, so they spawned inside the map and rendered in front of terrain with other transparent/reflective model layers.
+## Recent Fixes (Mar 16-17)
+- WMO/MDX cached-null reload → retries on re-entry
+- WMO doodad cap removed → distance-only culling
+- World object residency → unlimited renderer cache
+- WDL preview spawn + tile indexing → confirmed working (0.5.3)
+- Later-client maps → direct WDT load (no WDL preview)
+- World lifecycle → clean scene reset on switch
+- Skybox M2 → backdrop pass; fog M2 → depth enabled
+- MH2O → full instance parsing + exists bitmaps
+- Minimap → restored after dockable-panel regression
+- Inspector → direct access to world-data panels
 - `WorldScene` now classifies known skybox asset families into a dedicated skybox instance list, excludes them from the normal doodad passes, and renders only the nearest active skybox as a camera-anchored backdrop before terrain.
 - `MdxRenderer` now has a dedicated backdrop path that forces depth testing and depth writes off for every layer so sky models cannot stamp the depth buffer ahead of world geometry.
 - Validation completed at build/test level: `MdxViewer.sln` builds cleanly and `MdxViewer.Tests` passes 19/19. Runtime visual validation is still required on real maps because this path depends on actual asset content and placement behavior.

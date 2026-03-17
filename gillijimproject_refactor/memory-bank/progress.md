@@ -1,102 +1,44 @@
 # Progress
 
-## ✅ Working
+## Working (0.5.3 through 0.12 — fully usable)
 
-### MdxViewer (3D World Viewer) — Primary Project
-- **Alpha 0.5.3 WDT terrain**: ✅ Monolithic format, 256 MCNK per tile, async streaming
-- **0.6.0 split ADT terrain**: ✅ StandardTerrainAdapter, MCNK with header offsets (Feb 11)
-- **0.6.0 WMO-only maps**: ✅ MWMO+MODF parsed from WDT (Feb 11)
-- **Terrain liquid (MCLQ)**: ✅ Per-vertex sloped heights, absolute world Z, waterfall support (Feb 11)
-- **WMO v14 rendering**: ✅ 4-pass: opaque → doodads → liquids → transparent
-- **WMO liquid (MLIQ)**: ✅ matId-based type detection, correct positioning (Feb 11)
-- **WMO doodad culling**: ✅ Distance (500u) + cap (64) + nearest-first sort + fog passthrough
-- **WMO doodad loading**: ✅ FindInFileSet case-insensitive + mdx/mdl swap → 100% load rate
-- **MDX rendering**: ✅ Two-pass opaque/transparent, alpha cutout, specular highlights, sphere env map
-- **MDX GEOS version compatibility**: ✅ Ported version-routed GEOS parser behavior from `wow-mdx-viewer` (v1300/v1400 strict path + v1500 strict path + guarded fallback)
-- **MDX SEQS name compatibility**: ✅ Counted 0x8C named-record detection broadened to reduce fallback `Seq_{animId}` names on playable models
-- **MDX PRE2/RIBB parsing parity**: ✅ Expanded parser coverage for PRE2 and RIBB payload/tail animation chunks (runtime visual verification pending)
-- **MDX animation engine**: ✅ BONE/PIVT/HELP parsing, keyframe interpolation, bone hierarchy (Feb 12)
-- **Full-load mode**: ✅ `--full-load` (default) loads all tiles at startup with progress (Feb 11)
-- **MCSH shadow maps**: ✅ 64×64 bitmask applied to all terrain layers
-- **AOI streaming**: ✅ 9×9 tiles, directional lookahead, persistent tile cache, MPQ throttling (Feb 11)
-- **Frustum culling**: ✅ View-frustum + distance + fade
-- **AreaID lookup**: ✅ Low 16-bit extraction + low byte fallback for MapID mismatch
-- **DBC Lighting**: ✅ LightService loads Light.dbc + LightData.dbc, zone-based ambient/fog/sky colors
-- **Replaceable Textures**: ✅ DBC CDI variant validation against MPQ + model dir scan fallback
-- **Minimap overlay**: ✅ From minimap tile images
-- **WDL preview map spawn selection (Alpha 0.5.3)**: ✅ Runtime-confirmed. Preview orientation, clicked tile selection, and resulting world spawn match the terrain grid.
-- **Later-client map loading after WDL preview UI change**: ✅ Direct WDT load restored. Non-0.5.x clients no longer depend on unsupported WDL preview parsing just to open a map.
+- Terrain: Alpha WDT monolithic + 0.6.0 split ADT + WMO-only maps + MCSH shadows + alpha debug
+- AOI streaming: 9×9, directional lookahead, persistent cache, MPQ throttling
+- Terrain liquid (MCLQ): per-vertex heights, waterfall slopes
+- MDX: two-pass rendering, skeletal animation (GPU skinning, compressed quats), PRE2 particles, geoset anim, specular, sphere env map
+- WMO v14: 4-pass rendering, doodads, MLIQ liquid, shared static shaders
+- DBC: lighting, area names, replaceable textures, taxi paths, area POIs
+- WDL preview + spawn selection (Alpha 0.5.3 only)
+- VLM: dataset load/generate/minimap
+- Asset catalog: SQL dump → browse/filter → JSON+GLB+screenshot export
+- Build/release: `dotnet publish -r win-x64 --self-contained`, GitHub Actions CI
 
-### Model Parsers & Tools
-- **MDX-L_Tool**: ✅ Core parsing and Archaeology logic complete.
-- **GEOS Chunk (Alpha)**: ✅ Robust scanner for Version 1300 validated.
-- **Texture Export**: ✅ DBC-driven `ReplaceableId` resolution working.
-- **OBJ Splitter**: ✅ Geoset-keyed export verified on complex creatures.
-- **0.5.3 Alpha WDT/ADT**: ✅ Monolithic format, sequential MCNK.
-- **WMO v14/v17 converter**: ✅ Both directions implemented.
-- **BLP**: ✅ BlpResizer complete.
+## 3.3.5 WotLK: IN PROGRESS — NOT USABLE
 
-### Data Generation
-- **VLM Datasets (Alpha)**: ✅ Azeroth v10 (685 tiles).
+- **Terrain texturing: BROKEN** — runtime layer decode/blending still visually wrong despite MCAL/MCCV fixes
+- **MH2O liquid: code-level fix applied, NOT runtime-verified**
+- Split ADT loading + MPHD flags parsed, M2→MdxFile adapter works
+- Patch MPQ priority + BZip2 decompression working
 
-## ⚠️ Partial / In Progress
+## In Progress / Partial
 
-### MdxViewer — Rendering Quality & Performance
-- **3.3.5 ADT loading freeze**: Needs investigation
-- **Terrain alpha-mask regressions (post-343dadf baseline)**: still unresolved for active 3.x runtime rendering. Some recent MCAL-path assumptions/tests were ahead of reality; later-client terrain texturing is still visibly broken in the viewer and should not be described as signed off.
-- **Version routing policy hardening**: MPQ loading now requires explicit client version-family selection in `ViewerApp`; automatic build guessing from folder names/MPQ heuristics is disabled on the active path.
-- **Baseline recovery track checkpoint**: `recovery/terrain-surgical-343dadf` has first safe replay commit `c1e0d29` (manager/model slices only). High-risk terrain topology rollback is still pending.
-- **Terrain debug UX regression**: the alpha-mask debug checkbox currently prevents chunk/tile overlays from being visible in the same view because the shader exits early in alpha-debug mode. This is now part of the terrain-debugging problem, not just a UI annoyance.
-- **Batched missing-texture terrain parity**: The tile-array renderer now invalidates diffuse indices for missing BLP slices before draw, so later-client overlay layers no longer blend against synthetic white fallback textures when the per-chunk path would have skipped them.
-- **Current terrain handoff**: return to direct 3.x layer decode/sourcing investigation. Runtime screenshots still show broken later-client terrain, and the debug overlay path needs to be fixed so alpha plus chunk/tile boundaries can be inspected together.
-- **Immediate next execution item**: Wave 1 rollback of fused alpha+shadow tile pass in `TerrainRenderer`/`TerrainTileMeshBuilder`/`TerrainTileMesh` before replaying deferred commits.
-- **WMO stream reload regression**: Cached failed WMO/MDX loads no longer block reloads after stream-out/stream-in. Runtime verification against Ironforge re-entry is still needed.
-- **WMO culling too aggressive**: Objects outside WMO not visible from inside
-- **MDX GPU skinning**: Bone matrices computed per-frame but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)
-- **MDX animation UI**: Sequence selection combo box in ImGui panel not yet wired
-- **MDX per-geoset color/alpha**: Only static alpha used; animated GeosetAnims not wired
-- **MDX particles/ribbons**: Parser coverage expanded; runtime behavior verification still pending on effect-heavy assets
-- **MDX texture UV animation**: Not implemented
-- **MDX billboard bones**: Not implemented
-- **WMO lighting**: v14-16 grayscale lightmap + v17 MOCV vertex colors not implemented
-- **Vulkan RenderManager**: Research phase — `IRenderBackend` abstraction for Silk.NET Vulkan
+- **Terrain recovery**: Wave 1 topology rollback pending (fused alpha+shadow tile pass)
+- **Alpha debug overlay**: blocks chunk/tile overlays — terrain diagnosis regression
+- WMO stream reload: cached-null fix applied, needs runtime verify
+- MDX: no GPU skinning vertex attributes yet, no anim UI, no UV animation, no billboards
+- WMO: culling too aggressive from inside, no v14-16 lightmap/MOCV
+- Skybox: backdrop pass works, no DBC/WMO-driven metadata yet
+- Lava type mapping still broken (green)
 
-### Build & Release Infrastructure
-- **GitHub Actions**: ✅ `.github/workflows/release-mdxviewer.yml` — tag push or manual dispatch
-- **WoWDBDefs bundling**: ✅ 1315 `.dbd` files copied to output via csproj Content items
-- **Self-contained publish**: ✅ `dotnet publish -c Release -r win-x64 --self-contained` verified
+## Known Rendering Bugs
 
-### MDX-L_Tool Enhancements
-- **M2 Export (v264)**: 🔧 Implementing binary writer.
-
-## ❌ Known Issues
-
-### MdxViewer Rendering Bugs (Feb 12, 2026)
-
-#### Terrain Alpha / Shadow Batched Upload Regression (Mar 16, 2026)
-- **Symptom**: Batched terrain path can diverge from per-chunk alpha/shadow rendering, especially on LK big-alpha and already-fixed 64x64 data.
-- **Root cause candidate**: `TerrainTileMeshBuilder.FillAlphaShadowSlice` duplicated row/column 63 from 62 for all alpha/shadow slices, while `Mcal` and the per-chunk upload path already preserve final decode output.
-- **Real-data validation**: Confirmed on Alpha `Azeroth` tile `(0,0)` and WoWMuseum 3.3.5 `development` tile `(0,0)`. The old remap would have changed 17,367 explicit alpha/shadow bytes on the Alpha tile and 5,166 on the LK tile.
-- **Status**: 🔧 Tile-array packing and `TerrainImageIo` atlas roundtrips now preserve decoded data. Re-run audit shows atlas roundtrip diffs at zero on both validation tiles. First-party regression tests now cover the fixed semantics in `src/MdxViewer.Tests`.
-
-#### MDX Sphere Env / Specular Orientation (Feb 14, 2026)
-- **Symptom**: Reflective/specular surfaces (e.g., dome-like geometry) appeared inward-facing on some two-sided materials.
-- **Fix Applied**: Fragment shader now flips normals/view-space normals on backfaces before env UV generation and lighting/specular.
-- **Status**: 🔧 Patched in code, pending visual confirmation on Dalaran dome repro.
-
-#### WMO Semi-Transparent Window Materials
-- **Symptom**: Stormwind WMO maps blue/gold stained glass textures to white marble columns instead of window frames
-- **Hypothesis 1**: Secondary MOTV chunk not skipped → MOBA batch parsing misalignment
-- **Fix Attempt 1**: Added `reader.BaseStream.Position += chunkSize;` when secondary MOTV encountered in `WmoV14ToV17Converter.ParseMogp` (line 922)
-- **Result**: ❌ FAILED — window materials still map to wrong geometry
-- **Status**: Root cause still unknown. May not be MOTV-related. Need to check console logs to verify if secondary MOTV is even present in Stormwind groups.
-
-#### MDX Cylindrical Texture Stretching
-- **Symptom**: Barrels, tree trunks show single wood plank stretched around entire circumference instead of tiled texture
-- **Hypothesis 1**: Texture wrap mode incorrectly clamping both S and T axes when only one should clamp
-- **Fix Attempt 1**: Changed `ModelRenderer.LoadTextures` to use per-axis clamp flags (clampS/clampT) based on `tex.Flags & 0x1` and `tex.Flags & 0x2` (lines 778-779)
-- **Result**: ❌ FAILED — textures still stretched on cylindrical objects
-- **Status**: Root cause still unknown. May not be wrap mode related. Need to check console logs to verify texture flags and investigate UV coordinates.
+| Bug | Status |
+|-----|--------|
+| 3.x terrain texturing broken at runtime | 🔧 Active investigation |
+| Alpha debug hides chunk/tile overlays | 🔧 Needs fix before diagnosis |
+| WMO stained glass → wrong geometry | ❌ Root cause unknown |
+| MDX cylindrical texture stretching | ❌ Root cause unknown |
+| MDX sphere env orientation (dome) | 🔧 Patched, needs visual confirm |
 
 ### AdtModfInjector
 - **Problem**: Appends MWMO/MODF chunks to end of file; result is Noggit-incompatible.
