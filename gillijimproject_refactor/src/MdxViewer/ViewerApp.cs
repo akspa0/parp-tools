@@ -50,6 +50,17 @@ public partial class ViewerApp : IDisposable
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
     private string? _dbcBuild;
+    private static readonly (string Label, string BuildVersion)[] ClientBuildOptions =
+    {
+        ("Alpha 0.5.3", "0.5.3.3368"),
+        ("Early Split ADT 0.6-0.7", "0.7.0.3694"),
+        ("Early Split ADT 0.8", "0.8.0.3734"),
+        ("Early Split ADT 0.9.0", "0.9.0.3807"),
+        ("Early Split ADT 0.9.1", "0.9.1.3810"),
+        ("Early Split ADT 0.10 (provisional)", "0.10.3892"),
+        ("LK 3.0.1", "3.0.1.8303"),
+        ("LK 3.3.5", "3.3.5.12340")
+    };
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
     private AreaTableService? _areaTableService;
@@ -290,6 +301,9 @@ public partial class ViewerApp : IDisposable
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
     private string _folderInputBuf = "";
+    private bool _showBuildSelectionDialog = false;
+    private string? _pendingGameFolderPath;
+    private int _selectedBuildOptionIndex = 0;
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
 
@@ -1062,6 +1076,8 @@ void main() {
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
+        if (_showBuildSelectionDialog)
+            DrawBuildSelectionDialog();
         if (_showListfileInput)
             DrawListfileInputDialog();
         if (_showAlphaFolderImportScope)
@@ -2143,8 +2159,78 @@ void main() {
         if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
         {
             _folderInputBuf = selectedPath;
-            LoadMpqDataSource(selectedPath, null);
+            _pendingGameFolderPath = selectedPath;
+            _showBuildSelectionDialog = true;
         }
+    }
+
+    private void DrawBuildSelectionDialog()
+    {
+        if (!_showBuildSelectionDialog)
+            return;
+
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        bool open = _showBuildSelectionDialog;
+        if (!ImGui.Begin("Select Client Version Family", ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            _showBuildSelectionDialog = open;
+            if (!_showBuildSelectionDialog)
+                _pendingGameFolderPath = null;
+            ImGui.End();
+            return;
+        }
+
+        _showBuildSelectionDialog = open;
+        if (!_showBuildSelectionDialog)
+            _pendingGameFolderPath = null;
+
+        ImGui.TextWrapped("Explicit client version selection is required before loading MPQs. Automatic build guessing is disabled for terrain/profile safety.");
+        if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath))
+            ImGui.TextWrapped($"Folder: {_pendingGameFolderPath}");
+
+        ImGui.Separator();
+
+        _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, ClientBuildOptions.Length - 1);
+        string preview = ClientBuildOptions[_selectedBuildOptionIndex].Label;
+
+        if (ImGui.BeginCombo("Client version family", preview))
+        {
+            for (int i = 0; i < ClientBuildOptions.Length; i++)
+            {
+                bool isSelected = i == _selectedBuildOptionIndex;
+                if (ImGui.Selectable(ClientBuildOptions[i].Label, isSelected))
+                    _selectedBuildOptionIndex = i;
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled($"Selected build alias: {ClientBuildOptions[_selectedBuildOptionIndex].BuildVersion}");
+
+        if (ImGui.Button("Load MPQs"))
+        {
+            if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath) && Directory.Exists(_pendingGameFolderPath))
+            {
+                string selectedPath = _pendingGameFolderPath;
+                _pendingGameFolderPath = null;
+                _showBuildSelectionDialog = false;
+                LoadMpqDataSource(selectedPath, null, ClientBuildOptions[_selectedBuildOptionIndex].BuildVersion);
+            }
+            else
+            {
+                _statusMessage = "Game folder is missing or no longer accessible.";
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _pendingGameFolderPath = null;
+            _showBuildSelectionDialog = false;
+        }
+
+        ImGui.End();
     }
 
     private void DrawListfileInputDialog()
@@ -6551,7 +6637,7 @@ void main() {
         _selectedFileIndex = -1;
     }
 
-    private void LoadMpqDataSource(string gamePath, string? listfilePath)
+    private void LoadMpqDataSource(string gamePath, string? listfilePath, string explicitBuildVersion)
     {
         try
         {
@@ -6604,29 +6690,27 @@ void main() {
                 {
                     _dbdDir = dbdDir;
 
-                    // Infer build version from game path, validated against WoWDBDefs
-                    string buildAlias = InferBuildFromPath(gamePath, dbdDir);
-                    ViewerLog.Trace($"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}");
-                    
-                    if (!string.IsNullOrEmpty(buildAlias))
+                    if (!string.IsNullOrWhiteSpace(explicitBuildVersion))
                     {
-                        _dbcBuild = buildAlias;
-                        ViewerLog.Trace($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
-                        _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
+                        _dbcBuild = explicitBuildVersion;
+                        ViewerLog.Trace($"[MdxViewer] Using explicitly selected build '{_dbcBuild}' for path: {gamePath}");
+                        ViewerLog.Trace($"[MdxViewer] Loading DBCs via DBCD (build: {_dbcBuild}, DBDs: {dbdDir})");
+                        _texResolver.LoadFromDBC(dbcProvider, dbdDir, _dbcBuild);
 
                         // Discover maps
-                        var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
+                        var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, _dbcBuild, _dataSource);
                         _discoveredMaps = mapDiscovery.DiscoverMaps();
                         ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
                         WarmDiscoveredWdlPreviews();
 
                         // Load AreaTable for area name display
                         _areaTableService = new AreaTableService();
-                        _areaTableService.Load(dbcProvider, dbdDir, buildAlias);
+                        _areaTableService.Load(dbcProvider, dbdDir, _dbcBuild);
                     }
                     else
                     {
-                        ViewerLog.Trace("[MdxViewer] Could not determine build version. DBC texture resolution unavailable.");
+                        _dbcBuild = null;
+                        ViewerLog.Trace("[MdxViewer] No explicit build selected. DBC texture resolution unavailable.");
                     }
                 }
                 else
@@ -6641,202 +6725,6 @@ void main() {
         {
             _statusMessage = $"Failed to load MPQs: {ex.Message}";
         }
-    }
-
-    /// <summary>
-    /// Infer the full build string (e.g. "0.10.0.3892") from the game path.
-    /// Strategy:
-    ///   1. Regex-extract all X.Y.Z.NNNN candidates from the path
-    ///   2. Validate each against WoWDBDefs BUILD lines
-    ///   3. If no 4-part match, try X.Y.Z short versions and resolve to full build via DBD
-    ///   4. Fallback: MPQ heuristics for 3.3.5
-    /// </summary>
-    private static string InferBuildFromPath(string path, string? dbdDir)
-    {
-        // Collect all known builds from WoWDBDefs (cached per call)
-        HashSet<string> dbdBuilds = new(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(dbdDir) && Directory.Exists(dbdDir))
-        {
-            // Parse Map.dbd — it covers all versions and is always present
-            var mapDbd = Path.Combine(dbdDir, "Map.dbd");
-            if (File.Exists(mapDbd))
-            {
-                foreach (var line in File.ReadLines(mapDbd))
-                {
-                    var trimmed = line.Trim();
-                    if (!trimmed.StartsWith("BUILD ")) continue;
-                    // Parse "BUILD X.Y.Z.NNNN" or "BUILD X.Y.Z.NNNN-X.Y.Z.NNNN" or comma-separated
-                    var parts = trimmed[6..].Split(',', StringSplitOptions.TrimEntries);
-                    foreach (var part in parts)
-                    {
-                        // Handle ranges: "0.9.0.3807-0.12.0.3988"
-                        var rangeParts = part.Split('-', StringSplitOptions.TrimEntries);
-                        foreach (var rp in rangeParts)
-                            if (Regex.IsMatch(rp, @"^\d+\.\d+\.\d+\.\d+$"))
-                                dbdBuilds.Add(rp);
-                    }
-                }
-            }
-        }
-        ViewerLog.Trace($"[BuildDetect] Loaded {dbdBuilds.Count} known builds from WoWDBDefs");
-
-        // 1. Extract all X.Y.Z.NNNN candidates from the path
-        var fullMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+\.\d+)");
-        foreach (Match m in fullMatches)
-        {
-            string candidate = m.Groups[1].Value;
-            if (dbdBuilds.Contains(candidate))
-            {
-                ViewerLog.Trace($"[BuildDetect] Exact match from path: {candidate}");
-                return candidate;
-            }
-        }
-
-        // 2. Extract X.Y.Z short versions and find matching full build in DBD
-        var shortMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+)");
-        foreach (Match m in shortMatches)
-        {
-            string shortVer = m.Groups[1].Value;
-            // Find any DBD build that starts with this short version
-            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(shortVer + "."));
-            if (!string.IsNullOrEmpty(match))
-            {
-                ViewerLog.Trace($"[BuildDetect] Short version '{shortVer}' resolved to: {match}");
-                return match;
-            }
-        }
-
-        // 3. Check for full build in path that might be in a BUILD range (not exact endpoint)
-        foreach (Match m in fullMatches)
-        {
-            string candidate = m.Groups[1].Value;
-            // Try to find it in DBD range lines
-            string? rangeMatch = FindBuildInDbdRanges(dbdDir, candidate);
-            if (!string.IsNullOrEmpty(rangeMatch))
-            {
-                ViewerLog.Trace($"[BuildDetect] Range match from path: {candidate}");
-                return candidate;
-            }
-        }
-
-        // 4. Fallback: MPQ heuristics
-        if (Directory.Exists(path))
-        {
-            try
-            {
-                var mpqs = Directory.GetFiles(path, "*.mpq", SearchOption.AllDirectories)
-                    .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
-
-                // LK 3.3.5: has patch MPQs with "3" in name
-                if (mpqs.Any(m => m.Contains("patch") && m.Contains("3")))
-                {
-                    var lkBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("3.3.5."));
-                    return lkBuild ?? "3.3.5.12340";
-                }
-
-                // Alpha 0.5.3: dbc.mpq + model.mpq + texture.mpq, no common.mpq or patch-*.mpq
-                bool hasAlphaSignature = mpqs.Contains("dbc.mpq")
-                    && mpqs.Contains("model.mpq")
-                    && mpqs.Contains("texture.mpq")
-                    && !mpqs.Any(m => m.StartsWith("common"))
-                    && !mpqs.Any(m => m.StartsWith("patch-"));
-                if (hasAlphaSignature)
-                {
-                    // Check for patch.mpq → 0.7.0+, otherwise 0.5.3
-                    bool hasPatch = mpqs.Contains("patch.mpq");
-                    if (hasPatch)
-                    {
-                        // 0.6.0–0.8.0 range: try each in order
-                        foreach (var prefix in new[] { "0.8.0.", "0.7.0.", "0.6.0." })
-                        {
-                            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(prefix));
-                            if (!string.IsNullOrEmpty(match))
-                            {
-                                ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha+patch): {match}");
-                                return match;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        var alphaBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("0.5.3."));
-                        if (!string.IsNullOrEmpty(alphaBuild))
-                        {
-                            ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha): {alphaBuild}");
-                            return alphaBuild;
-                        }
-                        return "0.5.3.3368";
-                    }
-                }
-            }
-            catch { }
-        }
-
-        return "";
-    }
-
-    /// <summary>
-    /// Check if a build number falls within any BUILD range in the DBD files.
-    /// Parses ranges like "BUILD 0.9.0.3807-0.12.0.3988" and checks if the candidate
-    /// build falls within [start, end] using numeric tuple comparison.
-    /// </summary>
-    private static string? FindBuildInDbdRanges(string? dbdDir, string build)
-    {
-        if (string.IsNullOrEmpty(dbdDir)) return null;
-        var mapDbd = Path.Combine(dbdDir, "Map.dbd");
-        if (!File.Exists(mapDbd)) return null;
-
-        var buildTuple = ParseBuildTuple(build);
-        if (buildTuple == null) return null;
-
-        foreach (var line in File.ReadLines(mapDbd))
-        {
-            var trimmed = line.Trim();
-            if (!trimmed.StartsWith("BUILD ")) continue;
-
-            // Check explicit listing first
-            if (trimmed.Contains(build)) return build;
-
-            // Check ranges: "BUILD 0.9.0.3807-0.12.0.3988"
-            var entries = trimmed[6..].Split(',', StringSplitOptions.TrimEntries);
-            foreach (var entry in entries)
-            {
-                var rangeParts = entry.Split('-', StringSplitOptions.TrimEntries);
-                if (rangeParts.Length == 2)
-                {
-                    var lo = ParseBuildTuple(rangeParts[0]);
-                    var hi = ParseBuildTuple(rangeParts[1]);
-                    if (lo != null && hi != null &&
-                        CompareBuild(buildTuple, lo) >= 0 &&
-                        CompareBuild(buildTuple, hi) <= 0)
-                    {
-                        ViewerLog.Trace($"[BuildDetect] '{build}' falls within range {rangeParts[0]}-{rangeParts[1]}");
-                        return build;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    private static int[]? ParseBuildTuple(string build)
-    {
-        var parts = build.Split('.');
-        if (parts.Length != 4) return null;
-        var nums = new int[4];
-        for (int i = 0; i < 4; i++)
-            if (!int.TryParse(parts[i], out nums[i])) return null;
-        return nums;
-    }
-
-    private static int CompareBuild(int[] a, int[] b)
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            if (a[i] < b[i]) return -1;
-            if (a[i] > b[i]) return 1;
-        }
-        return 0;
     }
 
     private void LoadFileFromDisk(string filePath)
@@ -7834,6 +7722,7 @@ void main() {
                 return;
 
             WmoRenderer.MliqRotationQuarterTurns = settings.WmoMliqRotationQuarterTurns;
+            _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
         }
         catch (Exception ex)
         {
@@ -7849,7 +7738,8 @@ void main() {
 
             var settings = new ViewerSettings
             {
-                WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns
+                WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
+                LastSelectedBuildVersion = ClientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, ClientBuildOptions.Length - 1)].BuildVersion
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -7863,6 +7753,20 @@ void main() {
         {
             ViewerLog.Trace($"[ViewerSettings] Failed to save settings: {ex.Message}");
         }
+    }
+
+    private static int FindBuildOptionIndex(string? buildVersion)
+    {
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            return 0;
+
+        for (int i = 0; i < ClientBuildOptions.Length; i++)
+        {
+            if (string.Equals(ClientBuildOptions[i].BuildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return 0;
     }
 
     private bool _disposed;
@@ -7914,5 +7818,6 @@ void main() {
     private sealed class ViewerSettings
     {
         public int WmoMliqRotationQuarterTurns { get; set; }
+        public string? LastSelectedBuildVersion { get; set; }
     }
 }

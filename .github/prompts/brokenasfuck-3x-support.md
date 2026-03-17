@@ -10,6 +10,14 @@ Execute a no-assumption recovery workflow for terrain alpha and UI regressions i
 
 Restore known-good behavior first, then reintroduce changes safely.
 
+## Current Execution Checkpoint (Mar 17, 2026)
+
+- Explicit version-family selection is already implemented in active `ViewerApp` MPQ flow; do not reintroduce path/MPQ heuristic build guessing.
+- Baseline worktree branch `recovery/terrain-surgical-343dadf` exists and already contains one safe replay commit: `c1e0d29`.
+- Safe replay completed in `c1e0d29`: `TerrainManager`, `VlmTerrainManager`, `ModelRenderer` from `177f961`.
+- Pending high-risk work remains Wave 1: fused alpha+shadow tile-pass rollback in `TerrainRenderer`, `TerrainTileMeshBuilder`, `TerrainTileMesh`.
+- When running this plan again, start from this checkpoint and avoid redoing finished setup phases unless evidence changed.
+
 Treat this as one recovery problem:
 
 How do we get back to the last known-good baseline (343dadfa27df08d384614737b6c5921efe6409c8), surgically remove the single-pass alpha/shadow regression, and recover post-baseline improvements without reintroducing broken layering or UI regressions?
@@ -130,6 +138,16 @@ How do we get back to the last known-good baseline (343dadfa27df08d384614737b6c5
 3. Validate immediately against known broken sample area.
 4. If issue resolves, keep this as a hard gate and continue feature reintroduction.
 
+### Phase 3.1: Current Next Action (Do This First)
+
+1. Open baseline branch `recovery/terrain-surgical-343dadf`.
+2. Implement Wave 1 topology rollback only in:
+  - `src/MdxViewer/Terrain/TerrainRenderer.cs`
+  - `src/MdxViewer/Terrain/TerrainTileMeshBuilder.cs`
+  - `src/MdxViewer/Terrain/TerrainTileMesh.cs`
+3. Keep already replayed safe files unchanged unless compile/runtime evidence requires edits.
+4. Run compile check and runtime gate checks before touching deferred commits.
+
 ### Phase 4: Commit Triage and Bucketing
 
 Build a ledger of post-baseline commits grouped by risk:
@@ -210,7 +228,7 @@ Return all items:
 Start with:
 
 1. Current branch/HEAD/dirty snapshot
-2. Baseline verification status for 343dadf
+2. Confirmed checkpoint state (explicit version-selection implemented + `c1e0d29` present)
 3. Candidate commit list for single-pass alpha/shadow merge rollback
-4. Initial post-baseline commit ledger (bucketed)
-5. Proposed Wave 1 cherry-pick set
+4. Updated post-baseline commit ledger delta (only what changed since last run)
+5. Proposed or executed Wave 1 topology rollback patch set

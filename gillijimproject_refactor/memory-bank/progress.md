@@ -44,9 +44,12 @@
 ### MdxViewer — Rendering Quality & Performance
 - **3.3.5 ADT loading freeze**: Needs investigation
 - **Terrain alpha-mask regressions (post-343dadf baseline)**: still unresolved for active 3.x runtime rendering. Some recent MCAL-path assumptions/tests were ahead of reality; later-client terrain texturing is still visibly broken in the viewer and should not be described as signed off.
+- **Version routing policy hardening**: MPQ loading now requires explicit client version-family selection in `ViewerApp`; automatic build guessing from folder names/MPQ heuristics is disabled on the active path.
+- **Baseline recovery track checkpoint**: `recovery/terrain-surgical-343dadf` has first safe replay commit `c1e0d29` (manager/model slices only). High-risk terrain topology rollback is still pending.
 - **Terrain debug UX regression**: the alpha-mask debug checkbox currently prevents chunk/tile overlays from being visible in the same view because the shader exits early in alpha-debug mode. This is now part of the terrain-debugging problem, not just a UI annoyance.
 - **Batched missing-texture terrain parity**: The tile-array renderer now invalidates diffuse indices for missing BLP slices before draw, so later-client overlay layers no longer blend against synthetic white fallback textures when the per-chunk path would have skipped them.
 - **Current terrain handoff**: return to direct 3.x layer decode/sourcing investigation. Runtime screenshots still show broken later-client terrain, and the debug overlay path needs to be fixed so alpha plus chunk/tile boundaries can be inspected together.
+- **Immediate next execution item**: Wave 1 rollback of fused alpha+shadow tile pass in `TerrainRenderer`/`TerrainTileMeshBuilder`/`TerrainTileMesh` before replaying deferred commits.
 - **WMO stream reload regression**: Cached failed WMO/MDX loads no longer block reloads after stream-out/stream-in. Runtime verification against Ironforge re-entry is still needed.
 - **WMO culling too aggressive**: Objects outside WMO not visible from inside
 - **MDX GPU skinning**: Bone matrices computed per-frame but not yet applied in vertex shader (needs BIDX/BWGT vertex attributes)

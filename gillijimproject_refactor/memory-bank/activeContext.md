@@ -7,6 +7,7 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 ### Current Terrain Alpha Findings (Mar 16)
 
 - **Validation scope correction (Mar 17)**: do not treat repo `test_data/development` or `test_data/WoWMuseum/*` samples as the active signoff target for 3.x terrain. Current runtime validation must follow the user's official 3.0.1-era client data, with repo samples kept only as archival parser references.
+- **MPQ load path now requires explicit version-family choice**: `ViewerApp` no longer infers build/profile from folder names or MPQ heuristics during `Open Game Folder`. Users must select a client version family explicitly before DBC/profile routing is enabled.
 
 - **Batched terrain upload was mutating decoded alpha/shadow data**: `TerrainTileMeshBuilder.FillAlphaShadowSlice` was remapping texel row/column 63 back to 62 for every slice, even though `Mcal` and the per-chunk upload path already treat edge-fix as decode-time behavior.
 - **Real-data validation confirmed the bug on both Alpha and LK tiles**: a focused audit on `test_data/0.5.3/alphawdt/World/Maps/Azeroth/Azeroth.wdt` tile `(0,0)` and `test_data/WoWMuseum/335-dev/World/Maps/development` tile `(0,0)` found explicit alpha/shadow bytes that differed at the packed tile-array edge. The old remap would have changed 17,367 bytes on the Alpha tile and 5,166 bytes on the LK tile.
@@ -24,11 +25,20 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 - **3.x terrain texturing is still not resolved**: runtime validation is still showing broken later-client layer decode/blending in the viewer. Treat the current 3.x terrain path as unresolved even after the recent MCAL/MCCV changes.
 - **Alpha debug UX regressed terrain diagnosis**: enabling the alpha-mask view currently prevents chunk/tile overlays from showing through in the same view. The active terrain shader returns early in alpha-debug mode before the chunk/tile boundary overlays are applied, which makes later-client layer debugging materially harder.
 
+### Recovery Execution Checkpoint (Mar 17)
+
+- **Surgical recovery branch is active from baseline**: `recovery/terrain-surgical-343dadf` in worktree `_recovery_343dadf` is anchored to baseline `343dadfa27df08d384614737b6c5921efe6409c8`.
+- **Wave 0 evidence is locked**: commit `177f961` remains the first confirmed fused alpha+shadow tile-pass merge point (`uAlphaShadowArray`, `AlphaShadowArrayTexture`, `uShadowSampler`).
+- **Safe replay slice already committed on baseline branch**: `c1e0d29` replays low-risk manager/model changes from `177f961` (`TerrainManager`, `VlmTerrainManager`, `ModelRenderer`) without reintroducing fused terrain topology.
+- **Version policy hardening is implemented on active branch**: `ViewerApp` MPQ load now requires explicit client version-family selection; path and MPQ heuristic build guessing is disabled in the active flow.
+- **Next locked engineering step**: execute Wave 1 topology rollback in `TerrainRenderer`, `TerrainTileMeshBuilder`, and `TerrainTileMesh` before replaying deferred terrain refactors.
+
 ### Current Handoff (Mar 17)
 
 - **Current terrain handoff is back to active 3.x decode investigation**: runtime later-client terrain still looks wrong, so the active seam remains layer decode/sourcing/blending, not just validation.
 - **Do not treat the recent 3.x MCAL heuristics as signed off**: runtime evidence now says later-client terrain texturing is still broken, so the recent big-alpha/compressed-alpha/MCCV fixes are not sufficient closure.
 - **The alpha-mask debug path is currently insufficient for terrain investigation**: until the viewer can render alpha debug and chunk/tile overlays together, the debug UI itself is a blocker for diagnosing later-client terrain issues efficiently.
+- **Recovery sequencing remains strict**: do not replay mixed high-risk terrain commits (`177f961`, `d50cfe7`, `39799bf`) wholesale; keep split-based replay with runtime gates only.
 
 ### Current WMO Streaming Findings (Mar 16)
 

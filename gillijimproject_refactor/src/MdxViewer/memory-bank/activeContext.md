@@ -6,6 +6,8 @@
 
 ### Terrain Alpha Audit Update (2026-03-16)
 - Validation scope correction (2026-03-17): do not use repo `test_data/development` or `test_data/WoWMuseum/*` samples to sign off active 3.x terrain rendering. Those remain archival/parser references only; runtime 3.x validation must follow the user's official 3.0.1-era client data.
+- MPQ open flow now requires explicit client version-family selection before DBC/profile routing. Path-name and MPQ-contents build guessing in `ViewerApp` is disabled for active terrain/profile safety.
+- Recovery branch checkpoint: `recovery/terrain-surgical-343dadf` now contains `c1e0d29` (safe replay of `TerrainManager`, `VlmTerrainManager`, and `ModelRenderer` from `177f961`) while fused terrain topology files remain intentionally unreplayed.
 - Batched tile rendering introduced an extra row/column remap in `TerrainTileMeshBuilder.FillAlphaShadowSlice`, forcing texel row/column 63 to sample from 62 for all alpha and shadow slices.
 - Per-chunk terrain upload does **not** do that; it uploads decoded alpha/shadow data as-is.
 - Real-data validation on Alpha `Azeroth` tile `(0,0)` and WoWMuseum 3.3.5 `development` tile `(0,0)` confirmed the bug mattered in practice before the fix: the old remap would have changed 17,367 explicit alpha/shadow bytes on the Alpha tile and 5,166 on the LK tile.
@@ -88,10 +90,11 @@
 
 ## Immediate Next Steps
 
-1. **Fix the alpha debug overlay regression** — alpha-mask view must allow chunk/tile overlays to remain visible so terrain debugging is usable again
-2. **Return to direct 3.x terrain decode/sourcing investigation** — runtime screenshots still show broken later-client layer decode/blending despite recent MCAL-path edits
-3. **Runtime-verify 3.3.5 MH2O liquid rendering on the user's bad sample** — the viewer now parses full MH2O instance data and composes masks/layers more accurately, but this still needs live validation before it can be treated as resolved
-4. **Expand first-party terrain regression coverage only where it buys signal** — current tests cover some decode/packing seams, but they are not proof that the active 3.x viewer output is correct
+1. **Execute Wave 1 terrain topology rollback** — remove fused alpha+shadow tile-pass behavior in `TerrainRenderer`, `TerrainTileMeshBuilder`, and `TerrainTileMesh` while preserving baseline-independent alpha and shadow semantics
+2. **Fix the alpha debug overlay regression** — alpha-mask view must allow chunk/tile overlays to remain visible so terrain debugging is usable again
+3. **Return to direct 3.x terrain decode/sourcing investigation** — runtime screenshots still show broken later-client layer decode/blending despite recent MCAL-path edits
+4. **Runtime-verify 3.3.5 MH2O liquid rendering on the user's bad sample** — the viewer now parses full MH2O instance data and composes masks/layers more accurately, but this still needs live validation before it can be treated as resolved
+5. **Expand first-party terrain regression coverage only where it buys signal** — current tests cover some decode/packing seams, but they are not proof that the active 3.x viewer output is correct
 5. **Light.dbc / LightData.dbc integration** — Replace hardcoded TerrainLighting values with real game lighting data per zone
 6. **Later-client skybox routing** — `Environments/Stars/*` and explicit `SkyBox` M2s now render as camera-anchored backdrops instead of ordinary doodads, but DBC/WMO-driven skybox metadata is still not surfaced as a first-class system
 7. **Later-client fog/cloud M2 overlap** — reduced: Warcraft.NET M2 adapter no longer infers MDX `NoDepthTest` / `NoDepthSet` from ambiguous later-client render-flag bits; affected maps still need runtime spot-checks
