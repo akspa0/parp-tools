@@ -201,6 +201,27 @@ public class MdxRenderer : ISceneRenderer
         _wireframe = !_wireframe;
     }
 
+    public void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
+        Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
+        Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
+    {
+        bool previousWireframe = _wireframe;
+        _wireframe = true;
+        _gl.LineWidth(1.5f);
+
+        try
+        {
+            RenderWithTransform(modelMatrix, view, proj, RenderPass.Both, 1.0f,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lightDir, lightColor, ambientColor);
+        }
+        finally
+        {
+            _gl.LineWidth(1.0f);
+            _wireframe = previousWireframe;
+        }
+    }
+
     /// <summary>
     /// Mirror matrix for standalone viewing: negates X to convert WoW left-handed → OpenGL right-handed.
     /// WorldScene callers use RenderWithTransform directly (no mirror needed — camera handles it).

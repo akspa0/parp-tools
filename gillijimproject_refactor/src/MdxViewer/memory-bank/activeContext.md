@@ -69,6 +69,20 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Both the converter core project and the MdxViewer solution build passed after this batch.
 - Real-data validation is still pending for MCCV appearance and patched MPQ chains.
 
+### 3.x Terrain Alpha Follow-up (Mar 18)
+
+- The incorrect offset-0 LK alpha fallback experiment was reverted after runtime validation showed it was wrong.
+- Current terrain recovery direction is now explicitly profile-driven instead of heuristic-driven:
+   - 3.0.1 / 3.3.5 ADT profiles treat MPHD `0x4 | 0x80` as the big-alpha mask
+   - those same profiles prefer split `*_tex0.adt` MCNK/MTEX data for terrain layer and alpha sourcing
+   - `StandardTerrainAdapter` now routes layer/alpha/shadow sourcing through `*_tex0.adt` when the profile says to
+   - `Mcal` decode now distinguishes compressed alpha, 8-bit big alpha, and legacy 4-bit alpha while respecting the MCNK do-not-fix-alpha bit
+- Build validation passed after this batch, including the alternate-output MdxViewer build used while the live viewer holds `bin/Debug` locks.
+- Runtime validation follow-up is now positive on the user's real data:
+   - the tested 3.0.1 alpha-build terrain now renders correctly on this path
+   - the same recovery line also preserves Alpha 0.5.3 terrain after restoring the legacy edge fix in `AlphaTerrainAdapter`
+- Keep broader claims narrow: this is strong evidence that the profile split is correct for the tested samples, not blanket proof for every later-era terrain dataset.
+
 ### ModelRenderer Follow-up From 39799bf (Mar 18)
 
 - The commit message for `39799bf` bundled terrain and model notes together, but the only remaining model-renderer hunk on top of the already-applied MPQ fix was particle suppression on the world-scene instanced path.
@@ -76,6 +90,17 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - batched placed-model rendering skips particles
    - standalone model preview/rendering still allows particles
 - Keep this split until particle simulation becomes instance-aware.
+
+### World Wireframe Reveal Follow-up (Mar 18)
+
+- World-scene wireframe toggle is now hover-driven instead of a blanket terrain-only toggle:
+   - `WorldScene.ToggleWireframe()` now keeps terrain wireframe in sync while also enabling a hover reveal mode for placed WMOs and MDX/M2 doodads
+   - ViewerApp refreshes the reveal set every frame from the current scene-viewport mouse position
+   - hovered objects render an extra wireframe overlay pass without changing standalone model-viewer wireframe behavior
+- Current validation status:
+   - alternate-OutDir `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed after restoring terrain wireframe and switching the hover test from a loose ray/AABB heuristic to a screen-space brush
+   - `WorldAssetManager` world-model loading now resolves the canonical model path before M2 skin lookup so `.mdx` aliases that actually resolve to `MD20` roots can search for skins relative to the real asset path
+   - runtime visual validation is still pending for reveal radius feel and for confirming the remaining world-scene M2 load failures are actually cleared on user data
 
 ## Current Focus
 

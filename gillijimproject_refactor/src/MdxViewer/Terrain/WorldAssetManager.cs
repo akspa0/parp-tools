@@ -304,6 +304,17 @@ public class WorldAssetManager : IDisposable
             }
         }
 
+        if (data == null)
+        {
+            string? resolvedPath = TryResolveFromFileSet(key);
+            if (!string.IsNullOrWhiteSpace(resolvedPath))
+            {
+                data = _dataSource?.ReadFile(resolvedPath);
+                if (data != null)
+                    ViewerLog.Trace($"[WorldAssetManager] Resolved '{virtualPath}' via file set: '{resolvedPath}'");
+            }
+        }
+
         _fileDataCache[key] = data;
         TouchLru(_fileLru, _fileLruMap, key);
         EvictFileCacheIfNeeded();
@@ -324,6 +335,86 @@ public class WorldAssetManager : IDisposable
         return null;
     }
 
+    private string? TryResolveFromFileSet(string normalizedPath)
+    {
+        if (_dataSource is not MpqDataSource mpqDataSource)
+            return null;
+
+        foreach (var candidate in BuildFileSetCandidates(normalizedPath))
+        {
+            var found = mpqDataSource.FindInFileSet(candidate);
+            if (!string.IsNullOrWhiteSpace(found))
+                return found;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+        if (string.IsNullOrWhiteSpace(baseName))
+            return null;
+
+        foreach (string extension in GetLikelyModelExtensions(normalizedPath))
+        {
+            var match = mpqDataSource.GetFileList(extension)
+                .FirstOrDefault(file => Path.GetFileNameWithoutExtension(file)
+                    .Equals(baseName, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(match))
+                return NormalizeKey(match);
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> BuildFileSetCandidates(string normalizedPath)
+    {
+        yield return normalizedPath;
+
+        string? swapped = SwapMdlMdxExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(swapped))
+            yield return swapped;
+
+        string fileName = Path.GetFileName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return fileName;
+
+            string? swappedFileName = SwapMdlMdxExtension(fileName);
+            if (!string.IsNullOrWhiteSpace(swappedFileName))
+                yield return swappedFileName;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(baseName))
+        {
+            yield return $"Creature\\{baseName}\\{baseName}.mdx";
+            yield return $"Creature\\{baseName}\\{baseName}.m2";
+            yield return $"Creature\\{baseName}\\{baseName}.mdl";
+        }
+    }
+
+    private static IEnumerable<string> GetLikelyModelExtensions(string normalizedPath)
+    {
+        string ext = Path.GetExtension(normalizedPath);
+        if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".m2";
+            yield return ".mdx";
+            yield return ".mdl";
+            yield break;
+        }
+
+        if (ext.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdl";
+            yield return ".mdx";
+            yield return ".m2";
+            yield break;
+        }
+
+        yield return ".mdx";
+        yield return ".mdl";
+        yield return ".m2";
+    }
+
     // ── Private loading ────────────────────────────────────────────────
 
     private int _mdxLoadFailCount = 0;
@@ -331,7 +422,10 @@ public class WorldAssetManager : IDisposable
     {
         try
         {
-            byte[]? data = ReadFileData(normalizedKey);
+            string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+            byte[]? data = ReadFileData(resolvedModelPath);
+            if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+                data = ReadFileData(normalizedKey);
             if (data == null || data.Length == 0)
             {
                 if (_mdxLoadFailCount++ < 5)
@@ -342,10 +436,10 @@ public class WorldAssetManager : IDisposable
             // Detect M2 format (magic 0x3032444D = "MD20") and adapt directly via Warcraft.NET + .skin
             if (WarcraftNetM2Adapter.IsMd20(data))
             {
-                var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey));
+                var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
                 if (_dataSource != null)
                 {
-                    var bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(normalizedKey, _dataSource.GetFileList(".skin"));
+                    var bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, _dataSource.GetFileList(".skin"));
                     if (!string.IsNullOrWhiteSpace(bestSkinPath))
                         candidatePaths.Add(bestSkinPath);
                 }
@@ -364,11 +458,11 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, normalizedKey);
-                        string adaptedModelDir = Path.GetDirectoryName(normalizedKey) ?? "";
+                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath);
+                        string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, normalizedKey);
+                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath);
                     }
                     catch (Exception ex)
                     {
@@ -392,8 +486,8 @@ public class WorldAssetManager : IDisposable
 
             using var ms = new MemoryStream(data);
             var mdx = MdxFile.Load(ms);
-            string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
-            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, normalizedKey);
+            string modelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
+            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath);
         }
         catch (Exception ex)
         {
@@ -401,6 +495,23 @@ public class WorldAssetManager : IDisposable
                 ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
+    }
+
+    private string ResolveCanonicalModelPath(string normalizedKey)
+    {
+        string? resolved = TryResolveFromFileSet(normalizedKey);
+        if (!string.IsNullOrWhiteSpace(resolved))
+            return NormalizeKey(resolved);
+
+        string? swapped = SwapMdlMdxExtension(normalizedKey);
+        if (!string.IsNullOrWhiteSpace(swapped))
+        {
+            resolved = TryResolveFromFileSet(swapped);
+            if (!string.IsNullOrWhiteSpace(resolved))
+                return NormalizeKey(resolved);
+        }
+
+        return normalizedKey;
     }
 
     private WmoRenderer? LoadWmoModel(string normalizedKey)

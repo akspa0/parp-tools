@@ -28,13 +28,16 @@ Working branch is now reset in the main tree, not only in side worktrees.
 ### Validation Status
 
 - Build: dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug PASSED
-- Runtime real-data spot-check: PENDING (Alpha-era + LK 3.3.5)
-- No claim of full terrain regression safety without runtime real-data validation.
+- Runtime real-data spot-check: PARTIAL PASS
+	- user confirmed Alpha-era 0.5.3 terrain renders correctly again after the alpha-edge-fix restoration
+	- user confirmed a 3.0.1 alpha build now renders correctly on the current profile-driven 3.x path
+	- earlier 3.3.5 spot-check also looked correct, but broader cross-map signoff is still pending
+- Do not claim full terrain regression safety beyond the validated samples above.
 
 ### Next Integration Queue (Ordered)
 
 1. Commit and push the current profile/decode code slice if not already committed.
-2. Runtime-check alpha decode behavior on both fixed data families.
+2. Broaden runtime-check alpha decode behavior beyond the currently validated 0.5.3 and 3.0.1 samples.
 3. Continue commit-by-commit intake from v0.4.0..main with strict triage:
 	 - SAFE first
 	 - MIXED only with dependencies proven and build gates
@@ -102,6 +105,32 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- 1.x+ patch-chain reads on patched client data
 	- later-version encrypted MPQ entries
 	- 3.x MCCV highlight/tint behavior on real LK terrain after the BGRA + mid-gray semantic correction
+
+### 3.x Alpha Follow-up (Mar 18)
+
+- The LK offset-0 fallback experiment in `StandardTerrainAdapter.ExtractAlphaMaps(...)` was reverted after runtime validation showed it was wrong for the active 3.x terrain path.
+- Current conclusion:
+	- the recent attempt to treat `AlphaMapOffset == 0` as a valid relaxed-LK fallback case was not the correct fix
+	- keep that path reverted and continue investigating 3.x alpha sourcing/decode without broadening fallback heuristics blindly
+- Alternate-output build validation passed after reverting the tweak because a live `MdxViewer` process still had the normal `bin/Debug` outputs locked.
+
+### 3.x Profile-Driven Alpha Recovery (Mar 18)
+
+- Follow-up investigation confirmed the active recovery branch was still missing two important 3.x inputs that existed in rollback code:
+	- WDT/MPHD big-alpha detection should treat `0x4 | 0x80` as the effective big-alpha mask for 3.x profiles
+	- 3.x layer/alpha/shadow sourcing may need to come from split `*_tex0.adt` MCNK data rather than the root ADT alone
+- Recovery changes now applied:
+	- `AdtProfile` carries `BigAlphaFlagsMask` and `PreferTex0ForTextureData`
+	- 3.0.1 / 3.3.5 profiles use `0x4 | 0x80` and prefer `*_tex0.adt`
+	- `StandardTerrainAdapter` can build a `*_tex0.adt` MCNK index map and source MTEX/layers/MCAL/MCSH from that file when the profile says to
+	- `StandardTerrainAdapter` now passes the MCNK `0x8000` do-not-fix-alpha bit into MCAL decode and uses chunk-level big-alpha inference instead of the reverted offset-0 fallback
+	- `WoWMapConverter.Core.Formats.LichKing.Mcal` now has the stronger compressed / big-alpha / 4-bit decode split with proper edge-fix suppression for big-alpha and do-not-fix chunks
+- Build gates passed after this batch:
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+	- `dotnet build "I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="I:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- Runtime signoff is still pending:
+	- confirm real 3.x tiles stop falling back to obvious 4-bit Alpha-style layer-1-only behavior
+	- confirm split `*_tex0.adt` sourcing is actually the missing piece on the user’s 3.x client data
 
 ### Commit 39799bf Model Slice (Mar 18)
 

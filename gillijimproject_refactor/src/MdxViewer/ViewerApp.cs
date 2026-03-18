@@ -582,6 +582,9 @@ public partial class ViewerApp : IDisposable
             else if (_vlmTerrainManager != null)
                 _vlmTerrainManager.UpdateAOI(_camera.Position);
 
+            if (_worldScene != null)
+                UpdateWorldSceneWireframeReveal(view, proj);
+
             // Update current area name from chunk under camera (throttled to avoid per-frame overhead)
             if (_areaTableService != null && _terrainManager != null && _frameCount == 0)
             {
@@ -4749,6 +4752,28 @@ void main() {
             _selectedObjectType = "";
             _selectedObjectInfo = "";
         }
+    }
+
+    private void UpdateWorldSceneWireframeReveal(Matrix4x4 view, Matrix4x4 proj)
+    {
+        if (_worldScene == null || !_worldScene.WireframeRevealEnabled)
+            return;
+
+        if (ImGui.GetIO().WantCaptureMouse || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+        {
+            _worldScene.ClearWireframeReveal();
+            return;
+        }
+
+        if (_lastMouseX < vpX || _lastMouseX > vpX + vpW || _lastMouseY < vpY || _lastMouseY > vpY + vpH)
+        {
+            _worldScene.ClearWireframeReveal();
+            return;
+        }
+
+        float localX = _lastMouseX - vpX;
+        float localY = _lastMouseY - vpY;
+        _worldScene.UpdateWireframeReveal(view, proj, localX, localY, vpW, vpH);
     }
 
     private bool IsPointInSceneViewport(float x, float y)

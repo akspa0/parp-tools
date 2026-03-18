@@ -254,6 +254,7 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uDiffuseSampler", 0);
 
         // Bind alpha map for overlay layers
+        bool implicitFullAlpha = false;
         bool hasAlpha = false;
         if (!isBaseLayer && chunk.AlphaTextures.TryGetValue(layerIndex, out uint alphaTex))
         {
@@ -261,7 +262,12 @@ public class TerrainRenderer : IDisposable
             _gl.BindTexture(TextureTarget.Texture2D, alphaTex);
             hasAlpha = true;
         }
+        else if (!isBaseLayer && layerIndex < chunk.Layers.Length)
+        {
+            implicitFullAlpha = (chunk.Layers[layerIndex].Flags & 0x100u) == 0;
+        }
         _shader.SetInt("uHasAlphaMap", hasAlpha ? 1 : 0);
+        _shader.SetInt("uImplicitAlphaMap", implicitFullAlpha ? 1 : 0);
         _shader.SetInt("uAlphaSampler", 1);
 
         // Bind shadow map texture (unit 2) — applied on ALL layers so overlays don't wash out shadows
@@ -456,14 +462,6 @@ public class TerrainRenderer : IDisposable
             if (alphaData.Length < size * size)
                 continue;
 
-            // Noggit fix: duplicate last row/column so edge texels have valid data
-            for (int i = 0; i < 64; i++)
-            {
-                alphaData[i * 64 + 63] = alphaData[i * 64 + 62];
-                alphaData[63 * 64 + i] = alphaData[62 * 64 + i];
-            }
-            alphaData[63 * 64 + 63] = alphaData[62 * 64 + 62];
-
             uint tex = _gl.GenTexture();
             _gl.BindTexture(TextureTarget.Texture2D, tex);
 
@@ -545,6 +543,7 @@ uniform sampler2D uAlphaSampler;
 uniform sampler2D uShadowSampler;
 uniform int uHasTexture;
 uniform int uHasAlphaMap;
+uniform int uImplicitAlphaMap;
 uniform int uHasShadowMap;
 uniform int uIsBaseLayer;
 uniform int uShowChunkGrid;
@@ -579,10 +578,9 @@ void main() {
     }
 
     // Alpha from alpha map (overlay layers only)
-    // Alpha maps are 64x64 with Noggit edge fix applied, sampled with ClampToEdge.
     float alpha = 1.0;
-    if (uIsBaseLayer == 0 && uHasAlphaMap == 1) {
-        alpha = texture(uAlphaSampler, vTexCoord).r;
+    if (uIsBaseLayer == 0) {
+        alpha = (uHasAlphaMap == 1) ? texture(uAlphaSampler, vTexCoord).r : ((uImplicitAlphaMap == 1) ? 1.0 : 0.0);
         if (alpha < 0.004) discard;
     }
 

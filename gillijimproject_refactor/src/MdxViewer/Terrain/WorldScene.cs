@@ -49,10 +49,15 @@ public class WorldScene : ISceneRenderer
     private const float WmoFadeStartFraction = 0.85f;
     private const float NoCullRadius = 256f;         // Objects within this radius are never frustum-culled
     private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
+    private const float WireframeRevealBrushPixels = 96f;
+    private const float WireframeRevealMaxScreenRadius = 220f;
 
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly HashSet<string> _updatedMdxRenderers = new();
     private readonly List<(int idx, float distSq)> _transparentSortScratch = new();
+    private readonly List<int> _wireframeRevealWmoIndices = new();
+    private readonly List<int> _wireframeRevealMdxIndices = new();
+    private bool _wireframeRevealEnabled;
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -99,6 +104,7 @@ public class WorldScene : ISceneRenderer
     private int _selectedObjectIndex = -1;
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
+    public bool WireframeRevealEnabled => _wireframeRevealEnabled;
 
     /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
     public ObjectInstance? SelectedInstance => _selectedObjectType switch
@@ -1072,6 +1078,9 @@ public class WorldScene : ISceneRenderer
         _gl.DepthFunc(DepthFunction.Lequal);
         _terrainManager.RenderLiquid(view, proj, cameraPos);
 
+        if (_wireframeRevealEnabled)
+            RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
+
         // Reset GL state before bounding boxes
         _gl.Disable(EnableCap.Blend);
         _gl.DepthMask(true);
@@ -1289,7 +1298,39 @@ public class WorldScene : ISceneRenderer
 
     public void ToggleWireframe()
     {
+        _wireframeRevealEnabled = !_wireframeRevealEnabled;
         _terrainManager.ToggleWireframe();
+        if (!_wireframeRevealEnabled)
+            ClearWireframeReveal();
+    }
+
+    public void UpdateWireframeReveal(Matrix4x4 view, Matrix4x4 proj,
+        float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
+    {
+        if (!_wireframeRevealEnabled)
+        {
+            ClearWireframeReveal();
+            return;
+        }
+
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        _wireframeRevealWmoIndices.Clear();
+        _wireframeRevealMdxIndices.Clear();
+
+        if (_wmosVisible)
+            PopulateWireframeRevealHits(_wmoInstances, _wireframeRevealWmoIndices,
+                view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight);
+        if (_doodadsVisible)
+            PopulateWireframeRevealHits(_mdxInstances, _wireframeRevealMdxIndices,
+                view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight);
+    }
+
+    public void ClearWireframeReveal()
+    {
+        _wireframeRevealWmoIndices.Clear();
+        _wireframeRevealMdxIndices.Clear();
     }
 
     public void ToggleObjects() => _objectsVisible = !_objectsVisible;
@@ -1415,6 +1456,113 @@ public class WorldScene : ISceneRenderer
         }
 
         return tmin >= 0 ? tmin : tmax >= 0 ? tmax : -1;
+    }
+
+    private void PopulateWireframeRevealHits(List<ObjectInstance> instances, List<int> hitIndices,
+        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
+        float viewportWidth, float viewportHeight)
+    {
+        for (int i = 0; i < instances.Count; i++)
+        {
+            if (ShouldRevealInstance(instances[i], view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight))
+                hitIndices.Add(i);
+        }
+    }
+
+    private static bool ShouldRevealInstance(ObjectInstance inst, Matrix4x4 view, Matrix4x4 proj,
+        float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
+    {
+        Vector3 center = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
+        if (!TryProjectToViewport(center, view, proj, viewportWidth, viewportHeight, out float sx, out float sy, out float depth))
+            return false;
+
+        float dx = sx - mouseViewportX;
+        float dy = sy - mouseViewportY;
+        float distanceSq = dx * dx + dy * dy;
+
+        float worldRadius = MathF.Max((inst.BoundsMax - inst.BoundsMin).Length() * 0.5f, 4f);
+        float projectedRadius = EstimateProjectedRadius(worldRadius, depth, proj, viewportHeight);
+        float revealRadius = MathF.Min(WireframeRevealBrushPixels + projectedRadius, WireframeRevealMaxScreenRadius);
+        return distanceSq <= revealRadius * revealRadius;
+    }
+
+    private static bool TryProjectToViewport(Vector3 worldPos, Matrix4x4 view, Matrix4x4 proj,
+        float viewportWidth, float viewportHeight, out float sx, out float sy, out float depth)
+    {
+        var viewSpace = Vector4.Transform(new Vector4(worldPos, 1f), view);
+        depth = MathF.Abs(viewSpace.Z);
+        if (depth < 0.001f)
+        {
+            sx = sy = 0f;
+            return false;
+        }
+
+        var clip = Vector4.Transform(new Vector4(worldPos, 1f), view * proj);
+        if (clip.W <= 0f)
+        {
+            sx = sy = 0f;
+            return false;
+        }
+
+        float ndcX = clip.X / clip.W;
+        float ndcY = clip.Y / clip.W;
+        sx = (ndcX * 0.5f + 0.5f) * viewportWidth;
+        sy = (1f - (ndcY * 0.5f + 0.5f)) * viewportHeight;
+        return true;
+    }
+
+    private static float EstimateProjectedRadius(float worldRadius, float depth, Matrix4x4 proj, float viewportHeight)
+    {
+        float yScale = MathF.Abs(proj.M22);
+        if (yScale < 0.0001f)
+            return 0f;
+
+        return MathF.Min((worldRadius * yScale / depth) * (viewportHeight * 0.5f), WireframeRevealMaxScreenRadius);
+    }
+
+    private void RenderWireframeReveal(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
+        Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
+    {
+        if (_wireframeRevealWmoIndices.Count == 0 && _wireframeRevealMdxIndices.Count == 0)
+            return;
+
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.Blend);
+
+        foreach (int idx in _wireframeRevealWmoIndices)
+        {
+            if ((uint)idx >= (uint)_wmoInstances.Count)
+                continue;
+
+            var inst = _wmoInstances[idx];
+            var renderer = _assets.GetWmo(inst.ModelKey);
+            if (renderer == null)
+                continue;
+
+            renderer.RenderWireframeOverlay(inst.Transform, view, proj,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+        }
+
+        foreach (int idx in _wireframeRevealMdxIndices)
+        {
+            if ((uint)idx >= (uint)_mdxInstances.Count)
+                continue;
+
+            var inst = _mdxInstances[idx];
+            var renderer = _assets.GetMdx(inst.ModelKey);
+            if (renderer == null)
+                continue;
+
+            renderer.RenderWireframeOverlay(inst.Transform, view, proj,
+                fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+        }
+
+        _gl.DepthMask(true);
+        _gl.DepthFunc(DepthFunction.Lequal);
     }
 
     /// <summary>

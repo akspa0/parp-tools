@@ -14,6 +14,12 @@ namespace WoWMapConverter.Core.Formats.LichKing
     /// </summary>
     public class Mcnk
     {
+        public readonly struct ParseOptions
+        {
+            public bool UseHeaderAlphaSize { get; init; }
+            public bool UseHeaderShadowSize { get; init; }
+        }
+
         public const string Signature = "MCNK";
         public McnkHeader Header;
         public float[] Heightmap; // MCVT
@@ -29,9 +35,16 @@ namespace WoWMapConverter.Core.Formats.LichKing
         public byte[] McnrData;
         public byte[] McshData;
         public byte[] MclqData;  // MCLQ legacy liquid
+        private readonly ParseOptions _parseOptions;
 
         public Mcnk(byte[] data)
+            : this(data, default)
         {
+        }
+
+        public Mcnk(byte[] data, ParseOptions parseOptions)
+        {
+            _parseOptions = parseOptions;
             Parse(data);
         }
 
@@ -68,6 +81,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 uint fourcc = BitConverter.ToUInt32(data, pos);
                 uint size = BitConverter.ToUInt32(data, pos + 4);
                 int dataStart = pos + 8;
+                uint consumedSize = size;
 
                 if (diag)
                 {
@@ -117,22 +131,38 @@ namespace WoWMapConverter.Core.Formats.LichKing
                         break;
 
                     case 0x4D43414C: // MCAL
-                        if (size > 0 && dataStart + size <= data.Length)
+                    {
+                        uint sizeFromHeader = _parseOptions.UseHeaderAlphaSize && Header.SizeMcal >= 8
+                            ? Header.SizeMcal - 8
+                            : 0;
+                        if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
+                            consumedSize = sizeFromHeader;
+
+                        if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {
-                            var mcalBytes = new byte[size];
-                            Array.Copy(data, dataStart, mcalBytes, 0, (int)size);
+                            var mcalBytes = new byte[consumedSize];
+                            Array.Copy(data, dataStart, mcalBytes, 0, (int)consumedSize);
                             McalRawData = mcalBytes; // Always keep raw
                             AlphaMaps = new Mcal(mcalBytes); // 3.3.5 flag-based wrapper
                         }
                         break;
+                    }
 
                     case 0x4D435348: // MCSH
-                        if (size > 0 && dataStart + size <= data.Length)
+                    {
+                        uint sizeFromHeader = _parseOptions.UseHeaderShadowSize && Header.SizeMcsh >= 8
+                            ? Header.SizeMcsh - 8
+                            : 0;
+                        if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
+                            consumedSize = sizeFromHeader;
+
+                        if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {
-                            McshData = new byte[size];
-                            Array.Copy(data, dataStart, McshData, 0, (int)size);
+                            McshData = new byte[consumedSize];
+                            Array.Copy(data, dataStart, McshData, 0, (int)consumedSize);
                         }
                         break;
+                    }
 
                     case 0x4D434C51: // MCLQ
                         if (size > 0 && dataStart + size <= data.Length)
@@ -151,7 +181,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                         break;
                 }
 
-                pos = dataStart + (int)size;
+                pos = dataStart + (int)consumedSize;
                 remaining = data.Length - pos;
             }
 
@@ -229,7 +259,9 @@ namespace WoWMapConverter.Core.Formats.LichKing
                 h.OfsMcly = BitConverter.ToUInt32(data, 0x1C);
                 h.OfsMcrf = BitConverter.ToUInt32(data, 0x20);
                 h.OfsMcal = BitConverter.ToUInt32(data, 0x24);
+                h.SizeMcal = BitConverter.ToUInt32(data, 0x28);
                 h.OfsMcsh = BitConverter.ToUInt32(data, 0x2C);
+                h.SizeMcsh = BitConverter.ToUInt32(data, 0x30);
                 h.OfsMcse = BitConverter.ToUInt32(data, 0x58);
                 h.OfsMclq = BitConverter.ToUInt32(data, 0x60);
                 h.SizeMclq = BitConverter.ToUInt32(data, 0x64);
@@ -299,7 +331,9 @@ namespace WoWMapConverter.Core.Formats.LichKing
         public uint OfsMcly;  // 0x1c
         public uint OfsMcrf;  // 0x20
         public uint OfsMcal;  // 0x24
+        public uint SizeMcal; // 0x28 (sizeAlpha)
         public uint OfsMcsh;  // 0x2c
+        public uint SizeMcsh; // 0x30 (sizeShadow)
         public uint OfsMcse;  // 0x58
         public uint OfsMclq;  // 0x60
         public uint SizeMclq; // 0x64 (size of MCLQ data, from 0.5.3 header)

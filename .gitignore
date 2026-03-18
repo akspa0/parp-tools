@@ -21,6 +21,7 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+[Oo]utput/
 x64/
 x86/
 [Ww][Ii][Nn]32/
@@ -72,10 +73,15 @@ StyleCopReport.xml
 *_i.c
 *_p.c
 *_h.h
+*.dll
+*.dll.config
+*.exe
 *.ilk
+*.lib
 *.meta
 *.obj
 *.iobj
+*.o
 *.pch
 *.pdb
 *.ipdb
@@ -85,6 +91,7 @@ StyleCopReport.xml
 # but not Directory.Build.rsp, as it configures directory-level build defaults
 !Directory.Build.rsp
 *.sbr
+*.so
 *.tlb
 *.tli
 *.tlh
@@ -99,6 +106,8 @@ StyleCopReport.xml
 *.pidb
 *.svclog
 *.scc
+*.dylib
+*.a
 
 # Chutzpah Test files
 _Chutzpah*
@@ -448,6 +457,7 @@ ADTPrefabTool/lib/wow.export/
 
 # gillijimproject-refactor
 gillijimproject_refactor/test_data
+gillijimproject_refactor/output/
 
 # libs...
 *libs/*

@@ -16,6 +16,10 @@ public sealed class AdtProfile
     public required int ModfRecordSize { get; init; }
     public required bool UseMhdrOffsetsOnly { get; init; }
     public required bool EnableMh2oFallbackWhenNoMclq { get; init; }
+    public required uint BigAlphaFlagsMask { get; init; }
+    public required bool PreferTex0ForTextureData { get; init; }
+    public required bool UseMcnkHeaderAlphaSize { get; init; }
+    public required bool UseMcnkHeaderShadowSize { get; init; }
     public required TerrainAlphaDecodeMode AlphaDecodeMode { get; init; }
 }
 
@@ -68,6 +72,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = false,
         EnableMh2oFallbackWhenNoMclq = true,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -81,6 +89,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -94,6 +106,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -107,6 +123,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
+        BigAlphaFlagsMask = 0x4u | 0x80u,
+        PreferTex0ForTextureData = true,
+        UseMcnkHeaderAlphaSize = true,
+        UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 
@@ -120,6 +140,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
+        BigAlphaFlagsMask = 0x4u | 0x80u,
+        PreferTex0ForTextureData = true,
+        UseMcnkHeaderAlphaSize = true,
+        UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 
@@ -133,6 +157,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -146,6 +174,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -159,6 +191,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -352,6 +388,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -365,6 +405,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0,
+        PreferTex0ForTextureData = false,
+        UseMcnkHeaderAlphaSize = false,
+        UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
     };
 
@@ -378,6 +422,10 @@ public static class FormatProfileRegistry
         ModfRecordSize = 0x40,
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
+        BigAlphaFlagsMask = 0x4u | 0x80u,
+        PreferTex0ForTextureData = true,
+        UseMcnkHeaderAlphaSize = true,
+        UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
     };
 

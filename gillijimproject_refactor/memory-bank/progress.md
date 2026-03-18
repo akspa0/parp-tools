@@ -89,6 +89,44 @@
 	- confirm 3.x MCCV transparent/neutral regions no longer darken to black
 	- confirm maps stored inside `patch-[A-Z].mpq` are now discovered and load through normal WDT/ADT lookup paths
 
+### Mar 18, 2026 - 3.x Alpha Offset-0 Experiment Reverted
+
+- The recent LK offset-0 fallback change in `StandardTerrainAdapter.ExtractAlphaMaps(...)` was reverted after runtime validation showed it was wrong.
+- Updated conclusion:
+	- treating `AlphaMapOffset == 0` as a valid relaxed fallback for the active 3.x terrain path is not the correct fix
+	- keep the revert and continue investigating the real 3.x alpha decode/sourcing failure separately
+- Validation status:
+	- normal `dotnet build .../MdxViewer.sln -c Debug` still conflicts with the running viewer process locking `bin/Debug`
+	- use the alternate-output build for compile validation while the viewer stays open
+
+### Mar 18, 2026 - 3.x Profile-Driven Alpha Recovery
+
+- Investigated the remaining 3.x terrain failure after the offset-0 revert.
+- Confirmed the active recovery branch was still missing rollback-era handling for:
+	- MPHD/WDT big-alpha mask `0x4 | 0x80`
+	- split `*_tex0.adt` sourcing for textures/layers/alpha/shadow data
+	- stronger MCAL decode semantics for compressed alpha, big alpha, and do-not-fix chunks
+- Applied the recovery batch:
+	- `FormatProfileRegistry`: added `BigAlphaFlagsMask` and `PreferTex0ForTextureData`; 3.0.1 and 3.3.5 profiles now use `0x4 | 0x80` and prefer `*_tex0.adt`
+	- `StandardTerrainAdapter`: can read MTEX + MCNK data from `*_tex0.adt`, route layer/alpha/shadow sourcing through that file, pass the MCNK `0x8000` do-not-fix flag into alpha decode, and infer big-alpha per chunk
+	- `WoWMapConverter.Core/Formats/LichKing/Mcal.cs`: replaced the broken/simple decoder with the stronger compressed / big-alpha / 4-bit implementation
+- Build validation passed:
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+	- `dotnet build "I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="I:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- Runtime validation is still the blocker:
+	- no claim yet that 3.x alpha blending is correct on real user data
+	- next check is whether the failing 3.x sample now uses more than one alpha layer and stops looking like 4-bit Alpha-era decode
+
+### Mar 18, 2026 - Terrain Runtime Validation Update
+
+- User runtime validation now confirms the current terrain alpha recovery on two real data families:
+	- Alpha 0.5.3 terrain renders correctly again after restoring the alpha-era edge fix in `AlphaTerrainAdapter`
+	- 3.0.1 alpha-build terrain renders correctly on the profile-driven strict 3.x path
+- Earlier runtime feedback also reported the 3.3.5 sample looked correct before the 0.5.3 regression was fixed.
+- Status change:
+	- terrain validation is no longer build-only for the tested 0.5.3 and 3.0.1 samples
+	- broader signoff across more 3.x maps is still pending, so do not generalize this to all LK-era terrain yet
+
 ### Mar 18, 2026 - Remaining ModelRenderer Slice From 39799bf
 
 - Applied the last model-side hunk from `39799bf` after the MPQ reader work was already in place.

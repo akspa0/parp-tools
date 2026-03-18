@@ -7,205 +7,170 @@ namespace WoWMapConverter.Core.Formats.LichKing
     public class Mcal
     {
         public const string Signature = "MCAL";
-        private byte[] Data;
+        private readonly byte[] _data;
 
         public Mcal(byte[] data)
         {
-            Data = data;
+            _data = data;
         }
 
-        public byte[] GetAlphaMapForLayer(MclyEntry mclyEntry, bool bigAlpha = false)
+        public byte[]? GetAlphaMapForLayer(MclyEntry mclyEntry, bool bigAlpha = false, bool doNotFixAlphaMap = false)
         {
-            if (Data != null && (mclyEntry.Flags & MclyFlags.UseAlpha) != 0)
+            if ((_data == null || _data.Length == 0) || (mclyEntry.Flags & MclyFlags.UseAlpha) == 0)
+                return null;
+
+            int offset = checked((int)mclyEntry.AlphaMapOffset);
+            if ((uint)offset >= (uint)_data.Length)
+                return null;
+
+            bool compressed = (mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0;
+            if (compressed)
+                return ReadCompressedAlpha(_data, offset);
+
+            if (bigAlpha)
+                return ReadBigAlpha(_data, offset);
+
+            var result = ReadUncompressedAlpha4Bit(_data, offset);
+            return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
+        }
+
+        public byte[]? GetAlphaMapForLayerRelaxed(MclyEntry mclyEntry, int? nextLayerAlphaOffset, bool bigAlphaDefault = false, bool doNotFixAlphaMap = false)
+        {
+            if (_data == null || _data.Length == 0)
+                return null;
+
+            int offset = unchecked((int)mclyEntry.AlphaMapOffset);
+            if (offset < 0 || offset >= _data.Length)
+                return null;
+
+            bool compressed = (mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0;
+            if (compressed)
+                return ReadCompressedAlpha(_data, offset);
+
+            int available = _data.Length - offset;
+            int inferredSpan = available;
+            if (nextLayerAlphaOffset.HasValue)
             {
-                // Ensure offset is within bounds
-                if (mclyEntry.AlphaMapOffset >= Data.Length)
-                    return new byte[64 * 64];
-
-                int length = Data.Length - (int)mclyEntry.AlphaMapOffset;
-                byte[] alphaBuffer = new byte[length];
-                Array.Copy(Data, (int)mclyEntry.AlphaMapOffset, alphaBuffer, 0, length);
-
-                if ((mclyEntry.Flags & MclyFlags.CompressedAlpha) != 0)
-                {
-                    return ReadCompressedAlpha(alphaBuffer);
-                }
-                else if (bigAlpha)
-                {
-                    return ReadBigAlpha(alphaBuffer);
-                }
-                else
-                {
-                    return ReadUncompressedAlpha(alphaBuffer);
-                }
+                int next = nextLayerAlphaOffset.Value;
+                if (next > offset)
+                    inferredSpan = Math.Min(inferredSpan, next - offset);
             }
 
-            return new byte[64 * 64]; // Return empty (all 0) alpha map
+            if (bigAlphaDefault)
+                return ReadBigAlpha(_data, offset);
+
+            if (inferredSpan >= 4096)
+                return ReadBigAlpha(_data, offset);
+
+            if (inferredSpan >= 2048)
+            {
+                var result = ReadUncompressedAlpha4Bit(_data, offset);
+                return doNotFixAlphaMap ? result : ApplyEdgeFix(result);
+            }
+
+            return ReadCompressedAlpha(_data, offset);
         }
 
-        // FIXED: Corrected logic to write to alphaMap instead of overwriting input buffer
-        private byte[] ReadCompressedAlpha(byte[] alphaBuffer)
+        public static byte[] ReadCompressedAlpha(byte[] src, int offset)
+            => ReadCompressedAlphaWithSize(src, offset).Data;
+
+        public static (byte[] Data, int BytesConsumed) ReadCompressedAlphaWithSize(byte[] src, int offset)
         {
-            byte[] alphaMap = new byte[64 * 64];
-            // alphaMap is already 0-initialized by default in C#
+            var dst = new byte[64 * 64];
+            int srcPos = offset;
+            int dstPos = 0;
 
-            int offInner = 0;
-            int offOuter = 0;
-
-            while (offOuter < 4096)
+            while (dstPos < dst.Length && srcPos < src.Length)
             {
-                // Safety check for input buffer bounds
-                if (offInner >= alphaBuffer.Length) break;
-
-                bool fill = (alphaBuffer[offInner] & 0x80) != 0;
-                int num = (alphaBuffer[offInner] & 0x7F);
-                ++offInner;
-
-                for (int k = 0; k < num; ++k)
-                {
-                    if (offOuter == 4096)
-                        break;
-
-                    // FIX: Write to alphaMap, not alphaBuffer
-                    if (offInner < alphaBuffer.Length)
-                    {
-                        alphaMap[offOuter] = alphaBuffer[offInner];
-                    }
-                    
-                    ++offOuter;
-
-                    if (!fill)
-                    {
-                        ++offInner;
-                    }
-                }
+                byte ctrl = src[srcPos++];
+                bool fill = (ctrl & 0x80) != 0;
+                int count = ctrl & 0x7F;
+                if (count == 0)
+                    continue;
 
                 if (fill)
                 {
-                    ++offInner;
+                    if (srcPos >= src.Length)
+                        break;
+
+                    byte value = src[srcPos++];
+                    int n = Math.Min(count, dst.Length - dstPos);
+                    if (n > 0)
+                    {
+                        Array.Fill(dst, value, dstPos, n);
+                        dstPos += n;
+                    }
                 }
-            }
-
-            return alphaMap;
-        }
-
-        private byte[] ReadBigAlpha(byte[] alphaBuffer)
-        {
-            byte[] alphaMap = new byte[64 * 64];
-            int a = 0;
-            // 64x64 = 4096 bytes. BigAlpha is usually just uncompressed 4096 bytes?
-            // Verify logic from Warcraft.NET source:
-            // for (int j = 0; j < 64; ++j) for (int i = 0; i < 64; ++i)...
-            // It just copies byte by byte.
-            
-            if (alphaBuffer.Length >= 4096)
-            {
-                Array.Copy(alphaBuffer, 0, alphaMap, 0, 4096);
-            }
-            
-            // Warcraft.NET does a weird copy at the end:
-            // Array.Copy(alphaMap, 62 * 64, alphaMap, 63 * 64, 64);
-            // This copies row 62 to row 63. Likely a fix for some artifact or specific to how they render?
-            // "Fix the last row issue" maybe? I'll retain it to be safe as a "port".
-            Array.Copy(alphaMap, 62 * 64, alphaMap, 63 * 64, 64);
-
-            return alphaMap;
-        }
-
-        private byte[] ReadUncompressedAlpha(byte[] alphaBuffer)
-        {
-            byte[] alphaMap = new byte[64 * 64];
-            // 2048 bytes input (nibbles) -> 4096 bytes output
-            
-            int inner = 0;
-            int outer = 0;
-            for (int j = 0; j < 64; ++j)
-            {
-                for (int i = 0; i < 32; ++i)
+                else
                 {
-                    if (outer >= alphaBuffer.Length) break;
+                    int n = Math.Min(count, dst.Length - dstPos);
+                    int availableCopy = Math.Min(n, src.Length - srcPos);
+                    if (availableCopy > 0)
+                    {
+                        Buffer.BlockCopy(src, srcPos, dst, dstPos, availableCopy);
+                        srcPos += availableCopy;
+                        dstPos += availableCopy;
+                    }
 
-                    // Lower nibble first? Warcraft.NET: (alphaBuffer[outer] & 0x0f)
-                    // Then upper nibble? Warcraft.NET: (alphaBuffer[outer] & 0xf0)
-                    // Wait, loop goes 0 to 32. 
-                    // i=0..30: write 2 values. i=31: write 2 values.
-                    // Actually the loop logic in Warcraft.NET is:
-                    
-                    /*
-                    alphaMap[inner] = (byte)((255 * ((int)(alphaBuffer[outer] & 0x0f))) / 0x0f);
-                    inner++;
-                    if (i != 31) {
-                         alphaMap[inner] = ... 0xf0 ...
-                         inner++;
-                    } else {
-                         // This seems wrong in Warcraft.NET source I viewed?
-                         // "else { alphaMap[inner] = ... 0x0f ... }" ?
-                         // If i == 31, it reads 0x0f again? That implies it ignores the last nibble of the last byte in the row?
-                         // Let's look closely at the viewed source in Step 262.
-                         /*
-                            if (i != 31)
-                            {
-                                alphaMap[inner] = (byte)((255 * ((int)(alphaBuffer[outer] & 0xf0))) / 0xf0);
-                                inner++;
-                            }
-                            else
-                            {
-                                alphaMap[inner] = (byte)((255 * ((int)(alphaBuffer[outer] & 0x0f))) / 0x0f);
-                                inner++;
-                            }
-                         */
-                         // This looks like a bug in Warcraft.NET too? Or maybe distinct behavior.
-                         // Standard ADT uncompressed (2048) is usually 2 nibbles per byte. 
-                         // Row is 32 bytes -> 64 values.
-                         // i=31 is the last byte of the row.
-                         // If i=31, it reads lower nibble, increments inner. Then hits 'else', reads lower nibble AGAIN?
-                         // That would mean the last pixel of the row is same as the second-to-last pixel?
-                         // And the upper nibble of the last byte is ignored?
-                         
-                         // I will replicate it EXACTLY as is, because the goal is to port the logic (bugs and all, EXCEPT the one I'm explicitly fixing).
-                         // BUT, `ReadUncompressedAlpha` in Warcraft.NET might be buggy for `i=31`.
-                         // If I fix it, I might improve it. 
-                         // Logic: `(value * 255) / 15` is roughly `value * 17`. 0xF * 17 = 255.
-                         
-                         byte val1 = (byte)((alphaBuffer[outer] & 0x0F) * 17);
-                         byte val2 = (byte)(((alphaBuffer[outer] & 0xF0) >> 4) * 17);
-                         
-                         alphaMap[inner++] = val1;
-                         
-                         if (i != 31)
-                         {
-                             alphaMap[inner++] = val2;
-                         }
-                         else
-                         {
-                             // Warcraft.NET behavior replication:
-                             alphaMap[inner++] = val1; // Re-using val1?
-                         }
-                         
-                         outer++;
+                    if (availableCopy < n)
+                        break;
                 }
             }
 
-            // Also the copy of last row
-            Array.Copy(alphaMap, 62 * 64, alphaMap, 63 * 64, 64);
+            return (dst, srcPos - offset);
+        }
 
-            return alphaMap;
+        private static byte[] ReadBigAlpha(byte[] src, int offset)
+        {
+            var dst = new byte[64 * 64];
+            int available = Math.Min(dst.Length, src.Length - offset);
+            if (available > 0)
+                Buffer.BlockCopy(src, offset, dst, 0, available);
+            return dst;
+        }
+
+        private static byte[] ReadUncompressedAlpha4Bit(byte[] src, int offset)
+        {
+            var dst = new byte[64 * 64];
+            int readPos = offset;
+            int dataEnd = src.Length;
+            int writePos = 0;
+
+            for (int row = 0; row < 64 && readPos < dataEnd; row++)
+            {
+                for (int col = 0; col < 32 && readPos < dataEnd; col++)
+                {
+                    byte packed = src[readPos++];
+                    byte lowVal = (byte)((packed & 0x0F) * 17);
+                    byte highVal = (byte)(((packed >> 4) & 0x0F) * 17);
+
+                    dst[writePos++] = lowVal;
+                    dst[writePos++] = col == 31 ? lowVal : highVal;
+                }
+            }
+
+            return dst;
+        }
+
+        private static byte[] ApplyEdgeFix(byte[] alpha)
+        {
+            if (alpha.Length != 64 * 64)
+                return alpha;
+
+            for (int y = 0; y < 64; y++)
+                alpha[y * 64 + 63] = alpha[y * 64 + 62];
+
+            Buffer.BlockCopy(alpha, 62 * 64, alpha, 63 * 64, 64);
+            return alpha;
         }
     }
 
     [Flags]
     public enum MclyFlags : uint
     {
-        AnimationRotation = 0x7,        // 3 bits
-        Sign = 0x200,                   // 0x200
-        UseAlpha = 0x100,               // 0x100
-        CompressedAlpha = 0x200,        // 0x200 - Wait, Sign and CompressedAlpha overlap in my memory? 
-                                        // Let's check Warcraft.NET source or known docs.
-                                        // View Warcraft.NET source for Flags if possible.
-        // I don't have the Flags source. But usually 0x200 is compressed.
-        // I will assume 0x200 is Compressed based on usage. 
-        // 0x100 implies alpha presence.
-        // I'll check VlmDatasetExporter manual parsing to see what flags it checks currently, or assume standard.
+        AnimationRotationMask = 0x7,
+        UseAlpha = 0x100,
+        CompressedAlpha = 0x200,
     }
 
     public struct MclyEntry

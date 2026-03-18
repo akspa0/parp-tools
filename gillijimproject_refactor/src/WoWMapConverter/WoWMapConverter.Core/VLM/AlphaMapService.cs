@@ -30,22 +30,25 @@ public static class AlphaMapService
         if (offset < 0 || offset >= dataEnd)
             return amap;
 
-        // Noggit / 3.3.5 client behavior:
-        // - If MPHD says big alpha, alpha data is 4096 bytes (optionally RLE-compressed when MCLY 0x200 is set)
-        // - Otherwise alpha data is 4-bit packed (2048 bytes) and NOT RLE-compressed.
-        if (useBigAlphamaps)
+        bool usedLegacyPacked = false;
+
+        // Compression is a per-layer property and must win before any big-alpha fallback.
+        // Otherwise compressed payload bytes show up as literal bit patterns when routed through the 4-bit decoder.
+        if ((flags & 0x200) != 0)
         {
-            if ((flags & 0x200) != 0)
-                ReadCompressed(data, offset, dataEnd, amap);
-            else
-                ReadBigAlpha(data, offset, dataEnd, amap);
+            ReadCompressed(data, offset, dataEnd, amap);
+        }
+        else if (useBigAlphamaps)
+        {
+            ReadBigAlpha(data, offset, dataEnd, amap);
         }
         else
         {
             ReadNotCompressed(data, offset, dataEnd, amap);
+            usedLegacyPacked = true;
         }
 
-        if (!doNotFixAlphaMap)
+        if (usedLegacyPacked && !doNotFixAlphaMap)
             ApplyLegacyEdgeFix(amap);
 
         return amap;

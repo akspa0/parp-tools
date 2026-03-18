@@ -621,6 +621,8 @@ public class AlphaTerrainAdapter : ITerrainAdapter
                     alpha[j * 2] = (byte)((packed & 0x0F) * 17);     // low nibble → 0-255
                     alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);   // high nibble → 0-255
                 }
+
+                ApplyLegacyEdgeFix(alpha);
             }
             else
             {
@@ -634,6 +636,17 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
+    }
+
+    private static void ApplyLegacyEdgeFix(byte[] alpha)
+    {
+        if (alpha.Length < 64 * 64)
+            return;
+
+        for (int y = 0; y < 64; y++)
+            alpha[y * 64 + 63] = alpha[y * 64 + 62];
+
+        Buffer.BlockCopy(alpha, 62 * 64, alpha, 63 * 64, 64);
     }
 
     /// <summary>
