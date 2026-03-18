@@ -1,5 +1,57 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Current Focus: Recovery On v0.4.0 Baseline (Mar 17, 2026)
+
+MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tree.
+
+- Branch: recovery/v0.4.0-surgical-main-tree
+- Base commit: 343dadf (tag v0.4.0)
+- .github instructions/skills/prompts restored from main and committed (845748b)
+
+### Terrain Decode Direction (Current)
+
+- Priority is profile-correct alpha decode behavior before broader feature intake.
+- FormatProfileRegistry now carries terrain alpha decode mode per ADT profile.
+- StandardTerrainAdapter alpha extraction routes by profile mode:
+   - 3.x strict path
+   - 0.x legacy sequential path
+- Keep terrain renderer topology/shader rewrites out until decode stability is verified.
+
+### Next Steps
+
+1. Validate runtime terrain alpha output with real data on Alpha-era and LK 3.3.5.
+2. Continue surgical intake from v0.4.0..main with SAFE-first triage.
+3. Keep UI evolution incremental (no drastic layout churn).
+4. Bring import/export enhancements in small, build-gated batches after decode path stabilization.
+
+### Current Intake Decision
+
+- Commit queue triage for the current recovery pass:
+   - `177f961`: RISKY, skip
+   - `37f669c`: RISKY, skip
+   - `d50cfe7`, `326e6f8`, `4e2f681`, `39799bf`, `62ecf64`: MIXED, extract only isolated safe slices
+- First SAFE batch is limited to the corrected alpha-atlas helper from `62ecf64`.
+- Do not pull the earlier `d50cfe7` atlas helper version; it bakes in the old 63->62 edge remap during import/export.
+- Do not pull ViewerApp, TerrainRenderer, terrain decode heuristic, or test-project changes in this first batch.
+- First SAFE batch has now been applied and the MdxViewer solution build passed.
+- Runtime real-data validation is still required before treating the helper as terrain-safe in practice.
+
+### Rendering Recovery Follow-up (Mar 18)
+
+- Main-branch renderer residency fix is now applied in `WorldAssetManager`:
+   - do not evict live MDX/WMO renderers by default
+   - keep only raw file bytes under LRU pressure
+   - retry failed cached model loads instead of pinning permanent nulls
+- Minimal skybox support is now present:
+   - `WorldScene` classifies skybox-like MDX/M2 placements separately
+   - nearest skybox renders as a camera-anchored backdrop before terrain
+   - `ModelRenderer.RenderBackdrop(...)` forces no depth test/write for all layers
+- Reflective M2 bugfixes were already present on this branch before this batch:
+   - no inferred `NoDepthTest` / `NoDepthSet` from unstable Warcraft.NET render flags
+   - guarded env-map backface handling in the model shader path
+- Build passed again after the rendering batch.
+- Runtime verification still required for doodad reload/culling, skybox behavior, and LK MH2O liquids.
+
 ## Current Focus
 
 **v0.4.0 Release — 0.5.3 Rendering Improvements + Initial 3.3.5 Groundwork** — Major rendering improvements for Alpha 0.5.3 (lighting, particles, geoset animations). Initial 3.3.5 WotLK support scaffolding added but **NOT ready for use** — MH2O liquid and terrain texturing are broken. Only client versions 0.5.3 through 0.12 are currently usable.
@@ -17,7 +69,7 @@
 2. **Fix 3.3.5 terrain texturing** — Alpha map decode for LK format not working
 3. **3.3.5 terrain alpha maps** — Current LK path uses basic Mcal decode; needs full `AlphaMapService` integration without breaking 0.5.3
 4. **Light.dbc / LightData.dbc integration** — Replace hardcoded TerrainLighting values with real game lighting data per zone
-5. **Skybox rendering** — Not yet implemented; needed for proper atmosphere
+5. **Skybox rendering** — Minimal backdrop routing is now implemented; real-data runtime verification is still pending
 6. **Ribbon emitters (RIBB)** — Parsed but no rendering code yet
 7. **M2 particle emitters** — WarcraftNetM2Adapter doesn't map PRE2/particles to MdxFile format yet
 

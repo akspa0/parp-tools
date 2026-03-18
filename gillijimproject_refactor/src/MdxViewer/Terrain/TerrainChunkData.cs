@@ -7,6 +7,9 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class TerrainChunkData
 {
+    /// <summary>MCIN slot index for this chunk within the tile.</summary>
+    public int McinIndex { get; init; } = -1;
+
     /// <summary>Tile X in the 64×64 grid.</summary>
     public int TileX { get; init; }
 

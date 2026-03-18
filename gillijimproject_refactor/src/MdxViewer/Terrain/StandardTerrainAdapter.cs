@@ -6,6 +6,7 @@ using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using WoWMapConverter.Core.Diagnostics;
 using WoWMapConverter.Core.Formats.LichKing;
+using WoWMapConverter.Core.Formats.Liquids;
 
 namespace MdxViewer.Terrain;
 
@@ -364,6 +365,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
                 chunks.Add(new TerrainChunkData
                 {
+                    McinIndex = ci,
                     TileX = tileX,
                     TileY = tileY,
                     ChunkX = chunkX,
@@ -831,115 +833,213 @@ public class StandardTerrainAdapter : ITerrainAdapter
         int mh2oDataStart = mh2oAbs + 8;
         if (mh2oSize <= 0 || mh2oDataStart + mh2oSize > adt.Length) return;
 
-        int liquidCount = 0;
-        int skippedNoLayer = 0;
+        var mh2oPayload = new byte[mh2oSize];
+        Buffer.BlockCopy(adt, mh2oDataStart, mh2oPayload, 0, mh2oSize);
 
-        // 256 header entries, 12 bytes each (3 × uint32)
+        Mh2oChunk mh2o;
+        try
+        {
+            mh2o = Mh2oChunk.Parse(mh2oPayload);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Info(ViewerLog.Category.Terrain,
+                $"  Tile({tileX},{tileY}) MH2O parse failed: {ex.Message}");
+            return;
+        }
+
+        int liquidCount = 0;
         for (int ci = 0; ci < 256; ci++)
         {
-            int headerPos = mh2oDataStart + ci * 12;
-            if (headerPos + 12 > adt.Length) break;
-
-            uint ofsInformation = BitConverter.ToUInt32(adt, headerPos);
-            uint layerCount = BitConverter.ToUInt32(adt, headerPos + 4);
-            // uint ofsRender = BitConverter.ToUInt32(adt, headerPos + 8); // not needed for basic rendering
-
-            if (layerCount == 0 || ofsInformation == 0)
-            {
-                if (ci < 3 && layerCount == 0 && ofsInformation != 0)
-                    skippedNoLayer++;
+            var instances = mh2o.GetInstancesForChunk(ci).ToArray();
+            if (instances.Length == 0)
                 continue;
-            }
 
-            // SMLiquidInstance is at mh2oDataStart + ofsInformation
-            int instPos = mh2oDataStart + (int)ofsInformation;
-            if (instPos + 24 > adt.Length) continue;
+            var matchingChunk = result.Chunks.FirstOrDefault(c => c.McinIndex == ci);
+            int chunkX = matchingChunk?.ChunkX ?? (ci % 16);
+            int chunkY = matchingChunk?.ChunkY ?? (ci / 16);
+            Vector3 worldPos = matchingChunk?.WorldPosition
+                ?? new Vector3(
+                    WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall,
+                    WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall,
+                    0f);
 
-            ushort liquidTypeId = BitConverter.ToUInt16(adt, instPos);
-            // ushort liquidObject = BitConverter.ToUInt16(adt, instPos + 2);
-            float minHeight = BitConverter.ToSingle(adt, instPos + 4);
-            float maxHeight = BitConverter.ToSingle(adt, instPos + 8);
-            byte xOffset = adt[instPos + 12];
-            byte yOffset = adt[instPos + 13];
-            byte width = adt[instPos + 14];
-            byte height = adt[instPos + 15];
-            uint ofsMask = BitConverter.ToUInt32(adt, instPos + 16);
-            uint ofsHeightmap = BitConverter.ToUInt32(adt, instPos + 20);
+            var liquid = BuildMh2oLiquid(instances, tileX, tileY, chunkX, chunkY, worldPos);
+            if (liquid == null)
+                continue;
 
-            if (width == 0 || height == 0) continue;
-            if (width > 8 || height > 8) continue; // sanity
-
-            // Chunk indices: ci = y*16+x (row-major)
-            int chunkX = ci % 16; // column within tile
-            int chunkY = ci / 16; // row within tile
-
-            // Build 9×9 height grid for the liquid surface
-            // Default to flat at maxHeight
-            var heights = new float[81];
-            for (int i = 0; i < 81; i++)
-                heights[i] = maxHeight;
-
-            // Read per-vertex heights if available
-            if (ofsHeightmap != 0)
-            {
-                int heightPos = mh2oDataStart + (int)ofsHeightmap;
-                int vertCount = (width + 1) * (height + 1);
-                if (heightPos + vertCount * 4 <= adt.Length)
-                {
-                    // Fill sub-rect heights into the 9×9 grid
-                    for (int vy = 0; vy <= height; vy++)
-                    {
-                        for (int vx = 0; vx <= width; vx++)
-                        {
-                            int srcIdx = vy * (width + 1) + vx;
-                            int dstIdx = (yOffset + vy) * 9 + (xOffset + vx);
-                            if (dstIdx < 81)
-                                heights[dstIdx] = BitConverter.ToSingle(adt, heightPos + srcIdx * 4);
-                        }
-                    }
-                }
-            }
-
-            // Classify liquid type
-            LiquidType liqType = (liquidTypeId & 0x3) switch
-            {
-                0 => LiquidType.Water,
-                1 => LiquidType.Ocean,
-                2 => LiquidType.Magma,
-                3 => LiquidType.Slime,
-                _ => LiquidType.Water
-            };
-
-            // World position: same formula as terrain chunks
-            // tileX=row, tileY=col (raw row-major convention)
-            float worldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize - chunkY * chunkSmall;
-            float worldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize - chunkX * chunkSmall;
-
-            var liquid = new LiquidChunkData
-            {
-                MinHeight = minHeight,
-                MaxHeight = maxHeight,
-                Heights = heights,
-                Type = liqType,
-                WorldPosition = new Vector3(worldX, worldY, 0f),
-                TileX = tileX,
-                TileY = tileY,
-                ChunkX = chunkX,
-                ChunkY = chunkY
-            };
-
-            // Attach to matching terrain chunk if possible (never overwrite existing MCLQ liquid)
-            var matchingChunk = result.Chunks.FirstOrDefault(c =>
-                c.TileX == tileX && c.TileY == tileY && c.ChunkX == chunkX && c.ChunkY == chunkY);
             if (matchingChunk != null && matchingChunk.Liquid == null)
+            {
                 matchingChunk.Liquid = liquid;
-
-            liquidCount++;
+                liquidCount++;
+            }
         }
 
         if (liquidCount > 0)
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"  Tile({tileX},{tileY}) MH2O: {liquidCount} liquid chunks");
+    }
+
+    private static LiquidChunkData? BuildMh2oLiquid(
+        IEnumerable<Mh2oInstance> instances,
+        int tileX,
+        int tileY,
+        int chunkX,
+        int chunkY,
+        Vector3 worldPos)
+    {
+        var instanceList = instances
+            .Where(static instance => instance.Width is > 0 and <= 8 && instance.Height is > 0 and <= 8)
+            .ToArray();
+        if (instanceList.Length == 0)
+            return null;
+
+        var heights = new float[81];
+        var vertexRanks = new int[81];
+        var tileFlags = new byte[64];
+        var tileRanks = new int[64];
+        Array.Fill(vertexRanks, int.MaxValue);
+        Array.Fill(tileFlags, (byte)0x0F);
+        Array.Fill(tileRanks, int.MaxValue);
+
+        LiquidType chunkType = LiquidType.Water;
+        int chunkTypeRank = int.MaxValue;
+        float minHeight = float.PositiveInfinity;
+        float maxHeight = float.NegativeInfinity;
+        float fallbackHeight = 0f;
+        bool hasVisibleTile = false;
+        bool hasHeight = false;
+
+        foreach (var instance in instanceList)
+        {
+            LiquidType liquidType = MapMh2oLiquidType(instance.LiquidTypeId);
+            int precedence = GetMh2oLiquidPrecedence(liquidType);
+            if (precedence < chunkTypeRank)
+            {
+                chunkType = liquidType;
+                chunkTypeRank = precedence;
+            }
+
+            float instanceFallback = SelectMh2oFallbackHeight(instance);
+            if (!hasHeight)
+                fallbackHeight = instanceFallback;
+
+            for (int localY = 0; localY < instance.Height; localY++)
+            {
+                for (int localX = 0; localX < instance.Width; localX++)
+                {
+                    if (!instance.TileExists(localX, localY))
+                        continue;
+
+                    int tileIndex = (instance.YOffset + localY) * 8 + (instance.XOffset + localX);
+                    if ((uint)tileIndex >= 64u || precedence >= tileRanks[tileIndex])
+                        continue;
+
+                    tileRanks[tileIndex] = precedence;
+                    tileFlags[tileIndex] = 0;
+                    hasVisibleTile = true;
+                }
+            }
+
+            for (int localY = 0; localY <= instance.Height; localY++)
+            {
+                for (int localX = 0; localX <= instance.Width; localX++)
+                {
+                    int vertexIndex = (instance.YOffset + localY) * 9 + (instance.XOffset + localX);
+                    if ((uint)vertexIndex >= 81u || precedence >= vertexRanks[vertexIndex])
+                        continue;
+
+                    float vertexHeight = ReadMh2oVertexHeight(instance, localX, localY, instanceFallback);
+                    heights[vertexIndex] = vertexHeight;
+                    vertexRanks[vertexIndex] = precedence;
+                    minHeight = MathF.Min(minHeight, vertexHeight);
+                    maxHeight = MathF.Max(maxHeight, vertexHeight);
+                    hasHeight = true;
+                }
+            }
+        }
+
+        if (!hasVisibleTile)
+            return null;
+
+        if (!hasHeight)
+        {
+            minHeight = fallbackHeight;
+            maxHeight = fallbackHeight;
+            Array.Fill(heights, fallbackHeight);
+        }
+        else
+        {
+            for (int i = 0; i < heights.Length; i++)
+            {
+                if (vertexRanks[i] == int.MaxValue)
+                    heights[i] = fallbackHeight;
+            }
+        }
+
+        return new LiquidChunkData
+        {
+            MinHeight = minHeight,
+            MaxHeight = maxHeight,
+            Heights = heights,
+            TileFlags = tileFlags,
+            Type = chunkType,
+            WorldPosition = worldPos,
+            TileX = tileX,
+            TileY = tileY,
+            ChunkX = chunkX,
+            ChunkY = chunkY
+        };
+    }
+
+    private static float ReadMh2oVertexHeight(Mh2oInstance instance, int localX, int localY, float fallbackHeight)
+    {
+        if (instance.HeightMap == null)
+            return fallbackHeight;
+
+        int width = instance.Width + 1;
+        int index = localY * width + localX;
+        if ((uint)index >= (uint)instance.HeightMap.Length)
+            return fallbackHeight;
+
+        float value = instance.HeightMap[index];
+        if (float.IsNaN(value) || float.IsInfinity(value))
+            return fallbackHeight;
+
+        return value;
+    }
+
+    private static float SelectMh2oFallbackHeight(Mh2oInstance instance)
+    {
+        if (!float.IsNaN(instance.MaxHeightLevel) && !float.IsInfinity(instance.MaxHeightLevel))
+            return instance.MaxHeightLevel;
+        if (!float.IsNaN(instance.MinHeightLevel) && !float.IsInfinity(instance.MinHeightLevel))
+            return instance.MinHeightLevel;
+        return 0f;
+    }
+
+    private static LiquidType MapMh2oLiquidType(ushort liquidTypeId)
+    {
+        var mclqType = LiquidConverter.MapLiquidTypeIdToMclqType(liquidTypeId);
+        return mclqType switch
+        {
+            MclqLiquidType.Ocean => LiquidType.Ocean,
+            MclqLiquidType.Magma => LiquidType.Magma,
+            MclqLiquidType.Slime => LiquidType.Slime,
+            _ => LiquidType.Water,
+        };
+    }
+
+    private static int GetMh2oLiquidPrecedence(LiquidType liquidType)
+    {
+        return liquidType switch
+        {
+            LiquidType.Magma => 0,
+            LiquidType.Slime => 1,
+            LiquidType.Water => 2,
+            LiquidType.Ocean => 3,
+            _ => int.MaxValue,
+        };
     }
 
     /// <summary>

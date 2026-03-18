@@ -23,12 +23,15 @@ public class WorldScene : ISceneRenderer
     // Lightweight instance lists — just a key + transform, no renderer reference
     // These are rebuilt from _tileMdxInstances/_tileWmoInstances when tiles change
     private List<ObjectInstance> _mdxInstances = new();
+    private List<ObjectInstance> _skyboxInstances = new();
     private List<ObjectInstance> _wmoInstances = new();
 
     // Per-tile instance storage for lazy load/unload
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
+    private readonly Dictionary<(int, int), List<ObjectInstance>> _tileSkyboxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
     private readonly List<ObjectInstance> _externalMdxInstances = new();
+    private readonly List<ObjectInstance> _externalSkyboxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private bool _instancesDirty = false;
 
@@ -59,6 +62,7 @@ public class WorldScene : ISceneRenderer
 
     // Stats
     public int MdxInstanceCount => _mdxInstances.Count;
+    public int SkyboxInstanceCount => _skyboxInstances.Count;
     public int WmoInstanceCount => _wmoInstances.Count;
     public int UniqueMdxModels => _assets.MdxModelsLoaded;
     public int UniqueWmoModels => _assets.WmoModelsLoaded;
@@ -412,7 +416,7 @@ public class WorldScene : ISceneRenderer
                 bbMax = p.Position + new Vector3(2f);
             }
             string modelPath = mdxNames[p.NameIndex];
-            _mdxInstances.Add(new ObjectInstance
+            var instance = new ObjectInstance
             {
                 ModelKey = key,
                 Transform = transform,
@@ -424,7 +428,12 @@ public class WorldScene : ISceneRenderer
                 PlacementRotation = p.Rotation,
                 PlacementScale = scale,
                 UniqueId = p.UniqueId
-            });
+            };
+
+            if (IsSkyboxModelPath(modelPath))
+                _skyboxInstances.Add(instance);
+            else
+                _mdxInstances.Add(instance);
         }
 
         // WMO placements
@@ -478,7 +487,7 @@ public class WorldScene : ISceneRenderer
             });
         }
 
-        ViewerLog.Important(ViewerLog.Category.Terrain, $"Instances: {_mdxInstances.Count} MDX, {_wmoInstances.Count} WMO");
+        ViewerLog.Important(ViewerLog.Category.Terrain, $"Instances: {_mdxInstances.Count} MDX, {_skyboxInstances.Count} skybox, {_wmoInstances.Count} WMO");
         ViewerLog.Important(ViewerLog.Category.Terrain, $"Unique models: {UniqueMdxModels} MDX, {UniqueWmoModels} WMO");
 
         // Diagnostic: terrain chunk WorldPosition range
@@ -541,6 +550,7 @@ public class WorldScene : ISceneRenderer
 
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
+        var tileSkyboxes = new List<ObjectInstance>();
         foreach (var p in result.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
@@ -567,13 +577,18 @@ public class WorldScene : ISceneRenderer
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
             string modelPath = mdxNames[p.NameIndex];
-            tileMdx.Add(new ObjectInstance
+            var instance = new ObjectInstance
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
                 UniqueId = p.UniqueId
-            });
+            };
+
+            if (IsSkyboxModelPath(modelPath))
+                tileSkyboxes.Add(instance);
+            else
+                tileMdx.Add(instance);
         }
 
         // Build WMO instances for this tile
@@ -624,14 +639,15 @@ public class WorldScene : ISceneRenderer
         }
 
         _tileMdxInstances[(tileX, tileY)] = tileMdx;
+        _tileSkyboxInstances[(tileX, tileY)] = tileSkyboxes;
         _tileWmoInstances[(tileX, tileY)] = tileWmo;
         _instancesDirty = true;
 
         // Hide WDL low-res tile now that detailed ADT is loaded
         _wdlTerrain?.HideTile(tileX, tileY);
 
-        if (tileMdx.Count > 0 || tileWmo.Count > 0)
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileWmo.Count} WMO instances");
+        if (tileMdx.Count > 0 || tileSkyboxes.Count > 0 || tileWmo.Count > 0)
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"Tile ({tileX},{tileY}) loaded: {tileMdx.Count} MDX, {tileSkyboxes.Count} skybox, {tileWmo.Count} WMO instances");
     }
 
     /// <summary>
@@ -640,6 +656,7 @@ public class WorldScene : ISceneRenderer
     private void OnTileUnloaded(int tileX, int tileY)
     {
         _tileMdxInstances.Remove((tileX, tileY));
+        _tileSkyboxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
         _instancesDirty = true;
     }
@@ -655,6 +672,11 @@ public class WorldScene : ISceneRenderer
             _mdxInstances.AddRange(list);
         _mdxInstances.AddRange(_externalMdxInstances);
 
+        _skyboxInstances.Clear();
+        foreach (var list in _tileSkyboxInstances.Values)
+            _skyboxInstances.AddRange(list);
+        _skyboxInstances.AddRange(_externalSkyboxInstances);
+
         _wmoInstances.Clear();
         foreach (var list in _tileWmoInstances.Values)
             _wmoInstances.AddRange(list);
@@ -666,6 +688,7 @@ public class WorldScene : ISceneRenderer
     public void ClearExternalSpawns()
     {
         _externalMdxInstances.Clear();
+        _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();
         _instancesDirty = true;
     }
@@ -673,6 +696,7 @@ public class WorldScene : ISceneRenderer
     public void SetExternalSpawns(IEnumerable<WorldSpawnRecord> spawns)
     {
         _externalMdxInstances.Clear();
+        _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();
 
         foreach (var spawn in spawns)
@@ -747,7 +771,7 @@ public class WorldScene : ISceneRenderer
                     bbMax = pos + new Vector3(2f);
                 }
 
-                _externalMdxInstances.Add(new ObjectInstance
+                var instance = new ObjectInstance
                 {
                     ModelKey = key,
                     Transform = transform,
@@ -759,12 +783,17 @@ public class WorldScene : ISceneRenderer
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = mdxScale,
                     UniqueId = spawn.SpawnId
-                });
+                };
+
+                if (IsSkyboxModelPath(modelPath))
+                    _externalSkyboxInstances.Add(instance);
+                else
+                    _externalMdxInstances.Add(instance);
             }
         }
 
         ViewerLog.Info(ViewerLog.Category.Terrain,
-            $"SQL spawns injected: {_externalMdxInstances.Count} MDX, {_externalWmoInstances.Count} WMO");
+            $"SQL spawns injected: {_externalMdxInstances.Count} MDX, {_externalSkyboxInstances.Count} skybox, {_externalWmoInstances.Count} WMO");
 
         _instancesDirty = true;
     }
@@ -802,6 +831,10 @@ public class WorldScene : ISceneRenderer
         // Extract camera position for sky dome
         Matrix4x4.Invert(view, out var viewInvSky);
         var camPos = new Vector3(viewInvSky.M41, viewInvSky.M42, viewInvSky.M43);
+        var lighting = _terrainManager.Lighting;
+        Vector3 fogColor;
+        float fogStart;
+        float fogEnd;
 
         // 0. Render sky dome (before terrain, no depth write)
         // Update DBC lighting early so sky colors are available
@@ -812,15 +845,23 @@ public class WorldScene : ISceneRenderer
             _skyDome.ZenithColor = _lightService.SkyTopColor;
             _skyDome.HorizonColor = _lightService.FogColor;
             _skyDome.SkyFogColor = _lightService.FogColor;
+            fogColor = _lightService.FogColor;
+            fogEnd = _lightService.FogEnd > 10f ? _lightService.FogEnd : lighting.FogEnd;
+            fogStart = fogEnd * 0.25f;
         }
         else
         {
             _skyDome.UpdateFromLighting(_terrainManager.Lighting.GameTime);
+            fogColor = lighting.FogColor;
+            fogStart = lighting.FogStart;
+            fogEnd = lighting.FogEnd;
         }
         _skyDome.Render(view, proj, camPos);
 
         // Also set clear color to horizon color so any gaps match the sky
         _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
+
+        RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting);
 
         // 0. Render WDL low-res terrain (far background — hidden tiles replaced by detailed ADTs)
         if (ShowWdlTerrain && _wdlTerrain != null)
@@ -859,24 +900,6 @@ public class WorldScene : ISceneRenderer
         // Extract camera position from view matrix (inverse of view translation)
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
-
-        // Fog parameters: prefer DBC light data if available, else terrain defaults
-        // (LightService already updated earlier for sky dome)
-        var lighting = _terrainManager.Lighting;
-        Vector3 fogColor;
-        float fogStart, fogEnd;
-        if (_lightService != null && _lightService.ActiveLightId >= 0)
-        {
-            fogColor = _lightService.FogColor;
-            fogEnd = _lightService.FogEnd > 10f ? _lightService.FogEnd : lighting.FogEnd;
-            fogStart = fogEnd * 0.25f; // Fog starts at 25% of end distance
-        }
-        else
-        {
-            fogColor = lighting.FogColor;
-            fogStart = lighting.FogStart;
-            fogEnd = lighting.FogEnd;
-        }
 
         // Update frustum planes for culling
         var vp = view * proj;
@@ -1205,6 +1228,65 @@ public class WorldScene : ISceneRenderer
         }
     }
 
+    private void RenderSkyboxBackdrop(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
+        Vector3 fogColor, float fogStart, float fogEnd, TerrainLighting lighting)
+    {
+        if (_skyboxInstances.Count == 0)
+            return;
+
+        ObjectInstance? nearestSkybox = null;
+        float nearestDistSq = float.MaxValue;
+        foreach (var inst in _skyboxInstances)
+        {
+            float distSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
+            if (distSq >= nearestDistSq)
+                continue;
+
+            nearestDistSq = distSq;
+            nearestSkybox = inst;
+        }
+
+        if (!nearestSkybox.HasValue)
+            return;
+
+        var skybox = nearestSkybox.Value;
+        var renderer = _assets.GetMdx(skybox.ModelKey);
+        if (renderer == null)
+            return;
+
+        renderer.UpdateAnimation();
+        renderer.RenderBackdrop(CreateSkyboxBackdropTransform(skybox.Transform, cameraPos), view, proj,
+            fogColor, fogStart, fogEnd, cameraPos,
+            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+    }
+
+    private static Matrix4x4 CreateSkyboxBackdropTransform(Matrix4x4 placementTransform, Vector3 cameraPos)
+    {
+        placementTransform.M41 = cameraPos.X;
+        placementTransform.M42 = cameraPos.Y;
+        placementTransform.M43 = cameraPos.Z;
+        return placementTransform;
+    }
+
+    internal static bool IsSkyboxModelPath(string modelPath)
+    {
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return false;
+
+        string normalized = modelPath.Replace('\\', '/').ToLowerInvariant();
+        if (!normalized.EndsWith(".m2", StringComparison.OrdinalIgnoreCase) &&
+            !normalized.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (normalized.Contains("skylight"))
+            return false;
+
+        return normalized.Contains("environments/stars/") ||
+               normalized.Contains("/skybox/") ||
+               normalized.Contains("skybox") ||
+               normalized.Contains("skybowl");
+    }
+
     public void ToggleWireframe()
     {
         _terrainManager.ToggleWireframe();
@@ -1371,10 +1453,13 @@ public class WorldScene : ISceneRenderer
         _bbRenderer?.Dispose();
         _skyDome.Dispose();
         _mdxInstances.Clear();
+        _skyboxInstances.Clear();
         _wmoInstances.Clear();
         _tileMdxInstances.Clear();
+        _tileSkyboxInstances.Clear();
         _tileWmoInstances.Clear();
         _externalMdxInstances.Clear();
+        _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();
     }
 }

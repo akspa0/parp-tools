@@ -1,5 +1,60 @@
 # Progress
 
+## Mar 17, 2026 - Recovery Branch Checkpoint (v0.4.0 base)
+
+- Active branch reset in main tree: recovery/v0.4.0-surgical-main-tree (base 343dadf).
+- Restored .github customization stack from main and committed as 845748b.
+- Build from this branch passes in primary tree environment.
+- Terrain alpha decode profile routing is now staged in code:
+	- TerrainAlphaDecodeMode in AdtProfile
+	- LichKingStrict for 3.x profiles
+	- LegacySequential for 0.x profiles
+	- StandardTerrainAdapter alpha extraction routes by profile mode
+
+### Critical Pending Validation
+
+- Runtime terrain checks still required on both families:
+	- Alpha-era terrain
+	- LK 3.3.5 terrain
+- Do not mark terrain safety complete until these real-data checks are done.
+
+### Immediate Next Work
+
+1. Finalize commit state for the profile/decode changes (if still local).
+2. Run manual runtime spot-checks for alpha decode output.
+3. Resume surgical commit intake from v0.4.0..main in SAFE-first order.
+
+### Mar 17, 2026 - Intake Triage Update
+
+- Reviewed queued commits `177f961`, `d50cfe7`, `326e6f8`, `4e2f681`, `37f669c`, `39799bf`, and `62ecf64` against the recovery branch and terrain-alpha guardrails.
+- Marked `177f961` and `37f669c` as RISKY and out of scope for safe-first intake.
+- Marked `d50cfe7`, `326e6f8`, `4e2f681`, `39799bf`, and `62ecf64` as MIXED; only isolated helper/tooling slices are candidates.
+- Selected first SAFE extraction: corrected `TerrainImageIo` alpha-atlas helper from `62ecf64` only.
+- Explicitly rejected the earlier `d50cfe7` `TerrainImageIo` version because it hardcoded atlas edge remapping that the recovery notes already identified as changing shipped data.
+- No claim of terrain safety from this triage alone; runtime real-data validation is still required.
+
+### Mar 17, 2026 - First SAFE Batch Applied
+
+- Added `src/MdxViewer/Export/TerrainImageIo.cs` from the corrected `62ecf64` implementation only.
+- Kept ViewerApp, TerrainRenderer, WorldScene, test-project, and terrain decode heuristic changes out of this batch.
+- Build gate passed: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- Runtime terrain validation remains pending; build-only status is not sufficient for terrain signoff.
+
+### Mar 18, 2026 - Rendering Recovery Batch
+
+- Applied the `WorldAssetManager` renderer-residency fix from main so placed MDX/WMO renderers are no longer evicted out from under live world instances.
+- `GetMdx` / `GetWmo` now lazy-load missing models and cached failed loads can be retried.
+- Added the minimal skybox backdrop path from main:
+	- route skybox-like MDX/M2 placements into a dedicated list
+	- render the nearest skybox as a camera-anchored backdrop before terrain
+	- added `ModelRenderer.RenderBackdrop(...)` with forced no-depth state for all layers
+- Verified that the recovery branch already contained the reflective M2 depth-flag fix and env-map backface guard, so those regressions were not reintroduced here.
+- Build gate passed again: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- Runtime validation still required; build success does not prove:
+	- doodad/WMO reload correctness after moving away and back
+	- correct skybox classification on real map data
+	- MH2O liquid correctness on LK 3.3.5 tiles
+
 ## ✅ Working
 
 ### MdxViewer (3D World Viewer) — Primary Project

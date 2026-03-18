@@ -33,8 +33,11 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, LinkedListNode<string>> _mdxLruMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _wmoLru = new();
     private readonly Dictionary<string, LinkedListNode<string>> _wmoLruMap = new(StringComparer.OrdinalIgnoreCase);
-    private const int MaxMdxCached = 500;  // Max MDX renderers in GPU memory
-    private const int MaxWmoCached = 100;  // Max WMO renderers in GPU memory
+    // World placements keep instance references long after the initial tile-load callback.
+    // Bounded renderer eviction causes placed objects to disappear until the tile reloads,
+    // so renderer residency defaults to unlimited while the raw file-data cache stays bounded.
+    private static readonly int MaxMdxCached = 0; // 0 = unlimited
+    private static readonly int MaxWmoCached = 0; // 0 = unlimited
 
     // Raw file data cache — avoids re-reading the same file from MPQ multiple times
     private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
@@ -128,11 +131,15 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public void EnsureMdxLoaded(string normalizedKey)
     {
-        if (_mdxModels.ContainsKey(normalizedKey))
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
         {
             TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
             return;
         }
+
+        if (cachedRenderer == null && _mdxModels.ContainsKey(normalizedKey))
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"Retrying cached failed MDX load: \"{normalizedKey}\"");
+
         var renderer = LoadMdxModel(normalizedKey);
         _mdxModels[normalizedKey] = renderer;
         TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
@@ -144,11 +151,15 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public void EnsureWmoLoaded(string normalizedKey)
     {
-        if (_wmoModels.ContainsKey(normalizedKey))
+        if (_wmoModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
         {
             TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
             return;
         }
+
+        if (cachedRenderer == null && _wmoModels.ContainsKey(normalizedKey))
+            ViewerLog.Debug(ViewerLog.Category.Wmo, $"Retrying cached failed WMO load: \"{normalizedKey}\"");
+
         var renderer = LoadWmoModel(normalizedKey);
         _wmoModels[normalizedKey] = renderer;
         TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
@@ -162,10 +173,13 @@ public class WorldAssetManager : IDisposable
     {
         if (_mdxModels.TryGetValue(normalizedKey, out var r))
         {
-            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            if (r != null)
+                TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
             return r;
         }
-        return null;
+
+        EnsureMdxLoaded(normalizedKey);
+        return _mdxModels.TryGetValue(normalizedKey, out r) ? r : null;
     }
 
     /// <summary>
@@ -223,10 +237,13 @@ public class WorldAssetManager : IDisposable
     {
         if (_wmoModels.TryGetValue(normalizedKey, out var r))
         {
-            TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
+            if (r != null)
+                TouchLru(_wmoLru, _wmoLruMap, normalizedKey);
             return r;
         }
-        return null;
+
+        EnsureWmoLoaded(normalizedKey);
+        return _wmoModels.TryGetValue(normalizedKey, out r) ? r : null;
     }
 
     /// <summary>
@@ -511,6 +528,9 @@ public class WorldAssetManager : IDisposable
 
     private void EvictMdxIfNeeded()
     {
+        if (MaxMdxCached <= 0)
+            return;
+
         while (_mdxModels.Count > MaxMdxCached && _mdxLru.Count > 0)
         {
             string oldest = _mdxLru.First!.Value;
@@ -526,6 +546,9 @@ public class WorldAssetManager : IDisposable
 
     private void EvictWmoIfNeeded()
     {
+        if (MaxWmoCached <= 0)
+            return;
+
         while (_wmoModels.Count > MaxWmoCached && _wmoLru.Count > 0)
         {
             string oldest = _wmoLru.First!.Value;

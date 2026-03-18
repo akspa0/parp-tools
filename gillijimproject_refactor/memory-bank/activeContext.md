@@ -1,5 +1,82 @@
 # Active Context
 
+## Current Focus: v0.4.0 Recovery Branch (Mar 17, 2026)
+
+Working branch is now reset in the main tree, not only in side worktrees.
+
+- Branch: recovery/v0.4.0-surgical-main-tree
+- Baseline tag/commit: v0.4.0 / 343dadf
+- .github metadata restored from main and committed: 845748b
+- .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
+
+### Recovery Work Completed On This Branch
+
+- Re-established v0.4.0 baseline in the primary tree and validated build.
+- Restored the project instruction stack from main:
+	- copilot-instructions
+	- instructions
+	- prompts
+	- terrain-alpha-regression skill files
+- Applied profile-driven terrain alpha decode routing in viewer terrain path:
+	- Added TerrainAlphaDecodeMode to AdtProfile in FormatProfileRegistry
+	- 3.x profiles route to LichKingStrict
+	- 0.x profiles route to LegacySequential
+	- StandardTerrainAdapter alpha extraction now routes by profile mode
+	- Strict path includes UseAlpha-first decode plus offset/span fallback for mis-set flags
+	- Legacy path remains sequential 4-bit nibble expansion
+
+### Validation Status
+
+- Build: dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug PASSED
+- Runtime real-data spot-check: PENDING (Alpha-era + LK 3.3.5)
+- No claim of full terrain regression safety without runtime real-data validation.
+
+### Next Integration Queue (Ordered)
+
+1. Commit and push the current profile/decode code slice if not already committed.
+2. Runtime-check alpha decode behavior on both fixed data families.
+3. Continue commit-by-commit intake from v0.4.0..main with strict triage:
+	 - SAFE first
+	 - MIXED only with dependencies proven and build gates
+	 - RISKY terrain renderer/decode rewrites skipped unless explicitly approved
+4. Keep UI changes incremental; avoid broad layout rewrites.
+5. Pull selected import/export functionality in small batches after profile/decode stabilization.
+
+### Surgical Intake Triage (Mar 17)
+
+- Commit triage against `v0.4.0..main` is now documented for the current queue:
+	- `177f961`: RISKY, skip entire commit (terrain renderer + tile mesh + alpha decode rewrite)
+	- `37f669c`: RISKY, skip entire commit (relaxed alpha heuristics + MPQ decompression changes)
+	- `d50cfe7`, `326e6f8`, `4e2f681`, `39799bf`, `62ecf64`: MIXED, only extract isolated safe slices
+- First SAFE batch selected:
+	- take only the corrected `TerrainImageIo` alpha-atlas helper from `62ecf64`
+	- do not take the earlier `d50cfe7` version because it reintroduced atlas import/export edge remapping
+	- do not take ViewerApp, TerrainRenderer, WorldScene, test-project, or alpha-decode hunks in the first batch
+- Required gate after the first SAFE batch: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Runtime terrain validation remains required after any terrain-adjacent batch; build success is not proof of terrain correctness.
+- First SAFE batch status:
+	- corrected `TerrainImageIo` helper has been applied in the recovery branch
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the change
+	- runtime real-data validation is still pending
+
+### Rendering Fix Batch (Mar 18)
+
+- Applied the main-branch `WorldAssetManager` residency fix in the recovery branch:
+	- MDX/WMO renderer residency now defaults to unlimited
+	- only the raw file-data cache remains bounded
+	- cached failed model loads are retried instead of becoming permanent null entries
+	- lazy `GetMdx` / `GetWmo` lookups can now load on demand
+- Applied the minimal main-branch skybox backdrop path without broad ViewerApp/UI churn:
+	- skybox-like MDX/M2 placements are routed into a separate skybox instance list
+	- nearest skybox placement renders as a camera-anchored backdrop before terrain
+	- `ModelRenderer` now has a backdrop path that keeps depth test/write disabled for all layers
+- Current branch already had the reflective M2 depth-flag fix and the guarded env-map backface handling, so those were not re-applied.
+- Build gate passed again after this rendering batch: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- Runtime validation is still required for:
+	- WMO/MDX disappearance when moving away and back
+	- skybox model classification and backdrop behavior
+	- MH2O liquid rendering on LK data
+
 ## Current Focus: MDX Compatibility Port + Rendering Parity (Feb 14, 2026)
 
 MdxViewer is the **primary project** in the tooling suite. It is a high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data.
