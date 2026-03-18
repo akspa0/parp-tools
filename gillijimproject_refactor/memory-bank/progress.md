@@ -55,6 +55,24 @@
 	- correct skybox classification on real map data
 	- MH2O liquid correctness on LK 3.3.5 tiles
 
+### Mar 18, 2026 - MCCV + MPQ Recovery Batch
+
+- Restored MCCV terrain color support on the active chunk-based terrain path.
+- `TerrainChunkData` now carries MCCV bytes, `StandardTerrainAdapter` populates them, `TerrainMeshBuilder` uploads them, and `TerrainRenderer` applies them in shader.
+- Fixed the known MCCV black-tint regression by treating MCCV alpha as tint strength so no-tint/transparent areas remain neutral instead of darkening to black.
+- Applied the isolated `NativeMpqService` recovery slice from the mixed MPQ commits:
+	- expanded patch archive ordering for locale/custom patch names
+	- full normalized path encrypted-key derivation with basename fallback
+	- compression bitmask handling for MPQ sectors
+	- BZip2 support via SharpZipLib
+- Build gates passed:
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Runtime validation still required; build success does not prove:
+	- patched 1.x+ MPQ read correctness on real patch chains
+	- encrypted later-version MPQ entry reads on real data
+	- MCCV highlight/tint correctness on real 3.x terrain
+
 ## ✅ Working
 
 ### MdxViewer (3D World Viewer) — Primary Project

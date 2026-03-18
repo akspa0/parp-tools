@@ -77,6 +77,28 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- skybox model classification and backdrop behavior
 	- MH2O liquid rendering on LK data
 
+### MCCV + MPQ Recovery Batch (Mar 18)
+
+- Restored active-branch MCCV terrain support in the chunk renderer path:
+	- `StandardTerrainAdapter` now carries MCNK MCCV data into `TerrainChunkData`
+	- `TerrainMeshBuilder` uploads per-vertex RGBA alongside position/normal/UV
+	- `TerrainRenderer` consumes MCCV in the shader
+- Fixed the prior MCCV black-tint behavior:
+	- MCCV alpha now controls tint strength
+	- zero-alpha vertices stay neutral instead of multiplying terrain to black
+- Applied the isolated `NativeMpqService` slice from the mixed MPQ recovery commits:
+	- broader patch archive priority ordering, including locale/custom patch variants
+	- encrypted-file key derivation now tries the full normalized path first, then basename fallback
+	- per-sector MPQ decompression now handles bitmask combinations instead of only single-byte cases
+	- BZip2 sector decompression added via SharpZipLib
+- Build gates passed after this batch:
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Runtime real-data validation is still required for:
+	- 1.x+ patch-chain reads on patched client data
+	- later-version encrypted MPQ entries
+	- 3.x MCCV highlight/tint behavior on real LK terrain
+
 ## Current Focus: MDX Compatibility Port + Rendering Parity (Feb 14, 2026)
 
 MdxViewer is the **primary project** in the tooling suite. It is a high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data.

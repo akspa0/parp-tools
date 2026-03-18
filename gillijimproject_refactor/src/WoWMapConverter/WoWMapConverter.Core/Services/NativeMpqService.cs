@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Linq;
+using ICSharpCode.SharpZipLib.BZip2;
 using WoWMapConverter.Core.Diagnostics;
 
 namespace WoWMapConverter.Core.Services;
@@ -414,18 +415,53 @@ public class NativeMpqService : IDisposable
     private static int GetMpqPriority(string filename)
     {
         var lower = filename.ToLowerInvariant();
-        
-        // Patches get highest priority (loaded last = searched first)
-        if (lower.StartsWith("patch"))
+
+        // Patches get highest priority (loaded last = searched first).
+        // Support:
+        //   patch.mpq
+        //   patch-2.mpq, patch-3.mpq, ...
+        //   patch-A.mpq .. patch-Z.mpq
+        //   patch-enUS.mpq, patch-enUS-2.mpq, patch-enUS-A.mpq, ...
+        if (lower.StartsWith("patch", StringComparison.OrdinalIgnoreCase))
         {
-            if (lower == "patch.mpq") return 1000;
-            if (lower.StartsWith("patch-"))
+            var nameNoExt = lower;
+            if (nameNoExt.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+                nameNoExt = nameNoExt[..^4];
+
+            var parts = nameNoExt.Split('-', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 1 && parts[0] == "patch")
             {
-                var numPart = lower.Replace("patch-", "").Replace(".mpq", "");
-                if (int.TryParse(numPart, out int num))
-                    return 1000 + num;
+                bool isLocale = false;
+                int suffixIndex = 1;
+                if (parts.Length >= 2 && parts[1].Length == 4 && parts[1].All(char.IsLetter))
+                {
+                    isLocale = true;
+                    suffixIndex = 2;
+                }
+
+                string? suffix = parts.Length > suffixIndex ? parts[suffixIndex] : null;
+                int suffixRank = 0;
+
+                if (!string.IsNullOrEmpty(suffix))
+                {
+                    if (int.TryParse(suffix, out int number))
+                    {
+                        suffixRank = Math.Clamp(number, 0, 499);
+                    }
+                    else if (suffix.Length == 1 && suffix[0] >= 'a' && suffix[0] <= 'z')
+                    {
+                        suffixRank = 500 + (suffix[0] - 'a' + 1);
+                    }
+                    else
+                    {
+                        suffixRank = 900;
+                    }
+                }
+
+                return (isLocale ? 2000 : 1000) + suffixRank;
             }
-            return 1099;
+
+            return 2900;
         }
         
         if (lower.Contains("enus") || lower.Contains("engb") || lower.Contains("dede") || lower.Contains("locale"))
@@ -495,7 +531,7 @@ public class NativeMpqService : IDisposable
                 }
                 
                 Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → found in {Path.GetFileName(archive.Path)}, block: offset={block.BlockOffset}, size={block.BlockSize}, fileSize={block.FileSize}, flags=0x{block.Flags:X8}");
-                var data = ReadFileFromArchive(archive, block, Path.GetFileName(normalized));
+                var data = ReadFileFromArchive(archive, block, normalized);
                 if (data != null && data.Length > 0)
                 {
                     Console.WriteLine($"[NativeMpqService] ReadFile '{normalized}' → extracted {data.Length} bytes");
@@ -608,7 +644,24 @@ public class NativeMpqService : IDisposable
             
             var baseOffset = archive.HeaderOffset + block.BlockOffset;
             fs.Position = baseOffset;
-            return ReadFileData(reader, block, archive.Header.SectorSize, filename, baseOffset);
+
+            var data = ReadFileData(reader, block, archive.Header.SectorSize, filename, baseOffset);
+            if (data != null && data.Length > 0)
+                return data;
+
+            if ((block.Flags & FLAG_ENCRYPTED) != 0)
+            {
+                string baseName = Path.GetFileName(filename);
+                if (!string.Equals(baseName, filename, StringComparison.OrdinalIgnoreCase))
+                {
+                    fs.Position = baseOffset;
+                    data = ReadFileData(reader, block, archive.Header.SectorSize, baseName, baseOffset);
+                    if (data != null && data.Length > 0)
+                        return data;
+                }
+            }
+
+            return data;
         }
         catch (Exception ex)
         {
@@ -721,7 +774,7 @@ public class NativeMpqService : IDisposable
         uint key = 0;
         if ((block.Flags & FLAG_ENCRYPTED) != 0)
         {
-            key = HashString(Path.GetFileName(filename), HASH_FILE_KEY);
+            key = HashString(filename.Replace('/', '\\'), HASH_FILE_KEY);
             if ((block.Flags & FLAG_FIX_KEY) != 0)
                 key = (key + block.BlockOffset) ^ block.FileSize;
         }
@@ -863,31 +916,79 @@ public class NativeMpqService : IDisposable
     {
         if (data.Length == 0)
             return null;
-        
-        byte compressionType = data[0];
-        var compressedData = new byte[data.Length - 1];
-        Array.Copy(data, 1, compressedData, 0, compressedData.Length);
-        
-        switch (compressionType)
+
+        const byte MPQ_COMP_HUFFMAN = 0x01;
+        const byte MPQ_COMP_ZLIB = 0x02;
+        const byte MPQ_COMP_PKWARE = 0x08;
+        const byte MPQ_COMP_BZIP2 = 0x10;
+        const byte MPQ_COMP_LZMA = 0x80;
+
+        byte mask = data[0];
+        var payload = new byte[data.Length - 1];
+        Array.Copy(data, 1, payload, 0, payload.Length);
+
+        byte unsupported = (byte)(mask & ~(MPQ_COMP_HUFFMAN | MPQ_COMP_ZLIB | MPQ_COMP_PKWARE | MPQ_COMP_BZIP2 | MPQ_COMP_LZMA));
+        if (unsupported != 0)
         {
-            case 0x02: // ZLIB
-                return DecompressZlib(compressedData);
-            
-            case 0x08: // PKWARE DCL (implode)
-                Console.WriteLine($"[NativeMpqService] PKWARE: first bytes after type: {(compressedData.Length >= 8 ? BitConverter.ToString(compressedData, 0, Math.Min(16, compressedData.Length)) : "too short")} ({compressedData.Length} bytes → {expectedSize})");
-                return PkwareExplode.Decompress(compressedData, expectedSize);
-            
-            case 0x10: // BZip2
-                Console.WriteLine($"[NativeMpqService] BZip2 compression not implemented ({data.Length} bytes)");
+            Console.WriteLine($"[NativeMpqService] Unsupported MPQ compression bits: 0x{unsupported:X2} (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        if ((mask & MPQ_COMP_LZMA) != 0)
+        {
+            Console.WriteLine($"[NativeMpqService] LZMA MPQ compression not implemented (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        if ((mask & MPQ_COMP_HUFFMAN) != 0)
+        {
+            Console.WriteLine($"[NativeMpqService] Huffman MPQ compression not implemented (mask=0x{mask:X2}, {data.Length} bytes)");
+            return null;
+        }
+
+        byte[] current = payload;
+
+        if ((mask & MPQ_COMP_BZIP2) != 0)
+        {
+            var bz = DecompressBzip2(current);
+            if (bz == null)
                 return null;
-            
-            case 0x12: // ZLIB + PKWARE combo (seen in some MPQs)
-                Console.WriteLine($"[NativeMpqService] ZLIB+PKWARE combo compression ({data.Length} bytes)");
-                return DecompressZlib(compressedData);
-            
-            default:
-                Console.WriteLine($"[NativeMpqService] Unknown compression type 0x{compressionType:X2} ({data.Length} bytes)");
-                return data;
+            current = bz;
+        }
+
+        if ((mask & MPQ_COMP_ZLIB) != 0)
+        {
+            var z = DecompressZlib(current);
+            if (z == null)
+                return null;
+            current = z;
+        }
+
+        if ((mask & MPQ_COMP_PKWARE) != 0)
+        {
+            Console.WriteLine($"[NativeMpqService] PKWARE: first bytes after type: {(current.Length >= 8 ? BitConverter.ToString(current, 0, Math.Min(16, current.Length)) : "too short")} ({current.Length} bytes → {expectedSize})");
+            var pkware = PkwareExplode.Decompress(current, expectedSize);
+            if (pkware == null)
+                return null;
+            current = pkware;
+        }
+
+        return current;
+    }
+
+    private static byte[]? DecompressBzip2(byte[] data)
+    {
+        try
+        {
+            using var input = new MemoryStream(data, writable: false);
+            using var bzip = new BZip2InputStream(input);
+            using var output = new MemoryStream();
+            bzip.CopyTo(output);
+            return output.ToArray();
+        }
+        catch
+        {
+            return null;
         }
     }
 

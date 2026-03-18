@@ -27,8 +27,8 @@ public class TerrainMeshBuilder
     {
         if (chunk.Heights.Length < 145) return null;
 
-        // Build vertex data: position(3) + normal(3) + texcoord(2) = 8 floats per vertex
-        var vertices = new float[145 * 8];
+        // Build vertex data: position(3) + normal(3) + texcoord(2) + vertexColor(4) = 12 floats per vertex
+        var vertices = new float[145 * 12];
         float cellSize = WoWConstants.ChunkSize / 16f; // size of one chunk
         float subCellSize = cellSize / 8f;             // size of one cell within chunk
 
@@ -60,9 +60,9 @@ public class TerrainMeshBuilder
             // World position = chunk corner + local offset
             float wx = chunk.WorldPosition.X - y;
             float wy = chunk.WorldPosition.Y - x;
-            vertices[i * 8 + 0] = wx;
-            vertices[i * 8 + 1] = wy;
-            vertices[i * 8 + 2] = z;
+            vertices[i * 12 + 0] = wx;
+            vertices[i * 12 + 1] = wy;
+            vertices[i * 12 + 2] = z;
 
             // Update AABB
             bMin = Vector3.Min(bMin, new Vector3(wx, wy, z));
@@ -70,21 +70,42 @@ public class TerrainMeshBuilder
 
             // Normal
             var n = i < chunk.Normals.Length ? chunk.Normals[i] : Vector3.UnitZ;
-            vertices[i * 8 + 3] = n.X;
-            vertices[i * 8 + 4] = n.Y;
-            vertices[i * 8 + 5] = n.Z;
+            vertices[i * 12 + 3] = n.X;
+            vertices[i * 12 + 4] = n.Y;
+            vertices[i * 12 + 5] = n.Z;
 
             // Texture coordinates (0-1 across the chunk)
             if (!isInner)
             {
-                vertices[i * 8 + 6] = col / 8f;
-                vertices[i * 8 + 7] = (row / 2) / 8f;
+                vertices[i * 12 + 6] = col / 8f;
+                vertices[i * 12 + 7] = (row / 2) / 8f;
             }
             else
             {
-                vertices[i * 8 + 6] = (col + 0.5f) / 8f;
-                vertices[i * 8 + 7] = (row / 2 + 0.5f) / 8f;
+                vertices[i * 12 + 6] = (col + 0.5f) / 8f;
+                vertices[i * 12 + 7] = (row / 2 + 0.5f) / 8f;
             }
+
+            float red = 1f;
+            float green = 1f;
+            float blue = 1f;
+            float alpha = 0f;
+            if (chunk.MccvColors != null)
+            {
+                int colorOffset = i * 4;
+                if (colorOffset + 3 < chunk.MccvColors.Length)
+                {
+                    red = chunk.MccvColors[colorOffset + 0] / 255f;
+                    green = chunk.MccvColors[colorOffset + 1] / 255f;
+                    blue = chunk.MccvColors[colorOffset + 2] / 255f;
+                    alpha = chunk.MccvColors[colorOffset + 3] / 255f;
+                }
+            }
+
+            vertices[i * 12 + 8] = red;
+            vertices[i * 12 + 9] = green;
+            vertices[i * 12 + 10] = blue;
+            vertices[i * 12 + 11] = alpha;
         }
 
         // Build index buffer: 8×8 cells, each split into 4 triangles via center vertex = 256 triangles
@@ -212,7 +233,7 @@ public class TerrainMeshBuilder
         fixed (ushort* ptr = indices)
             _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
-        uint stride = 8 * sizeof(float);
+        uint stride = 12 * sizeof(float);
         // Position (location 0)
         _gl.EnableVertexAttribArray(0);
         _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
@@ -222,6 +243,9 @@ public class TerrainMeshBuilder
         // TexCoord (location 2)
         _gl.EnableVertexAttribArray(2);
         _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+        // Vertex color (location 5)
+        _gl.EnableVertexAttribArray(5);
+        _gl.VertexAttribPointer(5, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
 
         _gl.BindVertexArray(0);
 

@@ -52,6 +52,21 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Build passed again after the rendering batch.
 - Runtime verification still required for doodad reload/culling, skybox behavior, and LK MH2O liquids.
 
+### MCCV + MPQ Follow-up (Mar 18)
+
+- Active chunk-based terrain rendering now includes MCCV vertex colors again.
+- Implementation path is intentionally minimal:
+   - `StandardTerrainAdapter` extracts `MccvData`
+   - `TerrainChunkData` stores per-vertex MCCV bytes
+   - `TerrainMeshBuilder` uploads RGBA as a new vertex attribute
+   - `TerrainRenderer` applies the tint in shader
+- Important fix versus the older rollback path:
+   - do not multiply terrain directly by raw MCCV RGB
+   - use MCCV alpha as tint strength so zero-alpha/no-tint areas remain neutral instead of black
+- `NativeMpqService` also now carries the isolated patch-reader recovery slice needed for 1.x+ patched clients and later encrypted entries.
+- Both the converter core project and the MdxViewer solution build passed after this batch.
+- Real-data validation is still pending for MCCV appearance and patched MPQ chains.
+
 ## Current Focus
 
 **v0.4.0 Release — 0.5.3 Rendering Improvements + Initial 3.3.5 Groundwork** — Major rendering improvements for Alpha 0.5.3 (lighting, particles, geoset animations). Initial 3.3.5 WotLK support scaffolding added but **NOT ready for use** — MH2O liquid and terrain texturing are broken. Only client versions 0.5.3 through 0.12 are currently usable.

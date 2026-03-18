@@ -40,6 +40,9 @@ public class TerrainChunkData
     /// <summary>MCSH shadow map: 64×64 bytes (expanded from 1-bit-per-cell). 0=lit, 255=shadowed.</summary>
     public byte[]? ShadowMap { get; init; }
 
+    /// <summary>MCCV vertex colors: 145 RGBA entries, one per terrain vertex. Null if no MCCV is present.</summary>
+    public byte[]? MccvColors { get; init; }
+
     /// <summary>Parsed MCLQ liquid data for this chunk. Null if no liquid present.</summary>
     public LiquidChunkData? Liquid { get; set; }
 

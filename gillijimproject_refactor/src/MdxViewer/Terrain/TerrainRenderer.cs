@@ -512,6 +512,7 @@ public class TerrainRenderer : IDisposable
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
+layout(location = 5) in vec4 aVertexColor;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -520,12 +521,14 @@ uniform mat4 uProj;
 out vec3 vWorldPos;
 out vec3 vNormal;
 out vec2 vTexCoord;
+out vec4 vVertexColor;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
     vNormal = mat3(uModel) * aNormal;
     vTexCoord = aTexCoord;
+    vVertexColor = aVertexColor;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -535,6 +538,7 @@ void main() {
 in vec3 vWorldPos;
 in vec3 vNormal;
 in vec2 vTexCoord;
+in vec4 vVertexColor;
 
 uniform sampler2D uDiffuseSampler;
 uniform sampler2D uAlphaSampler;
@@ -600,6 +604,10 @@ void main() {
         // Darken shadowed areas: shadow=1.0 means shadowed, 0.0 means lit
         litColor *= mix(1.0, 0.4, shadow);
     }
+
+    // MCCV alpha controls tint strength. Zero-alpha vertices stay neutral instead of darkening to black.
+    vec3 vertexTint = mix(vec3(1.0), clamp(vVertexColor.rgb, 0.0, 1.0), clamp(vVertexColor.a, 0.0, 1.0));
+    litColor *= vertexTint;
 
     // Fog
     float dist = length(vWorldPos - uCameraPos);
