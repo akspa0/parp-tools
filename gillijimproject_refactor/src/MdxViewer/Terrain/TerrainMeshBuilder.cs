@@ -86,18 +86,19 @@ public class TerrainMeshBuilder
                 vertices[i * 12 + 7] = (row / 2 + 0.5f) / 8f;
             }
 
-            float red = 1f;
-            float green = 1f;
-            float blue = 1f;
-            float alpha = 0f;
+            float red = 127f / 255f;
+            float green = 127f / 255f;
+            float blue = 127f / 255f;
+            float alpha = 127f / 255f;
             if (chunk.MccvColors != null)
             {
                 int colorOffset = i * 4;
                 if (colorOffset + 3 < chunk.MccvColors.Length)
                 {
-                    red = chunk.MccvColors[colorOffset + 0] / 255f;
+                    // MCCV is stored as BGRA. Mid-gray (~127) is the neutral/no-tint value.
+                    blue = chunk.MccvColors[colorOffset + 0] / 255f;
                     green = chunk.MccvColors[colorOffset + 1] / 255f;
-                    blue = chunk.MccvColors[colorOffset + 2] / 255f;
+                    red = chunk.MccvColors[colorOffset + 2] / 255f;
                     alpha = chunk.MccvColors[colorOffset + 3] / 255f;
                 }
             }

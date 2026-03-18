@@ -59,7 +59,7 @@
 
 - Restored MCCV terrain color support on the active chunk-based terrain path.
 - `TerrainChunkData` now carries MCCV bytes, `StandardTerrainAdapter` populates them, `TerrainMeshBuilder` uploads them, and `TerrainRenderer` applies them in shader.
-- Fixed the known MCCV black-tint regression by treating MCCV alpha as tint strength so no-tint/transparent areas remain neutral instead of darkening to black.
+- Initial MCCV fix improved output but did not fully match runtime behavior.
 - Applied the isolated `NativeMpqService` recovery slice from the mixed MPQ commits:
 	- expanded patch archive ordering for locale/custom patch names
 	- full normalized path encrypted-key derivation with basename fallback
@@ -72,6 +72,30 @@
 	- patched 1.x+ MPQ read correctness on real patch chains
 	- encrypted later-version MPQ entry reads on real data
 	- MCCV highlight/tint correctness on real 3.x terrain
+
+### Mar 18, 2026 - MCCV + Patch-Letter Follow-up
+
+- Reworked MCCV semantics after user runtime feedback showed the first shader heuristic was still wrong.
+- Current interpretation now matches the repo's own MCCV writer comments:
+	- bytes are treated as BGRA, not RGBA
+	- neutral/no-tint values are mid-gray (`127`) rather than white
+	- terrain tint uses RGB remapped around mid-gray, not MCCV alpha strength
+- Extended `NativeMpqService.LoadArchives(...)` to discover MPQs recursively so nested/custom `patch-[A-Z].mpq` archives are included in the patch chain.
+- Kept Alpha single-asset wrapper archives (`.wmo.mpq`, `.wdt.mpq`, `.wdl.mpq`) out of the generic recursive scan because they are handled separately by the viewer data source.
+- Build gates passed again after this follow-up:
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Runtime validation is still the blocker:
+	- confirm 3.x MCCV transparent/neutral regions no longer darken to black
+	- confirm maps stored inside `patch-[A-Z].mpq` are now discovered and load through normal WDT/ADT lookup paths
+
+### Mar 18, 2026 - Remaining ModelRenderer Slice From 39799bf
+
+- Applied the last model-side hunk from `39799bf` after the MPQ reader work was already in place.
+- `ModelRenderer` now skips particle rendering on the world-scene batched render path only.
+- Standalone model viewing still renders particles as before.
+- Reason: per-instance transforms are not yet propagated into particle simulation for placed models, and leaving them enabled there can produce visibly wrong camera-locked effects.
+- Build gate passed: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
 
 ## ✅ Working
 

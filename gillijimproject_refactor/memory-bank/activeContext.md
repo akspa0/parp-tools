@@ -83,21 +83,36 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- `StandardTerrainAdapter` now carries MCNK MCCV data into `TerrainChunkData`
 	- `TerrainMeshBuilder` uploads per-vertex RGBA alongside position/normal/UV
 	- `TerrainRenderer` consumes MCCV in the shader
-- Fixed the prior MCCV black-tint behavior:
-	- MCCV alpha now controls tint strength
-	- zero-alpha vertices stay neutral instead of multiplying terrain to black
+- Follow-up correction after runtime feedback:
+	- MCCV is now treated as BGRA, matching the repo's own `MinimapService.GenerateMccvData` documentation
+	- neutral/no-tint MCCV is treated as mid-gray (`127`) rather than white
+	- shader tinting now maps mid-gray to neutral and no longer relies on MCCV alpha as terrain tint strength
 - Applied the isolated `NativeMpqService` slice from the mixed MPQ recovery commits:
 	- broader patch archive priority ordering, including locale/custom patch variants
 	- encrypted-file key derivation now tries the full normalized path first, then basename fallback
 	- per-sector MPQ decompression now handles bitmask combinations instead of only single-byte cases
 	- BZip2 sector decompression added via SharpZipLib
+- Follow-up patch-chain fix:
+	- `NativeMpqService.LoadArchives(...)` now discovers MPQs recursively instead of only scanning a few top-level directories
+	- Alpha-style single-asset wrapper archives (`.wmo.mpq`, `.wdt.mpq`, `.wdl.mpq`) are still excluded from this generic path because `MpqDataSource` handles them separately
 - Build gates passed after this batch:
 	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
 	- `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
 - Runtime real-data validation is still required for:
 	- 1.x+ patch-chain reads on patched client data
 	- later-version encrypted MPQ entries
-	- 3.x MCCV highlight/tint behavior on real LK terrain
+	- 3.x MCCV highlight/tint behavior on real LK terrain after the BGRA + mid-gray semantic correction
+
+### Commit 39799bf Model Slice (Mar 18)
+
+- The M2 load-failure fix associated with `39799bf` was the `NativeMpqService` encrypted-read compatibility slice, which is now already applied.
+- The only additional model-renderer change from that commit was also applied:
+	- `ModelRenderer` no longer renders particles on the world-scene batched instance path
+	- standalone model viewing still renders particles
+- Rationale:
+	- world-scene batch instancing does not yet propagate per-instance transforms into particle simulation/rendering
+	- leaving particles enabled there can produce camera-locked billboard artifacts on placed models
+- Build gate passed again after applying this renderer hunk: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
 
 ## Current Focus: MDX Compatibility Port + Rendering Parity (Feb 14, 2026)
 

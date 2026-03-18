@@ -346,8 +346,8 @@ public class NativeMpqService : IDisposable
 
     public void LoadArchives(IEnumerable<string> searchPaths)
     {
-        var pathsToSearch = new HashSet<string>();
-        
+        var pathsToSearch = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var path in searchPaths)
         {
             if (Directory.Exists(path))
@@ -372,27 +372,35 @@ public class NativeMpqService : IDisposable
         }
         
         Console.WriteLine($"[NativeMpqService] Searching {pathsToSearch.Count} paths for MPQs:");
-        
-        // Collect all MPQ files
-        var allMpqFiles = new List<string>();
+
+        // Collect all MPQ files recursively so nested patch folders are included.
+        // Skip Alpha-style single-asset wrapper MPQs; those are handled separately by MpqDataSource.
+        var allMpqFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in pathsToSearch)
         {
-            var mpqFiles = Directory.GetFiles(path, "*.mpq", SearchOption.TopDirectoryOnly);
-            allMpqFiles.AddRange(mpqFiles);
-            
-            var mpqFilesUpper = Directory.GetFiles(path, "*.MPQ", SearchOption.TopDirectoryOnly);
-            allMpqFiles.AddRange(mpqFilesUpper);
+            try
+            {
+                foreach (var mpqPath in Directory.EnumerateFiles(path, "*.mpq", SearchOption.AllDirectories))
+                {
+                    var lowerName = Path.GetFileName(mpqPath).ToLowerInvariant();
+                    if (lowerName.EndsWith(".wmo.mpq") || lowerName.EndsWith(".wdt.mpq") || lowerName.EndsWith(".wdl.mpq"))
+                        continue;
+                    allMpqFiles.Add(mpqPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NativeMpqService] Failed to enumerate MPQs in {path}: {ex.Message}");
+            }
         }
-        
-        allMpqFiles = allMpqFiles.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        
-        // Sort: base archives first, patches last (patches override base)
-        allMpqFiles = allMpqFiles
+
+        var orderedMpqFiles = allMpqFiles
             .OrderBy(f => GetMpqPriority(Path.GetFileName(f)))
+            .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        
-        Console.WriteLine($"[NativeMpqService] Loading {allMpqFiles.Count} archives:");
-        foreach (var mpqPath in allMpqFiles)
+
+        Console.WriteLine($"[NativeMpqService] Loading {orderedMpqFiles.Count} archives:");
+        foreach (var mpqPath in orderedMpqFiles)
         {
             try
             {

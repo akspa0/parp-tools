@@ -605,8 +605,9 @@ void main() {
         litColor *= mix(1.0, 0.4, shadow);
     }
 
-    // MCCV alpha controls tint strength. Zero-alpha vertices stay neutral instead of darkening to black.
-    vec3 vertexTint = mix(vec3(1.0), clamp(vVertexColor.rgb, 0.0, 1.0), clamp(vVertexColor.a, 0.0, 1.0));
+    // MCCV uses mid-gray as the neutral/no-tint value. Map 0.5 -> 1.0 so default MCCV leaves terrain unchanged.
+    // Alpha is preserved for debugging/export parity but is not used for terrain tinting here.
+    vec3 vertexTint = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
     litColor *= vertexTint;
 
     // Fog

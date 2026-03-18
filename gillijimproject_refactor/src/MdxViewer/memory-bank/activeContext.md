@@ -60,12 +60,22 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `TerrainChunkData` stores per-vertex MCCV bytes
    - `TerrainMeshBuilder` uploads RGBA as a new vertex attribute
    - `TerrainRenderer` applies the tint in shader
-- Important fix versus the older rollback path:
-   - do not multiply terrain directly by raw MCCV RGB
-   - use MCCV alpha as tint strength so zero-alpha/no-tint areas remain neutral instead of black
+- Runtime follow-up corrected the semantics further:
+   - MCCV bytes are now interpreted as BGRA, not RGBA
+   - neutral/no-tint values are treated as mid-gray (`127`) instead of white
+   - terrain tint is now derived from RGB remapped around mid-gray; MCCV alpha is preserved but not used as terrain tint strength
 - `NativeMpqService` also now carries the isolated patch-reader recovery slice needed for 1.x+ patched clients and later encrypted entries.
+- `NativeMpqService.LoadArchives(...)` now also scans recursively so map content in nested/custom `patch-[A-Z].mpq` archives is not skipped during archive discovery.
 - Both the converter core project and the MdxViewer solution build passed after this batch.
 - Real-data validation is still pending for MCCV appearance and patched MPQ chains.
+
+### ModelRenderer Follow-up From 39799bf (Mar 18)
+
+- The commit message for `39799bf` bundled terrain and model notes together, but the only remaining model-renderer hunk on top of the already-applied MPQ fix was particle suppression on the world-scene instanced path.
+- That hunk is now applied:
+   - batched placed-model rendering skips particles
+   - standalone model preview/rendering still allows particles
+- Keep this split until particle simulation becomes instance-aware.
 
 ## Current Focus
 

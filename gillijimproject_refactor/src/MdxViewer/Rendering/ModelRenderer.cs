@@ -322,14 +322,10 @@ public class MdxRenderer : ISceneRenderer
 
         RenderGeosets(pass, fadeAlpha);
 
-        // Render particles during transparent pass
-        if (pass == RenderPass.Transparent && _particleEmitters.Count > 0 && _particleRenderer != null)
-        {
-            _particleRenderer.Render(_particleEmitters, _cachedView, _cachedProj,
-                _cachedCameraPos, _textures, _mdx.Textures);
-            // Re-activate model shader since particle renderer uses its own
-            _gl.UseProgram(_shaderProgram);
-        }
+        // NOTE: world-scene batch instancing currently does not propagate per-instance model
+        // transforms into particle emitter simulation/rendering, which can produce camera-locked
+        // billboard artifacts for some placed MDX models. Keep particles disabled on this path
+        // until instance-aware particle transforms are implemented.
     }
 
     /// <summary>
