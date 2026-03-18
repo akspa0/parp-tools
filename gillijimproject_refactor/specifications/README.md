@@ -12,6 +12,14 @@ Definitive format documentation derived from our verified viewer implementations
 | [lk-335-terrain.md](lk-335-terrain.md) | LK 3.3.5 WDT/ADT/MCNK terrain | `StandardTerrainAdapter.cs`, `Mcnk.cs` |
 | [mpq-070-patching.md](mpq-070-patching.md) | WoW 0.7.0.3694 MPQ patch overlay behavior (`patch.MPQ`) | Ghidra decompilation of mount/open/lookup flow |
 
+## Versioning And Profile Architecture
+
+| File | Description |
+|------|-------------|
+| [versioning/Parser_Profile_Architecture.md](versioning/Parser_Profile_Architecture.md) | Build-level parser/profile architecture for ADT, WMO, MDX, and M2 dispatch |
+| [versioning/Stability_Matrix_0.6.0_to_0.9.x.md](versioning/Stability_Matrix_0.6.0_to_0.9.x.md) | Early-client stability matrix used to define safe profile boundaries |
+| [versioning/MPQ_Era_Future_Profile_Plan_4.x_to_5.3.md](versioning/MPQ_Era_Future_Profile_Plan_4.x_to_5.3.md) | Deferred roadmap for future `4.x` and `5.x` profile families after `3.x` stabilization |
+
 ## Ghidra Reverse Engineering Prompts
 
 | File | Target Binary | Notes |

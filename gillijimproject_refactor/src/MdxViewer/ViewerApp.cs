@@ -2457,6 +2457,7 @@ void main() {
         if (_worldScene != null)
         {
             ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
+            ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
         }
     }
 
@@ -3526,9 +3527,10 @@ void main() {
     {
         try
         {
+            string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
             _dataSource?.Dispose();
-            _dataSource = new MpqDataSource(gamePath, listfilePath);
+            _dataSource = new MpqDataSource(gamePath, resolvedListfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
@@ -3609,6 +3611,40 @@ void main() {
         {
             _statusMessage = $"Failed to load MPQs: {ex.Message}";
         }
+    }
+
+    private static string? ResolveListfilePath(string? explicitListfilePath)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitListfilePath) && File.Exists(explicitListfilePath))
+            return explicitListfilePath;
+
+        string[] bundledCandidates =
+        {
+            Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "test_data", "community-listfile-withcapitals.csv")),
+            Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "test_data", "community-listfile-withcapitals.csv")),
+            Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "community-listfile-withcapitals.csv")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "gillijimproject_refactor", "test_data", "community-listfile-withcapitals.csv")),
+            Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "test_data", "community-listfile-withcapitals.csv")),
+        };
+
+        foreach (string candidate in bundledCandidates)
+        {
+            if (File.Exists(candidate))
+            {
+                ViewerLog.Info(ViewerLog.Category.MpqData, $"Using bundled listfile: {candidate}");
+                return candidate;
+            }
+        }
+
+        string? downloadedPath = ListfileDownloader.GetListfilePath();
+        if (!string.IsNullOrWhiteSpace(downloadedPath) && File.Exists(downloadedPath))
+        {
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Using cached/downloaded listfile: {downloadedPath}");
+            return downloadedPath;
+        }
+
+        ViewerLog.Important(ViewerLog.Category.MpqData, "No external listfile available. MPQ file discovery will rely on archive-internal names only.");
+        return null;
     }
 
     /// <summary>
@@ -3894,7 +3930,7 @@ void main() {
             {
                 ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
                 var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, originalPath);
-                LoadMdxModel(mdx, dir, originalPath);
+                LoadMdxModel(mdx, dir, originalPath, isM2AdapterModel: true);
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
                 _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -4387,7 +4423,7 @@ void main() {
         }
     }
 
-    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null)
+    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false)
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
@@ -4396,7 +4432,7 @@ void main() {
         int totalVerts = mdx.Geosets.Sum(g => g.Vertices.Count);
         int totalTris = mdx.Geosets.Sum(g => g.Indices.Count / 3);
 
-        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath);
+        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();

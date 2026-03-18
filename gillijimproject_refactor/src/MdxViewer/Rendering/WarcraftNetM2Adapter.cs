@@ -10,11 +10,17 @@ namespace MdxViewer.Rendering;
 internal static class WarcraftNetM2Adapter
 {
     private const uint Md20Magic = 0x3032444D;
+    private const uint Md21Magic = 0x3132444D;
     private const uint SkinMagic = 0x4E494B53;
 
     public static bool IsMd20(byte[] data)
     {
         return data.Length >= 4 && BitConverter.ToUInt32(data, 0) == Md20Magic;
+    }
+
+    public static bool IsMd21(byte[] data)
+    {
+        return data.Length >= 4 && BitConverter.ToUInt32(data, 0) == Md21Magic;
     }
 
     public static IReadOnlyList<string> BuildSkinCandidates(string modelPath)
@@ -73,25 +79,7 @@ internal static class WarcraftNetM2Adapter
 
     public static MdxFile BuildRuntimeModel(byte[] m2Bytes, byte[] skinBytes, string modelPath)
     {
-        MD21 md21;
-        try
-        {
-            var m2Model = new Model(m2Bytes);
-            md21 = m2Model.ModelInformation ?? throw new InvalidDataException("M2 is missing MD21 model information.");
-        }
-        catch (Exception) when (IsMd20(m2Bytes))
-        {
-            // Some clients/assets use raw MD20 without MD21 chunk container.
-            // Warcraft.NET's top-level Model loader expects MD21 chunking; fallback to direct MD20 parser.
-            try
-            {
-                md21 = new MD21(m2Bytes);
-            }
-            catch (Exception parseEx)
-            {
-                throw new InvalidDataException($"Failed to parse raw MD20 model for '{Path.GetFileName(modelPath)}'.", parseEx);
-            }
-        }
+        MD21 md21 = ParseModelInformation(m2Bytes, modelPath);
 
         var skin = ParseSkinData(skinBytes, modelPath);
 
@@ -130,6 +118,55 @@ internal static class WarcraftNetM2Adapter
             throw new InvalidDataException("M2 adapter produced no renderable geosets.");
 
         return mdx;
+    }
+
+    private static MD21 ParseModelInformation(byte[] m2Bytes, string modelPath)
+    {
+        string fileName = Path.GetFileName(modelPath);
+
+        if (IsMd20(m2Bytes))
+        {
+            try
+            {
+                ViewerLog.Trace($"[M2] Parsing raw MD20 directly: {fileName}");
+                return new MD21(m2Bytes);
+            }
+            catch (Exception rawMd20Ex)
+            {
+                try
+                {
+                    ViewerLog.Trace($"[M2] Raw MD20 parse failed, trying Warcraft.NET Model wrapper: {fileName}");
+                    var wrapped = new Model(m2Bytes);
+                    if (wrapped.ModelInformation != null)
+                        return wrapped.ModelInformation;
+
+                    throw new InvalidDataException("M2 is missing MD21 model information.");
+                }
+                catch (Exception wrappedEx)
+                {
+                    throw new InvalidDataException(
+                        $"Failed to parse raw MD20 model for '{fileName}'.",
+                        new AggregateException(rawMd20Ex, wrappedEx));
+                }
+            }
+        }
+
+        try
+        {
+            var m2Model = new Model(m2Bytes);
+            if (m2Model.ModelInformation != null)
+            {
+                if (IsMd21(m2Bytes))
+                    ViewerLog.Trace($"[M2] Parsed MD21 container via Warcraft.NET Model wrapper: {fileName}");
+                return m2Model.ModelInformation;
+            }
+
+            throw new InvalidDataException("M2 is missing MD21 model information.");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidDataException($"Failed to parse M2 model '{fileName}'.", ex);
+        }
     }
 
     private static CMdlBounds ToMdlBounds(Warcraft.NET.Files.Structures.BoundingBox box, float radius)

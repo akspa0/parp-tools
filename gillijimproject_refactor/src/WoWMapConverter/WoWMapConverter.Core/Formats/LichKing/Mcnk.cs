@@ -136,7 +136,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                             ? Header.SizeMcal - 8
                             : 0;
                         if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
-                            consumedSize = sizeFromHeader;
+                            consumedSize = Math.Max(size, sizeFromHeader);
 
                         if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {
@@ -154,7 +154,7 @@ namespace WoWMapConverter.Core.Formats.LichKing
                             ? Header.SizeMcsh - 8
                             : 0;
                         if (sizeFromHeader > 0 && sizeFromHeader <= (uint)(data.Length - dataStart))
-                            consumedSize = sizeFromHeader;
+                            consumedSize = Math.Max(size, sizeFromHeader);
 
                         if (consumedSize > 0 && dataStart + consumedSize <= data.Length)
                         {

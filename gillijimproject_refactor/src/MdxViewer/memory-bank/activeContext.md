@@ -74,14 +74,31 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - The incorrect offset-0 LK alpha fallback experiment was reverted after runtime validation showed it was wrong.
 - Current terrain recovery direction is now explicitly profile-driven instead of heuristic-driven:
    - 3.0.1 / 3.3.5 ADT profiles treat MPHD `0x4 | 0x80` as the big-alpha mask
-   - those same profiles prefer split `*_tex0.adt` MCNK/MTEX data for terrain layer and alpha sourcing
-   - `StandardTerrainAdapter` now routes layer/alpha/shadow sourcing through `*_tex0.adt` when the profile says to
    - `Mcal` decode now distinguishes compressed alpha, 8-bit big alpha, and legacy 4-bit alpha while respecting the MCNK do-not-fix-alpha bit
 - Build validation passed after this batch, including the alternate-output MdxViewer build used while the live viewer holds `bin/Debug` locks.
 - Runtime validation follow-up is now positive on the user's real data:
    - the tested 3.0.1 alpha-build terrain now renders correctly on this path
    - the same recovery line also preserves Alpha 0.5.3 terrain after restoring the legacy edge fix in `AlphaTerrainAdapter`
 - Keep broader claims narrow: this is strong evidence that the profile split is correct for the tested samples, not blanket proof for every later-era terrain dataset.
+
+### 3.x Terrain Guardrail Update (Mar 18)
+
+- User direction is now explicit: do not use `*_tex0.adt` split terrain sourcing in the active viewer path for current 3.x alpha recovery work.
+- Active viewer profiles for `3.0.1`, `3.3.5`, and unknown `3.0.x` no longer opt into `_tex0` terrain layer/alpha sourcing.
+- `StandardTerrainAdapter` also now avoids opening `_tex0` files unless a future profile explicitly re-enables that path.
+- The temporary rollback of `MCNK.SizeMcal` / `SizeMcsh` trust caused a major runtime regression and was reverted immediately; the active viewer path still uses the prior 3.x header-size behavior.
+- Follow-up parser guardrail: `Mcnk.ScanSubchunks(...)` now treats `MCNK.SizeMcal` / `SizeMcsh` as an optional extension of the declared MCAL/MCSH payload, never a reason to advance less than the declared subchunk size. This avoids landing the FourCC scan inside MCAL/MCSH payload bytes when header sizes are smaller than the chunk-declared span.
+- Build validation passed after this parser fix:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- This is a guardrail rollback only. Runtime validation is still required for the remaining chunk-skip / decode-loss issue on 3.x terrain.
+
+### 4.x / 5.x Terrain Profile Direction (Mar 18)
+
+- Keep `_tex0.adt` and `_obj0.adt` parsing as a separate 4.x+/5.x concern, not part of the active 3.x recovery path.
+- `FormatProfileRegistry` now has separate provisional `4.x` and `5.x` ADT profiles that opt into split texture and placement sourcing.
+- `StandardTerrainAdapter` now routes placement parsing through `_obj0.adt` only when the resolved terrain profile explicitly requests it; 3.x remains on root-ADT placement parsing.
+- This is profile scaffolding, not full Cataclysm/MoP correctness. The user requirement is broader MPQ-era support through `5.3.x`; later CASC support is a separate future track.
 
 ### ModelRenderer Follow-up From 39799bf (Mar 18)
 
@@ -101,6 +118,111 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - alternate-OutDir `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed after restoring terrain wireframe and switching the hover test from a loose ray/AABB heuristic to a screen-space brush
    - `WorldAssetManager` world-model loading now resolves the canonical model path before M2 skin lookup so `.mdx` aliases that actually resolve to `MD20` roots can search for skins relative to the real asset path
    - runtime visual validation is still pending for reveal radius feel and for confirming the remaining world-scene M2 load failures are actually cleared on user data
+
+### M2 Adapter Follow-up (Mar 18)
+
+- `WarcraftNetM2Adapter` now treats raw `MD20` as the primary parse path instead of only using direct `MD21` parsing as a fallback after the Warcraft.NET `Model(...)` wrapper fails.
+- Current rationale:
+   - the user's active client data is dominated by raw `MD20` roots, not chunked `MD21` containers
+   - relying on the wrapper first made the effective parse path sporadic across assets
+- Build-only validation passed again on the alternate-OutDir MdxViewer solution build.
+- Runtime confirmation is still required for the remaining sporadic world-scene M2 failures.
+
+### World Load Performance Follow-up (Mar 18)
+
+- Northrend load-time investigation confirmed AOI terrain streaming was already the default; the bigger stall was world-object asset loading on tile arrival and first render.
+- `WorldScene` no longer eagerly calls blocking `EnsureMdxLoaded` / `EnsureWmoLoaded` for streamed tiles or external spawns.
+- `WorldAssetManager` now has deferred MDX/WMO load queues plus a bounded per-frame `ProcessPendingLoads(...)` path.
+- `WorldScene.Render(...)` now processes a small per-frame asset budget and only uses loaded renderers in render paths, queueing missing assets instead of force-loading them on the render thread.
+- Instance bounds are refreshed after queued model loads complete so culling can converge from temporary fallback bounds to real model bounds.
+- Follow-up asset-read recovery after runtime queue investigation:
+   - the UI queue counter now reports unique pending assets instead of raw queue-node count
+   - repeated `PrioritizeMdxLoad` / `PrioritizeWmoLoad` calls no longer flood the priority queues with duplicate entries every frame
+   - `MpqDataSource` now builds file-path and extension indexes once at startup instead of re-filtering the full file list for repeated model/skin lookups
+   - `MpqDataSource.ReadFile(...)` now has a bounded global raw-byte LRU cache so repeated model and texture reads reuse already-read archive data instead of hitting MPQ/loose-file resolution again
+   - `WorldAssetManager` skin selection now caches best `.skin` matches per resolved model path instead of rescanning the `.skin` file list on retries
+   - `MpqDataSource` now also has a bounded background prefetch path with separate read-only `NativeMpqService` workers so queued model bytes can be warmed into the shared raw-byte cache without sharing the primary archive reader across threads
+   - `WorldAssetManager` now triggers that prefetch when new MDX/WMO assets are queued, including common extension aliases and M2 skin candidates
+- Build validation passed after this change using the alternate output path:
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- No runtime real-data validation has been performed yet for the new loading behavior. Do not claim the Northrend load regression is fixed until startup responsiveness and in-world streaming are checked on real data.
+- Parallel MPQ archive reads are now limited to background raw-byte warmup only:
+   - GL renderer/material creation remains main-thread work in the current pipeline
+   - the primary `MpqDataSource` reader is still not shared across threads; worker threads use separate `NativeMpqService` instances
+   - runtime profiling is still required before increasing worker count or pushing texture/material construction off the main thread
+
+### World-Scene M2 Render Follow-up (Mar 18)
+
+- User runtime feedback after the deferred-load change: world M2 doodads appeared to load but remained invisible.
+- Current mitigation is targeted, not a full rollback:
+   - `MdxRenderer` now tracks whether it was built through the Warcraft.NET M2 adapter
+   - `WorldScene` keeps the lighter batched `RenderInstance(...)` path for classic MDX models
+   - M2-adapted world doodads now use the proven per-instance `RenderWithTransform(...)` path instead of the batched path
+- Rationale:
+   - standalone model viewing and WMO doodad rendering already rely on `RenderWithTransform(...)`
+   - the invisible-M2 symptom is therefore more likely a world-scene batch-path issue than an asset-read failure
+- Build validation passed after this mitigation using the alternate output path.
+- Runtime real-data validation is still required to confirm M2 doodads are visible again and to measure whether the selective fallback has an acceptable frame-time cost.
+
+### World-Scene M2 Conversion Follow-up (Mar 18)
+
+- Historical diff review showed the stronger world-side M2 recovery path lives in `main` / `4e9237a`, not in `177f961` alone.
+- `WorldAssetManager` now prefers `M2ToMdxConverter` for raw `MD20` world doodads before falling back to `WarcraftNetM2Adapter`.
+- `ModelRenderer` also now disables the classic layer-0 `Transparent` hard alpha-cutout heuristic for M2-derived models so their materials follow the blended path used by the working mainline M2 support.
+- Latest parity correction versus final `main` commit `62ecf64`:
+   - old `main` branch world M2 behavior was simpler than this recovery branch briefly became:
+      - direct `M2 + .skin` adaptation was the first-choice world load path
+      - world doodads then rendered through the normal `RenderInstance(...)` path with no M2-specific world-scene split
+   - recovery branch is now back on that shape:
+      - direct Warcraft.NET adaptation is tried first for world M2s
+      - byte-level `M2ToMdxConverter` conversion is now only a fallback after adapter failure
+      - world-scene rendering no longer special-cases M2-adapted doodads into `RenderWithTransform(...)`; all loaded world doodads use the normal instanced world path again
+- Deferred world-model loading now preserves the older retry semantics for failed entries:
+   - queued MDX/WMO loads only short-circuit when a non-null renderer is already cached
+   - queued `null` entries are allowed back through `ProcessPendingLoads(...)` for retry instead of becoming permanent invisible instances
+   - `.mdx` and `.m2` aliases are now both considered during direct reads and file-set resolution so LK-era model-extension mismatches have an exact-path fallback before basename heuristics
+- Build-only validation passed after these changes using the alternate output path:
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- No automated tests were added or run for this slice.
+- Runtime real-data validation is still the blocker:
+   - confirm Northrend or NorthrendBG now shows nonzero MDX/M2 world-object load/render stats
+   - confirm the converted M2 path does not regress frame time or material appearance
+
+### WMO Doodad M2 Loader Follow-up (Mar 18)
+
+- Remaining parity gap after the world-scene fixes: `WmoRenderer` doodad-set loading was still on an older MDX-only path.
+- Concrete issue:
+   - `GetOrLoadDoodadModel(...)` only did raw `MdxFile.Load(...)` after a direct file read
+   - it never attempted direct `.m2` / `MD20` / `MD21` adaptation with companion `.skin`
+   - it also round-tripped raw bytes through a shared cache filename, which could collide on duplicate doodad basenames across different directories
+- Current fix now mirrors the shared world/standalone behavior more closely:
+   - `WmoRenderer` resolves canonical doodad paths through the file set before loading
+   - WMO doodad M2s now try Warcraft.NET adapter + `.skin` first
+   - raw `MD20` doodads then fall back to `M2ToMdxConverter` only after adapter failure
+   - non-M2 doodads now load from in-memory streams instead of cache-file writes
+   - adapted and converted M2 renderers are explicitly marked as M2-derived so `ModelRenderer` keeps them on the non-cutout transparent-material path
+- Same M2-derived renderer flag is now also applied in `WorldAssetManager` and standalone `ViewerApp.LoadM2FromBytes(...)`.
+- Build validation passed after this change using the alternate output path:
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- Runtime real-data validation is still required:
+   - confirm WMO doodad sets now populate visible M2s instead of just the WMO shell
+   - confirm world doodads also recover with the restored shared M2 load path
+
+### MPQ Listfile Recovery Follow-up (Mar 18)
+
+- Root-cause follow-up for the latest standalone M2 `.skin` failure:
+   - `ViewerApp` UI text already claimed the community listfile was auto-downloaded
+   - actual `Open Game Folder` flow still passed `null` into `LoadMpqDataSource(...)`, so `MpqDataSource` never received any external listfile unless one was supplied manually
+- Current fix:
+   - `ViewerApp.LoadMpqDataSource(...)` now resolves the listfile path before constructing `MpqDataSource`
+   - resolution order is: explicit path, bundled repo/runtime `community-listfile-withcapitals.csv`, then cached/downloaded `ListfileDownloader` path
+   - if none are available, viewer now logs that it is falling back to archive-internal names only
+- Why this matters:
+   - many MPQ internal listfiles do not expose `.skin` entries even when `.m2` entries are present
+   - without the external listfile, companion `.skin` discovery can fail and surface as `Missing companion .skin for M2`
+- Build-only validation passed after this fix using the alternate output path:
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+- Runtime real-data validation is still required to confirm standalone M2 loading and world/WMO M2 recovery on the user's client data.
 
 ## Current Focus
 

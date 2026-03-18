@@ -412,8 +412,14 @@ public class WorldScene : ISceneRenderer
 
             // Use actual model bounds if available, transformed to world space
             Vector3 bbMin, bbMax;
+            Vector3 localMin = Vector3.Zero;
+            Vector3 localMax = Vector3.Zero;
+            bool boundsResolved = false;
             if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
             {
+                localMin = modelMin;
+                localMax = modelMax;
+                boundsResolved = true;
                 TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
             }
             else
@@ -428,6 +434,9 @@ public class WorldScene : ISceneRenderer
                 Transform = transform,
                 BoundsMin = bbMin,
                 BoundsMax = bbMax,
+                LocalBoundsMin = localMin,
+                LocalBoundsMax = localMax,
+                BoundsResolved = boundsResolved,
                 ModelName = Path.GetFileName(modelPath),
                 ModelPath = modelPath,
                 PlacementPosition = p.Position,
@@ -484,6 +493,7 @@ public class WorldScene : ISceneRenderer
                 BoundsMax = worldMax,
                 LocalBoundsMin = localMin,
                 LocalBoundsMax = localMax,
+                BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
                 ModelName = Path.GetFileName(wmoPath),
                 ModelPath = wmoPath,
                 PlacementPosition = p.Position,
@@ -561,7 +571,7 @@ public class WorldScene : ISceneRenderer
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
-            _assets.EnsureMdxLoaded(key);
+            _assets.QueueMdxLoad(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
             // Rotation stored as degrees in WoW coords — axes swapped to match position swap.
@@ -578,14 +588,23 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
             Vector3 bbMin, bbMax;
+            Vector3 localMin = Vector3.Zero;
+            Vector3 localMax = Vector3.Zero;
+            bool boundsResolved = false;
             if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+            {
+                localMin = modelMin;
+                localMax = modelMax;
+                boundsResolved = true;
                 TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+            }
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
             string modelPath = mdxNames[p.NameIndex];
             var instance = new ObjectInstance
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
+                LocalBoundsMin = localMin, LocalBoundsMax = localMax, BoundsResolved = boundsResolved,
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
                 UniqueId = p.UniqueId
@@ -603,7 +622,7 @@ public class WorldScene : ISceneRenderer
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            _assets.EnsureWmoLoaded(key);
+            _assets.QueueWmoLoad(key);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
@@ -638,6 +657,7 @@ public class WorldScene : ISceneRenderer
                 BoundsMax = worldMax,
                 LocalBoundsMin = localMin,
                 LocalBoundsMax = localMax,
+                BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
                 ModelName = Path.GetFileName(wmoPath), ModelPath = wmoPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f,
                 UniqueId = p.UniqueId
@@ -691,6 +711,101 @@ public class WorldScene : ISceneRenderer
         _instancesDirty = false;
     }
 
+    private MdxRenderer? TryGetQueuedMdx(string modelKey)
+    {
+        if (_assets.TryGetLoadedMdx(modelKey, out var renderer))
+            return renderer;
+
+        _assets.PrioritizeMdxLoad(modelKey);
+        return null;
+    }
+
+    private WmoRenderer? TryGetQueuedWmo(string modelKey)
+    {
+        if (_assets.TryGetLoadedWmo(modelKey, out var renderer))
+            return renderer;
+
+        _assets.PrioritizeWmoLoad(modelKey);
+        return null;
+    }
+
+    private void ProcessDeferredAssetLoads()
+    {
+        int processed = _assets.ProcessPendingLoads(maxLoads: 24, maxBudgetMs: 20.0);
+        if (processed <= 0)
+            return;
+
+        bool boundsChanged = false;
+        foreach (var list in _tileMdxInstances.Values)
+            boundsChanged |= RefreshMdxInstanceBounds(list);
+        foreach (var list in _tileSkyboxInstances.Values)
+            boundsChanged |= RefreshMdxInstanceBounds(list);
+        foreach (var list in _tileWmoInstances.Values)
+            boundsChanged |= RefreshWmoInstanceBounds(list);
+
+        boundsChanged |= RefreshMdxInstanceBounds(_externalMdxInstances);
+        boundsChanged |= RefreshMdxInstanceBounds(_externalSkyboxInstances);
+        boundsChanged |= RefreshWmoInstanceBounds(_externalWmoInstances);
+
+        if (boundsChanged)
+        {
+            _instancesDirty = true;
+            RebuildInstanceLists();
+        }
+    }
+
+    private bool RefreshMdxInstanceBounds(List<ObjectInstance> instances)
+    {
+        bool changed = false;
+
+        for (int i = 0; i < instances.Count; i++)
+        {
+            var inst = instances[i];
+            if (inst.BoundsResolved)
+                continue;
+
+            if (!_assets.TryGetMdxBounds(inst.ModelKey, out var localMin, out var localMax))
+                continue;
+
+            TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
+            inst.LocalBoundsMin = localMin;
+            inst.LocalBoundsMax = localMax;
+            inst.BoundsMin = worldMin;
+            inst.BoundsMax = worldMax;
+            inst.BoundsResolved = true;
+            instances[i] = inst;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private bool RefreshWmoInstanceBounds(List<ObjectInstance> instances)
+    {
+        bool changed = false;
+
+        for (int i = 0; i < instances.Count; i++)
+        {
+            var inst = instances[i];
+            if (inst.BoundsResolved)
+                continue;
+
+            if (!_assets.TryGetWmoBounds(inst.ModelKey, out var localMin, out var localMax))
+                continue;
+
+            TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
+            inst.LocalBoundsMin = localMin;
+            inst.LocalBoundsMax = localMax;
+            inst.BoundsMin = worldMin;
+            inst.BoundsMax = worldMax;
+            inst.BoundsResolved = true;
+            instances[i] = inst;
+            changed = true;
+        }
+
+        return changed;
+    }
+
     public void ClearExternalSpawns()
     {
         _externalMdxInstances.Clear();
@@ -727,7 +842,7 @@ public class WorldScene : ISceneRenderer
 
             if (isWmo)
             {
-                _assets.EnsureWmoLoaded(key);
+                _assets.QueueWmoLoad(key);
 
                 var transform = Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
@@ -752,6 +867,7 @@ public class WorldScene : ISceneRenderer
                     BoundsMax = worldMax,
                     LocalBoundsMin = localMin,
                     LocalBoundsMax = localMax,
+                    BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     PlacementPosition = pos,
@@ -762,15 +878,23 @@ public class WorldScene : ISceneRenderer
             }
             else
             {
-                _assets.EnsureMdxLoaded(key);
+                _assets.QueueMdxLoad(key);
 
                 var transform = Matrix4x4.CreateScale(mdxScale)
                     * Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 bbMin, bbMax;
+                Vector3 localMin = Vector3.Zero;
+                Vector3 localMax = Vector3.Zero;
+                bool boundsResolved = false;
                 if (_assets.TryGetMdxBounds(key, out var modelMin, out var modelMax))
+                {
+                    localMin = modelMin;
+                    localMax = modelMax;
+                    boundsResolved = true;
                     TransformBounds(modelMin, modelMax, transform, out bbMin, out bbMax);
+                }
                 else
                 {
                     bbMin = pos - new Vector3(2f);
@@ -783,6 +907,9 @@ public class WorldScene : ISceneRenderer
                     Transform = transform,
                     BoundsMin = bbMin,
                     BoundsMax = bbMax,
+                    LocalBoundsMin = localMin,
+                    LocalBoundsMax = localMax,
+                    BoundsResolved = boundsResolved,
                     ModelName = Path.GetFileName(modelPath),
                     ModelPath = modelPath,
                     PlacementPosition = pos,
@@ -833,6 +960,8 @@ public class WorldScene : ISceneRenderer
         // Rebuild flat instance lists if tiles changed
         if (_instancesDirty)
             RebuildInstanceLists();
+
+        ProcessDeferredAssetLoads();
 
         // Extract camera position for sky dome
         Matrix4x4.Invert(view, out var viewInvSky);
@@ -891,13 +1020,13 @@ public class WorldScene : ISceneRenderer
             int wmoFound = 0, wmoMissing = 0;
             foreach (var inst in _wmoInstances)
             {
-                if (_assets.GetWmo(inst.ModelKey) != null) wmoFound++;
+                if (_assets.TryGetLoadedWmo(inst.ModelKey, out _)) wmoFound++;
                 else { wmoMissing++; if (wmoMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Wmo, $"NOT FOUND: \"{inst.ModelKey}\""); }
             }
             int mdxFound = 0, mdxMissing = 0;
             foreach (var inst in _mdxInstances)
             {
-                if (_assets.GetMdx(inst.ModelKey) != null) mdxFound++;
+                if (_assets.TryGetLoadedMdx(inst.ModelKey, out _)) mdxFound++;
                 else { mdxMissing++; if (mdxMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Mdx, $"NOT FOUND: \"{inst.ModelKey}\""); }
             }
             ViewerLog.Info(ViewerLog.Category.Terrain, $"Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
@@ -951,7 +1080,7 @@ public class WorldScene : ISceneRenderer
                     wmoFade = 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange;
                 }
 
-                var renderer = _assets.GetWmo(inst.ModelKey);
+                var renderer = TryGetQueuedWmo(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderWithTransform(inst.Transform, view, proj,
                     fogColor, fogStart, fogEnd, cameraPos,
@@ -976,7 +1105,7 @@ public class WorldScene : ISceneRenderer
             {
                 if (_updatedMdxRenderers.Add(inst.ModelKey))
                 {
-                    var r = _assets.GetMdx(inst.ModelKey);
+                    _assets.TryGetLoadedMdx(inst.ModelKey, out var r);
                     r?.UpdateAnimation();
                 }
             }
@@ -989,8 +1118,8 @@ public class WorldScene : ISceneRenderer
             MdxRenderer? batchRenderer = null;
             foreach (var inst in _mdxInstances)
             {
-                batchRenderer = _assets.GetMdx(inst.ModelKey);
-                if (batchRenderer != null) break;
+                if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
+                    break;
             }
             batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
@@ -1015,7 +1144,7 @@ public class WorldScene : ISceneRenderer
                     float dist = MathF.Sqrt(distSq);
                     fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
                 }
-                var renderer = _assets.GetMdx(inst.ModelKey);
+                var renderer = TryGetQueuedMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
                 MdxRenderedCount++;
@@ -1037,13 +1166,13 @@ public class WorldScene : ISceneRenderer
             for (int i = 0; i < _mdxInstances.Count; i++)
             {
                 var inst = _mdxInstances[i];
-                if (_assets.GetMdx(inst.ModelKey) == null) continue;
                 // Same frustum + distance cull as opaque pass (with NoCullRadius)
                 var placementPos = inst.Transform.Translation;
                 float dist = Vector3.DistanceSquared(cameraPos, placementPos);
                 if (dist > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
                 if (diag < DoodadSmallThreshold && dist > DoodadCullDistanceSq) continue;
+                if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
                 _transparentSortScratch.Add((i, dist));
             }
             _transparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq)); // back-to-front
@@ -1057,7 +1186,7 @@ public class WorldScene : ISceneRenderer
                 float tFade = 1.0f;
                 if (tDiag < DoodadSmallThreshold && tDist > mdxFadeStart)
                     tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
-                var renderer = _assets.GetMdx(inst.ModelKey);
+                var renderer = TryGetQueuedMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderInstance(inst.Transform, RenderPass.Transparent, tFade);
             }
@@ -1259,7 +1388,7 @@ public class WorldScene : ISceneRenderer
             return;
 
         var skybox = nearestSkybox.Value;
-        var renderer = _assets.GetMdx(skybox.ModelKey);
+        var renderer = TryGetQueuedMdx(skybox.ModelKey);
         if (renderer == null)
             return;
 
@@ -1537,7 +1666,7 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             var inst = _wmoInstances[idx];
-            var renderer = _assets.GetWmo(inst.ModelKey);
+            var renderer = TryGetQueuedWmo(inst.ModelKey);
             if (renderer == null)
                 continue;
 
@@ -1552,7 +1681,7 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             var inst = _mdxInstances[idx];
-            var renderer = _assets.GetMdx(inst.ModelKey);
+            var renderer = TryGetQueuedMdx(inst.ModelKey);
             if (renderer == null)
                 continue;
 
@@ -1640,6 +1769,8 @@ public struct ObjectInstance
     public string ModelPath;
     /// <summary>UniqueId from MODF/MDDF placement (for dedup and display).</summary>
     public int UniqueId;
+    /// <summary>True once bounds were derived from the loaded model instead of a temporary placement fallback.</summary>
+    public bool BoundsResolved;
 }
 
 public enum ObjectType { None, Wmo, Mdx }

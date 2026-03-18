@@ -71,6 +71,7 @@ public class MdxRenderer : ISceneRenderer
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
     private readonly bool _mdxDebugFocus;
+    private readonly bool _isM2AdapterModel;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -104,17 +105,19 @@ public class MdxRenderer : ISceneRenderer
     public Vector3 BoundsMin => new(_mdx.Model.Bounds.Extent.Min.X, _mdx.Model.Bounds.Extent.Min.Y, _mdx.Model.Bounds.Extent.Min.Z);
     /// <summary>Model-space bounding box max corner.</summary>
     public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
+    public bool IsM2AdapterModel => _isM2AdapterModel;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public MdxAnimator? Animator => _animator;
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
-        ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null)
+        ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false)
     {
         _gl = gl;
         _mdx = mdx;
         _modelDir = modelDir;
         _dataSource = dataSource;
+        _isM2AdapterModel = isM2AdapterModel;
         
         var mdxName = Path.GetFileNameWithoutExtension(modelDir);
         MdxTextureDiagnosticLogger.Initialize(mdxName);
@@ -503,7 +506,10 @@ public class MdxRenderer : ISceneRenderer
                     // Determine if this layer needs blending
                     // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
                     // Render in opaque pass with high alpha threshold, not as blended
-                    bool isAlphaCutout = l == 0 && layer.BlendMode == MdlTexOp.Transparent;
+                    // M2-derived world models often use layer-0 Transparent in ways that do not behave
+                    // like classic MDX hard-cutout foliage. For those models, treat Transparent as standard
+                    // blended rendering instead of a 0.75 alpha-discard path.
+                    bool isAlphaCutout = !_isM2AdapterModel && l == 0 && layer.BlendMode == MdlTexOp.Transparent;
                     bool needsBlend = !isAlphaCutout && (l > 0 || layer.BlendMode != MdlTexOp.Load);
 
                     // Filter by render pass — alpha cutout renders in opaque pass

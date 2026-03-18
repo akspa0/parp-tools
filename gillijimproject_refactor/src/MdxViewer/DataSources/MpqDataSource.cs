@@ -1,5 +1,8 @@
 using MdxViewer.Logging;
 using WoWMapConverter.Core.Services;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace MdxViewer.DataSources;
 
@@ -18,6 +21,9 @@ public class MpqDataSource : IDataSource
     public NativeMpqService MpqService => _mpq;
     private readonly HashSet<string> _fileSet = new(StringComparer.OrdinalIgnoreCase);
     private List<string> _fileList = new();
+    private readonly Dictionary<string, string> _canonicalPathMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IReadOnlyList<string>> _filesByExtension = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _firstFileByExtensionAndBaseName = new(StringComparer.OrdinalIgnoreCase);
     private bool _loaded;
 
     // Loose file roots to check (game folder structure)
@@ -25,6 +31,24 @@ public class MpqDataSource : IDataSource
 
     // Alpha 0.5.3: virtual path → disk path for listfile-less .ext.MPQ files (WMO, WDT, WDL)
     private readonly Dictionary<string, string> _alphaMpqCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Global raw-byte cache for repeated model/texture reads.
+    private readonly Dictionary<string, byte[]?> _readCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _readCacheLru = new();
+    private readonly Dictionary<string, LinkedListNode<string>> _readCacheLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _readCacheLock = new();
+    private long _readCacheBytes;
+    private const int MaxReadCacheEntries = 4096;
+    private const long MaxReadCacheBytes = 256L * 1024 * 1024;
+
+    private readonly ConcurrentQueue<string> _prefetchQueue = new();
+    private readonly HashSet<string> _prefetchQueued = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _prefetchLock = new();
+    private SemaphoreSlim? _prefetchSignal;
+    private CancellationTokenSource? _prefetchCts;
+    private Task[]? _prefetchWorkers;
+    private List<NativeMpqService>? _prefetchMpqServices;
+    private const int PrefetchWorkerCount = 2;
 
     public string Name => $"Game: {Path.GetFileName(_gamePath)}";
     public bool IsLoaded => _loaded;
@@ -66,6 +90,7 @@ public class MpqDataSource : IDataSource
         ScanAlphaNestedMpqArchives(gamePath);
 
         _fileList = _fileSet.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        BuildLookupIndexes();
         _loaded = true;
 
         // Debug: show file counts by extension
@@ -309,67 +334,51 @@ public class MpqDataSource : IDataSource
     /// <summary>Find the actual path from the file set (case-insensitive, returns correctly-cased path).</summary>
     public string? FindInFileSet(string virtualPath)
     {
-        string normalized = virtualPath.Replace('/', '\\').ToLowerInvariant();
-        
-        // Try exact match first
-        if (_fileSet.Contains(normalized))
-            return normalized;
-        
-        // Try normalized match
-        foreach (var file in _fileSet)
+        string normalized = virtualPath.Replace('/', '\\');
+        return _canonicalPathMap.TryGetValue(normalized, out var resolved) ? resolved : null;
+    }
+
+    public string? FindByBaseName(string baseName, IEnumerable<string> extensions)
+    {
+        foreach (var extension in extensions)
         {
-            if (file.Equals(normalized, StringComparison.OrdinalIgnoreCase))
-                return file;
+            if (_firstFileByExtensionAndBaseName.TryGetValue(BuildBaseNameLookupKey(extension, baseName), out var resolved))
+                return resolved;
         }
-        
+
         return null;
+    }
+
+    public void PrefetchFile(string virtualPath)
+    {
+        string normalized = virtualPath.Replace('/', '\\');
+        if (string.IsNullOrWhiteSpace(normalized))
+            return;
+
+        if (TryGetCachedRead(normalized, out _))
+            return;
+
+        EnsurePrefetchWorkers();
+
+        lock (_prefetchLock)
+        {
+            if (!_prefetchQueued.Add(normalized))
+                return;
+        }
+
+        _prefetchQueue.Enqueue(normalized);
+        _prefetchSignal?.Release();
     }
 
     public byte[]? ReadFile(string virtualPath)
     {
-        // Try loose file first
-        var loosePath = TryResolveLoosePath(virtualPath);
-        if (loosePath != null)
-        {
-            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → loose file: {loosePath}");
-            return File.ReadAllBytes(loosePath);
-        }
+        string normalized = virtualPath.Replace('/', '\\');
+        if (TryGetCachedRead(normalized, out var cached))
+            return cached;
 
-        // Try Alpha nested .ext.MPQ cache (WMO, WDT, WDL — file ID 1 inside individual MPQ)
-        var normalized = virtualPath.Replace('/', '\\');
-        string? alphaMpqPath = null;
-        string? alphaMpqKey = null;
-
-        // Try exact match, then with .mpq suffix stripped (caller may pass "foo.wdt.mpq")
-        if (_alphaMpqCache.TryGetValue(normalized, out alphaMpqPath))
-            alphaMpqKey = normalized;
-        else if (_alphaMpqCache.TryGetValue(virtualPath, out alphaMpqPath))
-            alphaMpqKey = virtualPath;
-        else if (normalized.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) &&
-                 _alphaMpqCache.TryGetValue(normalized[..^4], out alphaMpqPath))
-            alphaMpqKey = normalized[..^4];
-        else if (virtualPath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) &&
-                 _alphaMpqCache.TryGetValue(virtualPath[..^4], out alphaMpqPath))
-            alphaMpqKey = virtualPath[..^4];
-
-        if (alphaMpqPath != null && alphaMpqKey != null)
-        {
-            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ: {alphaMpqPath}");
-            var data = ReadFromAlphaMpq(alphaMpqPath, alphaMpqKey);
-            if (data != null) return data;
-            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
-        }
-
-        // Try standard MPQ archives (large MPQs with listfiles — MDX, BLP, etc.)
-        var mpqData = _mpq.ReadFile(virtualPath);
-        if (mpqData != null)
-        {
-            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → standard MPQ ({mpqData.Length} bytes)");
-            return mpqData;
-        }
-            
-        ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → NOT FOUND (loose={_looseRoots.Count} roots, alphaMpq={_alphaMpqCache.ContainsKey(normalized)})");
-        return null;
+        var data = ReadFileUncached(normalized, _mpq, logFailures: true);
+        CacheRead(normalized, data);
+        return data;
     }
 
     /// <summary>
@@ -426,16 +435,246 @@ public class MpqDataSource : IDataSource
     public IReadOnlyList<string> GetFileList(string? extensionFilter = null)
     {
         if (extensionFilter != null)
-        {
-            return _fileList
-                .Where(f => f.EndsWith(extensionFilter, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
+            return _filesByExtension.TryGetValue(extensionFilter, out var files) ? files : Array.Empty<string>();
+
         return _fileList;
+    }
+
+    private void BuildLookupIndexes()
+    {
+        _canonicalPathMap.Clear();
+        _filesByExtension.Clear();
+        _firstFileByExtensionAndBaseName.Clear();
+
+        var filesByExtension = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in _fileList)
+        {
+            var normalized = file.Replace('/', '\\');
+            _canonicalPathMap[normalized] = normalized;
+
+            var extension = Path.GetExtension(normalized);
+            if (!filesByExtension.TryGetValue(extension, out var files))
+            {
+                files = new List<string>();
+                filesByExtension[extension] = files;
+            }
+
+            files.Add(normalized);
+
+            var baseName = Path.GetFileNameWithoutExtension(normalized);
+            if (!string.IsNullOrWhiteSpace(baseName))
+            {
+                var lookupKey = BuildBaseNameLookupKey(extension, baseName);
+                if (!_firstFileByExtensionAndBaseName.ContainsKey(lookupKey))
+                    _firstFileByExtensionAndBaseName[lookupKey] = normalized;
+            }
+        }
+
+        foreach (var kvp in filesByExtension)
+            _filesByExtension[kvp.Key] = kvp.Value;
+    }
+
+    private static string BuildBaseNameLookupKey(string extension, string baseName)
+        => $"{extension.ToLowerInvariant()}|{baseName.ToLowerInvariant()}";
+
+    private bool TryGetCachedRead(string normalizedPath, out byte[]? data)
+    {
+        lock (_readCacheLock)
+        {
+            if (_readCache.TryGetValue(normalizedPath, out data))
+            {
+                TouchReadCache_NoLock(normalizedPath);
+                return true;
+            }
+        }
+
+        data = null;
+        return false;
+    }
+
+    private void CacheRead(string normalizedPath, byte[]? data)
+    {
+        lock (_readCacheLock)
+        {
+            if (_readCache.TryGetValue(normalizedPath, out var existing))
+            {
+                _readCacheBytes -= existing?.LongLength ?? 0;
+                _readCache[normalizedPath] = data;
+                _readCacheBytes += data?.LongLength ?? 0;
+                TouchReadCache_NoLock(normalizedPath);
+                EvictReadCacheIfNeeded_NoLock();
+                return;
+            }
+
+            _readCache[normalizedPath] = data;
+            _readCacheBytes += data?.LongLength ?? 0;
+            var node = _readCacheLru.AddLast(normalizedPath);
+            _readCacheLruMap[normalizedPath] = node;
+            EvictReadCacheIfNeeded_NoLock();
+        }
+    }
+
+    private void TouchReadCache(string normalizedPath)
+    {
+        lock (_readCacheLock)
+            TouchReadCache_NoLock(normalizedPath);
+    }
+
+    private void TouchReadCache_NoLock(string normalizedPath)
+    {
+        if (!_readCacheLruMap.TryGetValue(normalizedPath, out var node))
+            return;
+
+        if (!ReferenceEquals(node, _readCacheLru.Last))
+        {
+            _readCacheLru.Remove(node);
+            _readCacheLru.AddLast(node);
+        }
+    }
+
+    private void EvictReadCacheIfNeeded()
+    {
+        lock (_readCacheLock)
+            EvictReadCacheIfNeeded_NoLock();
+    }
+
+    private void EvictReadCacheIfNeeded_NoLock()
+    {
+        while (_readCache.Count > MaxReadCacheEntries || _readCacheBytes > MaxReadCacheBytes)
+        {
+            var oldest = _readCacheLru.First;
+            if (oldest == null)
+                break;
+
+            var key = oldest.Value;
+            _readCacheLru.RemoveFirst();
+            _readCacheLruMap.Remove(key);
+
+            if (_readCache.TryGetValue(key, out var data))
+                _readCacheBytes -= data?.LongLength ?? 0;
+
+            _readCache.Remove(key);
+        }
+    }
+
+    private byte[]? ReadFileUncached(string virtualPath, NativeMpqService mpqService, bool logFailures)
+    {
+        var loosePath = TryResolveLoosePath(virtualPath);
+        if (loosePath != null)
+        {
+            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → loose file: {loosePath}");
+            return File.ReadAllBytes(loosePath);
+        }
+
+        string? alphaMpqPath = null;
+        string? alphaMpqKey = null;
+
+        if (_alphaMpqCache.TryGetValue(virtualPath, out alphaMpqPath))
+            alphaMpqKey = virtualPath;
+        else if (virtualPath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase) &&
+                 _alphaMpqCache.TryGetValue(virtualPath[..^4], out alphaMpqPath))
+            alphaMpqKey = virtualPath[..^4];
+
+        if (alphaMpqPath != null && alphaMpqKey != null)
+        {
+            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ: {alphaMpqPath}");
+            var alphaData = ReadFromAlphaMpq(alphaMpqPath, alphaMpqKey);
+            if (alphaData != null)
+                return alphaData;
+
+            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
+        }
+
+        var mpqData = mpqService.ReadFile(virtualPath);
+        if (mpqData != null)
+        {
+            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → standard MPQ ({mpqData.Length} bytes)");
+            return mpqData;
+        }
+
+        if (logFailures)
+            ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → NOT FOUND (loose={_looseRoots.Count} roots, alphaMpq={_alphaMpqCache.ContainsKey(virtualPath)})");
+
+        return null;
+    }
+
+    private void EnsurePrefetchWorkers()
+    {
+        lock (_prefetchLock)
+        {
+            if (_prefetchWorkers != null)
+                return;
+
+            _prefetchSignal = new SemaphoreSlim(0);
+            _prefetchCts = new CancellationTokenSource();
+            _prefetchMpqServices = new List<NativeMpqService>(PrefetchWorkerCount);
+            _prefetchWorkers = new Task[PrefetchWorkerCount];
+
+            for (int i = 0; i < PrefetchWorkerCount; i++)
+            {
+                var mpqService = new NativeMpqService();
+                mpqService.LoadArchives(new[] { _gamePath });
+                _prefetchMpqServices.Add(mpqService);
+                _prefetchWorkers[i] = Task.Run(() => PrefetchWorkerLoop(mpqService, _prefetchCts.Token));
+            }
+        }
+    }
+
+    private async Task PrefetchWorkerLoop(NativeMpqService mpqService, CancellationToken cancellationToken)
+    {
+        if (_prefetchSignal == null)
+            return;
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await _prefetchSignal.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            while (_prefetchQueue.TryDequeue(out var normalizedPath))
+            {
+                lock (_prefetchLock)
+                    _prefetchQueued.Remove(normalizedPath);
+
+                if (TryGetCachedRead(normalizedPath, out _))
+                    continue;
+
+                var data = ReadFileUncached(normalizedPath, mpqService, logFailures: false);
+                CacheRead(normalizedPath, data);
+            }
+        }
     }
 
     public void Dispose()
     {
+        if (_prefetchCts != null)
+        {
+            _prefetchCts.Cancel();
+            _prefetchSignal?.Release(PrefetchWorkerCount);
+            try
+            {
+                if (_prefetchWorkers != null)
+                    Task.WaitAll(_prefetchWorkers, TimeSpan.FromSeconds(2));
+            }
+            catch
+            {
+            }
+        }
+
+        if (_prefetchMpqServices != null)
+        {
+            foreach (var service in _prefetchMpqServices)
+                service.Dispose();
+        }
+
+        _prefetchSignal?.Dispose();
+        _prefetchCts?.Dispose();
         _mpq.Dispose();
     }
 }

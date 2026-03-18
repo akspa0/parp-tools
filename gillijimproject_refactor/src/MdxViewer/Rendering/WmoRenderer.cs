@@ -42,9 +42,10 @@ public class WmoRenderer : ISceneRenderer
     private readonly Dictionary<string, MdxRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
     private readonly List<string> _doodadNames = new(); // resolved from MODN
+    private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
     private int _activeDoodadSet = 0;
     private bool _doodadsVisible = true;
-    private readonly string _cacheDir;
 
     // Doodad culling constants
     private const float DoodadCullDistance = 1200f;  // Max distance from camera to render WMO doodads
@@ -85,7 +86,6 @@ public class WmoRenderer : ISceneRenderer
         _modelDir = modelDir;
         _dataSource = dataSource;
         _texResolver = texResolver;
-        _cacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
 
         InitShaders();
         InitLiquidShader();
@@ -934,7 +934,7 @@ void main() {
 
     private MdxRenderer? GetOrLoadDoodadModel(string modelPath)
     {
-        string normalized = modelPath.Replace('/', '\\').ToLowerInvariant();
+        string normalized = NormalizeDoodadPath(modelPath).ToLowerInvariant();
 
         if (_doodadModelCache.TryGetValue(normalized, out var cached))
         {
@@ -946,69 +946,40 @@ void main() {
         _lastLoadResult = DoodadLoadResult.NotFound;
         try
         {
-            byte[]? mdxData = null;
+            string resolvedModelPath = ResolveCanonicalDoodadPath(modelPath);
+            byte[]? modelData = ReadDoodadFileData(resolvedModelPath);
+            if ((modelData == null || modelData.Length == 0) && !resolvedModelPath.Equals(modelPath, StringComparison.OrdinalIgnoreCase))
+                modelData = ReadDoodadFileData(modelPath);
 
-            // Try loading from data source (MPQ)
-            if (_dataSource != null)
-            {
-                mdxData = _dataSource.ReadFile(modelPath);
-                if (mdxData == null)
-                    mdxData = _dataSource.ReadFile(normalized);
-
-                // Case-insensitive lookup via file set
-                if (mdxData == null && _dataSource is MpqDataSource mpqDs)
-                {
-                    var found = mpqDs.FindInFileSet(modelPath);
-                    if (found != null)
-                        mdxData = _dataSource.ReadFile(found);
-                }
-
-                // Try swapping .mdx ↔ .mdl (alpha used both interchangeably)
-                if (mdxData == null)
-                {
-                    string altPath = null;
-                    if (normalized.EndsWith(".mdx"))
-                        altPath = normalized[..^4] + ".mdl";
-                    else if (normalized.EndsWith(".mdl"))
-                        altPath = normalized[..^4] + ".mdx";
-
-                    if (altPath != null)
-                    {
-                        mdxData = _dataSource.ReadFile(altPath);
-                        if (mdxData == null && _dataSource is MpqDataSource mpqDs2)
-                        {
-                            var found = mpqDs2.FindInFileSet(altPath);
-                            if (found != null)
-                                mdxData = _dataSource.ReadFile(found);
-                        }
-                    }
-                }
-            }
-
-            // Try loading from local disk
-            if (mdxData == null)
-            {
-                string localPath = Path.Combine(_modelDir, Path.GetFileName(modelPath));
-                if (File.Exists(localPath))
-                    mdxData = File.ReadAllBytes(localPath);
-            }
-
-            if (mdxData != null && mdxData.Length > 0)
-            {
-                // Write to cache dir for MdxFile.Load (expects file path)
-                Directory.CreateDirectory(_cacheDir);
-                string cachePath = Path.Combine(_cacheDir, Path.GetFileName(modelPath));
-                File.WriteAllBytes(cachePath, mdxData);
-
-                var mdx = MdxFile.Load(cachePath);
-                renderer = new MdxRenderer(_gl, mdx, _cacheDir, _dataSource, _texResolver, modelPath);
-                _lastLoadResult = DoodadLoadResult.Loaded;
-                ViewerLog.Trace($"  Doodad loaded: {Path.GetFileName(modelPath)} ({mdx.Geosets.Count} geosets)");
-            }
-            else
+            if (modelData == null || modelData.Length == 0)
             {
                 if (_doodadModelCache.Count < 30) // only log first 30 unique misses
                     ViewerLog.Trace($"  Doodad not found: {modelPath}");
+
+                _doodadModelCache[normalized] = null;
+                return null;
+            }
+
+            bool isM2Family = resolvedModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
+                || WarcraftNetM2Adapter.IsMd20(modelData)
+                || WarcraftNetM2Adapter.IsMd21(modelData);
+
+            if (isM2Family)
+            {
+                renderer = LoadM2DoodadRenderer(modelPath, resolvedModelPath, modelData);
+            }
+            else
+            {
+                using var stream = new MemoryStream(modelData);
+                var mdx = MdxFile.Load(stream);
+                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath);
+            }
+
+            if (renderer != null)
+            {
+                _lastLoadResult = DoodadLoadResult.Loaded;
+                ViewerLog.Trace($"  Doodad loaded: {Path.GetFileName(modelPath)}");
             }
         }
         catch (Exception ex)
@@ -1019,6 +990,182 @@ void main() {
 
         _doodadModelCache[normalized] = renderer;
         return renderer;
+    }
+
+    private MdxRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
+    {
+        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
+        string? bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
+        if (!string.IsNullOrWhiteSpace(bestSkinPath))
+            candidatePaths.Add(bestSkinPath);
+
+        Exception? lastSkinError = null;
+        bool anySkinFound = false;
+
+        foreach (string skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            byte[]? skinBytes = ReadDoodadFileData(skinPath);
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            anySkinFound = true;
+
+            try
+            {
+                ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath);
+                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+            }
+            catch (Exception ex)
+            {
+                lastSkinError = ex;
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"[M2] WMO doodad skin candidate failed for {Path.GetFileName(originalModelPath)}: {skinPath} ({ex.Message})");
+            }
+        }
+
+        if (!anySkinFound)
+            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
+
+        if (WarcraftNetM2Adapter.IsMd20(modelData))
+        {
+            byte[]? convertedBytes = ConvertM2ToMdx(modelData, resolvedModelPath);
+            if (convertedBytes != null && convertedBytes.Length > 0)
+            {
+                using var convertedStream = new MemoryStream(convertedBytes);
+                var convertedMdx = MdxFile.Load(convertedStream);
+                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                ViewerLog.Info(ViewerLog.Category.Mdx,
+                    $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
+                return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+            }
+        }
+
+        if (lastSkinError != null)
+            throw new InvalidDataException($"All .skin candidates failed for WMO doodad M2: {Path.GetFileName(originalModelPath)}", lastSkinError);
+
+        return null;
+    }
+
+    private byte[]? ConvertM2ToMdx(byte[] modelData, string resolvedModelPath)
+    {
+        try
+        {
+            byte[]? skinBytes = null;
+            foreach (string skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                skinBytes = ReadDoodadFileData(skinPath);
+                if (skinBytes != null && skinBytes.Length > 0)
+                    break;
+            }
+
+            var converter = new M2ToMdxConverter();
+            return converter.ConvertToBytes(modelData, skinBytes);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] WMO doodad M2->MDX converter fallback failed for {Path.GetFileName(resolvedModelPath)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private string ResolveCanonicalDoodadPath(string modelPath)
+    {
+        string normalizedPath = NormalizeDoodadPath(modelPath);
+        if (_canonicalDoodadPathCache.TryGetValue(normalizedPath, out string? cachedPath))
+            return cachedPath;
+
+        string resolvedPath = normalizedPath;
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            string? found = mpqDataSource.FindInFileSet(normalizedPath);
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                resolvedPath = NormalizeDoodadPath(found);
+            }
+            else
+            {
+                string? swapped = SwapMdlMdxExtension(normalizedPath);
+                if (!string.IsNullOrWhiteSpace(swapped))
+                {
+                    found = mpqDataSource.FindInFileSet(swapped);
+                    resolvedPath = !string.IsNullOrWhiteSpace(found)
+                        ? NormalizeDoodadPath(found)
+                        : swapped;
+                }
+            }
+        }
+
+        _canonicalDoodadPathCache[normalizedPath] = resolvedPath;
+        return resolvedPath;
+    }
+
+    private string? ResolveBestSkinPath(string resolvedModelPath)
+    {
+        if (_bestSkinPathCache.TryGetValue(resolvedModelPath, out string? cachedPath))
+            return cachedPath;
+
+        string? bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(
+            resolvedModelPath,
+            _dataSource?.GetFileList(".skin") ?? Array.Empty<string>());
+
+        _bestSkinPathCache[resolvedModelPath] = bestSkinPath;
+        return bestSkinPath;
+    }
+
+    private byte[]? ReadDoodadFileData(string path)
+    {
+        string normalizedPath = NormalizeDoodadPath(path);
+
+        if (_dataSource != null)
+        {
+            byte[]? data = _dataSource.ReadFile(path);
+            if ((data == null || data.Length == 0) && !normalizedPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+                data = _dataSource.ReadFile(normalizedPath);
+
+            if ((data == null || data.Length == 0) && _dataSource is MpqDataSource mpqDataSource)
+            {
+                string? found = mpqDataSource.FindInFileSet(normalizedPath);
+                if (!string.IsNullOrWhiteSpace(found))
+                    data = _dataSource.ReadFile(found);
+            }
+
+            if (data != null && data.Length > 0)
+                return data;
+        }
+
+        string diskPath = path;
+        if (!Path.IsPathRooted(diskPath))
+            diskPath = Path.Combine(_modelDir, normalizedPath);
+
+        if (File.Exists(diskPath))
+            return File.ReadAllBytes(diskPath);
+
+        string fallbackPath = Path.Combine(_modelDir, Path.GetFileName(normalizedPath));
+        if (!fallbackPath.Equals(diskPath, StringComparison.OrdinalIgnoreCase) && File.Exists(fallbackPath))
+            return File.ReadAllBytes(fallbackPath);
+
+        return null;
+    }
+
+    private static string NormalizeDoodadPath(string path)
+    {
+        return path.Replace('/', '\\');
+    }
+
+    private static string? SwapMdlMdxExtension(string normalizedPath)
+    {
+        if (normalizedPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return normalizedPath[..^4] + ".mdl";
+
+        if (normalizedPath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+            return normalizedPath[..^4] + ".mdx";
+
+        return null;
     }
 
     private void InitLiquidShader()

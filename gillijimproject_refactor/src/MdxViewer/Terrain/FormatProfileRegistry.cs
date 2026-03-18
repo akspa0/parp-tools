@@ -18,6 +18,7 @@ public sealed class AdtProfile
     public required bool EnableMh2oFallbackWhenNoMclq { get; init; }
     public required uint BigAlphaFlagsMask { get; init; }
     public required bool PreferTex0ForTextureData { get; init; }
+    public required bool PreferObj0ForPlacementData { get; init; }
     public required bool UseMcnkHeaderAlphaSize { get; init; }
     public required bool UseMcnkHeaderShadowSize { get; init; }
     public required TerrainAlphaDecodeMode AlphaDecodeMode { get; init; }
@@ -74,6 +75,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = true,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -91,6 +93,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -108,6 +111,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -124,7 +128,8 @@ public static class FormatProfileRegistry
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
         BigAlphaFlagsMask = 0x4u | 0x80u,
-        PreferTex0ForTextureData = true,
+        PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
@@ -141,7 +146,8 @@ public static class FormatProfileRegistry
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = true,
         BigAlphaFlagsMask = 0x4u | 0x80u,
-        PreferTex0ForTextureData = true,
+        PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
@@ -159,6 +165,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -176,6 +183,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -193,6 +201,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -390,6 +399,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -407,6 +417,7 @@ public static class FormatProfileRegistry
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0,
         PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
         UseMcnkHeaderAlphaSize = false,
         UseMcnkHeaderShadowSize = false,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LegacySequential
@@ -423,7 +434,44 @@ public static class FormatProfileRegistry
         UseMhdrOffsetsOnly = true,
         EnableMh2oFallbackWhenNoMclq = false,
         BigAlphaFlagsMask = 0x4u | 0x80u,
+        PreferTex0ForTextureData = false,
+        PreferObj0ForPlacementData = false,
+        UseMcnkHeaderAlphaSize = true,
+        UseMcnkHeaderShadowSize = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
+    };
+
+    public static readonly AdtProfile AdtProfile40xUnknown = new()
+    {
+        ProfileId = "AdtProfile_40x_Unknown",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = true,
+        BigAlphaFlagsMask = 0x4u | 0x80u,
         PreferTex0ForTextureData = true,
+        PreferObj0ForPlacementData = true,
+        UseMcnkHeaderAlphaSize = true,
+        UseMcnkHeaderShadowSize = true,
+        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
+    };
+
+    public static readonly AdtProfile AdtProfile50xUnknown = new()
+    {
+        ProfileId = "AdtProfile_50x_Unknown",
+        McinEntrySize = 0x10,
+        MclqLayerStride = 0x324,
+        MclqTileFlagsOffset = 0x290,
+        MddfRecordSize = 0x24,
+        ModfRecordSize = 0x40,
+        UseMhdrOffsetsOnly = true,
+        EnableMh2oFallbackWhenNoMclq = true,
+        BigAlphaFlagsMask = 0x4u | 0x80u,
+        PreferTex0ForTextureData = true,
+        PreferObj0ForPlacementData = true,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
         AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
@@ -484,6 +532,12 @@ public static class FormatProfileRegistry
 
             if (major == 3 && minor == 0)
                 return AdtProfile30xUnknown;
+
+            if (major == 4)
+                return AdtProfile40xUnknown;
+
+            if (major == 5)
+                return AdtProfile50xUnknown;
 
             if (major == 0 && minor == 8)
                 return AdtProfile080xUnknown;

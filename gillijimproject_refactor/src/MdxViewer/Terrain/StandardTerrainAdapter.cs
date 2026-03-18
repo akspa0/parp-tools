@@ -110,8 +110,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Ghidra-verified filename: MapName_x_y.adt = MapName_{tileY}_{tileX}.
         string basePath = $"{_mapDir}\\{_mapName}_{tileY}_{tileX}";
         string rootPath = $"{basePath}.adt";
-        string texPath = $"{basePath}_tex0.adt";
-        string objPath = $"{basePath}_obj0.adt";
+        string? texPath = _adtProfile.PreferTex0ForTextureData ? $"{basePath}_tex0.adt" : null;
+        string? objPath = _adtProfile.PreferObj0ForPlacementData ? $"{basePath}_obj0.adt" : null;
 
         var adtBytes = _dataSource.ReadFile(rootPath);
         if (adtBytes == null || adtBytes.Length == 0)
@@ -122,8 +122,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
         ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
 
         // Optional split files (Cata+)
-        var texBytes = _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
-        var objBytes = _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+        var texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
+        var objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
 
         try
         {
@@ -470,7 +470,10 @@ public class StandardTerrainAdapter : ITerrainAdapter
 
         // Ghidra-verified (FUN_007d6ef0): MDDF/MODF are located via MHDR offsets,
         // NOT by linear scan. Name resolution: MDDF.nameId → MMID[nameId] → byte offset into MMDX.
-        CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
+        if (objBytes != null && objBytes.Length >= 16 && TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr))
+            CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+        else
+            CollectPlacementsViaMhdr(adtBytes, mhdrStart, mhdr, tileX, tileY, result);
     }
 
     private static bool TryGetMhdr(byte[] adtBytes, out int mhdrStart, out GillijimProject.WowFiles.Mhdr mhdr)
