@@ -746,7 +746,7 @@ out vec4 FragColor;
 void main() {
     vec3 norm = normalize(vNormal);
     vec3 viewNorm = normalize(vViewNormal);
-    if (!gl_FrontFacing) {
+    if (uSphereEnvMap == 1 && !gl_FrontFacing) {
         norm = -norm;
         viewNorm = -viewNorm;
     }

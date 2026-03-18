@@ -318,7 +318,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 var layers = ExtractLayers(mcnk.TextureLayers);
 
                 // Alpha maps
-                var alphaMaps = ExtractAlphaMaps(mcnk, _useBigAlpha);
+                var alphaMaps = ExtractAlphaMaps(mcnk, _adtProfile.AlphaDecodeMode, _useBigAlpha);
 
                 // Shadow map
                 byte[]? shadowMap = ExtractShadowMap(mcnk.McshData);
@@ -375,7 +375,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     AlphaMaps = alphaMaps,
                     ShadowMap = shadowMap,
                     Liquid = liquid,
-                    WorldPosition = new Vector3(worldX, worldY, 0f)
+                    WorldPosition = new Vector3(worldX, worldY, 0f),
+                    AreaId = (int)mcnk.Header.AreaId,
+                    McnkFlags = (int)mcnkFlagsRaw
                 });
 
                 LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
@@ -462,39 +464,57 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return layers;
     }
 
-    private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, bool useBigAlpha)
+    private static Dictionary<int, byte[]> ExtractAlphaMaps(Mcnk mcnk, TerrainAlphaDecodeMode decodeMode, bool useBigAlpha)
     {
         var maps = new Dictionary<int, byte[]>();
         if (mcnk.TextureLayers == null || mcnk.TextureLayers.Count <= 1)
             return maps;
 
-        // Detect format: if any layer has UseAlpha (0x100) or CompressedAlpha (0x200),
-        // use 3.3.5 flag-based decode via Mcal. Otherwise use Alpha-style sequential 4-bit.
-        bool hasLkFlags = false;
-        for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
+        if (decodeMode == TerrainAlphaDecodeMode.LichKingStrict)
         {
-            if ((mcnk.TextureLayers[i].Flags & (MclyFlags.UseAlpha | MclyFlags.CompressedAlpha)) != 0)
-            {
-                hasLkFlags = true;
-                break;
-            }
-        }
+            if (mcnk.AlphaMaps == null)
+                return maps;
 
-        if (hasLkFlags && mcnk.AlphaMaps != null)
-        {
-            // 3.3.5 path: per-layer offsets + flags (compressed, big alpha, etc.)
             for (int i = 1; i < mcnk.TextureLayers.Count && i < 4; i++)
             {
-                try
+                var layer = mcnk.TextureLayers[i];
+                byte[]? alpha = null;
+
+                int? nextOffset = GetNextLayerAlphaOffset(mcnk.TextureLayers, i, mcnk.McalRawData?.Length ?? 0);
+                bool layerBigAlpha = ResolveLayerBigAlpha(
+                    unchecked((int)layer.AlphaMapOffset),
+                    nextOffset,
+                    mcnk.McalRawData?.Length ?? 0,
+                    useBigAlpha);
+
+                if ((layer.Flags & MclyFlags.UseAlpha) != 0)
                 {
-                    var alpha = mcnk.AlphaMaps.GetAlphaMapForLayer(mcnk.TextureLayers[i], useBigAlpha);
-                    if (alpha != null && alpha.Length > 0)
-                        maps[i] = alpha;
+                    try
+                    {
+                        alpha = mcnk.AlphaMaps.GetAlphaMapForLayer(layer, layerBigAlpha);
+                    }
+                    catch
+                    {
+                        // Keep parse resilient and continue with remaining layers.
+                    }
                 }
-                catch { }
+                else if (layer.AlphaMapOffset != 0 && mcnk.McalRawData != null)
+                {
+                    alpha = DecodeLayerBySpan(
+                        mcnk.McalRawData,
+                        unchecked((int)layer.AlphaMapOffset),
+                        nextOffset,
+                        layerBigAlpha);
+                }
+
+                if (alpha != null && alpha.Length > 0)
+                    maps[i] = alpha;
             }
+
+            return maps;
         }
-        else if (mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
+
+        if (mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
         {
             // Alpha-style (0.5.3/0.6.0): sequential 4-bit nibbles, 2048 bytes per layer
             int offset = 0;
@@ -522,6 +542,84 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
+    }
+
+    private static int? GetNextLayerAlphaOffset(List<MclyEntry> textureLayers, int currentLayerIndex, int mcalLength)
+    {
+        int currentOffset = unchecked((int)textureLayers[currentLayerIndex].AlphaMapOffset);
+        int? nextOffset = null;
+
+        for (int layerIndex = currentLayerIndex + 1; layerIndex < textureLayers.Count; layerIndex++)
+        {
+            int candidateOffset = unchecked((int)textureLayers[layerIndex].AlphaMapOffset);
+            if (candidateOffset <= currentOffset || candidateOffset > mcalLength)
+                continue;
+
+            nextOffset = candidateOffset;
+            break;
+        }
+
+        return nextOffset;
+    }
+
+    private static bool ResolveLayerBigAlpha(int currentOffset, int? nextOffset, int mcalLength, bool defaultBigAlpha)
+    {
+        if (currentOffset < 0 || currentOffset >= mcalLength)
+            return defaultBigAlpha;
+
+        int span = nextOffset.HasValue
+            ? nextOffset.Value - currentOffset
+            : mcalLength - currentOffset;
+
+        if (span >= 4096)
+            return true;
+
+        if (span > 0 && span <= 2048)
+            return false;
+
+        return defaultBigAlpha;
+    }
+
+    private static byte[]? DecodeLayerBySpan(byte[] mcalRawData, int offset, int? nextOffset, bool useBigAlpha)
+    {
+        if (offset < 0 || offset >= mcalRawData.Length)
+            return null;
+
+        int remaining = mcalRawData.Length - offset;
+        if (remaining <= 0)
+            return null;
+
+        int span = nextOffset.HasValue
+            ? nextOffset.Value - offset
+            : remaining;
+
+        bool decodeAsBigAlpha = useBigAlpha;
+        if (span >= 4096)
+            decodeAsBigAlpha = true;
+        else if (span > 0 && span <= 2048)
+            decodeAsBigAlpha = false;
+
+        if (decodeAsBigAlpha)
+        {
+            int bytesToCopy = Math.Min(4096, remaining);
+            var alpha = new byte[4096];
+            Buffer.BlockCopy(mcalRawData, offset, alpha, 0, bytesToCopy);
+            return alpha;
+        }
+
+        int packedCount = Math.Min(2048, remaining);
+        if (packedCount <= 0)
+            return null;
+
+        var decoded = new byte[4096];
+        for (int i = 0; i < packedCount; i++)
+        {
+            byte packed = mcalRawData[offset + i];
+            decoded[i * 2] = (byte)((packed & 0x0F) * 17);
+            decoded[i * 2 + 1] = (byte)(((packed >> 4) & 0x0F) * 17);
+        }
+
+        return decoded;
     }
 
     private static byte[]? ExtractShadowMap(byte[]? mcshData)

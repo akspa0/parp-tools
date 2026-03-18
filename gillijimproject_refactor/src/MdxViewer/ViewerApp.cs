@@ -103,6 +103,7 @@ public partial class ViewerApp : IDisposable
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
+    private bool _showPerfWindow = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantOpenFolder = false;
@@ -762,6 +763,10 @@ void main() {
         if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
             DrawMinimapWindow();
 
+        // Perf (floating window)
+        if (_showPerfWindow)
+            DrawPerfWindow();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -837,6 +842,7 @@ void main() {
                 ImGui.MenuItem("Terrain Controls", "", ref _showTerrainControls);
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
+                ImGui.MenuItem("Perf", "", ref _showPerfWindow);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
@@ -985,6 +991,29 @@ void main() {
                 }
             }
         }
+    }
+
+    private void DrawPerfWindow()
+    {
+        ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (terrainRenderer == null)
+        {
+            ImGui.Text("No terrain loaded.");
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
+        ImGui.TextDisabled("Stats are for the last terrain Render() call.");
+
+        ImGui.End();
     }
 
     private void DrawFolderInputDialog()
