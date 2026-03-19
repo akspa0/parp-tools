@@ -5,11 +5,11 @@ using System.Text;
 namespace WoWMapConverter.Core.VLM;
 
 /// <summary>
-/// Parses WDL (World Detail Level) files for WoW Alpha 0.5.3.
-/// Based on Ghidra analysis of CMap::LoadWdl (0x0067FA20).
+/// Parses WDL (World Detail Level) files for WoW client map previews.
+/// Alpha-era files use version 0x12, but later clients still retain the same MAOF/MARE core layout.
 /// 
 /// File layout:
-///   MVER chunk → version uint32 (must be 0x12)
+///   MVER chunk → version uint32
 ///   MAOF chunk → uint32[4096] absolute file offsets (64×64 grid)
 ///   Per nonzero offset → MARE chunk header + int16[545] heights (17×17 outer + 16×16 inner)
 /// </summary>
@@ -57,73 +57,86 @@ public class WdlParser
     {
         if (data == null || data.Length < 20) return null;
 
-        using var ms = new MemoryStream(data);
-        using var br = new BinaryReader(ms);
-
-        // 1) Read MVER chunk
-        uint mverFourCC = br.ReadUInt32();
-        uint mverSize = br.ReadUInt32();
+        uint mverFourCC = ReadUInt32(data, 0);
+        uint mverSize = ReadUInt32(data, 4);
         if (mverFourCC != FOURCC_MVER)
         {
             Console.WriteLine($"[WdlParser] Expected MVER (0x{FOURCC_MVER:X8}), got 0x{mverFourCC:X8}");
             return null;
         }
 
-        int version = br.ReadInt32();
+        if (mverSize < sizeof(int) || 8 + mverSize > data.Length)
+        {
+            Console.WriteLine($"[WdlParser] Invalid MVER size {mverSize} for WDL length {data.Length}");
+            return null;
+        }
+
+        int version = BitConverter.ToInt32(data, 8);
         if (version != VERSION_EXPECTED)
+            Console.WriteLine($"[WdlParser] Non-Alpha WDL version {version} (0x{version:X}); attempting MAOF/MARE parse");
+
+        int scanOffset = checked((int)(8 + mverSize));
+        if (!TryFindChunk(data, scanOffset, FOURCC_MAOF, out int maofDataOffset, out uint maofSize))
         {
-            Console.WriteLine($"[WdlParser] Unsupported WDL version {version} (0x{version:X}), expected {VERSION_EXPECTED} (0x{VERSION_EXPECTED:X})");
+            Console.WriteLine("[WdlParser] Failed to locate MAOF chunk");
             return null;
         }
 
-        // Skip any remaining MVER data
-        ms.Position = 8 + mverSize;
-
-        // 2) Read MAOF chunk
-        uint maofFourCC = br.ReadUInt32();
-        uint maofSize = br.ReadUInt32();
-        if (maofFourCC != FOURCC_MAOF)
+        if (maofSize < CELL_COUNT * sizeof(uint) || maofDataOffset + (CELL_COUNT * sizeof(uint)) > data.Length)
         {
-            Console.WriteLine($"[WdlParser] Expected MAOF (0x{FOURCC_MAOF:X8}), got 0x{maofFourCC:X8}");
+            Console.WriteLine($"[WdlParser] Invalid MAOF size {maofSize} for WDL length {data.Length}");
             return null;
         }
 
-        // Client reads fixed 0x4000 bytes (4096 × uint32)
         var maofOffsets = new uint[CELL_COUNT];
         for (int i = 0; i < CELL_COUNT; i++)
-            maofOffsets[i] = br.ReadUInt32();
+            maofOffsets[i] = ReadUInt32(data, maofDataOffset + (i * sizeof(uint)));
 
         var result = new WdlData { Version = version };
         int tilesLoaded = 0;
 
-        // 3) For each nonzero MAOF offset, seek and read MARE chunk
         for (int i = 0; i < CELL_COUNT; i++)
         {
             uint offset = maofOffsets[i];
             if (offset == 0) continue;
-            if (offset + MARE_CHUNK_HEADER + MARE_BYTES > data.Length) continue;
 
-            ms.Position = offset;
+            int tileDataOffset = (int)offset;
+            if (tileDataOffset < 0 || tileDataOffset >= data.Length)
+                continue;
 
-            // Read MARE chunk header
-            uint mareFourCC = br.ReadUInt32();
-            uint mareSize = br.ReadUInt32();
+            if (tileDataOffset + MARE_CHUNK_HEADER <= data.Length)
+            {
+                uint mareFourCC = ReadUInt32(data, tileDataOffset);
+                uint mareSize = ReadUInt32(data, tileDataOffset + sizeof(uint));
+                if (mareFourCC == FOURCC_MARE)
+                {
+                    if (mareSize < MARE_BYTES || tileDataOffset + MARE_CHUNK_HEADER + MARE_BYTES > data.Length)
+                        continue;
 
-            if (mareFourCC != FOURCC_MARE)
-                continue; // Robust fallback: skip bad entries
+                    tileDataOffset += MARE_CHUNK_HEADER;
+                }
+                else if (tileDataOffset + MARE_BYTES > data.Length)
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                continue;
+            }
 
-            // Read 545 int16 heights, convert to float, compute bounds
             var tile = new WdlTile { HasData = true };
             float minZ = float.PositiveInfinity;
             float maxZ = float.NegativeInfinity;
+            int cursor = tileDataOffset;
 
-            // First 289 values: 17×17 outer lattice
             int hIdx = 0;
             for (int r = 0; r < 17; r++)
             {
                 for (int c = 0; c < 17; c++)
                 {
-                    short raw = br.ReadInt16();
+                    short raw = BitConverter.ToInt16(data, cursor);
+                    cursor += sizeof(short);
                     float z = raw;
                     tile.Heights[hIdx++] = z;
                     tile.Height17[r, c] = raw;
@@ -132,12 +145,12 @@ public class WdlParser
                 }
             }
 
-            // Next 256 values: 16×16 inner lattice (cell centers)
             for (int r = 0; r < 16; r++)
             {
                 for (int c = 0; c < 16; c++)
                 {
-                    short raw = br.ReadInt16();
+                    short raw = BitConverter.ToInt16(data, cursor);
+                    cursor += sizeof(short);
                     float z = raw;
                     tile.Heights[hIdx++] = z;
                     tile.Height16[r, c] = raw;
@@ -154,5 +167,56 @@ public class WdlParser
 
         Console.WriteLine($"[WdlParser] Parsed WDL v{version}: {tilesLoaded}/{CELL_COUNT} tiles with MARE data");
         return result;
+    }
+
+    private static bool TryFindChunk(byte[] data, int startOffset, uint fourCC, out int chunkDataOffset, out uint chunkSize)
+    {
+        int offset = Math.Max(0, startOffset);
+        while (offset + 8 <= data.Length)
+        {
+            uint chunkFourCC = ReadUInt32(data, offset);
+            uint size = ReadUInt32(data, offset + sizeof(uint));
+            if (chunkFourCC == fourCC && offset + 8 + size <= data.Length)
+            {
+                chunkDataOffset = offset + 8;
+                chunkSize = size;
+                return true;
+            }
+
+            if (size == 0)
+            {
+                offset += 8;
+                continue;
+            }
+
+            long nextOffset = offset + 8L + size;
+            if (nextOffset > data.Length)
+                break;
+
+            offset = (int)nextOffset;
+        }
+
+        for (offset = Math.Max(0, startOffset); offset + 8 <= data.Length; offset++)
+        {
+            if (ReadUInt32(data, offset) != fourCC)
+                continue;
+
+            uint size = ReadUInt32(data, offset + sizeof(uint));
+            if (offset + 8 + size > data.Length)
+                continue;
+
+            chunkDataOffset = offset + 8;
+            chunkSize = size;
+            return true;
+        }
+
+        chunkDataOffset = 0;
+        chunkSize = 0;
+        return false;
+    }
+
+    private static uint ReadUInt32(byte[] data, int offset)
+    {
+        return BitConverter.ToUInt32(data, offset);
     }
 }

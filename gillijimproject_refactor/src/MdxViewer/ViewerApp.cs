@@ -30,7 +30,8 @@ public partial class ViewerApp : IDisposable
     {
         Unknown,
         Mdlx,
-        Md20
+        Md20,
+        Md21,
     }
 
     private IWindow _window = null!;
@@ -57,9 +58,11 @@ public partial class ViewerApp : IDisposable
     private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private WdlPreviewRenderer? _wdlPreviewRenderer;
+    private WdlPreviewCacheService? _wdlPreviewCacheService;
     private bool _showWdlPreview = false;
     private MapDefinition? _selectedMapForPreview;
     private Vector2? _selectedSpawnTile; // WDL tile coordinates (0-63)
+    private string _wdlPreviewWarmupStatus = string.Empty;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
@@ -86,6 +89,8 @@ public partial class ViewerApp : IDisposable
 
     // Model info
     private string _modelInfo = "";
+    private readonly Dictionary<string, string?> _standaloneSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _reportedAreaDiagnostics = new(StringComparer.Ordinal);
     
     // Stored loaded model data for export (avoids re-parsing from disk)
     private WmoV14ToV17Converter.WmoV14Data? _loadedWmo;
@@ -595,10 +600,9 @@ public partial class ViewerApp : IDisposable
                     var name = _areaTableService.GetAreaDisplayNameForMap(chunk.AreaId, _currentMapId);
                     if (name == null)
                     {
+                        ReportAreaLookupDiagnostic(chunk.AreaId);
                         // Fallback if MapID filtering fails
                         name = _areaTableService.GetAreaDisplayName(chunk.AreaId);
-                        if (name.StartsWith("Unknown"))
-                            ViewerLog.Trace($"[AreaTable] Lookup miss: AreaId={chunk.AreaId}, MapId={_currentMapId} → {name}  (table has {_areaTableService.Count} entries)");
                     }
                     _currentAreaName = name ?? "";
                 }
@@ -2010,6 +2014,9 @@ void main() {
         if (_discoveredMaps.Count == 0) return;
 
         ImGui.Text($"{_discoveredMaps.Count} maps discovered");
+        var previewWarmup = GetWdlPreviewWarmupStats();
+        if (previewWarmup.total > 0)
+            ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
         ImGui.Separator();
 
         // Map list — use remaining height or fixed height
@@ -2034,24 +2041,14 @@ void main() {
 
                 if (!hasWdt) ImGui.PopStyleColor();
 
+                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
+
                 // Show WDL preview button if map has WDL
-                if (hasWdl)
+                if (canPreview)
                 {
                     ImGui.SameLine();
                     if (ImGui.SmallButton($"Preview##{map.Id}"))
-                    {
-                        _selectedMapForPreview = map;
-                        _showWdlPreview = true;
-                        _selectedSpawnTile = null;
-                        
-                        // Load WDL preview
-                        if (_wdlPreviewRenderer == null)
-                            _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
-                        
-                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Attempting to load WDL for {map.Directory}");
-                        bool loaded = _wdlPreviewRenderer.LoadWdl(_dataSource!, map.Directory);
-                        ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL Preview] Load result: {loaded}, HasPreview: {_wdlPreviewRenderer.HasPreview}");
-                    }
+                        OpenWdlPreview(map);
                 }
 
                 if (ImGui.IsItemHovered())
@@ -2060,8 +2057,10 @@ void main() {
                     ImGui.Text($"Directory: {map.Directory}");
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
-                    if (hasWdl)
+                    if (canPreview)
                         ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "Click 'Preview' to select spawn point");
+                    else if (hasWdl)
+                        ImGui.TextDisabled("WDL preview is preparing in the background.");
                     ImGui.EndTooltip();
                 }
             }
@@ -3529,9 +3528,12 @@ void main() {
         {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
+            _standaloneSkinPathCache.Clear();
+            ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new MpqDataSource(gamePath, resolvedListfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
+            InitializeWdlPreviewSupport(gamePath);
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
@@ -3589,6 +3591,7 @@ void main() {
                         var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
                         _discoveredMaps = mapDiscovery.DiscoverMaps();
                         ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
+                        WarmDiscoveredWdlPreviews();
 
                         // Load AreaTable for area name display
                         _areaTableService = new AreaTableService();
@@ -3645,6 +3648,152 @@ void main() {
 
         ViewerLog.Important(ViewerLog.Category.MpqData, "No external listfile available. MPQ file discovery will rely on archive-internal names only.");
         return null;
+    }
+
+    private void InitializeWdlPreviewSupport(string gamePath)
+    {
+        if (_dataSource == null)
+            return;
+
+        string cacheSegment = Regex.Replace(gamePath.ToLowerInvariant(), @"[^a-z0-9._-]+", "_").Trim('_');
+        if (string.IsNullOrWhiteSpace(cacheSegment))
+            cacheSegment = "default";
+
+        _wdlPreviewCacheService?.Dispose();
+        _wdlPreviewCacheService = new WdlPreviewCacheService(_dataSource, Path.Combine(CacheDir, "wdl-preview", cacheSegment));
+        _wdlPreviewWarmupStatus = string.Empty;
+    }
+
+    private void ResetWdlPreviewSupport()
+    {
+        _wdlPreviewCacheService?.Dispose();
+        _wdlPreviewCacheService = null;
+        _wdlPreviewWarmupStatus = string.Empty;
+        _wdlPreviewRenderer?.ClearPreview();
+    }
+
+    private void WarmDiscoveredWdlPreviews()
+    {
+        if (_wdlPreviewCacheService == null || _discoveredMaps.Count == 0)
+            return;
+
+        var mapsWithWdl = _discoveredMaps.Where(map => map.HasWdl).ToList();
+        if (mapsWithWdl.Count == 0)
+            return;
+
+        _wdlPreviewCacheService.WarmMaps(mapsWithWdl);
+        _wdlPreviewWarmupStatus = $"Warming {mapsWithWdl.Count} WDL previews in the background.";
+    }
+
+    private bool CanUseWdlPreviewFeature()
+    {
+        return _dataSource != null;
+    }
+
+    private void OpenWdlPreview(MapDefinition map)
+    {
+        _selectedMapForPreview = map;
+        _showWdlPreview = true;
+        _selectedSpawnTile = null;
+
+        if (_wdlPreviewRenderer == null)
+            _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
+
+        TryLoadSelectedWdlPreviewFromCache(map.Directory);
+    }
+
+    private void TryLoadSelectedWdlPreviewFromCache(string mapDirectory)
+    {
+        if (_wdlPreviewRenderer == null)
+            return;
+
+        if (_wdlPreviewCacheService != null && _wdlPreviewCacheService.TryGetPreview(mapDirectory, out var previewData) && previewData != null)
+        {
+            _wdlPreviewRenderer.LoadPreview(previewData);
+            _wdlPreviewWarmupStatus = string.Empty;
+            return;
+        }
+
+        _wdlPreviewRenderer.ClearPreview();
+
+        if (_wdlPreviewCacheService != null)
+        {
+            _wdlPreviewCacheService.EnsurePrefetch(mapDirectory);
+            var state = _wdlPreviewCacheService.GetState(mapDirectory);
+            _wdlPreviewWarmupStatus = state switch
+            {
+                WdlPreviewWarmState.Ready => string.Empty,
+                WdlPreviewWarmState.Failed => _wdlPreviewCacheService.GetError(mapDirectory) ?? $"Failed to prepare preview for {mapDirectory}.",
+                _ => $"Preparing WDL preview for {mapDirectory}...",
+            };
+            return;
+        }
+
+        if (_dataSource != null)
+        {
+            bool loaded = _wdlPreviewRenderer.LoadWdl(_dataSource, mapDirectory);
+            _wdlPreviewWarmupStatus = loaded ? string.Empty : _wdlPreviewRenderer.LastError ?? string.Empty;
+        }
+    }
+
+    private WdlPreviewWarmState GetSelectedWdlPreviewState()
+    {
+        if (_wdlPreviewRenderer?.HasPreview == true)
+            return WdlPreviewWarmState.Ready;
+
+        if (_selectedMapForPreview == null)
+            return WdlPreviewWarmState.NotQueued;
+
+        if (_wdlPreviewCacheService != null)
+            return _wdlPreviewCacheService.GetState(_selectedMapForPreview.Directory);
+
+        return string.IsNullOrWhiteSpace(_wdlPreviewRenderer?.LastError)
+            ? WdlPreviewWarmState.Loading
+            : WdlPreviewWarmState.Failed;
+    }
+
+    private string? GetSelectedWdlPreviewError()
+    {
+        if (_selectedMapForPreview == null)
+            return null;
+
+        if (_wdlPreviewCacheService != null)
+            return _wdlPreviewCacheService.GetError(_selectedMapForPreview.Directory);
+
+        return _wdlPreviewRenderer?.LastError;
+    }
+
+    private (int total, int ready, int loading, int failed) GetWdlPreviewWarmupStats()
+    {
+        if (_wdlPreviewCacheService == null || _discoveredMaps.Count == 0)
+            return (0, 0, 0, 0);
+
+        int total = 0;
+        int ready = 0;
+        int loading = 0;
+        int failed = 0;
+
+        foreach (var map in _discoveredMaps)
+        {
+            if (!map.HasWdl)
+                continue;
+
+            total++;
+            switch (_wdlPreviewCacheService.GetState(map.Directory))
+            {
+                case WdlPreviewWarmState.Ready:
+                    ready++;
+                    break;
+                case WdlPreviewWarmState.Loading:
+                    loading++;
+                    break;
+                case WdlPreviewWarmState.Failed:
+                    failed++;
+                    break;
+            }
+        }
+
+        return (total, ready, loading, failed);
     }
 
     /// <summary>
@@ -3880,7 +4029,8 @@ void main() {
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Failed to load: {ex.Message}";
+            LogLoadFailure("DiskLoad", filePath, ex);
+            _statusMessage = $"Failed to load: {BuildStatusExceptionSummary(ex)}";
             _modelInfo = "";
         }
     }
@@ -3899,40 +4049,61 @@ void main() {
     /// </summary>
     private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
     {
-        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(originalPath));
-
-        if (_dataSource != null)
-        {
-            var bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(originalPath, _dataSource.GetFileList(".skin"));
-            if (!string.IsNullOrWhiteSpace(bestSkinPath))
-                candidatePaths.Add(bestSkinPath);
-        }
+        string resolvedModelPath = ResolveStandaloneCanonicalModelPath(originalPath);
+        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, _dbcBuild);
+        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
 
         Exception? lastError = null;
         bool anySkinFound = false;
+        bool triedBestSkinPath = false;
 
-        foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        while (true)
         {
-            byte[]? skinBytes = null;
+            foreach (var skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                byte[]? skinBytes = ReadStandaloneFileData(skinPath);
+                if (skinBytes == null || skinBytes.Length == 0)
+                    continue;
 
-            if (File.Exists(skinPath))
-                skinBytes = File.ReadAllBytes(skinPath);
+                anySkinFound = true;
 
-            if (skinBytes == null && _dataSource != null)
-                skinBytes = _dataSource.ReadFile(skinPath);
+                try
+                {
+                    ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+                    var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
+                    LoadMdxModel(mdx, dir, resolvedModelPath, isM2AdapterModel: true);
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                    _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Skin candidate failed for {Path.GetFileName(originalPath)}: {skinPath} ({ex.Message})");
+                }
+            }
 
-            if (skinBytes == null || skinBytes.Length == 0)
-                continue;
+            if (triedBestSkinPath)
+                break;
 
-            anySkinFound = true;
+            triedBestSkinPath = true;
+            string? bestSkinPath = ResolveBestStandaloneSkinPath(resolvedModelPath);
+            if (string.IsNullOrWhiteSpace(bestSkinPath))
+                break;
 
+            candidatePaths.Add(bestSkinPath);
+        }
+
+        if (!anySkinFound && string.Equals(FormatProfileRegistry.ResolveModelProfile(_dbcBuild)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+        {
             try
             {
-                ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
-                var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, originalPath);
-                LoadMdxModel(mdx, dir, originalPath, isM2AdapterModel: true);
+                var embeddedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, null, resolvedModelPath, _dbcBuild);
+                LoadMdxModel(embeddedMdx, dir, resolvedModelPath, isM2AdapterModel: true);
                 ViewerLog.Info(ViewerLog.Category.Mdx,
-                    $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                    $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(originalPath)} after no external .skin resolved");
                 _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
                 return;
             }
@@ -3940,16 +4111,126 @@ void main() {
             {
                 lastError = ex;
                 ViewerLog.Debug(ViewerLog.Category.Mdx,
-                    $"[M2] Skin candidate failed for {Path.GetFileName(originalPath)}: {skinPath} ({ex.Message})");
+                    $"[M2] Embedded root-profile fallback failed for {Path.GetFileName(originalPath)}: {ex.Message}");
+            }
+        }
+
+        if (WarcraftNetM2Adapter.IsMd20(m2Bytes))
+        {
+            byte[]? convertedBytes = ConvertStandaloneM2ToMdx(m2Bytes, resolvedModelPath);
+            if (convertedBytes != null && convertedBytes.Length > 0)
+            {
+                try
+                {
+                    using var convertedStream = new MemoryStream(convertedBytes);
+                    var convertedMdx = MdxFile.Load(convertedStream);
+                    if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
+                    {
+                        LoadMdxModel(convertedMdx, dir, resolvedModelPath, isM2AdapterModel: true);
+                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                            $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(originalPath)} after adapter failure");
+                        _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
+                        return;
+                    }
+
+                    lastError = new InvalidDataException(
+                        $"M2->MDX fallback produced no renderable geometry for {Path.GetFileName(originalPath)} ({WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)})");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Rejecting converted fallback for {Path.GetFileName(originalPath)}: {WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)}");
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Converted fallback load failed for {Path.GetFileName(originalPath)}: {ex.Message}");
+                }
             }
         }
 
         if (!anySkinFound)
-            throw new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
+        {
+            bool isTracedPreRelease301 = string.Equals(
+                FormatProfileRegistry.ResolveModelProfile(_dbcBuild)?.ProfileId,
+                FormatProfileRegistry.M2Profile3018303.ProfileId,
+                StringComparison.Ordinal);
 
-        throw new InvalidDataException(
+            InvalidDataException missingSkinError = isTracedPreRelease301
+                ? new InvalidDataException(
+                    $"No external .skin resolved for pre-release M2: {Path.GetFileName(originalPath)}. wow.exe 3.0.1.8303 traces root-contained profile tables for CM2Shared; MdxViewer root-profile geometry parsing is still incomplete.")
+                : new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
+
+            ViewerLog.Error(ViewerLog.Category.Mdx,
+                $"[M2] {missingSkinError.Message} (build={_dbcBuild ?? "unknown"}, resolved='{resolvedModelPath}', candidateCount={candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase).Count()})");
+            throw missingSkinError;
+        }
+
+        var adaptFailure = new InvalidDataException(
             $"Failed to adapt M2 with available .skin candidates: {Path.GetFileName(originalPath)}",
             lastError);
+        ViewerLog.Error(ViewerLog.Category.Mdx,
+            $"[M2] {adaptFailure.Message} for '{resolvedModelPath}' (build={_dbcBuild ?? "unknown"}): {DescribeExceptionChain(lastError ?? adaptFailure)}");
+        throw adaptFailure;
+    }
+
+    private static string DescribeExceptionChain(Exception ex, int maxDepth = 6)
+    {
+        var parts = new List<string>();
+        Exception? current = ex;
+        while (current != null && parts.Count < maxDepth)
+        {
+            parts.Add($"{current.GetType().Name}: {current.Message}");
+            current = current.InnerException;
+        }
+
+        return string.Join(" -> ", parts);
+    }
+
+    private static string BuildStatusExceptionSummary(Exception ex)
+    {
+        string summary = DescribeExceptionChain(ex, 3);
+        return summary.Length <= 240 ? summary : summary[..237] + "...";
+    }
+
+    private void LogLoadFailure(string operation, string sourcePath, Exception ex, byte[]? modelBytes = null)
+    {
+        string byteSummary = modelBytes == null
+            ? string.Empty
+            : $" magic={GetModelMagicLabel(modelBytes)} md20Version={GetMd20VersionLabel(modelBytes)} bytes={modelBytes.Length}";
+        ViewerLog.Error(ViewerLog.Category.General,
+            $"[{operation}] Failed for '{sourcePath}': {DescribeExceptionChain(ex)}{byteSummary}");
+    }
+
+    private void LogDataSourceReadFailure(string requestedPath, string resolvedPath, string ext)
+    {
+        bool requestedExists = false;
+        bool resolvedExists = false;
+        try { requestedExists = _dataSource?.FileExists(requestedPath) ?? false; } catch { }
+        try { resolvedExists = _dataSource?.FileExists(resolvedPath) ?? false; } catch { }
+
+        string indexedRequested = "-";
+        string indexedResolved = "-";
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            try
+            {
+                indexedRequested = mpqDataSource.FindInFileSet(requestedPath.Replace('/', '\\')) ?? "-";
+                indexedResolved = mpqDataSource.FindInFileSet(resolvedPath.Replace('/', '\\')) ?? "-";
+            }
+            catch { }
+        }
+
+        ViewerLog.Error(ViewerLog.Category.General,
+            $"[DataSourceRead] Failed to read requested='{requestedPath}' resolved='{resolvedPath}' ext={ext} source={_dataSource?.GetType().Name ?? "<null>"} exists(requested)={requestedExists} exists(resolved)={resolvedExists} indexedRequested='{indexedRequested}' indexedResolved='{indexedResolved}'");
+    }
+
+    private void ReportAreaLookupDiagnostic(int areaId)
+    {
+        if (_areaTableService == null)
+            return;
+
+        string diagnostic = _areaTableService.DescribeLookup(areaId, _currentMapId);
+        if (_reportedAreaDiagnostics.Add(diagnostic))
+            ViewerLog.Important(ViewerLog.Category.General, diagnostic);
     }
 
     private static ModelContainerKind DetectModelContainer(byte[] modelBytes)
@@ -3959,6 +4240,7 @@ void main() {
         uint magic = BitConverter.ToUInt32(modelBytes, 0);
         if (magic == MdxHeaders.MAGIC) return ModelContainerKind.Mdlx;
         if (magic == 0x3032444D) return ModelContainerKind.Md20; // "MD20"
+        if (magic == 0x3132444D) return ModelContainerKind.Md21; // "MD21"
 
         return ModelContainerKind.Unknown;
     }
@@ -3972,6 +4254,7 @@ void main() {
         {
             MdxHeaders.MAGIC => "MDLX",
             0x3032444D => "MD20",
+            0x3132444D => "MD21",
             _ => $"0x{magic:X8}"
         };
     }
@@ -4013,9 +4296,10 @@ void main() {
                 return;
 
             case ModelContainerKind.Md20:
+            case ModelContainerKind.Md21:
                 if (ext == ".mdx" || ext == ".mdl")
                     ViewerLog.Important(ViewerLog.Category.Mdx,
-                        $"[ModelRouting] Extension/container mismatch: '{ext}' with MD20 root. Routing as M2-family: {Path.GetFileName(sourcePath)}");
+                        $"[ModelRouting] Extension/container mismatch: '{ext}' with {GetModelMagicLabel(modelBytes)} root. Routing as M2-family: {Path.GetFileName(sourcePath)}");
 
                 LoadM2FromBytes(modelBytes, sourcePath, dir);
                 return;
@@ -4198,6 +4482,224 @@ void main() {
         return false;
     }
 
+    private string ResolveStandaloneCanonicalModelPath(string sourcePath)
+    {
+        string normalizedPath = sourcePath.Replace('/', '\\');
+        if (_dataSource == null)
+            return normalizedPath;
+
+        if (_dataSource is not MpqDataSource mpqDataSource)
+            return normalizedPath;
+
+        foreach (string candidate in BuildStandaloneFileSetCandidates(normalizedPath))
+        {
+            string? found = mpqDataSource.FindInFileSet(candidate);
+            if (!string.IsNullOrWhiteSpace(found))
+                return found.Replace('/', '\\');
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(baseName))
+        {
+            string? indexed = mpqDataSource.FindByBaseName(baseName, GetLikelyStandaloneModelExtensions(normalizedPath));
+            if (!string.IsNullOrWhiteSpace(indexed))
+                return indexed.Replace('/', '\\');
+        }
+
+        foreach (string candidate in BuildStandaloneFileSetCandidates(normalizedPath))
+        {
+            if (_dataSource.FileExists(candidate))
+                return candidate.Replace('/', '\\');
+        }
+
+        return normalizedPath;
+    }
+
+    private string? ResolveBestStandaloneSkinPath(string resolvedModelPath)
+    {
+        if (_dataSource == null)
+            return null;
+
+        if (_standaloneSkinPathCache.TryGetValue(resolvedModelPath, out string? cachedPath))
+            return cachedPath;
+
+        string? bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(resolvedModelPath, _dataSource.GetFileList(".skin"));
+        _standaloneSkinPathCache[resolvedModelPath] = bestSkinPath;
+        return bestSkinPath;
+    }
+
+    private byte[]? ReadStandaloneFileData(string path)
+    {
+        if (File.Exists(path))
+            return File.ReadAllBytes(path);
+
+        if (_dataSource == null)
+            return null;
+
+        byte[]? data = _dataSource.ReadFile(path);
+        if (data != null && data.Length > 0)
+            return data;
+
+        string normalizedPath = path.Replace('/', '\\');
+        if (!normalizedPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+        {
+            data = _dataSource.ReadFile(normalizedPath);
+            if (data != null && data.Length > 0)
+                return data;
+        }
+
+        if (IsStandaloneModelPath(normalizedPath))
+        {
+            foreach (string candidate in BuildStandaloneFileSetCandidates(normalizedPath))
+            {
+                if (candidate.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                data = _dataSource.ReadFile(candidate);
+                if (data != null && data.Length > 0)
+                    return data;
+            }
+        }
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            foreach (string candidate in BuildStandaloneFileSetCandidates(normalizedPath))
+            {
+                string? found = mpqDataSource.FindInFileSet(candidate);
+                if (string.IsNullOrWhiteSpace(found))
+                    continue;
+
+                data = _dataSource.ReadFile(found);
+                if (data != null && data.Length > 0)
+                    return data;
+            }
+
+            string baseName = Path.GetFileNameWithoutExtension(normalizedPath);
+            if (!string.IsNullOrWhiteSpace(baseName))
+            {
+                string? indexed = mpqDataSource.FindByBaseName(baseName, GetLikelyStandaloneModelExtensions(normalizedPath));
+                if (!string.IsNullOrWhiteSpace(indexed))
+                {
+                    data = _dataSource.ReadFile(indexed);
+                    if (data != null && data.Length > 0)
+                        return data;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsStandaloneModelPath(string path)
+    {
+        string ext = Path.GetExtension(path);
+        return ext.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".m2", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<string> BuildStandaloneFileSetCandidates(string path)
+    {
+        yield return path;
+
+        foreach (string alternatePath in EnumerateStandaloneAlternateModelPaths(path))
+            yield return alternatePath;
+
+        string fileName = Path.GetFileName(path);
+        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(path, StringComparison.OrdinalIgnoreCase))
+        {
+            yield return fileName;
+
+            foreach (string alternatePath in EnumerateStandaloneAlternateModelPaths(fileName))
+                yield return alternatePath;
+        }
+
+        string baseName = Path.GetFileNameWithoutExtension(path);
+        if (!string.IsNullOrWhiteSpace(baseName))
+        {
+            yield return $"Creature\\{baseName}\\{baseName}.mdx";
+            yield return $"Creature\\{baseName}\\{baseName}.m2";
+            yield return $"Creature\\{baseName}\\{baseName}.mdl";
+        }
+    }
+
+    private byte[]? ConvertStandaloneM2ToMdx(byte[] m2Bytes, string resolvedModelPath)
+    {
+        try
+        {
+            byte[]? skinBytes = null;
+            foreach (string skinPath in WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                skinBytes = ReadStandaloneFileData(skinPath);
+                if (skinBytes != null && skinBytes.Length > 0)
+                    break;
+            }
+
+            if ((skinBytes == null || skinBytes.Length == 0) && _dataSource != null)
+            {
+                string? bestSkinPath = ResolveBestStandaloneSkinPath(resolvedModelPath);
+                if (!string.IsNullOrWhiteSpace(bestSkinPath))
+                    skinBytes = ReadStandaloneFileData(bestSkinPath);
+            }
+
+            var converter = new M2ToMdxConverter();
+            return converter.ConvertToBytes(m2Bytes, skinBytes, _dbcBuild);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] Standalone M2->MDX converter fallback failed for {Path.GetFileName(resolvedModelPath)}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateStandaloneAlternateModelPaths(string path)
+    {
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^4] + ".m2";
+            yield return path[..^4] + ".mdl";
+            yield break;
+        }
+
+        if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^4] + ".mdx";
+            yield return path[..^4] + ".m2";
+            yield break;
+        }
+
+        if (path.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return path[..^3] + ".mdx";
+            yield return path[..^3] + ".mdl";
+        }
+    }
+
+    private static IEnumerable<string> GetLikelyStandaloneModelExtensions(string path)
+    {
+        string ext = Path.GetExtension(path);
+        if (ext.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".m2";
+            yield return ".mdx";
+            yield return ".mdl";
+            yield break;
+        }
+
+        if (ext.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdl";
+            yield return ".mdx";
+            yield return ".m2";
+            yield break;
+        }
+
+        yield return ".mdx";
+        yield return ".m2";
+        yield return ".mdl";
+    }
+
     /// <summary>
     /// Detect WMO version by reading the MVER chunk from the file.
     /// Returns 14 for Alpha, 17 for standard WotLK+, or 0 if detection fails.
@@ -4361,7 +4863,8 @@ void main() {
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Failed to load {entry.Name}: {ex.Message}";
+            LogLoadFailure("CatalogLoad", resolvedPath, ex, isWmo ? null : data);
+            _statusMessage = $"Failed to load {entry.Name}: {BuildStatusExceptionSummary(ex)}";
             _modelInfo = "";
         }
     }
@@ -4374,19 +4877,38 @@ void main() {
         _loadedFileName = Path.GetFileName(virtualPath);
         _lastVirtualPath = virtualPath;
 
+        string resolvedVirtualPath = virtualPath;
+        string ext = Path.GetExtension(virtualPath).ToLowerInvariant();
+        byte[]? data = null;
+
         try
         {
-            var data = _dataSource.ReadFile(virtualPath);
+            if (ext is ".mdx" or ".mdl" or ".m2")
+            {
+                resolvedVirtualPath = ResolveStandaloneCanonicalModelPath(virtualPath);
+                data = ReadStandaloneFileData(resolvedVirtualPath);
+                if ((data == null || data.Length == 0) && !resolvedVirtualPath.Equals(virtualPath, StringComparison.OrdinalIgnoreCase))
+                    data = ReadStandaloneFileData(virtualPath);
+            }
+            else
+            {
+                data = _dataSource.ReadFile(virtualPath);
+            }
+
             if (data == null || data.Length == 0)
             {
-                _statusMessage = $"Failed to read: {virtualPath}";
+                LogDataSourceReadFailure(virtualPath, resolvedVirtualPath, ext);
+                _statusMessage = resolvedVirtualPath.Equals(virtualPath, StringComparison.OrdinalIgnoreCase)
+                    ? $"Failed to read: {virtualPath}"
+                    : $"Failed to read: {virtualPath} (resolved: {resolvedVirtualPath})";
                 return;
             }
 
             _renderer?.Dispose();
             _renderer = null;
 
-            var ext = Path.GetExtension(virtualPath).ToLowerInvariant();
+            _lastVirtualPath = resolvedVirtualPath;
+            _loadedFileName = Path.GetFileName(resolvedVirtualPath);
 
             // Write to cache folder for parsers that expect file paths
             Directory.CreateDirectory(CacheDir);
@@ -4398,7 +4920,8 @@ void main() {
             {
                 case ".mdx":
                 case ".m2":
-                    LoadModelFromBytesWithContainerProbe(data, virtualPath, CacheDir, "DataSource");
+                case ".mdl":
+                    LoadModelFromBytesWithContainerProbe(data, resolvedVirtualPath, CacheDir, "DataSource");
                     break;
 
                 case ".wmo":
@@ -4418,7 +4941,9 @@ void main() {
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Load failed: {ex.Message}";
+            LogLoadFailure("DataSourceLoad", resolvedVirtualPath, ex,
+                ext is ".mdx" or ".mdl" or ".m2" ? data : null);
+            _statusMessage = $"Load failed: {BuildStatusExceptionSummary(ex)}";
             _modelInfo = "";
         }
     }
@@ -4476,7 +5001,7 @@ void main() {
         int totalVerts = wmo.Groups.Sum(g => g.Vertices.Count);
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 
-        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver);
+        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -4571,7 +5096,7 @@ void main() {
             if (isAlpha)
             {
                 // Alpha WDT: monolithic file with embedded ADTs
-                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver,
+                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver, _dbcBuild,
                     onStatus: OnLoadStatus);
                 wdtType = "Alpha WDT";
             }
@@ -4589,7 +5114,7 @@ void main() {
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
                 var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
-                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver,
+                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild,
                     onStatus: OnLoadStatus);
                 wdtType = "Standard WDT";
             }
@@ -4618,6 +5143,9 @@ void main() {
             var curMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = curMapDef?.Id ?? -1;
+            _reportedAreaDiagnostics.Clear();
+            ViewerLog.Important(ViewerLog.Category.General,
+                $"[WorldLoad] Map='{curMapName}' resolvedMapId={_currentMapId} build={_dbcBuild ?? "unknown"} areaTable={_areaTableService?.DescribeLoadContext() ?? "not loaded"}");
             _sqlForceStreamRefresh = true;
 
             // Store DBC credentials for lazy loading (POI + Taxi deferred until user toggles them on)
@@ -4920,6 +5448,8 @@ void main() {
         SaveViewerSettings();
 
         _loadingScreen?.Dispose();
+        _wdlPreviewCacheService?.Dispose();
+        _wdlPreviewRenderer?.Dispose();
         _sqlPopulationService?.Dispose();
         _renderer?.Dispose();
         _worldScene?.Dispose();

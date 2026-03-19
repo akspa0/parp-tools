@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using MdxViewer.Terrain;
 
 namespace MdxViewer;
 
@@ -16,7 +17,13 @@ public partial class ViewerApp
             return;
         }
 
-        // Show error dialog if preview failed to load
+        if (!_wdlPreviewRenderer.HasPreview)
+        {
+            TryLoadSelectedWdlPreviewFromCache(_selectedMapForPreview.Directory);
+        }
+
+        var previewState = GetSelectedWdlPreviewState();
+
         if (!_wdlPreviewRenderer.HasPreview)
         {
             ImGui.SetNextWindowSize(new Vector2(400, 150), ImGuiCond.FirstUseEver);
@@ -24,11 +31,29 @@ public partial class ViewerApp
                 ImGui.GetIO().DisplaySize.X / 2 - 200,
                 ImGui.GetIO().DisplaySize.Y / 2 - 75), ImGuiCond.FirstUseEver);
 
-            if (ImGui.Begin($"WDL Preview Error - {_selectedMapForPreview.Name}", ref _showWdlPreview))
+            string title = previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued
+                ? $"Preparing Map Preview - {_selectedMapForPreview.Name}"
+                : $"WDL Preview Error - {_selectedMapForPreview.Name}";
+
+            if (ImGui.Begin(title, ref _showWdlPreview))
             {
-                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Failed to load WDL preview.");
-                if (_wdlPreviewRenderer.LastError != null)
-                    ImGui.TextWrapped(_wdlPreviewRenderer.LastError);
+                if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
+                {
+                    ImGui.TextWrapped("Preparing the WDL heightmap preview for this map.");
+                    if (!string.IsNullOrEmpty(_wdlPreviewWarmupStatus))
+                    {
+                        ImGui.Spacing();
+                        ImGui.TextWrapped(_wdlPreviewWarmupStatus);
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Failed to load WDL preview.");
+                    var error = GetSelectedWdlPreviewError();
+                    if (!string.IsNullOrEmpty(error))
+                        ImGui.TextWrapped(error);
+                }
+
                 ImGui.Separator();
                 if (ImGui.Button("Close"))
                     _showWdlPreview = false;
@@ -47,57 +72,45 @@ public partial class ViewerApp
             ImGui.TextWrapped("Click on the map preview to select a spawn point, then click 'Load Map' to start at that location.");
             ImGui.Separator();
 
-            // Preview image
             float previewSize = 512f;
             var cursorPos = ImGui.GetCursorScreenPos();
-            
-            // Draw the WDL preview texture
+
             ImGui.Image((nint)_wdlPreviewRenderer.TextureId, new Vector2(previewSize, previewSize));
 
-            // Handle mouse clicks on the preview
             if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var mousePos = ImGui.GetMousePos();
                 var relativePos = mousePos - cursorPos;
-                
-                // Scale to texture coordinates
+
                 float scaleX = _wdlPreviewRenderer.Width / previewSize;
                 float scaleY = _wdlPreviewRenderer.Height / previewSize;
                 var texturePos = new Vector2(relativePos.X * scaleX, relativePos.Y * scaleY);
 
-                // Convert to tile coordinates
                 var tile = _wdlPreviewRenderer.PixelToTile(texturePos);
                 if (tile.HasValue)
-                {
                     _selectedSpawnTile = new Vector2(tile.Value.tileX, tile.Value.tileY);
-                }
             }
 
-            // Draw selected spawn point marker
             if (_selectedSpawnTile.HasValue)
             {
                 var drawList = ImGui.GetWindowDrawList();
                 float tileSize = previewSize / 64f;
                 float markerX = cursorPos.X + (_selectedSpawnTile.Value.X + 0.5f) * tileSize;
                 float markerY = cursorPos.Y + (_selectedSpawnTile.Value.Y + 0.5f) * tileSize;
-                
-                // Draw crosshair
+
                 uint color = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0f, 0f, 1f));
                 float crossSize = 10f;
                 drawList.AddLine(new Vector2(markerX - crossSize, markerY), new Vector2(markerX + crossSize, markerY), color, 2f);
                 drawList.AddLine(new Vector2(markerX, markerY - crossSize), new Vector2(markerX, markerY + crossSize), color, 2f);
-                
-                // Draw circle around it
                 drawList.AddCircle(new Vector2(markerX, markerY), tileSize * 0.5f, color, 16, 2f);
             }
 
             ImGui.Separator();
 
-            // Spawn point info
             if (_selectedSpawnTile.HasValue)
             {
                 ImGui.Text($"Selected Tile: ({_selectedSpawnTile.Value.X:F0}, {_selectedSpawnTile.Value.Y:F0})");
-                
+
                 var worldPos = _wdlPreviewRenderer.TileToWorldPosition((int)_selectedSpawnTile.Value.X, (int)_selectedSpawnTile.Value.Y);
                 ImGui.Text($"World Position: ({worldPos.X:F1}, {worldPos.Y:F1}, {worldPos.Z:F1})");
             }
@@ -108,36 +121,32 @@ public partial class ViewerApp
 
             ImGui.Separator();
 
-            // Action buttons
             bool canLoad = _selectedMapForPreview.HasWdt && _selectedSpawnTile.HasValue;
             if (!canLoad) ImGui.BeginDisabled();
-            
+
             if (ImGui.Button("Load Map at Selected Point", new Vector2(-1, 0)))
             {
-                // Load the map and teleport to selected spawn point
                 string wdtPath = $"World\\Maps\\{_selectedMapForPreview.Directory}\\{_selectedMapForPreview.Directory}.wdt";
                 LoadFileFromDataSource(wdtPath);
-                
-                // Teleport camera to selected spawn point after a short delay (let map load first)
+
                 if (_selectedSpawnTile.HasValue && _wdlPreviewRenderer != null)
                 {
                     var spawnPos = _wdlPreviewRenderer.TileToWorldPosition(
-                        (int)_selectedSpawnTile.Value.X, 
+                        (int)_selectedSpawnTile.Value.X,
                         (int)_selectedSpawnTile.Value.Y);
-                    
-                    // Set camera position
+
                     _camera.Position = spawnPos;
                 }
-                
+
                 _showWdlPreview = false;
             }
-            
+
             if (!canLoad) ImGui.EndDisabled();
 
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled) && !canLoad)
             {
-                ImGui.SetTooltip(_selectedSpawnTile.HasValue 
-                    ? "WDT file not found for this map" 
+                ImGui.SetTooltip(_selectedSpawnTile.HasValue
+                    ? "WDT file not found for this map"
                     : "Select a spawn point on the map first");
             }
 
@@ -147,7 +156,6 @@ public partial class ViewerApp
                 _showWdlPreview = false;
             }
 
-            // Legend
             ImGui.Separator();
             ImGui.Text("Color Legend:");
             ImGui.SameLine();

@@ -40,17 +40,9 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public bool Load(IDataSource dataSource, string mapDirectory)
     {
-        string wdlPath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}.wdl";
-        byte[]? wdlBytes = dataSource.ReadFile(wdlPath);
-
-        // Alpha 0.5.3: WDL stored as .wdl.mpq
-        if (wdlBytes == null || wdlBytes.Length == 0)
-        {
-            wdlPath += ".mpq";
-            wdlBytes = dataSource.ReadFile(wdlPath);
-        }
-
-        if (wdlBytes == null || wdlBytes.Length == 0)
+        if (!WdlDataSourceResolver.TryReadWdlBytes(dataSource, mapDirectory, out byte[]? wdlBytes, out string? resolvedPath)
+            || wdlBytes == null
+            || wdlBytes.Length == 0)
         {
             ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL 3D] No WDL data for {mapDirectory}");
             return false;
@@ -62,6 +54,9 @@ public class WdlTerrainRenderer : IDisposable
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[WDL 3D] Failed to parse WDL for {mapDirectory}");
             return false;
         }
+
+        if (!string.IsNullOrWhiteSpace(resolvedPath))
+            ViewerLog.Info(ViewerLog.Category.Terrain, $"[WDL 3D] Loaded {mapDirectory} from {resolvedPath}");
 
         int built = 0;
         for (int tileY = 0; tileY < 64; tileY++)

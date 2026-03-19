@@ -106,6 +106,103 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- later-version encrypted MPQ entries
 	- 3.x MCCV highlight/tint behavior on real LK terrain after the BGRA + mid-gray semantic correction
 
+### WDL + Model Compatibility Follow-up (Mar 18)
+
+- Follow-up after runtime feedback on the newly ported WDL preview cache:
+	- the main WDL failure on 1.x/3.x was not only path lookup; `WoWMapConverter.Core.VLM.WdlParser` hard-rejected every non-`0x12` WDL
+	- parser is now version-tolerant and scans for `MAOF`/`MARE` instead of requiring Alpha-only layout assumptions
+	- parser also tolerates MAOF offsets that point either at a `MARE` chunk header or directly at the height payload
+- Viewer-side WDL read paths are now unified through `WdlDataSourceResolver`:
+	- both preview warmup and 3D WDL terrain now try `.wdl` and `.wdl.mpq`
+	- MPQ-backed loads also use `MpqDataSource.FindInFileSet(...)` so listfile/casing recovery works consistently
+- Remaining 3.x doodad extension parity gap closed in `WmoRenderer`:
+	- canonical doodad resolution now tries `.m2` in addition to `.mdx`/`.mdl`
+- Semi-translucent model follow-up in `ModelRenderer`:
+	- shared texture cache entries now carry a simple alpha classification (`Opaque`, `Binary`, `Translucent`)
+	- classic non-M2 layer-0 `Transparent` now stays on the hard alpha-cutout path only when the loaded texture alpha is binary
+	- textures with intermediate alpha values now render through the blended path instead of the old foliage-style cutout heuristic
+- Build gate passed after this batch:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Runtime validation is still required before claiming:
+	- non-Alpha WDL previews / WDL 3D terrain actually load on the user's real 1.x/3.x map set
+	- 3.x `.mdx` WMO doodads now resolve correctly as M2-family assets on real data
+	- the semi-translucent material heuristic fixes the reported visuals without regressing classic cutout foliage
+
+### M2 Empty-Fallback Guardrail (Mar 18)
+
+- Follow-up after the standalone 3.x model-load freeze fix: some M2-family assets could still appear to load while producing a blank viewport and model info with zero geometry.
+- Current conclusion is narrow:
+	- this is at least partly a false-positive success path, not necessarily a valid render of an odd pre-release asset
+	- raw `MD20` fallback conversion can yield an `MDX` shell that parses but has no renderable geosets
+- Recovery change applied:
+	- shared geometry validation added for converted M2 fallback results
+	- standalone `ViewerApp`, world `WorldAssetManager`, and WMO doodad `WmoRenderer` now reject empty converted fallback models and keep the real failure path visible in logs
+- Validation status:
+	- alternate-OutDir build passed: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+	- no runtime real-data validation yet
+	- do not over-claim this as a full M2 render fix for pre-release `3.0.1`; it is a guardrail that removes a misleading blank-success outcome
+
+### Pre-release 3.0.1 M2 + Shared Transparency Follow-up (Mar 18)
+
+- User runtime verification now narrows the remaining model issue further:
+	- most unresolved M2 failures are specific to the pre-release `3.0.1` model family, not the later `3.3.5` layout
+	- the active working assumption is that this pre-release family may be a hybrid or transitional `MDX` + `M2` variant rather than a clean later-WotLK `M2`
+- Treat this as a separate compatibility track:
+	- do not assume later `3.3.5` `MD20` / `.skin` semantics are sufficient for pre-release `3.0.1`
+	- keep profile/version-aware model parsing on the roadmap instead of broadening generic fallback heuristics
+	- the empty-fallback guardrail remains useful, but it is only a diagnostics fix
+- Separate rendering issue still confirmed by runtime evidence:
+	- neon-pink transparent surfaces still reproduce on both classic `MDX` and M2-family assets
+	- that means the pink/transparency bug is not only an M2 parser problem; it is likely in shared material, texture binding, blend, or shader behavior
+- Practical next investigation split:
+	1. pre-release `3.0.1` model-structure compatibility in `WarcraftNetM2Adapter` / profile routing
+	2. shared transparent-material shader parity across `ModelRenderer` and any M2-converted runtime path
+
+### Pre-release 3.0.1 wow.exe Guide Handoff (Mar 19)
+
+- Latest Ghidra pass mapped the common model load chain in `wow.exe` build `3.0.1.8303`:
+	- `FUN_0077e2c0` -> `FUN_0077d3c0` -> `FUN_0079bc70` -> `FUN_0079bc50` -> `FUN_0079bb30` -> `FUN_0079a8c0`
+- High-confidence parser contract now documented in `documentation/pre-release-3.0.1-m2-wow-exe-guide.md`:
+	- root must be `MD20`
+	- accepted version range is `0x104..0x108`
+	- parser layout splits at `0x108`
+	- shared typed span validators use strides `1`, `2`, `4`, `8`, `0x0C`, `0x30`, and `0x44`
+	- confirmed nested record families include `0x70`, `0x2C`, `0x38`, `0xD4`, and `0x7C`
+	- legacy side uses `0xDC` + `0x1F8`; later side uses `0xE0` + `0x234`
+- Fresh-chat prompts now exist for implementation, deeper Ghidra follow-up, and runtime triage:
+	- `.github/prompts/pre-release-3-0-1-m2-implementation-plan.prompt.md`
+	- `.github/prompts/pre-release-3-0-1-m2-ghidra-followup.prompt.md`
+	- `.github/prompts/pre-release-3-0-1-m2-runtime-triage.prompt.md`
+- Do not treat the guide as proof that viewer support is implemented yet:
+	- no new runtime validation happened in this documentation pass
+	- Track B pink transparency remains separate
+
+### Pre-release 3.0.1 Profile Routing Broadening (Mar 19)
+
+- Active profile resolution is no longer restricted to exact build `3.0.1.8303`.
+- `FormatProfileRegistry` now maps any parsed `3.0.1.x` build to the existing pre-release `3.0.1` ADT, WMO, and M2 profiles.
+- Keep the scope narrow:
+	- this is profile routing, not full parser completion for every remaining pre-release `3.0.1` model difference
+	- other `3.0.x` builds still use the generic `3.0.x` fallback profile unless new binary evidence justifies a tighter mapping
+- Validation status:
+	- code change applied
+	- build/runtime validation still pending for this exact routing update
+
+### Pre-release 3.0.1 Parser + Fallback Alignment (Mar 19)
+
+- `WarcraftNetM2Adapter` now has a dedicated pre-release `MD20` parse path based on the wow.exe contract instead of routing those files through Warcraft.NET's later-layout `MD21` parser.
+- Current scope of the fix:
+	- standalone model load
+	- world doodad load
+	- WMO doodad load
+	- shared `M2ToMdxConverter` fallback for those entry points
+- Important implementation boundary:
+	- the prior profile-specific `.skin` parser path was disabled because its `0x70` / `0x2C` record-size assumptions were lifted from model-family validation, not proven `.skin` layout evidence
+	- converter fallback now keeps pre-release handling geometry-focused by skipping later-layout animation / bone parsing and by not forcing optional fixed-stride `.skin` submesh / texture-unit parsing
+- Current residual risk:
+	- runtime validation on real `3.0.1` assets is still outstanding
+	- active MPQ build selection still relies on path/build inference unless a more explicit selector is ported later
+
 ### 3.x Alpha Follow-up (Mar 18)
 
 - The LK offset-0 fallback experiment in `StandardTerrainAdapter.ExtractAlphaMaps(...)` was reverted after runtime validation showed it was wrong for the active 3.x terrain path.

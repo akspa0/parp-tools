@@ -212,6 +212,7 @@ public class WorldScene : ISceneRenderer
         _dbdDir = dbdDir;
         _dbcBuild = build;
         _mapId = mapId;
+        _assets.SetBuildVersion(build);
     }
 
     private void LazyLoadWlLiquids()
@@ -272,11 +273,13 @@ public class WorldScene : ISceneRenderer
 
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
+        string? buildVersion = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
-        _assets = new WorldAssetManager(gl, dataSource, texResolver);
+        _dbcBuild = buildVersion;
+        _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
 
@@ -292,11 +295,13 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     public WorldScene(GL gl, TerrainManager terrainManager, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
+        string? buildVersion = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
-        _assets = new WorldAssetManager(gl, dataSource, texResolver);
+        _dbcBuild = buildVersion;
+        _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
         _terrainManager = terrainManager;

@@ -167,6 +167,19 @@ New feature planned: turn MdxViewer into an MCP server that external application
 - Chat UI via ImGui overlay
 - Phased: (1) server + GLB terrain + spawn, (2) click + chat, (3) audio + movement
 
+## Mar 18, 2026 - Current Model Rendering Handoff
+
+- The empty-fallback guardrail remains in place: converted M2-family fallback models are rejected when they contain no renderable geometry.
+- User runtime verification now narrows the remaining format issue:
+	- most unresolved M2 failures are specific to the pre-release `3.0.1` model family
+	- treat that family as a possible hybrid or transitional `MDX` + `M2` path rather than assuming later `3.3.5` semantics
+- Separate shared rendering defect still remains open:
+	- neon-pink transparent surfaces still reproduce on both `MDX` and M2-family assets
+	- treat that as shared material / texture / blend / shader work, not just parser work
+- Next split for follow-up work:
+	1. version-aware pre-release `3.0.1` model routing and parsing
+	2. shared transparent-surface parity audit in renderer code
+
 ## Detailed Fix Log
 
 ### 2026-02-09 Late Evening — Performance, Fog, Culling, Failed MDX Fix

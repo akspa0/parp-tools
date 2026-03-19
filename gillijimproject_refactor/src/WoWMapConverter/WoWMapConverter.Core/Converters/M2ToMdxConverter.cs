@@ -13,7 +13,7 @@ public class M2ToMdxConverter
     /// <summary>
     /// Convert an M2 file to MDX format.
     /// </summary>
-    public void Convert(string m2Path, string mdxOutputPath)
+    public void Convert(string m2Path, string mdxOutputPath, string? buildVersion = null)
     {
         try
         {
@@ -22,7 +22,7 @@ public class M2ToMdxConverter
             using var m2Stream = File.OpenRead(m2Path);
             using var reader = new BinaryReader(m2Stream);
 
-            var m2Data = ParseM2(reader);
+            var m2Data = ParseM2(reader, buildVersion);
 
             // Try to load .skin file
             var skinPath = Path.ChangeExtension(m2Path, "00.skin");
@@ -50,14 +50,14 @@ public class M2ToMdxConverter
     /// <summary>
     /// Convert M2 bytes to MDX bytes in memory.
     /// </summary>
-    public byte[] ConvertToBytes(byte[] m2Bytes, byte[]? skinBytes = null)
+    public byte[] ConvertToBytes(byte[] m2Bytes, byte[]? skinBytes = null, string? buildVersion = null)
     {
         try
         {
             using var m2Stream = new MemoryStream(m2Bytes);
             using var reader = new BinaryReader(m2Stream);
 
-            var m2Data = ParseM2(reader);
+            var m2Data = ParseM2(reader, buildVersion);
 
             if (skinBytes != null)
             {
@@ -79,7 +79,7 @@ public class M2ToMdxConverter
         }
     }
 
-    private M2Data ParseM2(BinaryReader reader)
+    private M2Data ParseM2(BinaryReader reader, string? buildVersion)
     {
         var data = new M2Data();
 
@@ -89,6 +89,9 @@ public class M2ToMdxConverter
             throw new InvalidDataException($"Invalid M2 magic: 0x{magic:X8}");
 
         data.Version = reader.ReadUInt32();
+        bool usePreRelease301Layout = IsPreRelease301Build(buildVersion)
+            && data.Version >= 0x104
+            && data.Version <= 0x108;
 
         // Name
         var nameLen = reader.ReadUInt32();
@@ -231,7 +234,7 @@ public class M2ToMdxConverter
             }
         }
 
-        if (animCount > 0 && animOfs > 0)
+        if (!usePreRelease301Layout && animCount > 0 && animOfs > 0)
         {
             ValidateTableRange("animations", animCount, animOfs, 0x40, reader.BaseStream.Length);
             reader.BaseStream.Position = animOfs;
@@ -259,7 +262,7 @@ public class M2ToMdxConverter
             }
         }
 
-        if (boneCount > 0 && boneOfs > 0)
+        if (!usePreRelease301Layout && boneCount > 0 && boneOfs > 0)
         {
             ValidateTableRange("bones", boneCount, boneOfs, 0x58, reader.BaseStream.Length);
             reader.BaseStream.Position = boneOfs;
@@ -325,59 +328,24 @@ public class M2ToMdxConverter
                 data.SkinTriangles[i] = reader.ReadUInt16();
         }
 
-        // Read submeshes
-        if (submeshCount > 0 && submeshOfs > 0)
-        {
-            ValidateTableRange("skin.submeshes", submeshCount, submeshOfs, 0x30, reader.BaseStream.Length);
-            reader.BaseStream.Position = submeshOfs;
-            data.Submeshes = new M2Submesh[submeshCount];
-            for (int i = 0; i < submeshCount; i++)
-            {
-                data.Submeshes[i] = new M2Submesh
-                {
-                    Id = reader.ReadUInt16(),
-                    Level = reader.ReadUInt16(),
-                    StartVertex = reader.ReadUInt16(),
-                    VertexCount = reader.ReadUInt16(),
-                    StartTriangle = reader.ReadUInt16(),
-                    TriangleCount = reader.ReadUInt16(),
-                    BoneCount = reader.ReadUInt16(),
-                    StartBone = reader.ReadUInt16(),
-                    BoneInfluences = reader.ReadUInt16(),
-                    RootBone = reader.ReadUInt16(),
-                    CenterMass = ReadVector3(reader),
-                    CenterBoundingBox = ReadVector3(reader),
-                    Radius = reader.ReadSingle()
-                };
-            }
-        }
+        _ = propCount;
+        _ = propOfs;
+        _ = submeshCount;
+        _ = submeshOfs;
+        _ = texUnitCount;
+        _ = texUnitOfs;
+    }
 
-        // Read texture units
-        if (texUnitCount > 0 && texUnitOfs > 0)
-        {
-            ValidateTableRange("skin.textureUnits", texUnitCount, texUnitOfs, 0x18, reader.BaseStream.Length);
-            reader.BaseStream.Position = texUnitOfs;
-            data.TextureUnits = new M2TextureUnit[texUnitCount];
-            for (int i = 0; i < texUnitCount; i++)
-            {
-                data.TextureUnits[i] = new M2TextureUnit
-                {
-                    Flags = reader.ReadUInt16(),
-                    Priority = reader.ReadUInt16(),
-                    ShaderId = reader.ReadUInt16(),
-                    SkinSectionIndex = reader.ReadUInt16(),
-                    GeosetIndex = reader.ReadUInt16(),
-                    ColorIndex = reader.ReadInt16(),
-                    MaterialIndex = reader.ReadUInt16(),
-                    MaterialLayer = reader.ReadUInt16(),
-                    TextureCount = reader.ReadUInt16(),
-                    TextureLookup = reader.ReadUInt16(),
-                    TextureUnitLookup = reader.ReadUInt16(),
-                    TransparencyLookup = reader.ReadUInt16(),
-                    TextureAnimLookup = reader.ReadUInt16()
-                };
-            }
-        }
+    private static bool IsPreRelease301Build(string? buildVersion)
+    {
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            return false;
+
+        string[] parts = buildVersion.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length >= 3
+            && parts[0] == "3"
+            && parts[1] == "0"
+            && parts[2] == "1";
     }
 
     private static void ValidateTableRange(string tableName, uint count, uint offset, uint stride, long streamLength)

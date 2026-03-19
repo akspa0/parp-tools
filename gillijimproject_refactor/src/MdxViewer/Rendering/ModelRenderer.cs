@@ -20,6 +20,20 @@ internal static class MdxTextureDiagnosticLogger
         lock (_lock)
         {
             _logWriter?.Dispose();
+            string? setting = Environment.GetEnvironmentVariable("PARP_MDX_TEXTURE_DIAG");
+            if (string.IsNullOrWhiteSpace(setting))
+            {
+                _logWriter = null;
+                return;
+            }
+
+            if (!string.Equals(setting, "1", StringComparison.OrdinalIgnoreCase) &&
+                !mdxName.Contains(setting, StringComparison.OrdinalIgnoreCase))
+            {
+                _logWriter = null;
+                return;
+            }
+
             var logPath = Path.Combine("output", $"mdx_texture_diagnostic_{mdxName}_{DateTime.Now:yyyyMMdd_HHmmss}.log");
             Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
             _logWriter = new StreamWriter(logPath, false) { AutoFlush = true };
@@ -86,6 +100,8 @@ public class MdxRenderer : ISceneRenderer
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
+    private readonly Dictionary<int, string> _textureCacheKeys = new();
+    private readonly Dictionary<int, TextureAlphaKind> _textureAlphaKinds = new();
     private bool _wireframe;
     private MdxAnimator? _animator;
     private DateTime _lastFrameTime = DateTime.UtcNow;
@@ -93,6 +109,23 @@ public class MdxRenderer : ISceneRenderer
     // ── Particle system ──
     private readonly List<ParticleEmitter> _particleEmitters = new();
     private static ParticleRenderer? _particleRenderer;
+
+    private static readonly object SharedTextureCacheLock = new();
+    private static readonly Dictionary<string, SharedTextureEntry> SharedTextureCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private enum TextureAlphaKind
+    {
+        Opaque,
+        Binary,
+        Translucent,
+    }
+
+    private sealed class SharedTextureEntry
+    {
+        public uint TextureId;
+        public int RefCount;
+        public TextureAlphaKind AlphaKind;
+    }
 
     // ── Geoset animation alpha cache (evaluated per-frame) ──
     private readonly Dictionary<int, float> _geosetAlphaOverrides = new();
@@ -509,7 +542,7 @@ public class MdxRenderer : ISceneRenderer
                     // M2-derived world models often use layer-0 Transparent in ways that do not behave
                     // like classic MDX hard-cutout foliage. For those models, treat Transparent as standard
                     // blended rendering instead of a 0.75 alpha-discard path.
-                    bool isAlphaCutout = !_isM2AdapterModel && l == 0 && layer.BlendMode == MdlTexOp.Transparent;
+                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, layer.BlendMode);
                     bool needsBlend = !isAlphaCutout && (l > 0 || layer.BlendMode != MdlTexOp.Load);
 
                     // Filter by render pass — alpha cutout renders in opaque pass
@@ -1239,6 +1272,8 @@ void main() {
 
             byte[]? blpData = null;
             string loadSource = "";
+            string? textureCachePath = null;
+            string textureCachePrefix = "mpq-blp";
 
             // Try to find the actual path in the file set (case-insensitive)
             string? actualPath = null;
@@ -1258,6 +1293,7 @@ void main() {
                     {
                         texPath = actualPath; // Use the correctly-cased path
                         loadSource = "MPQ (file set match)";
+                        textureCachePath = texPath;
                     }
                 }
                 
@@ -1268,6 +1304,7 @@ void main() {
                     if (blpData != null)
                     {
                         loadSource = "MPQ (original path)";
+                        textureCachePath = texPath;
                     }
                 }
                 
@@ -1280,6 +1317,7 @@ void main() {
                     {
                         texPath = normalized;
                         loadSource = "MPQ (normalized path)";
+                        textureCachePath = texPath;
                     }
                 }
                 
@@ -1298,6 +1336,7 @@ void main() {
                         {
                             texPath = actualPath;
                             loadSource = "MPQ (lowercase match)";
+                            textureCachePath = texPath;
                         }
                     }
                 }
@@ -1317,6 +1356,7 @@ void main() {
                         {
                             texPath = actualPath;
                             loadSource = "MPQ (uppercase match)";
+                            textureCachePath = texPath;
                         }
                     }
                 }
@@ -1342,6 +1382,7 @@ void main() {
                                 {
                                     texPath = foundPath;
                                     loadSource = "MPQ (model dir match)";
+                                    textureCachePath = texPath;
                                 }
                             }
                         }
@@ -1353,6 +1394,7 @@ void main() {
                             {
                                 texPath = altPath;
                                 loadSource = "MPQ (model dir)";
+                                textureCachePath = texPath;
                             }
                         }
                     }
@@ -1367,6 +1409,8 @@ void main() {
                 {
                     blpData = File.ReadAllBytes(blpLocal);
                     loadSource = "Local BLP";
+                    textureCachePath = blpLocal;
+                    textureCachePrefix = "disk-blp";
                 }
             }
 
@@ -1377,10 +1421,13 @@ void main() {
                 string pngPath = Path.Combine(_modelDir, pngName);
                 if (File.Exists(pngPath))
                 {
-                    uint glTex = LoadTextureFromPng(pngPath);
-                    if (glTex != 0)
+                    string pngCacheKey = BuildTextureCacheKey("png", pngPath, clampS: false, clampT: false);
+                    SharedTextureEntry? textureEntry = AcquireSharedTexture(pngCacheKey, () => LoadTextureFromPng(pngPath));
+                    if (textureEntry != null)
                     {
-                        _textures[i] = glTex;
+                        _textures[i] = textureEntry.TextureId;
+                        _textureCacheKeys[i] = pngCacheKey;
+                        _textureAlphaKinds[i] = textureEntry.AlphaKind;
                         ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - loaded");
                         loaded++;
                     }
@@ -1405,10 +1452,13 @@ void main() {
                 MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
                 MdxTextureDiagnosticLogger.Log($"  Source: {loadSource}, Size: {blpData.Length} bytes");
                 
-                uint glTex = LoadTextureFromBlp(blpData, texPath, clampS, clampT);
-                if (glTex != 0)
+                string cacheKey = BuildTextureCacheKey(textureCachePrefix, textureCachePath ?? texPath, clampS, clampT);
+                SharedTextureEntry? textureEntry = AcquireSharedTexture(cacheKey, () => LoadTextureFromBlp(blpData, texPath, clampS, clampT));
+                if (textureEntry != null)
                 {
-                    _textures[i] = glTex;
+                    _textures[i] = textureEntry.TextureId;
+                    _textureCacheKeys[i] = cacheKey;
+                    _textureAlphaKinds[i] = textureEntry.AlphaKind;
                     ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource})" +
                         (clampS || clampT ? $" [clamp S={clampS} T={clampT}]" : ""));
                     loaded++;
@@ -1428,6 +1478,64 @@ void main() {
 
         ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
         MdxTextureDiagnosticLogger.Close();
+    }
+
+    private static string BuildTextureCacheKey(string prefix, string path, bool clampS, bool clampT)
+    {
+        string normalizedPath = path.Replace('/', '\\').ToLowerInvariant();
+        return $"{prefix}|{normalizedPath}|s={(clampS ? 1 : 0)}|t={(clampT ? 1 : 0)}";
+    }
+
+    private SharedTextureEntry? AcquireSharedTexture(string cacheKey, Func<SharedTextureEntry?> textureFactory)
+    {
+        lock (SharedTextureCacheLock)
+        {
+            if (SharedTextureCache.TryGetValue(cacheKey, out var existing))
+            {
+                existing.RefCount++;
+                return existing;
+            }
+
+            SharedTextureEntry? created = textureFactory();
+            if (created == null || created.TextureId == 0)
+                return null;
+
+            created.RefCount = 1;
+            SharedTextureCache[cacheKey] = created;
+            return created;
+        }
+    }
+
+    private bool ShouldUseAlphaCutout(int layerIndex, int textureId, MdlTexOp blendMode)
+    {
+        if (_isM2AdapterModel || layerIndex != 0 || blendMode != MdlTexOp.Transparent)
+            return false;
+
+        return GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
+    }
+
+    private TextureAlphaKind GetTextureAlphaKind(int textureId)
+    {
+        if (_textureAlphaKinds.TryGetValue(textureId, out var alphaKind))
+            return alphaKind;
+
+        return TextureAlphaKind.Binary;
+    }
+
+    private void ReleaseSharedTexture(string cacheKey)
+    {
+        lock (SharedTextureCacheLock)
+        {
+            if (!SharedTextureCache.TryGetValue(cacheKey, out var existing))
+                return;
+
+            existing.RefCount--;
+            if (existing.RefCount > 0)
+                return;
+
+            SharedTextureCache.Remove(cacheKey);
+            _gl.DeleteTexture(existing.TextureId);
+        }
     }
 
     /// <summary>
@@ -1573,7 +1681,7 @@ void main() {
         return null;
     }
 
-    private unsafe uint LoadTextureFromBlp(byte[] blpData, string name, bool clampS = false, bool clampT = false)
+    private unsafe SharedTextureEntry? LoadTextureFromBlp(byte[] blpData, string name, bool clampS = false, bool clampT = false)
     {
         try
         {
@@ -1612,29 +1720,63 @@ void main() {
             }
             bmp.Dispose();
 
-            return UploadTexture(pixels, (uint)w, (uint)h, clampS, clampT);
+            uint textureId = UploadTexture(pixels, (uint)w, (uint)h, clampS, clampT);
+            if (textureId == 0)
+                return null;
+
+            return new SharedTextureEntry
+            {
+                TextureId = textureId,
+                AlphaKind = ClassifyTextureAlpha(pixels),
+            };
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[MdxRenderer] Failed to decode BLP {name}: {ex.Message}");
-            return 0;
+            return null;
         }
     }
 
-    private unsafe uint LoadTextureFromPng(string path)
+    private unsafe SharedTextureEntry? LoadTextureFromPng(string path)
     {
         try
         {
             using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(path);
             var pixels = new byte[image.Width * image.Height * 4];
             image.CopyPixelDataTo(pixels);
-            return UploadTexture(pixels, (uint)image.Width, (uint)image.Height, clampS: false, clampT: false);
+            uint textureId = UploadTexture(pixels, (uint)image.Width, (uint)image.Height, clampS: false, clampT: false);
+            if (textureId == 0)
+                return null;
+
+            return new SharedTextureEntry
+            {
+                TextureId = textureId,
+                AlphaKind = ClassifyTextureAlpha(pixels),
+            };
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[MdxRenderer] Failed to load PNG {path}: {ex.Message}");
-            return 0;
+            return null;
         }
+    }
+
+    private static TextureAlphaKind ClassifyTextureAlpha(byte[] pixels)
+    {
+        bool hasBinaryTransparency = false;
+        for (int i = 3; i < pixels.Length; i += 4)
+        {
+            byte alpha = pixels[i];
+            if (alpha == 255)
+                continue;
+
+            if (alpha != 0)
+                return TextureAlphaKind.Translucent;
+
+            hasBinaryTransparency = true;
+        }
+
+        return hasBinaryTransparency ? TextureAlphaKind.Binary : TextureAlphaKind.Opaque;
     }
 
     private unsafe uint UploadTexture(byte[] pixels, uint width, uint height, bool clampS = false, bool clampT = false)
@@ -1670,8 +1812,13 @@ void main() {
             _gl.DeleteBuffer(gb.Ebo);
         }
 
-        foreach (var tex in _textures.Values)
-            _gl.DeleteTexture(tex);
+        foreach (var kvp in _textures)
+        {
+            if (_textureCacheKeys.TryGetValue(kvp.Key, out var cacheKey))
+                ReleaseSharedTexture(cacheKey);
+            else
+                _gl.DeleteTexture(kvp.Value);
+        }
 
         // Don't delete the shared static shader program — other renderers still use it
     }

@@ -135,6 +135,199 @@
 - Reason: per-instance transforms are not yet propagated into particle simulation for placed models, and leaving them enabled there can produce visibly wrong camera-locked effects.
 - Build gate passed: `dotnet build I:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
 
+### Mar 18, 2026 - WDL Preview Warmup + Texture Reuse Batch
+
+- Ported the missing `main` WDL preview cache support into the recovery branch:
+	- added `WdlPreviewCacheService`
+	- `ViewerApp` now warms discovered WDL previews in the background and opens the preview dialog through the cache-aware path
+	- `ViewerApp_WdlPreview` now shows warmup/error state instead of only a synchronous failure dialog
+- Added a targeted model-load performance slice in `ModelRenderer`:
+	- per-model texture diagnostic logs are now opt-in via `PARP_MDX_TEXTURE_DIAG`
+	- BLP/PNG textures now use a shared refcounted GL texture cache so repeated world doodads do not decode/upload the same texture once per instance
+- Build validation passed: `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- Runtime validation is still required before claiming:
+	- WDL preview warmup/cache behavior is correct on the user's real map set
+	- M2 load time is materially improved in the real world scene
+
+### Mar 18, 2026 - WDL Parser Recovery + Transparency Heuristic Follow-up
+
+- Addressed the newly reported WDL read failure after the preview-cache port:
+	- `WoWMapConverter.Core/VLM/WdlParser.cs` no longer rejects all non-`0x12` WDL versions up front
+	- parser now scans the WDL chunk stream for `MAOF` and accepts MAOF offsets that reference either `MARE` headers or direct height payloads
+- Unified active viewer WDL reads through `src/MdxViewer/Terrain/WdlDataSourceResolver.cs` so both preview warmup and `WdlTerrainRenderer` use the same `.wdl` / `.wdl.mpq` + file-set lookup path.
+- Closed a remaining 3.x model-path gap in `WmoRenderer` by extending doodad extension fallback from only `.mdx`/`.mdl` to also include `.m2`.
+- Adjusted `ModelRenderer` transparency routing:
+	- shared texture cache entries now retain simple alpha-shape metadata
+	- classic non-M2 `Transparent` layer-0 materials only use hard cutout when the texture alpha is binary
+	- textures with intermediate alpha now stay on the blended path
+- Build validation passed: `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- No automated tests were added or run.
+- No runtime real-data validation has been performed yet for this batch.
+
+### Mar 18, 2026 - Standalone 3.x Model Load Freeze Follow-up
+
+- Addressed the reported freeze / non-load behavior when opening individual 3.x `.mdx` files in the viewer.
+- Root cause on the active standalone path was different from the world/WMO loaders:
+	- standalone container probing only recognized `MD20`, not `MD21`
+	- standalone M2 adaptation eagerly scanned the full `.skin` file list on the UI thread before trying the obvious same-basename candidates
+	- standalone file loads also lacked the world path's canonical model-path recovery and MD20 converter fallback
+- Current fix in `src/MdxViewer/ViewerApp.cs`:
+	- standalone probe now routes both `MD20` and `MD21` through the M2-family path even when the file extension is `.mdx`
+	- standalone M2 loads now resolve a canonical model path through MPQ file-set indexes before skin lookup
+	- predictable `.skin` candidates are tried first, and the broader `.skin` file-list search is only used as a fallback with a per-session cache
+	- standalone MD20 loads now also have the same M2->MDX converter fallback used elsewhere when direct adaptation cannot complete
+	- standalone skin-path cache is cleared when a new MPQ data source is loaded
+- Build validation passed: `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
+- No automated tests were added or run.
+- No runtime real-data validation has been performed yet for this batch.
+
+### Mar 18, 2026 - M2 Empty-Fallback Guardrail
+
+- Follow-up after runtime feedback that some M2-family models still "load" into an empty viewport with `0` geosets / vertices.
+- Current conclusion:
+	- at least some failures are not clean adapter failures; the raw `MD20` converter fallback can produce an `MDX` shell that parses but has no renderable geometry
+	- that state is misleading in the UI because it looks like a loaded model rather than an unsupported / failed conversion
+- Current fix:
+	- `WarcraftNetM2Adapter` now exposes shared renderable-geometry checks
+	- standalone `ViewerApp`, world `WorldAssetManager`, and WMO doodad `WmoRenderer` now reject converted fallback models unless they contain at least one renderable geoset
+	- rejected fallback loads now preserve/log the underlying failure instead of silently treating an empty converted model as success
+- Build validation passed: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`.
+- No automated tests were added or run.
+- No runtime real-data validation has been performed yet for this batch.
+- This is a diagnostics/correctness guardrail, not proof that pre-release `3.0.1` M2 layouts are fully supported.
+
+### Mar 18, 2026 - Pre-release 3.0.1 M2 Scope Clarified
+
+- User runtime verification after the guardrail patch indicates most remaining M2 problems are specific to the pre-release `3.0.1` model family rather than the later `3.3.5` family.
+- Current working assumption:
+	- pre-release `3.0.1` model files may be a transitional or hybrid `MDX` + `M2` variant
+	- later-WotLK assumptions should not be silently reused for that path
+- Separate runtime issue remains open across both model families:
+	- neon-pink transparent surfaces still appear on both `MDX` and M2-family assets
+	- treat that as a shared renderer/material/shader problem, not proof of a model-parser-only defect
+- Resulting investigation split for the next pass:
+	1. add true version/profile-aware handling for pre-release `3.0.1` model structure
+	2. audit shared transparent-surface handling, texture resolution, and blend/shader parity independently of format parsing
+- No new code changes were made in this note-only follow-up.
+- Runtime evidence came from the user's real data, not fixtures.
+
+### Mar 19, 2026 - Pre-release 3.0.1 Model Profile Guardrail
+
+- Live `wow.exe` decompilation for build `3.0.1.8303` confirmed the client-side model gate is stricter than the active generic adapter path:
+	- required root magic is `MD20`
+	- accepted version range is `0x104..0x108`
+	- parser behavior splits structurally at `0x108`
+- Active viewer code now routes that profile knowledge into all three shared M2-family entry points:
+	- standalone `ViewerApp.LoadM2FromBytes(...)`
+	- world `WorldAssetManager.LoadMdxModel(...)`
+	- WMO doodad `WmoRenderer.LoadM2DoodadRenderer(...)`
+- `WorldScene` / `WorldAssetManager` now receive the build string at construction time so constructor-time manifest loads use the same profile guard instead of waiting for later `SetDbcCredentials(...)`.
+- `WarcraftNetM2Adapter` now fails fast on build/profile mismatches before `.skin` search or fallback conversion:
+	- `3.0.1.8303` and unknown `3.0.x` profiles reject `MD21` roots and out-of-range MD20 versions
+	- `3.3.5.12340` currently keeps `MD21` container allowance to avoid broad later-branch regression while the parser path remains shared
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no new runtime real-data validation yet for the guarded `3.0.1` model path
+	- do not claim this as a full pre-release `3.0.1` render fix; it is a profile-routing/compatibility guardrail
+- Separate shared renderer issue is still open:
+	- neon-pink transparent surfaces remain a Track B problem across classic `MDX` and M2-family assets
+
+### Mar 19, 2026 - Standalone Data-Source M2 Read-Path Fix
+
+- The new user-visible `Failed to read: ...` symptom on standalone/browser-loaded M2-family assets was not a parser error.
+- Root cause:
+	- `ViewerApp.LoadFileFromDataSource(...)` still did an exact `_dataSource.ReadFile(virtualPath)` and returned early
+	- M2-family assets in the file browser can appear under alias paths that need the same canonical resolution logic already used later in the standalone M2 path
+- Current fix:
+	- data-source loads for `.mdx` / `.mdl` / `.m2` now resolve through `ResolveStandaloneCanonicalModelPath(...)`
+	- browser-side model reads now use `ReadStandaloneFileData(...)` before giving up
+	- successful reads now carry the resolved virtual path into the later container-probe path
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- runtime retry on the user's actual 3.0.1 data is still required to confirm the failure moved from read-time to the next real blocker
+
+### Mar 19, 2026 - Pre-release 3.0.1 wow.exe Documentation Pass
+
+- Shifted from speculative code changes to binary-backed documentation after the user reported that models still do not load.
+- New documented `wow.exe` facts for build `3.0.1.8303`:
+	- common loader chain is `FUN_0077e2c0` -> `FUN_0077d3c0` -> `FUN_0079bc70` -> `FUN_0079bc50` -> `FUN_0079bb30` -> `FUN_0079a8c0`
+	- accepted model-family extensions are normalized to `.m2` before parse/bootstrap continues
+	- high-level failure falls back to `Spells\\ErrorCube.mdx`
+	- root parser is `MD20`-only with version range `0x104..0x108`
+	- parser layout splits at `0x108`
+	- confirmed validator families now include shared span strides `1`, `2`, `4`, `8`, `0x0C`, `0x30`, `0x44` and nested record families `0x70`, `0x2C`, `0x38`, `0xD4`, `0x7C`
+	- version split families are legacy `0xDC` + `0x1F8` versus later `0xE0` + `0x234`
+- New artifacts created for fresh chats:
+	- `documentation/pre-release-3.0.1-m2-wow-exe-guide.md`
+	- `.github/prompts/pre-release-3-0-1-m2-implementation-plan.prompt.md`
+	- `.github/prompts/pre-release-3-0-1-m2-ghidra-followup.prompt.md`
+	- `.github/prompts/pre-release-3-0-1-m2-runtime-triage.prompt.md`
+- Validation status for this pass:
+	- no automated tests were added or run
+	- no new build was needed because this pass only added documentation and prompts
+	- no runtime real-data validation was performed
+
+### Mar 19, 2026 - 3.0.1 Pre-release Profile Routing Broadening
+
+- Follow-up after the wow.exe-backed profile guardrail: the active registry no longer binds the pre-release `3.0.1` profile only to exact build `3.0.1.8303`.
+- Current behavior:
+	- any parsed `3.0.1.x` build now resolves to the same pre-release `3.0.1` ADT, WMO, and M2 profiles
+	- other `3.0.x` builds still fall back to the generic unknown `3.0.x` profile until there is binary evidence for a narrower mapping
+- Why this matters:
+	- standalone model loads, world doodads, WMO doodads, and terrain/WMO profile routing now stay on the pre-release path for the whole `3.0.1` family instead of silently downgrading non-`8303` builds to the generic `3.0.x` profile
+- Validation status:
+	- build validation pending for this specific routing change
+	- no automated tests were added or run
+	- no runtime real-data validation was performed
+
+### Mar 19, 2026 - 3.0.1 Pre-release M2 Parser + Fallback Alignment
+
+- Follow-up after the routing-only fix was not enough: active model loading now includes a dedicated pre-release `MD20` parse path in `WarcraftNetM2Adapter` instead of sending raw `3.0.1` files through Warcraft.NET's later-layout `MD21` assumptions.
+- Current viewer-side behavior:
+	- standalone, world, and WMO doodad adapter loads normalize pre-release `MD20` data through a local parsed-model abstraction
+	- the old forced profile-specific `.skin` parser path was disabled because the wow.exe-derived `0x70` / `0x2C` family sizes were not proven `.skin` submesh / batch strides
+	- converter fallback now receives the active build version and avoids hard-parsing later-layout animation / bone tables for pre-release `3.0.1`
+	- converter skin fallback keeps only the index / triangle tables required for geometry conversion instead of forcing nonessential fixed-stride submesh / texture-unit tables
+- Why this matters:
+	- the primary runtime path and the fallback conversion path no longer disagree about pre-release `3.0.1` model-family assumptions
+	- non-`8303` `3.0.1.x` builds now reach both the right profile and a compatible loader path
+- Validation status for this pass:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no automated tests were added or run
+	- no runtime real-data validation was performed
+
+### Mar 19, 2026 - Standalone Alias Recovery + Unsuffixed Skin Candidates
+
+- Follow-up after fresh runtime errors still showed two model-load gaps:
+	- standalone/browser `DataSourceRead` failures could still stop at the unresolved `.mdx` alias path even when the world-model path already had broader file-set heuristics
+	- companion skin discovery only tried `00`-`03` suffixed names, not the unsuffixed `.skin` form some transitional assets may use
+- Current fix:
+	- `ViewerApp` standalone canonical resolution and data-source reads now reuse the broader candidate set already proven useful on the world path: exact path, extension aliases, bare filename aliases, and `Creature\Name\Name.{mdx|m2|mdl}` guesses
+	- standalone resolution now also probes guessed candidates through `FileExists` / `ReadFile` instead of depending only on the prebuilt file index
+	- shared `WarcraftNetM2Adapter.BuildSkinCandidates(...)` now includes unsuffixed `.skin` candidates before the numbered `00`-`03` forms
+- Why this matters:
+	- user-visible `Failed to read requested='...mdx'` errors can now recover through the same alias breadth the world loader already had
+	- `Missing companion .skin for M2` can now recover when the sidecar is present under the base `.skin` name instead of only numbered variants
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no automated tests were added or run
+	- runtime validation on the specific failing assets is still pending
+
+### Mar 19, 2026 - Cocoon Optional-Span Parser Follow-up
+
+- Fresh runtime log from `Creature\Cocoon\Cocoon.mdx` showed the profiled pre-release parser was now reached, but it still failed before geometry extraction because an unresolved optional table span (`colors`, stride `0x2C`) was treated as fatal.
+- Current fix:
+	- `WarcraftNetM2Adapter.ParseProfiledMd20Model(...)` now hard-validates only the spans the runtime model builder actually dereferences for viewer geometry
+	- optional / unresolved table families now use a nonfatal validator that logs and skips invalid spans instead of rejecting the entire model
+	- per-texture filename spans are also treated as optional so a bad embedded name table does not abort the whole model
+- Why this matters:
+	- `Cocoon.mdx` was failing in the parser before any real geometry read was attempted
+	- this keeps the wow.exe-backed strictness for required geometry tables while avoiding false rejects from still-unmapped optional families on `0x104..0x107` models
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no automated tests were added or run
+	- no runtime real-data validation was performed after the fix
+
 ## ✅ Working
 
 ### MdxViewer (3D World Viewer) — Primary Project

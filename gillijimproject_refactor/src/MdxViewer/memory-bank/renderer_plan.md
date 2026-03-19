@@ -32,6 +32,21 @@ All Ghidra-verified addresses and pseudocode live in two documentation sets:
 
 ---
 
+## Immediate Investigation Tracks (Mar 18, 2026)
+
+### A. Pre-release 3.0.1 Model Compatibility
+- [ ] Treat pre-release `3.0.1` as a separate model-profile family, not as automatic later-`3.3.5` M2 compatibility.
+- [ ] Compare raw container/layout assumptions for `MD20` / `MD21`, skin/submesh semantics, and any hybrid `MDX` + `M2` behavior seen on user data.
+- [ ] Route `WarcraftNetM2Adapter` behavior through explicit version/profile selection instead of expanding generic fallback heuristics.
+- [ ] Keep the empty-fallback guardrail, but do not mistake it for format support.
+
+### B. Shared Transparent-Surface Parity
+- [ ] Investigate neon-pink transparent surfaces as a shared renderer/material/shader defect because the symptom reproduces on both `MDX` and M2-family models.
+- [ ] Audit texture binding failure paths, replaceable texture fallbacks, blend-mode routing, and shader branches shared by `ModelRenderer` and converted M2 runtime models.
+- [ ] Cross-check genuine shader/material behavior from project documentation (`BLS.md` and related reverse-engineering notes) before rewriting transparency logic.
+
+---
+
 ## Phase 0 — Foundation & Shared Systems
 
 Refactor shared infrastructure out of the two existing renderers before adding new systems.

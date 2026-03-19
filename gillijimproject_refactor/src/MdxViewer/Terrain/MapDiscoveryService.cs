@@ -30,14 +30,26 @@ public class MapDiscoveryService
         var dbcd = new DBCD.DBCD(_dbcProvider, dbdProvider);
 
         IDBCDStorage storage;
+        Locale localeUsed;
         try
         {
-            try { storage = dbcd.Load("Map", _build, Locale.EnUS); }
-            catch { storage = dbcd.Load("Map", _build, Locale.None); }
+            try
+            {
+                storage = dbcd.Load("Map", _build, Locale.EnUS);
+                localeUsed = Locale.EnUS;
+            }
+            catch (Exception enUsEx)
+            {
+                ViewerLog.Important(ViewerLog.Category.General,
+                    $"[MapDiscovery] Locale.EnUS load failed for build {_build}: {enUsEx.Message}. Retrying Locale.None.");
+                storage = dbcd.Load("Map", _build, Locale.None);
+                localeUsed = Locale.None;
+            }
         }
         catch (Exception ex)
         {
-            ViewerLog.Trace($"[MapDiscovery] Failed to load Map.dbc: {ex.Message}");
+            ViewerLog.Error(ViewerLog.Category.Dbc,
+                $"[MapDiscovery] Failed to load Map.dbc for build {_build}: {ex.Message}");
             return maps;
         }
 
@@ -54,7 +66,8 @@ public class MapDiscoveryService
 
         // Detect the name column — varies across builds
         string nameCol = DetectNameColumn(storage);
-        ViewerLog.Trace($"[MapDiscovery] Using idCol='{idCol}', nameCol='{nameCol}'");
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[MapDiscovery] Using build={_build} locale={localeUsed} idCol='{idCol}' nameCol='{nameCol}' rowCount={storage.Keys.Count}");
 
         foreach (var key in storage.Keys)
         {
@@ -77,6 +90,9 @@ public class MapDiscoveryService
 
             maps.Add(new MapDefinition(id, dir, name, hasWdt, hasWdl));
         }
+
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[MapDiscovery] Produced {maps.Count} map definitions ({maps.Count(m => m.HasWdt)} with WDTs, {maps.Count(m => m.HasWdl)} with WDLs)");
 
         return maps.OrderBy(m => m.Name).ToList();
     }

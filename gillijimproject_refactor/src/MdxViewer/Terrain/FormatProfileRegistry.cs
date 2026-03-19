@@ -50,6 +50,7 @@ public sealed class M2Profile
 {
     public required string ProfileId { get; init; }
     public required ModelRootMagic RequiredRootMagic { get; init; }
+    public required bool AllowMd21Container { get; init; }
     public required int MinSupportedVersion { get; init; }
     public required int MaxSupportedVersion { get; init; }
     public required bool UseTypedOffsetCountTable { get; init; }
@@ -63,6 +64,10 @@ public sealed class M2Profile
 
 public static class FormatProfileRegistry
 {
+    private const int PreRelease301Major = 3;
+    private const int PreRelease301Minor = 0;
+    private const int PreRelease301Patch = 1;
+
     public static readonly AdtProfile AdtProfile060070Baseline = new()
     {
         ProfileId = "AdtProfile_060_070_Baseline",
@@ -346,6 +351,7 @@ public static class FormatProfileRegistry
     {
         ProfileId = "M2Profile_301_8303",
         RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = false,
         MinSupportedVersion = 0x104,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -361,6 +367,7 @@ public static class FormatProfileRegistry
     {
         ProfileId = "M2Profile_335_12340",
         RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = true,
         MinSupportedVersion = 0x108,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -376,6 +383,7 @@ public static class FormatProfileRegistry
     {
         ProfileId = "M2Profile_30x_Unknown",
         RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = false,
         MinSupportedVersion = 0x104,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -513,7 +521,7 @@ public static class FormatProfileRegistry
         if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
             return AdtProfile33512340;
 
-        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+        if (IsPreRelease301Build(buildVersion))
             return AdtProfile3018303;
 
         if (string.Equals(buildVersion, "0.7.0.3694", StringComparison.OrdinalIgnoreCase))
@@ -560,7 +568,7 @@ public static class FormatProfileRegistry
         if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
             return WmoProfile33512340;
 
-        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+        if (IsPreRelease301Build(buildVersion))
             return WmoProfile3018303;
 
         if (string.Equals(buildVersion, "0.7.0.3694", StringComparison.OrdinalIgnoreCase))
@@ -627,7 +635,7 @@ public static class FormatProfileRegistry
         if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
             return M2Profile33512340;
 
-        if (string.Equals(buildVersion, "3.0.1.8303", StringComparison.OrdinalIgnoreCase))
+        if (IsPreRelease301Build(buildVersion))
             return M2Profile3018303;
 
         if (TryParseBuild(buildVersion, out int major, out int minor, out _, out _))
@@ -637,6 +645,14 @@ public static class FormatProfileRegistry
         }
 
         return null;
+    }
+
+    private static bool IsPreRelease301Build(string? buildVersion)
+    {
+        return TryParseBuild(buildVersion, out int major, out int minor, out int patch, out _)
+            && major == PreRelease301Major
+            && minor == PreRelease301Minor
+            && patch == PreRelease301Patch;
     }
 
     private static bool TryParseBuild(string? buildVersion, out int major, out int minor, out int patch, out int build)

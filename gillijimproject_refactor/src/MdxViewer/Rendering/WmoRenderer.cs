@@ -3,6 +3,7 @@ using System.Text;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Terrain;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Converters;
 
@@ -20,6 +21,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly string _modelDir;
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
+    private readonly string? _buildVersion;
 
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
@@ -79,13 +81,14 @@ public class WmoRenderer : ISceneRenderer
     }
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
-        IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null)
+        IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null)
     {
         _gl = gl;
         _wmo = wmo;
         _modelDir = modelDir;
         _dataSource = dataSource;
         _texResolver = texResolver;
+        _buildVersion = buildVersion;
 
         InitShaders();
         InitLiquidShader();
@@ -994,6 +997,8 @@ void main() {
 
     private MdxRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
     {
+        WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, _buildVersion);
+
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
         string? bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
         if (!string.IsNullOrWhiteSpace(bestSkinPath))
@@ -1013,7 +1018,7 @@ void main() {
             try
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath);
+                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
                 string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
@@ -1028,19 +1033,56 @@ void main() {
         }
 
         if (!anySkinFound)
+        {
+            if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            {
+                try
+                {
+                    var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, _buildVersion);
+                    string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                    ViewerLog.Info(ViewerLog.Category.Mdx,
+                        $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
+                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Embedded root-profile WMO doodad fallback failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
+            }
+
             ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
+        }
 
         if (WarcraftNetM2Adapter.IsMd20(modelData))
         {
             byte[]? convertedBytes = ConvertM2ToMdx(modelData, resolvedModelPath);
             if (convertedBytes != null && convertedBytes.Length > 0)
             {
-                using var convertedStream = new MemoryStream(convertedBytes);
-                var convertedMdx = MdxFile.Load(convertedStream);
-                string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
-                ViewerLog.Info(ViewerLog.Category.Mdx,
-                    $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
-                return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                try
+                {
+                    using var convertedStream = new MemoryStream(convertedBytes);
+                    var convertedMdx = MdxFile.Load(convertedStream);
+                    if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
+                    {
+                        string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
+                        ViewerLog.Info(ViewerLog.Category.Mdx,
+                            $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
+                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                    }
+
+                    lastSkinError = new InvalidDataException(
+                        $"M2->MDX fallback produced no renderable geometry for WMO doodad {Path.GetFileName(originalModelPath)} ({WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)})");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Rejecting converted WMO doodad fallback for {Path.GetFileName(originalModelPath)}: {WarcraftNetM2Adapter.SummarizeGeometry(convertedMdx)}");
+                }
+                catch (Exception ex)
+                {
+                    lastSkinError = ex;
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"[M2] Converted WMO doodad fallback load failed for {Path.GetFileName(originalModelPath)}: {ex.Message}");
+                }
             }
         }
 
@@ -1063,7 +1105,7 @@ void main() {
             }
 
             var converter = new M2ToMdxConverter();
-            return converter.ConvertToBytes(modelData, skinBytes);
+            return converter.ConvertToBytes(modelData, skinBytes, _buildVersion);
         }
         catch (Exception ex)
         {
@@ -1089,13 +1131,14 @@ void main() {
             }
             else
             {
-                string? swapped = SwapMdlMdxExtension(normalizedPath);
-                if (!string.IsNullOrWhiteSpace(swapped))
+                foreach (string alternatePath in EnumerateAlternateDoodadPaths(normalizedPath))
                 {
-                    found = mpqDataSource.FindInFileSet(swapped);
-                    resolvedPath = !string.IsNullOrWhiteSpace(found)
-                        ? NormalizeDoodadPath(found)
-                        : swapped;
+                    found = mpqDataSource.FindInFileSet(alternatePath);
+                    if (string.IsNullOrWhiteSpace(found))
+                        continue;
+
+                    resolvedPath = NormalizeDoodadPath(found);
+                    break;
                 }
             }
         }
@@ -1157,15 +1200,24 @@ void main() {
         return path.Replace('/', '\\');
     }
 
-    private static string? SwapMdlMdxExtension(string normalizedPath)
+    private static IEnumerable<string> EnumerateAlternateDoodadPaths(string normalizedPath)
     {
         if (normalizedPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-            return normalizedPath[..^4] + ".mdl";
+        {
+            yield return normalizedPath[..^4] + ".m2";
+            yield return normalizedPath[..^4] + ".mdl";
+            yield break;
+        }
 
         if (normalizedPath.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
-            return normalizedPath[..^4] + ".mdx";
+        {
+            yield return normalizedPath[..^4] + ".mdx";
+            yield return normalizedPath[..^4] + ".m2";
+            yield break;
+        }
 
-        return null;
+        if (normalizedPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase))
+            yield return normalizedPath[..^3] + ".mdx";
     }
 
     private void InitLiquidShader()

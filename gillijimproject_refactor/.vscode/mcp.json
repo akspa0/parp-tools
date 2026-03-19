@@ -6,7 +6,7 @@
         "--ghidra-server",
         "http://localhost:8080/"
       ],
-      "command": "python",
+      "command": "C:/Users/akspa/anaconda3/python.exe",
       "disabled": false
     },
     "puppeteer": {
@@ -24,7 +24,7 @@
         "x64dbg_mcp",
         "--stdio"
       ],
-      "command": "python"
+      "command": "C:/Users/akspa/anaconda3/python.exe"
     }
   }
 }

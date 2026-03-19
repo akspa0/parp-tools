@@ -16,11 +16,20 @@
 - No animation playback system
 - Limited texture support (replaceable IDs, minimal loose file support)
 - No transparent texture rendering (alpha blending)
+- Pre-release `3.0.1` model compatibility is not equivalent to later `3.3.5` M2 support; treat it as a separate model-profile problem
+- Neon-pink transparent surfaces still reproduce on both `MDX` and M2-family assets, indicating a shared material/shader issue
 - No terrain rendering system
 - No detail doodad system
 - No day/night cycle / terrain lighting
 - No frustum culling optimization
 - Build version inference fails for 0.5.3
+
+### Current 3.x Rendering Findings (Mar 18, 2026)
+
+- User runtime verification indicates most remaining model-format failures are specific to the pre-release `3.0.1` family.
+- Working assumption: some pre-release `3.0.1` model files may behave like a hybrid or transitional `MDX` + `M2` format.
+- Do not generalize later-WotLK `MD20` / `.skin` assumptions onto that path without explicit evidence.
+- Keep model-format compatibility work separate from the neon-pink transparent-surface bug, because the latter reproduces on both classic `MDX` and M2-family assets.
 
 ---
 

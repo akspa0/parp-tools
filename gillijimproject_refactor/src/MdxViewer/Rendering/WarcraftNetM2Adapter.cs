@@ -1,9 +1,12 @@
+using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.Logging;
+using MdxViewer.Terrain;
 using Warcraft.NET.Files.M2;
 using Warcraft.NET.Files.M2.Chunks;
 using Warcraft.NET.Files.M2.Entries;
 using Warcraft.NET.Files.Skin;
+using WnBoundingBox = Warcraft.NET.Files.Structures.BoundingBox;
 
 namespace MdxViewer.Rendering;
 
@@ -23,11 +26,89 @@ internal static class WarcraftNetM2Adapter
         return data.Length >= 4 && BitConverter.ToUInt32(data, 0) == Md21Magic;
     }
 
+    public static void ValidateModelProfile(byte[] modelBytes, string modelPath, string? buildVersion)
+    {
+        var profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null)
+            return;
+
+        ValidateModelProfile(modelBytes, modelPath, profile, buildVersion);
+    }
+
+    public static void ValidateModelProfile(byte[] modelBytes, string modelPath, M2Profile profile, string? buildVersion = null)
+    {
+        string fileName = Path.GetFileName(modelPath);
+        string buildLabel = string.IsNullOrWhiteSpace(buildVersion) ? "unknown" : buildVersion;
+
+        if (modelBytes.Length < 4)
+            throw new InvalidDataException($"Model '{fileName}' is too short to validate against {profile.ProfileId}.");
+
+        uint rootMagic = BitConverter.ToUInt32(modelBytes, 0);
+        uint requiredMagic = profile.RequiredRootMagic switch
+        {
+            ModelRootMagic.MD20 => Md20Magic,
+            _ => throw new InvalidOperationException($"Unsupported model root magic policy for {profile.ProfileId}.")
+        };
+
+        if (rootMagic == Md21Magic && profile.AllowMd21Container)
+        {
+            ViewerLog.Trace($"[M2] Allowing MD21 container for {fileName} under {profile.ProfileId} (build={buildLabel})");
+            return;
+        }
+
+        if (rootMagic != requiredMagic)
+        {
+            throw new InvalidDataException(
+                $"Model '{fileName}' is incompatible with {profile.ProfileId} (build={buildLabel}): expected {GetMagicLabel(requiredMagic)} root, found {GetMagicLabel(rootMagic)}.");
+        }
+
+        if (modelBytes.Length < 8)
+            throw new InvalidDataException($"Model '{fileName}' is too short to read an MD20 version for {profile.ProfileId}.");
+
+        int version = unchecked((int)BitConverter.ToUInt32(modelBytes, 4));
+        if (version < profile.MinSupportedVersion || version > profile.MaxSupportedVersion)
+        {
+            throw new InvalidDataException(
+                $"Model '{fileName}' is incompatible with {profile.ProfileId} (build={buildLabel}): MD20 version 0x{version:X} is outside supported range 0x{profile.MinSupportedVersion:X}-0x{profile.MaxSupportedVersion:X}.");
+        }
+
+        ViewerLog.Trace(
+            $"[M2] Using {profile.ProfileId} for {fileName} (build={buildLabel}, magic={GetMagicLabel(rootMagic)}, version=0x{version:X})");
+    }
+
+    public static bool HasRenderableGeometry(MdxFile mdx)
+    {
+        return mdx.Geosets.Any(geoset => geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3);
+    }
+
+    public static string SummarizeGeometry(MdxFile mdx)
+    {
+        int validGeosets = mdx.Geosets.Count(geoset => geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3);
+        int totalVertices = mdx.Geosets.Sum(geoset => geoset.Vertices.Count);
+        int totalTriangles = mdx.Geosets.Sum(geoset => geoset.Indices.Count / 3);
+        return $"geosets={mdx.Geosets.Count}, validGeosets={validGeosets}, vertices={totalVertices}, triangles={totalTriangles}";
+    }
+
+    private static string GetMagicLabel(uint magic)
+    {
+        return magic switch
+        {
+            Md20Magic => "MD20",
+            Md21Magic => "MD21",
+            _ => $"0x{magic:X8}"
+        };
+    }
+
     public static IReadOnlyList<string> BuildSkinCandidates(string modelPath)
     {
         var baseName = Path.GetFileNameWithoutExtension(modelPath);
         var dir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? string.Empty;
-        var candidates = new List<string>(8);
+        var candidates = new List<string>(10);
+
+        candidates.Add(Path.ChangeExtension(modelPath, ".skin"));
+        candidates.Add(string.IsNullOrEmpty(dir)
+            ? $"{baseName}.skin"
+            : $"{dir}\\{baseName}.skin");
 
         for (int i = 0; i < 4; i++)
         {
@@ -77,39 +158,39 @@ internal static class WarcraftNetM2Adapter
         return bestScore > 0 ? bestPath : null;
     }
 
-    public static MdxFile BuildRuntimeModel(byte[] m2Bytes, byte[] skinBytes, string modelPath)
+    public static MdxFile BuildRuntimeModel(byte[] m2Bytes, byte[]? skinBytes, string modelPath, string? buildVersion = null)
     {
-        MD21 md21 = ParseModelInformation(m2Bytes, modelPath);
-
-        var skin = ParseSkinData(skinBytes, modelPath);
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        ParsedModelData model = ParseModelInformation(m2Bytes, modelPath, profile, buildVersion);
+        SkinData skin = ResolveSkinData(model, skinBytes, modelPath, profile, buildVersion);
 
         var mdx = new MdxFile
         {
             Version = 900,
             Model = new MdlModel
             {
-                Name = string.IsNullOrWhiteSpace(md21.Name) ? Path.GetFileNameWithoutExtension(modelPath) : md21.Name,
-                Bounds = ToMdlBounds(md21.BoundingBox, md21.BoundingBoxRadius),
+                Name = string.IsNullOrWhiteSpace(model.Name) ? Path.GetFileNameWithoutExtension(modelPath) : model.Name,
+                Bounds = ToMdlBounds(model.BoundingBox, model.BoundingBoxRadius),
             }
         };
 
-        foreach (var texture in md21.Textures)
+        foreach (var texture in model.Textures)
             mdx.Textures.Add(ToMdlTexture(texture));
 
         if (mdx.Textures.Count == 0)
             mdx.Textures.Add(new MdlTexture { Path = string.Empty, ReplaceableId = 0, Flags = 0 });
 
-        var sectionMaterialIds = BuildMaterialsFromBatches(mdx, md21, skin);
+        var sectionMaterialIds = BuildMaterialsFromBatches(mdx, model, skin);
 
         if (mdx.Materials.Count == 0)
             mdx.Materials.Add(CreateFallbackMaterial());
 
-        foreach (var geoset in BuildGeosets(md21, skin, sectionMaterialIds, mdx.Materials.Count))
+        foreach (var geoset in BuildGeosets(model, skin, sectionMaterialIds, mdx.Materials.Count))
             mdx.Geosets.Add(geoset);
 
         if (mdx.Geosets.Count == 0)
         {
-            var fallback = BuildWholeSkinGeoset(md21, skin, 0);
+            var fallback = BuildWholeSkinGeoset(model, skin, 0);
             if (fallback != null)
                 mdx.Geosets.Add(fallback);
         }
@@ -120,27 +201,61 @@ internal static class WarcraftNetM2Adapter
         return mdx;
     }
 
-    private static MD21 ParseModelInformation(byte[] m2Bytes, string modelPath)
+    private static SkinData ResolveSkinData(ParsedModelData model, byte[]? skinBytes, string modelPath, M2Profile? profile, string? buildVersion)
+    {
+        if (skinBytes != null && skinBytes.Length > 0)
+            return ParseSkinData(skinBytes, modelPath, profile);
+
+        if (model.EmbeddedSkin != null)
+        {
+            ViewerLog.Info(ViewerLog.Category.Mdx,
+                $"[M2] Using embedded root profile geometry for {Path.GetFileName(modelPath)} (build={buildVersion ?? "unknown"})");
+            return model.EmbeddedSkin;
+        }
+
+        throw new InvalidDataException($"No external or embedded skin/profile geometry was available for '{Path.GetFileName(modelPath)}'.");
+    }
+
+    private static ParsedModelData ParseModelInformation(byte[] m2Bytes, string modelPath, M2Profile? profile, string? buildVersion)
     {
         string fileName = Path.GetFileName(modelPath);
+
+        if (profile != null && IsMd20(m2Bytes) && !profile.AllowMd21Container)
+        {
+            try
+            {
+                ViewerLog.Trace($"[M2] Parsing profiled pre-release MD20: {fileName} ({profile.ProfileId})");
+                return ParseProfiledMd20Model(m2Bytes, fileName, profile, buildVersion);
+            }
+            catch (Exception profiledEx)
+            {
+                try
+                {
+                    ViewerLog.Trace($"[M2] Profiled MD20 parse failed, trying Warcraft.NET fallback: {fileName}");
+                    return ParseWarcraftNetModel(m2Bytes, modelPath);
+                }
+                catch (Exception fallbackEx)
+                {
+                    throw new InvalidDataException(
+                        $"Failed to parse profiled MD20 model for '{fileName}'.",
+                        new AggregateException(profiledEx, fallbackEx));
+                }
+            }
+        }
 
         if (IsMd20(m2Bytes))
         {
             try
             {
                 ViewerLog.Trace($"[M2] Parsing raw MD20 directly: {fileName}");
-                return new MD21(m2Bytes);
+                return ParseWarcraftNetModel(m2Bytes, modelPath);
             }
             catch (Exception rawMd20Ex)
             {
                 try
                 {
                     ViewerLog.Trace($"[M2] Raw MD20 parse failed, trying Warcraft.NET Model wrapper: {fileName}");
-                    var wrapped = new Model(m2Bytes);
-                    if (wrapped.ModelInformation != null)
-                        return wrapped.ModelInformation;
-
-                    throw new InvalidDataException("M2 is missing MD21 model information.");
+                    return ParseWarcraftNetModel(m2Bytes, modelPath);
                 }
                 catch (Exception wrappedEx)
                 {
@@ -153,15 +268,7 @@ internal static class WarcraftNetM2Adapter
 
         try
         {
-            var m2Model = new Model(m2Bytes);
-            if (m2Model.ModelInformation != null)
-            {
-                if (IsMd21(m2Bytes))
-                    ViewerLog.Trace($"[M2] Parsed MD21 container via Warcraft.NET Model wrapper: {fileName}");
-                return m2Model.ModelInformation;
-            }
-
-            throw new InvalidDataException("M2 is missing MD21 model information.");
+            return ParseWarcraftNetModel(m2Bytes, modelPath);
         }
         catch (Exception ex)
         {
@@ -169,7 +276,38 @@ internal static class WarcraftNetM2Adapter
         }
     }
 
-    private static CMdlBounds ToMdlBounds(Warcraft.NET.Files.Structures.BoundingBox box, float radius)
+    private static ParsedModelData ParseWarcraftNetModel(byte[] m2Bytes, string modelPath)
+    {
+        string fileName = Path.GetFileName(modelPath);
+
+        if (IsMd20(m2Bytes))
+        {
+            try
+            {
+                return ParsedModelData.FromWarcraftNet(new MD21(m2Bytes));
+            }
+            catch (Exception rawMd20Ex)
+            {
+                var wrapped = new Model(m2Bytes);
+                if (wrapped.ModelInformation != null)
+                    return ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
+
+                throw new InvalidDataException($"M2 is missing MD21 model information for '{fileName}'.", rawMd20Ex);
+            }
+        }
+
+        var m2Model = new Model(m2Bytes);
+        if (m2Model.ModelInformation != null)
+        {
+            if (IsMd21(m2Bytes))
+                ViewerLog.Trace($"[M2] Parsed MD21 container via Warcraft.NET Model wrapper: {fileName}");
+            return ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
+        }
+
+        throw new InvalidDataException("M2 is missing MD21 model information.");
+    }
+
+    private static CMdlBounds ToMdlBounds(WnBoundingBox box, float radius)
     {
         return new CMdlBounds
         {
@@ -182,7 +320,7 @@ internal static class WarcraftNetM2Adapter
         };
     }
 
-    private static MdlTexture ToMdlTexture(TextureStruct texture)
+    private static MdlTexture ToMdlTexture(ParsedTextureData texture)
     {
         string path = texture.Type == TextureType.None ? texture.Filename ?? string.Empty : string.Empty;
         return new MdlTexture
@@ -193,7 +331,7 @@ internal static class WarcraftNetM2Adapter
         };
     }
 
-    private static int[] BuildMaterialsFromBatches(MdxFile mdx, Warcraft.NET.Files.M2.Chunks.MD21 md21, SkinData skin)
+    private static int[] BuildMaterialsFromBatches(MdxFile mdx, ParsedModelData model, SkinData skin)
     {
         var sectionMaterialIds = Enumerable.Repeat(-1, skin.Submeshes.Count).ToArray();
 
@@ -203,15 +341,15 @@ internal static class WarcraftNetM2Adapter
             ushort renderFlagBits = 0;
             ushort blendMode = 0;
 
-            if (batch.MaterialIndex < md21.RenderFlags.Count)
+            if (batch.MaterialIndex < model.RenderFlags.Count)
             {
-                renderFlagBits = md21.RenderFlags[batch.MaterialIndex].Flags;
-                blendMode = md21.RenderFlags[batch.MaterialIndex].BlendingMode;
+                renderFlagBits = model.RenderFlags[batch.MaterialIndex].Flags;
+                blendMode = model.RenderFlags[batch.MaterialIndex].BlendingMode;
             }
 
-            int textureId = ResolveTextureId(md21, batch);
-            var textureFlags = (textureId >= 0 && textureId < md21.Textures.Count)
-                ? md21.Textures[textureId].Flags
+            int textureId = ResolveTextureId(model, batch);
+            var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
+                ? model.Textures[textureId].Flags
                 : 0;
 
             var material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
@@ -235,17 +373,17 @@ internal static class WarcraftNetM2Adapter
         return sectionMaterialIds;
     }
 
-    private static int ResolveTextureId(Warcraft.NET.Files.M2.Chunks.MD21 md21, SkinTextureUnitData batch)
+    private static int ResolveTextureId(ParsedModelData model, SkinTextureUnitData batch)
     {
         int lookupIndex = batch.TextureComboIndex;
-        if (lookupIndex >= 0 && lookupIndex < md21.TextureLookup.Count)
+        if (lookupIndex >= 0 && lookupIndex < model.TextureLookup.Count)
         {
-            int textureId = md21.TextureLookup[lookupIndex].TextureID;
-            if (textureId >= 0 && textureId < md21.Textures.Count)
+            int textureId = model.TextureLookup[lookupIndex].TextureId;
+            if (textureId >= 0 && textureId < model.Textures.Count)
                 return textureId;
         }
 
-        return md21.Textures.Count > 0 ? 0 : -1;
+        return model.Textures.Count > 0 ? 0 : -1;
     }
 
     private static MdlMaterial CreateFallbackMaterial()
@@ -263,7 +401,7 @@ internal static class WarcraftNetM2Adapter
         return material;
     }
 
-    private static IEnumerable<MdlGeoset> BuildGeosets(Warcraft.NET.Files.M2.Chunks.MD21 md21, SkinData skin, int[] sectionMaterialIds, int materialCount)
+    private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, int[] sectionMaterialIds, int materialCount)
     {
         var flatIndices = skin.TriangleIndices;
 
@@ -292,7 +430,7 @@ internal static class WarcraftNetM2Adapter
                 if (localSkinVertexIndex >= skin.Vertices.Count)
                     continue;
 
-                if (!TryGetVertex(md21, skin, localSkinVertexIndex, out var vertex))
+                if (!TryGetVertex(model, skin, localSkinVertexIndex, out var vertex))
                     continue;
 
                 if (!remap.TryGetValue(localSkinVertexIndex, out ushort mappedIndex))
@@ -318,7 +456,7 @@ internal static class WarcraftNetM2Adapter
         }
     }
 
-    private static MdlGeoset? BuildWholeSkinGeoset(Warcraft.NET.Files.M2.Chunks.MD21 md21, SkinData skin, int materialId)
+    private static MdlGeoset? BuildWholeSkinGeoset(ParsedModelData model, SkinData skin, int materialId)
     {
         var flatIndices = skin.TriangleIndices;
         if (flatIndices.Count < 3) return null;
@@ -329,7 +467,7 @@ internal static class WarcraftNetM2Adapter
         for (int indexPos = 0; indexPos < flatIndices.Count; indexPos++)
         {
             ushort localSkinVertexIndex = flatIndices[indexPos];
-            if (!TryGetVertex(md21, skin, localSkinVertexIndex, out var vertex))
+            if (!TryGetVertex(model, skin, localSkinVertexIndex, out var vertex))
                 continue;
 
             if (!remap.TryGetValue(localSkinVertexIndex, out ushort mappedIndex))
@@ -353,26 +491,28 @@ internal static class WarcraftNetM2Adapter
         return geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3 ? geoset : null;
     }
 
-    private static bool TryGetVertex(Warcraft.NET.Files.M2.Chunks.MD21 md21, SkinData skin, ushort localSkinVertexIndex, out VerticeStruct vertex)
+    private static bool TryGetVertex(ParsedModelData model, SkinData skin, ushort localSkinVertexIndex, out ParsedVertexData vertex)
     {
         vertex = default;
         if (localSkinVertexIndex >= skin.Vertices.Count)
             return false;
 
         int globalIndex = skin.Vertices[localSkinVertexIndex] + (int)skin.GlobalVertexOffset;
-        if (globalIndex < 0 || globalIndex >= md21.Vertices.Count)
+        if (globalIndex < 0 || globalIndex >= model.Vertices.Count)
         {
             globalIndex = skin.Vertices[localSkinVertexIndex];
-            if (globalIndex < 0 || globalIndex >= md21.Vertices.Count)
+            if (globalIndex < 0 || globalIndex >= model.Vertices.Count)
                 return false;
         }
 
-        vertex = md21.Vertices[globalIndex];
+        vertex = model.Vertices[globalIndex];
         return true;
     }
 
-    private static SkinData ParseSkinData(byte[] skinBytes, string modelPath)
+    private static SkinData ParseSkinData(byte[] skinBytes, string modelPath, M2Profile? profile = null)
     {
+        _ = profile;
+
         try
         {
             var skin = new Skin(skinBytes);
@@ -394,6 +534,455 @@ internal static class WarcraftNetM2Adapter
                     new AggregateException(ex, fallbackEx));
             }
         }
+    }
+
+    private static ParsedModelData ParseProfiledMd20Model(byte[] modelBytes, string fileName, M2Profile profile, string? buildVersion)
+    {
+        const int NameCountOffset = 0x08;
+        const int NameOffsetOffset = 0x0C;
+        const int VertexCountOffset = 0x44;
+        const int VertexDataOffset = 0x48;
+        const int RootProfileCountOffset = 0x4C;
+        const int RootProfileDataOffset = 0x50;
+        const int BoundingBoxOffset = 0xB4;
+        const int BoundingRadiusOffset = 0xCC;
+
+        using var ms = new MemoryStream(modelBytes);
+        using var br = new BinaryReader(ms);
+
+        uint magic = br.ReadUInt32();
+        if (magic != Md20Magic)
+            throw new InvalidDataException($"Model '{fileName}' is not a raw MD20 file.");
+
+        uint version = br.ReadUInt32();
+        if (version < profile.MinSupportedVersion || version > profile.MaxSupportedVersion)
+        {
+            throw new InvalidDataException(
+                $"Model '{fileName}' is incompatible with {profile.ProfileId}: MD20 version 0x{version:X} is outside supported range 0x{profile.MinSupportedVersion:X}-0x{profile.MaxSupportedVersion:X}.");
+        }
+
+        uint nameLength = ReadUInt32(modelBytes, NameCountOffset);
+        uint nameOffset = ReadUInt32(modelBytes, NameOffsetOffset);
+        uint vertexCount = ReadUInt32(modelBytes, VertexCountOffset);
+        uint vertexOffset = ReadUInt32(modelBytes, VertexDataOffset);
+        uint rootProfileCount = ReadUInt32(modelBytes, RootProfileCountOffset);
+        uint rootProfileOffset = ReadUInt32(modelBytes, RootProfileDataOffset);
+
+        WnBoundingBox boundingBox = ReadBoundingBox(modelBytes, BoundingBoxOffset);
+        float boundingRadius = ReadSingle(modelBytes, BoundingRadiusOffset);
+
+        ValidateSpan(vertexCount, vertexOffset, 0x30, modelBytes.Length, fileName, "vertices");
+        bool hasNameSpan = TryValidateOptionalSpan(nameLength, nameOffset, 1, modelBytes.Length, fileName, "name");
+
+        string modelName = string.Empty;
+        if (hasNameSpan && nameLength > 0 && nameOffset > 0)
+        {
+            br.BaseStream.Position = nameOffset;
+            modelName = ReadNullTerminatedString(br, (int)nameLength);
+        }
+
+        var data = new ParsedModelData
+        {
+            Name = modelName,
+            BoundingBox = boundingBox,
+            BoundingBoxRadius = boundingRadius,
+            EmbeddedSkin = TryParseEmbeddedRootProfile(modelBytes, rootProfileCount, rootProfileOffset, fileName),
+        };
+
+        if (vertexCount > 0)
+        {
+            for (uint i = 0; i < vertexCount; i++)
+            {
+                long entryPos = vertexOffset + (i * 0x30u);
+                br.BaseStream.Position = entryPos;
+                Vector3 position = ReadVector3(br);
+                br.BaseStream.Position = entryPos + 20;
+                Vector3 normal = ReadVector3(br);
+                br.BaseStream.Position = entryPos + 32;
+                float textureCoordX = br.ReadSingle();
+                float textureCoordY = br.ReadSingle();
+
+                data.Vertices.Add(new ParsedVertexData
+                {
+                    Position = position,
+                    Normal = normal,
+                    TextureCoordX = textureCoordX,
+                    TextureCoordY = textureCoordY,
+                });
+            }
+        }
+
+        TrySupplementMetadataFromWarcraftNet(modelBytes, fileName, data);
+
+        ViewerLog.Info(ViewerLog.Category.Mdx,
+            $"[M2] Using profiled MD20 parser for {fileName} (profile={profile.ProfileId}, build={buildVersion ?? "unknown"}, version=0x{version:X}, vertices={data.Vertices.Count}, textures={data.Textures.Count}, embeddedProfile={(data.EmbeddedSkin != null ? "yes" : "no")})");
+
+        return data;
+    }
+
+    private static void TrySupplementMetadataFromWarcraftNet(byte[] modelBytes, string fileName, ParsedModelData data)
+    {
+        try
+        {
+            ParsedModelData supplement = ParseWarcraftNetModel(modelBytes, fileName);
+
+            if (data.Textures.Count == 0)
+                data.Textures.AddRange(supplement.Textures);
+            if (data.RenderFlags.Count == 0)
+                data.RenderFlags.AddRange(supplement.RenderFlags);
+            if (data.TextureLookup.Count == 0)
+                data.TextureLookup.AddRange(supplement.TextureLookup);
+            if (string.IsNullOrWhiteSpace(data.Name) && !string.IsNullOrWhiteSpace(supplement.Name))
+                data.Name = supplement.Name;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] Warcraft.NET metadata supplement skipped for {fileName}: {ex.Message}");
+        }
+    }
+
+    private static SkinData? TryParseEmbeddedRootProfile(byte[] modelBytes, uint rootProfileCount, uint rootProfileOffset, string fileName)
+    {
+        if (rootProfileCount == 0 || rootProfileOffset == 0)
+            return null;
+
+        if (!TryValidateOptionalSpan(rootProfileCount, rootProfileOffset, 0x2C, modelBytes.Length, fileName, "rootProfiles"))
+            return null;
+
+        EmbeddedProfileHeader? selected = null;
+        const uint SelectionLimit = 0x100;
+
+        for (uint i = 0; i < rootProfileCount; i++)
+        {
+            int entryOffset = checked((int)(rootProfileOffset + (i * 0x2Cu)));
+            EmbeddedProfileHeader candidate = ReadEmbeddedProfileHeader(modelBytes, entryOffset);
+
+            bool requiredSpansValid = TryValidateOptionalSpan(candidate.VertexMapCount, candidate.VertexMapOffset, 2, modelBytes.Length, fileName, $"rootProfile[{i}].vertexMap")
+                && TryValidateOptionalSpan(candidate.IndexCount, candidate.IndexOffset, 2, modelBytes.Length, fileName, $"rootProfile[{i}].indices")
+                && TryValidateOptionalSpan(candidate.SubmeshCount, candidate.SubmeshOffset, 0x30, modelBytes.Length, fileName, $"rootProfile[{i}].submeshes");
+
+            if (!requiredSpansValid)
+                continue;
+
+            bool withinLimit = candidate.Selector <= SelectionLimit;
+            if (selected == null
+                || (withinLimit && selected.Value.Selector > SelectionLimit)
+                || (withinLimit == selected.Value.Selector <= SelectionLimit && candidate.Selector > selected.Value.Selector))
+            {
+                selected = candidate;
+            }
+        }
+
+        if (selected == null)
+            return null;
+
+        var skin = new SkinData();
+
+        using var ms = new MemoryStream(modelBytes);
+        using var br = new BinaryReader(ms);
+
+        br.BaseStream.Position = selected.Value.VertexMapOffset;
+        for (uint i = 0; i < selected.Value.VertexMapCount; i++)
+            skin.Vertices.Add(br.ReadUInt16());
+
+        br.BaseStream.Position = selected.Value.IndexOffset;
+        for (uint i = 0; i < selected.Value.IndexCount; i++)
+            skin.TriangleIndices.Add(br.ReadUInt16());
+
+        br.BaseStream.Position = selected.Value.SubmeshOffset;
+        for (uint i = 0; i < selected.Value.SubmeshCount; i++)
+        {
+            long recordStart = br.BaseStream.Position;
+            _ = br.ReadUInt16();
+            ushort vertexStart = br.ReadUInt16();
+            ushort vertexCount = br.ReadUInt16();
+            _ = br.ReadUInt16();
+            _ = br.ReadUInt16();
+            ushort indexCount = br.ReadUInt16();
+            ushort indexStart = br.ReadUInt16();
+
+            if (indexCount >= 3
+                && indexStart < skin.TriangleIndices.Count
+                && indexStart + indexCount <= skin.TriangleIndices.Count
+                && vertexStart + vertexCount <= skin.Vertices.Count)
+            {
+                skin.Submeshes.Add(new SkinSubmeshData
+                {
+                    IndexStart = indexStart,
+                    IndexCount = indexCount,
+                });
+            }
+
+            br.BaseStream.Position = recordStart + 0x30;
+        }
+
+        if (selected.Value.BatchCount > 0
+            && TryValidateOptionalSpan(selected.Value.BatchCount, selected.Value.BatchOffset, 0x18, modelBytes.Length, fileName, "rootProfile.batches"))
+        {
+            for (uint i = 0; i < selected.Value.BatchCount; i++)
+            {
+                int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
+                int submeshIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x04);
+                if (submeshIndex < skin.Submeshes.Count)
+                {
+                    skin.TextureUnits.Add(new SkinTextureUnitData
+                    {
+                        PriorityPlane = modelBytes[batchOffset + 0x01],
+                        SkinSectionIndex = submeshIndex,
+                        MaterialIndex = 0,
+                        TextureComboIndex = 0,
+                    });
+                }
+            }
+        }
+
+        if (skin.Submeshes.Count == 0 && skin.TriangleIndices.Count > 0)
+        {
+            skin.Submeshes.Add(new SkinSubmeshData
+            {
+                IndexStart = 0,
+                IndexCount = skin.TriangleIndices.Count,
+            });
+        }
+
+        if (skin.TextureUnits.Count == 0 && skin.Submeshes.Count > 0)
+        {
+            for (int i = 0; i < skin.Submeshes.Count; i++)
+            {
+                skin.TextureUnits.Add(new SkinTextureUnitData
+                {
+                    PriorityPlane = 0,
+                    SkinSectionIndex = i,
+                    MaterialIndex = 0,
+                    TextureComboIndex = 0,
+                });
+            }
+        }
+
+        if (skin.Vertices.Count == 0 || skin.TriangleIndices.Count == 0)
+            return null;
+
+        return skin;
+    }
+
+    private static EmbeddedProfileHeader ReadEmbeddedProfileHeader(byte[] modelBytes, int entryOffset)
+    {
+        return new EmbeddedProfileHeader
+        {
+            VertexMapCount = ReadUInt32(modelBytes, entryOffset + 0x00),
+            VertexMapOffset = ReadUInt32(modelBytes, entryOffset + 0x04),
+            IndexCount = ReadUInt32(modelBytes, entryOffset + 0x08),
+            IndexOffset = ReadUInt32(modelBytes, entryOffset + 0x0C),
+            BoneComboCount = ReadUInt32(modelBytes, entryOffset + 0x10),
+            BoneComboOffset = ReadUInt32(modelBytes, entryOffset + 0x14),
+            SubmeshCount = ReadUInt32(modelBytes, entryOffset + 0x18),
+            SubmeshOffset = ReadUInt32(modelBytes, entryOffset + 0x1C),
+            BatchCount = ReadUInt32(modelBytes, entryOffset + 0x20),
+            BatchOffset = ReadUInt32(modelBytes, entryOffset + 0x24),
+            Selector = ReadUInt32(modelBytes, entryOffset + 0x28),
+        };
+    }
+
+    private static uint ReadUInt32(byte[] data, int offset)
+    {
+        return BitConverter.ToUInt32(data, offset);
+    }
+
+    private static float ReadSingle(byte[] data, int offset)
+    {
+        return BitConverter.ToSingle(data, offset);
+    }
+
+    private static WnBoundingBox ReadBoundingBox(byte[] data, int offset)
+    {
+        Vector3 min = new(BitConverter.ToSingle(data, offset + 0x00), BitConverter.ToSingle(data, offset + 0x04), BitConverter.ToSingle(data, offset + 0x08));
+        Vector3 max = new(BitConverter.ToSingle(data, offset + 0x0C), BitConverter.ToSingle(data, offset + 0x10), BitConverter.ToSingle(data, offset + 0x14));
+        return new WnBoundingBox(min, max);
+    }
+
+    private static void ValidateSpan(uint count, uint offset, uint stride, int length, string fileName, string label)
+    {
+        if (count == 0 || offset == 0)
+            return;
+
+        ulong total = (ulong)count * stride;
+        ulong end = (ulong)offset + total;
+        if (offset >= length || end > (ulong)length || end < offset)
+        {
+            throw new InvalidDataException(
+                $"Profiled MD20 span '{label}' is out of range for '{fileName}': count={count}, offset=0x{offset:X}, stride=0x{stride:X}, length=0x{length:X}.");
+        }
+    }
+
+    private static bool TryValidateOptionalSpan(uint count, uint offset, uint stride, int length, string fileName, string label)
+    {
+        if (count == 0 || offset == 0)
+            return false;
+
+        try
+        {
+            ValidateSpan(count, offset, stride, length, fileName, label);
+            return true;
+        }
+        catch (InvalidDataException ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"[M2] Skipping optional profiled MD20 span for {fileName}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static WnBoundingBox ReadBoundingBox(BinaryReader br)
+    {
+        Vector3 min = ReadVector3(br);
+        Vector3 max = ReadVector3(br);
+        return new WnBoundingBox(min, max);
+    }
+
+    private static Vector3 ReadVector3(BinaryReader br)
+    {
+        return new Vector3(br.ReadSingle(), br.ReadSingle(), br.ReadSingle());
+    }
+
+    private static string ReadNullTerminatedString(BinaryReader br, int maxLength)
+    {
+        byte[] bytes = br.ReadBytes(maxLength);
+        int end = Array.IndexOf(bytes, (byte)0);
+        if (end < 0)
+            end = bytes.Length;
+        return System.Text.Encoding.UTF8.GetString(bytes, 0, end);
+    }
+
+    private static SkinData ParseProfiledSkin(byte[] skinBytes, M2Profile profile)
+    {
+        using var ms = new MemoryStream(skinBytes);
+        using var br = new BinaryReader(ms);
+
+        if (skinBytes.Length < 44)
+            throw new InvalidDataException($"Skin data is too short for {profile.ProfileId} header parsing.");
+
+        uint magic = br.ReadUInt32();
+        if (magic != SkinMagic)
+            throw new InvalidDataException($"Skin data does not start with SKIN magic for {profile.ProfileId}.");
+
+        uint nVertices = br.ReadUInt32();
+        uint ofsVertices = br.ReadUInt32();
+        uint nIndices = br.ReadUInt32();
+        uint ofsIndices = br.ReadUInt32();
+        uint nBones = br.ReadUInt32();
+        uint ofsBones = br.ReadUInt32();
+        uint nSubmeshes = br.ReadUInt32();
+        uint ofsSubmeshes = br.ReadUInt32();
+        uint nBatches = br.ReadUInt32();
+        uint ofsBatches = br.ReadUInt32();
+        uint globalVertexOffset = br.ReadUInt32();
+
+        uint nShadowBatches = 0;
+        uint ofsShadowBatches = 0;
+        if (br.BaseStream.Position + 16 <= br.BaseStream.Length)
+        {
+            nShadowBatches = br.ReadUInt32();
+            ofsShadowBatches = br.ReadUInt32();
+            br.ReadBytes(8);
+        }
+
+        _ = nBones;
+        _ = ofsBones;
+        _ = nShadowBatches;
+        _ = ofsShadowBatches;
+
+        var data = new SkinData { GlobalVertexOffset = globalVertexOffset };
+
+        if (ofsVertices + (nVertices * 2) <= skinBytes.Length)
+        {
+            br.BaseStream.Position = ofsVertices;
+            for (uint i = 0; i < nVertices; i++)
+                data.Vertices.Add(br.ReadUInt16());
+        }
+
+        if (ofsIndices + (nIndices * 2) <= skinBytes.Length)
+        {
+            br.BaseStream.Position = ofsIndices;
+            for (uint i = 0; i < nIndices; i++)
+                data.TriangleIndices.Add(br.ReadUInt16());
+        }
+
+        if (ofsSubmeshes + (nSubmeshes * (uint)profile.SkinLikeAStride) <= skinBytes.Length)
+        {
+            for (uint i = 0; i < nSubmeshes; i++)
+            {
+                long entryPos = ofsSubmeshes + (i * (uint)profile.SkinLikeAStride);
+                br.BaseStream.Position = entryPos;
+
+                _ = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                ushort indexStart = br.ReadUInt16();
+                ushort indexCount = br.ReadUInt16();
+
+                data.Submeshes.Add(new SkinSubmeshData
+                {
+                    IndexStart = indexStart,
+                    IndexCount = indexCount,
+                });
+            }
+        }
+
+        if (ofsBatches + (nBatches * (uint)profile.SkinLikeBStride) <= skinBytes.Length)
+        {
+            for (uint i = 0; i < nBatches; i++)
+            {
+                long entryPos = ofsBatches + (i * (uint)profile.SkinLikeBStride);
+                br.BaseStream.Position = entryPos;
+
+                byte flags = br.ReadByte();
+                byte priority = br.ReadByte();
+                _ = br.ReadUInt16();
+                ushort submeshIndex = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                ushort materialIndex = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                _ = br.ReadUInt16();
+                ushort textureComboIndex = br.ReadUInt16();
+
+                _ = flags;
+
+                data.TextureUnits.Add(new SkinTextureUnitData
+                {
+                    PriorityPlane = priority,
+                    SkinSectionIndex = submeshIndex,
+                    MaterialIndex = materialIndex,
+                    TextureComboIndex = textureComboIndex,
+                });
+            }
+        }
+
+        if (data.Submeshes.Count == 0 && data.TriangleIndices.Count > 0)
+        {
+            data.Submeshes.Add(new SkinSubmeshData
+            {
+                IndexStart = 0,
+                IndexCount = data.TriangleIndices.Count,
+            });
+        }
+
+        if (data.TextureUnits.Count == 0 && data.Submeshes.Count > 0)
+        {
+            data.TextureUnits.Add(new SkinTextureUnitData
+            {
+                PriorityPlane = 0,
+                SkinSectionIndex = 0,
+                MaterialIndex = 0,
+                TextureComboIndex = 0,
+            });
+        }
+
+        if (data.Vertices.Count == 0 || data.TriangleIndices.Count == 0)
+            throw new InvalidDataException($"Profiled skin parse for {profile.ProfileId} produced no vertices or indices.");
+
+        return data;
     }
 
     private static SkinData ParseLegacySkin(byte[] skinBytes)
@@ -593,6 +1182,109 @@ internal static class WarcraftNetM2Adapter
         public int TextureComboIndex { get; init; }
         public int SkinSectionIndex { get; init; }
         public ushort PriorityPlane { get; init; }
+    }
+
+    private sealed class ParsedModelData
+    {
+        public string Name { get; set; } = string.Empty;
+        public WnBoundingBox BoundingBox { get; init; }
+        public float BoundingBoxRadius { get; init; }
+        public SkinData? EmbeddedSkin { get; init; }
+        public List<ParsedVertexData> Vertices { get; } = new();
+        public List<ParsedTextureData> Textures { get; } = new();
+        public List<ParsedRenderFlagData> RenderFlags { get; } = new();
+        public List<ParsedTextureLookupData> TextureLookup { get; } = new();
+
+        public static ParsedModelData FromWarcraftNet(MD21 md21)
+        {
+            var data = new ParsedModelData
+            {
+                Name = md21.Name ?? string.Empty,
+                BoundingBox = md21.BoundingBox,
+                BoundingBoxRadius = md21.BoundingBoxRadius,
+            };
+
+            foreach (var vertex in md21.Vertices)
+            {
+                data.Vertices.Add(new ParsedVertexData
+                {
+                    Position = vertex.Position,
+                    Normal = vertex.Normal,
+                    TextureCoordX = vertex.TextureCoordX,
+                    TextureCoordY = vertex.TextureCoordY,
+                });
+            }
+
+            foreach (var texture in md21.Textures)
+            {
+                data.Textures.Add(new ParsedTextureData
+                {
+                    Type = texture.Type,
+                    Flags = texture.Flags,
+                    Filename = texture.Filename ?? string.Empty,
+                });
+            }
+
+            foreach (var renderFlag in md21.RenderFlags)
+            {
+                data.RenderFlags.Add(new ParsedRenderFlagData
+                {
+                    Flags = renderFlag.Flags,
+                    BlendingMode = renderFlag.BlendingMode,
+                });
+            }
+
+            foreach (var lookup in md21.TextureLookup)
+            {
+                data.TextureLookup.Add(new ParsedTextureLookupData
+                {
+                    TextureId = lookup.TextureID,
+                });
+            }
+
+            return data;
+        }
+    }
+
+    private struct ParsedVertexData
+    {
+        public Vector3 Position;
+        public Vector3 Normal;
+        public float TextureCoordX;
+        public float TextureCoordY;
+    }
+
+    private sealed class ParsedTextureData
+    {
+        public TextureType Type { get; init; }
+        public TextureFlags Flags { get; init; }
+        public string Filename { get; init; } = string.Empty;
+    }
+
+    private struct ParsedRenderFlagData
+    {
+        public ushort Flags;
+        public ushort BlendingMode;
+    }
+
+    private struct ParsedTextureLookupData
+    {
+        public int TextureId;
+    }
+
+    private struct EmbeddedProfileHeader
+    {
+        public uint VertexMapCount;
+        public uint VertexMapOffset;
+        public uint IndexCount;
+        public uint IndexOffset;
+        public uint BoneComboCount;
+        public uint BoneComboOffset;
+        public uint SubmeshCount;
+        public uint SubmeshOffset;
+        public uint BatchCount;
+        public uint BatchOffset;
+        public uint Selector;
     }
 
     private static MdlTexOp MapBlendMode(ushort blendMode)
