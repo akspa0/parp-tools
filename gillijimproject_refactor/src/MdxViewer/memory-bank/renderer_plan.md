@@ -4,6 +4,12 @@
 
 Reimplement the WoW Alpha 0.5.3 rendering pipeline in C# so we can render **all** asset types (MDX models, WMO buildings, ADT terrain, particles, liquids, detail doodads) with faithful visual parity to the original client, using the existing MdxViewer as the host application.
 
+Short-term active renderer work is broader than Alpha-only parity:
+
+- classic `0.5.3` MDX transparency/cutout behavior is currently restored for the validated sample
+- the remaining live model-rendering gap is concentrated in pre-release `3.0.1`
+- do not treat that remaining gap as parser-only; current runtime evidence suggests some failures are ancient material/effect/shader capability gaps on top of the raw format work
+
 ## Reference Material
 
 All Ghidra-verified addresses and pseudocode live in two documentation sets:
@@ -32,7 +38,13 @@ All Ghidra-verified addresses and pseudocode live in two documentation sets:
 
 ---
 
-## Immediate Investigation Tracks (Mar 18, 2026)
+## Immediate Investigation Tracks (Mar 19, 2026)
+
+Current state before choosing the next code slice:
+
+- classic `0.5.3` foliage/transparency is back to the expected working state on the validated runtime sample
+- the unresolved model-family work is pre-release `3.0.1`
+- the next investigation should compare at least one plain opaque `3.0.1` asset and one effect-heavy `3.0.1` asset before assuming the remaining blocker is parser/layout only
 
 ### A. Pre-release 3.0.1 Model Compatibility
 - [ ] Treat pre-release `3.0.1` as a separate model-profile family, not as automatic later-`3.3.5` M2 compatibility.
@@ -40,10 +52,24 @@ All Ghidra-verified addresses and pseudocode live in two documentation sets:
 - [ ] Route `WarcraftNetM2Adapter` behavior through explicit version/profile selection instead of expanding generic fallback heuristics.
 - [ ] Keep the empty-fallback guardrail, but do not mistake it for format support.
 
-### B. Shared Transparent-Surface Parity
-- [ ] Investigate neon-pink transparent surfaces as a shared renderer/material/shader defect because the symptom reproduces on both `MDX` and M2-family models.
-- [ ] Audit texture binding failure paths, replaceable texture fallbacks, blend-mode routing, and shader branches shared by `ModelRenderer` and converted M2 runtime models.
+### B. Pre-release 3.0.1 Material / Effect Feature Support
+- [ ] Treat ancient `3.0.1` material/effect support as a separate gap from raw layout parsing.
+- [ ] Audit which pre-release material features are still missing, flattened, or later-era-biased in `WarcraftNetM2Adapter` and related load paths:
+  - material layer stacks and per-section material assignment
+  - render flags, blend/depth/cull behavior
+  - texture lookup/combo tables
+  - texture transforms and texture animation tracks
+  - material alpha/color tracks
+  - environment-map or shader-combo style flags
+  - particle/ribbon or other effect-adjacent metadata that changes visible object behavior
+- [ ] When plain opaque assets work but effect-heavy assets still fail, treat that as feature-support debt first, not proof that the whole file family is unreadable.
+- [ ] Do not use Warcraft.NET later-client abstractions as the authority for prototype-era material/effect semantics.
+
+### C. Shared Transparent-Surface / Renderer Parity
+- [ ] Investigate neon-pink transparent surfaces as a truly shared renderer/material/shader defect only when the symptom still reproduces on both classic `MDX` and M2-family assets.
+- [ ] Audit texture binding failure paths, replaceable texture fallbacks, blend-mode routing, alpha-cutout vs blended-path selection, and shader branches shared by `ModelRenderer` and converted/adapted M2 runtime models.
 - [ ] Cross-check genuine shader/material behavior from project documentation (`BLS.md` and related reverse-engineering notes) before rewriting transparency logic.
+- [ ] Keep renderer fixes format-agnostic unless runtime evidence proves they must be version-specific.
 
 ---
 

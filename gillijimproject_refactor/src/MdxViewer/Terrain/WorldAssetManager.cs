@@ -722,7 +722,7 @@ public class WorldAssetManager : IDisposable
                         string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                     }
                     catch (Exception ex)
                     {
@@ -742,7 +742,7 @@ public class WorldAssetManager : IDisposable
                             string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
-                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                         }
                         catch (Exception ex)
                         {
@@ -769,7 +769,7 @@ public class WorldAssetManager : IDisposable
                                 string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
-                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                             }
 
                             lastSkinError = new InvalidDataException(

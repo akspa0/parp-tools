@@ -1,6 +1,4 @@
 using System.Numerics;
-using System.Text;
-
 namespace WoWMapConverter.Core.Formats.PM4;
 
 /// <summary>
@@ -9,6 +7,8 @@ namespace WoWMapConverter.Core.Formats.PM4;
 /// </summary>
 public class Pm4File
 {
+    public Pm4FileStructure Structure { get; }
+
     public uint Version { get; private set; }
     public Pm4Header Header { get; private set; } = new();
     public List<MslkEntry> LinkEntries { get; } = new();
@@ -31,182 +31,92 @@ public class Pm4File
 
     public Pm4File(byte[] data)
     {
-        using var ms = new MemoryStream(data);
-        using var br = new BinaryReader(ms);
-        Parse(br);
+        Structure = Pm4Decoder.Decode(data);
+        PopulateLegacyView(Structure);
     }
 
-    private void Parse(BinaryReader br)
+    private void PopulateLegacyView(Pm4FileStructure structure)
     {
-        while (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+        Version = structure.Version;
+
+        if (structure.Header != null)
         {
-            var sigBytes = br.ReadBytes(4);
-            Array.Reverse(sigBytes);
-            string sig = Encoding.ASCII.GetString(sigBytes);
-            uint size = br.ReadUInt32();
-            long dataStart = br.BaseStream.Position;
-
-            ChunkSizes[sig] = size;
-
-            switch (sig)
+            Header = new Pm4Header
             {
-                case "MVER":
-                    Version = br.ReadUInt32();
-                    break;
-                case "MSHD":
-                    Header = ReadHeader(br);
-                    break;
-                case "MSLK":
-                    ReadMslk(br, size);
-                    break;
-                case "MSPV":
-                    ReadVectors(br, size, PathVertices);
-                    break;
-                case "MSPI":
-                    ReadUints(br, size, PathIndices);
-                    break;
-                case "MSVT":
-                    ReadVectors(br, size, MeshVertices, isMsvt: true);
-                    break;
-                case "MSVI":
-                    ReadUints(br, size, MeshIndices);
-                    break;
-                case "MSUR":
-                    ReadMsur(br, size);
-                    break;
-                case "MSCN":
-                    ReadVectors(br, size, ExteriorVertices);
-                    break;
-                case "MPRL":
-                    ReadMprl(br, size);
-                    break;
-                case "MPRR":
-                    ReadMprr(br, size);
-                    break;
-                default:
-                    UnparsedChunks.Add($"{sig}:{size}");
-                    break;
-            }
-
-            br.BaseStream.Position = dataStart + size;
-        }
-    }
-
-    private Pm4Header ReadHeader(BinaryReader br)
-    {
-        return new Pm4Header
-        {
-            Unk00 = br.ReadUInt32(),
-            Unk04 = br.ReadUInt32(),
-            Unk08 = br.ReadUInt32(),
-            Unk0C = br.ReadUInt32(),
-            Unk10 = br.ReadUInt32(),
-            Unk14 = br.ReadUInt32(),
-            Unk18 = br.ReadUInt32(),
-            Unk1C = br.ReadUInt32()
-        };
-    }
-
-    private void ReadMslk(BinaryReader br, uint size)
-    {
-        int count = (int)(size / 20);
-        for (int i = 0; i < count; i++)
-        {
-            var entry = new MslkEntry
-            {
-                TypeFlags = br.ReadByte(),
-                Subtype = br.ReadByte(),
-                Padding = br.ReadUInt16(),
-                GroupObjectId = br.ReadUInt32()
+                Unk00 = structure.Header.Field00,
+                Unk04 = structure.Header.Field04,
+                Unk08 = structure.Header.Field08,
+                Unk0C = structure.Header.Field0C,
+                Unk10 = structure.Header.Field10,
+                Unk14 = structure.Header.Field14,
+                Unk18 = structure.Header.Field18,
+                Unk1C = structure.Header.Field1C
             };
-
-            // Read Int24 for MspiFirstIndex
-            byte[] b = br.ReadBytes(3);
-            int mspiFirst = b[0] | (b[1] << 8) | (b[2] << 16);
-            if ((mspiFirst & 0x800000) != 0) mspiFirst |= unchecked((int)0xFF000000);
-            entry.MspiFirstIndex = mspiFirst;
-
-            entry.MspiIndexCount = br.ReadByte();
-
-            // Read Int24 for MsviFirstIndex
-            b = br.ReadBytes(3);
-            int msviFirst = b[0] | (b[1] << 8) | (b[2] << 16);
-            if ((msviFirst & 0x800000) != 0) msviFirst |= unchecked((int)0xFF000000);
-            entry.MsviFirstIndex = msviFirst;
-
-            entry.MsviIndexCount = br.ReadByte();
-            entry.MsurIndex = br.ReadUInt32();
-
-            LinkEntries.Add(entry);
         }
-    }
 
-    private void ReadVectors(BinaryReader br, uint size, List<Vector3> target, bool isMsvt = false)
-    {
-        int count = (int)(size / 12);
-        for (int i = 0; i < count; i++)
+        PathVertices.AddRange(structure.PathVertices);
+        PathIndices.AddRange(structure.PathIndices);
+        MeshVertices.AddRange(structure.MeshVertices);
+        MeshIndices.AddRange(structure.MeshIndices);
+        ExteriorVertices.AddRange(structure.SceneNodes);
+
+        foreach (MslkChunk link in structure.LinkEntries)
         {
-            float x = br.ReadSingle();
-            float y = br.ReadSingle();
-            float z = br.ReadSingle();
-            target.Add(new Vector3(x, y, z));
+            LinkEntries.Add(new MslkEntry
+            {
+                TypeFlags = link.TypeFlags,
+                Subtype = link.Subtype,
+                Padding = link.Padding,
+                GroupObjectId = link.GroupObjectId,
+                MspiFirstIndex = link.MspiFirstIndex,
+                MspiIndexCount = link.MspiIndexCount,
+                LinkId = link.LinkId,
+                RefIndex = link.RefIndex,
+                SystemFlag = link.SystemFlag
+            });
         }
-    }
 
-    private void ReadUints(BinaryReader br, uint size, List<uint> target)
-    {
-        int count = (int)(size / 4);
-        for (int i = 0; i < count; i++)
-            target.Add(br.ReadUInt32());
-    }
-
-    private void ReadMsur(BinaryReader br, uint size)
-    {
-        // MSUR entries are 32 bytes each
-        int count = (int)(size / 32);
-        for (int i = 0; i < count; i++)
+        foreach (MsurChunk surface in structure.Surfaces)
         {
             Surfaces.Add(new MsurEntry
             {
-                GroupKey = br.ReadByte(),
-                IndexCount = br.ReadByte(),
-                AttributeMask = br.ReadByte(),
-                Padding = br.ReadByte(),
-                NormalX = br.ReadSingle(),
-                NormalY = br.ReadSingle(),
-                NormalZ = br.ReadSingle(),
-                Height = br.ReadSingle(),
-                MsviFirstIndex = br.ReadUInt32(),
-                MdosIndex = br.ReadUInt32(),
-                PackedParams = br.ReadUInt32()
+                GroupKey = surface.GroupKey,
+                IndexCount = surface.IndexCount,
+                AttributeMask = surface.AttributeMask,
+                Padding = surface.Padding,
+                NormalX = surface.Normal.X,
+                NormalY = surface.Normal.Y,
+                NormalZ = surface.Normal.Z,
+                Height = surface.Height,
+                MsviFirstIndex = surface.MsviFirstIndex,
+                MdosIndex = surface.MdosIndex,
+                PackedParams = surface.PackedParams
             });
         }
-    }
 
-    private void ReadMprl(BinaryReader br, uint size)
-    {
-        int count = (int)(size / 16);
-        for (int i = 0; i < count; i++)
+        foreach (MprlChunk positionRef in structure.PositionRefs)
         {
             PositionRefs.Add(new MprlEntry
             {
-                PositionX = br.ReadSingle(),
-                PositionY = br.ReadSingle(),
-                PositionZ = br.ReadSingle(),
-                RotationOrFlags = br.ReadUInt32()
+                Unk00 = positionRef.Unk00,
+                Unk02 = positionRef.Unk02,
+                Unk04 = positionRef.Unk04,
+                Unk06 = positionRef.Unk06,
+                PositionX = positionRef.Position.X,
+                PositionY = positionRef.Position.Y,
+                PositionZ = positionRef.Position.Z,
+                Unk14 = positionRef.Unk14,
+                Unk16 = positionRef.Unk16
             });
         }
-    }
 
-    private void ReadMprr(BinaryReader br, uint size)
-    {
-        int count = (int)(size / 4);
-        for (int i = 0; i < count; i++)
-        {
-            ushort val1 = br.ReadUInt16();
-            ushort val2 = br.ReadUInt16();
-            MprrEntries.Add(new MprrEntry(val1, val2));
-        }
+        foreach (MprrChunk graphEntry in structure.GraphEntries)
+            MprrEntries.Add(new MprrEntry(graphEntry.Value1, graphEntry.Value2));
+
+        foreach ((string key, uint value) in structure.ChunkSizes)
+            ChunkSizes[key] = value;
+
+        UnparsedChunks.AddRange(structure.UnparsedChunks);
     }
 
     /// <summary>
@@ -329,6 +239,9 @@ public class MslkEntry
     public int MsviFirstIndex { get; set; }
     public byte MsviIndexCount { get; set; }
     public uint MsurIndex { get; set; }
+    public uint LinkId { get; set; }
+    public ushort RefIndex { get; set; }
+    public ushort SystemFlag { get; set; }
 }
 
 public class MsurEntry
@@ -344,14 +257,31 @@ public class MsurEntry
     public uint MsviFirstIndex { get; set; }
     public uint MdosIndex { get; set; }
     public uint PackedParams { get; set; }
+
+    public uint Ck24 => (PackedParams >> 8) & 0xFFFFFF;
+
+    public byte Ck24Type => (byte)((PackedParams >> 24) & 0xFF);
+
+    public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
 }
 
 public class MprlEntry
 {
+    public ushort Unk00 { get; set; }
+    public short Unk02 { get; set; }
+    public ushort Unk04 { get; set; }
+    public ushort Unk06 { get; set; }
     public float PositionX { get; set; }
     public float PositionY { get; set; }
     public float PositionZ { get; set; }
-    public uint RotationOrFlags { get; set; }
+    public short Unk14 { get; set; }
+    public ushort Unk16 { get; set; }
+
+    public uint RotationOrFlags
+    {
+        get => Unk04;
+        set => Unk04 = (ushort)value;
+    }
 
     public Vector3 Position => new(PositionX, PositionY, PositionZ);
 }

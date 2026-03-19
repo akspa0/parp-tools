@@ -275,6 +275,24 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 - DBC lighting (Light.dbc + LightData.dbc)
 - Replaceable texture DBC resolution with MPQ validation
 
+### Mar 19, 2026 - PM4 Coordinate Validation Slice
+
+- Active core PM4 support now has one explicit coordinate-validation path built around `MPRL` refs already stored in ADT placement order.
+- New active-core pieces:
+	- `WoWMapConverter.Core/Formats/PM4/Pm4CoordinateService.cs` defines the authoritative PM4 placement helpers for this first validation pass.
+	- `WoWMapConverter.Core/Formats/PM4/Pm4CoordinateValidator.cs` validates transformed `MPRL` refs against real `_obj0.adt` placements from the fixed development dataset.
+	- `WoWMapConverter.Cli` now exposes `pm4-validate-coords`.
+- Real-data validation status for this slice:
+	- `wowmapconverter pm4-validate-coords --tile-limit 100` validated 100 PM4 tiles with placements from the fixed development dataset
+	- 38,133 `MPRL` refs landed in expected tile bounds (100.0%)
+	- 36,070 refs landed within a 32-unit nearest-placement threshold (94.6%)
+	- average nearest-placement distance was 10.86 units
+- Scope boundary:
+	- this validates the `MPRL` anchor path only
+	- cross-tile CK24 aggregation is still pending
+	- MSCN/world-space semantics are still not the validated contract for active core code
+- Do not claim PM4 world placement is fully solved beyond this `MPRL` path until CK24 aggregation and MSCN semantics are also validated.
+
 ### Working Features
 
 | Feature | Status | Notes |

@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Text.Json;
 using ImGuiNET;
@@ -111,7 +113,7 @@ public partial class ViewerApp : IDisposable
     private bool _showPerfWindow = false;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
-    private bool _wantOpenFolder = false;
+    private bool _wantAttachLooseMapFolder = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
 
@@ -802,6 +804,9 @@ void main() {
                     _folderInputBuf = "";
                 }
 
+                if (ImGui.MenuItem("Attach Loose Map Folder...", "", false, _dataSource is MpqDataSource))
+                    _wantAttachLooseMapFolder = true;
+
                 if (ImGui.MenuItem("Open VLM Project..."))
                     _wantOpenVlmProject = true;
 
@@ -917,6 +922,22 @@ void main() {
 
             if (!string.IsNullOrEmpty(vlmPath) && Directory.Exists(vlmPath))
                 LoadVlmProject(vlmPath);
+        }
+
+        if (_wantAttachLooseMapFolder)
+        {
+            _wantAttachLooseMapFolder = false;
+
+            if (_dataSource is MpqDataSource)
+            {
+                string? overlayPath = ShowFolderDialogSTA(
+                    "Select loose map overlay folder (contains World\\Maps or a map directory under World\\Maps)",
+                    initialDir: null,
+                    showNewFolderButton: false);
+
+                if (!string.IsNullOrEmpty(overlayPath) && Directory.Exists(overlayPath))
+                    AttachLooseMapOverlay(overlayPath);
+            }
         }
 
         if (_wantExportGlbCollision)
@@ -2027,7 +2048,9 @@ void main() {
             {
                 bool hasWdt = map.HasWdt;
                 bool hasWdl = map.HasWdl;
-                string label = $"[{map.Id:D3}] {map.Name}";
+                string label = map.HasDbcEntry
+                    ? $"[{map.Id:D3}] {map.Name}"
+                    : $"[custom] {map.Name}";
                 if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
 
                 if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
@@ -2041,7 +2064,7 @@ void main() {
                 if (hasWdt)
                 {
                     ImGui.SameLine();
-                    if (ImGui.SmallButton($"Load##{map.Id}"))
+                    if (ImGui.SmallButton($"Load##{map.Directory}"))
                         LoadMapAtDefaultSpawn(map);
                 }
 
@@ -2053,7 +2076,7 @@ void main() {
 
                 ImGui.SameLine();
                 if (!canSelectSpawn) ImGui.BeginDisabled();
-                if (ImGui.SmallButton($"Spawn##{map.Id}") && canSelectSpawn)
+                if (ImGui.SmallButton($"Spawn##{map.Directory}") && canSelectSpawn)
                     OpenWdlPreview(map);
                 if (!canSelectSpawn) ImGui.EndDisabled();
 
@@ -2061,6 +2084,7 @@ void main() {
                 {
                     ImGui.BeginTooltip();
                     ImGui.Text($"Directory: {map.Directory}");
+                    ImGui.Text($"Source: {(map.HasDbcEntry ? "Map.dbc + data source" : "Loose data source only")}");
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
                     if (canSelectSpawn)
@@ -3532,6 +3556,31 @@ void main() {
         _selectedFileIndex = -1;
     }
 
+    private void RefreshDiscoveredMaps()
+    {
+        if (_dataSource == null)
+        {
+            _discoveredMaps.Clear();
+            return;
+        }
+
+        if (_dbcProvider != null && !string.IsNullOrWhiteSpace(_dbdDir) && !string.IsNullOrWhiteSpace(_dbcBuild))
+        {
+            var mapDiscovery = new MapDiscoveryService(_dbcProvider, _dbdDir!, _dbcBuild!, _dataSource);
+            _discoveredMaps = mapDiscovery.DiscoverMaps();
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"Discovered {_discoveredMaps.Count} maps via Map.dbc/data source ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs, {_discoveredMaps.Count(m => !m.HasDbcEntry)} custom loose maps)");
+        }
+        else
+        {
+            _discoveredMaps = MapDiscoveryService.DiscoverLooseMapsOnly(_dataSource);
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"Discovered {_discoveredMaps.Count} loose maps without Map.dbc metadata.");
+        }
+
+        WarmDiscoveredWdlPreviews();
+    }
+
     private void LoadMpqDataSource(string gamePath, string? listfilePath)
     {
         try
@@ -3539,11 +3588,13 @@ void main() {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
             _standaloneSkinPathCache.Clear();
+            _discoveredMaps.Clear();
+            _areaTableService = null;
             ResetWdlPreviewSupport();
             _dataSource?.Dispose();
             _dataSource = new MpqDataSource(gamePath, resolvedListfilePath);
             _statusMessage = $"Loaded: {_dataSource.Name}";
-            InitializeWdlPreviewSupport(gamePath);
+            InitializeWdlPreviewSupport();
 
             // Load DBC tables directly from MPQ for replaceable texture resolution
             _texResolver = new ReplaceableTextureResolver();
@@ -3597,26 +3648,24 @@ void main() {
                         ViewerLog.Trace($"[MdxViewer] Loading DBCs via DBCD (build: {buildAlias}, DBDs: {dbdDir})");
                         _texResolver.LoadFromDBC(dbcProvider, dbdDir, buildAlias);
 
-                        // Discover maps
-                        var mapDiscovery = new MapDiscoveryService(dbcProvider, dbdDir, buildAlias, _dataSource);
-                        _discoveredMaps = mapDiscovery.DiscoverMaps();
-                        ViewerLog.Important(ViewerLog.Category.Dbc, $"Discovered {_discoveredMaps.Count} maps via Map.dbc ({_discoveredMaps.Count(m => m.HasWdt)} with WDTs)");
-                        WarmDiscoveredWdlPreviews();
-
                         // Load AreaTable for area name display
                         _areaTableService = new AreaTableService();
                         _areaTableService.Load(dbcProvider, dbdDir, buildAlias);
                     }
                     else
                     {
+                        _dbcBuild = null;
                         ViewerLog.Trace("[MdxViewer] Could not determine build version. DBC texture resolution unavailable.");
                     }
                 }
                 else
                 {
+                    _dbcBuild = null;
                     ViewerLog.Trace("[MdxViewer] WoWDBDefs definitions not found. DBC texture resolution unavailable.");
                 }
             }
+
+            RefreshDiscoveredMaps();
 
             RefreshFileList();
         }
@@ -3624,6 +3673,73 @@ void main() {
         {
             _statusMessage = $"Failed to load MPQs: {ex.Message}";
         }
+    }
+
+    private void AttachLooseMapOverlay(string selectedPath)
+    {
+        if (_dataSource is not MpqDataSource mpqDataSource)
+        {
+            _statusMessage = "Load a base MPQ game path first, then attach a loose map overlay.";
+            return;
+        }
+
+        string? overlayRoot = ResolveLooseMapOverlayRoot(selectedPath);
+        if (string.IsNullOrWhiteSpace(overlayRoot))
+        {
+            _statusMessage = "Selected folder must contain World\\Maps or be a map directory under World\\Maps.";
+            return;
+        }
+
+        if (!mpqDataSource.AddOverlayRoot(overlayRoot, out string normalizedRoot, out string message))
+        {
+            _statusMessage = message;
+            return;
+        }
+
+        _standaloneSkinPathCache.Clear();
+        ResetWdlPreviewSupport();
+        InitializeWdlPreviewSupport();
+        RefreshDiscoveredMaps();
+        RefreshFileList();
+        _statusMessage = $"Attached loose map overlay: {normalizedRoot}";
+    }
+
+    private static string? ResolveLooseMapOverlayRoot(string selectedPath)
+    {
+        string fullPath = Path.GetFullPath(selectedPath);
+        if (!Directory.Exists(fullPath))
+            return null;
+
+        if (Directory.Exists(Path.Combine(fullPath, "World", "Maps")))
+            return fullPath;
+
+        var directoryInfo = new DirectoryInfo(fullPath);
+
+        if (directoryInfo.Name.Equals("World", StringComparison.OrdinalIgnoreCase) &&
+            Directory.Exists(Path.Combine(directoryInfo.FullName, "Maps")))
+        {
+            return directoryInfo.Parent?.FullName;
+        }
+
+        if (directoryInfo.Name.Equals("Maps", StringComparison.OrdinalIgnoreCase) &&
+            directoryInfo.Parent?.Name.Equals("World", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return directoryInfo.Parent.Parent?.FullName;
+        }
+
+        if (directoryInfo.Parent?.Name.Equals("Maps", StringComparison.OrdinalIgnoreCase) == true &&
+            directoryInfo.Parent.Parent?.Name.Equals("World", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return directoryInfo.Parent.Parent.Parent?.FullName;
+        }
+
+        for (DirectoryInfo? current = directoryInfo; current != null; current = current.Parent)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "World", "Maps")))
+                return current.FullName;
+        }
+
+        return null;
     }
 
     private static string? ResolveListfilePath(string? explicitListfilePath)
@@ -3660,18 +3776,33 @@ void main() {
         return null;
     }
 
-    private void InitializeWdlPreviewSupport(string gamePath)
+    private void InitializeWdlPreviewSupport()
     {
         if (_dataSource == null)
             return;
 
-        string cacheSegment = Regex.Replace(gamePath.ToLowerInvariant(), @"[^a-z0-9._-]+", "_").Trim('_');
+        string cacheIdentity = BuildWdlPreviewCacheIdentity();
+        string cacheSegment = string.IsNullOrWhiteSpace(cacheIdentity)
+            ? "default"
+            : Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(cacheIdentity))).ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(cacheSegment))
             cacheSegment = "default";
 
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewCacheService = new WdlPreviewCacheService(_dataSource, Path.Combine(CacheDir, "wdl-preview", cacheSegment));
         _wdlPreviewWarmupStatus = string.Empty;
+    }
+
+    private string BuildWdlPreviewCacheIdentity()
+    {
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            var parts = new List<string> { mpqDataSource.GamePath };
+            parts.AddRange(mpqDataSource.OverlayRoots.OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+            return string.Join("||", parts);
+        }
+
+        return _dataSource?.Name ?? "default";
     }
 
     private void ResetWdlPreviewSupport()
@@ -5072,7 +5203,7 @@ void main() {
         int totalVerts = mdx.Geosets.Sum(g => g.Vertices.Count);
         int totalTris = mdx.Geosets.Sum(g => g.Indices.Count / 3);
 
-        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel);
+        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -5257,7 +5388,7 @@ void main() {
             string curMapName = _terrainManager.MapName;
             var curMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, curMapName, StringComparison.OrdinalIgnoreCase));
-            _currentMapId = curMapDef?.Id ?? -1;
+            _currentMapId = curMapDef?.HasDbcEntry == true ? curMapDef.Id : -1;
             _reportedAreaDiagnostics.Clear();
             ViewerLog.Important(ViewerLog.Category.General,
                 $"[WorldLoad] Map='{curMapName}' resolvedMapId={_currentMapId} build={_dbcBuild ?? "unknown"} areaTable={_areaTableService?.DescribeLoadContext() ?? "not loaded"}");
@@ -5267,10 +5398,10 @@ void main() {
             // Only Lighting is loaded eagerly since it affects rendering immediately.
             if (_dbcProvider != null && _dbdDir != null && _dbcBuild != null)
             {
-                int mapId = curMapDef?.Id ?? -1;
+                int mapId = curMapDef?.HasDbcEntry == true ? curMapDef.Id : -1;
                 _worldScene.SetDbcCredentials(_dbcProvider, _dbdDir, _dbcBuild, mapId);
 
-                if (curMapDef != null)
+                if (curMapDef?.HasDbcEntry == true)
                     _worldScene.LoadLighting(_dbcProvider, _dbdDir, _dbcBuild, curMapDef.Id);
             }
 

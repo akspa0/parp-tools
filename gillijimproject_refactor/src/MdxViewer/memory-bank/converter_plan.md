@@ -103,29 +103,67 @@ Reverse pipeline:
 
 ---
 
-## Phase 3: PM4 as Pseudo-Map Tiles (Medium Priority)
+## Phase 3: PM4 World Support (Medium Priority)
 
-**Goal**: Load PM4 files in the viewer as navigable terrain.
+**Goal**: Load the complete PM4 set as a world-space dataset in the viewer, preserving CK24 object identity across tile boundaries and mapping decoded geometry to the correct world positions.
 
-### 3a. PM4TerrainAdapter
-- New `ITerrainAdapter` implementation
-- Scans folder of PM4 files (development_XX_YY.pm4)
-- Maps PM4 coordinates to tile grid
-- Extracts MSVT/MSVI mesh geometry
-- Produces simplified `TerrainChunkData` (navmesh as terrain surface)
-- No textures — use wireframe or solid color based on surface type (MSUR flags)
+### 3a. Unify PM4 Decode In Core
+- Do not treat the current lightweight `WoWMapConverter.Core.Formats.PM4.Pm4File` parser as sufficient for final PM4 support.
+- Port or align the richer rollback decoder contract into reusable core types:
+	- `Pm4Decoder`
+	- `Pm4ChunkTypes`
+	- `Pm4FileStructure`
+	- `Pm4MapReader`
+- Preserve the key PM4 relationships explicitly:
+	- `MSUR.PackedParams` → `CK24`
+	- `MSUR.MdosIndex` → `MSCN`
+	- `MSLK` / `MSPI` / `MSPV` path links
+	- `MSVT` / `MSVI` surface mesh links
+	- `MPRL` / `MPRR` placement/reference graph data
+- Required outcome: one reusable PM4 decode layer that can read all 616 PM4 files from the fixed development dataset without losing CK24 identity or surface-link metadata.
 
-### 3b. PM4 Coordinate Fix
-- Use Pm4AdtCorrelator with known development map data as ground truth
-- Compare PM4 MPRL positions with ADT MODF positions
-- Calculate and apply the systematic offset
+### 3b. Build A Cross-Tile CK24 Registry
+- Treat CK24 as the primary object-group key across the full PM4 map set, not just inside a single tile.
+- Build a map-level registry that aggregates surfaces, scene nodes, and placement references by CK24 across multiple `development_XX_YY.pm4` tiles.
+- Keep tile provenance on every decoded element so cross-tile objects can still be traced back to source PM4s.
+- Split responsibilities clearly:
+	- `CK24 == 0` → terrain/navmesh/background surface layer
+	- `CK24 != 0` → object candidate layer
+	- optional `MSVI` gap splitting inside a CK24 group when one CK24 contains multiple repeated instances
+- Required outcome: the viewer and later exporters can ask for `all geometry for CK24 X` and get a complete, cross-tile object layer instead of partial tile fragments.
 
-### 3c. PM4 Object Extraction
-- MSLK hierarchy defines object grouping
-- Use Pm4GeometryClusterer to identify distinct objects
-- Match against known WMO models via Pm4WmoGeometryMatcher
-- Export unmatched objects as OBJ for manual identification
-- Overlay extracted objects on terrain in the viewer
+### 3c. Establish One Authoritative World-Coordinate Contract
+- Coordinate correctness is the current hard gate.
+- Preserve the proven findings from rollback work:
+	- CK24 grouping via `MSUR` is already usable
+	- MSCN-linked object discovery via `MdosIndex` is already usable
+	- coordinate handling is where previous PM4 output became wrong
+- Validate and codify the coordinate contract against fixed development data before integrating rendering/export broadly:
+	- determine which chunks are already world-space vs tile-local (`MSCN`, `MPRL`, `MSVT`)
+	- document any required axis swap and any required tile-origin transform
+	- compare transformed PM4 placements against ADT `MODF` / `MDDF` ground truth in `test_data/development/World/Maps/development`
+- Required outcome: one documented transform API that converts PM4-derived object anchors into the same world coordinates used by the viewer scene and ADT placements.
+
+### 3d. Classify PM4 Output Into Viewer Layers
+- PM4 support should produce distinct renderable/debug layers instead of a single mesh blob.
+- Minimum layer split:
+	- nav/background surfaces
+	- CK24 object groups
+	- matched WMO candidates
+	- matched M2 candidates
+	- unmatched geometry candidates
+	- placement/reference markers from `MPRL`
+- Viewer integration should start with debug rendering first:
+	- wireframe/flat-shaded PM4 surfaces
+	- color-by-layer or color-by-CK24 rendering
+	- toggleable anchors/bounds for transformed object placements
+- Required outcome: visual proof that PM4 layers land in the right world positions before any higher-level conversion/export claims are made.
+
+### 3e. PM4 Object Extraction And Matching
+- After world coordinates are trusted, reuse the existing CK24 and MSCN grouping to build object candidates.
+- Match grouped geometry against known WMO/M2 libraries.
+- Keep unmatched geometry export as a first-class output for manual identification.
+- Do not collapse this into only WMO reconstruction; PM4 support should preserve a generic object-class layer whether or not a final asset match exists.
 
 ---
 

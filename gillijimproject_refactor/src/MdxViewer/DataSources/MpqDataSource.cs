@@ -14,8 +14,26 @@ namespace MdxViewer.DataSources;
 /// </summary>
 public class MpqDataSource : IDataSource
 {
+    private static readonly HashSet<string> IndexedLooseExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mdx",
+        ".wmo",
+        ".m2",
+        ".blp",
+        ".skin",
+        ".anim",
+        ".dbc",
+        ".wdt",
+        ".adt",
+        ".wlw",
+        ".wlq",
+        ".wlm",
+        ".pm4"
+    };
+
     private readonly NativeMpqService _mpq = new();
     private readonly string _gamePath;
+    private readonly List<string> _overlayRoots = new();
 
     /// <summary>Exposes the underlying MPQ service for DBC provider access.</summary>
     public NativeMpqService MpqService => _mpq;
@@ -50,10 +68,14 @@ public class MpqDataSource : IDataSource
     private List<NativeMpqService>? _prefetchMpqServices;
     private const int PrefetchWorkerCount = 2;
 
-    public string Name => $"Game: {Path.GetFileName(_gamePath)}";
+    public string GamePath => _gamePath;
+    public IReadOnlyList<string> OverlayRoots => _overlayRoots;
+    public string Name => _overlayRoots.Count == 0
+        ? $"Game: {Path.GetFileName(_gamePath)}"
+        : $"Game: {Path.GetFileName(_gamePath)} + {_overlayRoots.Count} loose overlay(s)";
     public bool IsLoaded => _loaded;
 
-    public MpqDataSource(string gamePath, string? listfilePath = null)
+    public MpqDataSource(string gamePath, string? listfilePath = null, IEnumerable<string>? overlayRoots = null)
     {
         _gamePath = gamePath;
 
@@ -91,6 +113,16 @@ public class MpqDataSource : IDataSource
 
         _fileList = _fileSet.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         BuildLookupIndexes();
+
+        if (overlayRoots != null)
+        {
+            foreach (string overlayRoot in overlayRoots)
+            {
+                if (!string.IsNullOrWhiteSpace(overlayRoot))
+                    AddOverlayRoot(overlayRoot, out _, out _);
+            }
+        }
+
         _loaded = true;
 
         // Debug: show file counts by extension
@@ -221,7 +253,47 @@ public class MpqDataSource : IDataSource
         ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {count} listfile entries.");
     }
 
-    private void ScanLooseFiles(string gamePath)
+    public bool AddOverlayRoot(string rootPath, out string normalizedRoot, out string message)
+    {
+        normalizedRoot = Path.GetFullPath(rootPath);
+
+        if (!Directory.Exists(normalizedRoot))
+        {
+            message = $"Overlay folder not found: {normalizedRoot}";
+            return false;
+        }
+
+        if (_overlayRoots.Contains(normalizedRoot, StringComparer.OrdinalIgnoreCase))
+        {
+            message = $"Overlay already attached: {normalizedRoot}";
+            return false;
+        }
+
+        int fileCountBefore = _fileSet.Count;
+        int alphaCountBefore = _alphaMpqCache.Count;
+
+        ScanLooseFiles(normalizedRoot);
+        ScanAlphaNestedMpqArchives(normalizedRoot);
+
+        int addedFiles = _fileSet.Count - fileCountBefore;
+        int addedAlphaEntries = _alphaMpqCache.Count - alphaCountBefore;
+        if (addedFiles <= 0 && addedAlphaEntries <= 0)
+        {
+            message = $"No supported loose map files were found under {normalizedRoot}";
+            return false;
+        }
+
+        _overlayRoots.Add(normalizedRoot);
+        _fileList = _fileSet.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+        BuildLookupIndexes();
+        ClearReadCache();
+
+        message = $"Attached loose overlay {normalizedRoot} ({addedFiles} indexed files, {addedAlphaEntries} alpha wrapper entries).";
+        ViewerLog.Important(ViewerLog.Category.MpqData, message);
+        return true;
+    }
+
+    private int ScanLooseFiles(string gamePath)
     {
         // Scan for loose files in the game directory structure
         // Alpha 0.5.3 has files directly in Data/ subfolders
@@ -230,6 +302,8 @@ public class MpqDataSource : IDataSource
             gamePath,
             Path.Combine(gamePath, "Data"),
         };
+
+        int totalAdded = 0;
 
         foreach (var root in scanRoots)
         {
@@ -261,7 +335,7 @@ public class MpqDataSource : IDataSource
                     foreach (var file in Directory.EnumerateFiles(fullDir, "*.*", SearchOption.AllDirectories))
                     {
                         var ext = Path.GetExtension(file).ToLowerInvariant();
-                        if (ext is ".mdx" or ".wmo" or ".m2" or ".blp" or ".skin" or ".anim" or ".dbc")
+                        if (IndexedLooseExtensions.Contains(ext))
                         {
                             var virtualPath = Path.GetRelativePath(root, file).Replace('/', '\\');
                             _fileSet.Add(virtualPath);
@@ -274,6 +348,7 @@ public class MpqDataSource : IDataSource
                 }
 
                 int found = _fileSet.Count - before;
+                totalAdded += found;
                 ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} files in {subDir}/");
                 foundAny = found > 0;
             }
@@ -301,11 +376,14 @@ public class MpqDataSource : IDataSource
                 }
 
                 int found = _fileSet.Count - before;
+                totalAdded += found;
                 ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} WMO files");
             }
 
             if (foundAny) break;
         }
+
+        return totalAdded;
     }
 
     public bool FileExists(string virtualPath)
@@ -512,6 +590,17 @@ public class MpqDataSource : IDataSource
             var node = _readCacheLru.AddLast(normalizedPath);
             _readCacheLruMap[normalizedPath] = node;
             EvictReadCacheIfNeeded_NoLock();
+        }
+    }
+
+    private void ClearReadCache()
+    {
+        lock (_readCacheLock)
+        {
+            _readCache.Clear();
+            _readCacheLru.Clear();
+            _readCacheLruMap.Clear();
+            _readCacheBytes = 0;
         }
     }
 

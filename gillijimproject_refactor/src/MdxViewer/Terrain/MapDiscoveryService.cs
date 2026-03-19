@@ -6,7 +6,7 @@ using MdxViewer.Logging;
 
 namespace MdxViewer.Terrain;
 
-public record MapDefinition(int Id, string Directory, string Name, bool HasWdt, bool HasWdl);
+public record MapDefinition(int Id, string Directory, string Name, bool HasWdt, bool HasWdl, bool HasDbcEntry = true);
 
 public class MapDiscoveryService
 {
@@ -25,7 +25,7 @@ public class MapDiscoveryService
 
     public List<MapDefinition> DiscoverMaps()
     {
-        var maps = new List<MapDefinition>();
+        var mapsByDirectory = new Dictionary<string, MapDefinition>(StringComparer.OrdinalIgnoreCase);
         var dbdProvider = new FilesystemDBDProvider(_dbdDir);
         var dbcd = new DBCD.DBCD(_dbcProvider, dbdProvider);
 
@@ -50,7 +50,7 @@ public class MapDiscoveryService
         {
             ViewerLog.Error(ViewerLog.Category.Dbc,
                 $"[MapDiscovery] Failed to load Map.dbc for build {_build}: {ex.Message}");
-            return maps;
+            return DiscoverLooseMapsOnly(_dataSource);
         }
 
         // Detect the actual MapID column (varies by build: "ID", "MapID", etc.)
@@ -88,13 +88,100 @@ public class MapDiscoveryService
             string wdlPath = $"World\\Maps\\{dir}\\{dir}.wdl";
             bool hasWdl = _dataSource.FileExists(wdlPath);
 
-            maps.Add(new MapDefinition(id, dir, name, hasWdt, hasWdl));
+            mapsByDirectory[dir] = new MapDefinition(id, dir, name, hasWdt, hasWdl, HasDbcEntry: true);
         }
 
-        ViewerLog.Important(ViewerLog.Category.General,
-            $"[MapDiscovery] Produced {maps.Count} map definitions ({maps.Count(m => m.HasWdt)} with WDTs, {maps.Count(m => m.HasWdl)} with WDLs)");
+        MergeLooseMaps(mapsByDirectory, _dataSource);
 
-        return maps.OrderBy(m => m.Name).ToList();
+        var maps = mapsByDirectory.Values.OrderBy(m => m.Name).ToList();
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[MapDiscovery] Produced {maps.Count} map definitions ({maps.Count(m => m.HasWdt)} with WDTs, {maps.Count(m => m.HasWdl)} with WDLs, {maps.Count(m => !m.HasDbcEntry)} custom loose maps)");
+
+        return maps;
+    }
+
+    public static List<MapDefinition> DiscoverLooseMapsOnly(IDataSource dataSource)
+    {
+        var mapsByDirectory = new Dictionary<string, MapDefinition>(StringComparer.OrdinalIgnoreCase);
+        MergeLooseMaps(mapsByDirectory, dataSource);
+
+        var maps = mapsByDirectory.Values.OrderBy(m => m.Name).ToList();
+        ViewerLog.Important(ViewerLog.Category.General,
+            $"[MapDiscovery] Produced {maps.Count} loose map definitions without Map.dbc metadata.");
+        return maps;
+    }
+
+    private static void MergeLooseMaps(IDictionary<string, MapDefinition> mapsByDirectory, IDataSource dataSource)
+    {
+        int nextSyntheticId = mapsByDirectory.Values
+            .Where(map => !map.HasDbcEntry)
+            .Select(map => map.Id)
+            .DefaultIfEmpty(0)
+            .Min() - 1;
+        if (nextSyntheticId >= 0)
+            nextSyntheticId = -1;
+
+        foreach (MapDefinition looseMap in EnumerateLooseMaps(dataSource, nextSyntheticId))
+        {
+            if (mapsByDirectory.TryGetValue(looseMap.Directory, out var existing))
+            {
+                mapsByDirectory[looseMap.Directory] = existing with
+                {
+                    HasWdt = existing.HasWdt || looseMap.HasWdt,
+                    HasWdl = existing.HasWdl || looseMap.HasWdl
+                };
+                continue;
+            }
+
+            mapsByDirectory[looseMap.Directory] = looseMap;
+            nextSyntheticId = looseMap.Id - 1;
+        }
+    }
+
+    private static IEnumerable<MapDefinition> EnumerateLooseMaps(IDataSource dataSource, int startingSyntheticId)
+    {
+        int nextSyntheticId = startingSyntheticId;
+        foreach (string path in dataSource.GetFileList(".wdt"))
+        {
+            if (!TryExtractMapDirectoryFromWdtPath(path, out string? mapDirectory) || string.IsNullOrWhiteSpace(mapDirectory))
+                continue;
+
+            string discoveredDirectory = mapDirectory;
+            string normalizedWdtPath = $"World\\Maps\\{discoveredDirectory}\\{discoveredDirectory}.wdt";
+            bool hasWdt = dataSource.FileExists(normalizedWdtPath);
+            bool hasWdl = dataSource.FileExists($"World\\Maps\\{discoveredDirectory}\\{discoveredDirectory}.wdl");
+            yield return new MapDefinition(nextSyntheticId--, discoveredDirectory, discoveredDirectory, hasWdt, hasWdl, HasDbcEntry: false);
+        }
+    }
+
+    private static bool TryExtractMapDirectoryFromWdtPath(string path, out string? mapDirectory)
+    {
+        string normalized = path.Replace('/', '\\').TrimStart('\\');
+        string[] segments = normalized.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4)
+        {
+            mapDirectory = null;
+            return false;
+        }
+
+        if (!segments[0].Equals("World", StringComparison.OrdinalIgnoreCase) ||
+            !segments[1].Equals("Maps", StringComparison.OrdinalIgnoreCase))
+        {
+            mapDirectory = null;
+            return false;
+        }
+
+        string directory = segments[2];
+        string fileName = segments[^1];
+        string expectedFileName = directory + ".wdt";
+        if (!fileName.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            mapDirectory = null;
+            return false;
+        }
+
+        mapDirectory = directory;
+        return true;
     }
 
     private static string DetectIdColumn(IDBCDStorage storage)

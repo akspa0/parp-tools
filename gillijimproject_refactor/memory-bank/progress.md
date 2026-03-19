@@ -342,6 +342,21 @@
 	- classic `0.5.3` MDX should be treated as restored for the tested runtime sample
 	- pre-release `3.0.1` rendering is still buggy and remains the active unresolved model-family track
 
+### Mar 19, 2026 - PM4 Coordinate Validation Command
+
+- Added `WoWMapConverter.Core/Formats/PM4/Pm4CoordinateService.cs` as the first authoritative PM4 placement helper set in active core code.
+- Added `WoWMapConverter.Core/Formats/PM4/Pm4CoordinateValidator.cs` to validate transformed `MPRL` refs against real `_obj0.adt` placements from the fixed development dataset.
+- Added CLI command: `wowmapconverter pm4-validate-coords [--input-dir <dir>] [--tile-limit <n>] [--threshold <units>] [--json <path>]`.
+- Important scope limit:
+	- this is a real-data validation path for `MPRL` only
+	- it does not yet validate MSCN semantics
+	- it does not yet build the cross-tile CK24 registry
+- Validation status at this note:
+	- initial real-data slice showed `MPRL` is already in ADT placement order, not tile-local
+	- broadened sample run on 100 validated tiles reported 38,133 refs in expected tile bounds (100.0%) and 36,070 refs within 32 units of a nearest `_obj0.adt` placement (94.6%)
+	- average nearest-placement distance on that sample was 10.86 units
+	- broader work is still pending for CK24 aggregation and MSCN semantics
+
 ## ✅ Working
 
 ### MdxViewer (3D World Viewer) — Primary Project

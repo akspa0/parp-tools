@@ -851,7 +851,7 @@ Previously deferred issue now resolved. ParticleRenderer rewritten with per-part
 - `specifications/ghidra/prompt-400.md` — 4.0.0 Cata (split ADT introduction)
 
 ### Converter Master Plan
-- `memory-bank/converter_plan.md` — 4-phase plan: LK model reading → format conversion → PM4 tiles → unified project
+- `memory-bank/converter_plan.md` — 4-phase plan: LK model reading → format conversion → PM4 world support with CK24 aggregation and coordinate validation → unified project
 
 ## Session 2026-02-08 (Evening) Summary
 
@@ -896,6 +896,29 @@ Previously deferred issue now resolved. ParticleRenderer rewritten with per-part
 - Dialog UI: client path (folder picker), map name, output dir, tile limit, progress log.
 - Runs `VlmDatasetExporter.ExportMapAsync()` on `ThreadPool` with `IProgress<string>` feeding real-time log.
 - "Open in Viewer" button after export completes.
+
+#### Loose Map Overlay Workflow (ViewerApp.cs, MpqDataSource.cs, MapDiscoveryService.cs) (Mar 19, 2026)
+- Base 3.3.5 MPQ clients can now be extended with loose custom-map content after initial load.
+- Workflow:
+   - `File > Open Game Folder (MPQ)...`
+   - `File > Attach Loose Map Folder...`
+- Supported overlay expectation:
+   - selected folder contains `World\Maps\...` directly, or is itself under `World\Maps\<mapDir>`
+- `MpqDataSource` overlay behavior:
+   - overlay roots are indexed into the same virtual-path file set used by terrain/model loading
+   - loose overlay scan now includes `.wdt`, `.adt`, `.pm4`, `.wlw`, `.wlq`, and `.wlm` in addition to existing model/texture extensions
+   - raw-byte read cache is cleared on overlay attach so old misses do not hide newly added files
+- `MapDiscoveryService` behavior:
+   - loose `World\Maps\<dir>\<dir>.wdt` paths are merged into the discovered map list even when no `Map.dbc` row exists
+   - custom loose maps are shown with synthetic IDs / custom labels in the UI
+   - custom loose maps intentionally skip `Map.dbc` lighting IDs
+- Scope boundary:
+   - this slice improves loading/discovery for converted loose maps and PM4 sidecars
+   - viewer-side PM4 reconstruction/rendering is still not implemented here; PM4 files are only indexed/resolvable for later work
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+   - no automated tests were added or run
+   - no runtime real-data validation has been completed yet for this loose overlay workflow
 
 ### Key Technical Decisions
 - **Coordinate system**: Renderer X = WoW Y, Renderer Y = WoW X, Z = height. MapOrigin = 17066.66666f, ChunkSize = 533.33333f.

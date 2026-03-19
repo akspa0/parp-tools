@@ -1022,7 +1022,7 @@ void main() {
                 string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
             }
             catch (Exception ex)
             {
@@ -1042,7 +1042,7 @@ void main() {
                     string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
-                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                 }
                 catch (Exception ex)
                 {
@@ -1069,7 +1069,7 @@ void main() {
                         string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
-                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true);
+                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                     }
 
                     lastSkinError = new InvalidDataException(

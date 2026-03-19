@@ -2,6 +2,7 @@ using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Terrain;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
 
@@ -86,6 +87,7 @@ public class MdxRenderer : ISceneRenderer
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
     private readonly bool _mdxDebugFocus;
     private readonly bool _isM2AdapterModel;
+    private readonly bool _usesPreRelease301M2Profile;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -144,13 +146,19 @@ public class MdxRenderer : ISceneRenderer
     public MdxAnimator? Animator => _animator;
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
-        ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false)
+        ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false,
+        string? buildVersion = null)
     {
         _gl = gl;
         _mdx = mdx;
         _modelDir = modelDir;
         _dataSource = dataSource;
         _isM2AdapterModel = isM2AdapterModel;
+        _usesPreRelease301M2Profile = _isM2AdapterModel
+            && string.Equals(
+                FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
+                FormatProfileRegistry.M2Profile3018303.ProfileId,
+                StringComparison.Ordinal);
         
         var mdxName = Path.GetFileNameWithoutExtension(modelDir);
         MdxTextureDiagnosticLogger.Initialize(mdxName);
@@ -641,7 +649,7 @@ public class MdxRenderer : ISceneRenderer
                     }
                     else
                     {
-                        if (_isM2AdapterModel)
+                        if (_usesPreRelease301M2Profile)
                         {
                             suppressedMissingTextureFallback = true;
                             continue;
@@ -678,7 +686,7 @@ public class MdxRenderer : ISceneRenderer
             }
 
             // Fallback: no material or no layers rendered — treat as opaque
-            if (!anyLayerRendered && pass != RenderPass.Transparent && !(_isM2AdapterModel && suppressedMissingTextureFallback))
+            if (!anyLayerRendered && pass != RenderPass.Transparent && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
@@ -1273,7 +1281,7 @@ void main() {
             // Some pre-release M2 records carry both a nominal file path and a replaceable id.
             // Keep this fallback scoped to M2-adapted models so classic MDX textures do not get
             // redirected through replaceable heuristics when their normal file path should win.
-            if (_isM2AdapterModel && replaceablePath == null && tex.ReplaceableId > 0)
+            if (_usesPreRelease301M2Profile && replaceablePath == null && tex.ReplaceableId > 0)
                 replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
 
             if (string.IsNullOrEmpty(texPath))
@@ -1415,7 +1423,7 @@ void main() {
             }
 
             // If the direct texture path failed, fall back to the resolved replaceable path when available.
-            if (_isM2AdapterModel
+            if (_usesPreRelease301M2Profile
                 && blpData == null
                 && !string.IsNullOrWhiteSpace(replaceablePath)
                 && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
@@ -1513,10 +1521,10 @@ void main() {
                 // Keep classic MDX on the older working wrap interpretation.
                 // The newer repeat/clamp inversion is only for M2-adapted models.
                 var texFlags = (MdlGeoFlags)tex.Flags;
-                bool clampS = _isM2AdapterModel
+                bool clampS = _usesPreRelease301M2Profile
                     ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
                     : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-                bool clampT = _isM2AdapterModel
+                bool clampT = _usesPreRelease301M2Profile
                     ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
                     : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
                 

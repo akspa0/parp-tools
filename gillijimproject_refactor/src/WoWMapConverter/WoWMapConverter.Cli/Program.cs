@@ -3,6 +3,7 @@ using System.Text.Json;
 using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.Dbc;
+using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.Services;
 using WoWMapConverter.Core.VLM;
 
@@ -33,6 +34,7 @@ public static class Program
             "convert-mdx" => RunConvertMdx(args.Skip(1).ToArray()),
             "convert-m2-to-mdx" => RunConvertM2ToMdx(args.Skip(1).ToArray()),
             "pm4-export" => RunPm4Export(args.Skip(1).ToArray()),
+            "pm4-validate-coords" => RunPm4ValidateCoords(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
@@ -673,6 +675,103 @@ public static class Program
         {
             Console.Error.WriteLine($"Error: {ex.Message}");
             Console.Error.WriteLine($"Stack: {ex.StackTrace}");
+            return 1;
+        }
+    }
+
+    private static int RunPm4ValidateCoords(string[] args)
+    {
+        string inputDir = Pm4CoordinateService.DefaultDevelopmentMapDirectory;
+        string? jsonOutputPath = null;
+        int? tileLimit = null;
+        float threshold = 32f;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--input-dir":
+                case "-i":
+                    if (i + 1 < args.Length) inputDir = args[++i];
+                    break;
+                case "--json":
+                    if (i + 1 < args.Length) jsonOutputPath = args[++i];
+                    break;
+                case "--tile-limit":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int parsedTileLimit))
+                        tileLimit = parsedTileLimit;
+                    break;
+                case "--threshold":
+                    if (i + 1 < args.Length && float.TryParse(args[++i], out float parsedThreshold))
+                        threshold = parsedThreshold;
+                    break;
+            }
+        }
+
+        Console.WriteLine("PM4 Coordinate Validation");
+        Console.WriteLine("=========================");
+        Console.WriteLine($"Input:      {Pm4CoordinateService.ResolveMapDirectory(inputDir)}");
+        Console.WriteLine($"Threshold:  {threshold:F1} units");
+        if (tileLimit.HasValue)
+            Console.WriteLine($"Tile limit: {tileLimit.Value}");
+
+        try
+        {
+            var report = Pm4CoordinateValidator.ValidateDirectory(new Pm4CoordinateValidationOptions(
+                MapDirectory: inputDir,
+                TileLimit: tileLimit,
+                MatchThreshold: threshold,
+                TileBoundsTolerance: 2f,
+                SampleCount: 3));
+
+            Console.WriteLine();
+            Console.WriteLine($"Tiles scanned:              {report.TilesScanned}");
+            Console.WriteLine($"Tiles validated:            {report.TilesValidated}");
+            Console.WriteLine($"Skipped without _obj0.adt:  {report.TilesSkippedMissingObj0}");
+            Console.WriteLine($"Skipped without placements: {report.TilesSkippedMissingPlacements}");
+            Console.WriteLine($"ADT placements:             {report.TotalPlacements}");
+            Console.WriteLine($"PM4 MPRL refs:              {report.TotalPositionRefs}");
+
+            float inTileRatio = report.TotalPositionRefs > 0
+                ? (float)report.TotalInTileBounds / report.TotalPositionRefs * 100f
+                : 0f;
+            float matchRatio = report.TotalPositionRefs > 0
+                ? (float)report.TotalMatchedWithinThreshold / report.TotalPositionRefs * 100f
+                : 0f;
+
+            Console.WriteLine($"Refs in expected tile:      {report.TotalInTileBounds} ({inTileRatio:F1}%)");
+            Console.WriteLine($"Refs within threshold:      {report.TotalMatchedWithinThreshold} ({matchRatio:F1}%)");
+            Console.WriteLine($"Avg nearest placement dist: {(report.AverageNearestDistance?.ToString("F2") ?? "n/a")}");
+
+            foreach (var tile in report.Tiles
+                .OrderBy(tile => tile.AverageNearestDistance ?? float.MaxValue)
+                .Take(5))
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Tile {tile.TileName} ({tile.TileX},{tile.TileY})");
+                Console.WriteLine($"  placements={tile.PlacementCount}, refs={tile.PositionRefCount}, inTile={tile.InTileBoundsCount}, matched={tile.MatchedWithinThresholdCount}");
+                Console.WriteLine($"  avgNearest={(tile.AverageNearestDistance?.ToString("F2") ?? "n/a")}, avgMatched={(tile.AverageMatchedDistance?.ToString("F2") ?? "n/a")}");
+
+                foreach (var sample in tile.BestMatches)
+                {
+                    Console.WriteLine(
+                        $"  sample {sample.PlacementKind}:{sample.PlacementLabel} dist={sample.HorizontalDistance:F2} heightΔ={sample.HeightDelta:F2} ref=({sample.RefPlacementPosition.X:F2}, {sample.RefPlacementPosition.Y:F2}, {sample.RefPlacementPosition.Z:F2})");
+                }
+            }
+
+            if (!string.IsNullOrEmpty(jsonOutputPath))
+            {
+                string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(jsonOutputPath, json);
+                Console.WriteLine();
+                Console.WriteLine($"JSON report: {Path.GetFullPath(jsonOutputPath)}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
     }
@@ -1456,6 +1555,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter convert-mdx <input.mdx> [options]       Convert MDX → M2");
         Console.WriteLine("  wowmapconverter convert-m2-to-mdx <m2> [options]        Convert M2 → MDX");
         Console.WriteLine("  wowmapconverter pm4-export <pm4> [options]              Export PM4 to OBJ");
+        Console.WriteLine("  wowmapconverter pm4-validate-coords [options]           Validate PM4 MPRL refs against _obj0 placements");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter vlm-export [options]                    Export VLM training dataset");
         Console.WriteLine("  wowmapconverter vlm-decode [options]                    Decode VLM JSON to ADT");
