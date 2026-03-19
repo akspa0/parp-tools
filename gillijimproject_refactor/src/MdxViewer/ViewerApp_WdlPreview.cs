@@ -26,6 +26,15 @@ public partial class ViewerApp
 
         if (!_wdlPreviewRenderer.HasPreview)
         {
+            if (previewState == WdlPreviewWarmState.Failed)
+            {
+                var failedMap = _selectedMapForPreview;
+                _showWdlPreview = false;
+                if (failedMap != null)
+                    LoadMapAtDefaultSpawn(failedMap);
+                return;
+            }
+
             ImGui.SetNextWindowSize(new Vector2(400, 150), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowPos(new Vector2(
                 ImGui.GetIO().DisplaySize.X / 2 - 200,
@@ -125,21 +134,7 @@ public partial class ViewerApp
             if (!canLoad) ImGui.BeginDisabled();
 
             if (ImGui.Button("Load Map at Selected Point", new Vector2(-1, 0)))
-            {
-                string wdtPath = $"World\\Maps\\{_selectedMapForPreview.Directory}\\{_selectedMapForPreview.Directory}.wdt";
-                LoadFileFromDataSource(wdtPath);
-
-                if (_selectedSpawnTile.HasValue && _wdlPreviewRenderer != null)
-                {
-                    var spawnPos = _wdlPreviewRenderer.TileToWorldPosition(
-                        (int)_selectedSpawnTile.Value.X,
-                        (int)_selectedSpawnTile.Value.Y);
-
-                    _camera.Position = spawnPos;
-                }
-
-                _showWdlPreview = false;
-            }
+                LoadSelectedPreviewMapAtSpawn();
 
             if (!canLoad) ImGui.EndDisabled();
 

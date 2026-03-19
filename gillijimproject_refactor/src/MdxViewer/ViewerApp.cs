@@ -2033,34 +2033,44 @@ void main() {
                 if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
                 {
                     if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                    {
-                        string wdtPath = $"World\\Maps\\{map.Directory}\\{map.Directory}.wdt";
-                        LoadFileFromDataSource(wdtPath);
-                    }
+                        LoadMapAtDefaultSpawn(map);
                 }
 
                 if (!hasWdt) ImGui.PopStyleColor();
 
-                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
-
-                // Show WDL preview button if map has WDL
-                if (canPreview)
+                if (hasWdt)
                 {
                     ImGui.SameLine();
-                    if (ImGui.SmallButton($"Preview##{map.Id}"))
-                        OpenWdlPreview(map);
+                    if (ImGui.SmallButton($"Load##{map.Id}"))
+                        LoadMapAtDefaultSpawn(map);
                 }
 
-                if (ImGui.IsItemHovered())
+                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
+                WdlPreviewWarmState previewState = canPreview && _wdlPreviewCacheService != null
+                    ? _wdlPreviewCacheService.GetState(map.Directory)
+                    : (canPreview ? WdlPreviewWarmState.Ready : WdlPreviewWarmState.NotQueued);
+                bool canSelectSpawn = hasWdt && canPreview && previewState == WdlPreviewWarmState.Ready;
+
+                ImGui.SameLine();
+                if (!canSelectSpawn) ImGui.BeginDisabled();
+                if (ImGui.SmallButton($"Spawn##{map.Id}") && canSelectSpawn)
+                    OpenWdlPreview(map);
+                if (!canSelectSpawn) ImGui.EndDisabled();
+
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 {
                     ImGui.BeginTooltip();
                     ImGui.Text($"Directory: {map.Directory}");
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
-                    if (canPreview)
-                        ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "Click 'Preview' to select spawn point");
-                    else if (hasWdl)
+                    if (canSelectSpawn)
+                        ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "WDL preview ready. Click 'Spawn' to choose a start tile.");
+                    else if (!hasWdl)
+                        ImGui.TextDisabled("No WDL preview is available. 'Load' will use the default map spawn.");
+                    else if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
                         ImGui.TextDisabled("WDL preview is preparing in the background.");
+                    else if (previewState == WdlPreviewWarmState.Failed)
+                        ImGui.TextDisabled("WDL preview failed. 'Load' will fall back to the default map spawn.");
                     ImGui.EndTooltip();
                 }
             }
@@ -3690,16 +3700,121 @@ void main() {
         return _dataSource != null;
     }
 
+    private static IEnumerable<string> EnumerateMapWdtCandidates(string mapDirectory)
+    {
+        string basePath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}.wdt";
+        yield return basePath;
+        yield return basePath + ".mpq";
+    }
+
+    private string? ResolveMapWdtPath(string mapDirectory)
+    {
+        if (_dataSource == null)
+            return null;
+
+        foreach (string candidate in EnumerateMapWdtCandidates(mapDirectory))
+        {
+            byte[]? data = _dataSource.ReadFile(candidate);
+            if (data != null && data.Length > 0)
+                return candidate;
+
+            if (_dataSource is not MpqDataSource mpqDataSource)
+                continue;
+
+            string? found = mpqDataSource.FindInFileSet(candidate);
+            if (string.IsNullOrWhiteSpace(found))
+                continue;
+
+            data = _dataSource.ReadFile(found);
+            if (data != null && data.Length > 0)
+                return found;
+        }
+
+        return null;
+    }
+
+    private void LoadMapAtDefaultSpawn(MapDefinition map)
+    {
+        if (!map.HasWdt)
+            return;
+
+        string? resolvedWdtPath = ResolveMapWdtPath(map.Directory);
+        if (string.IsNullOrWhiteSpace(resolvedWdtPath))
+        {
+            _statusMessage = $"Failed to resolve WDT for {map.Directory}.";
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[WorldLoad] Failed to resolve map WDT for {map.Directory} from discovery actions.");
+            return;
+        }
+
+        _selectedMapForPreview = null;
+        _selectedSpawnTile = null;
+        _showWdlPreview = false;
+
+        LoadFileFromDataSource(resolvedWdtPath);
+    }
+
+    private void LoadSelectedPreviewMapAtSpawn()
+    {
+        if (_selectedMapForPreview == null || !_selectedMapForPreview.HasWdt)
+            return;
+
+        string? resolvedWdtPath = ResolveMapWdtPath(_selectedMapForPreview.Directory);
+        if (string.IsNullOrWhiteSpace(resolvedWdtPath))
+        {
+            _statusMessage = $"Failed to resolve WDT for {_selectedMapForPreview.Directory}.";
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[WorldLoad] Failed to resolve map WDT for {_selectedMapForPreview.Directory} from spawn preview.");
+            return;
+        }
+
+        LoadFileFromDataSource(resolvedWdtPath);
+
+        if (_selectedSpawnTile.HasValue && _wdlPreviewRenderer?.HasPreview == true)
+        {
+            var spawnPos = _wdlPreviewRenderer.TileToWorldPosition(
+                (int)_selectedSpawnTile.Value.X,
+                (int)_selectedSpawnTile.Value.Y);
+
+            _camera.Position = spawnPos;
+        }
+
+        _showWdlPreview = false;
+    }
+
     private void OpenWdlPreview(MapDefinition map)
     {
+        if (!map.HasWdt)
+            return;
+
+        if (!map.HasWdl || !CanUseWdlPreviewFeature())
+        {
+            LoadMapAtDefaultSpawn(map);
+            return;
+        }
+
         _selectedMapForPreview = map;
-        _showWdlPreview = true;
         _selectedSpawnTile = null;
+        _showWdlPreview = true;
 
         if (_wdlPreviewRenderer == null)
             _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
 
         TryLoadSelectedWdlPreviewFromCache(map.Directory);
+
+        if (_wdlPreviewRenderer.HasPreview)
+        {
+            _showWdlPreview = true;
+            return;
+        }
+
+        if (GetSelectedWdlPreviewState() == WdlPreviewWarmState.Failed)
+        {
+            ViewerLog.Info(ViewerLog.Category.Terrain,
+                $"[WDL] Preview unavailable for {map.Directory}; using default map spawn.");
+            LoadMapAtDefaultSpawn(map);
+            return;
+        }
     }
 
     private void TryLoadSelectedWdlPreviewFromCache(string mapDirectory)

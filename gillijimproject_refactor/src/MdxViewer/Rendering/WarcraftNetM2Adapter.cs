@@ -323,7 +323,7 @@ internal static class WarcraftNetM2Adapter
     private static MdlTexture ToMdlTexture(ParsedTextureData texture)
     {
         uint replaceableId = MapReplaceableId(texture.Type);
-        string path = replaceableId == 0 ? texture.Filename ?? string.Empty : string.Empty;
+        string path = texture.Filename ?? string.Empty;
         return new MdlTexture
         {
             Path = path.Replace('/', '\\'),
@@ -356,6 +356,9 @@ internal static class WarcraftNetM2Adapter
         for (int batchIndex = 0; batchIndex < skin.TextureUnits.Count; batchIndex++)
         {
             var batch = skin.TextureUnits[batchIndex];
+            if (batch.SkinSectionIndex < 0 || batch.SkinSectionIndex >= sectionMaterialIds.Length)
+                continue;
+
             ushort renderFlagBits = 0;
             ushort blendMode = 0;
 
@@ -370,7 +373,22 @@ internal static class WarcraftNetM2Adapter
                 ? model.Textures[textureId].Flags
                 : 0;
 
-            var material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
+            int materialId = sectionMaterialIds[batch.SkinSectionIndex];
+            MdlMaterial material;
+            if (materialId >= 0)
+            {
+                material = mdx.Materials[materialId];
+                if (batch.PriorityPlane > material.PriorityPlane)
+                    material.PriorityPlane = batch.PriorityPlane;
+            }
+            else
+            {
+                material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
+                materialId = mdx.Materials.Count;
+                mdx.Materials.Add(material);
+                sectionMaterialIds[batch.SkinSectionIndex] = materialId;
+            }
+
             material.Layers.Add(new MdlTexLayer
             {
                 BlendMode = MapBlendMode(blendMode),
@@ -380,12 +398,6 @@ internal static class WarcraftNetM2Adapter
                 StaticAlpha = 1.0f,
                 Flags = MapLayerFlags(renderFlagBits, textureFlags),
             });
-
-            int materialId = mdx.Materials.Count;
-            mdx.Materials.Add(material);
-
-            if (batch.SkinSectionIndex < sectionMaterialIds.Length && sectionMaterialIds[batch.SkinSectionIndex] < 0)
-                sectionMaterialIds[batch.SkinSectionIndex] = materialId;
         }
 
         return sectionMaterialIds;
@@ -631,6 +643,7 @@ internal static class WarcraftNetM2Adapter
         }
 
         TrySupplementMetadataFromWarcraftNet(modelBytes, fileName, data);
+        TryParseProfiledMaterialMetadata(modelBytes, fileName, data);
 
         ViewerLog.Info(ViewerLog.Category.Mdx,
             $"[M2] Using profiled MD20 parser for {fileName} (profile={profile.ProfileId}, build={buildVersion ?? "unknown"}, version=0x{version:X}, vertices={data.Vertices.Count}, textures={data.Textures.Count}, embeddedProfile={(data.EmbeddedSkin != null ? "yes" : "no")})");
@@ -658,6 +671,261 @@ internal static class WarcraftNetM2Adapter
             ViewerLog.Debug(ViewerLog.Category.Mdx,
                 $"[M2] Warcraft.NET metadata supplement skipped for {fileName}: {ex.Message}");
         }
+    }
+
+    private static void TryParseProfiledMaterialMetadata(byte[] modelBytes, string fileName, ParsedModelData data)
+    {
+        bool changed = false;
+
+        if (data.Textures.Count == 0)
+        {
+            List<ParsedTextureData>? parsedTextures = DiscoverProfiledTextureTable(modelBytes, fileName);
+            if (parsedTextures != null)
+            {
+                data.Textures.AddRange(parsedTextures);
+                changed = true;
+            }
+        }
+
+        if (data.RenderFlags.Count == 0)
+        {
+            List<ParsedRenderFlagData>? parsedRenderFlags = DiscoverProfiledRenderFlags(modelBytes, fileName);
+            if (parsedRenderFlags != null)
+            {
+                data.RenderFlags.AddRange(parsedRenderFlags);
+                changed = true;
+            }
+        }
+
+        if (data.TextureLookup.Count == 0 && data.Textures.Count > 0)
+        {
+            List<ParsedTextureLookupData>? parsedTextureLookup = DiscoverProfiledTextureLookup(modelBytes, fileName, data.Textures.Count);
+            if (parsedTextureLookup != null)
+            {
+                data.TextureLookup.AddRange(parsedTextureLookup);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            ViewerLog.Info(ViewerLog.Category.Mdx,
+                $"[M2] Parsed direct profiled metadata for {fileName}: textures={data.Textures.Count}, renderFlags={data.RenderFlags.Count}, textureLookup={data.TextureLookup.Count}");
+        }
+    }
+
+    private static List<ParsedTextureData>? DiscoverProfiledTextureTable(byte[] modelBytes, string fileName)
+    {
+        const int HeaderStart = 0x48;
+        const int HeaderEnd = 0xA0;
+        List<ParsedTextureData>? best = null;
+        int bestScore = int.MinValue;
+
+        for (int headerOffset = HeaderStart; headerOffset <= HeaderEnd; headerOffset += 4)
+        {
+            uint count = ReadUInt32(modelBytes, headerOffset);
+            uint dataOffset = ReadUInt32(modelBytes, headerOffset + 4);
+            if (!TryReadTextureTable(modelBytes, fileName, count, dataOffset, out List<ParsedTextureData>? candidate, out int score))
+                continue;
+
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool TryReadTextureTable(byte[] modelBytes, string fileName, uint count, uint dataOffset, out List<ParsedTextureData>? textures, out int score)
+    {
+        textures = null;
+        score = 0;
+
+        if (count == 0 || count > 4096 || dataOffset == 0)
+            return false;
+
+        if (!TryValidateOptionalSpan(count, dataOffset, 0x10, modelBytes.Length, fileName, "profiled.textures"))
+            return false;
+
+        var parsed = new List<ParsedTextureData>((int)count);
+        int namedTextures = 0;
+
+        for (uint i = 0; i < count; i++)
+        {
+            int entryOffset = checked((int)(dataOffset + (i * 0x10u)));
+            uint rawType = ReadUInt32(modelBytes, entryOffset + 0x00);
+            uint rawFlags = ReadUInt32(modelBytes, entryOffset + 0x04);
+            uint nameLength = ReadUInt32(modelBytes, entryOffset + 0x08);
+            uint nameOffset = ReadUInt32(modelBytes, entryOffset + 0x0C);
+
+            if (rawType > (uint)TextureType.Unk2)
+                return false;
+            if ((rawFlags & ~0x3u) != 0)
+                return false;
+
+            string filename = string.Empty;
+            if (nameLength > 0 && nameOffset > 0)
+            {
+                if (!TryValidateOptionalSpan(nameLength, nameOffset, 1, modelBytes.Length, fileName, $"profiled.texture[{i}].name"))
+                    return false;
+
+                filename = ReadUtf8String(modelBytes, (int)nameOffset, (int)nameLength);
+                if (!string.IsNullOrWhiteSpace(filename))
+                    namedTextures++;
+            }
+
+            parsed.Add(new ParsedTextureData
+            {
+                Type = (TextureType)rawType,
+                Flags = (TextureFlags)rawFlags,
+                Filename = filename,
+            });
+        }
+
+        score = (int)Math.Min(count, 256) + (namedTextures * 32);
+        textures = parsed;
+        return parsed.Count > 0;
+    }
+
+    private static List<ParsedRenderFlagData>? DiscoverProfiledRenderFlags(byte[] modelBytes, string fileName)
+    {
+        const int HeaderStart = 0x48;
+        const int HeaderEnd = 0xA0;
+        List<ParsedRenderFlagData>? best = null;
+        int bestScore = int.MinValue;
+
+        for (int headerOffset = HeaderStart; headerOffset <= HeaderEnd; headerOffset += 4)
+        {
+            uint count = ReadUInt32(modelBytes, headerOffset);
+            uint dataOffset = ReadUInt32(modelBytes, headerOffset + 4);
+            if (!TryReadRenderFlags(modelBytes, fileName, count, dataOffset, out List<ParsedRenderFlagData>? candidate, out int score))
+                continue;
+
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool TryReadRenderFlags(byte[] modelBytes, string fileName, uint count, uint dataOffset, out List<ParsedRenderFlagData>? renderFlags, out int score)
+    {
+        renderFlags = null;
+        score = 0;
+
+        if (count == 0 || count > 2048 || dataOffset == 0)
+            return false;
+
+        if (!TryValidateOptionalSpan(count, dataOffset, 0x04, modelBytes.Length, fileName, "profiled.renderFlags"))
+            return false;
+
+        var parsed = new List<ParsedRenderFlagData>((int)count);
+        int plausibleBlendModes = 0;
+
+        for (uint i = 0; i < count; i++)
+        {
+            int entryOffset = checked((int)(dataOffset + (i * 0x04u)));
+            ushort flags = BitConverter.ToUInt16(modelBytes, entryOffset + 0x00);
+            ushort blendMode = BitConverter.ToUInt16(modelBytes, entryOffset + 0x02);
+            if (blendMode <= 6)
+                plausibleBlendModes++;
+
+            parsed.Add(new ParsedRenderFlagData
+            {
+                Flags = flags,
+                BlendingMode = blendMode,
+            });
+        }
+
+        if (plausibleBlendModes == 0)
+            return false;
+
+        score = (plausibleBlendModes * 8) + (int)Math.Min(count, 128);
+        renderFlags = parsed;
+        return true;
+    }
+
+    private static List<ParsedTextureLookupData>? DiscoverProfiledTextureLookup(byte[] modelBytes, string fileName, int textureCount)
+    {
+        const int HeaderStart = 0x48;
+        const int HeaderEnd = 0xA0;
+        List<ParsedTextureLookupData>? best = null;
+        int bestScore = int.MinValue;
+
+        for (int headerOffset = HeaderStart; headerOffset <= HeaderEnd; headerOffset += 4)
+        {
+            uint count = ReadUInt32(modelBytes, headerOffset);
+            uint dataOffset = ReadUInt32(modelBytes, headerOffset + 4);
+            if (!TryReadTextureLookup(modelBytes, fileName, count, dataOffset, textureCount, out List<ParsedTextureLookupData>? candidate, out int score))
+                continue;
+
+            if (score > bestScore)
+            {
+                best = candidate;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private static bool TryReadTextureLookup(byte[] modelBytes, string fileName, uint count, uint dataOffset, int textureCount, out List<ParsedTextureLookupData>? lookup, out int score)
+    {
+        lookup = null;
+        score = 0;
+
+        if (count == 0 || count > 8192 || dataOffset == 0 || textureCount <= 0)
+            return false;
+
+        if (!TryValidateOptionalSpan(count, dataOffset, 0x02, modelBytes.Length, fileName, "profiled.textureLookup"))
+            return false;
+
+        var parsed = new List<ParsedTextureLookupData>((int)count);
+        int validEntries = 0;
+
+        for (uint i = 0; i < count; i++)
+        {
+            int entryOffset = checked((int)(dataOffset + (i * 0x02u)));
+            ushort textureId = BitConverter.ToUInt16(modelBytes, entryOffset);
+            if (textureId == ushort.MaxValue)
+            {
+                parsed.Add(new ParsedTextureLookupData { TextureId = -1 });
+                continue;
+            }
+
+            if (textureId < textureCount)
+                validEntries++;
+            else
+                return false;
+
+            parsed.Add(new ParsedTextureLookupData { TextureId = textureId });
+        }
+
+        if (validEntries == 0)
+            return false;
+
+        score = (validEntries * 4) + (int)Math.Min(count, 256);
+        lookup = parsed;
+        return true;
+    }
+
+    private static string ReadUtf8String(byte[] data, int offset, int length)
+    {
+        int safeLength = Math.Max(0, Math.Min(length, data.Length - offset));
+        if (safeLength == 0)
+            return string.Empty;
+
+        int end = offset;
+        int limit = offset + safeLength;
+        while (end < limit && data[end] != 0)
+            end++;
+
+        return System.Text.Encoding.UTF8.GetString(data, offset, end - offset);
     }
 
     private static SkinData? TryParseEmbeddedRootProfile(byte[] modelBytes, uint rootProfileCount, uint rootProfileOffset, string fileName)

@@ -354,6 +354,96 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - no automated tests were added or run
    - real-data runtime validation is still required before claiming the geometry-loss issue fixed
 
+### Pre-release 3.0.1 Direct Material Metadata Fallback (Mar 19)
+
+- Follow-up after geometry improved but affected pre-release `3.0.1` doodads still rendered magenta / untextured and appeared to miss normal lighting.
+- Current adapter change in `WarcraftNetM2Adapter`:
+   - the profiled `MD20` path no longer depends only on Warcraft.NET for textures, render flags, and texture lookup
+   - if Warcraft.NET does not populate those tables, the adapter now scans the profiled header region and validates direct table candidates for:
+      - texture records (`0x10` stride)
+      - render flags (`0x04` stride)
+      - texture lookup (`0x02` stride)
+   - replaceable textures remain on the renderer's replaceable-resolution path instead of being forced through file-path loading
+- Scope note:
+   - this fallback only runs inside the special pre-release `3.0.1` profiled parser path
+   - it does not change normal `3.3.5` Warcraft.NET model parsing or classic `MDX` handling
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the change
+   - the build ran while the live viewer held output DLL locks, so MSB3026 copy-retry warnings were expected but non-fatal
+   - no automated tests were added or run
+   - no new real-data runtime validation has been completed yet for the direct metadata fallback
+
+### Pre-release 3.0.1 Transparent Material Follow-up (Mar 19)
+
+- Latest runtime feedback narrowed the remaining visual issue further: most non-transparent pre-release `3.0.1` M2s now appear to load, while foliage/cutout-style transparent assets still rendered as opaque quads using the texture color in areas that should be alpha-driven.
+- Current renderer-side mitigation in `ModelRenderer`:
+   - layer-0 M2-adapted materials now derive an effective blend mode from the loaded texture alpha shape when the declared blend mode is still `Load`
+   - binary-alpha textures are promoted to `Transparent` so they can use alpha-cutout behavior
+   - translucent-alpha textures are promoted to `Blend` so they use standard alpha blending instead of an opaque pass
+   - the alpha-cutout path is no longer blanket-disabled for all M2-adapted models; it now keys off actual texture alpha classification
+- Scope note:
+   - this is a narrow fallback for M2-adapted models with imperfect pre-release blend metadata
+   - it does not change classic non-M2 renderer behavior
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the change
+   - no automated tests were added or run
+   - real-data runtime validation is still required on the same transparent doodads before claiming the issue fixed
+
+### WDL Spawn Fallback + World Load Throughput Follow-up (Mar 19)
+
+- Latest user follow-up added three viewer-facing requirements beyond base pre-release M2 decode:
+   - spawn-point selection should only be offered once a WDL preview is actually ready
+   - if WDL preview generation/read fails, map load should silently fall back to the default terrain spawn instead of trapping the user in a preview error path
+   - deferred world-object loading needs to settle materially faster on large maps
+- Current viewer changes:
+   - map discovery rows now expose explicit `Load` and `Spawn` actions instead of a generic preview-only path
+   - `Spawn` is gated on `WdlPreviewWarmState.Ready`; loading/failed states stay disabled in the UI
+   - `OpenWdlPreview(...)` and `DrawWdlPreviewDialog()` now fall back to the normal map load path when WDL preview preparation fails
+   - the first attempt to speed up deferred world-object loading used a larger adaptive per-frame load budget and heavier queue-time model prefetch
+   - that throughput experiment caused a major runtime regression on real data and was reverted after user feedback
+   - active behavior is back to the lighter fixed `ProcessPendingLoads(maxLoads: 24, maxBudgetMs: 20.0)` path plus the simpler alias-based model/skin prefetch
+- Transparent follow-up coupled to this pass:
+   - `ModelRenderer` no longer renders magenta fallback geometry for M2-adapted layers/geosets whose textures failed to resolve
+   - alpha-kind fallback for uncategorized textures now defaults to `Opaque` instead of `Binary`, so the M2 layer-0 blend heuristic does not infer alpha-cutout behavior from unloaded textures
+- Validation status:
+   - file-level diagnostics are clean after the code change
+   - the throughput experiment itself should be treated as rejected, not active
+   - no automated tests were added or run
+
+### Pre-release 3.0.1 M2 Wrap + Pink Transparency Follow-up (Mar 19)
+
+- Latest runtime feedback after the load-regression revert narrowed the remaining model issues to two specific symptoms:
+   - some pre-release `3.0.1` M2 surfaces showed wrong texture addressing consistent with wrap/clamp inversion
+   - transparent surfaces still rendered pink, suggesting the renderer was binding fallback state instead of a usable texture path
+- Current targeted fixes:
+   - `ModelRenderer` now interprets `WrapWidth` / `WrapHeight` as repeat flags; clamp is only used when those flags are absent
+   - `WarcraftNetM2Adapter.ToMdlTexture(...)` now preserves any parsed texture filename even when a nonzero replaceable texture type is also present
+   - the direct profiled texture-table fallback now reads filenames whenever the record contains a valid string span, instead of discarding names solely because the texture type is nonzero
+- Why this matters:
+   - the previous sampler logic inverted the MDX-side wrap semantics into GL clamp state
+   - the previous adapter logic could strip the only usable texture filename from pre-release records that still also carried replaceable metadata, which is a plausible cause of all-pink transparent layers
+- Validation status:
+   - file-level diagnostics were clean for `ModelRenderer.cs` and `WarcraftNetM2Adapter.cs`
+   - alternate-OutDir build passed: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - real-data runtime validation is still required before claiming the clamp and pink-surface issues are fixed
+
+### Pre-release 3.0.1 Transparent Layer Stack Follow-up (Mar 19)
+
+- User runtime evidence after the wrap/path fixes still showed foliage-like transparent doodads rendering as pink crossed planes, plus detached transparent fragments that looked like the wrong layers were bound to the wrong sections.
+- Current adapter + renderer change set:
+   - `WarcraftNetM2Adapter.BuildMaterialsFromBatches(...)` no longer collapses each skin section to only the first batch/material layer
+   - all texture-unit batches for the same skin section now accumulate as layers on a shared material, preserving layered cutout/blended section composition instead of dropping later layers
+   - `ModelRenderer.LoadTextures()` now keeps replaceable-texture resolution available as a fallback even when a direct texture filename exists but fails to load
+- Why this is the current best root-cause fix:
+   - pink transparent quads are consistent with section geometry surviving while the intended transparent layer stack is reduced to an incomplete or wrong first layer
+   - pre-release records that carry both a nominal filename and replaceable metadata can still need the replaceable path when the direct filename does not actually resolve on disk/MPQ
+- Validation status:
+   - file-level diagnostics were clean for the edited files
+   - alternate-OutDir build passed: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - real-data runtime validation is still required before claiming the pink foliage / detached transparent fragment issue fixed
+
 ### Standalone Data-Source M2 Read-Path Fix (Mar 19)
 
 - Follow-up after user report that every standalone/browser-loaded M2 showed `Failed to read`.

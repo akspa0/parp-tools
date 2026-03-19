@@ -527,6 +527,7 @@ public class MdxRenderer : ISceneRenderer
 
             // Render each material layer for this geoset
             bool anyLayerRendered = false;
+            bool suppressedMissingTextureFallback = false;
             var geoset = _mdx.Geosets[gb.GeosetIndex];
             if (geoset.MaterialId >= 0 && geoset.MaterialId < _mdx.Materials.Count)
             {
@@ -535,15 +536,13 @@ public class MdxRenderer : ISceneRenderer
                 {
                     var layer = material.Layers[l];
                     int texId = layer.TextureId;
+                    MdlTexOp effectiveBlendMode = GetEffectiveBlendMode(l, texId, layer.BlendMode);
 
                     // Determine if this layer needs blending
                     // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
                     // Render in opaque pass with high alpha threshold, not as blended
-                    // M2-derived world models often use layer-0 Transparent in ways that do not behave
-                    // like classic MDX hard-cutout foliage. For those models, treat Transparent as standard
-                    // blended rendering instead of a 0.75 alpha-discard path.
-                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, layer.BlendMode);
-                    bool needsBlend = !isAlphaCutout && (l > 0 || layer.BlendMode != MdlTexOp.Load);
+                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, effectiveBlendMode);
+                    bool needsBlend = !isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load);
 
                     // Filter by render pass — alpha cutout renders in opaque pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
@@ -597,7 +596,7 @@ public class MdxRenderer : ISceneRenderer
                         _gl.DepthMask(false); // Don't write depth for blended layers
                         _gl.Uniform1(_uAlphaTest, 1);
                         _gl.Uniform1(_uAlphaThreshold, 0.05f); // Low threshold for smooth blending
-                        switch (layer.BlendMode)
+                        switch (effectiveBlendMode)
                         {
                             case MdlTexOp.Transparent:
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -642,6 +641,12 @@ public class MdxRenderer : ISceneRenderer
                     }
                     else
                     {
+                        if (_isM2AdapterModel)
+                        {
+                            suppressedMissingTextureFallback = true;
+                            continue;
+                        }
+
                         _gl.Uniform1(_uHasTexture, l == 0 ? 0 : 1);
                         if (l > 0) continue;
                     }
@@ -673,7 +678,7 @@ public class MdxRenderer : ISceneRenderer
             }
 
             // Fallback: no material or no layers rendered — treat as opaque
-            if (!anyLayerRendered && pass != RenderPass.Transparent)
+            if (!anyLayerRendered && pass != RenderPass.Transparent && !(_isM2AdapterModel && suppressedMissingTextureFallback))
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
@@ -1246,11 +1251,13 @@ void main() {
         {
             var tex = _mdx.Textures[i];
             string? texPath = tex.Path;
+            string? replaceablePath = null;
 
             // Handle Replaceable textures via DBC resolution
             if (string.IsNullOrEmpty(texPath) && tex.ReplaceableId > 0)
             {
-                texPath = ResolveReplaceableTexture(tex.ReplaceableId);
+                replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
+                texPath = replaceablePath;
                 if (texPath != null)
                 {
                     ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} -> {texPath}");
@@ -1262,6 +1269,11 @@ void main() {
                     replaceableFailed++;
                 }
             }
+
+            // Some pre-release M2 records carry both a nominal file path and a replaceable id.
+            // If the direct file path later fails to load, we still want the replaceable resolver as a fallback.
+            if (replaceablePath == null && tex.ReplaceableId > 0)
+                replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
 
             if (string.IsNullOrEmpty(texPath))
             {
@@ -1401,6 +1413,60 @@ void main() {
                 }
             }
 
+            // If the direct texture path failed, fall back to the resolved replaceable path when available.
+            if (blpData == null
+                && !string.IsNullOrWhiteSpace(replaceablePath)
+                && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
+            {
+                string fallbackPath = replaceablePath;
+                string? replaceableActualPath = null;
+
+                if (_dataSource is MpqDataSource mpqReplaceable)
+                {
+                    replaceableActualPath = mpqReplaceable.FindInFileSet(fallbackPath);
+                    if (replaceableActualPath != null)
+                    {
+                        blpData = _dataSource!.ReadFile(replaceableActualPath);
+                        if (blpData != null)
+                        {
+                            texPath = replaceableActualPath;
+                            loadSource = "MPQ (replaceable fallback match)";
+                            textureCachePath = texPath;
+                        }
+                    }
+                }
+
+                if (blpData == null && _dataSource != null)
+                {
+                    blpData = _dataSource.ReadFile(fallbackPath);
+                    if (blpData == null)
+                        blpData = _dataSource.ReadFile(fallbackPath.Replace('/', '\\'));
+
+                    if (blpData != null)
+                    {
+                        texPath = fallbackPath.Replace('/', '\\');
+                        loadSource = "MPQ (replaceable fallback)";
+                        textureCachePath = texPath;
+                    }
+                }
+
+                if (blpData == null && File.Exists(fallbackPath))
+                {
+                    blpData = File.ReadAllBytes(fallbackPath);
+                    texPath = fallbackPath;
+                    loadSource = "Local replaceable BLP";
+                    textureCachePath = fallbackPath;
+                    textureCachePrefix = "disk-blp";
+                }
+
+                if (blpData != null)
+                {
+                    ViewerLog.Debug(ViewerLog.Category.Mdx,
+                        $"Texture[{i}]: using replaceable fallback for direct path '{tex.Path}' -> '{texPath}'");
+                    replaceableResolved++;
+                }
+            }
+
             // 2. Try local BLP file on disk
             if (blpData == null)
             {
@@ -1442,11 +1508,10 @@ void main() {
 
             if (blpData != null && blpData.Length > 0)
             {
-                // Determine wrap mode from texture flags (per-axis).
-                // WrapWidth/WrapHeight are 0x4/0x8 in MDX flags.
+                // WrapWidth/WrapHeight request repeating; when absent we clamp.
                 var texFlags = (MdlGeoFlags)tex.Flags;
-                bool clampS = texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-                bool clampT = texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+                bool clampS = !texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+                bool clampT = !texFlags.HasFlag(MdlGeoFlags.WrapHeight);
                 
                 MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
                 MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
@@ -1508,10 +1573,23 @@ void main() {
 
     private bool ShouldUseAlphaCutout(int layerIndex, int textureId, MdlTexOp blendMode)
     {
-        if (_isM2AdapterModel || layerIndex != 0 || blendMode != MdlTexOp.Transparent)
+        if (layerIndex != 0 || blendMode != MdlTexOp.Transparent)
             return false;
 
         return GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
+    }
+
+    private MdlTexOp GetEffectiveBlendMode(int layerIndex, int textureId, MdlTexOp declaredBlendMode)
+    {
+        if (!_isM2AdapterModel || layerIndex != 0 || declaredBlendMode != MdlTexOp.Load)
+            return declaredBlendMode;
+
+        return GetTextureAlphaKind(textureId) switch
+        {
+            TextureAlphaKind.Binary => MdlTexOp.Transparent,
+            TextureAlphaKind.Translucent => MdlTexOp.Blend,
+            _ => declaredBlendMode,
+        };
     }
 
     private TextureAlphaKind GetTextureAlphaKind(int textureId)
@@ -1519,7 +1597,7 @@ void main() {
         if (_textureAlphaKinds.TryGetValue(textureId, out var alphaKind))
             return alphaKind;
 
-        return TextureAlphaKind.Binary;
+        return TextureAlphaKind.Opaque;
     }
 
     private void ReleaseSharedTexture(string cacheKey)
