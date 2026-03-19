@@ -318,6 +318,20 @@
 - Fresh runtime log from `Creature\Cocoon\Cocoon.mdx` showed the profiled pre-release parser was now reached, but it still failed before geometry extraction because an unresolved optional table span (`colors`, stride `0x2C`) was treated as fatal.
 - Current fix:
 	- `WarcraftNetM2Adapter.ParseProfiledMd20Model(...)` now hard-validates only the spans the runtime model builder actually dereferences for viewer geometry
+
+### Mar 19, 2026 - MCNK Index Repair Hook For Development ADT Export
+
+- Added a rollback-CLI `repair-mcnk-indices` command that audits or rewrites root ADT `MCNK` header `IndexX` / `IndexY` values.
+- `development-repair` now runs the same fixup in-memory on exported root ADTs by default; disable with `--repair-mcnk-indices false` if raw output is needed.
+- Repair logic prefers `MCIN` order when present and otherwise falls back to top-level `MCNK` scan order.
+- Real-data audit on the loose source folder `test_data/development/World/Maps/development` found:
+	- 466 root ADT filenames
+	- 114 zero-byte placeholders
+	- 352 non-empty roots with chunk data
+	- 0 detected `MCNK` index mismatches under scan-order validation on those raw loose roots
+- Validation limits:
+	- this does not prove generated WDL-derived / repaired export sets are clean because the referenced `PM4ADTs/*` outputs are not present in this workspace
+	- `dotnet run/build` for `WoWRollback.Cli` is still blocked here by pre-existing missing `WoWFormatLib` / `CascLib` references under `WoWRollback.AnalysisModule`, so end-to-end CLI execution was not revalidated in this environment
 	- optional / unresolved table families now use a nonfatal validator that logs and skips invalid spans instead of rejecting the entire model
 	- per-texture filename spans are also treated as optional so a bad embedded name table does not abort the whole model
 - Why this matters:
@@ -358,6 +372,23 @@
 	- broader work is still pending for CK24 aggregation and MSCN semantics
 
 ## ✅ Working
+
+### Mar 19, 2026 - 4.x Split ADT No-MCIN Fallback
+
+- Real-data audit of the fixed `test_data/development/World/Maps/development` loose roots confirmed the current 4.x load failure is primarily a no-`MCIN` issue, not an `MCNK.IndexX/IndexY` issue:
+	- 466 root ADT filenames
+	- 114 zero-byte placeholders
+	- 352 non-empty roots
+	- 0 non-empty roots with `MCIN`
+- `src/MdxViewer/Terrain/StandardTerrainAdapter.cs` now falls back to top-level `MCNK` scan order when a root ADT omits `MCIN`.
+- `src/WoWMapConverter/WoWMapConverter.Core/Converters/LkToAlphaConverter.cs` now uses the same root fallback so later split roots can flow into the existing Alpha conversion path instead of throwing immediately on missing `MCIN`.
+- Scope limit:
+	- this is a geometry/chunk-order recovery step first
+	- full 4.x `_tex0.adt` texture-layer parity is still not claimed
+	- the converter only consumes split texture companions when they expose LK-style `MCNK` payloads large enough for the current Alpha builder
+- Validation status at this note:
+	- code edits landed
+	- build/runtime validation still pending after this patch
 
 ### MdxViewer (3D World Viewer) — Primary Project
 - **Alpha 0.5.3 WDT terrain**: ✅ Monolithic format, 256 MCNK per tile, async streaming

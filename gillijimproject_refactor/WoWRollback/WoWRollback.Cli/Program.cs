@@ -217,6 +217,8 @@ internal static class Program
                     return RunPm4CreateAdt(opts);
                 case "compare-adt":
                     return CompareAdtCommand.Execute(opts);
+                case "repair-mcnk-indices":
+                    return RepairMcnkIndicesCommand.Execute(opts);
                 case "development-repair":
                     return DevelopmentRepairCommand.Execute(opts);
                 case "verify-pm4-data":

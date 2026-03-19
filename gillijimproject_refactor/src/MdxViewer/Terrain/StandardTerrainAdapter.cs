@@ -50,20 +50,22 @@ public class StandardTerrainAdapter : ITerrainAdapter
         _mapName = mapName;
         _mapDir = $"World\\Maps\\{mapName}";
         _buildVersion = buildVersion;
-        _adtProfile = FormatProfileRegistry.ResolveAdtProfile(buildVersion);
+
+        // Parse MPHD
+        _mphdFlags = ReadMphdFlags(wdtBytes);
+
+        // Parse MAIN chunk to enumerate tiles
+        _existingTiles = ResolveExistingTiles(wdtBytes);
+        _existingTileSet = new HashSet<int>(_existingTiles);
+
+        _adtProfile = ResolveTerrainProfile(buildVersion, _existingTiles);
         _mcnkParseOptions = new Mcnk.ParseOptions
         {
             UseHeaderAlphaSize = _adtProfile.UseMcnkHeaderAlphaSize,
             UseHeaderShadowSize = _adtProfile.UseMcnkHeaderShadowSize
         };
 
-        // Parse MPHD
-        _mphdFlags = ReadMphdFlags(wdtBytes);
         _useBigAlpha = (_mphdFlags & _adtProfile.BigAlphaFlagsMask) != 0;
-
-        // Parse MAIN chunk to enumerate tiles
-        _existingTiles = ReadMainChunk(wdtBytes);
-        _existingTileSet = new HashSet<int>(_existingTiles);
 
         // Check for WMO-only map (no terrain tiles but has MODF)
         IsWmoBased = _existingTiles.Count == 0;
@@ -93,6 +95,47 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
     }
 
+    private AdtProfile ResolveTerrainProfile(string? buildVersion, IReadOnlyList<int> existingTiles)
+    {
+        var resolvedProfile = FormatProfileRegistry.ResolveAdtProfile(buildVersion);
+        if (resolvedProfile.PreferTex0ForTextureData || resolvedProfile.PreferObj0ForPlacementData || existingTiles.Count == 0)
+            return resolvedProfile;
+
+        if (!TryDetectSplitAdtCompanion(existingTiles, out bool hasTex0, out bool hasObj0, out string? detectedTileBasePath))
+            return resolvedProfile;
+
+        var splitProfile = FormatProfileRegistry.AdtProfile40xUnknown;
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"Split ADT companions detected for map '{_mapName}' at '{detectedTileBasePath}' (tex0={hasTex0}, obj0={hasObj0}); promoting terrain profile from {resolvedProfile.ProfileId} to {splitProfile.ProfileId} while keeping build={buildVersion ?? "unknown"} for non-terrain systems.");
+        return splitProfile;
+    }
+
+    private bool TryDetectSplitAdtCompanion(IReadOnlyList<int> existingTiles, out bool hasTex0, out bool hasObj0, out string? detectedTileBasePath)
+    {
+        hasTex0 = false;
+        hasObj0 = false;
+        detectedTileBasePath = null;
+
+        foreach (int idx in existingTiles)
+        {
+            int tileRow = idx / 64;
+            int tileColumn = idx % 64;
+            string basePath = $"{_mapDir}\\{_mapName}_{tileColumn}_{tileRow}";
+
+            bool tex0Exists = _dataSource.FileExists($"{basePath}_tex0.adt");
+            bool obj0Exists = _dataSource.FileExists($"{basePath}_obj0.adt");
+            if (!tex0Exists && !obj0Exists)
+                continue;
+
+            hasTex0 = tex0Exists;
+            hasObj0 = obj0Exists;
+            detectedTileBasePath = basePath;
+            return true;
+        }
+
+        return false;
+    }
+
     public bool TileExists(int tileX, int tileY)
     {
         int idx = tileX * 64 + tileY;
@@ -113,17 +156,31 @@ public class StandardTerrainAdapter : ITerrainAdapter
         string? texPath = _adtProfile.PreferTex0ForTextureData ? $"{basePath}_tex0.adt" : null;
         string? objPath = _adtProfile.PreferObj0ForPlacementData ? $"{basePath}_obj0.adt" : null;
 
+        var texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
+        var objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
+
         var adtBytes = _dataSource.ReadFile(rootPath);
         if (adtBytes == null || adtBytes.Length == 0)
         {
-            ViewerLog.Trace($"[StandardADT] ADT not found or empty: {rootPath}");
+            bool rootIsEmptyPlaceholder = adtBytes != null && adtBytes.Length == 0;
+            if (objBytes != null && objBytes.Length >= 16 && TryGetMhdr(objBytes, out int objMhdrStart, out var objMhdr))
+            {
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    rootIsEmptyPlaceholder
+                        ? $"[StandardADT] Root ADT is a zero-byte placeholder for tile ({tileX},{tileY}); loading placements from {objPath} only."
+                        : $"[StandardADT] Root ADT missing for tile ({tileX},{tileY}); loading placements from {objPath} only.");
+                CollectPlacementsViaMhdr(objBytes, objMhdrStart, objMhdr, tileX, tileY, result);
+            }
+            else
+            {
+                ViewerLog.Trace(rootIsEmptyPlaceholder
+                    ? $"[StandardADT] ADT is a zero-byte placeholder: {rootPath}"
+                    : $"[StandardADT] ADT not found or empty: {rootPath}");
+            }
+
             return result;
         }
         ViewerLog.Trace($"[StandardADT] Loaded {rootPath}: {adtBytes.Length} bytes, first4='{Encoding.ASCII.GetString(adtBytes, 0, Math.Min(4, adtBytes.Length))}'");
-
-        // Optional split files (Cata+)
-        var texBytes = texPath != null && _dataSource.FileExists(texPath) ? _dataSource.ReadFile(texPath) : null;
-        var objBytes = objPath != null && _dataSource.FileExists(objPath) ? _dataSource.ReadFile(objPath) : null;
 
         try
         {
@@ -135,6 +192,87 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return result;
+    }
+
+    private List<int> ResolveExistingTiles(byte[] wdtBytes)
+    {
+        var wdtTiles = ReadMainChunk(wdtBytes);
+        var indexedTiles = EnumerateIndexedMapTiles();
+        if (indexedTiles.Count == 0)
+            return wdtTiles;
+
+        var mergedTiles = new HashSet<int>(indexedTiles);
+        int keptWdtTiles = 0;
+        int droppedWdtTiles = 0;
+
+        foreach (int tileIndex in wdtTiles)
+        {
+            if (mergedTiles.Contains(tileIndex) || TileHasBackingFiles(tileIndex))
+            {
+                mergedTiles.Add(tileIndex);
+                keptWdtTiles++;
+            }
+            else
+            {
+                droppedWdtTiles++;
+            }
+        }
+
+        int addedIndexedTiles = mergedTiles.Count - keptWdtTiles;
+        ViewerLog.Important(ViewerLog.Category.Terrain,
+            $"Standard WDT tile coverage for '{_mapName}': WDT={wdtTiles.Count}, indexed={indexedTiles.Count}, merged={mergedTiles.Count}, droppedMissing={droppedWdtTiles}, addedFromFiles={Math.Max(0, addedIndexedTiles)}");
+
+        return mergedTiles.OrderBy(static tileIndex => tileIndex).ToList();
+    }
+
+    private HashSet<int> EnumerateIndexedMapTiles()
+    {
+        var tiles = new HashSet<int>();
+        string mapPrefix = $"{_mapDir}\\";
+        string filePrefix = $"{_mapName}_";
+
+        foreach (string filePath in _dataSource.GetFileList(".adt"))
+        {
+            if (!filePath.StartsWith(mapPrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            if (!fileName.StartsWith(filePrefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string suffix = fileName[filePrefix.Length..];
+            string[] parts = suffix.Split('_', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2 || parts.Length > 3)
+                continue;
+
+            if (!int.TryParse(parts[0], out int tileColumn) || !int.TryParse(parts[1], out int tileRow))
+                continue;
+
+            if (tileColumn is < 0 or > 63 || tileRow is < 0 or > 63)
+                continue;
+
+            if (parts.Length == 3 &&
+                !string.Equals(parts[2], "obj0", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(parts[2], "tex0", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            tiles.Add((tileRow * 64) + tileColumn);
+        }
+
+        return tiles;
+    }
+
+    private bool TileHasBackingFiles(int tileIndex)
+    {
+        int tileRow = tileIndex / 64;
+        int tileColumn = tileIndex % 64;
+        string basePath = $"{_mapDir}\\{_mapName}_{tileColumn}_{tileRow}";
+
+        return _dataSource.FileExists($"{basePath}.adt") ||
+               _dataSource.FileExists($"{basePath}_obj0.adt") ||
+               _dataSource.FileExists($"{basePath}_tex0.adt");
     }
 
     private void ParseAdt(byte[] adtBytes, byte[]? texBytes, byte[]? objBytes,
@@ -211,50 +349,61 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (textures.Count > 0)
             TileTextures.TryAdd((tileX, tileY), textures);
 
-        // Use MHDR to find MCIN
+        // Use MHDR to find MCIN; later 4.x roots can omit it and still contain top-level MCNK chunks.
+        List<int> mcnkOffsets;
         int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
         if (mcinOff == 0)
         {
-            Build335Diagnostics.Increment("MissingRequiredChunkCount");
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"MCIN offset zero in ADT ({tileX},{tileY})");
-            return;
-        }
+            mcnkOffsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+            if (mcnkOffsets.Count == 0)
+            {
+                Build335Diagnostics.Increment("MissingRequiredChunkCount");
+                ViewerLog.Info(ViewerLog.Category.Terrain,
+                    $"MCIN offset zero in ADT ({tileX},{tileY}) and no top-level MCNK fallback was found");
+                return;
+            }
 
-        int mcinAbsPos = mhdrStart + mcinOff;
-        // Diagnostic: log MCIN position and first bytes
-        if (mcinAbsPos + 8 <= adtBytes.Length)
-        {
-            string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
-
-            int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
-            if (mcinSig != "NICM")
-            {
-                Build335Diagnostics.Increment("InvalidChunkSignatureCount");
-                ViewerLog.Info(ViewerLog.Category.Terrain,
-                    $"MCIN signature mismatch in ADT ({tileX},{tileY}): '{mcinSig}'");
-                return;
-            }
-
-            if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
-            {
-                Build335Diagnostics.Increment("InvalidChunkSizeCount");
-                ViewerLog.Info(ViewerLog.Category.Terrain,
-                    $"MCIN size invalid in ADT ({tileX},{tileY}): size={mcinSize}, file={adtBytes.Length}");
-                return;
-            }
-
-            if ((mcinSize % _adtProfile.McinEntrySize) != 0)
-            {
-                Build335Diagnostics.Increment("UnknownFieldUsageCount");
-                ViewerLog.Important(ViewerLog.Category.Terrain,
-                    $"MCIN size misaligned in ADT ({tileX},{tileY}): size={mcinSize}, entrySize={_adtProfile.McinEntrySize}");
-            }
+                $"MCIN offset zero in ADT ({tileX},{tileY}); using top-level MCNK scan fallback with {mcnkOffsets.Count} chunks");
         }
+        else
+        {
+            int mcinAbsPos = mhdrStart + mcinOff;
+            // Diagnostic: log MCIN position and first bytes
+            if (mcinAbsPos + 8 <= adtBytes.Length)
+            {
+                string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
+                ViewerLog.Important(ViewerLog.Category.Terrain,
+                    $"MCIN at file pos {mcinAbsPos}: sig='{mcinSig}' (mhdrOff={mhdrOffset}, mhdrStart={mhdrStart}, mcinOff={mcinOff})");
 
-        var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
-        var mcnkOffsets = mcin.GetMcnkOffsets();
+                int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
+                if (mcinSig != "NICM")
+                {
+                    Build335Diagnostics.Increment("InvalidChunkSignatureCount");
+                    ViewerLog.Info(ViewerLog.Category.Terrain,
+                        $"MCIN signature mismatch in ADT ({tileX},{tileY}): '{mcinSig}'");
+                    return;
+                }
+
+                if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
+                {
+                    Build335Diagnostics.Increment("InvalidChunkSizeCount");
+                    ViewerLog.Info(ViewerLog.Category.Terrain,
+                        $"MCIN size invalid in ADT ({tileX},{tileY}): size={mcinSize}, file={adtBytes.Length}");
+                    return;
+                }
+
+                if ((mcinSize % _adtProfile.McinEntrySize) != 0)
+                {
+                    Build335Diagnostics.Increment("UnknownFieldUsageCount");
+                    ViewerLog.Important(ViewerLog.Category.Terrain,
+                        $"MCIN size misaligned in ADT ({tileX},{tileY}): size={mcinSize}, entrySize={_adtProfile.McinEntrySize}");
+                }
+            }
+
+            var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
+            mcnkOffsets = mcin.GetMcnkOffsets();
+        }
 
         float chunkSmall = WoWConstants.ChunkSize / 16f;
         var chunks = new List<TerrainChunkData>(256);
@@ -504,24 +653,32 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (!TryGetMhdr(adtBytes, out mhdrStart, out mhdr))
             return false;
 
+        List<int> offsets;
         int mcinOff = mhdr.GetOffset(GillijimProject.WowFiles.Mhdr.McinOffset);
         if (mcinOff == 0)
-            return false;
+        {
+            offsets = ReadMcnkOffsetsByChunkScan(adtBytes);
+            if (offsets.Count == 0)
+                return false;
+        }
+        else
+        {
+            int mcinAbsPos = mhdrStart + mcinOff;
+            if (mcinAbsPos + 8 > adtBytes.Length)
+                return false;
 
-        int mcinAbsPos = mhdrStart + mcinOff;
-        if (mcinAbsPos + 8 > adtBytes.Length)
-            return false;
+            string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
+            if (mcinSig != "NICM")
+                return false;
 
-        string mcinSig = Encoding.ASCII.GetString(adtBytes, mcinAbsPos, 4);
-        if (mcinSig != "NICM")
-            return false;
+            int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
+            if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
+                return false;
 
-        int mcinSize = BitConverter.ToInt32(adtBytes, mcinAbsPos + 4);
-        if (mcinSize <= 0 || mcinAbsPos + 8 + mcinSize > adtBytes.Length)
-            return false;
+            var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
+            offsets = mcin.GetMcnkOffsets();
+        }
 
-        var mcin = new GillijimProject.WowFiles.Mcin(adtBytes, mcinAbsPos);
-        var offsets = mcin.GetMcnkOffsets();
         int entryCount = Math.Min(256, offsets.Count);
 
         for (int ci = 0; ci < entryCount; ci++)
@@ -546,6 +703,31 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return mcnkByIndex.Count > 0;
+    }
+
+    private static List<int> ReadMcnkOffsetsByChunkScan(byte[] adtBytes)
+    {
+        var offsets = new List<int>(256);
+        int position = 0;
+
+        while (position + 8 <= adtBytes.Length)
+        {
+            string signature = Encoding.ASCII.GetString(adtBytes, position, 4);
+            int size = BitConverter.ToInt32(adtBytes, position + 4);
+            if (size < 0)
+                break;
+
+            if (signature == "KNCM")
+                offsets.Add(position);
+
+            int next = position + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (next <= position)
+                break;
+
+            position = next;
+        }
+
+        return offsets;
     }
 
     private Vector3[] ExtractNormals(byte[]? mcnrData)

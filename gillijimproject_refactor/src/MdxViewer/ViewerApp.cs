@@ -172,6 +172,11 @@ public partial class ViewerApp : IDisposable
     private string _folderInputBuf = "";
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
+    private string _lastGameFolderPath = "";
+    private string _lastLooseOverlayPath = "";
+    private List<KnownGoodClientPath> _knownGoodClientPaths = new();
+    private string? _pendingKnownGoodClientPath;
+    private bool _pendingKnownGoodClientAttachLooseFolder;
 
     // FPS counter
     private int _frameCount;
@@ -801,11 +806,56 @@ void main() {
                 if (ImGui.MenuItem("Open Game Folder (MPQ)..."))
                 {
                     _showFolderInput = true;
-                    _folderInputBuf = "";
+                    _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
+                }
+
+                if (ImGui.BeginMenu("Open Saved Game Folder", _knownGoodClientPaths.Count > 0))
+                {
+                    foreach (var knownClient in _knownGoodClientPaths)
+                    {
+                        if (ImGui.MenuItem($"{knownClient.Name}##open_saved_{knownClient.Path}"))
+                            QueueKnownGoodClientAction(knownClient.Path, attachLooseFolder: false);
+
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip(knownClient.Path);
+                    }
+
+                    ImGui.EndMenu();
                 }
 
                 if (ImGui.MenuItem("Attach Loose Map Folder...", "", false, _dataSource is MpqDataSource))
                     _wantAttachLooseMapFolder = true;
+
+                if (ImGui.BeginMenu("Load Loose Map Folder Against Saved Base", _knownGoodClientPaths.Count > 0))
+                {
+                    foreach (var knownClient in _knownGoodClientPaths)
+                    {
+                        if (ImGui.MenuItem($"{knownClient.Name}##attach_saved_{knownClient.Path}"))
+                            QueueKnownGoodClientAction(knownClient.Path, attachLooseFolder: true);
+
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip(knownClient.Path);
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                if (ImGui.MenuItem("Save Current Game Folder As Known-Good Base", "", false, _dataSource is MpqDataSource))
+                    SaveCurrentGameFolderAsKnownGoodBase();
+
+                if (ImGui.BeginMenu("Forget Known-Good Base", _knownGoodClientPaths.Count > 0))
+                {
+                    foreach (var knownClient in _knownGoodClientPaths)
+                    {
+                        if (ImGui.MenuItem($"{knownClient.Name}##forget_saved_{knownClient.Path}"))
+                            ForgetKnownGoodClientPath(knownClient.Path);
+
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip(knownClient.Path);
+                    }
+
+                    ImGui.EndMenu();
+                }
 
                 if (ImGui.MenuItem("Open VLM Project..."))
                     _wantOpenVlmProject = true;
@@ -932,11 +982,41 @@ void main() {
             {
                 string? overlayPath = ShowFolderDialogSTA(
                     "Select loose map overlay folder (contains World\\Maps or a map directory under World\\Maps)",
-                    initialDir: null,
+                    initialDir: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
                     showNewFolderButton: false);
 
                 if (!string.IsNullOrEmpty(overlayPath) && Directory.Exists(overlayPath))
                     AttachLooseMapOverlay(overlayPath);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_pendingKnownGoodClientPath))
+        {
+            string savedBasePath = _pendingKnownGoodClientPath!;
+            bool attachLooseFolder = _pendingKnownGoodClientAttachLooseFolder;
+            _pendingKnownGoodClientPath = null;
+            _pendingKnownGoodClientAttachLooseFolder = false;
+
+            if (!Directory.Exists(savedBasePath))
+            {
+                _statusMessage = $"Saved client path no longer exists: {savedBasePath}";
+            }
+            else if (attachLooseFolder)
+            {
+                string? overlayPath = ShowFolderDialogSTA(
+                    "Select loose map folder to load against the saved base client",
+                    initialDir: string.IsNullOrWhiteSpace(_lastLooseOverlayPath) ? null : _lastLooseOverlayPath,
+                    showNewFolderButton: false);
+
+                if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
+                {
+                    LoadMpqDataSource(savedBasePath, null);
+                    AttachLooseMapOverlay(overlayPath);
+                }
+            }
+            else
+            {
+                LoadMpqDataSource(savedBasePath, null);
             }
         }
 
@@ -1063,6 +1143,72 @@ void main() {
         }
     }
 
+    private void QueueKnownGoodClientAction(string gamePath, bool attachLooseFolder)
+    {
+        _pendingKnownGoodClientPath = gamePath;
+        _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
+    }
+
+    private void SaveCurrentGameFolderAsKnownGoodBase()
+    {
+        if (_dataSource is not MpqDataSource mpqDataSource)
+        {
+            _statusMessage = "Load a base MPQ game folder before saving it as a known-good client path.";
+            return;
+        }
+
+        AddOrUpdateKnownGoodClientPath(mpqDataSource.GamePath, _dbcBuild);
+        SaveViewerSettings();
+        _statusMessage = $"Saved known-good client path: {mpqDataSource.GamePath}";
+    }
+
+    private void AddOrUpdateKnownGoodClientPath(string gamePath, string? buildVersion)
+    {
+        string normalizedPath = Path.GetFullPath(gamePath);
+        string displayName = BuildKnownGoodClientDisplayName(normalizedPath, buildVersion);
+
+        int existingIndex = _knownGoodClientPaths.FindIndex(entry =>
+            string.Equals(entry.Path, normalizedPath, StringComparison.OrdinalIgnoreCase));
+
+        var entry = new KnownGoodClientPath
+        {
+            Name = displayName,
+            Path = normalizedPath
+        };
+
+        if (existingIndex >= 0)
+            _knownGoodClientPaths[existingIndex] = entry;
+        else
+            _knownGoodClientPaths.Add(entry);
+
+        _knownGoodClientPaths = _knownGoodClientPaths
+            .OrderBy(client => client.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void ForgetKnownGoodClientPath(string gamePath)
+    {
+        int removed = _knownGoodClientPaths.RemoveAll(entry =>
+            string.Equals(entry.Path, gamePath, StringComparison.OrdinalIgnoreCase));
+
+        if (removed > 0)
+        {
+            SaveViewerSettings();
+            _statusMessage = $"Removed known-good client path: {gamePath}";
+        }
+    }
+
+    private static string BuildKnownGoodClientDisplayName(string gamePath, string? buildVersion)
+    {
+        string folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(gamePath));
+        if (string.IsNullOrWhiteSpace(folderName))
+            folderName = gamePath;
+
+        return string.IsNullOrWhiteSpace(buildVersion)
+            ? folderName
+            : $"{folderName} [{buildVersion}]";
+    }
+
     private void DrawListfileInputDialog()
     {
         // No longer needed — listfile is auto-downloaded
@@ -1078,14 +1224,14 @@ void main() {
 
         if (ImGui.Begin("Map Converter", ref _showMapConverterDialog))
         {
-            ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and LK 3.3.5 split ADT formats.");
+            ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and split ADT formats, including LK 3.3.5 and no-MCIN later-era roots where supported.");
             ImGui.Spacing();
 
             // Direction selector
             ImGui.Text("Direction:");
             ImGui.RadioButton("Alpha WDT \u2192 LK ADTs", ref _mapConvertDirection, 0);
             ImGui.SameLine();
-            ImGui.RadioButton("LK ADTs \u2192 Alpha WDT", ref _mapConvertDirection, 1);
+            ImGui.RadioButton("Split ADTs \u2192 Alpha WDT", ref _mapConvertDirection, 1);
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
@@ -1116,25 +1262,25 @@ void main() {
             }
             else
             {
-                // LK → Alpha
-                ImGui.Text("Source LK WDT:");
+                // Split ADTs → Alpha
+                ImGui.Text("Source Split-ADT WDT:");
                 ImGui.SetNextItemWidth(-80);
                 ImGui.InputText("##l2a_src", ref _mapConvertSourcePath, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##l2a_src"))
                 {
                     string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
-                    var picked = ShowFileDialogSTA("Select LK WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
+                    var picked = ShowFileDialogSTA("Select split-ADT WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
                     if (picked != null) _mapConvertSourcePath = picked;
                 }
 
-                ImGui.Text("LK ADT Directory (containing MapName_X_Y.adt files):");
+                ImGui.Text("Split ADT Directory (containing MapName_X_Y.adt roots):");
                 ImGui.SetNextItemWidth(-80);
                 ImGui.InputText("##l2a_mapdir", ref _mapConvertLkMapDir, 512);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse##l2a_dir"))
                 {
-                    var picked = ShowFolderDialogSTA("Select directory containing LK ADT files");
+                    var picked = ShowFolderDialogSTA("Select directory containing split ADT files");
                     if (picked != null) _mapConvertLkMapDir = picked;
                 }
 
@@ -3587,6 +3733,7 @@ void main() {
         {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
+            _lastGameFolderPath = Path.GetFullPath(gamePath);
             _standaloneSkinPathCache.Clear();
             _discoveredMaps.Clear();
             _areaTableService = null;
@@ -3696,6 +3843,7 @@ void main() {
             return;
         }
 
+        _lastLooseOverlayPath = Path.GetFullPath(selectedPath);
         _standaloneSkinPathCache.Clear();
         ResetWdlPreviewSupport();
         InitializeWdlPreviewSupport();
@@ -5648,6 +5796,9 @@ void main() {
                 return;
 
             WmoRenderer.MliqRotationQuarterTurns = settings.WmoMliqRotationQuarterTurns;
+            _lastGameFolderPath = settings.LastGameFolderPath ?? "";
+            _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
+            _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
         }
         catch (Exception ex)
         {
@@ -5663,7 +5814,10 @@ void main() {
 
             var settings = new ViewerSettings
             {
-                WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns
+                WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
+                LastGameFolderPath = _lastGameFolderPath,
+                LastLooseOverlayPath = _lastLooseOverlayPath,
+                KnownGoodClientPaths = _knownGoodClientPaths
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -5677,6 +5831,48 @@ void main() {
         {
             ViewerLog.Trace($"[ViewerSettings] Failed to save settings: {ex.Message}");
         }
+    }
+
+    private static List<KnownGoodClientPath> NormalizeKnownGoodClientPaths(List<KnownGoodClientPath>? knownGoodClientPaths)
+    {
+        if (knownGoodClientPaths == null || knownGoodClientPaths.Count == 0)
+            return new List<KnownGoodClientPath>();
+
+        var normalizedEntries = new List<KnownGoodClientPath>();
+        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in knownGoodClientPaths)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Path))
+                continue;
+
+            string normalizedPath;
+            try
+            {
+                normalizedPath = Path.GetFullPath(entry.Path);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!seenPaths.Add(normalizedPath))
+                continue;
+
+            string name = string.IsNullOrWhiteSpace(entry.Name)
+                ? Path.GetFileName(Path.TrimEndingDirectorySeparator(normalizedPath))
+                : entry.Name.Trim();
+
+            normalizedEntries.Add(new KnownGoodClientPath
+            {
+                Name = name,
+                Path = normalizedPath
+            });
+        }
+
+        return normalizedEntries
+            .OrderBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private bool _disposed;
@@ -5717,5 +5913,14 @@ void main() {
     private sealed class ViewerSettings
     {
         public int WmoMliqRotationQuarterTurns { get; set; }
+        public string? LastGameFolderPath { get; set; }
+        public string? LastLooseOverlayPath { get; set; }
+        public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
+    }
+
+    private sealed class KnownGoodClientPath
+    {
+        public string Name { get; set; } = "";
+        public string Path { get; set; } = "";
     }
 }

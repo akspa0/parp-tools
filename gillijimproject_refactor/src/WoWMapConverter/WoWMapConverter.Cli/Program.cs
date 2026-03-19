@@ -35,6 +35,7 @@ public static class Program
             "convert-m2-to-mdx" => RunConvertM2ToMdx(args.Skip(1).ToArray()),
             "pm4-export" => RunPm4Export(args.Skip(1).ToArray()),
             "pm4-validate-coords" => RunPm4ValidateCoords(args.Skip(1).ToArray()),
+            "development-analyze" => RunDevelopmentAnalyze(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
@@ -922,6 +923,102 @@ public static class Program
         }
     }
 
+    private static int RunDevelopmentAnalyze(string[] args)
+    {
+        string inputDir = DevelopmentMapAnalyzer.DefaultDevelopmentMapDirectory;
+        string? jsonOutputPath = null;
+        int? tileLimit = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--input-dir":
+                case "--input":
+                case "-i":
+                    if (i + 1 < args.Length)
+                        inputDir = args[++i];
+                    break;
+                case "--json":
+                    if (i + 1 < args.Length)
+                        jsonOutputPath = args[++i];
+                    break;
+                case "--tile-limit":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int parsedTileLimit))
+                        tileLimit = parsedTileLimit;
+                    break;
+                case "--help":
+                case "-h":
+                    Console.WriteLine("Development Dataset Analysis");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: wowmapconverter development-analyze [options]");
+                    Console.WriteLine();
+                    Console.WriteLine("Options:");
+                    Console.WriteLine("  --input-dir, -i <dir>  Development source directory (default: fixed development dataset)");
+                    Console.WriteLine("  --json <path>          Write the full report to JSON");
+                    Console.WriteLine("  --tile-limit <n>       Analyze only the first N tiles after sorting");
+                    return 0;
+            }
+        }
+
+        Console.WriteLine("Development Dataset Analysis");
+        Console.WriteLine("============================");
+        Console.WriteLine($"Input: {Pm4CoordinateService.ResolveMapDirectory(inputDir)}");
+        if (tileLimit.HasValue)
+            Console.WriteLine($"Tile limit: {tileLimit.Value}");
+
+        try
+        {
+            var report = DevelopmentMapAnalyzer.Analyze(inputDir, tileLimit);
+
+            Console.WriteLine();
+            Console.WriteLine($"Map files: WDT={(report.WdtExists ? "yes" : "no")}, WDL={(report.WdlExists ? "yes" : "no")}");
+            Console.WriteLine($"Tiles analyzed:              {report.TilesAnalyzed}");
+            Console.WriteLine($"Root ADTs:                   {report.RootAdtCount}");
+            Console.WriteLine($"_obj0 ADTs:                  {report.Obj0Count}");
+            Console.WriteLine($"_tex0 ADTs:                  {report.Tex0Count}");
+            Console.WriteLine($"PM4 files:                   {report.Pm4Count}");
+            Console.WriteLine($"WLW/WLM/WLQ/WLL tiles:       {report.WlwCount}/{report.WlmCount}/{report.WlqCount}/{report.WllCount}");
+            Console.WriteLine($"Zero-byte roots:             {report.ZeroByteRootCount}");
+            Console.WriteLine($"Roots missing MCIN:          {report.MissingMcinRootCount}");
+            Console.WriteLine($"Roots with partial chunks:   {report.PartialMcnkRootCount}");
+            Console.WriteLine($"Tiles without usable ground: {report.TilesWithoutUsableTerrain}");
+            Console.WriteLine($"Tiles with bad chunk index:  {report.TilesWithHeaderIndexMismatches}");
+            Console.WriteLine($"Tiles with repeated 0,0 idx: {report.TilesWithRepeatedZeroIndices}");
+
+            foreach (var tile in report.Tiles
+                .Where(tile => tile.RootStatus != "mcin-valid" || tile.HeaderIndexMismatchCount > 0 || tile.ZeroIndexHeaderCount > 1)
+                .OrderByDescending(tile => tile.HeaderIndexMismatchCount)
+                .ThenByDescending(tile => tile.ZeroIndexHeaderCount)
+                .ThenBy(tile => tile.TileY)
+                .ThenBy(tile => tile.TileX)
+                .Take(20))
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Tile {tile.TileName}");
+                Console.WriteLine($"  root={tile.RootStatus}, validChunks={tile.ValidRootChunkCount}, mcin={tile.HasMcin}, topLevelMcnk={tile.TopLevelMcnkCount}");
+                Console.WriteLine($"  idxMismatch={tile.HeaderIndexMismatchCount}, zeroIdx={tile.ZeroIndexHeaderCount}, dupIdx={tile.DuplicateHeaderIndexCount}");
+                Console.WriteLine($"  obj0={tile.HasObj0Adt}, tex0={tile.HasTex0Adt}, pm4={tile.HasPm4}, wl={(tile.HasWlw || tile.HasWlm || tile.HasWlq || tile.HasWll)}");
+                Console.WriteLine($"  action={tile.RecommendedAction}");
+            }
+
+            if (!string.IsNullOrEmpty(jsonOutputPath))
+            {
+                string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(jsonOutputPath, json);
+                Console.WriteLine();
+                Console.WriteLine($"JSON report: {Path.GetFullPath(jsonOutputPath)}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
     private static async Task<int> RunAnalyzeAsync(string[] args)
     {
         Console.WriteLine("Analyze command - not yet implemented");
@@ -1556,6 +1653,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter convert-m2-to-mdx <m2> [options]        Convert M2 → MDX");
         Console.WriteLine("  wowmapconverter pm4-export <pm4> [options]              Export PM4 to OBJ");
         Console.WriteLine("  wowmapconverter pm4-validate-coords [options]           Validate PM4 MPRL refs against _obj0 placements");
+        Console.WriteLine("  wowmapconverter development-analyze [options]           Audit the original development ADT/PM4/WL dataset");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter vlm-export [options]                    Export VLM training dataset");
         Console.WriteLine("  wowmapconverter vlm-decode [options]                    Decode VLM JSON to ADT");

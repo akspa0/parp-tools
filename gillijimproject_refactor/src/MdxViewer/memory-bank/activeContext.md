@@ -100,6 +100,19 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - `StandardTerrainAdapter` now routes placement parsing through `_obj0.adt` only when the resolved terrain profile explicitly requests it; 3.x remains on root-ADT placement parsing.
 - This is profile scaffolding, not full Cataclysm/MoP correctness. The user requirement is broader MPQ-era support through `5.3.x`; later CASC support is a separate future track.
 
+### 4.x No-MCIN Root Fallback (Mar 19)
+
+- Real-data audit on the fixed `test_data/development/World/Maps/development` source confirmed the active 4.x blocker is structural, not just bad chunk indices:
+   - 466 root ADT filenames
+   - 114 zero-byte placeholders
+   - 352 non-empty roots
+   - 0 non-empty roots with `MCIN`
+- `StandardTerrainAdapter` now treats missing `MCIN` on later-era root ADTs as a top-level `MCNK` scan fallback instead of an automatic hard failure.
+- Scope limit for this fallback:
+   - it is intended to recover root geometry/chunk order first
+   - it does not by itself prove full `_tex0.adt` texture-layer parity for 4.x data
+   - keep 3.x alpha-path guardrails unchanged
+
 ### ModelRenderer Follow-up From 39799bf (Mar 18)
 
 - The commit message for `39799bf` bundled terrain and model notes together, but the only remaining model-renderer hunk on top of the already-applied MPQ fix was particle suppression on the world-scene instanced path.
@@ -919,6 +932,35 @@ Previously deferred issue now resolved. ParticleRenderer rewritten with per-part
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
    - no automated tests were added or run
    - no runtime real-data validation has been completed yet for this loose overlay workflow
+
+#### Split ADT Auto-Promotion For Loose Maps (StandardTerrainAdapter.cs) (Mar 19, 2026)
+- `StandardTerrainAdapter` now detects `*_tex0.adt` / `*_obj0.adt` companions from the actual tile set before locking the ADT profile.
+- If the loaded base client build resolves to a non-split terrain profile but the map data is visibly split, the adapter promotes only the terrain parser to provisional `AdtProfile_40x_Unknown`.
+- Scope boundary:
+   - this keeps `_dbcBuild` unchanged for model, WMO, and DBC-driven systems
+   - the goal is to let a 3.3.5 base client load loose 4.x+ split terrain without reclassifying the whole client as 4.x
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` still required after this slice
+   - no runtime real-data validation has been completed yet for `test_data/development/World/Maps/development`
+
+#### Development Map Tile Coverage Follow-up (StandardTerrainAdapter.cs) (Mar 19, 2026)
+- Real-data check on `test_data/development/World/Maps/development` showed the loose map files and `development.wdt` disagree materially:
+   - WDT `MAIN` advertises 1496 tiles
+   - loose files on disk cover 613 tile coordinates across root / `_obj0` / `_tex0`
+   - only 352 root ADTs are both present on disk and flagged by `MAIN`
+- Active viewer consequence before the fix:
+   - 114 root filenames on disk were zero-byte placeholders paired with `_obj0` / `_tex0`, so they could not contribute terrain geometry through the root-ADT path
+   - 147 `_obj0` tiles without a root ADT returned early and lost their placements entirely
+- Current adapter behavior:
+   - tile discovery now merges `MAIN` with indexed loose split-ADT filenames for the current map and drops `MAIN` entries that have no backing tile files
+   - rootless `_obj0` tiles now still load placement data even when no terrain root exists
+- Current dataset interpretation:
+   - tiles that load as terrain are the 352 non-empty root ADTs
+   - many of the remaining “real Blizzard” split tiles appear to be placement/texture sidecars around zero-byte root placeholders, so they need a different terrain source (for example WDL-derived geometry) if the goal is to render ground there
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this slice
+   - no automated tests were added or run
+   - no runtime real-data validation has been completed yet for the updated development-map load path
 
 ### Key Technical Decisions
 - **Coordinate system**: Renderer X = WoW Y, Renderer Y = WoW X, Z = height. MapOrigin = 17066.66666f, ChunkSize = 533.33333f.

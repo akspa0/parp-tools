@@ -93,6 +93,7 @@ dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
   --source-adt <path/to/source_adts> \
   --client-path <path/to/3.3.5_client> \
   --out <path/to/output_dir> \
+  [--repair-mcnk-indices false] \
   [--map <map_name>]
 ```
 
@@ -101,6 +102,7 @@ dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
 - `--source-adt`: Directory containing source ADTs to patch (e.g., WDL-generated or existing split ADTs).
 - `--client-path`: Path to 3.3.5 WoW client (root folder containing `Data/`).
 - `--out`: Output directory for repaired ADTs and intermediate files.
+- `--repair-mcnk-indices`: Defaults to enabled. Rewrites bad MCNK `IndexX` / `IndexY` values in exported root ADTs so chunk coordinates match their real 16x16 positions.
 - `--map`: Map name (default: `development`).
 
 ### What it does
@@ -108,3 +110,21 @@ dotnet run --project WoWRollback/WoWRollback.Cli -- development-repair \
 2.  **Matches Objects**: Matches PM4 geometry against extracted WMOs to reconstruct `MODF` placements.
 3.  **Fixes Coordinates**: Applies `ServerToAdtPosition` transform to fix PM4 coordinate system issues.
 4.  **Patches ADTs**: Injects new placements into source ADTs, creating valid 3.3.5 files ready for Noggit.
+5.  **Repairs MCNK Indices**: Normalizes bad MCNK `IndexX` / `IndexY` values in the final exported ADTs so viewers and editors can place chunk terrain correctly.
+
+## MCNK Index Repair
+
+Audit or rewrite root ADTs whose MCNK headers carry bad chunk indices.
+
+```bash
+dotnet run --project WoWRollback/WoWRollback.Cli -- repair-mcnk-indices \
+  --in <path/to/file_or_dir> \
+  [--out <path/to/output_file_or_dir>] \
+  [--audit-only] \
+  [--overwrite]
+```
+
+### Notes
+- Root `.adt` files are processed; `_obj0.adt` and `_tex0.adt` companions are skipped.
+- When `MCIN` is present, expected chunk indices come from MCIN order; otherwise the command falls back to top-level MCNK chunk order.
+- `--audit-only` reports mismatches without writing changes.

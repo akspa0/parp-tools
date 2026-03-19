@@ -248,33 +248,37 @@ public class LkToAlphaConverter
         var result = new TileConversionResult();
         var bytes = await File.ReadAllBytesAsync(rootAdtPath, ct);
 
-        // Find LK MHDR and MCIN
+        // Find LK MHDR and MCIN. Later split roots can omit MCIN and still expose top-level MCNK order.
         int mhdrOffset = FindChunk(bytes, "MHDR");
         if (mhdrOffset < 0)
             throw new InvalidDataException("MHDR not found");
 
-        int mhdrDataStart = mhdrOffset + 8;
-        int mcinRelOffset = BitConverter.ToInt32(bytes, mhdrDataStart); // First field is MCIN offset
-        if (mcinRelOffset == 0)
-            throw new InvalidDataException("MCIN offset is 0");
+        var scannedRootOffsets = ReadTopLevelMcnkOffsets(bytes, minimumChunkSize: 128);
+        if (scannedRootOffsets.Count == 0)
+            throw new InvalidDataException("No root MCNK chunks found");
 
-        int mcinOffset = mhdrDataStart + mcinRelOffset;
-        var mcnkOffsets = ReadMcinOffsets(bytes, mcinOffset);
+        var mcnkOffsets = ResolveMcnkOffsets(bytes, minimumChunkSize: 128);
 
-        // Load optional _tex.adt for texture data
+        // Load optional split texture data. Some 4.x _tex0 files do not contain LK-style MCNK payloads,
+        // so only adopt per-chunk offsets when the file exposes valid MCNK-sized chunks.
         byte[]? texBytes = null;
         List<int>? texMcnkOffsets = null;
         var baseName = Path.GetFileNameWithoutExtension(rootAdtPath);
-        var texPath = Path.Combine(mapDir, baseName + "_tex.adt");
-        if (File.Exists(texPath))
+        foreach (var texSuffix in new[] { "_tex0.adt", "_tex.adt" })
         {
-            texBytes = await File.ReadAllBytesAsync(texPath, ct);
-            int texMhdr = FindChunk(texBytes, "MHDR");
-            if (texMhdr >= 0)
+            var texPath = Path.Combine(mapDir, baseName + texSuffix);
+            if (!File.Exists(texPath))
+                continue;
+
+            var candidateBytes = await File.ReadAllBytesAsync(texPath, ct);
+            texBytes ??= candidateBytes;
+
+            var candidateOffsets = ResolveMcnkOffsets(candidateBytes, minimumChunkSize: 128);
+            if (candidateOffsets.Any(offset => offset > 0))
             {
-                int texMcinRel = BitConverter.ToInt32(texBytes, texMhdr + 8);
-                if (texMcinRel > 0)
-                    texMcnkOffsets = ReadMcinOffsets(texBytes, texMhdr + 8 + texMcinRel);
+                texBytes = candidateBytes;
+                texMcnkOffsets = candidateOffsets;
+                break;
             }
         }
 
@@ -627,6 +631,60 @@ public class LkToAlphaConverter
             offsets.Add(0);
 
         return offsets;
+    }
+
+    private static List<int> ResolveMcnkOffsets(byte[] bytes, int minimumChunkSize)
+    {
+        int mhdrOffset = FindChunk(bytes, "MHDR");
+        if (mhdrOffset >= 0)
+        {
+            int mhdrDataStart = mhdrOffset + 8;
+            int mcinRelOffset = BitConverter.ToInt32(bytes, mhdrDataStart);
+            if (mcinRelOffset > 0)
+            {
+                int mcinOffset = mhdrDataStart + mcinRelOffset;
+                return ReadMcinOffsets(bytes, mcinOffset);
+            }
+        }
+
+        return PadMcnkOffsets(ReadTopLevelMcnkOffsets(bytes, minimumChunkSize));
+    }
+
+    private static List<int> ReadTopLevelMcnkOffsets(byte[] bytes, int minimumChunkSize)
+    {
+        var offsets = new List<int>(256);
+        int position = 0;
+
+        while (position + 8 <= bytes.Length)
+        {
+            string signature = Encoding.ASCII.GetString(bytes, position, 4);
+            int size = BitConverter.ToInt32(bytes, position + 4);
+            if (size < 0)
+                break;
+
+            if (signature == "KNCM" && size >= minimumChunkSize && position + 8 + size <= bytes.Length)
+                offsets.Add(position);
+
+            int next = position + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (next <= position)
+                break;
+
+            position = next;
+        }
+
+        return offsets;
+    }
+
+    private static List<int> PadMcnkOffsets(List<int> offsets)
+    {
+        if (offsets.Count >= 256)
+            return offsets;
+
+        var padded = new List<int>(offsets);
+        while (padded.Count < 256)
+            padded.Add(0);
+
+        return padded;
     }
 
     private static void WriteChunk(MemoryStream ms, string fourCC, byte[] data)

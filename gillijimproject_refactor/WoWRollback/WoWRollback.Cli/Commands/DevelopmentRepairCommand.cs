@@ -27,10 +27,12 @@ public static class DevelopmentRepairCommand
         var dumpObjs = opts.ContainsKey("dump-objs");
         var reuseCsvPath = opts.GetValueOrDefault("reuse-csv");
         var cacheDir = opts.GetValueOrDefault("cache-dir");
+        var repairMcnkIndices = !opts.TryGetValue("repair-mcnk-indices", out var repairMcnkIndicesValue)
+            || !string.Equals(repairMcnkIndicesValue, "false", StringComparison.OrdinalIgnoreCase);
 
         if (string.IsNullOrEmpty(pm4Dir) || string.IsNullOrEmpty(sourceAdtDir) || string.IsNullOrEmpty(clientPath) || string.IsNullOrEmpty(outDir))
         {
-            Console.WriteLine("Usage: development-repair --pm4-dir <dir> --source-adt <dir> --client-path <dir> --out <dir> [--cache-dir <dir>] [--map <name>] [--listfile <path>] [--dump-objs] [--reuse-csv <path>]");
+            Console.WriteLine("Usage: development-repair --pm4-dir <dir> --source-adt <dir> --client-path <dir> --out <dir> [--cache-dir <dir>] [--map <name>] [--listfile <path>] [--dump-objs] [--reuse-csv <path>] [--repair-mcnk-indices false]");
             Console.WriteLine();
             Console.WriteLine("Automates the full repair pipeline for the development map (In-Memory Fast Mode).");
             return 1;
@@ -46,6 +48,7 @@ public static class DevelopmentRepairCommand
         Console.WriteLine($"Client:      {clientPath}");
         Console.WriteLine($"Output:      {outDir}");
         Console.WriteLine($"Cache Dir:   {effectiveCacheDir}"); // Explicit feedback
+        Console.WriteLine($"Repair MCNK: {(repairMcnkIndices ? "enabled" : "disabled")}");
         if (!string.IsNullOrEmpty(listfilePath)) Console.WriteLine($"Listfile:    {listfilePath}");
         Console.WriteLine();
 
@@ -198,8 +201,18 @@ public static class DevelopmentRepairCommand
                 // Console.WriteLine($"  Merging tile {tileX}_{tileY} (no new placements)...");
             }
 
-            // 3. Write Output
             var outPath = Path.Combine(adtOutDir, Path.GetFileName(adtPath));
+            if (repairMcnkIndices)
+            {
+                var repairReport = McnkIndexRepairService.RepairBytes(finalAdt, fileName, writeChanges: true, outputPath: outPath);
+                if (repairReport.MismatchCount > 0 && repairReport.RepairedBytes != null)
+                {
+                    Console.WriteLine($"  Repaired {repairReport.MismatchCount} MCNK index mismatches in {fileName} using {(repairReport.UsedMcin ? "MCIN" : "chunk scan")}");
+                    finalAdt = repairReport.RepairedBytes;
+                }
+            }
+
+            // 3. Write Output
             File.WriteAllBytes(outPath, finalAdt);
             
             // 4. Verify & Dump
