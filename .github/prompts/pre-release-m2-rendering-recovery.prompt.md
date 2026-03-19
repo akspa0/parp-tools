@@ -1,5 +1,5 @@
 ---
-description: "Use when debugging pre-release 3.0.1 M2 compatibility, hybrid MDX+M2 model behavior, or neon-pink transparent surfaces in MdxViewer. Splits format-compatibility work from shared shader/material failures and requires real-data validation."
+description: "Use when debugging pre-release 3.0.1 M2 compatibility, ancient material/effect feature gaps, hybrid MDX+M2 behavior, or neon-pink transparent surfaces in MdxViewer. Splits format work, pre-release feature support, and shared shader/material failures and requires real-data validation."
 name: "Pre-release M2 Rendering Recovery"
 argument-hint: "Optional model path, client build, runtime symptom, screenshot clue, or suspected shader/material path"
 agent: "agent"
@@ -9,28 +9,32 @@ Execute a no-assumption investigation plan for pre-release `3.0.1` model compati
 
 ## Goal
 
-Separate two problems that can look similar at runtime but are not the same:
+Separate three problems that can look similar at runtime but are not the same:
 
 1. pre-release `3.0.1` model-format compatibility
-2. shared transparent-material / shader parity defects that also affect classic `MDX`
+2. pre-release `3.0.1` material, effect, and shader-era feature support that Warcraft.NET does not fully model
+3. shared transparent-material / shader parity defects that also affect classic `MDX`
 
-Do not treat a fix in one track as proof that the other track is solved.
+Do not treat a fix in one track as proof that the others are solved.
 
 ## Current Working Assumptions
 
 - Pre-release `3.0.1` model files are not safely modeled as later `3.3.5` M2 files.
 - Some assets may be transitional or hybrid `MDX` + `M2` variants.
 - Empty converted fallback models are already blocked by guardrails; that only removes a false-positive success state.
-- Neon-pink transparent surfaces reproduce on both `MDX` and M2-family assets, so that symptom is likely in shared material, texture, blend, or shader handling.
+- Some remaining `3.0.1` failures now look concentrated in objects with transparency, animated materials, environment mapping, or other effect/shader behavior rather than in every model equally.
+- Warcraft.NET later-era abstractions may flatten or omit pre-release material/effect metadata that these assets still need.
+- Neon-pink transparent surfaces reproduce on both `MDX` and M2-family assets, so that symptom can still indicate shared material, texture, blend, or shader handling.
 
 ## Scope
 
 - In scope:
-  - `WarcraftNetM2Adapter` compatibility assumptions
-  - version/profile routing for model parsing
-  - `ViewerApp`, `WorldAssetManager`, and `WmoRenderer` M2-family load paths
-  - `ModelRenderer` texture binding, transparency routing, and shader behavior
-  - replaceable-texture fallback behavior
+   - `WarcraftNetM2Adapter` compatibility assumptions
+   - version/profile routing for model parsing
+   - extraction of pre-release material, texture, render-flag, and effect-related metadata
+   - `ViewerApp`, `WorldAssetManager`, and `WmoRenderer` M2-family load paths
+   - `ModelRenderer` texture binding, transparency routing, and shader behavior
+   - replaceable-texture fallback behavior
 - Out of scope unless directly required by evidence:
   - terrain alpha issues
   - unrelated UI/layout cleanup
@@ -69,7 +73,21 @@ Do not treat a fix in one track as proof that the other track is solved.
    - any headers or chunk layouts that look transitional rather than final-WotLK
 4. If behavior differs by client family, route through explicit model profile logic rather than silent heuristics.
 
-### Track B: Shared Pink Transparency / Shader Parity
+### Track B: Pre-release 3.0.1 Material / Effect Feature Support
+
+1. Determine whether plain opaque assets work better than cutout, translucent, env-mapped, or otherwise effect-heavy assets.
+2. Audit what the active adapter path extracts versus what the asset class likely needs:
+   - material layers and section-to-material assignment
+   - render flags and blend/depth/cull behavior
+   - texture lookup/combo tables
+   - texture transforms and texture animation tracks
+   - material color/alpha animation tracks
+   - environment-map or shader-combo style flags
+   - particle, ribbon, or attachment-related records when they affect visible object behavior
+3. If Warcraft.NET flattens or drops required pre-release metadata, recover the minimum missing data explicitly in the pre-release path instead of broadening generic later-era heuristics.
+4. Keep the deliverable concrete: name the missing feature family, where it is lost, and what renderer behavior depends on it.
+
+### Track C: Shared Pink Transparency / Shader Parity
 
 1. Reproduce or trace the neon-pink transparent surface path on both one classic `MDX` asset and one M2-family asset.
 2. Audit shared failure candidates:
@@ -94,16 +112,18 @@ Return all items:
 
 1. Which track or tracks were confirmed by evidence
 2. Exact failing path for the model load
-3. Any profile/version split introduced or proposed
-4. Any shared shader/material defect confirmed
-5. Validation status with explicit runtime limitations
-6. Memory-bank updates required after the investigation
+3. Whether missing pre-release material/effect support is part of the failure
+4. Any profile/version split introduced or proposed
+5. Any shared shader/material defect confirmed
+6. Validation status with explicit runtime limitations
+7. Memory-bank updates required after the investigation
 
 ## First Output
 
 Start with:
 
 1. active failing symptom summary
-2. whether it looks like Track A, Track B, or both
-3. exact files to inspect first
-4. what runtime evidence is still missing
+2. whether it looks like Track A, Track B, Track C, or a combination
+3. whether the failing asset looks plain or effect-heavy
+4. exact files to inspect first
+5. what runtime evidence is still missing

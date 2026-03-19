@@ -328,6 +328,20 @@
 	- no automated tests were added or run
 	- no runtime real-data validation was performed after the fix
 
+### Mar 19, 2026 - Classic 0.5.3 MDX Regression Closed; 3.0.1 Still Open
+
+- User runtime validation now confirms the classic Alpha `0.5.3` MDX rendering regression is fixed.
+- Confirmed repair stack in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+	- direct-path replaceable fallback is restricted to `_isM2AdapterModel`
+	- wrap/clamp interpretation is split between classic MDX and M2-adapted models
+	- classic `Layer 0 + Transparent` once again always uses alpha-cutout
+- A new direct-asset diagnostic path was added in `src/MdxViewer/AssetProbe.cs` and wired through `src/MdxViewer/Program.cs`:
+	- `--probe-mdx` loads an asset from a real client path, prints parsed materials, and reports decoded BLP alpha statistics
+	- this was used on `DuskwoodTree07.mdx` to prove the remaining canopy failure was in renderer behavior after decode, not in TEXS parsing or BLP decode
+- Current status change:
+	- classic `0.5.3` MDX should be treated as restored for the tested runtime sample
+	- pre-release `3.0.1` rendering is still buggy and remains the active unresolved model-family track
+
 ## ✅ Working
 
 ### MdxViewer (3D World Viewer) — Primary Project

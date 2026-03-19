@@ -31,6 +31,19 @@
 - Do not generalize later-WotLK `MD20` / `.skin` assumptions onto that path without explicit evidence.
 - Keep model-format compatibility work separate from the neon-pink transparent-surface bug, because the latter reproduces on both classic `MDX` and M2-family assets.
 
+### Current 3.0.1 Implementation Direction (Mar 19, 2026)
+
+- The classic `0.5.3` MDX transparency regression was fixed in `ModelRenderer`, so the remaining `3.0.1` work should no longer be framed as a generic shared parser failure.
+- Current runtime evidence suggests many remaining bad `3.0.1` renders are concentrated in objects with effects, transparency, or special shader/material behavior rather than in every model equally.
+- Treat ancient pre-release M2 support as three separate workstreams:
+    - core container/layout/profile parsing
+    - pre-release material/effect feature extraction that Warcraft.NET does not fully preserve
+    - renderer-side behavior for those extracted features
+- Practical implication for future implementation work:
+    - do not stop at "geometry loads"
+    - explicitly audit material layer stacks, render flags, texture lookup/combo tables, texture transforms, alpha/color tracks, environment-mapping flags, and any particle/ribbon-adjacent metadata that affects visible objects
+    - when effect-heavy assets fail but plain opaque assets work, treat that as a feature-support gap first, not as proof the whole file family is unreadable
+
 ---
 
 ## 1. Animation System

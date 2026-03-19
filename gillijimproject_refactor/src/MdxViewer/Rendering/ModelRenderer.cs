@@ -1271,8 +1271,9 @@ void main() {
             }
 
             // Some pre-release M2 records carry both a nominal file path and a replaceable id.
-            // If the direct file path later fails to load, we still want the replaceable resolver as a fallback.
-            if (replaceablePath == null && tex.ReplaceableId > 0)
+            // Keep this fallback scoped to M2-adapted models so classic MDX textures do not get
+            // redirected through replaceable heuristics when their normal file path should win.
+            if (_isM2AdapterModel && replaceablePath == null && tex.ReplaceableId > 0)
                 replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
 
             if (string.IsNullOrEmpty(texPath))
@@ -1414,7 +1415,8 @@ void main() {
             }
 
             // If the direct texture path failed, fall back to the resolved replaceable path when available.
-            if (blpData == null
+            if (_isM2AdapterModel
+                && blpData == null
                 && !string.IsNullOrWhiteSpace(replaceablePath)
                 && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
             {
@@ -1508,10 +1510,15 @@ void main() {
 
             if (blpData != null && blpData.Length > 0)
             {
-                // WrapWidth/WrapHeight request repeating; when absent we clamp.
+                // Keep classic MDX on the older working wrap interpretation.
+                // The newer repeat/clamp inversion is only for M2-adapted models.
                 var texFlags = (MdlGeoFlags)tex.Flags;
-                bool clampS = !texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-                bool clampT = !texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+                bool clampS = _isM2AdapterModel
+                    ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
+                    : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+                bool clampT = _isM2AdapterModel
+                    ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
+                    : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
                 
                 MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
                 MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
@@ -1575,6 +1582,9 @@ void main() {
     {
         if (layerIndex != 0 || blendMode != MdlTexOp.Transparent)
             return false;
+
+        if (!_isM2AdapterModel)
+            return true;
 
         return GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
     }

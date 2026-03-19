@@ -677,34 +677,31 @@ internal static class WarcraftNetM2Adapter
     {
         bool changed = false;
 
-        if (data.Textures.Count == 0)
+        List<ParsedTextureData>? parsedTextures = DiscoverProfiledTextureTable(modelBytes, fileName);
+        if (parsedTextures != null && ShouldPreferProfiledTextures(parsedTextures, data.Textures))
         {
-            List<ParsedTextureData>? parsedTextures = DiscoverProfiledTextureTable(modelBytes, fileName);
-            if (parsedTextures != null)
-            {
-                data.Textures.AddRange(parsedTextures);
-                changed = true;
-            }
+            data.Textures.Clear();
+            data.Textures.AddRange(parsedTextures);
+            changed = true;
         }
 
-        if (data.RenderFlags.Count == 0)
+        List<ParsedRenderFlagData>? parsedRenderFlags = DiscoverProfiledRenderFlags(modelBytes, fileName);
+        if (parsedRenderFlags != null && ShouldPreferProfiledRenderFlags(parsedRenderFlags, data.RenderFlags))
         {
-            List<ParsedRenderFlagData>? parsedRenderFlags = DiscoverProfiledRenderFlags(modelBytes, fileName);
-            if (parsedRenderFlags != null)
-            {
-                data.RenderFlags.AddRange(parsedRenderFlags);
-                changed = true;
-            }
+            data.RenderFlags.Clear();
+            data.RenderFlags.AddRange(parsedRenderFlags);
+            changed = true;
         }
 
-        if (data.TextureLookup.Count == 0 && data.Textures.Count > 0)
+        List<ParsedTextureLookupData>? parsedTextureLookup = null;
+        if (data.Textures.Count > 0)
+            parsedTextureLookup = DiscoverProfiledTextureLookup(modelBytes, fileName, data.Textures.Count);
+
+        if (parsedTextureLookup != null && ShouldPreferProfiledTextureLookup(parsedTextureLookup, data.TextureLookup, data.Textures.Count))
         {
-            List<ParsedTextureLookupData>? parsedTextureLookup = DiscoverProfiledTextureLookup(modelBytes, fileName, data.Textures.Count);
-            if (parsedTextureLookup != null)
-            {
-                data.TextureLookup.AddRange(parsedTextureLookup);
-                changed = true;
-            }
+            data.TextureLookup.Clear();
+            data.TextureLookup.AddRange(parsedTextureLookup);
+            changed = true;
         }
 
         if (changed)
@@ -712,6 +709,82 @@ internal static class WarcraftNetM2Adapter
             ViewerLog.Info(ViewerLog.Category.Mdx,
                 $"[M2] Parsed direct profiled metadata for {fileName}: textures={data.Textures.Count}, renderFlags={data.RenderFlags.Count}, textureLookup={data.TextureLookup.Count}");
         }
+    }
+
+    private static bool ShouldPreferProfiledTextures(IReadOnlyList<ParsedTextureData> candidate, IReadOnlyList<ParsedTextureData> current)
+    {
+        if (candidate.Count == 0)
+            return false;
+
+        if (current.Count == 0)
+            return true;
+
+        return EvaluateTextureTableQuality(candidate) > EvaluateTextureTableQuality(current);
+    }
+
+    private static int EvaluateTextureTableQuality(IReadOnlyList<ParsedTextureData> textures)
+    {
+        int namedCount = 0;
+        int replaceableCount = 0;
+
+        foreach (ParsedTextureData texture in textures)
+        {
+            if (!string.IsNullOrWhiteSpace(texture.Filename))
+                namedCount++;
+            if (texture.Type != TextureType.None)
+                replaceableCount++;
+        }
+
+        return textures.Count + (namedCount * 32) + (replaceableCount * 2);
+    }
+
+    private static bool ShouldPreferProfiledRenderFlags(IReadOnlyList<ParsedRenderFlagData> candidate, IReadOnlyList<ParsedRenderFlagData> current)
+    {
+        if (candidate.Count == 0)
+            return false;
+
+        if (current.Count == 0)
+            return true;
+
+        return EvaluateRenderFlagQuality(candidate) > EvaluateRenderFlagQuality(current);
+    }
+
+    private static int EvaluateRenderFlagQuality(IReadOnlyList<ParsedRenderFlagData> renderFlags)
+    {
+        int plausibleBlendModes = 0;
+        foreach (ParsedRenderFlagData renderFlag in renderFlags)
+        {
+            if (renderFlag.BlendingMode <= 6)
+                plausibleBlendModes++;
+        }
+
+        return (plausibleBlendModes * 8) + renderFlags.Count;
+    }
+
+    private static bool ShouldPreferProfiledTextureLookup(
+        IReadOnlyList<ParsedTextureLookupData> candidate,
+        IReadOnlyList<ParsedTextureLookupData> current,
+        int textureCount)
+    {
+        if (candidate.Count == 0)
+            return false;
+
+        if (current.Count == 0)
+            return true;
+
+        return EvaluateTextureLookupQuality(candidate, textureCount) > EvaluateTextureLookupQuality(current, textureCount);
+    }
+
+    private static int EvaluateTextureLookupQuality(IReadOnlyList<ParsedTextureLookupData> lookup, int textureCount)
+    {
+        int validEntries = 0;
+        foreach (ParsedTextureLookupData entry in lookup)
+        {
+            if (entry.TextureId >= 0 && entry.TextureId < textureCount)
+                validEntries++;
+        }
+
+        return (validEntries * 4) + lookup.Count;
     }
 
     private static List<ParsedTextureData>? DiscoverProfiledTextureTable(byte[] modelBytes, string fileName)

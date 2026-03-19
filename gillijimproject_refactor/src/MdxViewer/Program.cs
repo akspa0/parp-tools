@@ -13,6 +13,9 @@ class Program
 {
     static void Main(string[] args)
     {
+        if (AssetProbe.TryRun(args))
+            return;
+
         bool verbose = args.Any(a => a.Equals("--verbose", StringComparison.OrdinalIgnoreCase));
         bool fullLoad = args.Any(a => a.Equals("--full-load", StringComparison.OrdinalIgnoreCase));
         // AOI streaming is the default; --full-load loads all tiles at startup

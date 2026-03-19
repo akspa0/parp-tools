@@ -444,6 +444,90 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - no automated tests were added or run
    - real-data runtime validation is still required before claiming the pink foliage / detached transparent fragment issue fixed
 
+### Pre-release 3.0.1 Profiled Texture Metadata Preference Follow-up (Mar 19)
+
+- User runtime feedback after the layer-stack change reported the result was better, but broad pink foliage still remained on Northrend.
+- Current adapter-side conclusion:
+   - the profiled `MD20` path was still treating any non-empty Warcraft.NET texture/render metadata as authoritative
+   - that meant a partial or weak Warcraft.NET table could block the direct profiled metadata reader from replacing it, even when the profiled table had more usable filenames and stronger lookup coverage
+- Current fix in `WarcraftNetM2Adapter`:
+   - direct profiled texture, render-flag, and texture-lookup discovery now always runs for the pre-release path
+   - profiled metadata replaces the current table only when it scores higher than the existing metadata, instead of only when the existing list is completely empty
+   - texture-table quality now prefers named texture records strongly, which is the right bias for the remaining pink-foliage symptom
+- Why this matters:
+   - these pre-release shrubs appear to be failing as texture-resolution problems more than geometry problems
+   - if Warcraft.NET preserved only replaceable IDs or an incomplete lookup set, the renderer could still end up with unresolved pink-transparent layers even after the earlier replaceable and layer-stack fixes
+- Validation status:
+   - file-level diagnostics were clean for `WarcraftNetM2Adapter.cs`
+   - alternate-OutDir build passed again: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - no new runtime real-data validation has been performed yet for this follow-up
+
+### 0.5.3 MDX Replaceable Fallback Regression Follow-up (Mar 19)
+
+- User runtime validation on Alpha `0.5.3` Azeroth showed a clear regression after the latest M2-oriented texture work: classic MDX foliage that previously rendered correctly was now resolving to pink/wrong leaf surfaces.
+- Root cause is narrow and renderer-side:
+   - `ModelRenderer.LoadTextures()` had been broadened so direct-path textures with a nonzero `ReplaceableId` could fall back through replaceable-texture heuristics after a direct load miss
+   - that fallback was intended only for pre-release M2-adapted models that carry both a nominal filename and replaceable metadata
+   - applying it to classic MDX leaked M2 recovery logic into the 0.5.3 MDX path and could redirect valid classic foliage materials through the wrong replaceable texture resolution flow
+- Current fix:
+   - the direct-path replaceable fallback path is now gated behind `_isM2AdapterModel`
+   - classic MDX keeps the older working behavior: replaceable resolution is only used when the MDX texture path itself is empty
+- Validation status:
+   - file-level diagnostics were clean for `ModelRenderer.cs`
+   - alternate-OutDir build passed again: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - runtime real-data recheck is still required to confirm Alpha `0.5.3` foliage is back to the prior working state
+
+### 0.5.3 MDX Wrap Semantics Regression Follow-up (Mar 19)
+
+- The Alpha `0.5.3` foliage regression still reproduced after scoping the direct-path replaceable fallback back to M2 only.
+- Stronger current renderer-side conclusion:
+   - the later M2 wrap/clamp fix had also been applied in the shared `ModelRenderer` texture upload path for every model
+   - that changed classic MDX sampler behavior from the previously working recovery-branch interpretation
+   - for foliage cards, this is a plausible source of broad magenta tree canopies because transparent texels often carry magenta RGB and sampler edge behavior determines whether those texels bleed into visible leaf quads
+- Current fix:
+   - classic MDX now stays on the earlier working wrap/clamp interpretation in `ModelRenderer.LoadTextures()`
+   - the newer wrap interpretation remains scoped to `_isM2AdapterModel`
+- Validation status:
+   - file-level diagnostics were clean for `ModelRenderer.cs`
+   - alternate-OutDir build passed again: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - runtime real-data recheck is still required to confirm Alpha `0.5.3` foliage is back to the prior working state
+
+### 0.5.3 MDX Transparent-Layer Alpha-Cutout Regression Follow-up (Mar 19)
+
+- After the wrap fix, standalone `DuskwoodTree07.mdx` still reproduced with magenta canopy cards.
+- A new non-UI `--probe-mdx` diagnostic path was added to `MdxViewer` so broken assets can be inspected directly against the real client data source without relying on the live GL viewer.
+- Probe result for `World\Azeroth\Duskwood\PassiveDoodads\Trees\DuskwoodTree07.mdx` against `H:\053-client`:
+   - the MDX parses correctly: canopy material is `Layer[0] TextureId=0 Blend=Transparent`
+   - the canopy BLP decodes correctly: `DuskwoodTreeCanopy11.blp` contains substantial real alpha (`zero=20158`, `full=42316`, `translucent=3062`)
+   - this ruled out profile routing, TEXS parsing, and basic BLP decode as the active cause for the remaining 0.5.3 tree failure
+- Verified renderer-side root cause:
+   - current `ModelRenderer.ShouldUseAlphaCutout(...)` had been generalized so `Layer 0 + Transparent` no longer used alpha-cutout when the texture had any translucent edge pixels
+   - recovery-branch classic MDX behavior was simpler: `Layer 0 + Transparent` always rendered as alpha-cutout
+   - for classic foliage textures with magenta RGB in low-alpha edge texels, downgrading them to regular blending is a plausible direct cause of the magenta canopy bleed seen in Duskwood trees
+- Current fix:
+   - classic MDX now restores the recovery behavior in `ShouldUseAlphaCutout(...)`: `Layer 0 + Transparent` always uses alpha-cutout
+   - the newer alpha-kind-sensitive heuristic remains scoped to `_isM2AdapterModel`
+- Validation status:
+   - file-level diagnostics were clean for `ModelRenderer.cs`
+   - alternate-OutDir build passed again: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"`
+   - no automated tests were added or run
+   - user runtime validation now confirms Alpha `0.5.3` MDX rendering is back to the expected working state
+   - remaining model-family rendering issues are now isolated to the pre-release `3.0.1` path
+
+### Model Rendering Status Update (Mar 19)
+
+- User runtime validation now confirms the classic Alpha `0.5.3` MDX regression is fixed.
+- Current state after the renderer rollback / probe-guided repair:
+   - classic `0.5.3` MDX foliage and transparency behavior are back to the expected working state
+   - the non-UI `--probe-mdx` path remains available for direct asset triage against real client data
+   - pre-release `3.0.1` rendering is still buggy and should not be described as solved or broadly compatible yet
+- Working conclusion for future follow-up:
+   - do not re-open classic MDX parser or generic texture-loading suspicion first
+   - treat remaining rendering defects as pre-release `3.0.1` parser / material / texture-binding work unless fresh runtime evidence shows a new classic regression
+
 ### Standalone Data-Source M2 Read-Path Fix (Mar 19)
 
 - Follow-up after user report that every standalone/browser-loaded M2 showed `Failed to read`.

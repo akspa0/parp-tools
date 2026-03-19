@@ -180,6 +180,21 @@ New feature planned: turn MdxViewer into an MCP server that external application
 	1. version-aware pre-release `3.0.1` model routing and parsing
 	2. shared transparent-surface parity audit in renderer code
 
+## Mar 19, 2026 - Runtime Confirmation Update
+
+- User runtime validation now confirms classic Alpha `0.5.3` MDX rendering is fixed again.
+- The repaired classic path includes three scoped renderer corrections in `ModelRenderer.cs`:
+	- replaceable fallback kept M2-only
+	- wrap/clamp semantics kept version-family-specific
+	- classic `Layer 0 + Transparent` restored to unconditional alpha-cutout behavior
+- A reusable direct-asset diagnostic path was added:
+	- `MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>]`
+	- this was used against `DuskwoodTree07.mdx` on the real `H:\053-client` data to prove the remaining failure was renderer-side, not parser-side
+- Current model status is now narrower and more defensible:
+	- classic `0.5.3` MDX is restored
+	- pre-release `3.0.1` is still buggy
+	- do not describe the remaining model issue as a shared MDX + M2 transparency problem anymore without new evidence
+
 ## Detailed Fix Log
 
 ### 2026-02-09 Late Evening — Performance, Fog, Culling, Failed MDX Fix
