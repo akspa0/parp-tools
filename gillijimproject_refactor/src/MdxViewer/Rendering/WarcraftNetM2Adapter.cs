@@ -322,13 +322,31 @@ internal static class WarcraftNetM2Adapter
 
     private static MdlTexture ToMdlTexture(ParsedTextureData texture)
     {
-        string path = texture.Type == TextureType.None ? texture.Filename ?? string.Empty : string.Empty;
+        uint replaceableId = MapReplaceableId(texture.Type);
+        string path = replaceableId == 0 ? texture.Filename ?? string.Empty : string.Empty;
         return new MdlTexture
         {
             Path = path.Replace('/', '\\'),
-            ReplaceableId = 0,
-            Flags = 0,
+            ReplaceableId = replaceableId,
+            Flags = MapTextureFlags(texture.Flags),
         };
+    }
+
+    private static uint MapReplaceableId(TextureType textureType)
+    {
+        return textureType == TextureType.None ? 0u : (uint)textureType;
+    }
+
+    private static uint MapTextureFlags(TextureFlags textureFlags)
+    {
+        uint flags = 0;
+
+        if (textureFlags.HasFlag(TextureFlags.Flag_0x1_WrapX))
+            flags |= (uint)MdlGeoFlags.WrapWidth;
+        if (textureFlags.HasFlag(TextureFlags.Flag_0x2_WrapY))
+            flags |= (uint)MdlGeoFlags.WrapHeight;
+
+        return flags;
     }
 
     private static int[] BuildMaterialsFromBatches(MdxFile mdx, ParsedModelData model, SkinData skin)
@@ -694,13 +712,16 @@ internal static class WarcraftNetM2Adapter
         for (uint i = 0; i < selected.Value.SubmeshCount; i++)
         {
             long recordStart = br.BaseStream.Position;
-            _ = br.ReadUInt16();
+            ushort skinSectionId = br.ReadUInt16();
+            ushort level = br.ReadUInt16();
             ushort vertexStart = br.ReadUInt16();
             ushort vertexCount = br.ReadUInt16();
-            _ = br.ReadUInt16();
-            _ = br.ReadUInt16();
-            ushort indexCount = br.ReadUInt16();
             ushort indexStart = br.ReadUInt16();
+            ushort indexCount = br.ReadUInt16();
+            _ = br.ReadUInt16();
+            _ = br.ReadUInt16();
+            _ = br.ReadUInt16();
+            _ = br.ReadUInt16();
 
             if (indexCount >= 3
                 && indexStart < skin.TriangleIndices.Count
@@ -709,6 +730,10 @@ internal static class WarcraftNetM2Adapter
             {
                 skin.Submeshes.Add(new SkinSubmeshData
                 {
+                    SkinSectionId = skinSectionId,
+                    Level = level,
+                    VertexStart = vertexStart,
+                    VertexCount = vertexCount,
                     IndexStart = indexStart,
                     IndexCount = indexCount,
                 });
@@ -723,6 +748,8 @@ internal static class WarcraftNetM2Adapter
             for (uint i = 0; i < selected.Value.BatchCount; i++)
             {
                 int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
+                ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x08);
+                ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
                 int submeshIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x04);
                 if (submeshIndex < skin.Submeshes.Count)
                 {
@@ -730,8 +757,8 @@ internal static class WarcraftNetM2Adapter
                     {
                         PriorityPlane = modelBytes[batchOffset + 0x01],
                         SkinSectionIndex = submeshIndex,
-                        MaterialIndex = 0,
-                        TextureComboIndex = 0,
+                        MaterialIndex = materialIndex,
+                        TextureComboIndex = textureComboIndex,
                     });
                 }
             }
@@ -1150,6 +1177,10 @@ internal static class WarcraftNetM2Adapter
             {
                 data.Submeshes.Add(new SkinSubmeshData
                 {
+                    SkinSectionId = s.SkinSectionId,
+                    Level = s.Level,
+                    VertexStart = s.VertexStart,
+                    VertexCount = s.VertexCount,
                     IndexStart = s.IndexStart,
                     IndexCount = s.IndexCount,
                 });
@@ -1172,6 +1203,10 @@ internal static class WarcraftNetM2Adapter
 
     private sealed class SkinSubmeshData
     {
+        public int SkinSectionId { get; init; }
+        public int Level { get; init; }
+        public int VertexStart { get; init; }
+        public int VertexCount { get; init; }
         public int IndexStart { get; init; }
         public int IndexCount { get; init; }
     }

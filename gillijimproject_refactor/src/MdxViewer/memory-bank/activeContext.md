@@ -324,6 +324,36 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
    - runtime validation on real `3.0.1` assets is still pending
 
+### Pre-release 3.0.1 Texture Mapping Follow-up (Mar 19)
+
+- Latest user runtime feedback narrowed the remaining visible problem from geometry to texture binding: affected `3.0.1` models now appear, but some still render magenta or with the wrong texture.
+- `WarcraftNetM2Adapter` now preserves non-file M2 texture semantics instead of discarding them:
+   - non-`None` texture types now keep their `ReplaceableId` instead of becoming empty-path textures with replaceable id `0`
+   - texture wrap flags now flow through `MdlTexture.Flags`, so renderer-side clamp handling can still work for adapted M2s
+- Embedded root-profile batch parsing also now preserves `MaterialIndex` and `TextureComboIndex` instead of forcing every batch to slot `0`.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no automated tests were added or run
+   - no new real-data runtime validation has happened yet for the texture fix itself
+   - do not claim the magenta/pre-release texture issue solved until the same real client assets are rechecked
+
+### Pre-release 3.0.1 Embedded Submesh Decode Follow-up (Mar 19)
+
+- New runtime evidence showed the embedded root-profile path was still only decoding part of many pre-release `3.0.1` models, with severe spiking/artifact geometry on affected doodads.
+- Root cause in the current adapter was concrete:
+   - the embedded `0x30` submesh records were being read with the wrong field mapping
+   - the parser was effectively treating `Level` as `VertexStart` and later fields as triangle bounds, which can cut sections incorrectly and produce partial/exploded meshes
+- Current correction in `WarcraftNetM2Adapter`:
+   - embedded root-profile submeshes now use the same `VertexStart` / `VertexCount` / `IndexStart` / `IndexCount` ordering as the known `M2SkinSection` layout
+   - replaceable textures also now stay on the renderer's replaceable-resolution path by emitting an empty texture path when a non-file replaceable id is present
+- Scope note:
+   - this change is isolated to the special pre-release embedded-root-profile path
+   - it does not reroute normal `3.3.5` Warcraft.NET parsing and does not affect classic standalone `MDX` handling
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the correction
+   - no automated tests were added or run
+   - real-data runtime validation is still required before claiming the geometry-loss issue fixed
+
 ### Standalone Data-Source M2 Read-Path Fix (Mar 19)
 
 - Follow-up after user report that every standalone/browser-loaded M2 showed `Failed to read`.
