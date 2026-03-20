@@ -48,6 +48,7 @@ Implemented in `WorldScene.BuildPm4TileObjects(...)`:
 2. Group surfaces by CK24
 3. Detect axis convention for each CK24 candidate set
 4. Build one shared planar transform per CK24 using linked MPRL anchors
+  - coordinate mode (tile-local vs world-space) is selected per CK24 by MPRL fit score, not fixed once per file
 5. Split CK24 by MSLK-linked components
 6. Optional split by MDOS index
 7. Optional split by vertex connectivity

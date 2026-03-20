@@ -682,7 +682,7 @@ public class WorldScene : ISceneRenderer
         if (!pm4.Surfaces.Any(surface => surface.Ck24 != 0))
             return objects;
 
-        bool useTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
+        bool fallbackTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
@@ -701,6 +701,14 @@ public class WorldScene : ISceneRenderer
             Pm4AxisConvention ck24AxisConvention = DetectPm4AxisConvention(pm4, surfaceGroup.Select(static entry => entry.Surface));
             List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
             List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
+            bool useTileLocalCoordinates = ResolveCk24CoordinateMode(
+                pm4,
+                ck24Surfaces,
+                ck24PositionRefs,
+                tileX,
+                tileY,
+                ck24AxisConvention,
+                fallbackTileLocalCoordinates);
             // Keep one shared planar transform per CK24 so split linked/components stay on one coordinate plane.
             Pm4PlanarTransform ck24PlanarTransform = ResolvePlanarTransform(pm4, ck24Surfaces, ck24PositionRefs, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention);
             List<List<Pm4IndexedSurface>> linkedGroups = SplitSurfaceGroupByMslk(pm4, surfaceGroup);
@@ -769,6 +777,119 @@ public class WorldScene : ISceneRenderer
         remainingLineBudget -= linesUsed;
         remainingTriangleBudget -= trianglesUsed;
         return objects;
+    }
+
+    private static bool ResolveCk24CoordinateMode(
+        Pm4File pm4,
+        IReadOnlyList<MsurEntry> surfaces,
+        IReadOnlyList<MprlEntry> anchorPositionRefs,
+        int tileX,
+        int tileY,
+        Pm4AxisConvention axisConvention,
+        bool fallbackTileLocalCoordinates)
+    {
+        if (surfaces.Count == 0)
+            return fallbackTileLocalCoordinates;
+
+        IReadOnlyList<MprlEntry> scoringRefs = anchorPositionRefs.Count > 0
+            ? anchorPositionRefs
+            : pm4.PositionRefs;
+        if (scoringRefs.Count == 0)
+            return fallbackTileLocalCoordinates;
+
+        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaces);
+        if (objectVertices.Count == 0)
+            return fallbackTileLocalCoordinates;
+
+        List<Vector3> sampledObjectVertices = SampleObjectVertices(objectVertices, 192);
+        List<Vector2> referencePlanarPoints = BuildMprlPlanarPoints(scoringRefs);
+        if (sampledObjectVertices.Count == 0 || referencePlanarPoints.Count == 0)
+            return fallbackTileLocalCoordinates;
+
+        float tileLocalScore = EvaluateCoordinateModeScore(
+            pm4,
+            surfaces,
+            scoringRefs,
+            sampledObjectVertices,
+            referencePlanarPoints,
+            tileX,
+            tileY,
+            axisConvention,
+            useTileLocalCoordinates: true);
+        float worldSpaceScore = EvaluateCoordinateModeScore(
+            pm4,
+            surfaces,
+            scoringRefs,
+            sampledObjectVertices,
+            referencePlanarPoints,
+            tileX,
+            tileY,
+            axisConvention,
+            useTileLocalCoordinates: false);
+
+        if (!float.IsFinite(tileLocalScore) && !float.IsFinite(worldSpaceScore))
+            return fallbackTileLocalCoordinates;
+        if (!float.IsFinite(tileLocalScore))
+            return false;
+        if (!float.IsFinite(worldSpaceScore))
+            return true;
+
+        const float decisiveMargin = 512f;
+        if (tileLocalScore + decisiveMargin < worldSpaceScore)
+            return true;
+        if (worldSpaceScore + decisiveMargin < tileLocalScore)
+            return false;
+
+        return fallbackTileLocalCoordinates;
+    }
+
+    private static float EvaluateCoordinateModeScore(
+        Pm4File pm4,
+        IReadOnlyList<MsurEntry> surfaces,
+        IReadOnlyList<MprlEntry> scoringRefs,
+        IReadOnlyList<Vector3> sampledObjectVertices,
+        IReadOnlyList<Vector2> referencePlanarPoints,
+        int tileX,
+        int tileY,
+        Pm4AxisConvention axisConvention,
+        bool useTileLocalCoordinates)
+    {
+        Pm4PlanarTransform transform = ResolvePlanarTransform(
+            pm4,
+            surfaces,
+            scoringRefs,
+            tileX,
+            tileY,
+            useTileLocalCoordinates,
+            axisConvention);
+
+        float footprintScore = ComputeMprlFootprintScore(
+            referencePlanarPoints,
+            sampledObjectVertices,
+            tileX,
+            tileY,
+            useTileLocalCoordinates,
+            axisConvention,
+            transform);
+
+        if (!float.IsFinite(footprintScore))
+            return float.MaxValue;
+
+        Vector3 centroid = Vector3.Zero;
+        for (int i = 0; i < sampledObjectVertices.Count; i++)
+            centroid += sampledObjectVertices[i];
+        centroid /= sampledObjectVertices.Count;
+
+        Vector3 centroidWorld = ConvertPm4VertexToWorld(
+            centroid,
+            tileX,
+            tileY,
+            useTileLocalCoordinates,
+            axisConvention,
+            transform);
+        float centroidScore = NearestPositionRefDistanceSquared(scoringRefs, centroidWorld);
+
+        return footprintScore * 0.85f + centroidScore * 0.15f;
     }
 
     private static List<List<Pm4IndexedSurface>> SplitSurfaceGroupByMslk(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)

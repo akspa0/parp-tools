@@ -177,6 +177,19 @@
 	- no automated tests were added or run
 	- runtime signoff still pending
 
+## 2026-03-20 — PM4 Tile Drift Follow-up (Per-CK24 Coordinate Mode)
+
+- Follow-up after runtime report that many PM4 tiles/object payloads appeared shifted southeast/off-map:
+	- `WorldScene.BuildPm4TileObjects(...)` no longer relies on one file-level tile-local/world-space decision
+	- coordinate mode is now selected per CK24 via `ResolveCk24CoordinateMode(...)` using MPRL fit quality
+	- the chooser compares tile-local vs world-space placement by weighted footprint/centroid score against linked/all MPRL refs
+- Intent:
+	- prevent incorrect tile-offset application when PM4 coordinate mode differs across objects/files
+	- keep deterministic filename tile assignment and no MPRL tile-reassignment heuristic
+- Validation status:
+	- no automated tests were added or run
+	- runtime signoff still pending
+
 ## 2026-03-20 — PM4 Overlay Diagnostics/Grouping/Winding Update
 
 - Added active PM4 overlay reconstruction/rendering in `WorldScene` with controls in `ViewerApp`.
