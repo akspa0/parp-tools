@@ -11,7 +11,8 @@ This is a status snapshot, not a final spec.
 - Strong: CK24 object-part cohesion now holds (parts stay together as one object).
 - Strong: PM4 tile assignment is deterministic from filename (`map_x_y.pm4` -> `tileX=x`, `tileY=y`).
 - Strong: duplicate PM4 tile payloads merge rather than overwrite.
-- Open issue: reconstructed PM4 objects currently appear rotated about 90 degrees counter-clockwise versus expected world orientation in runtime checks.
+- Strong: coordinate mode (tile-local vs world-space) is resolved per CK24 by MPRL fit, not one mode per file.
+- Open issue: runtime visual signoff is still pending for remaining orientation/visibility edge cases (for example reported tile `22_18` invisibility in some views).
 
 ## Active Data Contract In Use
 
@@ -80,8 +81,17 @@ For MPRL association:
   - when linked-footprint scoring is active, strong yaw agreement can override modest footprint-distance differences
 4. small penalty for winding inversion
 
+After planar transform selection, a CK24-scoped continuous yaw correction can be applied:
+
+- derive candidate principal yaw from reconstructed object footprint
+- derive expected yaw from linked MPRL refs
+- compute best signed delta with basis/parity fallback
+- rotate world-space geometry around CK24 world centroid before world->renderer conversion
+
 For tile-local data it evaluates swap+invert combinations.
 For world-space data it evaluates swap parity without inversion.
+
+This keeps one shared orientation correction per CK24 so split components remain coherent.
 
 ## Coordinate Conversion Contract
 
@@ -103,28 +113,34 @@ For world-space data it evaluates swap parity without inversion.
 
 This matches the active terrain/object renderer basis.
 
-## Known Residual Problem
+## Diagnostics And Interchange
 
-Runtime status after restoring shared CK24 transforms:
+Viewer-side export support now exists for offline PM4 comparison:
 
-- object parts stay together (major improvement)
-- orientation is still globally offset by about 90 degrees counter-clockwise in tested scenes
+- `WorldScene.BuildPm4OverlayInterchangeJson(...)` emits overlay summary, tile/object metadata, alignment state, and optional lines/triangles geometry
+- PM4 Alignment UI includes `Dump PM4 Objects JSON` to save this payload
 
-Interpretation:
+External CLI sanity check on the reported-problem input (`development_22_18.pm4`) confirms source data is not empty:
 
-- assembly and grouping are closer to correct
-- residual is likely a consistent yaw-basis offset, not random per-part divergence
+- `dump-pm4-geometry` produced large outputs for both MSVT and MSCN
+- observed magnitude: roughly 65k WMO faces, 126k WMO vertices, 68k MSCN points
+
+Interpretation: if that tile appears missing in viewer, diagnosis should focus on reconstruction/visibility/culling state rather than PM4 file emptiness.
 
 ## Next Fix Slice (Smallest Safe)
 
 1. Keep grouping/splitting as-is
-2. Add temporary debug readout for selected object:
+2. Use interchange JSON export on a known failing camera/view state to compare:
+	- tile/object counts loaded vs expected
+	- object bounds/centers vs visible terrain extents
+	- line/triangle counts for allegedly missing objects
+3. Add temporary debug readout for selected object:
    - chosen planar transform
    - averaged MPRL yaw
    - solved principal-axis yaw
    - delta in degrees
-3. Validate the current stronger MPRL-oriented tie-break on the same known failing scene before broader changes
-4. If residual offset remains, constrain any further correction to the yaw tie-break/basis layer only
+4. Validate the current CK24 yaw correction on the same known failing scene before broader changes
+5. If residual offset/visibility loss remains, constrain further fixes to reconstruction/visibility layers only
 
 ## What Not To Reintroduce
 

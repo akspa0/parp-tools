@@ -3404,6 +3404,10 @@ void main() {
             SaveCurrentPm4Alignment();
 
         ImGui.SameLine();
+        if (ImGui.Button("Dump PM4 Objects JSON"))
+            ExportPm4ObjectsJson();
+
+        ImGui.SameLine();
         if (ImGui.Button("Print Alignment"))
         {
             ViewerLog.Important(ViewerLog.Category.Terrain,
@@ -3427,6 +3431,34 @@ void main() {
         SaveViewerSettings();
 
         _statusMessage = $"Saved PM4 alignment: T=({_pm4SavedOverlayTranslation.X:F2}, {_pm4SavedOverlayTranslation.Y:F2}, {_pm4SavedOverlayTranslation.Z:F2}) Rot=({_pm4SavedOverlayRotationDegrees.X:F2}, {_pm4SavedOverlayRotationDegrees.Y:F2}, {_pm4SavedOverlayRotationDegrees.Z:F2})° S=({_pm4SavedOverlayScale.X:F3}, {_pm4SavedOverlayScale.Y:F3}, {_pm4SavedOverlayScale.Z:F3})";
+    }
+
+    private void ExportPm4ObjectsJson()
+    {
+        if (_worldScene == null)
+            return;
+
+        string defaultName = $"pm4_objects_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+        string? picked = ShowSaveFileDialogSTA(
+            "Save PM4 Objects JSON",
+            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            string json = _worldScene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
+            File.WriteAllText(picked, json, Encoding.UTF8);
+            _statusMessage = $"Exported PM4 objects JSON: {picked}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4 JSON export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
+        }
     }
 
     private void ApplySavedPm4AlignmentToScene()

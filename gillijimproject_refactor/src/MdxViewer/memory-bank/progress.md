@@ -190,6 +190,36 @@
 	- no automated tests were added or run
 	- runtime signoff still pending
 
+## 2026-03-20 — PM4 Continuous CK24 Yaw Correction Follow-up
+
+- Follow-up after runtime report that PM4 orientation was still coherently off by about 80 degrees:
+	- `WorldScene` now computes a signed yaw delta at CK24 scope (`TryComputeWorldYawCorrectionRadians(...)`) from principal-axis yaw vs MPRL-derived yaw using basis/parity fallback
+	- PM4 geometry conversion now applies this as a world-space rotation around the CK24 world centroid before renderer conversion (`RotateWorldAroundPivot(...)`)
+	- edge/triangle generation paths share the same correction inputs so line and solid overlays stay coherent
+- Intent:
+	- keep deterministic tile assignment and per-CK24 coordinate mode logic unchanged
+	- resolve the residual coherent yaw offset without reintroducing per-part divergence
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime visual signoff still pending
+
+## 2026-03-20 — PM4 Interchange Export + Tile 22_18 Data Confirmation
+
+- Added PM4 interchange export in viewer:
+	- `WorldScene.BuildPm4OverlayInterchangeJson(...)` emits summary + tile/object metadata and optional geometry payload (lines/triangles)
+	- `ViewerApp` PM4 Alignment window now includes `Dump PM4 Objects JSON` to write this payload for offline comparison
+- External data sanity check run on known-problem tile:
+	- `WoWRollback.PM4Module` `dump-pm4-geometry` executed for `test_data/development/.../development_22_18.pm4`
+	- exports were non-trivial (`development_22_18_msvt_wmo.obj`, `development_22_18_msvt_m2.obj`, `development_22_18_mscn.obj`)
+	- observed payload magnitude: ~65k WMO face lines, ~126k WMO vertex lines, ~68k MSCN points
+- Interpretation:
+	- source PM4 tile `22_18` contains substantial geometry
+	- remaining "missing tile" symptom is likely in viewer reconstruction/visibility state, not empty PM4 input data
+- Validation status:
+	- no automated tests were added or run
+	- runtime viewer-side signoff still pending
+
 ## 2026-03-20 — PM4 Overlay Diagnostics/Grouping/Winding Update
 
 - Added active PM4 overlay reconstruction/rendering in `WorldScene` with controls in `ViewerApp`.
