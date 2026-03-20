@@ -88,6 +88,10 @@ public class MapDiscoveryService
             string wdlPath = $"World\\Maps\\{dir}\\{dir}.wdl";
             bool hasWdl = _dataSource.FileExists(wdlPath);
 
+            // Do not surface map candidates that are not actually loadable from current data.
+            if (!hasWdt)
+                continue;
+
             mapsByDirectory[dir] = new MapDefinition(id, dir, name, hasWdt, hasWdl, HasDbcEntry: true);
         }
 
@@ -149,6 +153,9 @@ public class MapDiscoveryService
             string discoveredDirectory = mapDirectory;
             string normalizedWdtPath = $"World\\Maps\\{discoveredDirectory}\\{discoveredDirectory}.wdt";
             bool hasWdt = dataSource.FileExists(normalizedWdtPath);
+            if (!hasWdt)
+                continue;
+
             bool hasWdl = dataSource.FileExists($"World\\Maps\\{discoveredDirectory}\\{discoveredDirectory}.wdl");
             yield return new MapDefinition(nextSyntheticId--, discoveredDirectory, discoveredDirectory, hasWdt, hasWdl, HasDbcEntry: false);
         }

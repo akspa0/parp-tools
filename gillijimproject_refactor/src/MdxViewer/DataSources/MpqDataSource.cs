@@ -42,6 +42,8 @@ public class MpqDataSource : IDataSource
     private readonly Dictionary<string, string> _canonicalPathMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, IReadOnlyList<string>> _filesByExtension = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _firstFileByExtensionAndBaseName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, bool> _existsCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _existsCacheLock = new();
     private bool _loaded;
 
     // Loose file roots to check (game folder structure)
@@ -286,6 +288,7 @@ public class MpqDataSource : IDataSource
         _overlayRoots.Add(normalizedRoot);
         _fileList = _fileSet.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
         BuildLookupIndexes();
+        ClearExistsCache();
         ClearReadCache();
 
         message = $"Attached loose overlay {normalizedRoot} ({scannedLooseFiles} loose files scanned, {addedFiles} newly indexed paths, {addedAlphaEntries} alpha wrapper entries).";
@@ -388,25 +391,55 @@ public class MpqDataSource : IDataSource
 
     public bool FileExists(string virtualPath)
     {
-        // Check loose files first (faster), then alpha MPQ cache, then file set, then StormLib
-        if (TryResolveLoosePath(virtualPath) != null)
-            return true;
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return false;
 
         var normalized = virtualPath.Replace('/', '\\');
 
+        lock (_existsCacheLock)
+        {
+            if (_existsCache.TryGetValue(normalized, out bool cached))
+                return cached;
+        }
+
+        // Check loose files first (faster), then alpha MPQ cache, then file set, then StormLib
+        if (TryResolveLoosePath(virtualPath) != null)
+            return CacheExistsResult(normalized, true);
+
         // Alpha 0.5.3: .ext.MPQ archives (WMO, WDT, WDL) are indexed in _alphaMpqCache
         if (_alphaMpqCache.ContainsKey(normalized) || _alphaMpqCache.ContainsKey(virtualPath))
-            return true;
+            return CacheExistsResult(normalized, true);
 
         // Also try with .mpq suffix (e.g. "development.wdt" → "development.wdt.mpq" in cache)
         if (_alphaMpqCache.ContainsKey(normalized + ".mpq") || _alphaMpqCache.ContainsKey(virtualPath + ".mpq"))
-            return true;
+            return CacheExistsResult(normalized, true);
 
-        // Check the master file set (includes all discovered files)
-        if (_fileSet.Contains(normalized) || _fileSet.Contains(virtualPath))
-            return true;
+        // Check direct path in loaded MPQ archives.
+        if (_mpq.FileExists(normalized) || _mpq.FileExists(virtualPath))
+            return CacheExistsResult(normalized, true);
 
-        return _mpq.FileExists(virtualPath);
+        // Try canonical file-set spelling/casing as a fallback probe.
+        if (_canonicalPathMap.TryGetValue(normalized, out string? canonicalPath))
+        {
+            if (_mpq.FileExists(canonicalPath))
+                return CacheExistsResult(normalized, true);
+        }
+
+        return CacheExistsResult(normalized, false);
+    }
+
+    private bool CacheExistsResult(string normalizedPath, bool value)
+    {
+        lock (_existsCacheLock)
+            _existsCache[normalizedPath] = value;
+
+        return value;
+    }
+
+    private void ClearExistsCache()
+    {
+        lock (_existsCacheLock)
+            _existsCache.Clear();
     }
 
     /// <summary>Find the actual path from the file set (case-insensitive, returns correctly-cased path).</summary>

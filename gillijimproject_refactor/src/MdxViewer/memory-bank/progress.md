@@ -57,10 +57,30 @@
 | Live minimap + click-to-teleport | ✅ WDT + VLM |
 | AreaPOI system | ✅ DBC loading, 3D markers, minimap markers, UI list |
 | Object picking/selection | ✅ |
+| PM4 debug overlay | 🔧 In progress — viewer-side PM4 surfaces + color modes + MPRL/centroid markers + CK24 split controls + parity-aware winding correction; runtime visual signoff still pending |
 | GLB export | ✅ MDX + WMO, Z-up → Y-up conversion |
 | Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
 | **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
 | **Loading screen** | ✅ BLP-based with progress bar |
+
+## 2026-03-20 — PM4 Overlay Diagnostics/Grouping/Winding Update
+
+- Added active PM4 overlay reconstruction/rendering in `WorldScene` with controls in `ViewerApp`.
+- Visualization/inspection additions:
+	- PM4 color modes (`CK24` type/object/key, tile, dominant group/attribute, height)
+	- optional PM4 solid overlay + edge lines
+	- optional `MPRL` ref pins and PM4 object centroid pins
+- Object decomposition additions:
+	- split CK24 groups by shared-vertex connectivity
+	- optional split by dominant `MSUR.MdosIndex` before connectivity split
+- Orientation/winding additions:
+	- per-object planar transform solve across swap/invert U/V candidates, scored against nearest `MPRL` anchors
+	- mirrored transform parity now flips triangle winding to avoid backward-wound surfaces
+- Selected-object diagnostics now include dominant group key, attribute mask, `MdosIndex`, planar transform flags, and winding inversion status.
+- Validation status:
+	- repeated `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime real-data visual signoff is still pending for disjoint/merged PM4 object edge cases
 
 ## Phase Status
 

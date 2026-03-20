@@ -439,6 +439,25 @@
 	- average nearest-placement distance on that sample was 10.86 units
 	- broader work is still pending for CK24 aggregation and MSCN semantics
 
+### Mar 20, 2026 - PM4 Viewer Overlay Diagnostics/Grouping/Winding Pass
+
+- Added active PM4 overlay rendering + diagnostics in `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp.cs`.
+- Added PM4 color modes for structural inspection (`CK24` type/object/key, tile, dominant group/attribute, height).
+- Added optional PM4 3D markers (`MPRL` refs and object centroids).
+- Added CK24 decomposition controls for disjoint geometry:
+	- split by shared vertex connectivity
+	- optional split by dominant `MSUR.MdosIndex` before connectivity
+- Added per-object planar transform solve and winding parity correction:
+	- candidate swap/invert U/V planar transforms scored against nearest `MPRL` anchors
+	- mirrored parity now flips triangle winding order to avoid backward-wound faces
+- Validation status:
+	- repeated `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime real-data signoff still pending for merged/disjoint PM4 object cases
+- Scope boundary:
+	- this does not replace the pending map-level CK24 registry or finalize MSCN semantics
+	- current PM4 reconstruction should be treated as viewer debug instrumentation + heuristics, not final export-grade identity mapping
+
 ## ✅ Working
 
 ### Mar 19, 2026 - 4.x Split ADT No-MCIN Fallback
@@ -480,6 +499,7 @@
 - **DBC Lighting**: ✅ LightService loads Light.dbc + LightData.dbc, zone-based ambient/fog/sky colors
 - **Replaceable Textures**: ✅ DBC CDI variant validation against MPQ + model dir scan fallback
 - **Minimap overlay**: ✅ From minimap tile images
+- **PM4 debug overlay (viewer-side)**: 🔧 In progress — color modes, 3D markers, CK24 split modes, and parity-aware winding fixes landed; runtime signoff still pending
 
 ### Model Parsers & Tools
 - **MDX-L_Tool**: ✅ Core parsing and Archaeology logic complete.

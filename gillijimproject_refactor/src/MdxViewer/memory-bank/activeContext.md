@@ -926,12 +926,33 @@ Previously deferred issue now resolved. ParticleRenderer rewritten with per-part
    - custom loose maps are shown with synthetic IDs / custom labels in the UI
    - custom loose maps intentionally skip `Map.dbc` lighting IDs
 - Scope boundary:
-   - this slice improves loading/discovery for converted loose maps and PM4 sidecars
-   - viewer-side PM4 reconstruction/rendering is still not implemented here; PM4 files are only indexed/resolvable for later work
+   - this slice initially improved loading/discovery for converted loose maps and PM4 sidecars
+   - follow-up PM4 viewer rendering work now exists in `WorldScene`/`ViewerApp` (see Mar 20 PM4 overlay note below)
 - Validation status:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
    - no automated tests were added or run
    - no runtime real-data validation has been completed yet for this loose overlay workflow
+
+#### PM4 Overlay Diagnostics + Grouping/Winding Iteration (WorldScene.cs, ViewerApp.cs) (Mar 20, 2026)
+- PM4 sidecars now render in-viewer as a debug overlay instead of only being indexed/discovered.
+- Added PM4 visualization controls:
+   - color-by mode (`CK24` type/object/key, tile, dominant group key, dominant attribute mask, height)
+   - optional solid overlay + wireframe edge overlay
+   - optional 3D pins for `MPRL` refs and PM4 object centroids
+- Added PM4 grouping controls for disjoint geometry:
+   - split CK24 groups by shared-vertex connectivity
+   - optional split by dominant `MSUR.MdosIndex` before connectivity split
+- Added PM4 orientation/winding diagnostics path:
+   - per-object planar transform solve (swap/invert U/V candidates, scored against nearest `MPRL` refs)
+   - winding parity correction flips triangle index order when chosen transform mirrors orientation
+   - selected-object panel now shows dominant group key, attribute mask, `MdosIndex`, and planar/winding flags
+- Scope boundary:
+   - this is still viewer-side debug reconstruction, not a finalized cross-tile PM4 object identity contract
+   - CK24 aggregation across full map and MSCN semantics remain open beyond this slice
+- Validation status for this PM4 slice:
+   - repeated `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+   - no automated tests were added or run
+   - runtime real-data visual signoff is still pending for the merged/disjoint object edge cases
 
 #### Split ADT Auto-Promotion For Loose Maps (StandardTerrainAdapter.cs) (Mar 19, 2026)
 - `StandardTerrainAdapter` now detects `*_tex0.adt` / `*_obj0.adt` companions from the actual tile set before locking the ADT profile.

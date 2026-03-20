@@ -293,6 +293,23 @@ MdxViewer is the **primary project** in the tooling suite. It is a high-performa
 	- MSCN/world-space semantics are still not the validated contract for active core code
 - Do not claim PM4 world placement is fully solved beyond this `MPRL` path until CK24 aggregation and MSCN semantics are also validated.
 
+### Mar 20, 2026 - PM4 Viewer Overlay Diagnostics + Grouping/Winding Pass
+
+- PM4 support advanced from coordinate-validation-only into active viewer diagnostics in `src/MdxViewer/Terrain/WorldScene.cs` + `src/MdxViewer/ViewerApp.cs`.
+- New viewer PM4 overlay capabilities now include:
+	- multi-mode color classification (`CK24` type/object/key, tile, dominant group/attribute, height)
+	- optional `MPRL` reference pins and PM4-object centroid pins
+	- selected-object PM4 metadata readout (dominant group key, attribute mask, `MdosIndex`, planar transform flags, winding parity)
+	- CK24 disjoint-geometry splitting toggles: connectivity split and optional `MdosIndex` pre-split
+- Orientation correction changed from translation-first nudging to per-object planar transform solving with parity-aware triangle winding correction.
+- Scope boundary for this pass:
+	- still a viewer-side PM4 debug/reconstruction layer, not final cross-tile object identity
+	- map-wide CK24 registry + MSCN semantics remain pending
+- Validation status:
+	- repeated `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime real-data visual signoff remains pending for merged/disjoint object edge cases
+
 ### Working Features
 
 | Feature | Status | Notes |

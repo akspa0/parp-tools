@@ -8,6 +8,105 @@ using WoWMapConverter.Core.Formats.PM4;
 
 namespace MdxViewer.Terrain;
 
+public enum Pm4OverlayColorMode
+{
+    Ck24Type,
+    Ck24ObjectId,
+    Ck24Key,
+    Tile,
+    GroupKey,
+    AttributeMask,
+    Height
+}
+
+internal readonly struct Pm4PlanarTransform
+{
+    public Pm4PlanarTransform(bool swapPlanarAxes, bool invertU, bool invertV)
+    {
+        SwapPlanarAxes = swapPlanarAxes;
+        InvertU = invertU;
+        InvertV = invertV;
+    }
+
+    public bool SwapPlanarAxes { get; }
+    public bool InvertU { get; }
+    public bool InvertV { get; }
+
+    public bool InvertsWinding
+    {
+        get
+        {
+            int parity = 0;
+            if (SwapPlanarAxes) parity++;
+            if (InvertU) parity++;
+            if (InvertV) parity++;
+            return (parity & 1) != 0;
+        }
+    }
+}
+
+public readonly struct Pm4ObjectDebugInfo
+{
+    public Pm4ObjectDebugInfo(
+        uint ck24,
+        byte ck24Type,
+        ushort ck24ObjectId,
+        int tileX,
+        int tileY,
+        int surfaceCount,
+        byte dominantGroupKey,
+        byte dominantAttributeMask,
+        uint dominantMdosIndex,
+        float averageSurfaceHeight,
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        Vector3 center,
+        float nearestPositionRefDistance,
+        bool swapPlanarAxes,
+        bool invertU,
+        bool invertV,
+        bool invertsWinding)
+    {
+        Ck24 = ck24;
+        Ck24Type = ck24Type;
+        Ck24ObjectId = ck24ObjectId;
+        TileX = tileX;
+        TileY = tileY;
+        SurfaceCount = surfaceCount;
+        DominantGroupKey = dominantGroupKey;
+        DominantAttributeMask = dominantAttributeMask;
+        DominantMdosIndex = dominantMdosIndex;
+        AverageSurfaceHeight = averageSurfaceHeight;
+        BoundsMin = boundsMin;
+        BoundsMax = boundsMax;
+        Center = center;
+        NearestPositionRefDistance = nearestPositionRefDistance;
+        SwapPlanarAxes = swapPlanarAxes;
+        InvertU = invertU;
+        InvertV = invertV;
+        InvertsWinding = invertsWinding;
+    }
+
+    public uint Ck24 { get; }
+    public byte Ck24Type { get; }
+    public ushort Ck24ObjectId { get; }
+    public int TileX { get; }
+    public int TileY { get; }
+    public int SurfaceCount { get; }
+    public byte DominantGroupKey { get; }
+    public byte DominantAttributeMask { get; }
+    public uint DominantMdosIndex { get; }
+    public float AverageSurfaceHeight { get; }
+    public Vector3 BoundsMin { get; }
+    public Vector3 BoundsMax { get; }
+    public Vector3 Center { get; }
+    public float NearestPositionRefDistance { get; }
+    public bool SwapPlanarAxes { get; }
+    public bool InvertU { get; }
+    public bool InvertV { get; }
+    public bool InvertsWinding { get; }
+}
+
 /// <summary>
 /// Combines terrain (WDT/ADT), WMO placements (MODF), and MDX placements (MDDF)
 /// into a single world scene — the same way the game client renders a map.
@@ -65,12 +164,19 @@ public class WorldScene : ISceneRenderer
     private const int Pm4MaxLinesPerTile = 12000;
     private const int Pm4MaxTrianglesTotal = 240000;
     private const int Pm4MaxTrianglesPerTile = 12000;
+    private const int Pm4MaxPositionRefsTotal = 120000;
+    private const int Pm4MaxPositionRefsPerTile = 3000;
     private const float Pm4MaxEdgeLength = 512f;
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
+    private bool _showPm4PositionRefs;
+    private bool _showPm4ObjectCentroids;
+    private bool _pm4SplitCk24ByConnectivity = true;
     private bool _showPm4Type40 = true;
     private bool _showPm4Type80 = true;
     private bool _showPm4TypeOther = true;
+    private bool _pm4SplitCk24ByMdos = true;
+    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24Type;
     private Vector3 _pm4OverlayTranslation = Vector3.Zero;
     private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4OverlayScale = Vector3.One;
@@ -85,8 +191,16 @@ public class WorldScene : ISceneRenderer
     private int _pm4VisibleObjectCount;
     private int _pm4VisibleLineCount;
     private int _pm4VisibleTriangleCount;
+    private int _pm4PositionRefCount;
+    private int _pm4VisiblePositionRefCount;
+    private float _pm4MinObjectZ;
+    private float _pm4MaxObjectZ;
     private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
     private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
+    private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Pm4OverlayObject> _pm4ObjectLookup = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
+    private (int tileX, int tileY, uint ck24)? _selectedPm4ObjectKey;
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -156,13 +270,44 @@ public class WorldScene : ISceneRenderer
     public int Pm4VisibleObjectCount => _pm4VisibleObjectCount;
     public int Pm4VisibleLineCount => _pm4VisibleLineCount;
     public int Pm4VisibleTriangleCount => _pm4VisibleTriangleCount;
+    public int Pm4PositionRefCount => _pm4PositionRefCount;
+    public int Pm4VisiblePositionRefCount => _pm4VisiblePositionRefCount;
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
+    public bool ShowPm4PositionRefs { get => _showPm4PositionRefs; set => _showPm4PositionRefs = value; }
+    public bool ShowPm4ObjectCentroids { get => _showPm4ObjectCentroids; set => _showPm4ObjectCentroids = value; }
+    public bool Pm4SplitCk24ByConnectivity { get => _pm4SplitCk24ByConnectivity; set => _pm4SplitCk24ByConnectivity = value; }
     public bool ShowPm4Type40 { get => _showPm4Type40; set => _showPm4Type40 = value; }
     public bool ShowPm4Type80 { get => _showPm4Type80; set => _showPm4Type80 = value; }
     public bool ShowPm4TypeOther { get => _showPm4TypeOther; set => _showPm4TypeOther = value; }
+    public bool Pm4SplitCk24ByMdos { get => _pm4SplitCk24ByMdos; set => _pm4SplitCk24ByMdos = value; }
+    public Pm4OverlayColorMode Pm4ColorMode { get => _pm4ColorMode; set => _pm4ColorMode = value; }
     public Vector3 Pm4OverlayTranslation { get => _pm4OverlayTranslation; set => _pm4OverlayTranslation = value; }
     public Vector3 Pm4OverlayRotationDegrees { get => _pm4OverlayRotationDegrees; set => _pm4OverlayRotationDegrees = value; }
     public Vector3 Pm4OverlayScale { get => _pm4OverlayScale; set => _pm4OverlayScale = value; }
+    public bool HasSelectedPm4Object => _selectedPm4ObjectKey.HasValue;
+    public (int tileX, int tileY, uint ck24)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
+    public Vector3 SelectedPm4ObjectTranslation
+    {
+        get
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return Vector3.Zero;
+
+            return _pm4ObjectTranslations.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 translation)
+                ? translation
+                : Vector3.Zero;
+        }
+        set
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return;
+
+            if (value.LengthSquared() < 0.0001f)
+                _pm4ObjectTranslations.Remove(_selectedPm4ObjectKey.Value);
+            else
+                _pm4ObjectTranslations[_selectedPm4ObjectKey.Value] = value;
+        }
+    }
     public float Pm4OverlayYawDegrees
     {
         get => _pm4OverlayRotationDegrees.Z;
@@ -294,6 +439,9 @@ public class WorldScene : ISceneRenderer
         _pm4LoadAttempted = true;
         _pm4TileObjects.Clear();
         _pm4TileStats.Clear();
+        _pm4TilePositionRefs.Clear();
+        _pm4ObjectLookup.Clear();
+        _selectedPm4ObjectKey = null;
         _pm4TotalFiles = 0;
         _pm4LoadedFiles = 0;
         _pm4ObjectCount = 0;
@@ -303,6 +451,10 @@ public class WorldScene : ISceneRenderer
         _pm4VisibleObjectCount = 0;
         _pm4VisibleLineCount = 0;
         _pm4VisibleTriangleCount = 0;
+        _pm4PositionRefCount = 0;
+        _pm4VisiblePositionRefCount = 0;
+        _pm4MinObjectZ = float.MaxValue;
+        _pm4MaxObjectZ = float.MinValue;
 
         if (_dataSource == null)
         {
@@ -325,6 +477,7 @@ public class WorldScene : ISceneRenderer
 
         int remainingLineBudget = Pm4MaxLinesTotal;
         int remainingTriangleBudget = Pm4MaxTrianglesTotal;
+        int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
         foreach (string pm4Path in pm4Candidates)
         {
             if (remainingLineBudget <= 0)
@@ -345,6 +498,8 @@ public class WorldScene : ISceneRenderer
                     pm4,
                     tileX,
                     tileY,
+                    _pm4SplitCk24ByMdos,
+                    _pm4SplitCk24ByConnectivity,
                     ref remainingLineBudget,
                     ref remainingTriangleBudget,
                     ref rejectedLongEdges);
@@ -352,6 +507,24 @@ public class WorldScene : ISceneRenderer
                     continue;
 
                 _pm4TileObjects[(tileX, tileY)] = objects;
+                foreach (Pm4OverlayObject obj in objects)
+                {
+                    _pm4ObjectLookup[(tileX, tileY, obj.Ck24)] = obj;
+                    _pm4MinObjectZ = MathF.Min(_pm4MinObjectZ, obj.Center.Z);
+                    _pm4MaxObjectZ = MathF.Max(_pm4MaxObjectZ, obj.Center.Z);
+                }
+
+                if (remainingPositionRefBudget > 0)
+                {
+                    List<Vector3> positionRefs = BuildPm4PositionRefMarkers(pm4, Math.Min(Pm4MaxPositionRefsPerTile, remainingPositionRefBudget));
+                    if (positionRefs.Count > 0)
+                    {
+                        _pm4TilePositionRefs[(tileX, tileY)] = positionRefs;
+                        _pm4PositionRefCount += positionRefs.Count;
+                        remainingPositionRefBudget -= positionRefs.Count;
+                    }
+                }
+
                 _pm4LoadedFiles++;
                 _pm4ObjectCount += objects.Count;
                 int tileLineCount = objects.Sum(obj => obj.Lines.Count);
@@ -373,7 +546,13 @@ public class WorldScene : ISceneRenderer
             return;
         }
 
-        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4RejectedLongEdges} long edges rejected.";
+        if (_pm4MinObjectZ > _pm4MaxObjectZ)
+        {
+            _pm4MinObjectZ = 0f;
+            _pm4MaxObjectZ = 1f;
+        }
+
+        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected.";
         ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
     }
 
@@ -392,6 +571,8 @@ public class WorldScene : ISceneRenderer
         Pm4File pm4,
         int tileX,
         int tileY,
+        bool splitCk24ByMdos,
+        bool splitCk24ByConnectivity,
         ref int remainingLineBudget,
         ref int remainingTriangleBudget,
         ref int rejectedLongEdges)
@@ -400,7 +581,9 @@ public class WorldScene : ISceneRenderer
         if (remainingLineBudget <= 0 || pm4.MeshVertices.Count == 0)
             return objects;
 
+        Pm4AxisConvention fallbackAxisConvention = DetectPm4AxisConvention(pm4);
         bool useTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
+        Pm4PlanarTransform fallbackPlanarTransform = DefaultPlanarTransform(useTileLocalCoordinates);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
@@ -411,31 +594,67 @@ public class WorldScene : ISceneRenderer
             if (tileLineBudget <= 0)
                 break;
 
-            List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, ck24Group, tileX, tileY, useTileLocalCoordinates, tileLineBudget, ref rejectedLongEdges);
-            List<Pm4Triangle> triangles = tileTriangleBudget > 0
-                ? BuildCk24ObjectTriangles(pm4, ck24Group, tileX, tileY, useTileLocalCoordinates, tileTriangleBudget)
-                : new List<Pm4Triangle>();
-            if (lines.Count == 0 && triangles.Count == 0)
-                continue;
-
             uint ck24 = ck24Group.Key;
             byte ck24Type = (byte)(ck24 >> 16);
-            objects.Add(new Pm4OverlayObject(ck24, ck24Type, lines, triangles));
-            tileLineBudget -= lines.Count;
-            tileTriangleBudget -= triangles.Count;
+            List<MsurEntry> surfaceGroup = ck24Group.ToList();
+            List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
+                ? SplitSurfaceGroupByMdos(surfaceGroup)
+                : new List<List<MsurEntry>> { surfaceGroup };
+
+            foreach (List<MsurEntry> anchorGroup in anchorGroups)
+            {
+                List<List<MsurEntry>> components = splitCk24ByConnectivity
+                    ? SplitSurfaceGroupByConnectivity(pm4, anchorGroup)
+                    : new List<List<MsurEntry>> { anchorGroup };
+
+                foreach (List<MsurEntry> component in components)
+                {
+                    if (tileLineBudget <= 0)
+                        break;
+
+                    Pm4AxisConvention objectAxisConvention = DetectPm4AxisConvention(pm4, component);
+                    Pm4PlanarTransform planarTransform = ResolvePlanarTransform(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention);
+                    List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention, planarTransform, tileLineBudget, ref rejectedLongEdges);
+                    List<Pm4Triangle> triangles = tileTriangleBudget > 0
+                        ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention, planarTransform, tileTriangleBudget)
+                        : new List<Pm4Triangle>();
+                    if (lines.Count == 0 && triangles.Count == 0)
+                        continue;
+
+                    byte dominantGroupKey = SelectDominantSurfaceValue(component, static surface => surface.GroupKey);
+                    byte dominantAttributeMask = SelectDominantSurfaceValue(component, static surface => surface.AttributeMask);
+                    uint dominantMdosIndex = SelectDominantSurfaceValue(component, static surface => surface.MdosIndex);
+                    float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
+
+                    objects.Add(new Pm4OverlayObject(
+                        ck24,
+                        ck24Type,
+                        lines,
+                        triangles,
+                        component.Count,
+                        dominantGroupKey,
+                        dominantAttributeMask,
+                        dominantMdosIndex,
+                        averageSurfaceHeight,
+                        planarTransform));
+
+                    tileLineBudget -= lines.Count;
+                    tileTriangleBudget -= triangles.Count;
+                }
+            }
         }
 
         // Fallback for PM4 files that don't provide usable CK24 groupings.
         if (objects.Count == 0 && pm4.MeshIndices.Count >= 3 && (tileLineBudget > 0 || tileTriangleBudget > 0))
         {
             List<Pm4LineSegment> fallbackLines = tileLineBudget > 0
-                ? BuildFallbackMeshLines(pm4, tileX, tileY, useTileLocalCoordinates, tileLineBudget, ref rejectedLongEdges)
+                ? BuildFallbackMeshLines(pm4, tileX, tileY, useTileLocalCoordinates, fallbackAxisConvention, fallbackPlanarTransform, tileLineBudget, ref rejectedLongEdges)
                 : new List<Pm4LineSegment>();
             List<Pm4Triangle> fallbackTriangles = tileTriangleBudget > 0
-                ? BuildFallbackMeshTriangles(pm4, tileX, tileY, useTileLocalCoordinates, tileTriangleBudget)
+                ? BuildFallbackMeshTriangles(pm4, tileX, tileY, useTileLocalCoordinates, fallbackAxisConvention, fallbackPlanarTransform, tileTriangleBudget)
                 : new List<Pm4Triangle>();
             if (fallbackLines.Count > 0 || fallbackTriangles.Count > 0)
-                objects.Add(new Pm4OverlayObject(0, 0, fallbackLines, fallbackTriangles));
+                objects.Add(new Pm4OverlayObject(0, 0, fallbackLines, fallbackTriangles, 0, 0, 0, 0, 0f, fallbackPlanarTransform));
         }
 
         int linesUsed = objects.Sum(obj => obj.Lines.Count);
@@ -447,18 +666,21 @@ public class WorldScene : ISceneRenderer
 
     private static List<Pm4LineSegment> BuildCk24ObjectLines(
         Pm4File pm4,
-        IGrouping<uint, MsurEntry> ck24Group,
+        IReadOnlyList<MsurEntry> surfaces,
         int tileX,
         int tileY,
         bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
         int lineBudget,
         ref int rejectedLongEdges)
     {
         var lines = new List<Pm4LineSegment>();
         var uniqueEdges = new HashSet<ulong>();
 
-        foreach (MsurEntry surface in ck24Group)
+        for (int s = 0; s < surfaces.Count; s++)
         {
+            MsurEntry surface = surfaces[s];
             if (lines.Count >= lineBudget)
                 break;
 
@@ -481,7 +703,7 @@ public class WorldScene : ISceneRenderer
                 if ((uint)nextVertex >= (uint)pm4.MeshVertices.Count)
                     continue;
 
-                AddUniqueEdge(pm4, prevVertex, nextVertex, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+                AddUniqueEdge(pm4, prevVertex, nextVertex, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
                 prevVertex = nextVertex;
             }
 
@@ -491,7 +713,7 @@ public class WorldScene : ISceneRenderer
                 int firstVertex = (int)pm4.MeshIndices[firstIndex];
                 int lastVertex = (int)pm4.MeshIndices[endExclusive - 1];
                 if ((uint)firstVertex < (uint)pm4.MeshVertices.Count && (uint)lastVertex < (uint)pm4.MeshVertices.Count)
-                    AddUniqueEdge(pm4, lastVertex, firstVertex, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+                    AddUniqueEdge(pm4, lastVertex, firstVertex, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
             }
         }
 
@@ -500,16 +722,19 @@ public class WorldScene : ISceneRenderer
 
     private static List<Pm4Triangle> BuildCk24ObjectTriangles(
         Pm4File pm4,
-        IGrouping<uint, MsurEntry> ck24Group,
+        IReadOnlyList<MsurEntry> surfaces,
         int tileX,
         int tileY,
         bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
         int triangleBudget)
     {
         var triangles = new List<Pm4Triangle>();
 
-        foreach (MsurEntry surface in ck24Group)
+        for (int s = 0; s < surfaces.Count; s++)
         {
+            MsurEntry surface = surfaces[s];
             if (triangles.Count >= triangleBudget)
                 break;
 
@@ -528,7 +753,7 @@ public class WorldScene : ISceneRenderer
             if ((uint)i0 >= (uint)pm4.MeshVertices.Count)
                 continue;
 
-            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates);
+            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
             for (int idx = firstIndex + 1; idx + 1 < endExclusive && triangles.Count < triangleBudget; idx++)
             {
                 int i1 = (int)pm4.MeshIndices[idx];
@@ -536,9 +761,11 @@ public class WorldScene : ISceneRenderer
                 if ((uint)i1 >= (uint)pm4.MeshVertices.Count || (uint)i2 >= (uint)pm4.MeshVertices.Count)
                     continue;
 
-                Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates);
-                Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates);
-                triangles.Add(new Pm4Triangle(v0, v1, v2));
+                Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+                Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+                triangles.Add(planarTransform.InvertsWinding
+                    ? new Pm4Triangle(v0, v2, v1)
+                    : new Pm4Triangle(v0, v1, v2));
             }
         }
 
@@ -550,6 +777,8 @@ public class WorldScene : ISceneRenderer
         int tileX,
         int tileY,
         bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
         int lineBudget,
         ref int rejectedLongEdges)
     {
@@ -567,12 +796,181 @@ public class WorldScene : ISceneRenderer
                 (uint)i2 >= (uint)pm4.MeshVertices.Count)
                 continue;
 
-            AddUniqueEdge(pm4, i0, i1, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
-            AddUniqueEdge(pm4, i1, i2, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
-            AddUniqueEdge(pm4, i2, i0, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            AddUniqueEdge(pm4, i0, i1, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            AddUniqueEdge(pm4, i1, i2, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            AddUniqueEdge(pm4, i2, i0, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
         }
 
         return lines;
+    }
+
+    private static List<List<MsurEntry>> SplitSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces)
+    {
+        var components = new List<List<MsurEntry>>();
+        if (surfaces.Count == 0)
+            return components;
+        if (surfaces.Count == 1)
+        {
+            components.Add(new List<MsurEntry> { surfaces[0] });
+            return components;
+        }
+
+        var surfaceVertices = new List<List<int>>(surfaces.Count);
+        var vertexToSurfaceIndices = new Dictionary<int, List<int>>();
+
+        for (int s = 0; s < surfaces.Count; s++)
+        {
+            MsurEntry surface = surfaces[s];
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            var vertices = new List<int>();
+            var unique = new HashSet<int>();
+
+            if (surface.IndexCount > 0 && firstIndex >= 0 && endExclusive > firstIndex)
+            {
+                for (int idx = firstIndex; idx < endExclusive; idx++)
+                {
+                    int vertexIndex = (int)pm4.MeshIndices[idx];
+                    if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                        continue;
+                    if (!unique.Add(vertexIndex))
+                        continue;
+
+                    vertices.Add(vertexIndex);
+                    if (!vertexToSurfaceIndices.TryGetValue(vertexIndex, out List<int>? owners))
+                    {
+                        owners = new List<int>();
+                        vertexToSurfaceIndices[vertexIndex] = owners;
+                    }
+                    owners.Add(s);
+                }
+            }
+
+            surfaceVertices.Add(vertices);
+        }
+
+        var visited = new bool[surfaces.Count];
+        var queue = new Queue<int>();
+        for (int start = 0; start < surfaces.Count; start++)
+        {
+            if (visited[start])
+                continue;
+
+            visited[start] = true;
+            queue.Enqueue(start);
+            var component = new List<MsurEntry>();
+
+            while (queue.Count > 0)
+            {
+                int current = queue.Dequeue();
+                component.Add(surfaces[current]);
+
+                List<int> vertices = surfaceVertices[current];
+                for (int v = 0; v < vertices.Count; v++)
+                {
+                    int vertexIndex = vertices[v];
+                    if (!vertexToSurfaceIndices.TryGetValue(vertexIndex, out List<int>? neighbors))
+                        continue;
+
+                    for (int n = 0; n < neighbors.Count; n++)
+                    {
+                        int neighborSurface = neighbors[n];
+                        if (visited[neighborSurface])
+                            continue;
+
+                        visited[neighborSurface] = true;
+                        queue.Enqueue(neighborSurface);
+                    }
+                }
+            }
+
+            components.Add(component);
+        }
+
+        return components;
+    }
+
+    private static List<List<MsurEntry>> SplitSurfaceGroupByMdos(IReadOnlyList<MsurEntry> surfaces)
+    {
+        if (surfaces.Count <= 1)
+            return new List<List<MsurEntry>> { surfaces.ToList() };
+
+        var groups = surfaces
+            .GroupBy(static surface => surface.MdosIndex)
+            .Select(static group => group.ToList())
+            .Where(static group => group.Count > 0)
+            .ToList();
+
+        return groups.Count > 0 ? groups : new List<List<MsurEntry>> { surfaces.ToList() };
+    }
+
+    private static byte SelectDominantSurfaceValue(IReadOnlyList<MsurEntry> surfaces, Func<MsurEntry, byte> selector)
+    {
+        if (surfaces.Count == 0)
+            return 0;
+
+        Span<int> counts = stackalloc int[256];
+        for (int i = 0; i < surfaces.Count; i++)
+            counts[selector(surfaces[i])]++;
+
+        int bestCount = -1;
+        byte bestValue = 0;
+        for (int i = 0; i < counts.Length; i++)
+        {
+            int count = counts[i];
+            if (count <= bestCount)
+                continue;
+
+            bestCount = count;
+            bestValue = (byte)i;
+        }
+
+        return bestValue;
+    }
+
+    private static uint SelectDominantSurfaceValue(IReadOnlyList<MsurEntry> surfaces, Func<MsurEntry, uint> selector)
+    {
+        if (surfaces.Count == 0)
+            return 0;
+
+        var counts = new Dictionary<uint, int>();
+        uint bestValue = 0;
+        int bestCount = -1;
+
+        for (int i = 0; i < surfaces.Count; i++)
+        {
+            uint value = selector(surfaces[i]);
+            int count = 1;
+            if (counts.TryGetValue(value, out int existing))
+                count = existing + 1;
+            counts[value] = count;
+
+            if (count > bestCount)
+            {
+                bestCount = count;
+                bestValue = value;
+            }
+        }
+
+        return bestValue;
+    }
+
+    private static List<Vector3> BuildPm4PositionRefMarkers(Pm4File pm4, int limit)
+    {
+        var markers = new List<Vector3>();
+        int count = Math.Min(limit, pm4.PositionRefs.Count);
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 refPos = pm4.PositionRefs[i].Position;
+            // MPRL uses ADT placement: X/Z planar with Y vertical.
+            Vector3 world = new(refPos.X, refPos.Z, refPos.Y);
+            markers.Add(new Vector3(
+                WoWConstants.MapOrigin - world.Y,
+                WoWConstants.MapOrigin - world.X,
+                world.Z + 0.5f));
+        }
+
+        return markers;
     }
 
     private static List<Pm4Triangle> BuildFallbackMeshTriangles(
@@ -580,6 +978,8 @@ public class WorldScene : ISceneRenderer
         int tileX,
         int tileY,
         bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
         int triangleBudget)
     {
         var triangles = new List<Pm4Triangle>();
@@ -595,17 +995,19 @@ public class WorldScene : ISceneRenderer
                 (uint)i2 >= (uint)pm4.MeshVertices.Count)
                 continue;
 
-            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates);
-            Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates);
-            Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates);
-            triangles.Add(new Pm4Triangle(v0, v1, v2));
+            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            triangles.Add(planarTransform.InvertsWinding
+                ? new Pm4Triangle(v0, v2, v1)
+                : new Pm4Triangle(v0, v1, v2));
         }
 
         return triangles;
     }
 
     private static void AddUniqueEdge(Pm4File pm4, int ia, int ib,
-        int tileX, int tileY, bool useTileLocalCoordinates,
+        int tileX, int tileY, bool useTileLocalCoordinates, Pm4AxisConvention axisConvention, Pm4PlanarTransform planarTransform,
         HashSet<ulong> uniqueEdges, List<Pm4LineSegment> lines, int tileLineBudget,
         ref int rejectedLongEdges)
     {
@@ -616,8 +1018,8 @@ public class WorldScene : ISceneRenderer
         if (!uniqueEdges.Add(key))
             return;
 
-        Vector3 from = ConvertPm4VertexToRenderer(pm4.MeshVertices[ia], tileX, tileY, useTileLocalCoordinates);
-        Vector3 to = ConvertPm4VertexToRenderer(pm4.MeshVertices[ib], tileX, tileY, useTileLocalCoordinates);
+        Vector3 from = ConvertPm4VertexToRenderer(pm4.MeshVertices[ia], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+        Vector3 to = ConvertPm4VertexToRenderer(pm4.MeshVertices[ib], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
 
         if (Vector3.DistanceSquared(from, to) > Pm4MaxEdgeLength * Pm4MaxEdgeLength)
         {
@@ -635,41 +1037,418 @@ public class WorldScene : ISceneRenderer
         return ((ulong)lo << 32) | hi;
     }
 
-    private static bool IsLikelyTileLocal(IReadOnlyList<Vector3> vertices)
+    private enum Pm4AxisConvention
     {
+        XZPlaneYUp,
+        XYPlaneZUp,
+        YZPlaneXUp
+    }
+
+    private static Pm4AxisConvention DetectPm4AxisConvention(Pm4File pm4)
+    {
+        // Pick the basis that yields the most horizontal (floor-like) triangles.
+        // This avoids forcing users to manually undo a 90-degree wall orientation.
+        var candidates = new[]
+        {
+            Pm4AxisConvention.XZPlaneYUp,
+            Pm4AxisConvention.XYPlaneZUp,
+            Pm4AxisConvention.YZPlaneXUp
+        };
+
+        Pm4AxisConvention bestConvention = Pm4AxisConvention.XYPlaneZUp;
+        float bestScore = float.MinValue;
+        foreach (Pm4AxisConvention candidate in candidates)
+        {
+            float score = ScoreAxisConventionByTriangleNormals(pm4, candidate);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestConvention = candidate;
+            }
+        }
+
+        if (bestScore > 0f)
+            return bestConvention;
+
+        return DetectAxisConventionByRanges(pm4.MeshVertices);
+    }
+
+    private static Pm4AxisConvention DetectPm4AxisConvention(Pm4File pm4, IEnumerable<MsurEntry> surfaces)
+    {
+        var surfaceList = surfaces as List<MsurEntry> ?? surfaces.ToList();
+        if (surfaceList.Count == 0)
+            return DetectPm4AxisConvention(pm4);
+
+        var candidates = new[]
+        {
+            Pm4AxisConvention.XZPlaneYUp,
+            Pm4AxisConvention.XYPlaneZUp,
+            Pm4AxisConvention.YZPlaneXUp
+        };
+
+        Pm4AxisConvention bestConvention = Pm4AxisConvention.XYPlaneZUp;
+        float bestScore = float.MinValue;
+        foreach (Pm4AxisConvention candidate in candidates)
+        {
+            float score = ScoreAxisConventionBySurfaceNormals(pm4, surfaceList, candidate);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestConvention = candidate;
+            }
+        }
+
+        if (bestScore > 0f)
+            return bestConvention;
+
+        List<Vector3> groupVertices = CollectSurfaceVertices(pm4, surfaceList);
+        return groupVertices.Count > 0
+            ? DetectAxisConventionByRanges(groupVertices)
+            : DetectPm4AxisConvention(pm4);
+    }
+
+    private static Pm4PlanarTransform ResolvePlanarTransform(
+        Pm4File pm4,
+        IEnumerable<MsurEntry> surfaces,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention)
+    {
+        Pm4PlanarTransform defaultTransform = DefaultPlanarTransform(useTileLocalCoordinates);
+        if (pm4.PositionRefs.Count == 0)
+            return defaultTransform;
+
+        var surfaceList = surfaces as List<MsurEntry> ?? surfaces.ToList();
+        if (surfaceList.Count == 0)
+            return defaultTransform;
+
+        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaceList);
+        if (objectVertices.Count == 0)
+            return defaultTransform;
+
+        Vector3 centroid = Vector3.Zero;
+        for (int i = 0; i < objectVertices.Count; i++)
+            centroid += objectVertices[i];
+        centroid /= objectVertices.Count;
+
+        Pm4PlanarTransform bestTransform = defaultTransform;
+        float bestScore = float.MaxValue;
+        foreach (Pm4PlanarTransform candidate in EnumeratePlanarTransforms(useTileLocalCoordinates))
+        {
+            Vector3 candidateWorld = ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
+            float score = NearestPositionRefDistanceSquared(pm4.PositionRefs, candidateWorld);
+
+            // Prefer transforms that do not invert winding when scores are close.
+            if (candidate.InvertsWinding)
+                score += 0.5f;
+
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestTransform = candidate;
+            }
+        }
+
+        return bestTransform;
+    }
+
+    private static Pm4PlanarTransform DefaultPlanarTransform(bool useTileLocalCoordinates)
+    {
+        return useTileLocalCoordinates
+            ? new Pm4PlanarTransform(false, true, true)
+            : new Pm4PlanarTransform(false, false, false);
+    }
+
+    private static IEnumerable<Pm4PlanarTransform> EnumeratePlanarTransforms(bool useTileLocalCoordinates)
+    {
+        // For tile-local PM4 data, evaluate all swap/axis-inversion combinations.
+        // For world-space PM4 data, keep inversion disabled and only test swap parity.
+        if (!useTileLocalCoordinates)
+        {
+            yield return new Pm4PlanarTransform(false, false, false);
+            yield return new Pm4PlanarTransform(true, false, false);
+            yield break;
+        }
+
+        for (int swap = 0; swap <= 1; swap++)
+        {
+            for (int invertU = 0; invertU <= 1; invertU++)
+            {
+                for (int invertV = 0; invertV <= 1; invertV++)
+                {
+                    yield return new Pm4PlanarTransform(
+                        swap == 1,
+                        invertU == 1,
+                        invertV == 1);
+                }
+            }
+        }
+    }
+
+    private static float NearestPositionRefDistanceSquared(IReadOnlyList<MprlEntry> positionRefs, Vector3 world)
+    {
+        float best = float.MaxValue;
+        for (int i = 0; i < positionRefs.Count; i++)
+        {
+            Vector3 refPos = positionRefs[i].Position;
+            // MPRL uses ADT-style placement: X/Z planar with Y vertical.
+            Vector3 refWorld = new(refPos.X, refPos.Z, refPos.Y);
+            float dx = refWorld.X - world.X;
+            float dy = refWorld.Y - world.Y;
+            float distSq = dx * dx + dy * dy;
+            if (distSq < best)
+                best = distSq;
+        }
+
+        return best;
+    }
+
+    private static float ScoreAxisConventionByTriangleNormals(Pm4File pm4, Pm4AxisConvention convention)
+    {
+        if (pm4.MeshVertices.Count == 0 || pm4.MeshIndices.Count < 3)
+            return 0f;
+
+        float sum = 0f;
+        int samples = 0;
+        const int maxSamples = 1024;
+
+        for (int i = 0; i + 2 < pm4.MeshIndices.Count && samples < maxSamples; i += 3)
+        {
+            int i0 = (int)pm4.MeshIndices[i];
+            int i1 = (int)pm4.MeshIndices[i + 1];
+            int i2 = (int)pm4.MeshIndices[i + 2];
+            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            Vector3 a = ConvertPm4VertexToWorld(pm4.MeshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 b = ConvertPm4VertexToWorld(pm4.MeshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 c = ConvertPm4VertexToWorld(pm4.MeshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
+
+            Vector3 normal = Vector3.Cross(b - a, c - a);
+            float length = normal.Length();
+            if (length < 1e-5f)
+                continue;
+
+            // Higher |normal.Z| means more floor-like orientation in this renderer.
+            sum += MathF.Abs(normal.Z / length);
+            samples++;
+        }
+
+        return samples > 0 ? sum / samples : 0f;
+    }
+
+    private static float ScoreAxisConventionBySurfaceNormals(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces, Pm4AxisConvention convention)
+    {
+        if (pm4.MeshVertices.Count == 0 || pm4.MeshIndices.Count < 3 || surfaces.Count == 0)
+            return 0f;
+
+        float sum = 0f;
+        int samples = 0;
+        const int maxSamples = 1024;
+
+        for (int s = 0; s < surfaces.Count && samples < maxSamples; s++)
+        {
+            MsurEntry surface = surfaces[s];
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            if (surface.IndexCount < 3 || firstIndex < 0 || endExclusive - firstIndex < 3)
+                continue;
+
+            int i0 = (int)pm4.MeshIndices[firstIndex];
+            if ((uint)i0 >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            Vector3 a = ConvertPm4VertexToWorld(pm4.MeshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
+            for (int idx = firstIndex + 1; idx + 1 < endExclusive && samples < maxSamples; idx++)
+            {
+                int i1 = (int)pm4.MeshIndices[idx];
+                int i2 = (int)pm4.MeshIndices[idx + 1];
+                if ((uint)i1 >= (uint)pm4.MeshVertices.Count || (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                    continue;
+
+                Vector3 b = ConvertPm4VertexToWorld(pm4.MeshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
+                Vector3 c = ConvertPm4VertexToWorld(pm4.MeshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
+
+                Vector3 normal = Vector3.Cross(b - a, c - a);
+                float length = normal.Length();
+                if (length < 1e-5f)
+                    continue;
+
+                sum += MathF.Abs(normal.Z / length);
+                samples++;
+            }
+        }
+
+        return samples > 0 ? sum / samples : 0f;
+    }
+
+    private static List<Vector3> CollectSurfaceVertices(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces)
+    {
+        var vertices = new List<Vector3>();
+        var seen = new HashSet<int>();
+
+        for (int s = 0; s < surfaces.Count; s++)
+        {
+            MsurEntry surface = surfaces[s];
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            if (surface.IndexCount <= 0 || firstIndex < 0 || endExclusive <= firstIndex)
+                continue;
+
+            for (int idx = firstIndex; idx < endExclusive; idx++)
+            {
+                int vertexIndex = (int)pm4.MeshIndices[idx];
+                if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                    continue;
+                if (!seen.Add(vertexIndex))
+                    continue;
+
+                vertices.Add(pm4.MeshVertices[vertexIndex]);
+            }
+        }
+
+        return vertices;
+    }
+
+    private static Pm4AxisConvention DetectAxisConventionByRanges(IReadOnlyList<Vector3> vertices)
+    {
+        if (vertices.Count == 0)
+            return Pm4AxisConvention.XYPlaneZUp;
+
         float minX = float.MaxValue;
+        float minY = float.MaxValue;
         float minZ = float.MaxValue;
         float maxX = float.MinValue;
+        float maxY = float.MinValue;
         float maxZ = float.MinValue;
 
         for (int i = 0; i < vertices.Count; i++)
         {
             Vector3 v = vertices[i];
             if (v.X < minX) minX = v.X;
+            if (v.Y < minY) minY = v.Y;
             if (v.Z < minZ) minZ = v.Z;
             if (v.X > maxX) maxX = v.X;
+            if (v.Y > maxY) maxY = v.Y;
+            if (v.Z > maxZ) maxZ = v.Z;
+        }
+
+        float rangeX = maxX - minX;
+        float rangeY = maxY - minY;
+        float rangeZ = maxZ - minZ;
+        const float tieTolerance = 8f;
+
+        if (rangeY + tieTolerance < rangeX && rangeY + tieTolerance < rangeZ)
+            return Pm4AxisConvention.XZPlaneYUp;
+        if (rangeZ + tieTolerance < rangeX && rangeZ + tieTolerance < rangeY)
+            return Pm4AxisConvention.XYPlaneZUp;
+        if (rangeX + tieTolerance < rangeY && rangeX + tieTolerance < rangeZ)
+            return Pm4AxisConvention.YZPlaneXUp;
+
+        // Ambiguous ranges: default to WoW-style XY plane with Z up.
+        return Pm4AxisConvention.XYPlaneZUp;
+    }
+
+    private static bool IsLikelyTileLocal(IReadOnlyList<Vector3> vertices)
+    {
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float minZ = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+        float maxZ = float.MinValue;
+
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            Vector3 v = vertices[i];
+            if (v.X < minX) minX = v.X;
+            if (v.Y < minY) minY = v.Y;
+            if (v.Z < minZ) minZ = v.Z;
+            if (v.X > maxX) maxX = v.X;
+            if (v.Y > maxY) maxY = v.Y;
             if (v.Z > maxZ) maxZ = v.Z;
         }
 
         const float tolerance = 64f;
         float tileSpan = Pm4CoordinateService.TileSize;
-        return minX >= -tolerance && minZ >= -tolerance &&
-               maxX <= tileSpan + tolerance && maxZ <= tileSpan + tolerance;
+
+        bool xyLocal = minX >= -tolerance && minY >= -tolerance &&
+                       maxX <= tileSpan + tolerance && maxY <= tileSpan + tolerance;
+        bool xzLocal = minX >= -tolerance && minZ >= -tolerance &&
+                       maxX <= tileSpan + tolerance && maxZ <= tileSpan + tolerance;
+        bool yzLocal = minY >= -tolerance && minZ >= -tolerance &&
+                       maxY <= tileSpan + tolerance && maxZ <= tileSpan + tolerance;
+
+        return xyLocal || xzLocal || yzLocal;
     }
 
-    private static Vector3 ConvertPm4VertexToRenderer(Vector3 pm4Vertex, int tileX, int tileY, bool useTileLocalCoordinates)
+    private static Vector3 ConvertPm4VertexToWorld(Vector3 pm4Vertex, int tileX, int tileY, bool useTileLocalCoordinates, Pm4AxisConvention axisConvention, Pm4PlanarTransform planarTransform)
     {
-        // PM4 helpers produce ADT placement order (X/Z world plane, Y vertical).
-        Vector3 placement = useTileLocalCoordinates
-            ? Pm4CoordinateService.Pm4LocalToAdtPlacement(pm4Vertex, tileX, tileY)
-            : pm4Vertex;
+        float localU;
+        float localV;
+        float localUp;
 
-        // Renderer world plane expects X from placement.X and Y from placement.Z.
-        // Swapping these rotates PM4 overlays by 90 degrees.
+        switch (axisConvention)
+        {
+            case Pm4AxisConvention.XZPlaneYUp:
+                localU = pm4Vertex.X;
+                localV = pm4Vertex.Z;
+                localUp = pm4Vertex.Y;
+                break;
+            case Pm4AxisConvention.YZPlaneXUp:
+                localU = pm4Vertex.Y;
+                localV = pm4Vertex.Z;
+                localUp = pm4Vertex.X;
+                break;
+            case Pm4AxisConvention.XYPlaneZUp:
+            default:
+                localU = pm4Vertex.X;
+                localV = pm4Vertex.Y;
+                localUp = pm4Vertex.Z;
+                break;
+        }
+
+        if (planarTransform.SwapPlanarAxes)
+            (localU, localV) = (localV, localU);
+
+        float tileSpan = Pm4CoordinateService.TileSize;
+        float worldX;
+        float worldY;
+
+        if (useTileLocalCoordinates)
+        {
+            float mappedU = planarTransform.InvertU ? tileSpan - localU : localU;
+            float mappedV = planarTransform.InvertV ? tileSpan - localV : localV;
+            worldX = tileX * tileSpan + mappedU;
+            worldY = tileY * tileSpan + mappedV;
+        }
+        else
+        {
+            if (planarTransform.InvertU)
+                localU = -localU;
+            if (planarTransform.InvertV)
+                localV = -localV;
+
+            worldX = localU;
+            worldY = localV;
+        }
+
+        return new Vector3(worldX, worldY, localUp);
+    }
+
+    private static Vector3 ConvertPm4VertexToRenderer(Vector3 pm4Vertex, int tileX, int tileY, bool useTileLocalCoordinates, Pm4AxisConvention axisConvention, Pm4PlanarTransform planarTransform)
+    {
+        Vector3 world = ConvertPm4VertexToWorld(pm4Vertex, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+
+        // Canonical world->renderer transform used across terrain/object pipelines.
+        // rendererX = MapOrigin - wowY, rendererY = MapOrigin - wowX, rendererZ = wowZ
         return new Vector3(
-            WoWConstants.MapOrigin - placement.X,
-            WoWConstants.MapOrigin - placement.Z,
-            placement.Y + 0.5f);
+            WoWConstants.MapOrigin - world.Y,
+            WoWConstants.MapOrigin - world.X,
+            world.Z + 0.5f);
     }
 
     public void ReloadPm4Overlay()
@@ -1714,6 +2493,7 @@ public class WorldScene : ISceneRenderer
             _pm4VisibleObjectCount = 0;
             _pm4VisibleLineCount = 0;
             _pm4VisibleTriangleCount = 0;
+            _pm4VisiblePositionRefCount = 0;
 
             if (_showPm4Overlay && _pm4TileObjects.Count > 0)
             {
@@ -1728,22 +2508,40 @@ public class WorldScene : ISceneRenderer
                     if (hasLoadedTiles && !_terrainManager.IsTileLoaded(tileKey.tileX, tileKey.tileY))
                         continue;
 
+                    if (_showPm4PositionRefs
+                        && _pm4TilePositionRefs.TryGetValue(tileKey, out List<Vector3>? positionRefs)
+                        && positionRefs.Count > 0)
+                    {
+                        for (int i = 0; i < positionRefs.Count; i++)
+                        {
+                            Vector3 marker = applyPm4Transform ? ApplyPm4OverlayTransform(positionRefs[i], pm4Transform) : positionRefs[i];
+                            _bbRenderer.BatchPin(marker, 16f, 3f, new Vector3(0.20f, 0.90f, 1.00f));
+                        }
+
+                        _pm4VisiblePositionRefCount += positionRefs.Count;
+                    }
+
                     foreach (Pm4OverlayObject obj in objects)
                     {
                         if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
                             continue;
 
+                        var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                        Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+
                         _pm4VisibleObjectCount++;
-                        Vector3 pm4Color = GetPm4ObjectColor(obj.Ck24Type);
+                        Vector3 pm4Color = GetPm4ObjectColor(tileKey, obj);
+                        if (_selectedPm4ObjectKey.HasValue && _selectedPm4ObjectKey.Value == objectKey)
+                            pm4Color = new Vector3(1.0f, 1.0f, 0.2f);
 
                         if (_showPm4SolidOverlay && obj.Triangles.Count > 0)
                         {
                             for (int i = 0; i < obj.Triangles.Count; i++)
                             {
                                 Pm4Triangle tri = obj.Triangles[i];
-                                Vector3 a = applyPm4Transform ? ApplyPm4OverlayTransform(tri.A, pm4Transform) : tri.A;
-                                Vector3 b = applyPm4Transform ? ApplyPm4OverlayTransform(tri.B, pm4Transform) : tri.B;
-                                Vector3 c = applyPm4Transform ? ApplyPm4OverlayTransform(tri.C, pm4Transform) : tri.C;
+                                Vector3 a = applyObjectTransform ? ApplyPm4OverlayTransform(tri.A, objectTransform) : tri.A;
+                                Vector3 b = applyObjectTransform ? ApplyPm4OverlayTransform(tri.B, objectTransform) : tri.B;
+                                Vector3 c = applyObjectTransform ? ApplyPm4OverlayTransform(tri.C, objectTransform) : tri.C;
                                 _bbRenderer.BatchTriangle(a, b, c, pm4Color, 0.20f);
                             }
                             _pm4VisibleTriangleCount += obj.Triangles.Count;
@@ -1752,12 +2550,18 @@ public class WorldScene : ISceneRenderer
                         for (int i = 0; i < obj.Lines.Count; i++)
                         {
                             Pm4LineSegment line = obj.Lines[i];
-                            Vector3 from = applyPm4Transform ? ApplyPm4OverlayTransform(line.From, pm4Transform) : line.From;
-                            Vector3 to = applyPm4Transform ? ApplyPm4OverlayTransform(line.To, pm4Transform) : line.To;
+                            Vector3 from = applyObjectTransform ? ApplyPm4OverlayTransform(line.From, objectTransform) : line.From;
+                            Vector3 to = applyObjectTransform ? ApplyPm4OverlayTransform(line.To, objectTransform) : line.To;
                             _bbRenderer.BatchLine(from, to, pm4Color);
                         }
 
                         _pm4VisibleLineCount += obj.Lines.Count;
+
+                        if (_showPm4ObjectCentroids)
+                        {
+                            Vector3 center = applyObjectTransform ? ApplyPm4OverlayTransform(obj.Center, objectTransform) : obj.Center;
+                            _bbRenderer.BatchPin(center, 22f, 4f, pm4Color);
+                        }
                     }
                 }
             }
@@ -2072,10 +2876,130 @@ public class WorldScene : ISceneRenderer
         _selectedObjectIndex = bestIndex;
     }
 
+    public bool SelectPm4ObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
+    {
+        if (!_showPm4Overlay || _pm4TileObjects.Count == 0)
+        {
+            _selectedPm4ObjectKey = null;
+            return false;
+        }
+
+        bool hasLoadedTiles = _terrainManager.LoadedTileCount > 0;
+        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+        bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+            || _pm4OverlayScale != Vector3.One;
+
+        float bestT = float.MaxValue;
+        (int tileX, int tileY, uint ck24)? bestKey = null;
+
+        foreach (var (tileKey, objects) in _pm4TileObjects)
+        {
+            if (hasLoadedTiles && !_terrainManager.IsTileLoaded(tileKey.tileX, tileKey.tileY))
+                continue;
+
+            foreach (Pm4OverlayObject obj in objects)
+            {
+                if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                    continue;
+
+                var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+
+                Vector3 boundsMin = obj.BoundsMin;
+                Vector3 boundsMax = obj.BoundsMax;
+                if (applyObjectTransform)
+                    TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+                Vector3 padding = new(2f, 2f, 2f);
+                float t = RayAABBIntersect(rayOrigin, rayDir, boundsMin - padding, boundsMax + padding);
+                if (t >= 0f && t < bestT)
+                {
+                    bestT = t;
+                    bestKey = objectKey;
+                }
+            }
+        }
+
+        _selectedPm4ObjectKey = bestKey;
+        return bestKey.HasValue;
+    }
+
     public void ClearSelection()
     {
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+    }
+
+    public void ClearPm4ObjectSelection()
+    {
+        _selectedPm4ObjectKey = null;
+    }
+
+    public bool TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo info)
+    {
+        info = default;
+        if (!_selectedPm4ObjectKey.HasValue)
+            return false;
+
+        var objectKey = _selectedPm4ObjectKey.Value;
+        if (!_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
+            return false;
+
+        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+        bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+            || _pm4OverlayScale != Vector3.One;
+        Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+
+        Vector3 center = applyObjectTransform ? ApplyPm4OverlayTransform(obj.Center, objectTransform) : obj.Center;
+        Vector3 boundsMin = obj.BoundsMin;
+        Vector3 boundsMax = obj.BoundsMax;
+        if (applyObjectTransform)
+            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+        float nearestPositionRefDistance = float.NaN;
+        if (_pm4TilePositionRefs.TryGetValue((objectKey.tileX, objectKey.tileY), out List<Vector3>? positionRefs)
+            && positionRefs.Count > 0)
+        {
+            nearestPositionRefDistance = NearestPointDistance(center, positionRefs, applyPm4Transform, pm4Transform);
+        }
+
+        info = new Pm4ObjectDebugInfo(
+            obj.Ck24,
+            obj.Ck24Type,
+            obj.Ck24ObjectId,
+            objectKey.tileX,
+            objectKey.tileY,
+            obj.SurfaceCount,
+            obj.DominantGroupKey,
+            obj.DominantAttributeMask,
+            obj.DominantMdosIndex,
+            obj.AverageSurfaceHeight,
+            boundsMin,
+            boundsMax,
+            center,
+            nearestPositionRefDistance,
+            obj.PlanarTransform.SwapPlanarAxes,
+            obj.PlanarTransform.InvertU,
+            obj.PlanarTransform.InvertV,
+            obj.PlanarTransform.InvertsWinding);
+
+        return true;
+    }
+
+    private static float NearestPointDistance(Vector3 point, IReadOnlyList<Vector3> candidates, bool applyPm4Transform, in Matrix4x4 pm4Transform)
+    {
+        float best = float.MaxValue;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            Vector3 candidate = applyPm4Transform ? ApplyPm4OverlayTransform(candidates[i], pm4Transform) : candidates[i];
+            float dist = Vector3.Distance(point, candidate);
+            if (dist < best)
+                best = dist;
+        }
+
+        return best;
     }
 
     /// <summary>
@@ -2244,7 +3168,71 @@ public class WorldScene : ISceneRenderer
         return (origin, dir);
     }
 
-    private static Vector3 GetPm4ObjectColor(byte ck24Type)
+    private Vector3 GetPm4ObjectColor((int tileX, int tileY) tileKey, Pm4OverlayObject obj)
+    {
+        return _pm4ColorMode switch
+        {
+            Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(obj.Ck24ObjectId),
+            Pm4OverlayColorMode.Ck24Key => ColorFromSeed(obj.Ck24),
+            Pm4OverlayColorMode.Tile => ColorFromSeed((uint)HashCode.Combine(tileKey.tileX, tileKey.tileY)),
+            Pm4OverlayColorMode.GroupKey => ColorFromSeed(obj.DominantGroupKey),
+            Pm4OverlayColorMode.AttributeMask => ColorFromSeed(obj.DominantAttributeMask),
+            Pm4OverlayColorMode.Height => ColorFromHeight(obj.Center.Z),
+            _ => GetPm4TypeColor(obj.Ck24Type)
+        };
+    }
+
+    private Vector3 ColorFromHeight(float z)
+    {
+        float denom = _pm4MaxObjectZ - _pm4MinObjectZ;
+        float t = denom > 0.001f ? Math.Clamp((z - _pm4MinObjectZ) / denom, 0f, 1f) : 0.5f;
+        return Vector3.Lerp(new Vector3(0.15f, 0.45f, 1.00f), new Vector3(1.00f, 0.35f, 0.15f), t);
+    }
+
+    private static Vector3 ColorFromSeed(uint seed)
+    {
+        uint golden = seed * 2654435761u;
+        float hue = (golden & 0x00FFFFFF) / 16777215f;
+        return HsvToRgb(hue, 0.75f, 0.95f);
+    }
+
+    private static Vector3 HsvToRgb(float h, float s, float v)
+    {
+        h = h - MathF.Floor(h);
+        float c = v * s;
+        float x = c * (1f - MathF.Abs((h * 6f) % 2f - 1f));
+        float m = v - c;
+
+        float r;
+        float g;
+        float b;
+        int sector = (int)(h * 6f);
+        switch (sector)
+        {
+            case 0:
+                r = c; g = x; b = 0f;
+                break;
+            case 1:
+                r = x; g = c; b = 0f;
+                break;
+            case 2:
+                r = 0f; g = c; b = x;
+                break;
+            case 3:
+                r = 0f; g = x; b = c;
+                break;
+            case 4:
+                r = x; g = 0f; b = c;
+                break;
+            default:
+                r = c; g = 0f; b = x;
+                break;
+        }
+
+        return new Vector3(r + m, g + m, b + m);
+    }
+
+    private static Vector3 GetPm4TypeColor(byte ck24Type)
     {
         return ck24Type switch
         {
@@ -2281,6 +3269,57 @@ public class WorldScene : ISceneRenderer
         return Vector3.Transform(position, transform);
     }
 
+    private Matrix4x4 BuildPm4ObjectTransform((int tileX, int tileY, uint ck24) objectKey,
+        bool applyPm4Transform,
+        in Matrix4x4 pm4Transform,
+        out bool applyObjectTransform)
+    {
+        applyObjectTransform = false;
+        Matrix4x4 transform = Matrix4x4.Identity;
+
+        if (applyPm4Transform)
+        {
+            transform = pm4Transform;
+            applyObjectTransform = true;
+        }
+
+        if (_pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectTranslation)
+            && objectTranslation.LengthSquared() > 0.0001f)
+        {
+            Matrix4x4 objectTranslationMatrix = Matrix4x4.CreateTranslation(objectTranslation);
+            transform = applyObjectTransform
+                ? transform * objectTranslationMatrix
+                : objectTranslationMatrix;
+            applyObjectTransform = true;
+        }
+
+        return transform;
+    }
+
+    private static void TransformBounds(Vector3 boundsMin, Vector3 boundsMax, in Matrix4x4 transform,
+        out Vector3 transformedMin, out Vector3 transformedMax)
+    {
+        transformedMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        transformedMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+        Span<Vector3> corners = stackalloc Vector3[8];
+        corners[0] = new Vector3(boundsMin.X, boundsMin.Y, boundsMin.Z);
+        corners[1] = new Vector3(boundsMax.X, boundsMin.Y, boundsMin.Z);
+        corners[2] = new Vector3(boundsMin.X, boundsMax.Y, boundsMin.Z);
+        corners[3] = new Vector3(boundsMax.X, boundsMax.Y, boundsMin.Z);
+        corners[4] = new Vector3(boundsMin.X, boundsMin.Y, boundsMax.Z);
+        corners[5] = new Vector3(boundsMax.X, boundsMin.Y, boundsMax.Z);
+        corners[6] = new Vector3(boundsMin.X, boundsMax.Y, boundsMax.Z);
+        corners[7] = new Vector3(boundsMax.X, boundsMax.Y, boundsMax.Z);
+
+        for (int i = 0; i < corners.Length; i++)
+        {
+            Vector3 transformed = Vector3.Transform(corners[i], transform);
+            transformedMin = Vector3.Min(transformedMin, transformed);
+            transformedMax = Vector3.Max(transformedMax, transformed);
+        }
+    }
+
     public void Dispose()
     {
         _terrainManager.OnTileLoaded -= OnTileLoaded;
@@ -2300,23 +3339,87 @@ public class WorldScene : ISceneRenderer
         _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();
         _pm4TileObjects.Clear();
+        _pm4TileStats.Clear();
+        _pm4TilePositionRefs.Clear();
+        _pm4ObjectLookup.Clear();
+        _pm4ObjectTranslations.Clear();
     }
 }
 
 internal sealed class Pm4OverlayObject
 {
-    public Pm4OverlayObject(uint ck24, byte ck24Type, List<Pm4LineSegment> lines, List<Pm4Triangle> triangles)
+    public Pm4OverlayObject(
+        uint ck24,
+        byte ck24Type,
+        List<Pm4LineSegment> lines,
+        List<Pm4Triangle> triangles,
+        int surfaceCount,
+        byte dominantGroupKey,
+        byte dominantAttributeMask,
+        uint dominantMdosIndex,
+        float averageSurfaceHeight,
+        Pm4PlanarTransform planarTransform)
     {
         Ck24 = ck24;
         Ck24Type = ck24Type;
         Lines = lines;
         Triangles = triangles;
+        SurfaceCount = surfaceCount;
+        DominantGroupKey = dominantGroupKey;
+        DominantAttributeMask = dominantAttributeMask;
+        DominantMdosIndex = dominantMdosIndex;
+        AverageSurfaceHeight = averageSurfaceHeight;
+        PlanarTransform = planarTransform;
+        (BoundsMin, BoundsMax) = ComputeBounds(lines, triangles);
+        Center = (BoundsMin + BoundsMax) * 0.5f;
     }
 
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
+    public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
     public List<Pm4LineSegment> Lines { get; }
     public List<Pm4Triangle> Triangles { get; }
+    public int SurfaceCount { get; }
+    public byte DominantGroupKey { get; }
+    public byte DominantAttributeMask { get; }
+    public uint DominantMdosIndex { get; }
+    public float AverageSurfaceHeight { get; }
+    public Pm4PlanarTransform PlanarTransform { get; }
+    public Vector3 BoundsMin { get; }
+    public Vector3 BoundsMax { get; }
+    public Vector3 Center { get; }
+
+    private static (Vector3 min, Vector3 max) ComputeBounds(List<Pm4LineSegment> lines, List<Pm4Triangle> triangles)
+    {
+        Vector3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+        Vector3 max = new(float.MinValue, float.MinValue, float.MinValue);
+        bool hasData = false;
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            min = Vector3.Min(min, lines[i].From);
+            min = Vector3.Min(min, lines[i].To);
+            max = Vector3.Max(max, lines[i].From);
+            max = Vector3.Max(max, lines[i].To);
+            hasData = true;
+        }
+
+        for (int i = 0; i < triangles.Count; i++)
+        {
+            min = Vector3.Min(min, triangles[i].A);
+            min = Vector3.Min(min, triangles[i].B);
+            min = Vector3.Min(min, triangles[i].C);
+            max = Vector3.Max(max, triangles[i].A);
+            max = Vector3.Max(max, triangles[i].B);
+            max = Vector3.Max(max, triangles[i].C);
+            hasData = true;
+        }
+
+        if (!hasData)
+            return (Vector3.Zero, Vector3.Zero);
+
+        return (min, max);
+    }
 }
 
 internal readonly struct Pm4LineSegment
