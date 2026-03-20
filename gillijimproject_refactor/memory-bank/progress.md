@@ -1,5 +1,34 @@
 # Progress
 
+### Mar 20, 2026 - PM4 Tile Mapping Normalization + Reboot Handoff
+
+- Applied PM4 viewer tile mapping guardrail in `WorldScene`:
+	- map PM4 filename `x_y` into terrain tile keys as `(tileX=x, tileY=y)`
+	- remove MPRL-centroid tile reassignment from PM4 overlay load path
+	- merge duplicate PM4 tile payloads instead of overwriting (objects/stats/position refs)
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Runtime handoff:
+	- user will restart machine before runtime checks
+	- next required validation is the reported tile adjacency case (`00_00`, `01_00`, `01_01`) to confirm no PM4 tile drift/data loss
+
+### Mar 20, 2026 - WDL Spawn Chooser Cross-Version Regression Handoff
+
+- User runtime report: WDL heightmap spawn chooser currently does not function on tested versions.
+- Status correction:
+	- treat prior notes that implied chooser readiness/fallback behavior was sufficient as unverified for the active branch state
+	- keep this issue open until runtime behavior is re-proven end-to-end
+- Investigation target area for the next pass:
+	- map-row spawn action gating (`WdlPreviewWarmState` and readiness transitions)
+	- preview cache warmup readiness state propagation into chooser UI
+	- chooser commit path versus fallback load path when preview prep fails
+- Validation requirement for closure:
+	- real-data runtime proof on at least one Alpha-era map and one 3.x map
+	- explicit evidence that user can pick a spawn point and spawn is applied
+- Validation limits in this handoff-only update:
+	- no code changes made
+	- no automated tests added or run
+
 ### Mar 19, 2026 - Terrain Texture Transfer Command (Backend Slice)
 
 - Added first backend/library + CLI slice for mapped terrain texture transfer:

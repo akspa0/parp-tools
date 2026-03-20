@@ -113,6 +113,35 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - it does not by itself prove full `_tex0.adt` texture-layer parity for 4.x data
    - keep 3.x alpha-path guardrails unchanged
 
+### PM4 MSLK-Driven Assembly Follow-up (Mar 20)
+
+- PM4 overlay object assembly in `WorldScene` now consumes `MSLK` linkage to split CK24 buckets into linked sub-groups before optional MDOS/connectivity splitting.
+- PM4 object keys now include a per-component `objectPart` id (`tile + ck24 + objectPart`) so per-object selection/offset state does not collide when CK24 is reused by multiple linked components.
+- Planar transform solving now uses linked `MPRL` refs at CK24 scope and applies one shared transform per CK24, so split linked/components remain on the same coordinate plane.
+- `MSLK` linkage logic now prefers `MsurIndex` for surface association and only falls back to `RefIndex` as a surface id when needed.
+- Selected PM4 diagnostics now expose `ObjectPartId`, dominant `MSLK.GroupObjectId`, and linked `MPRL` ref count to aid runtime triage.
+- Build status: `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only).
+- Runtime signoff is still required on the reported real-data PM4 cases (split structures + 90-degree ramp mismatch).
+
+### PM4 Tile Mapping Guardrail Follow-up (Mar 20)
+
+- PM4 overlay tile assignment in `WorldScene` now trusts filename coordinates and maps them into the terrain adapter's row/col tile convention:
+   - PM4 filename `map_x_y.pm4` -> viewer tile `(tileX=x, tileY=y)`.
+- Removed the prior PM4 tile reassignment heuristic that remapped tiles from `MPRL` centroid/bounds checks.
+   - Inter-tile links in sparse PM4 datasets made that heuristic unstable and caused drift/collisions.
+- Duplicate PM4 files that resolve to the same viewer tile now merge instead of overwrite.
+   - Overlay object lists, tile stats, and PM4 position refs append; object-part ids are rebased for lookup-key uniqueness.
+- Practical effect: sparse/missing PM4 or ADT tile sets remain sparse/blank rather than shifting adjacent PM4 geometry into the wrong tile.
+
+### PM4 Reboot Runtime Handoff (Mar 20)
+
+- Next session starts with runtime-only validation, not additional PM4 decode refactors.
+- First required checks after restart:
+   - verify PM4 tile placement continuity for the reported mismatch path (`00_00`, `01_00`, and `01_01`/`1_1`)
+   - confirm missing PM4 tiles remain blank instead of shifting neighboring PM4 geometry
+   - confirm no duplicate-tile overwrite symptoms when multiple PM4 files map to one viewer tile
+- If mismatch persists, collect one concrete file pair and an on-screen tile reference, then add temporary debug output for `pm4Path -> (tileX,tileY)` mapping before changing transforms again.
+
 ### ModelRenderer Follow-up From 39799bf (Mar 18)
 
 - The commit message for `39799bf` bundled terrain and model notes together, but the only remaining model-renderer hunk on top of the already-applied MPQ fix was particle suppression on the world-scene instanced path.
@@ -422,6 +451,21 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - file-level diagnostics are clean after the code change
    - the throughput experiment itself should be treated as rejected, not active
    - no automated tests were added or run
+
+### WDL Spawn Chooser Regression Handoff (Mar 20)
+
+- Latest runtime report: the WDL heightmap spawn chooser does not function on tested versions in the active branch state.
+- Treat earlier spawn-fallback notes as historical implementation intent, not proof of current runtime correctness.
+- Active investigation slice for a fresh chat:
+   - verify map-row `Spawn` enablement versus actual warm-state transitions
+   - verify chooser open path and spawn-commit callback execution
+   - verify failure fallback still loads map normally when preview warmup/read fails
+- Required closure evidence:
+   - real runtime confirmation on both Alpha-era and 3.x data
+   - explicit user-visible proof that spawn selection applies camera/player spawn rather than silently no-oping
+- Validation limits for this note-only handoff:
+   - no code changes in this entry
+   - no automated tests added or run
 
 ### Pre-release 3.0.1 M2 Wrap + Pink Transparency Follow-up (Mar 19)
 

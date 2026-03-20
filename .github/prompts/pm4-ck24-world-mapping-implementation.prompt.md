@@ -27,6 +27,13 @@ The intended end state is:
 3. PM4-derived object layers can be converted into correct world coordinates
 4. the viewer can place PM4 geometry and PM4-derived object anchors in the same world space as ADT terrain and placements
 
+## Current Checkpoint (Mar 20, 2026)
+
+- Viewer PM4 tile assignment now uses direct filename indices (`map_x_y.pm4` -> `tileX=x`, `tileY=y`).
+- Viewer PM4 load path no longer reassigns tiles from MPRL centroid/bounds heuristics.
+- Duplicate PM4 files resolving to one viewer tile now merge instead of overwrite.
+- The immediate next milestone is runtime validation after machine restart, not additional transform refactors.
+
 ## Non-Negotiable Architecture
 
 - Do not treat each PM4 tile as an isolated object catalog.
@@ -78,6 +85,14 @@ At minimum, keep these logical outputs separate:
 - If you only built a decoder or viewer path without cross-tile aggregation, say so explicitly.
 - If automated tests were not added or run, say so explicitly.
 - Build success is not proof that the world-coordinate mapping is correct.
+
+## First Post-Restart Validation Task
+
+Before any new PM4 code changes, validate the reported tile-adjacency mismatch:
+
+1. confirm `00_00.pm4` aligns to ADT tile `(0,0)`
+2. confirm geometry expected on `01_00` does not shift into `01_01`
+3. confirm sparse/missing PM4 tiles remain blank and do not induce neighbor drift
 
 ## Deliverables
 

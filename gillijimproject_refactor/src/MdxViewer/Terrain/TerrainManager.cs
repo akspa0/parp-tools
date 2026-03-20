@@ -77,6 +77,78 @@ public class TerrainManager : ISceneRenderer
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
     public ITerrainAdapter Adapter => _adapter;
 
+    /// <summary>
+    /// Replace a tile's parsed chunk data and rebuild its loaded GPU meshes.
+    /// Call on the render thread.
+    /// </summary>
+    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
+    {
+        if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
+        {
+            cached = _adapter.LoadTileWithPlacements(tileX, tileY);
+            _tileCache[(tileX, tileY)] = cached;
+        }
+
+        cached.Chunks.Clear();
+        cached.Chunks.AddRange(newChunks);
+
+        var key = (tileX, tileY);
+        if (_loadedTiles.TryGetValue(key, out var oldMeshes))
+        {
+            _terrainRenderer.RemoveChunks(oldMeshes);
+            _liquidRenderer.RemoveChunksForTile(tileX, tileY);
+            foreach (var mesh in oldMeshes)
+                mesh.Dispose();
+            _loadedTiles.Remove(key);
+        }
+
+        var meshes = new List<TerrainChunkMesh>(cached.Chunks.Count);
+        foreach (var chunkData in cached.Chunks)
+        {
+            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
+            if (mesh != null)
+                meshes.Add(mesh);
+        }
+
+        if (meshes.Count == 0)
+            return;
+
+        _loadedTiles[key] = meshes;
+        _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
+        _liquidRenderer.AddChunks(cached.Chunks);
+    }
+
+    /// <summary>
+    /// Try to get cached parsed tile data.
+    /// </summary>
+    public bool TryGetTileLoadResult(int tileX, int tileY, out TileLoadResult result)
+    {
+        if (_tileCache.TryGetValue((tileX, tileY), out var cached))
+        {
+            result = cached;
+            return true;
+        }
+
+        result = new TileLoadResult();
+        return false;
+    }
+
+    /// <summary>
+    /// Get parsed tile data from cache, loading it if needed.
+    /// </summary>
+    public TileLoadResult GetOrLoadTileLoadResult(int tileX, int tileY)
+    {
+        if (_tileCache.TryGetValue((tileX, tileY), out var cached))
+            return cached;
+
+        if (!_adapter.TileExists(tileX, tileY))
+            return new TileLoadResult();
+
+        var loaded = _adapter.LoadTileWithPlacements(tileX, tileY);
+        _tileCache[(tileX, tileY)] = loaded;
+        return loaded;
+    }
+
     public TerrainManager(GL gl, string wdtPath, IDataSource? dataSource)
     {
         _gl = gl;

@@ -56,6 +56,28 @@ public class TerrainRenderer : IDisposable
     public int LoadedChunkCount => _chunks.Count;
     public TerrainLighting Lighting => _lighting;
 
+    public readonly struct TerrainChunkInfo
+    {
+        public int TileX { get; }
+        public int TileY { get; }
+        public int ChunkX { get; }
+        public int ChunkY { get; }
+        public Vector3 BoundsMin { get; }
+        public Vector3 BoundsMax { get; }
+        public int AreaId { get; }
+
+        public TerrainChunkInfo(int tileX, int tileY, int chunkX, int chunkY, Vector3 boundsMin, Vector3 boundsMax, int areaId)
+        {
+            TileX = tileX;
+            TileY = tileY;
+            ChunkX = chunkX;
+            ChunkY = chunkY;
+            BoundsMin = boundsMin;
+            BoundsMax = boundsMax;
+            AreaId = areaId;
+        }
+    }
+
     /// <summary>
     /// Find the chunk mesh closest to the given world XY position (for area lookup).
     /// Returns null if no chunks are loaded.
@@ -77,6 +99,61 @@ public class TerrainRenderer : IDisposable
             }
         }
         return best;
+    }
+
+    public TerrainChunkInfo? GetChunkInfoAt(float worldX, float worldY)
+    {
+        TerrainChunkInfo? best = null;
+        float bestDist = float.MaxValue;
+
+        foreach (var chunk in _chunks)
+        {
+            if (worldX < chunk.BoundsMin.X || worldX > chunk.BoundsMax.X ||
+                worldY < chunk.BoundsMin.Y || worldY > chunk.BoundsMax.Y)
+                continue;
+
+            var center = (chunk.BoundsMin + chunk.BoundsMax) * 0.5f;
+            float dx = center.X - worldX;
+            float dy = center.Y - worldY;
+            float dist = dx * dx + dy * dy;
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = new TerrainChunkInfo(
+                    chunk.TileX,
+                    chunk.TileY,
+                    chunk.ChunkX,
+                    chunk.ChunkY,
+                    chunk.BoundsMin,
+                    chunk.BoundsMax,
+                    chunk.AreaId);
+            }
+        }
+
+        return best;
+    }
+
+    public bool TryGetChunkInfo(int tileX, int tileY, int chunkX, int chunkY, out TerrainChunkInfo info)
+    {
+        foreach (var chunk in _chunks)
+        {
+            if (chunk.TileX == tileX && chunk.TileY == tileY &&
+                chunk.ChunkX == chunkX && chunk.ChunkY == chunkY)
+            {
+                info = new TerrainChunkInfo(
+                    chunk.TileX,
+                    chunk.TileY,
+                    chunk.ChunkX,
+                    chunk.ChunkY,
+                    chunk.BoundsMin,
+                    chunk.BoundsMax,
+                    chunk.AreaId);
+                return true;
+            }
+        }
+
+        info = default;
+        return false;
     }
 
     public TerrainRenderer(GL gl, IDataSource? dataSource, TerrainLighting lighting,
@@ -121,6 +198,62 @@ public class TerrainRenderer : IDisposable
     {
         foreach (var chunk in chunks)
             _chunks.Remove(chunk);
+    }
+
+    public void ReplaceTileAlphaShadowArray(int tileX, int tileY, byte[] alphaShadowRgba)
+    {
+        const int chunkSize = 64 * 64;
+        const int chunkStride = chunkSize * 4;
+        const int tileChunks = 16;
+        int expected = chunkStride * tileChunks * tileChunks;
+        if (alphaShadowRgba == null || alphaShadowRgba.Length < expected)
+            throw new ArgumentException($"Expected alpha-shadow RGBA array length {expected}.");
+
+        foreach (var chunk in _chunks)
+        {
+            if (chunk.TileX != tileX || chunk.TileY != tileY)
+                continue;
+
+            int slice = chunk.ChunkY * tileChunks + chunk.ChunkX;
+            int sliceBase = slice * chunkStride;
+
+            var alpha1 = new byte[chunkSize];
+            var alpha2 = new byte[chunkSize];
+            var alpha3 = new byte[chunkSize];
+            var shadow = new byte[chunkSize];
+
+            for (int i = 0; i < chunkSize; i++)
+            {
+                int src = sliceBase + i * 4;
+                alpha1[i] = alphaShadowRgba[src + 0];
+                alpha2[i] = alphaShadowRgba[src + 1];
+                alpha3[i] = alphaShadowRgba[src + 2];
+                shadow[i] = alphaShadowRgba[src + 3];
+            }
+
+            chunk.AlphaMaps[1] = alpha1;
+            chunk.AlphaMaps[2] = alpha2;
+            chunk.AlphaMaps[3] = alpha3;
+            chunk.ShadowMap = shadow;
+
+            for (int layer = 1; layer <= 3; layer++)
+            {
+                if (chunk.AlphaTextures.TryGetValue(layer, out uint oldTex) && oldTex != 0)
+                    _gl.DeleteTexture(oldTex);
+                chunk.AlphaTextures.Remove(layer);
+            }
+
+            if (chunk.ShadowTexture != 0)
+            {
+                _gl.DeleteTexture(chunk.ShadowTexture);
+                chunk.ShadowTexture = 0;
+            }
+
+            chunk.AlphaTextures[1] = UploadSingleChannelTexture(alpha1);
+            chunk.AlphaTextures[2] = UploadSingleChannelTexture(alpha2);
+            chunk.AlphaTextures[3] = UploadSingleChannelTexture(alpha3);
+            chunk.ShadowTexture = UploadSingleChannelTexture(shadow);
+        }
     }
 
     // Culling stats (updated each frame)
@@ -501,6 +634,24 @@ public class TerrainRenderer : IDisposable
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         chunk.ShadowTexture = tex;
+    }
+
+    private unsafe uint UploadSingleChannelTexture(byte[] data)
+    {
+        uint tex = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, tex);
+
+        fixed (byte* ptr = data)
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+                64, 64, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+
+        return tex;
     }
 
     private ShaderProgram CreateTerrainShader()

@@ -31,6 +31,46 @@ The required end state is:
   - previous PM4 work already exported layers of the same object via CK24
 - The current hard blocker is coordinate correctness, not the existence of a grouping key.
 
+## Mar 20 Checkpoint + Reboot Resume
+
+- PM4 viewer overlay load path now uses filename-based tile mapping aligned to terrain row/col conventions:
+  - `map_x_y.pm4` maps to viewer tile `(tileX=x, tileY=y)`
+- The previous MPRL-based tile reassignment heuristic was removed from viewer PM4 tile assignment.
+- Duplicate PM4 files resolving to one tile now merge instead of overwrite, including:
+  - overlay object payloads
+  - PM4 tile stats
+  - PM4 position-ref markers
+
+Post-restart runtime validation order:
+
+1. Load the reported mismatch area and verify `00_00` aligns to ADT `(0,0)`.
+2. Verify tile directly below (`01_00`) no longer appears shifted into `01_01`.
+3. Verify sparse/missing PM4 tiles remain blank instead of causing neighbor drift.
+4. Verify merged duplicate-tile behavior does not regress selection/object-part uniqueness.
+
+Validation note:
+
+- Build pass exists; runtime signoff is still pending and required before claiming this fixed globally.
+
+## Mar 20 Runtime Update (Post-Reboot)
+
+- Current viewer behavior has improved from fragmented part orientation to coherent per-object assembly:
+  - CK24 object parts now stay together on one shared coordinate plane
+  - residual orientation issue is now a consistent global yaw offset
+- Latest runtime observation:
+  - PM4 reconstructed objects appear approximately 90 degrees counter-clockwise from expected placement orientation
+  - this is materially better than mixed per-part spins because it indicates the remaining problem is likely one consistent basis correction
+
+Documentation checkpoint:
+
+- The active PM4 decode/assembly/transform logic is now captured in:
+  - `documentation/pm4-current-decoding-logic-2026-03-20.md`
+- That document records:
+  - active chunk usage (`MSUR`, `MSLK`, `MPRL`, `MSVT`, `MSVI`)
+  - tile mapping and merge guardrails
+  - CK24 assembly pipeline and identity keys
+  - transform solver inputs and known residual 90-degree offset
+
 ## Source Of Truth
 
 The richer rollback PM4 decoder should be treated as the current behavioral reference, not the thinner core PM4 parser alone.

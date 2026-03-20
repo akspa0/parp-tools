@@ -50,6 +50,59 @@ public class VlmTerrainManager : ISceneRenderer
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
 
+    /// <summary>
+    /// Try to get parsed tile data for a tile, loading from project data if needed.
+    /// </summary>
+    public bool TryGetTileLoadResult(int tileX, int tileY, out TileLoadResult result)
+    {
+        if (_loadedTiles.ContainsKey((tileX, tileY)))
+        {
+            result = _loader.LoadTile(tileX, tileY);
+            return result.Chunks.Count > 0;
+        }
+
+        if (_loader.TileCoords.Contains((tileX, tileY)))
+        {
+            result = _loader.LoadTile(tileX, tileY);
+            return result.Chunks.Count > 0;
+        }
+
+        result = new TileLoadResult();
+        return false;
+    }
+
+    /// <summary>
+    /// Rebuild a tile's meshes from externally edited chunks.
+    /// Call on the render thread.
+    /// </summary>
+    public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
+    {
+        var key = (tileX, tileY);
+        if (_loadedTiles.TryGetValue(key, out var oldMeshes))
+        {
+            _terrainRenderer.RemoveChunks(oldMeshes);
+            _liquidRenderer.RemoveChunksForTile(tileX, tileY);
+            foreach (var chunk in oldMeshes)
+                chunk.Dispose();
+            _loadedTiles.Remove(key);
+        }
+
+        var meshes = new List<TerrainChunkMesh>(newChunks.Count);
+        foreach (var chunkData in newChunks)
+        {
+            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
+            if (mesh != null)
+                meshes.Add(mesh);
+        }
+
+        if (meshes.Count == 0)
+            return;
+
+        _loadedTiles[key] = meshes;
+        _terrainRenderer.AddChunks(meshes, _loader.TileTextures);
+        _liquidRenderer.AddChunks(newChunks);
+    }
+
     public VlmTerrainManager(GL gl, string projectRoot)
     {
         _gl = gl;

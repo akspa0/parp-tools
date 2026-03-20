@@ -116,6 +116,106 @@ public partial class ViewerApp : IDisposable
     private bool _wantAttachLooseMapFolder = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
+    private bool _wantExportMapGlbTiles = false;
+
+    private enum TerrainTileScope
+    {
+        CurrentTile = 0,
+        LoadedTiles = 1,
+        WholeMap = 2,
+        CustomList = 3,
+    }
+
+    private enum TerrainExportKind
+    {
+        None = 0,
+        AlphaCurrentTileAtlas = 1,
+        AlphaCurrentTileChunksFolder = 2,
+        AlphaLoadedTilesFolder = 3,
+        AlphaWholeMapFolder = 4,
+        Heightmap257CurrentTilePerTile = 10,
+        Heightmap257LoadedTilesFolderPerTile = 11,
+        Heightmap257WholeMapFolderPerMap = 12,
+    }
+
+    private enum TerrainImportKind
+    {
+        None = 0,
+        AlphaFolder = 1,
+        Heightmap257Folder = 10,
+    }
+
+    private bool _wantTerrainExport;
+    private TerrainExportKind _terrainExportKind = TerrainExportKind.None;
+    private bool _wantTerrainImport;
+    private TerrainImportKind _terrainImportKind = TerrainImportKind.None;
+    private bool _showAlphaFolderImportScope;
+    private bool _showHeightmapFolderImportScope;
+    private TerrainTileScope _terrainTileScope = TerrainTileScope.LoadedTiles;
+    private TerrainTileScope _mapGlbScope = TerrainTileScope.CurrentTile;
+    private string _terrainImportFolder = "";
+    private string _terrainCustomTilesText = "";
+
+    private bool _chunkToolEnabled;
+    private ChunkClipboard? _chunkClipboard;
+    private string _chunkClipboardStatus = "";
+    private bool _chunkClipboardUseMouse;
+    private bool _chunkClipboardPasteRelativeHeights = true;
+    private bool _chunkClipboardIncludeAlphaShadow;
+    private bool _chunkClipboardIncludeTextures;
+    private (int tileX, int tileY, int chunkX, int chunkY)? _chunkClipboardCopiedKey;
+    private (int tileX, int tileY, int chunkX, int chunkY)? _chunkClipboardLockedTargetKey;
+    private int _chunkClipboardSelectionRotation;
+    private bool _chunkClipboardCtrlCWasPressed;
+    private bool _chunkClipboardCtrlVWasPressed;
+    private readonly HashSet<(int tileX, int tileY, int chunkX, int chunkY)> _selectedChunks = new();
+    private ChunkClipboardSet? _chunkClipboardSet;
+    private bool _chunkClipboardShowOverlay = true;
+    private Terrain.BoundingBoxRenderer? _editorOverlayBb;
+
+    private sealed class HeightmapMetadata
+    {
+        public int Version { get; set; } = 1;
+        public int Resolution { get; set; } = TerrainHeightmapIo.TileHeightmapSize;
+        public float MinHeight { get; set; }
+        public float MaxHeight { get; set; }
+        public string Normalization { get; set; } = "per_tile";
+    }
+
+    private sealed class ChunkClipboard
+    {
+        public float[] Heights { get; }
+        public Vector3[] Normals { get; }
+        public int HoleMask { get; }
+        public TerrainLayer[] Layers { get; }
+        public Dictionary<int, byte[]> AlphaMaps { get; }
+        public byte[]? ShadowMap { get; }
+        public byte[]? MccvColors { get; }
+
+        public ChunkClipboard(TerrainChunkData chunk)
+        {
+            Heights = (float[])chunk.Heights.Clone();
+            Normals = (Vector3[])chunk.Normals.Clone();
+            HoleMask = chunk.HoleMask;
+            Layers = chunk.Layers.ToArray();
+            AlphaMaps = CloneAlphaMaps(chunk.AlphaMaps);
+            ShadowMap = chunk.ShadowMap != null ? (byte[])chunk.ShadowMap.Clone() : null;
+            MccvColors = chunk.MccvColors != null ? (byte[])chunk.MccvColors.Clone() : null;
+        }
+    }
+
+    private sealed class ChunkClipboardSet
+    {
+        public int OriginGlobalChunkX { get; }
+        public int OriginGlobalChunkY { get; }
+        public Dictionary<(int dx, int dy), ChunkClipboard> Chunks { get; } = new();
+
+        public ChunkClipboardSet(int originGlobalChunkX, int originGlobalChunkY)
+        {
+            OriginGlobalChunkX = originGlobalChunkX;
+            OriginGlobalChunkY = originGlobalChunkY;
+        }
+    }
 
     // Sidebar layout
     private bool _showLeftSidebar = true;
@@ -303,9 +403,30 @@ public partial class ViewerApp : IDisposable
             {
                 if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse)
                     _mouseDown = true;
-                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse && _worldScene != null
+                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse
                     && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
-                    PickObjectAtMouse(_lastMouseX, _lastMouseY);
+                {
+                    var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+                    if (terrainRenderer != null && _chunkToolEnabled)
+                    {
+                        bool shift = ImGui.GetIO().KeyShift;
+                        bool ctrl = ImGui.GetIO().KeyCtrl;
+
+                        if (ctrl && !shift)
+                        {
+                            if (TryLockChunkPasteTarget(terrainRenderer))
+                                return;
+                        }
+                        else if (shift)
+                        {
+                            if (TryHandleChunkSelectionClick(terrainRenderer, shift))
+                                return;
+                        }
+                    }
+
+                    if (_worldScene != null)
+                        PickObjectAtMouse(_lastMouseX, _lastMouseY);
+                }
             };
             mouse.MouseUp += (_, btn) =>
             {
@@ -502,6 +623,29 @@ public partial class ViewerApp : IDisposable
         if (_input.Keyboards.Count == 0) return;
         var kb = _input.Keyboards[0];
 
+        if (_chunkToolEnabled && !ImGui.GetIO().WantCaptureKeyboard)
+        {
+            bool ctrlDown = kb.IsKeyPressed(Key.ControlLeft) || kb.IsKeyPressed(Key.ControlRight);
+            bool cDown = kb.IsKeyPressed(Key.C);
+            bool vDown = kb.IsKeyPressed(Key.V);
+
+            bool ctrlCDown = ctrlDown && cDown;
+            bool ctrlVDown = ctrlDown && vDown;
+
+            var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+            if (terrainRenderer != null)
+            {
+                if (ctrlCDown && !_chunkClipboardCtrlCWasPressed)
+                    ExecuteChunkClipboardCopy(terrainRenderer);
+
+                if (ctrlVDown && !_chunkClipboardCtrlVWasPressed)
+                    ExecuteChunkClipboardPaste(terrainRenderer);
+            }
+
+            _chunkClipboardCtrlCWasPressed = ctrlCDown;
+            _chunkClipboardCtrlVWasPressed = ctrlVDown;
+        }
+
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
         if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
@@ -689,6 +833,7 @@ public partial class ViewerApp : IDisposable
             {
                 // WorldScene / VLM terrain — handles its own lighting
                 _renderer.Render(view, proj);
+                DrawEditorOverlays(view, proj);
             }
         }
 
@@ -828,6 +973,10 @@ void main() {
             DrawVlmExportDialog();
         if (_showTerrainTextureTransferDialog)
             DrawTerrainTextureTransferDialog();
+        if (_showAlphaFolderImportScope)
+            DrawAlphaFolderImportScopeDialog();
+        if (_showHeightmapFolderImportScope)
+            DrawHeightmapFolderImportScopeDialog();
         if (_showMapConverterDialog)
             DrawMapConverterDialog();
         if (_showWmoConverterDialog)
@@ -970,6 +1119,135 @@ void main() {
                 ImGui.EndMenu();
             }
 
+            if (ImGui.BeginMenu("Export"))
+            {
+                if (ImGui.BeginMenu("GLB"))
+                {
+                    if (ImGui.MenuItem("Export GLB...", _renderer != null))
+                        _wantExportGlb = true;
+                    if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
+                        _wantExportGlbCollision = true;
+
+                    ImGui.Separator();
+
+                    bool canExportMapGlb = _terrainManager != null && _dataSource != null;
+                    if (ImGui.BeginMenu("Map Tiles", canExportMapGlb))
+                    {
+                        if (ImGui.MenuItem("Current Tile (Terrain + Objects)", "", false, canExportMapGlb))
+                        {
+                            _mapGlbScope = TerrainTileScope.CurrentTile;
+                            _wantExportMapGlbTiles = true;
+                        }
+                        if (ImGui.MenuItem("Loaded Tiles Folder", "", false, canExportMapGlb))
+                        {
+                            _mapGlbScope = TerrainTileScope.LoadedTiles;
+                            _wantExportMapGlbTiles = true;
+                        }
+                        if (ImGui.MenuItem("Whole Map Folder", "", false, canExportMapGlb))
+                        {
+                            _mapGlbScope = TerrainTileScope.WholeMap;
+                            _wantExportMapGlbTiles = true;
+                        }
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                if (ImGui.BeginMenu("Terrain"))
+                {
+                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                    if (ImGui.BeginMenu("Alpha Masks"))
+                    {
+                        if (ImGui.MenuItem("Current Tile Atlas (PNG)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+                        }
+
+                        if (ImGui.MenuItem("Current Tile Chunks Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileChunksFolder;
+                        }
+
+                        if (ImGui.MenuItem("Loaded Tiles Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaLoadedTilesFolder;
+                        }
+
+                        if (ImGui.MenuItem("Whole Map Folder...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.AlphaWholeMapFolder;
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Heightmaps"))
+                    {
+                        if (ImGui.MenuItem("Current Tile (257x257 L16 PNG + JSON)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                        }
+
+                        if (ImGui.MenuItem("Loaded Tiles Folder (per-tile)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257LoadedTilesFolderPerTile;
+                        }
+
+                        if (ImGui.MenuItem("Whole Map Folder (per-map)...", hasTerrain))
+                        {
+                            _wantTerrainExport = true;
+                            _terrainExportKind = TerrainExportKind.Heightmap257WholeMapFolderPerMap;
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Import"))
+            {
+                if (ImGui.BeginMenu("Terrain"))
+                {
+                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                    if (ImGui.BeginMenu("Alpha Masks"))
+                    {
+                        if (ImGui.MenuItem("From Folder of Tile Atlases...", hasTerrain))
+                        {
+                            _wantTerrainImport = true;
+                            _terrainImportKind = TerrainImportKind.AlphaFolder;
+                        }
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Heightmaps"))
+                    {
+                        if (ImGui.MenuItem("From Folder of Tile Heightmaps...", hasTerrain))
+                        {
+                            _wantTerrainImport = true;
+                            _terrainImportKind = TerrainImportKind.Heightmap257Folder;
+                        }
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
             ImGui.EndMainMenuBar();
         }
 
@@ -1063,6 +1341,18 @@ void main() {
             }
         }
 
+        if (_wantTerrainExport)
+        {
+            _wantTerrainExport = false;
+            RunTerrainExport();
+        }
+
+        if (_wantTerrainImport)
+        {
+            _wantTerrainImport = false;
+            RunTerrainImport();
+        }
+
         if (_wantExportGlbCollision)
         {
             _wantExportGlbCollision = false;
@@ -1142,6 +1432,1652 @@ void main() {
                 }
             }
         }
+
+        if (_wantExportMapGlbTiles)
+        {
+            _wantExportMapGlbTiles = false;
+            try
+            {
+                RunMapGlbTilesExport();
+            }
+            catch (Exception ex)
+            {
+                _statusMessage = $"Map GLB export failed: {ex.Message}";
+            }
+        }
+    }
+
+    private void RunMapGlbTilesExport()
+    {
+        if (_terrainManager == null)
+        {
+            _statusMessage = "No terrain loaded.";
+            return;
+        }
+
+        if (_dataSource == null)
+        {
+            _statusMessage = "No data source loaded (required to export textures/models).";
+            return;
+        }
+
+        var tiles = GetTileScopeList(_mapGlbScope);
+        if (tiles.Count == 0)
+        {
+            _statusMessage = "No tiles in scope.";
+            return;
+        }
+
+        string outDir = Path.Combine(ExportDir, "map_glb", _terrainManager.MapName);
+        Directory.CreateDirectory(outDir);
+
+        int exported = 0;
+        foreach (var (tileX, tileY) in tiles)
+        {
+            string outPath = Path.Combine(outDir, $"{_terrainManager.MapName}_{tileX:D2}_{tileY:D2}.glb");
+            MapGlbExporter.ExportTile(_terrainManager, _dataSource, _md5Index, tileX, tileY, outPath, includePlacements: true);
+            exported++;
+        }
+
+        _statusMessage = $"Exported {exported} tile GLB(s) to: {outDir}";
+    }
+
+    private void RunTerrainExport()
+    {
+        try
+        {
+            switch (_terrainExportKind)
+            {
+                case TerrainExportKind.AlphaCurrentTileAtlas:
+                    ExportAlphaCurrentTileAtlas();
+                    break;
+                case TerrainExportKind.AlphaCurrentTileChunksFolder:
+                    ExportAlphaCurrentTileChunksFolder();
+                    break;
+                case TerrainExportKind.AlphaLoadedTilesFolder:
+                    ExportAlphaTilesFolder(wholeMap: false);
+                    break;
+                case TerrainExportKind.AlphaWholeMapFolder:
+                    ExportAlphaTilesFolder(wholeMap: true);
+                    break;
+                case TerrainExportKind.Heightmap257CurrentTilePerTile:
+                    ExportHeightmap257CurrentTilePerTile();
+                    break;
+                case TerrainExportKind.Heightmap257LoadedTilesFolderPerTile:
+                    ExportHeightmap257TilesFolderPerTile(wholeMap: false);
+                    break;
+                case TerrainExportKind.Heightmap257WholeMapFolderPerMap:
+                    ExportHeightmap257TilesFolderPerMap();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Terrain export failed: {ex.Message}";
+        }
+        finally
+        {
+            _terrainExportKind = TerrainExportKind.None;
+        }
+    }
+
+    private void RunTerrainImport()
+    {
+        try
+        {
+            switch (_terrainImportKind)
+            {
+                case TerrainImportKind.AlphaFolder:
+                    BeginAlphaFolderImport();
+                    break;
+                case TerrainImportKind.Heightmap257Folder:
+                    BeginHeightmapFolderImport();
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Terrain import failed: {ex.Message}";
+        }
+        finally
+        {
+            _terrainImportKind = TerrainImportKind.None;
+        }
+    }
+
+    private static bool TryParseTileCoordsFromFileName(string filePath, out int tileX, out int tileY)
+    {
+        tileX = 0;
+        tileY = 0;
+        string name = Path.GetFileNameWithoutExtension(filePath);
+
+        var matches = Regex.Matches(name, @"\d+");
+        if (matches.Count < 2)
+            return false;
+
+        var candidates = new List<int>(matches.Count);
+        foreach (Match m in matches)
+        {
+            if (int.TryParse(m.Value, out int v) && v >= 0 && v < 64)
+                candidates.Add(v);
+        }
+
+        if (candidates.Count < 2)
+            return false;
+
+        tileX = candidates[^2];
+        tileY = candidates[^1];
+        return true;
+    }
+
+    private static IEnumerable<(int tileX, int tileY)> ParseCustomTileList(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            yield break;
+
+        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) continue;
+            if (!int.TryParse(parts[0], out int x)) continue;
+            if (!int.TryParse(parts[1], out int y)) continue;
+            if ((uint)x >= 64u || (uint)y >= 64u) continue;
+            yield return (x, y);
+        }
+    }
+
+    private IReadOnlyList<(int tileX, int tileY)> GetTileScopeList(TerrainTileScope scope)
+    {
+        if (scope == TerrainTileScope.CurrentTile)
+        {
+            var cam = GetCameraTile();
+            return new List<(int, int)> { cam };
+        }
+
+        if (scope == TerrainTileScope.CustomList)
+            return ParseCustomTileList(_terrainCustomTilesText).Distinct().ToList();
+
+        if (_terrainManager != null)
+        {
+            if (scope == TerrainTileScope.LoadedTiles)
+                return _terrainManager.LoadedTiles.ToList();
+
+            if (scope == TerrainTileScope.WholeMap)
+                return _terrainManager.Adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (scope == TerrainTileScope.LoadedTiles)
+                return _vlmTerrainManager.Loader.TileCoords
+                    .Where(t => _vlmTerrainManager.IsTileLoaded(t.tileX, t.tileY))
+                    .ToList();
+
+            if (scope == TerrainTileScope.WholeMap)
+                return _vlmTerrainManager.Loader.TileCoords.ToList();
+        }
+
+        return new List<(int, int)>();
+    }
+
+    private IReadOnlyList<TerrainChunkData>? LoadTileChunksForExport(int tileX, int tileY)
+    {
+        if (_terrainManager != null)
+        {
+            return _terrainManager.GetOrLoadTileLoadResult(tileX, tileY).Chunks;
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
+                return tile.Chunks;
+
+            if (_vlmTerrainManager.Loader.TileCoords.Contains((tileX, tileY)))
+                return _vlmTerrainManager.Loader.LoadTile(tileX, tileY).Chunks;
+        }
+
+        return null;
+    }
+
+    private void ExportAlphaCurrentTileAtlas()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        Directory.CreateDirectory(ExportDir);
+        string defaultName = $"tile_{tx}_{ty}_alpha.png";
+        var picked = ShowSaveFileDialogSTA(
+            "Save Alpha Mask Atlas",
+            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+        if (string.IsNullOrEmpty(picked))
+            return;
+
+        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+        using (var fs = File.Create(picked))
+            atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        _statusMessage = $"Exported: {picked}";
+    }
+
+    private void ExportAlphaCurrentTileChunksFolder()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for chunk alpha masks",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+        var chunkImages = TerrainImageIo.BuildAlphaChunkImagesFromAtlas(atlas);
+        foreach (var kvp in chunkImages)
+        {
+            var (cx, cy) = kvp.Key;
+            string path = Path.Combine(folder, $"tile_{tx}_{ty}_chunk_{cx}_{cy}_alpha.png");
+            using (var fs = File.Create(path))
+                kvp.Value.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            kvp.Value.Dispose();
+        }
+
+        _statusMessage = $"Exported chunks: {folder}";
+    }
+
+    private void ExportAlphaTilesFolder(bool wholeMap)
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for tile alpha atlases",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = wholeMap
+            ? GetTileScopeList(TerrainTileScope.WholeMap)
+            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            using var atlas = TerrainImageIo.BuildAlphaAtlasFromChunks(chunks);
+            string path = Path.Combine(folder, $"tile_{tx}_{ty}_alpha.png");
+            using (var fs = File.Create(path))
+                atlas.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles: {folder}";
+    }
+
+    private void BeginAlphaFolderImport()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select folder containing tile alpha atlases",
+            initialDir: null,
+            showNewFolderButton: false);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        _terrainImportFolder = folder;
+        _showAlphaFolderImportScope = true;
+    }
+
+    private void DrawAlphaFolderImportScopeDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Import Alpha Masks", ref _showAlphaFolderImportScope, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text("Apply imported alpha masks to:");
+        ImGui.Separator();
+
+        int scope = (int)_terrainTileScope;
+        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
+        _terrainTileScope = (TerrainTileScope)scope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Import"))
+        {
+            ApplyAlphaFolderImport(_terrainImportFolder, _terrainTileScope);
+            _terrainImportFolder = "";
+            _showAlphaFolderImportScope = false;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _terrainImportFolder = "";
+            _showAlphaFolderImportScope = false;
+        }
+
+        ImGui.End();
+    }
+
+    private void ApplyAlphaFolderImport(string folder, TerrainTileScope scope)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        var targets = new HashSet<(int tileX, int tileY)>(GetTileScopeList(scope));
+        if (targets.Count == 0)
+        {
+            _statusMessage = "No target tiles selected.";
+            return;
+        }
+
+        if (scope == TerrainTileScope.WholeMap && _terrainManager != null)
+            _terrainManager.LoadAllTiles();
+
+        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            _statusMessage = "No terrain renderer.";
+            return;
+        }
+
+        int applied = 0;
+        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
+        {
+            if (!TryParseTileCoordsFromFileName(file, out int tx, out int ty))
+                continue;
+
+            if (!targets.Contains((tx, ty)))
+                continue;
+
+            if (_terrainManager != null && !_terrainManager.IsTileLoaded(tx, ty))
+                continue;
+            if (_vlmTerrainManager != null && !_vlmTerrainManager.IsTileLoaded(tx, ty))
+                continue;
+
+            using var atlas = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(file);
+            var alphaShadow = TerrainImageIo.DecodeAlphaShadowArrayFromAtlas(atlas);
+            renderer.ReplaceTileAlphaShadowArray(tx, ty, alphaShadow);
+            applied++;
+        }
+
+        _statusMessage = $"Imported alpha masks for {applied} tiles.";
+    }
+
+    private void ExportHeightmap257CurrentTilePerTile()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        Directory.CreateDirectory(ExportDir);
+        string defaultName = $"tile_{tx}_{ty}_height_257.png";
+        var picked = ShowSaveFileDialogSTA(
+            "Save Heightmap (257x257 L16)",
+            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+        if (string.IsNullOrEmpty(picked))
+            return;
+
+        var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+        using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+        using (var fs = File.Create(picked))
+            img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+        var meta = new HeightmapMetadata
+        {
+            MinHeight = tile.MinHeight,
+            MaxHeight = tile.MaxHeight,
+            Normalization = "per_tile",
+        };
+        string jsonPath = Path.ChangeExtension(picked, ".json");
+        File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+
+        _statusMessage = $"Exported: {picked}";
+    }
+
+    private void ExportHeightmap257TilesFolderPerTile(bool wholeMap)
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for tile heightmaps",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = wholeMap
+            ? GetTileScopeList(TerrainTileScope.WholeMap)
+            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, tile.MinHeight, tile.MaxHeight);
+            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+            using (var fs = File.Create(pngPath))
+                img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+            var meta = new HeightmapMetadata
+            {
+                MinHeight = tile.MinHeight,
+                MaxHeight = tile.MaxHeight,
+                Normalization = "per_tile",
+            };
+            string jsonPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
+            File.WriteAllText(jsonPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles: {folder}";
+    }
+
+    private void ExportHeightmap257TilesFolderPerMap()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for map-normalized tile heightmaps",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = GetTileScopeList(TerrainTileScope.WholeMap);
+        if (tiles.Count == 0)
+        {
+            _statusMessage = "No tiles available.";
+            return;
+        }
+
+        float gMin = float.MaxValue;
+        float gMax = float.MinValue;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            if (tile.MinHeight < gMin) gMin = tile.MinHeight;
+            if (tile.MaxHeight > gMax) gMax = tile.MaxHeight;
+        }
+        if (gMin == float.MaxValue || gMax == float.MinValue)
+        {
+            gMin = 0f;
+            gMax = 0f;
+        }
+
+        var mapMeta = new HeightmapMetadata
+        {
+            MinHeight = gMin,
+            MaxHeight = gMax,
+            Normalization = "per_map",
+        };
+        string mapJson = Path.Combine(folder, "heightmap_257_map.json");
+        File.WriteAllText(mapJson, JsonSerializer.Serialize(mapMeta, new JsonSerializerOptions { WriteIndented = true }));
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null) continue;
+
+            var tile = TerrainHeightmapIo.BuildTileHeightmap257(chunks);
+            using var img = TerrainHeightmapIo.EncodeL16(tile.Heights, gMin, gMax);
+            string pngPath = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.png");
+            using (var fs = File.Create(pngPath))
+                img.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} tiles (per-map): {folder}";
+    }
+
+    private void BeginHeightmapFolderImport()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select folder containing tile heightmaps",
+            initialDir: null,
+            showNewFolderButton: false);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        _terrainImportFolder = folder;
+        _showHeightmapFolderImportScope = true;
+    }
+
+    private void DrawHeightmapFolderImportScopeDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Import Heightmaps", ref _showHeightmapFolderImportScope, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text("Apply imported heightmaps to:");
+        ImGui.Separator();
+
+        int scope = (int)_terrainTileScope;
+        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
+        _terrainTileScope = (TerrainTileScope)scope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
+        }
+
+        ImGui.Separator();
+        if (ImGui.Button("Import"))
+        {
+            ApplyHeightmapFolderImport(_terrainImportFolder, _terrainTileScope);
+            _terrainImportFolder = "";
+            _showHeightmapFolderImportScope = false;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _terrainImportFolder = "";
+            _showHeightmapFolderImportScope = false;
+        }
+
+        ImGui.End();
+    }
+
+    private void ApplyHeightmapFolderImport(string folder, TerrainTileScope scope)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        var targets = new HashSet<(int tileX, int tileY)>(GetTileScopeList(scope));
+        if (targets.Count == 0)
+        {
+            _statusMessage = "No target tiles selected.";
+            return;
+        }
+
+        HeightmapMetadata? mapMeta = null;
+        string mapMetaPath = Path.Combine(folder, "heightmap_257_map.json");
+        if (File.Exists(mapMetaPath))
+        {
+            try
+            {
+                mapMeta = JsonSerializer.Deserialize<HeightmapMetadata>(File.ReadAllText(mapMetaPath));
+            }
+            catch
+            {
+                mapMeta = null;
+            }
+        }
+
+        int applied = 0;
+        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
+        {
+            if (!TryParseTileCoordsFromFileName(file, out int tx, out int ty))
+                continue;
+            if (!targets.Contains((tx, ty)))
+                continue;
+
+            if (_terrainManager != null && !_terrainManager.IsTileLoaded(tx, ty))
+                continue;
+            if (_vlmTerrainManager != null && !_vlmTerrainManager.IsTileLoaded(tx, ty))
+                continue;
+
+            HeightmapMetadata? meta = null;
+            string perTileJson = Path.Combine(folder, $"tile_{tx}_{ty}_height_257.json");
+            if (File.Exists(perTileJson))
+            {
+                try
+                {
+                    meta = JsonSerializer.Deserialize<HeightmapMetadata>(File.ReadAllText(perTileJson));
+                }
+                catch
+                {
+                    meta = null;
+                }
+            }
+
+            meta ??= mapMeta;
+            if (meta == null)
+                continue;
+
+            using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.L16>(file);
+            var tileHeights = TerrainHeightmapIo.DecodeL16(img, meta.MinHeight, meta.MaxHeight);
+
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null)
+                continue;
+
+            var newChunks = TerrainHeightmapIo.ApplyHeightmap257ToChunks(chunks, tileHeights);
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+
+            applied++;
+        }
+
+        _statusMessage = $"Imported heightmaps for {applied} tiles.";
+    }
+
+    private TerrainRenderer.TerrainChunkInfo? GetChunkClipboardTarget(TerrainRenderer renderer)
+    {
+        if (_chunkClipboardUseMouse && TryPickTerrainChunkUnderMouse(renderer, out var mouseChunk))
+            return mouseChunk;
+        return renderer.GetChunkInfoAt(_camera.Position.X, _camera.Position.Y);
+    }
+
+    private bool TryLockChunkPasteTarget(TerrainRenderer renderer)
+    {
+        if (!TryPickTerrainChunkUnderMouse(renderer, out var info))
+            return false;
+
+        _chunkClipboardLockedTargetKey = (info.TileX, info.TileY, info.ChunkX, info.ChunkY);
+        _chunkClipboardStatus = $"Locked paste target: tile({info.TileX},{info.TileY}) chunk({info.ChunkX},{info.ChunkY})";
+        return true;
+    }
+
+    private void ExecuteChunkClipboardCopy(TerrainRenderer renderer)
+    {
+        if (_selectedChunks.Count > 0)
+        {
+            CopySelectedChunks(renderer);
+            return;
+        }
+
+        CopyChunkAtTarget(renderer);
+    }
+
+    private void ExecuteChunkClipboardPaste(TerrainRenderer renderer)
+    {
+        if (_chunkClipboardLockedTargetKey == null)
+        {
+            _chunkClipboardStatus = "Paste blocked: lock a paste target with Ctrl+LMB.";
+            return;
+        }
+
+        if (_chunkClipboardSet != null)
+            PasteClipboardSetAtTarget(renderer);
+        else
+            PasteChunkAtTarget(renderer);
+    }
+
+    private void CopyChunkAtTarget(TerrainRenderer renderer)
+    {
+        var targetChunk = GetChunkClipboardTarget(renderer);
+        if (!targetChunk.HasValue)
+        {
+            _chunkClipboardStatus = "Copy failed: no loaded chunk at target.";
+            return;
+        }
+
+        var key = targetChunk.Value;
+
+        if (!TryGetChunkData(key.TileX, key.TileY, key.ChunkX, key.ChunkY, out var chunk))
+        {
+            _chunkClipboardStatus = $"Copy failed: chunk data not available for tile({key.TileX},{key.TileY}) chunk({key.ChunkX},{key.ChunkY}).";
+            return;
+        }
+
+        _chunkClipboard = new ChunkClipboard(chunk);
+        _chunkClipboardSet = null;
+        _chunkClipboardCopiedKey = (key.TileX, key.TileY, key.ChunkX, key.ChunkY);
+        _chunkClipboardStatus = $"Copied: tile({key.TileX},{key.TileY}) chunk({key.ChunkX},{key.ChunkY})";
+    }
+
+    private bool TryHandleChunkSelectionClick(TerrainRenderer renderer, bool shift)
+    {
+        if (!TryPickTerrainChunkUnderMouse(renderer, out var info))
+            return false;
+
+        var key = (info.TileX, info.TileY, info.ChunkX, info.ChunkY);
+        if (shift)
+        {
+            if (!_selectedChunks.Add(key))
+                _selectedChunks.Remove(key);
+        }
+        else
+        {
+            _selectedChunks.Clear();
+            _selectedChunks.Add(key);
+        }
+
+        _chunkClipboardStatus = $"Selected {_selectedChunks.Count} chunk(s)";
+        return true;
+    }
+
+    private void CopySelectedChunks(TerrainRenderer renderer)
+    {
+        if (_selectedChunks.Count == 0)
+            return;
+
+        int minGlobalX = int.MaxValue;
+        int minGlobalY = int.MaxValue;
+        foreach (var (tx, ty, cx, cy) in _selectedChunks)
+        {
+            int gx = tx * 16 + cx;
+            int gy = ty * 16 + cy;
+            minGlobalX = Math.Min(minGlobalX, gx);
+            minGlobalY = Math.Min(minGlobalY, gy);
+        }
+
+        var set = new ChunkClipboardSet(minGlobalX, minGlobalY);
+        int copied = 0;
+
+        foreach (var (stx, sty, scx, scy) in _selectedChunks)
+        {
+            if (!TryGetChunkData(stx, sty, scx, scy, out var chunk))
+                continue;
+
+            int gx = stx * 16 + scx;
+            int gy = sty * 16 + scy;
+            set.Chunks[(gx - minGlobalX, gy - minGlobalY)] = new ChunkClipboard(chunk);
+            copied++;
+        }
+
+        if (copied == 0)
+        {
+            _chunkClipboardStatus = "Copy failed: selection chunks not available.";
+            return;
+        }
+
+        _chunkClipboardSet = set;
+        _chunkClipboard = null;
+        _chunkClipboardCopiedKey = _selectedChunks.First();
+        _chunkClipboardStatus = $"Copied selection: {copied} chunk(s).";
+    }
+
+    private void PasteClipboardSetAtTarget(TerrainRenderer renderer)
+    {
+        if (_chunkClipboardSet == null)
+            return;
+
+        if (_chunkClipboardLockedTargetKey == null)
+        {
+            _chunkClipboardStatus = "Paste blocked: lock a paste target with Ctrl+LMB.";
+            return;
+        }
+
+        int targetGlobalX = _chunkClipboardLockedTargetKey.Value.tileX * 16 + _chunkClipboardLockedTargetKey.Value.chunkX;
+        int targetGlobalY = _chunkClipboardLockedTargetKey.Value.tileY * 16 + _chunkClipboardLockedTargetKey.Value.chunkY;
+
+        int maxDx = 0;
+        int maxDy = 0;
+        foreach (var key in _chunkClipboardSet.Chunks.Keys)
+        {
+            maxDx = Math.Max(maxDx, key.dx);
+            maxDy = Math.Max(maxDy, key.dy);
+        }
+        int width = maxDx + 1;
+        int height = maxDy + 1;
+
+        int srcGridW = width * 16 + 1;
+        int srcGridH = height * 16 + 1;
+        var sum = new float[srcGridW * srcGridH];
+        var count = new ushort[srcGridW * srcGridH];
+
+        foreach (var kvp in _chunkClipboardSet.Chunks)
+        {
+            int baseX = kvp.Key.dx * 16;
+            int baseY = kvp.Key.dy * 16;
+            var clip = kvp.Value;
+            if (clip.Heights == null || clip.Heights.Length < 145)
+                continue;
+
+            for (int i = 0; i < 145; i++)
+            {
+                GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
+
+                int hx;
+                int hy;
+                if (!isInner)
+                {
+                    hx = col * 2;
+                    hy = (row / 2) * 2;
+                }
+                else
+                {
+                    hx = col * 2 + 1;
+                    hy = (row / 2) * 2 + 1;
+                }
+
+                int px = baseX + hx;
+                int py = baseY + hy;
+                if ((uint)px >= (uint)srcGridW || (uint)py >= (uint)srcGridH)
+                    continue;
+
+                int idx = py * srcGridW + px;
+                sum[idx] += clip.Heights[i];
+                if (count[idx] != ushort.MaxValue)
+                    count[idx]++;
+            }
+        }
+
+        var srcGrid = new float[srcGridW * srcGridH];
+        for (int i = 0; i < srcGrid.Length; i++)
+            srcGrid[i] = count[i] > 0 ? (sum[i] / count[i]) : float.NaN;
+
+        var rotatedGrid = RotateFloatGrid(srcGrid, srcGridW, srcGridH, _chunkClipboardSelectionRotation, out int rotGridW, out int rotGridH);
+
+        float heightDelta = 0f;
+        if (_chunkClipboardPasteRelativeHeights)
+        {
+            var sourceClip = _chunkClipboardSet.Chunks.TryGetValue((0, 0), out var origin) ? origin : _chunkClipboardSet.Chunks.Values.First();
+            float sourceRef = ComputeAverageHeight(sourceClip.Heights);
+            if (TryGetChunkData(_chunkClipboardLockedTargetKey.Value.tileX, _chunkClipboardLockedTargetKey.Value.tileY,
+                    _chunkClipboardLockedTargetKey.Value.chunkX, _chunkClipboardLockedTargetKey.Value.chunkY, out var targetChunkData))
+            {
+                float targetRef = ComputeAverageHeight(targetChunkData.Heights);
+                heightDelta = targetRef - sourceRef;
+            }
+        }
+
+        static (int dx, int dy) RotateInBox(int dx, int dy, int width, int height, int rot)
+        {
+            rot = ((rot % 4) + 4) % 4;
+            return rot switch
+            {
+                0 => (dx, dy),
+                1 => (height - 1 - dy, dx),
+                2 => (width - 1 - dx, height - 1 - dy),
+                3 => (dy, width - 1 - dx),
+                _ => (dx, dy)
+            };
+        }
+
+        var perTile = new Dictionary<(int tileX, int tileY), List<(int chunkX, int chunkY, int rdx, int rdy, ChunkClipboard clip)>>();
+        foreach (var kvp in _chunkClipboardSet.Chunks)
+        {
+            var (rdx, rdy) = RotateInBox(kvp.Key.dx, kvp.Key.dy, width, height, _chunkClipboardSelectionRotation);
+            int destGlobalX = targetGlobalX + rdx;
+            int destGlobalY = targetGlobalY + rdy;
+            if (destGlobalX < 0 || destGlobalX >= 64 * 16 || destGlobalY < 0 || destGlobalY >= 64 * 16)
+                continue;
+
+            int tileX = destGlobalX / 16;
+            int tileY = destGlobalY / 16;
+            int chunkX = destGlobalX % 16;
+            int chunkY = destGlobalY % 16;
+
+            var tkey = (tileX, tileY);
+            if (!perTile.TryGetValue(tkey, out var list))
+            {
+                list = new List<(int, int, int, int, ChunkClipboard)>();
+                perTile[tkey] = list;
+            }
+
+            list.Add((chunkX, chunkY, rdx, rdy, kvp.Value));
+        }
+
+        int pasted = 0;
+        int skipped = 0;
+
+        foreach (var entry in perTile)
+        {
+            var (tileX, tileY) = entry.Key;
+            if (!TryGetTileChunksForEdit(tileX, tileY, out var chunks))
+            {
+                skipped += entry.Value.Count;
+                continue;
+            }
+
+            var newChunks = chunks.ToList();
+
+            foreach (var (chunkX, chunkY, rdx, rdy, clip) in entry.Value)
+            {
+                int idx = newChunks.FindIndex(c => c.ChunkX == chunkX && c.ChunkY == chunkY);
+                if (idx < 0)
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var target = newChunks[idx];
+                bool layersMatch = AreLayersCompatible(target.Layers, clip.Layers);
+
+                int baseX = rdx * 16;
+                int baseY = rdy * 16;
+                var heights = new float[145];
+                for (int i = 0; i < 145; i++)
+                {
+                    GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
+
+                    int hx;
+                    int hy;
+                    if (!isInner)
+                    {
+                        hx = col * 2;
+                        hy = (row / 2) * 2;
+                    }
+                    else
+                    {
+                        hx = col * 2 + 1;
+                        hy = (row / 2) * 2 + 1;
+                    }
+
+                    int px = baseX + hx;
+                    int py = baseY + hy;
+                    if ((uint)px >= (uint)rotGridW || (uint)py >= (uint)rotGridH)
+                    {
+                        heights[i] = target.Heights[i];
+                        continue;
+                    }
+
+                    float v = rotatedGrid[py * rotGridW + px];
+                    heights[i] = float.IsNaN(v) ? target.Heights[i] : (v + heightDelta);
+                }
+
+                int holeMask = RotateHoleMask(clip.HoleMask, _chunkClipboardSelectionRotation);
+                var normals = GenerateNormalsForChunk(target, heights, holeMask);
+
+                var layersToUse = target.Layers;
+                var alphaToUse = target.AlphaMaps;
+                byte[]? shadowToUse = target.ShadowMap;
+
+                if (_chunkClipboardIncludeTextures)
+                {
+                    layersToUse = clip.Layers;
+                    if (_chunkClipboardIncludeAlphaShadow)
+                    {
+                        alphaToUse = CloneAlphaMaps(clip.AlphaMaps);
+                        shadowToUse = clip.ShadowMap != null ? (byte[])clip.ShadowMap.Clone() : null;
+                    }
+                }
+                else if (_chunkClipboardIncludeAlphaShadow && layersMatch)
+                {
+                    alphaToUse = CloneAlphaMaps(clip.AlphaMaps);
+                    shadowToUse = clip.ShadowMap != null ? (byte[])clip.ShadowMap.Clone() : null;
+                }
+
+                var pastedChunk = new Terrain.TerrainChunkData
+                {
+                    TileX = target.TileX,
+                    TileY = target.TileY,
+                    ChunkX = target.ChunkX,
+                    ChunkY = target.ChunkY,
+                    Heights = heights,
+                    Normals = normals,
+                    HoleMask = holeMask,
+
+                    Layers = layersToUse,
+                    AlphaMaps = alphaToUse,
+                    ShadowMap = shadowToUse,
+
+                    MccvColors = target.MccvColors,
+                    Liquid = target.Liquid,
+                    WorldPosition = target.WorldPosition,
+                    AreaId = target.AreaId,
+                    McnkFlags = target.McnkFlags
+                };
+
+                newChunks[idx] = pastedChunk;
+                pasted++;
+            }
+
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tileX, tileY, newChunks);
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tileX, tileY, newChunks);
+        }
+
+        _chunkClipboardStatus = $"Pasted {pasted} chunk(s)" + (skipped > 0 ? $" (skipped {skipped})" : "") + $". Rotation={_chunkClipboardSelectionRotation * 90}°";
+    }
+
+    private static float[] RotateFloatGrid(float[] src, int w, int h, int rot, out int outW, out int outH)
+    {
+        rot = ((rot % 4) + 4) % 4;
+        if (rot == 0)
+        {
+            outW = w;
+            outH = h;
+            return src;
+        }
+
+        if (rot == 2)
+        {
+            outW = w;
+            outH = h;
+            var dst = new float[w * h];
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int sx = x;
+                    int sy = y;
+                    int dx = (w - 1 - sx);
+                    int dy = (h - 1 - sy);
+                    dst[dy * w + dx] = src[sy * w + sx];
+                }
+            }
+            return dst;
+        }
+
+        outW = h;
+        outH = w;
+        var outGrid = new float[outW * outH];
+
+        if (rot == 1)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int dx = (h - 1 - y);
+                    int dy = x;
+                    outGrid[dy * outW + dx] = src[y * w + x];
+                }
+            }
+        }
+        else
+        {
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int dx = y;
+                    int dy = (w - 1 - x);
+                    outGrid[dy * outW + dx] = src[y * w + x];
+                }
+            }
+        }
+
+        return outGrid;
+    }
+
+    private static int RotateHoleMask(int holeMask, int rot)
+    {
+        rot = ((rot % 4) + 4) % 4;
+        if (rot == 0 || holeMask == 0)
+            return holeMask;
+
+        int GetBit(int x, int y) => (holeMask >> (y * 4 + x)) & 1;
+        int SetBit(int x, int y) => 1 << (y * 4 + x);
+
+        int outMask = 0;
+        for (int y = 0; y < 4; y++)
+        {
+            for (int x = 0; x < 4; x++)
+            {
+                if (GetBit(x, y) == 0)
+                    continue;
+
+                int rx;
+                int ry;
+                switch (rot)
+                {
+                    case 1:
+                        rx = 3 - y;
+                        ry = x;
+                        break;
+                    case 2:
+                        rx = 3 - x;
+                        ry = 3 - y;
+                        break;
+                    case 3:
+                        rx = y;
+                        ry = 3 - x;
+                        break;
+                    default:
+                        rx = x;
+                        ry = y;
+                        break;
+                }
+
+                outMask |= SetBit(rx, ry);
+            }
+        }
+
+        return outMask;
+    }
+
+    private static Vector3[] GenerateNormalsForChunk(Terrain.TerrainChunkData chunk, float[] heights, int holeMask)
+    {
+        var positions = new Vector3[145];
+        for (int i = 0; i < 145; i++)
+            positions[i] = GetChunkVertexWorldPosition(chunk, heights, i);
+
+        var indices = BuildChunkIndices(holeMask);
+        var accum = new Vector3[145];
+
+        for (int t = 0; t + 2 < indices.Length; t += 3)
+        {
+            int i0 = indices[t + 0];
+            int i1 = indices[t + 1];
+            int i2 = indices[t + 2];
+
+            var p0 = positions[i0];
+            var p1 = positions[i1];
+            var p2 = positions[i2];
+
+            var e1 = p1 - p0;
+            var e2 = p2 - p0;
+            var n = Vector3.Cross(e1, e2);
+            float lenSq = n.LengthSquared();
+            if (lenSq < 1e-10f)
+                continue;
+
+            n = Vector3.Normalize(n);
+            accum[i0] += n;
+            accum[i1] += n;
+            accum[i2] += n;
+        }
+
+        var normals = new Vector3[145];
+        for (int i = 0; i < 145; i++)
+        {
+            var n = accum[i];
+            float lenSq = n.LengthSquared();
+            normals[i] = lenSq > 1e-10f ? Vector3.Normalize(n) : Vector3.UnitZ;
+        }
+
+        return normals;
+    }
+
+    private static Vector3 GetChunkVertexWorldPosition(Terrain.TerrainChunkData chunk, float[] heights, int index)
+    {
+        GetChunkVertexPosition(index, out int row, out int col, out bool isInner);
+
+        float cellSize = WoWConstants.ChunkSize / 16f;
+        float subCellSize = cellSize / 8f;
+
+        float x;
+        float y;
+        if (!isInner)
+        {
+            x = col * subCellSize;
+            y = (row / 2) * subCellSize;
+        }
+        else
+        {
+            x = (col + 0.5f) * subCellSize;
+            y = (row / 2 + 0.5f) * subCellSize;
+        }
+
+        float z = (index < heights.Length) ? heights[index] : 0f;
+        float wx = chunk.WorldPosition.X - y;
+        float wy = chunk.WorldPosition.Y - x;
+        return new Vector3(wx, wy, z);
+    }
+
+    private static int OuterIndex(int outerRow, int outerCol) => outerRow * 17 + outerCol;
+    private static int InnerIndex(int innerRow, int innerCol) => innerRow * 17 + 9 + innerCol;
+
+    private static int[] BuildChunkIndices(int holeMask)
+    {
+        var indices = new List<int>(256 * 3);
+
+        for (int cellY = 0; cellY < 8; cellY++)
+        {
+            for (int cellX = 0; cellX < 8; cellX++)
+            {
+                if (holeMask != 0)
+                {
+                    int holeX = cellX / 2;
+                    int holeY = cellY / 2;
+                    int holeBit = 1 << (holeY * 4 + holeX);
+                    if ((holeMask & holeBit) != 0)
+                        continue;
+                }
+
+                int tl = OuterIndex(cellY, cellX);
+                int tr = OuterIndex(cellY, cellX + 1);
+                int bl = OuterIndex(cellY + 1, cellX);
+                int br = OuterIndex(cellY + 1, cellX + 1);
+                int center = InnerIndex(cellY, cellX);
+
+                indices.Add(center);
+                indices.Add(tr);
+                indices.Add(tl);
+
+                indices.Add(center);
+                indices.Add(br);
+                indices.Add(tr);
+
+                indices.Add(center);
+                indices.Add(bl);
+                indices.Add(br);
+
+                indices.Add(center);
+                indices.Add(tl);
+                indices.Add(bl);
+            }
+        }
+
+        return indices.ToArray();
+    }
+
+    private void PasteChunkAtTarget(TerrainRenderer renderer)
+    {
+        if (_chunkClipboard == null)
+        {
+            _chunkClipboardStatus = "Paste failed: clipboard is empty.";
+            return;
+        }
+
+        if (_chunkClipboardLockedTargetKey == null)
+        {
+            _chunkClipboardStatus = "Paste blocked: lock a paste target with Ctrl+LMB.";
+            return;
+        }
+
+        var key = (TileX: _chunkClipboardLockedTargetKey.Value.tileX,
+            TileY: _chunkClipboardLockedTargetKey.Value.tileY,
+            ChunkX: _chunkClipboardLockedTargetKey.Value.chunkX,
+            ChunkY: _chunkClipboardLockedTargetKey.Value.chunkY);
+
+        if (!TryGetTileChunksForEdit(key.TileX, key.TileY, out var chunks))
+        {
+            _chunkClipboardStatus = $"Paste failed: tile data not available for tile({key.TileX},{key.TileY}).";
+            return;
+        }
+
+        int idx = chunks.FindIndex(c => c.ChunkX == key.ChunkX && c.ChunkY == key.ChunkY);
+        if (idx < 0)
+        {
+            _chunkClipboardStatus = $"Paste failed: chunk not found in tile({key.TileX},{key.TileY}) chunk({key.ChunkX},{key.ChunkY}).";
+            return;
+        }
+
+        var target = chunks[idx];
+        bool layersMatch = AreLayersCompatible(target.Layers, _chunkClipboard.Layers);
+
+        float[] heights = (float[])_chunkClipboard.Heights.Clone();
+        Vector3[] normals = (Vector3[])_chunkClipboard.Normals.Clone();
+        if (_chunkClipboardPasteRelativeHeights)
+        {
+            float sourceRef = ComputeAverageHeight(_chunkClipboard.Heights);
+            float targetRef = ComputeAverageHeight(target.Heights);
+            float delta = targetRef - sourceRef;
+            for (int i = 0; i < heights.Length; i++)
+                heights[i] += delta;
+        }
+
+        var layersToUse = target.Layers;
+        var alphaToUse = target.AlphaMaps;
+        byte[]? shadowToUse = target.ShadowMap;
+
+        if (_chunkClipboardIncludeTextures)
+        {
+            layersToUse = _chunkClipboard.Layers;
+            if (_chunkClipboardIncludeAlphaShadow)
+            {
+                alphaToUse = CloneAlphaMaps(_chunkClipboard.AlphaMaps);
+                shadowToUse = _chunkClipboard.ShadowMap != null ? (byte[])_chunkClipboard.ShadowMap.Clone() : null;
+            }
+        }
+        else if (_chunkClipboardIncludeAlphaShadow && layersMatch)
+        {
+            alphaToUse = CloneAlphaMaps(_chunkClipboard.AlphaMaps);
+            shadowToUse = _chunkClipboard.ShadowMap != null ? (byte[])_chunkClipboard.ShadowMap.Clone() : null;
+        }
+
+        var pasted = new Terrain.TerrainChunkData
+        {
+            TileX = target.TileX,
+            TileY = target.TileY,
+            ChunkX = target.ChunkX,
+            ChunkY = target.ChunkY,
+            Heights = heights,
+            Normals = normals,
+            HoleMask = _chunkClipboard.HoleMask,
+            Layers = layersToUse,
+            AlphaMaps = alphaToUse,
+            ShadowMap = shadowToUse,
+            MccvColors = (target.MccvColors != null && _chunkClipboard.MccvColors != null)
+                ? (byte[])_chunkClipboard.MccvColors.Clone()
+                : target.MccvColors,
+            Liquid = target.Liquid,
+            WorldPosition = target.WorldPosition,
+            AreaId = target.AreaId,
+            McnkFlags = target.McnkFlags
+        };
+
+        var newChunks = chunks.ToList();
+        newChunks[idx] = pasted;
+
+        if (_terrainManager != null)
+            _terrainManager.ReplaceTileChunksAndRebuild(key.TileX, key.TileY, newChunks);
+        else
+            _vlmTerrainManager?.ReplaceTileChunksAndRebuild(key.TileX, key.TileY, newChunks);
+
+        bool didTextures = _chunkClipboardIncludeTextures;
+        bool didAlpha = _chunkClipboardIncludeAlphaShadow && (didTextures || layersMatch);
+
+        _chunkClipboardStatus = $"Pasted heights" +
+                       (didTextures ? " + textures" : "") +
+                       (didAlpha ? " + alpha/shadow" : "") +
+                       $" into tile({key.TileX},{key.TileY}) chunk({key.ChunkX},{key.ChunkY})" +
+                       (!didTextures && _chunkClipboardIncludeAlphaShadow && !layersMatch ? " (alpha skipped: layer mismatch)" : "");
+    }
+
+    private void DrawEditorOverlays(Matrix4x4 view, Matrix4x4 proj)
+    {
+        if (!_chunkClipboardShowOverlay)
+            return;
+
+        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+            return;
+
+        _editorOverlayBb ??= new Terrain.BoundingBoxRenderer(_gl);
+
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _gl.DepthMask(false);
+
+        if (_selectedChunks.Count > 0)
+        {
+            foreach (var (tx, ty, cx, cy) in _selectedChunks)
+            {
+                if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
+                    _editorOverlayBb.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+            }
+        }
+
+        if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
+            _editorOverlayBb.DrawBoxMinMax(lockedInfo.BoundsMin, lockedInfo.BoundsMax, view, proj, new Vector3(1f, 1f, 1f));
+
+        if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
+            _editorOverlayBb.DrawBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
+
+        _gl.DepthMask(true);
+    }
+
+    private static float ComputeAverageHeight(float[] heights)
+    {
+        if (heights == null || heights.Length == 0)
+            return 0f;
+        double sum = 0;
+        for (int i = 0; i < heights.Length; i++)
+            sum += heights[i];
+        return (float)(sum / heights.Length);
+    }
+
+    private bool TryPickTerrainChunkUnderMouse(TerrainRenderer renderer, out TerrainRenderer.TerrainChunkInfo info)
+    {
+        info = default;
+
+        if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+            return false;
+
+        var mouse = ImGui.GetMousePos();
+        float mouseX = mouse.X;
+        float mouseY = mouse.Y;
+        if (mouseX < vpX || mouseX > vpX + vpW || mouseY < vpY || mouseY > vpY + vpH)
+            return false;
+
+        float aspect = vpW / Math.Max(vpH, 1f);
+        var view = _camera.GetViewMatrix();
+        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
+
+        float localX = mouseX - vpX;
+        float localY = mouseY - vpY;
+        float ndcX = (localX / vpW) * 2f - 1f;
+        float ndcY = 1f - (localY / vpH) * 2f;
+
+        var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
+        return TryRaycastTerrain(renderer, rayOrigin, rayDir, farPlane, out info);
+    }
+
+    private bool TryRaycastTerrain(TerrainRenderer renderer, Vector3 rayOrigin, Vector3 rayDir, float maxDistance, out TerrainRenderer.TerrainChunkInfo info)
+    {
+        info = default;
+
+        const float step = 16f;
+        int maxSteps = (int)MathF.Ceiling(maxDistance / step);
+        maxSteps = Math.Clamp(maxSteps, 16, 1024);
+
+        float prevT = 0f;
+        float prevD = float.NaN;
+
+        for (int i = 0; i <= maxSteps; i++)
+        {
+            float t = i * step;
+            var p = rayOrigin + rayDir * t;
+
+            if (!TrySampleTerrainHeightLoaded(renderer, p.X, p.Y, out float height, out var curInfo))
+                continue;
+
+            float d = p.Z - height;
+            if (!float.IsNaN(prevD))
+            {
+                if (prevD > 0f && d <= 0f)
+                {
+                    float a = prevT;
+                    float b = t;
+                    TerrainRenderer.TerrainChunkInfo best = curInfo;
+                    for (int it = 0; it < 10; it++)
+                    {
+                        float m = (a + b) * 0.5f;
+                        var pm = rayOrigin + rayDir * m;
+                        if (!TrySampleTerrainHeightLoaded(renderer, pm.X, pm.Y, out float hm, out var mi))
+                        {
+                            a = m;
+                            continue;
+                        }
+
+                        best = mi;
+                        float dm = pm.Z - hm;
+                        if (dm > 0f)
+                            a = m;
+                        else
+                            b = m;
+                    }
+
+                    info = best;
+                    return true;
+                }
+            }
+
+            prevT = t;
+            prevD = d;
+        }
+
+        return false;
+    }
+
+    private bool TrySampleTerrainHeightLoaded(TerrainRenderer renderer, float worldX, float worldY, out float height, out TerrainRenderer.TerrainChunkInfo info)
+    {
+        height = 0f;
+        info = default;
+
+        var ci = renderer.GetChunkInfoAt(worldX, worldY);
+        if (!ci.HasValue)
+            return false;
+
+        info = ci.Value;
+        if (!TryGetChunkDataLoadedOnly(info.TileX, info.TileY, info.ChunkX, info.ChunkY, out var chunk))
+            return false;
+
+        float localX = chunk.WorldPosition.Y - worldY;
+        float localY = chunk.WorldPosition.X - worldX;
+        localX = Math.Clamp(localX, 0f, WoWConstants.ChunkSize);
+        localY = Math.Clamp(localY, 0f, WoWConstants.ChunkSize);
+
+        height = SampleHeightOuterGrid(chunk, localX, localY);
+        return true;
+    }
+
+    private bool TryGetChunkDataLoadedOnly(int tileX, int tileY, int chunkX, int chunkY, out Terrain.TerrainChunkData chunk)
+    {
+        chunk = new Terrain.TerrainChunkData();
+
+        List<Terrain.TerrainChunkData>? chunks = null;
+        if (_terrainManager != null)
+        {
+            if (!_terrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
+                return false;
+            chunks = tile.Chunks;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            if (!_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
+                return false;
+            chunks = tile.Chunks;
+        }
+
+        if (chunks == null || chunks.Count == 0)
+            return false;
+
+        var found = chunks.FirstOrDefault(c => c != null && c.ChunkX == chunkX && c.ChunkY == chunkY);
+        if (found == null || found.Heights == null || found.Heights.Length < 145)
+            return false;
+
+        chunk = found;
+        return true;
+    }
+
+    private static float SampleHeightOuterGrid(Terrain.TerrainChunkData chunk, float localX, float localY)
+    {
+        if (chunk.Heights == null || chunk.Heights.Length < 145) return chunk.WorldPosition.Z;
+
+        float cellSize = WoWConstants.ChunkSize / 16f;
+        float subCellSize = cellSize / 8f;
+
+        Span<float> grid = stackalloc float[9 * 9];
+        grid.Clear();
+
+        for (int i = 0; i < 145; i++)
+        {
+            GetChunkVertexPosition(i, out int row, out int col, out bool isInner);
+            if (isInner) continue;
+            int gy = row / 2;
+            if ((uint)gy >= 9u || (uint)col >= 9u) continue;
+            grid[gy * 9 + col] = chunk.Heights[i];
+        }
+
+        float gx = localX / subCellSize;
+        float gyf = localY / subCellSize;
+        int ix = Math.Clamp((int)MathF.Floor(gx), 0, 7);
+        int iy = Math.Clamp((int)MathF.Floor(gyf), 0, 7);
+        float fx = Math.Clamp(gx - ix, 0f, 1f);
+        float fy = Math.Clamp(gyf - iy, 0f, 1f);
+
+        float h00 = grid[iy * 9 + ix];
+        float h10 = grid[iy * 9 + (ix + 1)];
+        float h01 = grid[(iy + 1) * 9 + ix];
+        float h11 = grid[(iy + 1) * 9 + (ix + 1)];
+
+        float h0 = h00 + (h10 - h00) * fx;
+        float h1 = h01 + (h11 - h01) * fx;
+        return h0 + (h1 - h0) * fy;
+    }
+
+    private static void GetChunkVertexPosition(int index, out int row, out int col, out bool isInner)
+    {
+        int remaining = index;
+        row = 0;
+        col = 0;
+        isInner = false;
+
+        for (int r = 0; r < 17; r++)
+        {
+            int rowSize = (r % 2 == 0) ? 9 : 8;
+            if (remaining < rowSize)
+            {
+                row = r;
+                col = remaining;
+                isInner = (r % 2 == 1);
+                return;
+            }
+            remaining -= rowSize;
+        }
+    }
+
+    private bool TryGetChunkData(int tileX, int tileY, int chunkX, int chunkY, out Terrain.TerrainChunkData chunk)
+    {
+        chunk = new Terrain.TerrainChunkData();
+
+        if (!TryGetTileChunksForEdit(tileX, tileY, out var chunks))
+            return false;
+
+        var found = chunks.FirstOrDefault(c => c != null && c.ChunkX == chunkX && c.ChunkY == chunkY);
+        if (found == null || found.Heights == null || found.Heights.Length == 0)
+            return false;
+
+        chunk = found;
+        return true;
+    }
+
+    private bool TryGetTileChunksForEdit(int tileX, int tileY, out List<Terrain.TerrainChunkData> chunks)
+    {
+        chunks = new List<Terrain.TerrainChunkData>();
+
+        if (_terrainManager != null)
+        {
+            var tile = _terrainManager.GetOrLoadTileLoadResult(tileX, tileY);
+            chunks = tile.Chunks;
+            return chunks.Count > 0;
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out var tile))
+            {
+                chunks = tile.Chunks;
+                return chunks.Count > 0;
+            }
+
+            tile = _vlmTerrainManager.Loader.LoadTile(tileX, tileY);
+            chunks = tile.Chunks;
+            return chunks.Count > 0;
+        }
+
+        return false;
+    }
+
+    private static bool AreLayersCompatible(Terrain.TerrainLayer[] a, Terrain.TerrainLayer[] b)
+    {
+        if (a.Length != b.Length)
+            return false;
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i].TextureIndex != b[i].TextureIndex)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static Dictionary<int, byte[]> CloneAlphaMaps(Dictionary<int, byte[]> maps)
+    {
+        var clone = new Dictionary<int, byte[]>(maps.Count);
+        foreach (var (k, v) in maps)
+            clone[k] = (byte[])v.Clone();
+        return clone;
     }
 
     private void DrawPerfWindow()
@@ -1255,11 +3191,13 @@ void main() {
             Vector3 selectedObjectTranslation = _worldScene.SelectedPm4ObjectTranslation;
             bool objectTranslationChanged = false;
 
-            ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6}");
+            ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
             if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
             {
                 ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
                 ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+                ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
+                ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
                 ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
             }
 
@@ -3316,6 +5254,82 @@ void main() {
             ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
             ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
         }
+
+        ImGui.Separator();
+        ImGui.Text("Chunk Clipboard");
+        ImGui.Checkbox("Enable Chunk Tool", ref _chunkToolEnabled);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Overlay", ref _chunkClipboardShowOverlay);
+
+        ImGui.TextDisabled("Shift+LMB: toggle selection | Ctrl+LMB: lock paste target | Ctrl+C/Ctrl+V: copy/paste");
+
+        ImGui.Checkbox("Copy Target: Use Mouse", ref _chunkClipboardUseMouse);
+        ImGui.Checkbox("Paste Relative Heights", ref _chunkClipboardPasteRelativeHeights);
+        ImGui.Checkbox("Include Alpha/Shadow", ref _chunkClipboardIncludeAlphaShadow);
+        ImGui.Checkbox("Include Textures", ref _chunkClipboardIncludeTextures);
+
+        ImGui.SetNextItemWidth(160f);
+        string[] rotLabels = { "0°", "90°", "180°", "270°" };
+        ImGui.Combo("Paste Rotation", ref _chunkClipboardSelectionRotation, rotLabels, rotLabels.Length);
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Clear Locked Target##chunkTargetClear"))
+        {
+            _chunkClipboardLockedTargetKey = null;
+            _chunkClipboardStatus = "Cleared locked paste target.";
+        }
+
+        ImGui.TextDisabled($"Selected: {_selectedChunks.Count}");
+        if (_selectedChunks.Count > 0)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear##chunkSelClear"))
+                _selectedChunks.Clear();
+        }
+
+        if (_chunkClipboardLockedTargetKey is { } locked)
+            ImGui.Text($"Locked Paste Target: tile({locked.tileX},{locked.tileY}) chunk({locked.chunkX},{locked.chunkY})");
+        else
+            ImGui.TextDisabled("Locked Paste Target: (none)  (Ctrl+LMB to set)");
+
+        var targetChunk = GetChunkClipboardTarget(renderer);
+        bool hasChunk = targetChunk.HasValue;
+        string targetLabel = _chunkClipboardUseMouse ? "Mouse" : "Camera";
+        if (hasChunk)
+        {
+            var c = targetChunk.Value;
+            ImGui.TextDisabled($"Copy Target ({targetLabel}): tile({c.TileX},{c.TileY}) chunk({c.ChunkX},{c.ChunkY})");
+        }
+        else
+        {
+            ImGui.TextDisabled($"Copy Target ({targetLabel}): (none loaded)");
+        }
+
+        if (!hasChunk) ImGui.BeginDisabled();
+        if (ImGui.Button(_selectedChunks.Count > 0 ? "Copy Selection" : "Copy Chunk"))
+        {
+            if (_selectedChunks.Count > 0)
+                CopySelectedChunks(renderer);
+            else
+                CopyChunkAtTarget(renderer);
+        }
+        if (!hasChunk) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool canPaste = (_chunkClipboardSet != null || _chunkClipboard != null);
+        if (!canPaste) ImGui.BeginDisabled();
+        if (ImGui.Button(_chunkClipboardSet != null ? "Paste Selection" : "Paste Chunk"))
+        {
+            if (_chunkClipboardSet != null)
+                PasteClipboardSetAtTarget(renderer);
+            else
+                PasteChunkAtTarget(renderer);
+        }
+        if (!canPaste) ImGui.EndDisabled();
+
+        if (!string.IsNullOrWhiteSpace(_chunkClipboardStatus))
+            ImGui.TextWrapped(_chunkClipboardStatus);
+
     }
 
     private void DrawWorldObjectsContent()
@@ -6498,7 +8512,9 @@ void main() {
                 _selectedObjectInfo =
                     $"PM4 Object\n" +
                     $"Tile: ({debugInfo.TileX}, {debugInfo.TileY})\n" +
-                    $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId})\n" +
+                    $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, part={debugInfo.ObjectPartId})\n" +
+                    $"MSLK Group: 0x{debugInfo.LinkGroupObjectId:X8}\n" +
+                    $"Linked MPRL refs: {debugInfo.LinkedPositionRefCount}\n" +
                     $"Surfaces: {debugInfo.SurfaceCount}\n" +
                     $"GroupKey: 0x{debugInfo.DominantGroupKey:X2}  AttrMask: 0x{debugInfo.DominantAttributeMask:X2}  Mdos: {debugInfo.DominantMdosIndex}\n" +
                     $"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}\n" +
@@ -6512,7 +8528,7 @@ void main() {
                 _selectedObjectInfo =
                     $"PM4 Object\n" +
                     $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
-                    $"CK24: 0x{selectedPm4.ck24:X6}\n" +
+                    $"CK24: 0x{selectedPm4.ck24:X6} (part={selectedPm4.objectPart})\n" +
                     $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
             }
             return;
@@ -6740,6 +8756,7 @@ void main() {
         _loadingScreen?.Dispose();
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewRenderer?.Dispose();
+        _editorOverlayBb?.Dispose();
         _sqlPopulationService?.Dispose();
         _renderer?.Dispose();
         _worldScene?.Dispose();

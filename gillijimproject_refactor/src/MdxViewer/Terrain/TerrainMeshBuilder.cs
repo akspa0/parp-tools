@@ -294,7 +294,7 @@ public class TerrainChunkMesh : IDisposable
     public Dictionary<int, byte[]> AlphaMaps { get; init; } = new();
 
     /// <summary>MCSH shadow map: 64×64 bytes (0=lit, 255=shadowed). Null if no shadow data.</summary>
-    public byte[]? ShadowMap { get; init; }
+    public byte[]? ShadowMap { get; set; }
 
     /// <summary>GL texture handles for alpha maps (layer index → GL texture).</summary>
     public Dictionary<int, uint> AlphaTextures { get; } = new();

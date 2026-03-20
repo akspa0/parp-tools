@@ -51,6 +51,9 @@ public readonly struct Pm4ObjectDebugInfo
         uint ck24,
         byte ck24Type,
         ushort ck24ObjectId,
+        int objectPartId,
+        uint linkGroupObjectId,
+        int linkedPositionRefCount,
         int tileX,
         int tileY,
         int surfaceCount,
@@ -70,6 +73,9 @@ public readonly struct Pm4ObjectDebugInfo
         Ck24 = ck24;
         Ck24Type = ck24Type;
         Ck24ObjectId = ck24ObjectId;
+        ObjectPartId = objectPartId;
+        LinkGroupObjectId = linkGroupObjectId;
+        LinkedPositionRefCount = linkedPositionRefCount;
         TileX = tileX;
         TileY = tileY;
         SurfaceCount = surfaceCount;
@@ -90,6 +96,9 @@ public readonly struct Pm4ObjectDebugInfo
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public ushort Ck24ObjectId { get; }
+    public int ObjectPartId { get; }
+    public uint LinkGroupObjectId { get; }
+    public int LinkedPositionRefCount { get; }
     public int TileX { get; }
     public int TileY { get; }
     public int SurfaceCount { get; }
@@ -171,11 +180,11 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4PositionRefs;
     private bool _showPm4ObjectCentroids;
-    private bool _pm4SplitCk24ByConnectivity = true;
+    private bool _pm4SplitCk24ByConnectivity;
     private bool _showPm4Type40 = true;
     private bool _showPm4Type80 = true;
     private bool _showPm4TypeOther = true;
-    private bool _pm4SplitCk24ByMdos = true;
+    private bool _pm4SplitCk24ByMdos;
     private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24Type;
     private Vector3 _pm4OverlayTranslation = Vector3.Zero;
     private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
@@ -198,9 +207,9 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
     private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
-    private readonly Dictionary<(int tileX, int tileY, uint ck24), Pm4OverlayObject> _pm4ObjectLookup = new();
-    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
-    private (int tileX, int tileY, uint ck24)? _selectedPm4ObjectKey;
+    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectTranslations = new();
+    private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectKey;
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -285,7 +294,7 @@ public class WorldScene : ISceneRenderer
     public Vector3 Pm4OverlayRotationDegrees { get => _pm4OverlayRotationDegrees; set => _pm4OverlayRotationDegrees = value; }
     public Vector3 Pm4OverlayScale { get => _pm4OverlayScale; set => _pm4OverlayScale = value; }
     public bool HasSelectedPm4Object => _selectedPm4ObjectKey.HasValue;
-    public (int tileX, int tileY, uint ck24)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
+    public (int tileX, int tileY, uint ck24, int objectPart)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
     public Vector3 SelectedPm4ObjectTranslation
     {
         get
@@ -483,7 +492,10 @@ public class WorldScene : ISceneRenderer
             if (remainingLineBudget <= 0)
                 break;
 
-            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
+                continue;
+
+            if (!TryMapPm4FileTileToTerrainTile(fileTileX, fileTileY, out int effectiveTileX, out int effectiveTileY))
                 continue;
 
             byte[]? bytes = _dataSource.ReadFile(pm4Path);
@@ -496,8 +508,8 @@ public class WorldScene : ISceneRenderer
                 int rejectedLongEdges = 0;
                 List<Pm4OverlayObject> objects = BuildPm4TileObjects(
                     pm4,
-                    tileX,
-                    tileY,
+                    effectiveTileX,
+                    effectiveTileY,
                     _pm4SplitCk24ByMdos,
                     _pm4SplitCk24ByConnectivity,
                     ref remainingLineBudget,
@@ -506,10 +518,24 @@ public class WorldScene : ISceneRenderer
                 if (objects.Count == 0)
                     continue;
 
-                _pm4TileObjects[(tileX, tileY)] = objects;
+                if (_pm4TileObjects.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
+                {
+                    ViewerLog.Debug(
+                        ViewerLog.Category.Terrain,
+                        $"[PM4] Multiple files mapped to tile ({effectiveTileX},{effectiveTileY}); merging '{Path.GetFileName(pm4Path)}' into existing overlay tile.");
+
+                    int objectPartOffset = existingObjects.Count;
+                    objects = RebasePm4ObjectParts(objects, objectPartOffset);
+                    existingObjects.AddRange(objects);
+                }
+                else
+                {
+                    _pm4TileObjects[(effectiveTileX, effectiveTileY)] = objects;
+                }
+
                 foreach (Pm4OverlayObject obj in objects)
                 {
-                    _pm4ObjectLookup[(tileX, tileY, obj.Ck24)] = obj;
+                    _pm4ObjectLookup[(effectiveTileX, effectiveTileY, obj.Ck24, obj.ObjectPartId)] = obj;
                     _pm4MinObjectZ = MathF.Min(_pm4MinObjectZ, obj.Center.Z);
                     _pm4MaxObjectZ = MathF.Max(_pm4MaxObjectZ, obj.Center.Z);
                 }
@@ -519,7 +545,11 @@ public class WorldScene : ISceneRenderer
                     List<Vector3> positionRefs = BuildPm4PositionRefMarkers(pm4, Math.Min(Pm4MaxPositionRefsPerTile, remainingPositionRefBudget));
                     if (positionRefs.Count > 0)
                     {
-                        _pm4TilePositionRefs[(tileX, tileY)] = positionRefs;
+                        if (_pm4TilePositionRefs.TryGetValue((effectiveTileX, effectiveTileY), out List<Vector3>? existingPositionRefs))
+                            existingPositionRefs.AddRange(positionRefs);
+                        else
+                            _pm4TilePositionRefs[(effectiveTileX, effectiveTileY)] = positionRefs;
+
                         _pm4PositionRefCount += positionRefs.Count;
                         remainingPositionRefBudget -= positionRefs.Count;
                     }
@@ -532,7 +562,24 @@ public class WorldScene : ISceneRenderer
                 _pm4LineCount += tileLineCount;
                 _pm4TriangleCount += tileTriangleCount;
                 _pm4RejectedLongEdges += rejectedLongEdges;
-                _pm4TileStats[(tileX, tileY)] = new Pm4OverlayTileStats(tileX, tileY, objects.Count, tileLineCount, tileTriangleCount);
+                if (_pm4TileStats.TryGetValue((effectiveTileX, effectiveTileY), out Pm4OverlayTileStats existingStats))
+                {
+                    _pm4TileStats[(effectiveTileX, effectiveTileY)] = new Pm4OverlayTileStats(
+                        effectiveTileX,
+                        effectiveTileY,
+                        existingStats.ObjectCount + objects.Count,
+                        existingStats.LineCount + tileLineCount,
+                        existingStats.TriangleCount + tileTriangleCount);
+                }
+                else
+                {
+                    _pm4TileStats[(effectiveTileX, effectiveTileY)] = new Pm4OverlayTileStats(
+                        effectiveTileX,
+                        effectiveTileY,
+                        objects.Count,
+                        tileLineCount,
+                        tileTriangleCount);
+                }
             }
             catch (Exception ex)
             {
@@ -567,6 +614,57 @@ public class WorldScene : ISceneRenderer
         return normalized.Contains(mapSegment, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TryMapPm4FileTileToTerrainTile(int fileTileX, int fileTileY, out int terrainTileX, out int terrainTileY)
+    {
+        // PM4 filename parsing and PM4 coordinate validation use direct x/y tile pairing.
+        // Keep tile reassignment deterministic from filename and avoid heuristic remapping.
+        terrainTileX = fileTileX;
+        terrainTileY = fileTileY;
+
+        return terrainTileX is >= 0 and <= 63
+            && terrainTileY is >= 0 and <= 63;
+    }
+
+    private static List<Pm4OverlayObject> RebasePm4ObjectParts(IReadOnlyList<Pm4OverlayObject> objects, int objectPartOffset)
+    {
+        if (objects.Count == 0 || objectPartOffset == 0)
+            return objects.ToList();
+
+        var rebased = new List<Pm4OverlayObject>(objects.Count);
+        for (int i = 0; i < objects.Count; i++)
+        {
+            Pm4OverlayObject obj = objects[i];
+            rebased.Add(new Pm4OverlayObject(
+                obj.Ck24,
+                obj.Ck24Type,
+                obj.ObjectPartId + objectPartOffset,
+                obj.LinkGroupObjectId,
+                obj.LinkedPositionRefCount,
+                obj.Lines,
+                obj.Triangles,
+                obj.SurfaceCount,
+                obj.DominantGroupKey,
+                obj.DominantAttributeMask,
+                obj.DominantMdosIndex,
+                obj.AverageSurfaceHeight,
+                obj.PlanarTransform));
+        }
+
+        return rebased;
+    }
+
+    private readonly struct Pm4IndexedSurface
+    {
+        public Pm4IndexedSurface(int surfaceIndex, MsurEntry surface)
+        {
+            SurfaceIndex = surfaceIndex;
+            Surface = surface;
+        }
+
+        public int SurfaceIndex { get; }
+        public MsurEntry Surface { get; }
+    }
+
     private static List<Pm4OverlayObject> BuildPm4TileObjects(
         Pm4File pm4,
         int tileX,
@@ -581,80 +679,89 @@ public class WorldScene : ISceneRenderer
         if (remainingLineBudget <= 0 || pm4.MeshVertices.Count == 0)
             return objects;
 
-        Pm4AxisConvention fallbackAxisConvention = DetectPm4AxisConvention(pm4);
+        if (!pm4.Surfaces.Any(surface => surface.Ck24 != 0))
+            return objects;
+
         bool useTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
-        Pm4PlanarTransform fallbackPlanarTransform = DefaultPlanarTransform(useTileLocalCoordinates);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
         foreach (var ck24Group in pm4.Surfaces
-            .Where(surface => surface.Ck24 != 0)
-            .GroupBy(surface => surface.Ck24))
+            .Select((surface, surfaceIndex) => new Pm4IndexedSurface(surfaceIndex, surface))
+            .Where(indexedSurface => indexedSurface.Surface.Ck24 != 0)
+            .GroupBy(indexedSurface => indexedSurface.Surface.Ck24))
         {
             if (tileLineBudget <= 0)
                 break;
 
             uint ck24 = ck24Group.Key;
             byte ck24Type = (byte)(ck24 >> 16);
-            List<MsurEntry> surfaceGroup = ck24Group.ToList();
-            List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
-                ? SplitSurfaceGroupByMdos(surfaceGroup)
-                : new List<List<MsurEntry>> { surfaceGroup };
+            int objectPartCounter = 0;
+            List<Pm4IndexedSurface> surfaceGroup = ck24Group.ToList();
+            Pm4AxisConvention ck24AxisConvention = DetectPm4AxisConvention(pm4, surfaceGroup.Select(static entry => entry.Surface));
+            List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
+            List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
+            // Keep one shared planar transform per CK24 so split linked/components stay on one coordinate plane.
+            Pm4PlanarTransform ck24PlanarTransform = ResolvePlanarTransform(pm4, ck24Surfaces, ck24PositionRefs, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention);
+            List<List<Pm4IndexedSurface>> linkedGroups = SplitSurfaceGroupByMslk(pm4, surfaceGroup);
 
-            foreach (List<MsurEntry> anchorGroup in anchorGroups)
+            foreach (List<Pm4IndexedSurface> linkedGroup in linkedGroups)
             {
-                List<List<MsurEntry>> components = splitCk24ByConnectivity
-                    ? SplitSurfaceGroupByConnectivity(pm4, anchorGroup)
-                    : new List<List<MsurEntry>> { anchorGroup };
+                if (linkedGroup.Count == 0 || tileLineBudget <= 0)
+                    continue;
 
-                foreach (List<MsurEntry> component in components)
+                uint dominantLinkGroupObjectId = SelectDominantMslkGroupObjectId(pm4, linkedGroup);
+                List<MsurEntry> linkedSurfaces = linkedGroup.Select(static entry => entry.Surface).ToList();
+                List<MprlEntry> linkedPositionRefs = CollectLinkedPositionRefs(pm4, linkedGroup);
+                List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
+                    ? SplitSurfaceGroupByMdos(linkedSurfaces)
+                    : new List<List<MsurEntry>> { linkedSurfaces };
+
+                foreach (List<MsurEntry> anchorGroup in anchorGroups)
                 {
-                    if (tileLineBudget <= 0)
-                        break;
+                    List<List<MsurEntry>> components = splitCk24ByConnectivity
+                        ? SplitSurfaceGroupByConnectivity(pm4, anchorGroup)
+                        : new List<List<MsurEntry>> { anchorGroup };
 
-                    Pm4AxisConvention objectAxisConvention = DetectPm4AxisConvention(pm4, component);
-                    Pm4PlanarTransform planarTransform = ResolvePlanarTransform(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention);
-                    List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention, planarTransform, tileLineBudget, ref rejectedLongEdges);
-                    List<Pm4Triangle> triangles = tileTriangleBudget > 0
-                        ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, objectAxisConvention, planarTransform, tileTriangleBudget)
-                        : new List<Pm4Triangle>();
-                    if (lines.Count == 0 && triangles.Count == 0)
-                        continue;
+                    foreach (List<MsurEntry> component in components)
+                    {
+                        if (tileLineBudget <= 0)
+                            break;
 
-                    byte dominantGroupKey = SelectDominantSurfaceValue(component, static surface => surface.GroupKey);
-                    byte dominantAttributeMask = SelectDominantSurfaceValue(component, static surface => surface.AttributeMask);
-                    uint dominantMdosIndex = SelectDominantSurfaceValue(component, static surface => surface.MdosIndex);
-                    float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
+                        // Keep split components under one linked group on a shared transform basis.
+                        // Per-component transform resolution can explode one real object into offset fragments.
+                        List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, tileLineBudget, ref rejectedLongEdges);
+                        List<Pm4Triangle> triangles = tileTriangleBudget > 0
+                            ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, tileTriangleBudget)
+                            : new List<Pm4Triangle>();
+                        if (lines.Count == 0 && triangles.Count == 0)
+                            continue;
 
-                    objects.Add(new Pm4OverlayObject(
-                        ck24,
-                        ck24Type,
-                        lines,
-                        triangles,
-                        component.Count,
-                        dominantGroupKey,
-                        dominantAttributeMask,
-                        dominantMdosIndex,
-                        averageSurfaceHeight,
-                        planarTransform));
+                        byte dominantGroupKey = SelectDominantSurfaceValue(component, static surface => surface.GroupKey);
+                        byte dominantAttributeMask = SelectDominantSurfaceValue(component, static surface => surface.AttributeMask);
+                        uint dominantMdosIndex = SelectDominantSurfaceValue(component, static surface => surface.MdosIndex);
+                        float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
 
-                    tileLineBudget -= lines.Count;
-                    tileTriangleBudget -= triangles.Count;
+                        objects.Add(new Pm4OverlayObject(
+                            ck24,
+                            ck24Type,
+                            objectPartCounter++,
+                            dominantLinkGroupObjectId,
+                            linkedPositionRefs.Count,
+                            lines,
+                            triangles,
+                            component.Count,
+                            dominantGroupKey,
+                            dominantAttributeMask,
+                            dominantMdosIndex,
+                            averageSurfaceHeight,
+                            ck24PlanarTransform));
+
+                        tileLineBudget -= lines.Count;
+                        tileTriangleBudget -= triangles.Count;
+                    }
                 }
             }
-        }
-
-        // Fallback for PM4 files that don't provide usable CK24 groupings.
-        if (objects.Count == 0 && pm4.MeshIndices.Count >= 3 && (tileLineBudget > 0 || tileTriangleBudget > 0))
-        {
-            List<Pm4LineSegment> fallbackLines = tileLineBudget > 0
-                ? BuildFallbackMeshLines(pm4, tileX, tileY, useTileLocalCoordinates, fallbackAxisConvention, fallbackPlanarTransform, tileLineBudget, ref rejectedLongEdges)
-                : new List<Pm4LineSegment>();
-            List<Pm4Triangle> fallbackTriangles = tileTriangleBudget > 0
-                ? BuildFallbackMeshTriangles(pm4, tileX, tileY, useTileLocalCoordinates, fallbackAxisConvention, fallbackPlanarTransform, tileTriangleBudget)
-                : new List<Pm4Triangle>();
-            if (fallbackLines.Count > 0 || fallbackTriangles.Count > 0)
-                objects.Add(new Pm4OverlayObject(0, 0, fallbackLines, fallbackTriangles, 0, 0, 0, 0, 0f, fallbackPlanarTransform));
         }
 
         int linesUsed = objects.Sum(obj => obj.Lines.Count);
@@ -662,6 +769,405 @@ public class WorldScene : ISceneRenderer
         remainingLineBudget -= linesUsed;
         remainingTriangleBudget -= trianglesUsed;
         return objects;
+    }
+
+    private static List<List<Pm4IndexedSurface>> SplitSurfaceGroupByMslk(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        var groups = new List<List<Pm4IndexedSurface>>();
+        if (surfaces.Count == 0)
+            return groups;
+
+        if (surfaces.Count == 1 || pm4.LinkEntries.Count == 0)
+        {
+            groups.Add(surfaces.ToList());
+            return groups;
+        }
+
+        var surfaceIndexToLocal = new Dictionary<int, int>(surfaces.Count);
+        for (int i = 0; i < surfaces.Count; i++)
+            surfaceIndexToLocal[surfaces[i].SurfaceIndex] = i;
+
+        var groupToMembers = new Dictionary<uint, HashSet<int>>();
+        int surfaceCount = pm4.Surfaces.Count;
+        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        {
+            MslkEntry link = pm4.LinkEntries[i];
+            if (link.GroupObjectId == 0)
+                continue;
+
+            int localMsurIndex = -1;
+            if (link.MsurIndex < (uint)surfaceCount && surfaceIndexToLocal.TryGetValue((int)link.MsurIndex, out int msurLocal))
+                localMsurIndex = msurLocal;
+
+            int localRefIndex = -1;
+            if (link.RefIndex < surfaceCount && surfaceIndexToLocal.TryGetValue(link.RefIndex, out int refLocal))
+                localRefIndex = refLocal;
+
+            if (localMsurIndex >= 0)
+                localRefIndex = -1;
+
+            if (localRefIndex < 0 && localMsurIndex < 0)
+                continue;
+
+            if (!groupToMembers.TryGetValue(link.GroupObjectId, out HashSet<int>? members))
+            {
+                members = new HashSet<int>();
+                groupToMembers[link.GroupObjectId] = members;
+            }
+
+            if (localRefIndex >= 0)
+                members.Add(localRefIndex);
+            if (localMsurIndex >= 0)
+                members.Add(localMsurIndex);
+        }
+
+        if (groupToMembers.Count == 0)
+        {
+            groups.Add(surfaces.ToList());
+            return groups;
+        }
+
+        int[] parent = new int[surfaces.Count];
+        for (int i = 0; i < parent.Length; i++)
+            parent[i] = i;
+
+        static int Find(int[] parentArray, int index)
+        {
+            while (parentArray[index] != index)
+            {
+                parentArray[index] = parentArray[parentArray[index]];
+                index = parentArray[index];
+            }
+
+            return index;
+        }
+
+        static void Union(int[] parentArray, int a, int b)
+        {
+            int rootA = Find(parentArray, a);
+            int rootB = Find(parentArray, b);
+            if (rootA != rootB)
+                parentArray[rootB] = rootA;
+        }
+
+        var linkedLocalIndices = new HashSet<int>();
+        foreach (HashSet<int> members in groupToMembers.Values)
+        {
+            if (members.Count < 2)
+                continue;
+
+            int first = members.First();
+            linkedLocalIndices.Add(first);
+            foreach (int member in members)
+            {
+                linkedLocalIndices.Add(member);
+                Union(parent, first, member);
+            }
+        }
+
+        if (linkedLocalIndices.Count < 2)
+        {
+            groups.Add(surfaces.ToList());
+            return groups;
+        }
+
+        var linkedComponents = new Dictionary<int, List<Pm4IndexedSurface>>();
+        for (int i = 0; i < surfaces.Count; i++)
+        {
+            if (!linkedLocalIndices.Contains(i))
+                continue;
+
+            int root = Find(parent, i);
+            if (!linkedComponents.TryGetValue(root, out List<Pm4IndexedSurface>? component))
+            {
+                component = new List<Pm4IndexedSurface>();
+                linkedComponents[root] = component;
+            }
+
+            component.Add(surfaces[i]);
+        }
+
+        if (linkedComponents.Count <= 1)
+        {
+            groups.Add(surfaces.ToList());
+            return groups;
+        }
+
+        foreach (List<Pm4IndexedSurface> component in linkedComponents.Values.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
+            groups.Add(component);
+
+        var unlinked = new List<Pm4IndexedSurface>();
+        for (int i = 0; i < surfaces.Count; i++)
+        {
+            if (!linkedLocalIndices.Contains(i))
+                unlinked.Add(surfaces[i]);
+        }
+
+        if (unlinked.Count > 0)
+            groups.Add(unlinked);
+
+        return groups;
+    }
+
+    private static uint SelectDominantMslkGroupObjectId(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        if (surfaces.Count == 0 || pm4.LinkEntries.Count == 0)
+            return 0;
+
+        int surfaceCount = pm4.Surfaces.Count;
+        var surfaceIndices = new HashSet<int>(surfaces.Select(static surface => surface.SurfaceIndex));
+        var counts = new Dictionary<uint, int>();
+
+        uint bestGroupObjectId = 0;
+        int bestCount = 0;
+        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        {
+            MslkEntry link = pm4.LinkEntries[i];
+            if (link.GroupObjectId == 0)
+                continue;
+
+            if (!LinkReferencesSurface(link, surfaceIndices, surfaceCount))
+                continue;
+
+            int nextCount = 1;
+            if (counts.TryGetValue(link.GroupObjectId, out int existingCount))
+                nextCount = existingCount + 1;
+            counts[link.GroupObjectId] = nextCount;
+
+            if (nextCount > bestCount)
+            {
+                bestCount = nextCount;
+                bestGroupObjectId = link.GroupObjectId;
+            }
+        }
+
+        return bestGroupObjectId;
+    }
+
+    private static List<MprlEntry> CollectLinkedPositionRefs(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        var refs = new List<MprlEntry>();
+        if (surfaces.Count == 0 || pm4.LinkEntries.Count == 0 || pm4.PositionRefs.Count == 0)
+            return refs;
+
+        int surfaceCount = pm4.Surfaces.Count;
+        var surfaceIndices = new HashSet<int>(surfaces.Select(static surface => surface.SurfaceIndex));
+        var seenRefIndices = new HashSet<int>();
+
+        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        {
+            MslkEntry link = pm4.LinkEntries[i];
+            if ((uint)link.RefIndex >= (uint)pm4.PositionRefs.Count)
+                continue;
+
+            if (!LinkReferencesSurface(link, surfaceIndices, surfaceCount))
+                continue;
+
+            if (!seenRefIndices.Add(link.RefIndex))
+                continue;
+
+            refs.Add(pm4.PositionRefs[link.RefIndex]);
+        }
+
+        return refs;
+    }
+
+    private static bool LinkReferencesSurface(MslkEntry link, HashSet<int> surfaceIndices, int surfaceCount)
+    {
+        if (link.MsurIndex < (uint)surfaceCount && surfaceIndices.Contains((int)link.MsurIndex))
+            return true;
+
+        // Fallback for variants where RefIndex stores the local surface id.
+        if (link.RefIndex < surfaceCount && surfaceIndices.Contains(link.RefIndex))
+            return true;
+
+        return false;
+    }
+
+    private static bool TryComputeExpectedMprlYawRadians(IReadOnlyList<MprlEntry> positionRefs, out float yawRadians)
+    {
+        yawRadians = 0f;
+        if (positionRefs.Count == 0)
+            return false;
+
+        double sumSin = 0d;
+        double sumCos = 0d;
+        int count = 0;
+        for (int i = 0; i < positionRefs.Count; i++)
+        {
+            // Runtime evidence shows PM4 objects are consistently rotated 90 degrees clockwise
+            // when using the raw packed MPRL low-16 angle directly. Treat the packed value as
+            // clockwise and rebase by +90 degrees to align with world yaw comparison.
+            float rawAngle = (positionRefs[i].RotationOrFlags & 0xFFFF) * (2f * MathF.PI / 65536f);
+            float angleRadians = (MathF.PI * 0.5f) - rawAngle;
+            sumSin += Math.Sin(angleRadians);
+            sumCos += Math.Cos(angleRadians);
+            count++;
+        }
+
+        if (count == 0)
+            return false;
+
+        double length = Math.Sqrt(sumSin * sumSin + sumCos * sumCos);
+        if (length < 1e-4)
+            return false;
+
+        yawRadians = (float)Math.Atan2(sumSin, sumCos);
+        return true;
+    }
+
+    private static bool TryComputePlanarPrincipalYaw(
+        IReadOnlyList<Vector3> objectVertices,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
+        out float yawRadians)
+    {
+        yawRadians = 0f;
+        if (objectVertices.Count < 3)
+            return false;
+
+        int sampleCount = Math.Min(512, objectVertices.Count);
+        int stride = Math.Max(1, objectVertices.Count / sampleCount);
+        double meanX = 0d;
+        double meanY = 0d;
+        int used = 0;
+
+        for (int i = 0; i < objectVertices.Count; i += stride)
+        {
+            Vector3 world = ConvertPm4VertexToWorld(objectVertices[i], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            meanX += world.X;
+            meanY += world.Y;
+            used++;
+        }
+
+        if (used < 3)
+            return false;
+
+        meanX /= used;
+        meanY /= used;
+
+        double covXX = 0d;
+        double covYY = 0d;
+        double covXY = 0d;
+        for (int i = 0; i < objectVertices.Count; i += stride)
+        {
+            Vector3 world = ConvertPm4VertexToWorld(objectVertices[i], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            double dx = world.X - meanX;
+            double dy = world.Y - meanY;
+            covXX += dx * dx;
+            covYY += dy * dy;
+            covXY += dx * dy;
+        }
+
+        if (covXX + covYY < 1e-4)
+            return false;
+
+        yawRadians = 0.5f * (float)Math.Atan2(2.0 * covXY, covXX - covYY);
+        return true;
+    }
+
+    private static float ComputeUndirectedAngleDelta(float a, float b)
+    {
+        float delta = MathF.Abs(a - b);
+        while (delta > MathF.PI)
+            delta -= 2f * MathF.PI;
+        delta = MathF.Abs(delta);
+        if (delta > MathF.PI * 0.5f)
+            delta = MathF.PI - delta;
+
+        return MathF.Abs(delta);
+    }
+
+    private static float ComputeMprlYawDeltaWithQuarterTurnFallback(float candidateYaw, float expectedYaw)
+    {
+        float bestDelta = ComputeUndirectedAngleDelta(candidateYaw, expectedYaw);
+        bestDelta = MathF.Min(bestDelta, ComputeUndirectedAngleDelta(candidateYaw, -expectedYaw));
+
+        const float quarterTurn = MathF.PI * 0.5f;
+        bestDelta = MathF.Min(bestDelta, ComputeUndirectedAngleDelta(candidateYaw, expectedYaw + quarterTurn));
+        bestDelta = MathF.Min(bestDelta, ComputeUndirectedAngleDelta(candidateYaw, expectedYaw - quarterTurn));
+        bestDelta = MathF.Min(bestDelta, ComputeUndirectedAngleDelta(candidateYaw, -expectedYaw + quarterTurn));
+        bestDelta = MathF.Min(bestDelta, ComputeUndirectedAngleDelta(candidateYaw, -expectedYaw - quarterTurn));
+
+        return bestDelta;
+    }
+
+    private static List<Vector3> SampleObjectVertices(IReadOnlyList<Vector3> objectVertices, int maxSamples)
+    {
+        var sampled = new List<Vector3>();
+        if (objectVertices.Count == 0)
+            return sampled;
+
+        int sampleCount = Math.Min(maxSamples, objectVertices.Count);
+        int stride = Math.Max(1, objectVertices.Count / sampleCount);
+        for (int i = 0; i < objectVertices.Count; i += stride)
+            sampled.Add(objectVertices[i]);
+
+        if (sampled.Count == 0)
+            sampled.Add(objectVertices[0]);
+
+        return sampled;
+    }
+
+    private static List<Vector2> BuildMprlPlanarPoints(IReadOnlyList<MprlEntry> positionRefs)
+    {
+        var points = new List<Vector2>(positionRefs.Count);
+        for (int i = 0; i < positionRefs.Count; i++)
+        {
+            Vector3 refPos = positionRefs[i].Position;
+            points.Add(new Vector2(refPos.X, refPos.Z));
+        }
+
+        return points;
+    }
+
+    private static float NearestDistanceSquared(IReadOnlyList<Vector2> points, in Vector2 target)
+    {
+        float best = float.MaxValue;
+        for (int i = 0; i < points.Count; i++)
+        {
+            Vector2 delta = points[i] - target;
+            float distSq = delta.LengthSquared();
+            if (distSq < best)
+                best = distSq;
+        }
+
+        return best;
+    }
+
+    private static float ComputeMprlFootprintScore(
+        IReadOnlyList<Vector2> referencePoints,
+        IReadOnlyList<Vector3> sampledVertices,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform candidate)
+    {
+        if (referencePoints.Count == 0 || sampledVertices.Count == 0)
+            return float.MaxValue;
+
+        var candidatePoints = new List<Vector2>(sampledVertices.Count);
+        for (int i = 0; i < sampledVertices.Count; i++)
+        {
+            Vector3 world = ConvertPm4VertexToWorld(sampledVertices[i], tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
+            candidatePoints.Add(new Vector2(world.X, world.Y));
+        }
+
+        float sumObjectToRef = 0f;
+        for (int i = 0; i < candidatePoints.Count; i++)
+            sumObjectToRef += NearestDistanceSquared(referencePoints, candidatePoints[i]);
+
+        float sumRefToObject = 0f;
+        for (int i = 0; i < referencePoints.Count; i++)
+            sumRefToObject += NearestDistanceSquared(candidatePoints, referencePoints[i]);
+
+        float avgObjectToRef = sumObjectToRef / Math.Max(1, candidatePoints.Count);
+        float avgRefToObject = sumRefToObject / Math.Max(1, referencePoints.Count);
+        return avgObjectToRef + avgRefToObject;
     }
 
     private static List<Pm4LineSegment> BuildCk24ObjectLines(
@@ -1110,6 +1616,7 @@ public class WorldScene : ISceneRenderer
     private static Pm4PlanarTransform ResolvePlanarTransform(
         Pm4File pm4,
         IEnumerable<MsurEntry> surfaces,
+        IReadOnlyList<MprlEntry>? anchorPositionRefs,
         int tileX,
         int tileY,
         bool useTileLocalCoordinates,
@@ -1132,20 +1639,65 @@ public class WorldScene : ISceneRenderer
             centroid += objectVertices[i];
         centroid /= objectVertices.Count;
 
+        IReadOnlyList<MprlEntry> scoringRefs = (anchorPositionRefs != null && anchorPositionRefs.Count > 0)
+            ? anchorPositionRefs
+            : pm4.PositionRefs;
+        bool useFootprintScoring = anchorPositionRefs != null && anchorPositionRefs.Count >= 2;
+        List<Vector3> sampledObjectVertices = useFootprintScoring
+            ? SampleObjectVertices(objectVertices, 256)
+            : new List<Vector3>();
+        List<Vector2> referencePlanarPoints = useFootprintScoring
+            ? BuildMprlPlanarPoints(scoringRefs)
+            : new List<Vector2>();
+        bool hasExpectedYaw = TryComputeExpectedMprlYawRadians(scoringRefs, out float expectedYaw);
+
         Pm4PlanarTransform bestTransform = defaultTransform;
         float bestScore = float.MaxValue;
+        float bestYawDelta = float.MaxValue;
         foreach (Pm4PlanarTransform candidate in EnumeratePlanarTransforms(useTileLocalCoordinates))
         {
             Vector3 candidateWorld = ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
-            float score = NearestPositionRefDistanceSquared(pm4.PositionRefs, candidateWorld);
+            float centroidScore = NearestPositionRefDistanceSquared(scoringRefs, candidateWorld);
+            float score = centroidScore;
+
+            if (useFootprintScoring)
+            {
+                float footprintScore = ComputeMprlFootprintScore(
+                    referencePlanarPoints,
+                    sampledObjectVertices,
+                    tileX,
+                    tileY,
+                    useTileLocalCoordinates,
+                    axisConvention,
+                    candidate);
+                if (float.IsFinite(footprintScore))
+                    score = footprintScore * 0.85f + centroidScore * 0.15f;
+            }
+            float yawDelta = float.MaxValue;
+
+            if (hasExpectedYaw
+                && TryComputePlanarPrincipalYaw(objectVertices, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate, out float candidateYaw))
+            {
+                yawDelta = ComputeMprlYawDeltaWithQuarterTurnFallback(candidateYaw, expectedYaw);
+            }
 
             // Prefer transforms that do not invert winding when scores are close.
             if (candidate.InvertsWinding)
                 score += 0.5f;
 
-            if (score < bestScore)
+            bool isBetterDistance = score < bestScore - 0.001f;
+            float tieDistanceThreshold = useFootprintScoring ? 256f : 4096f;
+            bool isNearDistance = MathF.Abs(score - bestScore) <= tieDistanceThreshold;
+            bool isBetterYaw = yawDelta + 0.01f < bestYawDelta;
+            bool yawCanOverrideDistance = useFootprintScoring
+                && hasExpectedYaw
+                && yawDelta + 0.02f < bestYawDelta
+                && score <= bestScore + 1024f;
+
+            if (isBetterDistance || (isNearDistance && isBetterYaw) || yawCanOverrideDistance)
             {
                 bestScore = score;
+                bestYawDelta = yawDelta;
                 bestTransform = candidate;
             }
         }
@@ -2526,7 +3078,7 @@ public class WorldScene : ISceneRenderer
                         if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
                             continue;
 
-                        var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                        var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
                         Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
 
                         _pm4VisibleObjectCount++;
@@ -2891,7 +3443,7 @@ public class WorldScene : ISceneRenderer
             || _pm4OverlayScale != Vector3.One;
 
         float bestT = float.MaxValue;
-        (int tileX, int tileY, uint ck24)? bestKey = null;
+        (int tileX, int tileY, uint ck24, int objectPart)? bestKey = null;
 
         foreach (var (tileKey, objects) in _pm4TileObjects)
         {
@@ -2903,7 +3455,7 @@ public class WorldScene : ISceneRenderer
                 if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
                     continue;
 
-                var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24);
+                var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
                 Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
 
                 Vector3 boundsMin = obj.BoundsMin;
@@ -2969,6 +3521,9 @@ public class WorldScene : ISceneRenderer
             obj.Ck24,
             obj.Ck24Type,
             obj.Ck24ObjectId,
+            obj.ObjectPartId,
+            obj.LinkGroupObjectId,
+            obj.LinkedPositionRefCount,
             objectKey.tileX,
             objectKey.tileY,
             obj.SurfaceCount,
@@ -3269,7 +3824,7 @@ public class WorldScene : ISceneRenderer
         return Vector3.Transform(position, transform);
     }
 
-    private Matrix4x4 BuildPm4ObjectTransform((int tileX, int tileY, uint ck24) objectKey,
+    private Matrix4x4 BuildPm4ObjectTransform((int tileX, int tileY, uint ck24, int objectPart) objectKey,
         bool applyPm4Transform,
         in Matrix4x4 pm4Transform,
         out bool applyObjectTransform)
@@ -3351,6 +3906,9 @@ internal sealed class Pm4OverlayObject
     public Pm4OverlayObject(
         uint ck24,
         byte ck24Type,
+        int objectPartId,
+        uint linkGroupObjectId,
+        int linkedPositionRefCount,
         List<Pm4LineSegment> lines,
         List<Pm4Triangle> triangles,
         int surfaceCount,
@@ -3362,6 +3920,9 @@ internal sealed class Pm4OverlayObject
     {
         Ck24 = ck24;
         Ck24Type = ck24Type;
+        ObjectPartId = objectPartId;
+        LinkGroupObjectId = linkGroupObjectId;
+        LinkedPositionRefCount = linkedPositionRefCount;
         Lines = lines;
         Triangles = triangles;
         SurfaceCount = surfaceCount;
@@ -3377,6 +3938,9 @@ internal sealed class Pm4OverlayObject
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
+    public int ObjectPartId { get; }
+    public uint LinkGroupObjectId { get; }
+    public int LinkedPositionRefCount { get; }
     public List<Pm4LineSegment> Lines { get; }
     public List<Pm4Triangle> Triangles { get; }
     public int SurfaceCount { get; }

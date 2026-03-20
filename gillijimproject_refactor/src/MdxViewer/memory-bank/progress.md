@@ -18,6 +18,7 @@
 | WDL parser (MVER/MAOF/MARE, v0x12) | ✅ Strict parsing + version validation |
 | WDL terrain tile scale | ✅ Uses TileSize (8533.3333), not ChunkSize |
 | WDL preview window reliability | ✅ Error reporting + `.wdl.mpq` fallback |
+| WDL spawn chooser | ❌ Reported non-functional across tested versions (Mar 20 runtime report) |
 | WDL runtime visibility toggle | ✅ UI checkbox for testing overlap issues |
 | Async tile streaming | ✅ Background parse, render-thread GPU upload, max 2/frame |
 | Standalone MDX rendering | ✅ MirrorX for LH→RH, front-facing, textured |
@@ -62,6 +63,119 @@
 | Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
 | **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
 | **Loading screen** | ✅ BLP-based with progress bar |
+
+## 2026-03-20 - WDL Spawn Chooser Regression Handoff
+
+- Runtime status correction: WDL heightmap spawn chooser is currently reported non-functional across tested versions.
+- This is now an active blocker for the WDL spawn workflow.
+- Prior implementation notes about `Spawn` gating/fallback should be treated as historical code intent until runtime behavior is revalidated.
+- Required next-pass investigation focus:
+	- map list `Spawn` enablement state versus warm-state lifecycle
+	- chooser open path and spawn-commit callback
+	- preview-failure fallback behavior (`OpenWdlPreview`/dialog path) and whether it bypasses chooser state incorrectly
+- Required closure evidence:
+	- real-data runtime verification on at least one Alpha-era map and one 3.x map
+	- proof that selected spawn is actually applied
+- Validation limits in this handoff update:
+	- no code changes made
+	- no automated tests added or run
+
+## 2026-03-20 — PM4 MSLK Grouping + Per-Object Keying Follow-up
+
+- `WorldScene` PM4 object assembly now uses `MSLK` relationships to split CK24 buckets into linked sub-groups before optional MDOS/connectivity splitting.
+- PM4 object identity is no longer `tile + CK24` only:
+	- selection, lookup, and per-object translation keys now include a per-component `objectPart` id
+	- this avoids key collisions/overwrites when one CK24 resolves to multiple linked components
+- Planar/orientation solve now uses linked `MPRL` anchors at CK24 scope with one shared transform per CK24:
+	- gathers linked `MPRL` refs from `MSLK` entries across the CK24 surface set
+	- keeps nearest-anchor distance scoring plus MPRL-rotation-aware tie-breaking using the candidate's planar principal axis
+	- keeps `MSLK` surface linkage preferring `MsurIndex` over ambiguous `RefIndex` surface matching
+	- avoids per-linked-component transform divergence that can spin parts of one CK24 object differently
+- Selected PM4 debug metadata now includes:
+	- `ObjectPartId`
+	- dominant `MSLK.GroupObjectId` (when available)
+	- linked `MPRL` ref count used by the orientation solve
+- `ViewerApp` PM4 UI/pick text now displays the per-component part id and MSLK group id for triage.
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Validation limits:
+	- no automated tests were added or run
+	- no runtime real-data PM4 visual signoff yet on the reported split/rotated structures
+
+## 2026-03-20 — PM4 Tile Assignment Normalization + Sparse Merge Guardrail
+
+- Addressed PM4 tile drift/collision risk in `WorldScene` overlay loading:
+	- removed MPRL-driven tile reassignment from parsed PM4 filenames
+	- filename coordinates now map directly by index (`x_y` -> `tileX=x`, `tileY=y`)
+- Added duplicate-tile merge behavior:
+	- PM4 objects append instead of replacing prior tile payload
+	- PM4 tile stats and position-ref markers accumulate instead of overwrite
+	- merged object part ids are rebased to preserve `(tile, ck24, objectPart)` uniqueness
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Validation limits:
+	- no automated tests were added or run
+	- no runtime real-data validation yet for the specific tile mismatch report (`00_00` / `01_00` / `1_1`)
+
+## 2026-03-20 — PM4 Post-Restart Runtime Validation Handoff
+
+- User requested system restart before runtime checks due to performance constraints.
+- Pending first-pass runtime validation order after restart:
+	1. confirm PM4 for `00_00.pm4` aligns to ADT tile `(0,0)`
+	2. confirm tile directly below (`01_00`) no longer appears shifted into `01_01`
+	3. confirm sparse/missing PM4 tiles stay empty rather than causing neighbor drift
+	4. confirm no data-loss behavior from duplicate tile mapping (merge path active)
+- Implementation state at handoff:
+	- filename tile mapping normalized to direct filename indices (`x_y -> tileX=x, tileY=y`)
+	- MPRL-based tile reassignment removed in PM4 viewer load path
+	- duplicate tile payloads merge instead of overwrite
+
+## 2026-03-20 — PM4 Runtime Orientation Consolidation Checkpoint
+
+- Runtime update after reverting per-linked-subgroup transform solving:
+	- CK24 object parts now stay together as coherent objects (major regression rollback success)
+	- residual orientation is now a consistent global offset of about 90 degrees counter-clockwise in tested scenes
+- Interpretation:
+	- grouping/splitting and object-part keying are materially improved
+	- remaining issue is likely a single yaw-basis correction, not random per-part transform divergence
+- Documentation artifact added:
+	- `documentation/pm4-current-decoding-logic-2026-03-20.md`
+	- captures active PM4 chunk usage, assembly pipeline, transform logic, and current residual offset status
+
+## 2026-03-20 — PM4 Yaw Basis Tie-Break Fallback
+
+- Applied a minimal orientation-solver follow-up in `WorldScene.ResolvePlanarTransform(...)`:
+	- yaw tie-break now keeps direct MPRL yaw comparison as primary
+	- adds an explicit quarter-turn fallback (`expectedYaw +/- 90°`) only when it clearly out-scores the direct comparison
+- Scope intentionally stays narrow:
+	- no change to CK24 grouping, MSLK splitting, object-part identity, or tile mapping
+	- no change to centroid/footprint distance scoring terms
+- Goal of this slice:
+	- handle the currently observed global ~90° PM4 orientation offset without reintroducing part-fragmentation regressions
+- Validation status:
+	- build/runtime validation still pending in this checkpoint entry
+	- no automated tests were added or run
+
+## 2026-03-20 — PM4 MPRL Orientation Weighting Follow-up
+
+- Follow-up solver adjustment in `WorldScene.ResolvePlanarTransform(...)` after runtime report that objects were still rotated wrong:
+	- yaw-basis fallback now evaluates direct, sign-flipped, and quarter-turn variants (`expected`, `-expected`, `expected +/- 90°`, `-expected +/- 90°`)
+	- when linked-footprint scoring is active, strong yaw agreement can now override modest distance-score differences
+- Intent of this slice:
+	- treat MPRL as authoritative orientation linkage more strongly for transform selection
+	- keep prior CK24 cohesion/object-part/tile-mapping guardrails unchanged
+- Validation status:
+	- no automated tests were added or run
+	- runtime signoff still pending
+
+## 2026-03-20 — PM4 MPRL Yaw Decode Basis Correction
+
+- Follow-up after runtime report that PM4 objects were still 90 degrees clockwise:
+	- `TryComputeExpectedMprlYawRadians(...)` now decodes packed MPRL low-16 rotation as clockwise and rebases it by +90 degrees before circular averaging
+	- this directly targets the observed consistent global yaw-basis mismatch while keeping CK24 grouping/tile mapping logic unchanged
+- Validation status:
+	- no automated tests were added or run
+	- runtime signoff still pending
 
 ## 2026-03-20 — PM4 Overlay Diagnostics/Grouping/Winding Update
 

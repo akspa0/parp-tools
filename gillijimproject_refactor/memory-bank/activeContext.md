@@ -128,6 +128,26 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- 3.x `.mdx` WMO doodads now resolve correctly as M2-family assets on real data
 	- the semi-translucent material heuristic fixes the reported visuals without regressing classic cutout foliage
 
+### WDL Spawn Chooser Regression Handoff (Mar 20)
+
+- Latest runtime report from the active branch: WDL heightmap spawn chooser is currently non-functional across tested versions.
+- Treat earlier notes that framed the spawn chooser path as working as stale until revalidated.
+- Scope this as a viewer flow regression, not a parser-complete claim:
+	- likely touchpoints are spawn action enablement (`WdlPreviewWarmState` gating), preview readiness transitions, and preview dialog/open fallback routing
+	- this may involve both UI state and async warmup timing, not just WDL decode
+- Do not close this issue on build success or file-level diagnostics alone.
+- Required signoff for closure:
+	- real-data runtime verification on at least one Alpha-era map and one 3.x map
+	- explicit proof that spawn chooser opens/commits a spawn point and that fallback load behavior still works when preview prep fails
+
+### PM4 Tile Mapping Runtime Handoff (Mar 20)
+
+- PM4 viewer tile assignment now follows direct filename indices (`map_x_y.pm4` maps to `(tileX=x, tileY=y)`).
+- The old MPRL-based tile reassignment heuristic has been removed from the PM4 overlay load path.
+- Duplicate PM4 files mapping to one tile now merge object payloads/stats/refs instead of replacing prior data.
+- Immediate next step after restart is runtime validation on the reported adjacency mismatch (`00_00`, `01_00`, and `01_01`) before further PM4 transform work.
+- Do not claim this fixed from build-only validation; runtime signoff is still pending.
+
 ### M2 Empty-Fallback Guardrail (Mar 18)
 
 - Follow-up after the standalone 3.x model-load freeze fix: some M2-family assets could still appear to load while producing a blank viewport and model info with zero geometry.
