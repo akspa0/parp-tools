@@ -91,7 +91,7 @@ public class MdxRenderer : ISceneRenderer
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
-    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded, _uPremultiplyAlpha;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
@@ -597,28 +597,39 @@ public class MdxRenderer : ISceneRenderer
                         _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);
                         _gl.Uniform1(_uAlphaThreshold, 0.75f);
+                        _gl.Uniform1(_uPremultiplyAlpha, 0);
                     }
                     else if (needsBlend)
                     {
                         _gl.Enable(EnableCap.Blend);
                         _gl.DepthMask(false); // Don't write depth for blended layers
-                        _gl.Uniform1(_uAlphaTest, 1);
-                        _gl.Uniform1(_uAlphaThreshold, 0.05f); // Low threshold for smooth blending
+                        _gl.Uniform1(_uPremultiplyAlpha, 0);
                         switch (effectiveBlendMode)
                         {
                             case MdlTexOp.Transparent:
-                                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            case MdlTexOp.Blend:
+                                // Premultiplied alpha avoids color-matte fringes on soft transparent edges.
+                                _gl.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
+                                _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uAlphaThreshold, 0.0f);
+                                _gl.Uniform1(_uPremultiplyAlpha, 1);
                                 break;
                             case MdlTexOp.Add:
                             case MdlTexOp.AddAlpha:
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                                _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uAlphaThreshold, 0.0f);
                                 break;
                             case MdlTexOp.Modulate:
                             case MdlTexOp.Modulate2X:
                                 _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
+                                _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uAlphaThreshold, 0.0f);
                                 break;
                             default:
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                                _gl.Uniform1(_uAlphaTest, 1);
+                                _gl.Uniform1(_uAlphaThreshold, 0.05f);
                                 break;
                         }
                     }
@@ -632,12 +643,14 @@ public class MdxRenderer : ISceneRenderer
                             _gl.DepthMask(!noDepthWrite);
                             _gl.Uniform1(_uAlphaTest, 1);
                             _gl.Uniform1(_uAlphaThreshold, 0.05f);
+                            _gl.Uniform1(_uPremultiplyAlpha, 0);
                         }
                         else
                         {
                             _gl.Disable(EnableCap.Blend);
                             _gl.DepthMask(!noDepthWrite);
                             _gl.Uniform1(_uAlphaTest, 0);
+                            _gl.Uniform1(_uPremultiplyAlpha, 0);
                         }
                     }
 
@@ -858,6 +871,7 @@ uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
 uniform float uAlphaThreshold;
+uniform int uPremultiplyAlpha;
 uniform int uUnshaded;
 uniform int uSphereEnvMap;
 uniform int uUvSet;
@@ -894,8 +908,12 @@ void main() {
         texColor = vec4(1.0, 0.0, 1.0, 1.0);
     }
 
+    vec3 texRgb = texColor.rgb;
+    if (uPremultiplyAlpha == 1)
+        texRgb *= texColor.a;
+
     // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
-    vec3 litColor = texColor.rgb;
+    vec3 litColor = texRgb;
     if (uUnshaded == 0) {
         vec3 lightDir = normalize(uLightDir);
         // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
@@ -911,7 +929,7 @@ void main() {
         float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
         vec3 specular = uLightColor * spec * 0.15;
 
-        litColor = texColor.rgb * (uAmbientColor + diffuse) + specular;
+        litColor = texRgb * (uAmbientColor + diffuse) + specular;
     }
 
     // Fog: blend to fog color based on distance from camera (matches terrain fog)
@@ -955,6 +973,7 @@ void main() {
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
         _uAlphaThreshold = _gl.GetUniformLocation(_shaderProgram, "uAlphaThreshold");
+        _uPremultiplyAlpha = _gl.GetUniformLocation(_shaderProgram, "uPremultiplyAlpha");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
         _uColor = _gl.GetUniformLocation(_shaderProgram, "uColor");
         _uFogColor = _gl.GetUniformLocation(_shaderProgram, "uFogColor");
@@ -1281,7 +1300,7 @@ void main() {
             // Some pre-release M2 records carry both a nominal file path and a replaceable id.
             // Keep this fallback scoped to M2-adapted models so classic MDX textures do not get
             // redirected through replaceable heuristics when their normal file path should win.
-            if (_usesPreRelease301M2Profile && replaceablePath == null && tex.ReplaceableId > 0)
+            if (replaceablePath == null && tex.ReplaceableId > 0)
                 replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
 
             if (string.IsNullOrEmpty(texPath))
@@ -1423,8 +1442,7 @@ void main() {
             }
 
             // If the direct texture path failed, fall back to the resolved replaceable path when available.
-            if (_usesPreRelease301M2Profile
-                && blpData == null
+            if (blpData == null
                 && !string.IsNullOrWhiteSpace(replaceablePath)
                 && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
             {

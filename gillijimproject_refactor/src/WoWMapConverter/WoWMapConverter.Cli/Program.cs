@@ -36,6 +36,8 @@ public static class Program
             "pm4-export" => RunPm4Export(args.Skip(1).ToArray()),
             "pm4-validate-coords" => RunPm4ValidateCoords(args.Skip(1).ToArray()),
             "development-analyze" => RunDevelopmentAnalyze(args.Skip(1).ToArray()),
+            "development-repair" => RunDevelopmentRepair(args.Skip(1).ToArray()),
+            "terrain-texture-transfer" => RunTerrainTextureTransfer(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
             "vlm-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "vlm-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
@@ -985,9 +987,14 @@ public static class Program
             Console.WriteLine($"Tiles without usable ground: {report.TilesWithoutUsableTerrain}");
             Console.WriteLine($"Tiles with bad chunk index:  {report.TilesWithHeaderIndexMismatches}");
             Console.WriteLine($"Tiles with repeated 0,0 idx: {report.TilesWithRepeatedZeroIndices}");
+            Console.WriteLine($"Class healthy-split:         {report.HealthySplitCount}");
+            Console.WriteLine($"Class index-corrupt:         {report.IndexCorruptCount}");
+            Console.WriteLine($"Class scan-only-root:        {report.ScanOnlyRootCount}");
+            Console.WriteLine($"Class wdl-rebuild:           {report.WdlRebuildCount}");
+            Console.WriteLine($"Class manual-review:         {report.ManualReviewCount}");
 
             foreach (var tile in report.Tiles
-                .Where(tile => tile.RootStatus != "mcin-valid" || tile.HeaderIndexMismatchCount > 0 || tile.ZeroIndexHeaderCount > 1)
+                .Where(tile => tile.TileClass != "healthy-split" || tile.HeaderIndexMismatchCount > 0 || tile.ZeroIndexHeaderCount > 1)
                 .OrderByDescending(tile => tile.HeaderIndexMismatchCount)
                 .ThenByDescending(tile => tile.ZeroIndexHeaderCount)
                 .ThenBy(tile => tile.TileY)
@@ -996,6 +1003,7 @@ public static class Program
             {
                 Console.WriteLine();
                 Console.WriteLine($"Tile {tile.TileName}");
+                Console.WriteLine($"  class={tile.TileClass}");
                 Console.WriteLine($"  root={tile.RootStatus}, validChunks={tile.ValidRootChunkCount}, mcin={tile.HasMcin}, topLevelMcnk={tile.TopLevelMcnkCount}");
                 Console.WriteLine($"  idxMismatch={tile.HeaderIndexMismatchCount}, zeroIdx={tile.ZeroIndexHeaderCount}, dupIdx={tile.DuplicateHeaderIndexCount}");
                 Console.WriteLine($"  obj0={tile.HasObj0Adt}, tex0={tile.HasTex0Adt}, pm4={tile.HasPm4}, wl={(tile.HasWlw || tile.HasWlm || tile.HasWlq || tile.HasWll)}");
@@ -1017,6 +1025,379 @@ public static class Program
             Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
+    }
+
+    private static int RunDevelopmentRepair(string[] args)
+    {
+        DevelopmentRepairOptions options = DevelopmentRepairOptions.CreateDefault();
+        string inputDir = options.InputDirectory;
+        string outputDir = options.OutputDirectory;
+        string mode = options.Mode;
+        int? tileLimit = options.TileLimit;
+        string? tile = options.Tile;
+        bool skipWl = options.SkipWl;
+        bool skipWdlGenerate = options.SkipWdlGenerate;
+        bool skipPm4 = options.SkipPm4;
+        string? manifestPath = options.ManifestPath;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--input-dir":
+                case "--input":
+                case "-i":
+                    if (i + 1 < args.Length)
+                        inputDir = args[++i];
+                    break;
+                case "--output-dir":
+                case "--output":
+                case "-o":
+                    if (i + 1 < args.Length)
+                        outputDir = args[++i];
+                    break;
+                case "--mode":
+                    if (i + 1 < args.Length)
+                        mode = args[++i];
+                    break;
+                case "--tile":
+                    if (i + 1 < args.Length)
+                        tile = args[++i];
+                    break;
+                case "--tile-limit":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int parsedTileLimit))
+                        tileLimit = parsedTileLimit;
+                    break;
+                case "--skip-wl":
+                    skipWl = true;
+                    break;
+                case "--skip-wdl-generate":
+                    skipWdlGenerate = true;
+                    break;
+                case "--skip-pm4":
+                    skipPm4 = true;
+                    break;
+                case "--manifest":
+                    if (i + 1 < args.Length)
+                        manifestPath = args[++i];
+                    break;
+                case "--help":
+                case "-h":
+                    Console.WriteLine("Development Dataset Repair");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: wowmapconverter development-repair [options]");
+                    Console.WriteLine();
+                    Console.WriteLine("Options:");
+                    Console.WriteLine("  --input-dir, -i <dir>    Development source directory (default: fixed development dataset)");
+                    Console.WriteLine("  --output-dir, -o <dir>   Repair output root (default: output/development-repair)");
+                    Console.WriteLine("  --mode <audit|repair>    audit = classify + manifests, repair = write repaired ADTs");
+                    Console.WriteLine("  --tile <x_y>             Process only one tile coordinate");
+                    Console.WriteLine("  --tile-limit <n>         Process only first N discovered tiles");
+                    Console.WriteLine("  --skip-wl                Skip WL* to MH2O conversion");
+                    Console.WriteLine("  --skip-wdl-generate      Skip WDL terrain generation fallback");
+                    Console.WriteLine("  --skip-pm4               Keep PM4 refinement disabled for this first slice");
+                    Console.WriteLine("  --manifest <path>        Summary manifest output path");
+                    return 0;
+            }
+        }
+
+        var runOptions = new DevelopmentRepairOptions(
+            InputDirectory: inputDir,
+            OutputDirectory: outputDir,
+            Mode: mode,
+            TileLimit: tileLimit,
+            Tile: tile,
+            SkipWl: skipWl,
+            SkipWdlGenerate: skipWdlGenerate,
+            SkipPm4: skipPm4,
+            ManifestPath: manifestPath);
+
+        Console.WriteLine("Development Dataset Repair");
+        Console.WriteLine("==========================");
+        Console.WriteLine($"Input:  {Pm4CoordinateService.ResolveMapDirectory(runOptions.InputDirectory)}");
+        Console.WriteLine($"Output: {Path.GetFullPath(runOptions.OutputDirectory)}");
+        Console.WriteLine($"Mode:   {runOptions.Mode}");
+        if (!string.IsNullOrWhiteSpace(runOptions.Tile))
+            Console.WriteLine($"Tile:   {runOptions.Tile}");
+        if (runOptions.TileLimit.HasValue)
+            Console.WriteLine($"Limit:  {runOptions.TileLimit.Value}");
+        Console.WriteLine($"Skip WL conversion:      {(runOptions.SkipWl ? "yes" : "no")}");
+        Console.WriteLine($"Skip WDL generation:     {(runOptions.SkipWdlGenerate ? "yes" : "no")}");
+        Console.WriteLine($"Skip PM4 refinement:     {(runOptions.SkipPm4 ? "yes" : "no")}");
+
+        try
+        {
+            DevelopmentRepairExecutionReport report = DevelopmentRepairService.Execute(runOptions);
+
+            Console.WriteLine();
+            Console.WriteLine($"Map: {report.MapName}");
+            Console.WriteLine($"Tiles processed: {report.TilesProcessed}");
+            Console.WriteLine($"Tiles written:   {report.TilesWritten}");
+            Console.WriteLine($"WDT written:     {(report.WdtWritten ? "yes" : "no")}");
+            Console.WriteLine($"WDL copied:      {(report.WdlCopied ? "yes" : "no")}");
+
+            Console.WriteLine();
+            Console.WriteLine($"Class healthy-split:  {report.Tiles.Count(t => t.TileClass == "healthy-split")}");
+            Console.WriteLine($"Class index-corrupt:  {report.Tiles.Count(t => t.TileClass == "index-corrupt")}");
+            Console.WriteLine($"Class scan-only-root: {report.Tiles.Count(t => t.TileClass == "scan-only-root")}");
+            Console.WriteLine($"Class wdl-rebuild:    {report.Tiles.Count(t => t.TileClass == "wdl-rebuild")}");
+            Console.WriteLine($"Class manual-review:  {report.Tiles.Count(t => t.TileClass == "manual-review" || t.NeedsManualReview)}");
+
+            Console.WriteLine();
+            Console.WriteLine($"Summary manifest: {report.SummaryManifestPath}");
+
+            foreach (DevelopmentTileRepairManifest tileManifest in report.Tiles
+                .Where(tileManifest => tileManifest.NeedsManualReview || tileManifest.Warnings.Count > 0)
+                .Take(15))
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Tile {tileManifest.TileName}");
+                Console.WriteLine($"  class={tileManifest.TileClass}, route={tileManifest.RepairRoute}, output={tileManifest.OutputWritten}");
+                Console.WriteLine($"  splitMerge={tileManifest.SplitMergeRan}, indexRepair={tileManifest.ChunkIndicesRepairRan} (mismatch={tileManifest.ChunkIndexMismatchCount})");
+                Console.WriteLine($"  wdlGenerate={tileManifest.WdlGenerationRan}, wlToMh2o={tileManifest.WlLiquidsConverted} (chunks={tileManifest.WlLiquidChunkCount})");
+                if (tileManifest.Warnings.Count > 0)
+                    Console.WriteLine($"  warning={tileManifest.Warnings[0]}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static int RunTerrainTextureTransfer(string[] args)
+    {
+        TerrainTextureTransferOptions defaults = TerrainTextureTransferOptions.CreateDefault();
+
+        string sourceDir = defaults.SourceDirectory;
+        string targetDir = defaults.TargetDirectory;
+        string outputDir = defaults.OutputDirectory;
+        string mode = defaults.Mode;
+        int? tileLimit = defaults.TileLimit;
+        int? globalDeltaX = defaults.GlobalDeltaX;
+        int? globalDeltaY = defaults.GlobalDeltaY;
+        int chunkOffsetX = defaults.ChunkOffsetX;
+        int chunkOffsetY = defaults.ChunkOffsetY;
+        bool copyMtex = defaults.CopyMtex;
+        bool copyMcly = defaults.CopyMcly;
+        bool copyMcal = defaults.CopyMcal;
+        bool copyMcsh = defaults.CopyMcsh;
+        bool copyHoles = defaults.CopyHoles;
+        string? manifestPath = defaults.ManifestPath;
+        var pairs = new List<TerrainTilePair>();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--source-dir":
+                case "--source":
+                case "-s":
+                    if (i + 1 < args.Length)
+                        sourceDir = args[++i];
+                    break;
+                case "--target-dir":
+                case "--target":
+                case "-t":
+                    if (i + 1 < args.Length)
+                        targetDir = args[++i];
+                    break;
+                case "--output-dir":
+                case "--output":
+                case "-o":
+                    if (i + 1 < args.Length)
+                        outputDir = args[++i];
+                    break;
+                case "--mode":
+                    if (i + 1 < args.Length)
+                        mode = args[++i];
+                    break;
+                case "--pair":
+                    if (i + 1 < args.Length)
+                    {
+                        if (!TryParseTilePair(args[++i], out TerrainTilePair pair))
+                        {
+                            Console.Error.WriteLine($"Invalid --pair value '{args[i]}'. Expected srcX_srcY:dstX_dstY");
+                            return 1;
+                        }
+
+                        pairs.Add(pair);
+                    }
+                    break;
+                case "--global-delta":
+                    if (i + 1 < args.Length)
+                    {
+                        if (!TryParseIntPair(args[++i], out int dx, out int dy))
+                        {
+                            Console.Error.WriteLine($"Invalid --global-delta value '{args[i]}'. Expected dx,dy");
+                            return 1;
+                        }
+
+                        globalDeltaX = dx;
+                        globalDeltaY = dy;
+                    }
+                    break;
+                case "--chunk-offset":
+                    if (i + 1 < args.Length)
+                    {
+                        if (!TryParseIntPair(args[++i], out int dx, out int dy))
+                        {
+                            Console.Error.WriteLine($"Invalid --chunk-offset value '{args[i]}'. Expected dx,dy");
+                            return 1;
+                        }
+
+                        chunkOffsetX = dx;
+                        chunkOffsetY = dy;
+                    }
+                    break;
+                case "--tile-limit":
+                    if (i + 1 < args.Length && int.TryParse(args[++i], out int parsedTileLimit))
+                        tileLimit = parsedTileLimit;
+                    break;
+                case "--no-mtex":
+                    copyMtex = false;
+                    break;
+                case "--no-mcly":
+                    copyMcly = false;
+                    break;
+                case "--no-mcal":
+                    copyMcal = false;
+                    break;
+                case "--no-mcsh":
+                    copyMcsh = false;
+                    break;
+                case "--no-holes":
+                    copyHoles = false;
+                    break;
+                case "--manifest":
+                    if (i + 1 < args.Length)
+                        manifestPath = args[++i];
+                    break;
+                case "--help":
+                case "-h":
+                    Console.WriteLine("Terrain Texture Transfer");
+                    Console.WriteLine();
+                    Console.WriteLine("Usage: wowmapconverter terrain-texture-transfer [options]");
+                    Console.WriteLine();
+                    Console.WriteLine("Mapping options (required):");
+                    Console.WriteLine("  --pair <sx_sy:tx_ty>     Add explicit source->target tile pair (repeatable)");
+                    Console.WriteLine("  --global-delta <dx,dy>   Auto-build pairs from source roots with target=(source+delta)");
+                    Console.WriteLine();
+                    Console.WriteLine("Core options:");
+                    Console.WriteLine("  --source-dir, -s <dir>   Source map directory (default: fixed development dataset)");
+                    Console.WriteLine("  --target-dir, -t <dir>   Target map directory (default: fixed development dataset)");
+                    Console.WriteLine("  --output-dir, -o <dir>   Output root (default: output/terrain-texture-transfer)");
+                    Console.WriteLine("  --mode <dry-run|apply>   dry-run writes manifests only; apply also writes ADTs");
+                    Console.WriteLine("  --chunk-offset <dx,dy>   Source chunk remap offset per target chunk");
+                    Console.WriteLine("  --tile-limit <n>         Limit number of planned pairs");
+                    Console.WriteLine("  --manifest <path>        Summary manifest output path");
+                    Console.WriteLine();
+                    Console.WriteLine("Payload toggles:");
+                    Console.WriteLine("  --no-mtex                Do not copy MTEX");
+                    Console.WriteLine("  --no-mcly                Do not copy MCLY layers");
+                    Console.WriteLine("  --no-mcal                Do not copy MCAL alpha maps");
+                    Console.WriteLine("  --no-mcsh                Do not copy MCSH shadow maps");
+                    Console.WriteLine("  --no-holes               Do not copy MCNK holes");
+                    return 0;
+            }
+        }
+
+        var runOptions = new TerrainTextureTransferOptions(
+            SourceDirectory: sourceDir,
+            TargetDirectory: targetDir,
+            OutputDirectory: outputDir,
+            Mode: mode,
+            Pairs: pairs,
+            TileLimit: tileLimit,
+            GlobalDeltaX: globalDeltaX,
+            GlobalDeltaY: globalDeltaY,
+            ChunkOffsetX: chunkOffsetX,
+            ChunkOffsetY: chunkOffsetY,
+            CopyMtex: copyMtex,
+            CopyMcly: copyMcly,
+            CopyMcal: copyMcal,
+            CopyMcsh: copyMcsh,
+            CopyHoles: copyHoles,
+            ManifestPath: manifestPath);
+
+        Console.WriteLine("Terrain Texture Transfer");
+        Console.WriteLine("========================");
+        Console.WriteLine($"Source: {Pm4CoordinateService.ResolveMapDirectory(runOptions.SourceDirectory)}");
+        Console.WriteLine($"Target: {Pm4CoordinateService.ResolveMapDirectory(runOptions.TargetDirectory)}");
+        Console.WriteLine($"Output: {Path.GetFullPath(runOptions.OutputDirectory)}");
+        Console.WriteLine($"Mode:   {runOptions.Mode}");
+        Console.WriteLine($"Pairs:  {(runOptions.Pairs.Count > 0 ? runOptions.Pairs.Count : 0)} explicit");
+        if (runOptions.GlobalDeltaX.HasValue && runOptions.GlobalDeltaY.HasValue)
+            Console.WriteLine($"Delta:  ({runOptions.GlobalDeltaX.Value}, {runOptions.GlobalDeltaY.Value})");
+        Console.WriteLine($"Chunk offset: ({runOptions.ChunkOffsetX}, {runOptions.ChunkOffsetY})");
+        Console.WriteLine($"Copy: MTEX={runOptions.CopyMtex}, MCLY={runOptions.CopyMcly}, MCAL={runOptions.CopyMcal}, MCSH={runOptions.CopyMcsh}, Holes={runOptions.CopyHoles}");
+
+        try
+        {
+            TerrainTextureTransferExecutionReport report = TerrainTextureTransferService.Execute(runOptions);
+
+            Console.WriteLine();
+            Console.WriteLine($"Source map: {report.SourceMapName}");
+            Console.WriteLine($"Target map: {report.TargetMapName}");
+            Console.WriteLine($"Tiles planned:   {report.TilesPlanned}");
+            Console.WriteLine($"Tiles processed: {report.TilesProcessed}");
+            Console.WriteLine($"Tiles written:   {report.TilesWritten}");
+            Console.WriteLine($"Manual review:   {report.TilesNeedingManualReview}");
+            Console.WriteLine($"Chunk pairs:     {report.ChunkPairsApplied}");
+            Console.WriteLine();
+            Console.WriteLine($"Summary manifest: {report.SummaryManifestPath}");
+
+            foreach (TerrainTextureTransferTileManifest tile in report.Tiles
+                .Where(tile => tile.NeedsManualReview || tile.Warnings.Count > 0)
+                .Take(15))
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Pair {tile.SourceTileName} -> {tile.TargetTileName}");
+                Console.WriteLine($"  touched={tile.TargetChunksTouched}, sourceChunks={tile.SourceChunksUsed}, missingSource={tile.MissingSourceChunkCount}, outOfRange={tile.OutOfRangeChunkRemapCount}");
+                Console.WriteLine($"  copied: mtex={tile.MtexCopied}, mcly={tile.MclyCopied}, mcal={tile.McalCopied}, mcsh={tile.McshCopied}, holes={tile.HolesCopied}");
+                if (tile.Warnings.Count > 0)
+                    Console.WriteLine($"  warning={tile.Warnings[0]}");
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static bool TryParseTilePair(string raw, out TerrainTilePair pair)
+    {
+        pair = new TerrainTilePair(0, 0, 0, 0);
+        string[] split = raw.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (split.Length != 2)
+            return false;
+
+        if (!TryParseIntPair(split[0], out int sx, out int sy)
+            || !TryParseIntPair(split[1], out int tx, out int ty))
+        {
+            return false;
+        }
+
+        pair = new TerrainTilePair(sx, sy, tx, ty);
+        return true;
+    }
+
+    private static bool TryParseIntPair(string raw, out int x, out int y)
+    {
+        x = 0;
+        y = 0;
+        string normalized = raw.Replace('_', ',').Replace('x', ',').Replace('X', ',');
+        string[] parts = normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length != 2)
+            return false;
+
+        return int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y);
     }
 
     private static async Task<int> RunAnalyzeAsync(string[] args)
@@ -1654,6 +2035,8 @@ public static class Program
         Console.WriteLine("  wowmapconverter pm4-export <pm4> [options]              Export PM4 to OBJ");
         Console.WriteLine("  wowmapconverter pm4-validate-coords [options]           Validate PM4 MPRL refs against _obj0 placements");
         Console.WriteLine("  wowmapconverter development-analyze [options]           Audit the original development ADT/PM4/WL dataset");
+        Console.WriteLine("  wowmapconverter development-repair [options]            Run the active development repair slice + manifests");
+        Console.WriteLine("  wowmapconverter terrain-texture-transfer [options]      Transfer MCAL/MCLY/MCSH/holes across mapped tiles");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter vlm-export [options]                    Export VLM training dataset");
         Console.WriteLine("  wowmapconverter vlm-decode [options]                    Decode VLM JSON to ADT");

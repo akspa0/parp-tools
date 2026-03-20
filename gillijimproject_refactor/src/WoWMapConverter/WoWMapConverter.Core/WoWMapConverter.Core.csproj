@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
+    <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
     <ProjectReference Include="..\..\..\lib\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />

@@ -272,12 +272,12 @@ public class MpqDataSource : IDataSource
         int fileCountBefore = _fileSet.Count;
         int alphaCountBefore = _alphaMpqCache.Count;
 
-        ScanLooseFiles(normalizedRoot);
+        int scannedLooseFiles = ScanLooseFiles(normalizedRoot);
         ScanAlphaNestedMpqArchives(normalizedRoot);
 
         int addedFiles = _fileSet.Count - fileCountBefore;
         int addedAlphaEntries = _alphaMpqCache.Count - alphaCountBefore;
-        if (addedFiles <= 0 && addedAlphaEntries <= 0)
+        if (scannedLooseFiles <= 0 && addedAlphaEntries <= 0)
         {
             message = $"No supported loose map files were found under {normalizedRoot}";
             return false;
@@ -288,7 +288,7 @@ public class MpqDataSource : IDataSource
         BuildLookupIndexes();
         ClearReadCache();
 
-        message = $"Attached loose overlay {normalizedRoot} ({addedFiles} indexed files, {addedAlphaEntries} alpha wrapper entries).";
+        message = $"Attached loose overlay {normalizedRoot} ({scannedLooseFiles} loose files scanned, {addedFiles} newly indexed paths, {addedAlphaEntries} alpha wrapper entries).";
         ViewerLog.Important(ViewerLog.Category.MpqData, message);
         return true;
     }
@@ -328,7 +328,7 @@ public class MpqDataSource : IDataSource
                     _looseRoots.Add(root);
 
                 ViewerLog.Debug(ViewerLog.Category.MpqData, $"Scanning loose files: {fullDir}");
-                int before = _fileSet.Count;
+                int supportedFilesFound = 0;
 
                 try
                 {
@@ -337,6 +337,7 @@ public class MpqDataSource : IDataSource
                         var ext = Path.GetExtension(file).ToLowerInvariant();
                         if (IndexedLooseExtensions.Contains(ext))
                         {
+                            supportedFilesFound++;
                             var virtualPath = Path.GetRelativePath(root, file).Replace('/', '\\');
                             _fileSet.Add(virtualPath);
                         }
@@ -347,10 +348,9 @@ public class MpqDataSource : IDataSource
                     ViewerLog.Error(ViewerLog.Category.MpqData, $"Scan error in {fullDir}: {ex.Message}");
                 }
 
-                int found = _fileSet.Count - before;
-                totalAdded += found;
-                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} files in {subDir}/");
-                foundAny = found > 0;
+                totalAdded += supportedFilesFound;
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {supportedFilesFound} supported files in {subDir}/");
+                foundAny |= supportedFilesFound > 0;
             }
 
             // Additional scan for WMO files in nested wmo directories
@@ -360,12 +360,13 @@ public class MpqDataSource : IDataSource
                 if (!Directory.Exists(fullWmoDir)) continue;
 
                 ViewerLog.Debug(ViewerLog.Category.MpqData, $"Scanning WMO files: {fullWmoDir}");
-                int before = _fileSet.Count;
+                int supportedFilesFound = 0;
 
                 try
                 {
                     foreach (var file in Directory.EnumerateFiles(fullWmoDir, "*.wmo", SearchOption.AllDirectories))
                     {
+                        supportedFilesFound++;
                         var virtualPath = Path.GetRelativePath(root, file).Replace('/', '\\');
                         _fileSet.Add(virtualPath);
                     }
@@ -375,9 +376,8 @@ public class MpqDataSource : IDataSource
                     ViewerLog.Error(ViewerLog.Category.MpqData, $"WMO scan error in {fullWmoDir}: {ex.Message}");
                 }
 
-                int found = _fileSet.Count - before;
-                totalAdded += found;
-                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {found} WMO files");
+                totalAdded += supportedFilesFound;
+                ViewerLog.Debug(ViewerLog.Category.MpqData, $"  Found {supportedFilesFound} WMO files");
             }
 
             if (foundAny) break;

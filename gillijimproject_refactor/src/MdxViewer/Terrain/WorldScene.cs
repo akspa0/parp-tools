@@ -4,6 +4,7 @@ using MdxViewer.Logging;
 using MdxViewer.Population;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
+using WoWMapConverter.Core.Formats.PM4;
 
 namespace MdxViewer.Terrain;
 
@@ -59,6 +60,34 @@ public class WorldScene : ISceneRenderer
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private bool _wireframeRevealEnabled;
 
+    // PM4 debug overlay
+    private const int Pm4MaxLinesTotal = 400000;
+    private const int Pm4MaxLinesPerTile = 12000;
+    private const int Pm4MaxTrianglesTotal = 240000;
+    private const int Pm4MaxTrianglesPerTile = 12000;
+    private const float Pm4MaxEdgeLength = 512f;
+    private bool _showPm4Overlay;
+    private bool _showPm4SolidOverlay = true;
+    private bool _showPm4Type40 = true;
+    private bool _showPm4Type80 = true;
+    private bool _showPm4TypeOther = true;
+    private Vector3 _pm4OverlayTranslation = Vector3.Zero;
+    private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
+    private Vector3 _pm4OverlayScale = Vector3.One;
+    private bool _pm4LoadAttempted;
+    private string _pm4Status = "PM4 overlay not loaded.";
+    private int _pm4TotalFiles;
+    private int _pm4LoadedFiles;
+    private int _pm4ObjectCount;
+    private int _pm4LineCount;
+    private int _pm4TriangleCount;
+    private int _pm4RejectedLongEdges;
+    private int _pm4VisibleObjectCount;
+    private int _pm4VisibleLineCount;
+    private int _pm4VisibleTriangleCount;
+    private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
+    private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
+
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
     public int WmoCulledCount { get; private set; }
@@ -105,6 +134,41 @@ public class WorldScene : ISceneRenderer
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
+    public bool ShowPm4Overlay
+    {
+        get => _showPm4Overlay;
+        set
+        {
+            _showPm4Overlay = value;
+            // Allow reattempt when previously loaded with no data, e.g. after attaching a new loose overlay.
+            if (value && (!_pm4LoadAttempted || _pm4TileObjects.Count == 0))
+                LazyLoadPm4Overlay();
+        }
+    }
+    public bool Pm4LoadAttempted => _pm4LoadAttempted;
+    public string Pm4Status => _pm4Status;
+    public int Pm4TotalFiles => _pm4TotalFiles;
+    public int Pm4LoadedFiles => _pm4LoadedFiles;
+    public int Pm4ObjectCount => _pm4ObjectCount;
+    public int Pm4LineCount => _pm4LineCount;
+    public int Pm4TriangleCount => _pm4TriangleCount;
+    public int Pm4RejectedLongEdges => _pm4RejectedLongEdges;
+    public int Pm4VisibleObjectCount => _pm4VisibleObjectCount;
+    public int Pm4VisibleLineCount => _pm4VisibleLineCount;
+    public int Pm4VisibleTriangleCount => _pm4VisibleTriangleCount;
+    public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
+    public bool ShowPm4Type40 { get => _showPm4Type40; set => _showPm4Type40 = value; }
+    public bool ShowPm4Type80 { get => _showPm4Type80; set => _showPm4Type80 = value; }
+    public bool ShowPm4TypeOther { get => _showPm4TypeOther; set => _showPm4TypeOther = value; }
+    public Vector3 Pm4OverlayTranslation { get => _pm4OverlayTranslation; set => _pm4OverlayTranslation = value; }
+    public Vector3 Pm4OverlayRotationDegrees { get => _pm4OverlayRotationDegrees; set => _pm4OverlayRotationDegrees = value; }
+    public Vector3 Pm4OverlayScale { get => _pm4OverlayScale; set => _pm4OverlayScale = value; }
+    public float Pm4OverlayYawDegrees
+    {
+        get => _pm4OverlayRotationDegrees.Z;
+        set => _pm4OverlayRotationDegrees = new Vector3(_pm4OverlayRotationDegrees.X, _pm4OverlayRotationDegrees.Y, value);
+    }
+    public IReadOnlyCollection<Pm4OverlayTileStats> Pm4TileStats => _pm4TileStats.Values;
 
     /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
     public ObjectInstance? SelectedInstance => _selectedObjectType switch
@@ -223,6 +287,395 @@ public class WorldScene : ISceneRenderer
         _wlLoader.LoadAll();
         if (_wlLoader.HasData)
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
+    }
+
+    private void LazyLoadPm4Overlay()
+    {
+        _pm4LoadAttempted = true;
+        _pm4TileObjects.Clear();
+        _pm4TileStats.Clear();
+        _pm4TotalFiles = 0;
+        _pm4LoadedFiles = 0;
+        _pm4ObjectCount = 0;
+        _pm4LineCount = 0;
+        _pm4TriangleCount = 0;
+        _pm4RejectedLongEdges = 0;
+        _pm4VisibleObjectCount = 0;
+        _pm4VisibleLineCount = 0;
+        _pm4VisibleTriangleCount = 0;
+
+        if (_dataSource == null)
+        {
+            _pm4Status = "PM4 unavailable: no data source.";
+            return;
+        }
+
+        string mapName = _terrainManager.MapName;
+        var pm4Candidates = _dataSource
+            .GetFileList(".pm4")
+            .Where(path => IsMapPm4Path(path, mapName))
+            .ToList();
+
+        _pm4TotalFiles = pm4Candidates.Count;
+        if (_pm4TotalFiles == 0)
+        {
+            _pm4Status = $"PM4: no files found for map '{mapName}'.";
+            return;
+        }
+
+        int remainingLineBudget = Pm4MaxLinesTotal;
+        int remainingTriangleBudget = Pm4MaxTrianglesTotal;
+        foreach (string pm4Path in pm4Candidates)
+        {
+            if (remainingLineBudget <= 0)
+                break;
+
+            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int tileX, out int tileY))
+                continue;
+
+            byte[]? bytes = _dataSource.ReadFile(pm4Path);
+            if (bytes == null || bytes.Length == 0)
+                continue;
+
+            try
+            {
+                var pm4 = new Pm4File(bytes);
+                int rejectedLongEdges = 0;
+                List<Pm4OverlayObject> objects = BuildPm4TileObjects(
+                    pm4,
+                    tileX,
+                    tileY,
+                    ref remainingLineBudget,
+                    ref remainingTriangleBudget,
+                    ref rejectedLongEdges);
+                if (objects.Count == 0)
+                    continue;
+
+                _pm4TileObjects[(tileX, tileY)] = objects;
+                _pm4LoadedFiles++;
+                _pm4ObjectCount += objects.Count;
+                int tileLineCount = objects.Sum(obj => obj.Lines.Count);
+                int tileTriangleCount = objects.Sum(obj => obj.Triangles.Count);
+                _pm4LineCount += tileLineCount;
+                _pm4TriangleCount += tileTriangleCount;
+                _pm4RejectedLongEdges += rejectedLongEdges;
+                _pm4TileStats[(tileX, tileY)] = new Pm4OverlayTileStats(tileX, tileY, objects.Count, tileLineCount, tileTriangleCount);
+            }
+            catch (Exception ex)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] Failed to decode '{pm4Path}': {ex.Message}");
+            }
+        }
+
+        if (_pm4LoadedFiles == 0)
+        {
+            _pm4Status = $"PM4: {_pm4TotalFiles} files found, none decoded into overlay data.";
+            return;
+        }
+
+        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4RejectedLongEdges} long edges rejected.";
+        ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+    }
+
+    private static bool IsMapPm4Path(string path, string mapName)
+    {
+        string normalized = path.Replace('\\', '/');
+        string fileName = Path.GetFileName(normalized);
+        if (fileName.StartsWith(mapName + "_", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string mapSegment = "/" + mapName + "/";
+        return normalized.Contains(mapSegment, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<Pm4OverlayObject> BuildPm4TileObjects(
+        Pm4File pm4,
+        int tileX,
+        int tileY,
+        ref int remainingLineBudget,
+        ref int remainingTriangleBudget,
+        ref int rejectedLongEdges)
+    {
+        var objects = new List<Pm4OverlayObject>();
+        if (remainingLineBudget <= 0 || pm4.MeshVertices.Count == 0)
+            return objects;
+
+        bool useTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
+        int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
+        int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
+
+        foreach (var ck24Group in pm4.Surfaces
+            .Where(surface => surface.Ck24 != 0)
+            .GroupBy(surface => surface.Ck24))
+        {
+            if (tileLineBudget <= 0)
+                break;
+
+            List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, ck24Group, tileX, tileY, useTileLocalCoordinates, tileLineBudget, ref rejectedLongEdges);
+            List<Pm4Triangle> triangles = tileTriangleBudget > 0
+                ? BuildCk24ObjectTriangles(pm4, ck24Group, tileX, tileY, useTileLocalCoordinates, tileTriangleBudget)
+                : new List<Pm4Triangle>();
+            if (lines.Count == 0 && triangles.Count == 0)
+                continue;
+
+            uint ck24 = ck24Group.Key;
+            byte ck24Type = (byte)(ck24 >> 16);
+            objects.Add(new Pm4OverlayObject(ck24, ck24Type, lines, triangles));
+            tileLineBudget -= lines.Count;
+            tileTriangleBudget -= triangles.Count;
+        }
+
+        // Fallback for PM4 files that don't provide usable CK24 groupings.
+        if (objects.Count == 0 && pm4.MeshIndices.Count >= 3 && (tileLineBudget > 0 || tileTriangleBudget > 0))
+        {
+            List<Pm4LineSegment> fallbackLines = tileLineBudget > 0
+                ? BuildFallbackMeshLines(pm4, tileX, tileY, useTileLocalCoordinates, tileLineBudget, ref rejectedLongEdges)
+                : new List<Pm4LineSegment>();
+            List<Pm4Triangle> fallbackTriangles = tileTriangleBudget > 0
+                ? BuildFallbackMeshTriangles(pm4, tileX, tileY, useTileLocalCoordinates, tileTriangleBudget)
+                : new List<Pm4Triangle>();
+            if (fallbackLines.Count > 0 || fallbackTriangles.Count > 0)
+                objects.Add(new Pm4OverlayObject(0, 0, fallbackLines, fallbackTriangles));
+        }
+
+        int linesUsed = objects.Sum(obj => obj.Lines.Count);
+        int trianglesUsed = objects.Sum(obj => obj.Triangles.Count);
+        remainingLineBudget -= linesUsed;
+        remainingTriangleBudget -= trianglesUsed;
+        return objects;
+    }
+
+    private static List<Pm4LineSegment> BuildCk24ObjectLines(
+        Pm4File pm4,
+        IGrouping<uint, MsurEntry> ck24Group,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        int lineBudget,
+        ref int rejectedLongEdges)
+    {
+        var lines = new List<Pm4LineSegment>();
+        var uniqueEdges = new HashSet<ulong>();
+
+        foreach (MsurEntry surface in ck24Group)
+        {
+            if (lines.Count >= lineBudget)
+                break;
+
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int surfaceIndexCount = surface.IndexCount;
+            if (surfaceIndexCount < 2 || firstIndex < 0 || firstIndex >= pm4.MeshIndices.Count)
+                continue;
+
+            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, pm4.MeshIndices.Count);
+            if (endExclusive - firstIndex < 2)
+                continue;
+
+            int prevVertex = (int)pm4.MeshIndices[firstIndex];
+            if ((uint)prevVertex >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            for (int idx = firstIndex + 1; idx < endExclusive && lines.Count < lineBudget; idx++)
+            {
+                int nextVertex = (int)pm4.MeshIndices[idx];
+                if ((uint)nextVertex >= (uint)pm4.MeshVertices.Count)
+                    continue;
+
+                AddUniqueEdge(pm4, prevVertex, nextVertex, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+                prevVertex = nextVertex;
+            }
+
+            // Close each surface loop so CK24 objects stay visually self-contained.
+            if (lines.Count < lineBudget)
+            {
+                int firstVertex = (int)pm4.MeshIndices[firstIndex];
+                int lastVertex = (int)pm4.MeshIndices[endExclusive - 1];
+                if ((uint)firstVertex < (uint)pm4.MeshVertices.Count && (uint)lastVertex < (uint)pm4.MeshVertices.Count)
+                    AddUniqueEdge(pm4, lastVertex, firstVertex, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            }
+        }
+
+        return lines;
+    }
+
+    private static List<Pm4Triangle> BuildCk24ObjectTriangles(
+        Pm4File pm4,
+        IGrouping<uint, MsurEntry> ck24Group,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        int triangleBudget)
+    {
+        var triangles = new List<Pm4Triangle>();
+
+        foreach (MsurEntry surface in ck24Group)
+        {
+            if (triangles.Count >= triangleBudget)
+                break;
+
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int surfaceIndexCount = surface.IndexCount;
+            if (surfaceIndexCount < 3 || firstIndex < 0 || firstIndex >= pm4.MeshIndices.Count)
+                continue;
+
+            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, pm4.MeshIndices.Count);
+            int indexCount = endExclusive - firstIndex;
+            if (indexCount < 3)
+                continue;
+
+            // Most PM4 surfaces are listed as loops; use a fan from the first vertex.
+            int i0 = (int)pm4.MeshIndices[firstIndex];
+            if ((uint)i0 >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates);
+            for (int idx = firstIndex + 1; idx + 1 < endExclusive && triangles.Count < triangleBudget; idx++)
+            {
+                int i1 = (int)pm4.MeshIndices[idx];
+                int i2 = (int)pm4.MeshIndices[idx + 1];
+                if ((uint)i1 >= (uint)pm4.MeshVertices.Count || (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                    continue;
+
+                Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates);
+                Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates);
+                triangles.Add(new Pm4Triangle(v0, v1, v2));
+            }
+        }
+
+        return triangles;
+    }
+
+    private static List<Pm4LineSegment> BuildFallbackMeshLines(
+        Pm4File pm4,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        int lineBudget,
+        ref int rejectedLongEdges)
+    {
+        var lines = new List<Pm4LineSegment>();
+        var uniqueEdges = new HashSet<ulong>();
+
+        for (int i = 0; i + 2 < pm4.MeshIndices.Count && lines.Count < lineBudget; i += 3)
+        {
+            int i0 = (int)pm4.MeshIndices[i];
+            int i1 = (int)pm4.MeshIndices[i + 1];
+            int i2 = (int)pm4.MeshIndices[i + 2];
+
+            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            AddUniqueEdge(pm4, i0, i1, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            AddUniqueEdge(pm4, i1, i2, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+            AddUniqueEdge(pm4, i2, i0, tileX, tileY, useTileLocalCoordinates, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
+        }
+
+        return lines;
+    }
+
+    private static List<Pm4Triangle> BuildFallbackMeshTriangles(
+        Pm4File pm4,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        int triangleBudget)
+    {
+        var triangles = new List<Pm4Triangle>();
+
+        for (int i = 0; i + 2 < pm4.MeshIndices.Count && triangles.Count < triangleBudget; i += 3)
+        {
+            int i0 = (int)pm4.MeshIndices[i];
+            int i1 = (int)pm4.MeshIndices[i + 1];
+            int i2 = (int)pm4.MeshIndices[i + 2];
+
+            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
+                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                continue;
+
+            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates);
+            Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates);
+            Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates);
+            triangles.Add(new Pm4Triangle(v0, v1, v2));
+        }
+
+        return triangles;
+    }
+
+    private static void AddUniqueEdge(Pm4File pm4, int ia, int ib,
+        int tileX, int tileY, bool useTileLocalCoordinates,
+        HashSet<ulong> uniqueEdges, List<Pm4LineSegment> lines, int tileLineBudget,
+        ref int rejectedLongEdges)
+    {
+        if (ia == ib || lines.Count >= tileLineBudget)
+            return;
+
+        ulong key = PackEdgeKey(ia, ib);
+        if (!uniqueEdges.Add(key))
+            return;
+
+        Vector3 from = ConvertPm4VertexToRenderer(pm4.MeshVertices[ia], tileX, tileY, useTileLocalCoordinates);
+        Vector3 to = ConvertPm4VertexToRenderer(pm4.MeshVertices[ib], tileX, tileY, useTileLocalCoordinates);
+
+        if (Vector3.DistanceSquared(from, to) > Pm4MaxEdgeLength * Pm4MaxEdgeLength)
+        {
+            rejectedLongEdges++;
+            return;
+        }
+
+        lines.Add(new Pm4LineSegment(from, to));
+    }
+
+    private static ulong PackEdgeKey(int ia, int ib)
+    {
+        uint lo = ia < ib ? (uint)ia : (uint)ib;
+        uint hi = ia < ib ? (uint)ib : (uint)ia;
+        return ((ulong)lo << 32) | hi;
+    }
+
+    private static bool IsLikelyTileLocal(IReadOnlyList<Vector3> vertices)
+    {
+        float minX = float.MaxValue;
+        float minZ = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxZ = float.MinValue;
+
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            Vector3 v = vertices[i];
+            if (v.X < minX) minX = v.X;
+            if (v.Z < minZ) minZ = v.Z;
+            if (v.X > maxX) maxX = v.X;
+            if (v.Z > maxZ) maxZ = v.Z;
+        }
+
+        const float tolerance = 64f;
+        float tileSpan = Pm4CoordinateService.TileSize;
+        return minX >= -tolerance && minZ >= -tolerance &&
+               maxX <= tileSpan + tolerance && maxZ <= tileSpan + tolerance;
+    }
+
+    private static Vector3 ConvertPm4VertexToRenderer(Vector3 pm4Vertex, int tileX, int tileY, bool useTileLocalCoordinates)
+    {
+        // PM4 helpers produce ADT placement order (X/Z world plane, Y vertical).
+        Vector3 placement = useTileLocalCoordinates
+            ? Pm4CoordinateService.Pm4LocalToAdtPlacement(pm4Vertex, tileX, tileY)
+            : pm4Vertex;
+
+        // Renderer world plane expects X from placement.X and Y from placement.Z.
+        // Swapping these rotates PM4 overlays by 90 degrees.
+        return new Vector3(
+            WoWConstants.MapOrigin - placement.X,
+            WoWConstants.MapOrigin - placement.Z,
+            placement.Y + 0.5f);
+    }
+
+    public void ReloadPm4Overlay()
+    {
+        _pm4LoadAttempted = false;
+        LazyLoadPm4Overlay();
     }
 
     /// <summary>
@@ -1256,6 +1709,58 @@ public class WorldScene : ISceneRenderer
         if (_bbRenderer != null)
         {
             _bbRenderer.BeginBatch();
+            _bbRenderer.BeginSolidBatch();
+
+            _pm4VisibleObjectCount = 0;
+            _pm4VisibleLineCount = 0;
+            _pm4VisibleTriangleCount = 0;
+
+            if (_showPm4Overlay && _pm4TileObjects.Count > 0)
+            {
+                bool hasLoadedTiles = _terrainManager.LoadedTileCount > 0;
+                Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+                bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+                    || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                    || _pm4OverlayScale != Vector3.One;
+
+                foreach (var (tileKey, objects) in _pm4TileObjects)
+                {
+                    if (hasLoadedTiles && !_terrainManager.IsTileLoaded(tileKey.tileX, tileKey.tileY))
+                        continue;
+
+                    foreach (Pm4OverlayObject obj in objects)
+                    {
+                        if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                            continue;
+
+                        _pm4VisibleObjectCount++;
+                        Vector3 pm4Color = GetPm4ObjectColor(obj.Ck24Type);
+
+                        if (_showPm4SolidOverlay && obj.Triangles.Count > 0)
+                        {
+                            for (int i = 0; i < obj.Triangles.Count; i++)
+                            {
+                                Pm4Triangle tri = obj.Triangles[i];
+                                Vector3 a = applyPm4Transform ? ApplyPm4OverlayTransform(tri.A, pm4Transform) : tri.A;
+                                Vector3 b = applyPm4Transform ? ApplyPm4OverlayTransform(tri.B, pm4Transform) : tri.B;
+                                Vector3 c = applyPm4Transform ? ApplyPm4OverlayTransform(tri.C, pm4Transform) : tri.C;
+                                _bbRenderer.BatchTriangle(a, b, c, pm4Color, 0.20f);
+                            }
+                            _pm4VisibleTriangleCount += obj.Triangles.Count;
+                        }
+
+                        for (int i = 0; i < obj.Lines.Count; i++)
+                        {
+                            Pm4LineSegment line = obj.Lines[i];
+                            Vector3 from = applyPm4Transform ? ApplyPm4OverlayTransform(line.From, pm4Transform) : line.From;
+                            Vector3 to = applyPm4Transform ? ApplyPm4OverlayTransform(line.To, pm4Transform) : line.To;
+                            _bbRenderer.BatchLine(from, to, pm4Color);
+                        }
+
+                        _pm4VisibleLineCount += obj.Lines.Count;
+                    }
+                }
+            }
 
             // POI pin markers (magenta)
             if (_showPoi && _poiLoader != null && _poiLoader.Entries.Count > 0)
@@ -1365,6 +1870,20 @@ public class WorldScene : ISceneRenderer
                         _bbRenderer.BatchLine(v3, v7, triggerColor);
                     }
                 }
+            }
+
+            if (_showPm4Overlay && _showPm4SolidOverlay && _pm4VisibleTriangleCount > 0)
+            {
+                _gl.Enable(EnableCap.Blend);
+                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Lequal);
+                _gl.DepthMask(false);
+                _gl.Disable(EnableCap.CullFace);
+                _bbRenderer.FlushSolidBatch(view, proj);
+                _gl.Enable(EnableCap.CullFace);
+                _gl.DepthMask(true);
+                _gl.Disable(EnableCap.Blend);
             }
 
             _bbRenderer.FlushBatch(view, proj);
@@ -1725,6 +2244,43 @@ public class WorldScene : ISceneRenderer
         return (origin, dir);
     }
 
+    private static Vector3 GetPm4ObjectColor(byte ck24Type)
+    {
+        return ck24Type switch
+        {
+            0x40 => new Vector3(1.0f, 0.55f, 0.10f),
+            0x80 => new Vector3(0.95f, 0.32f, 0.08f),
+            _ => new Vector3(0.95f, 0.48f, 0.08f)
+        };
+    }
+
+    private bool ShouldRenderPm4ObjectType(byte ck24Type)
+    {
+        return ck24Type switch
+        {
+            0x40 => _showPm4Type40,
+            0x80 => _showPm4Type80,
+            _ => _showPm4TypeOther
+        };
+    }
+
+    private Matrix4x4 BuildPm4OverlayTransformMatrix()
+    {
+        float rotX = _pm4OverlayRotationDegrees.X * MathF.PI / 180f;
+        float rotY = _pm4OverlayRotationDegrees.Y * MathF.PI / 180f;
+        float rotZ = _pm4OverlayRotationDegrees.Z * MathF.PI / 180f;
+        return Matrix4x4.CreateScale(_pm4OverlayScale)
+            * Matrix4x4.CreateRotationX(rotX)
+            * Matrix4x4.CreateRotationY(rotY)
+            * Matrix4x4.CreateRotationZ(rotZ)
+            * Matrix4x4.CreateTranslation(_pm4OverlayTranslation);
+    }
+
+    private static Vector3 ApplyPm4OverlayTransform(Vector3 position, in Matrix4x4 transform)
+    {
+        return Vector3.Transform(position, transform);
+    }
+
     public void Dispose()
     {
         _terrainManager.OnTileLoaded -= OnTileLoaded;
@@ -1743,7 +2299,68 @@ public class WorldScene : ISceneRenderer
         _externalMdxInstances.Clear();
         _externalSkyboxInstances.Clear();
         _externalWmoInstances.Clear();
+        _pm4TileObjects.Clear();
     }
+}
+
+internal sealed class Pm4OverlayObject
+{
+    public Pm4OverlayObject(uint ck24, byte ck24Type, List<Pm4LineSegment> lines, List<Pm4Triangle> triangles)
+    {
+        Ck24 = ck24;
+        Ck24Type = ck24Type;
+        Lines = lines;
+        Triangles = triangles;
+    }
+
+    public uint Ck24 { get; }
+    public byte Ck24Type { get; }
+    public List<Pm4LineSegment> Lines { get; }
+    public List<Pm4Triangle> Triangles { get; }
+}
+
+internal readonly struct Pm4LineSegment
+{
+    public Pm4LineSegment(Vector3 from, Vector3 to)
+    {
+        From = from;
+        To = to;
+    }
+
+    public Vector3 From { get; }
+    public Vector3 To { get; }
+}
+
+internal readonly struct Pm4Triangle
+{
+    public Pm4Triangle(Vector3 a, Vector3 b, Vector3 c)
+    {
+        A = a;
+        B = b;
+        C = c;
+    }
+
+    public Vector3 A { get; }
+    public Vector3 B { get; }
+    public Vector3 C { get; }
+}
+
+public readonly struct Pm4OverlayTileStats
+{
+    public Pm4OverlayTileStats(int tileX, int tileY, int objectCount, int lineCount, int triangleCount)
+    {
+        TileX = tileX;
+        TileY = tileY;
+        ObjectCount = objectCount;
+        LineCount = lineCount;
+        TriangleCount = triangleCount;
+    }
+
+    public int TileX { get; }
+    public int TileY { get; }
+    public int ObjectCount { get; }
+    public int LineCount { get; }
+    public int TriangleCount { get; }
 }
 
 /// <summary>

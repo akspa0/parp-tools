@@ -8,6 +8,7 @@ public record DevelopmentTileAnalysisResult(
     string TileName,
     int TileX,
     int TileY,
+    string TileClass,
     bool HasRootAdt,
     long RootLength,
     bool HasObj0Adt,
@@ -57,6 +58,11 @@ public record DevelopmentMapAnalysisReport(
     int TilesWithoutUsableTerrain,
     int TilesWithHeaderIndexMismatches,
     int TilesWithRepeatedZeroIndices,
+    int HealthySplitCount,
+    int IndexCorruptCount,
+    int ScanOnlyRootCount,
+    int WdlRebuildCount,
+    int ManualReviewCount,
     List<DevelopmentTileAnalysisResult> Tiles);
 
 public static partial class DevelopmentMapAnalyzer
@@ -145,6 +151,11 @@ public static partial class DevelopmentMapAnalyzer
             TilesWithoutUsableTerrain: tileReports.Count(t => !t.HasRootAdt || t.ValidRootChunkCount == 0),
             TilesWithHeaderIndexMismatches: tileReports.Count(t => t.HeaderIndexMismatchCount > 0),
             TilesWithRepeatedZeroIndices: tileReports.Count(t => t.ZeroIndexHeaderCount > 1),
+            HealthySplitCount: tileReports.Count(t => t.TileClass == "healthy-split"),
+            IndexCorruptCount: tileReports.Count(t => t.TileClass == "index-corrupt"),
+            ScanOnlyRootCount: tileReports.Count(t => t.TileClass == "scan-only-root"),
+            WdlRebuildCount: tileReports.Count(t => t.TileClass == "wdl-rebuild"),
+            ManualReviewCount: tileReports.Count(t => t.TileClass == "manual-review"),
             Tiles: tileReports);
     }
 
@@ -164,11 +175,14 @@ public static partial class DevelopmentMapAnalyzer
             : RootInspection.Missing;
 
         string tileName = $"{mapName}_{tile.TileX}_{tile.TileY}";
+        string tileClass = ClassifyTile(tile, inspection);
+        string recommendedAction = RecommendAction(tileClass, tile, inspection);
 
         return new DevelopmentTileAnalysisResult(
             TileName: tileName,
             TileX: tile.TileX,
             TileY: tile.TileY,
+            TileClass: tileClass,
             HasRootAdt: tile.RootAdtPath != null,
             RootLength: rootLength,
             HasObj0Adt: tile.Obj0Path != null,
@@ -196,7 +210,7 @@ public static partial class DevelopmentMapAnalyzer
             HeaderIndexMismatchCount: inspection.HeaderIndexMismatchCount,
             ZeroIndexHeaderCount: inspection.ZeroIndexHeaderCount,
             DuplicateHeaderIndexCount: inspection.DuplicateHeaderIndexCount,
-            RecommendedAction: RecommendAction(tile, inspection));
+                RecommendedAction: recommendedAction);
     }
 
     private static RootInspection InspectRootAdt(string rootAdtPath)
@@ -302,27 +316,44 @@ public static partial class DevelopmentMapAnalyzer
             DuplicateHeaderIndexCount: duplicateHeaderIndexCount);
     }
 
-    private static string RecommendAction(TileFiles tile, RootInspection inspection)
+    private static string ClassifyTile(TileFiles tile, RootInspection inspection)
     {
-        bool hasAnyWl = tile.WlwPath != null || tile.WlmPath != null || tile.WlqPath != null || tile.WllPath != null;
-        bool hasRepairInputs = tile.Obj0Path != null || tile.Tex0Path != null || tile.Pm4Path != null || hasAnyWl;
+        if (tile.RootAdtPath == null || inspection.RootStatus == "missing")
+            return "wdl-rebuild";
 
-        if (tile.RootAdtPath == null)
-            return hasAnyWl ? "generate-from-wdl" : (hasRepairInputs ? "rebuild-from-sidecars" : "missing-source");
+        if (inspection.RootStatus == "zero-byte")
+            return "wdl-rebuild";
 
-        if (inspection.RootStatus == "zero-byte" || inspection.ValidRootChunkCount == 0)
-            return hasAnyWl ? "generate-from-wdl-and-patch" : (hasRepairInputs ? "merge-and-manual-repair" : "manual-review");
+        if (!inspection.HasMcin && tile.RootAdtPath != null && inspection.TopLevelMcnkCount > 0)
+            return "scan-only-root";
 
-        if (inspection.HeaderIndexMismatchCount > 0 || inspection.ZeroIndexHeaderCount > 1 || inspection.DuplicateHeaderIndexCount > 0)
-            return "repair-mcnk-indices";
+        if (inspection.ValidRootChunkCount == 0)
+            return "wdl-rebuild";
 
-        if (!inspection.HasMcin && inspection.ValidRootChunkCount > 0)
-            return "scan-order-root";
+        if (inspection.RootStatus == "mcin-partial"
+            || inspection.HeaderIndexMismatchCount > 0
+            || inspection.ZeroIndexHeaderCount > 1
+            || inspection.DuplicateHeaderIndexCount > 0)
+            return "index-corrupt";
 
-        if (tile.Tex0Path != null || tile.Obj0Path != null)
-            return "merge-split";
+        if (inspection.ValidRootChunkCount > 0)
+            return "healthy-split";
 
-        return "healthy";
+        return "manual-review";
+    }
+
+    private static string RecommendAction(string tileClass, TileFiles tile, RootInspection inspection)
+    {
+        return tileClass switch
+        {
+            "healthy-split" => (tile.Tex0Path != null || tile.Obj0Path != null) ? "merge-split" : "preserve-root",
+            "index-corrupt" => "repair-mcnk-indices",
+            "scan-only-root" => "scan-order-root",
+            "wdl-rebuild" => "generate-from-wdl",
+            "manual-review" when tile.RootAdtPath != null && inspection.ValidRootChunkCount > 0 => "manual-review-root",
+            "manual-review" => "manual-review",
+            _ => "manual-review"
+        };
     }
 
     private static long GetFileLength(string? path) => path != null && File.Exists(path) ? new FileInfo(path).Length : 0L;
@@ -385,7 +416,7 @@ public static partial class DevelopmentMapAnalyzer
             && int.TryParse(match.Groups[2].Value, out tileX)
             && int.TryParse(match.Groups[3].Value, out tileY))
         {
-            extension = match.Groups[5].Value;
+            extension = "." + match.Groups[5].Value.ToLowerInvariant();
             suffix = match.Groups[4].Value;
             return true;
         }

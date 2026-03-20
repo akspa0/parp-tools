@@ -25,6 +25,13 @@ public class BoundingBoxRenderer : IDisposable
     private readonly List<float> _batchVertices = new(4096); // pos(3) + color(3) per vertex
     private int _batchLineVertexCount;
 
+    // Batched solid-triangle rendering (PM4 filled overlay)
+    private uint _solidBatchVao, _solidBatchVbo;
+    private uint _solidBatchShader;
+    private int _solidBatchUVP, _solidBatchInitialized;
+    private readonly List<float> _solidBatchVertices = new(4096); // pos(3) + color(4) per vertex
+    private int _solidBatchVertexCount;
+
     // 8 vertices of a unit cube (0..1), scaled/translated per box
     private static readonly float[] CubeVertices =
     {
@@ -131,7 +138,48 @@ void main() { FragColor = vec4(vColor, 1.0); }";
         _gl.EnableVertexAttribArray(1);
         _gl.BindVertexArray(0);
 
+        // ── Shader for batched solid triangles (per-vertex color + alpha) ──
+        string solidVertSrc = @"#version 330 core
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aColor;
+uniform mat4 uVP;
+out vec4 vColor;
+void main() {
+    gl_Position = uVP * vec4(aPos, 1.0);
+    vColor = aColor;
+}";
+        string solidFragSrc = @"#version 330 core
+in vec4 vColor;
+out vec4 FragColor;
+void main() { FragColor = vColor; }";
+
+        uint svs = CompileShader(ShaderType.VertexShader, solidVertSrc);
+        uint sfs = CompileShader(ShaderType.FragmentShader, solidFragSrc);
+        _solidBatchShader = _gl.CreateProgram();
+        _gl.AttachShader(_solidBatchShader, svs);
+        _gl.AttachShader(_solidBatchShader, sfs);
+        _gl.LinkProgram(_solidBatchShader);
+        _gl.GetProgram(_solidBatchShader, ProgramPropertyARB.LinkStatus, out int solidLink);
+        if (solidLink == 0)
+            ViewerLog.Trace($"[BoundingBoxRenderer] Solid batch program link error: {_gl.GetProgramInfoLog(_solidBatchShader)}");
+        _gl.DeleteShader(svs);
+        _gl.DeleteShader(sfs);
+
+        _solidBatchUVP = _gl.GetUniformLocation(_solidBatchShader, "uVP");
+
+        _solidBatchVao = _gl.GenVertexArray();
+        _solidBatchVbo = _gl.GenBuffer();
+        _gl.BindVertexArray(_solidBatchVao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _solidBatchVbo);
+        // pos(3) + color(4) = 7 floats per vertex, stride = 28 bytes
+        _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 7 * sizeof(float), (void*)0);
+        _gl.EnableVertexAttribArray(0);
+        _gl.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, 7 * sizeof(float), (void*)(3 * sizeof(float)));
+        _gl.EnableVertexAttribArray(1);
+        _gl.BindVertexArray(0);
+
         _batchInitialized = 1;
+        _solidBatchInitialized = 1;
         _initialized = true;
         ViewerLog.Trace($"[BoundingBoxRenderer] Init: cube={_shader} batch={_batchShader}");
     }
@@ -147,6 +195,15 @@ void main() { FragColor = vec4(vColor, 1.0); }";
     {
         _batchVertices.Clear();
         _batchLineVertexCount = 0;
+    }
+
+    /// <summary>
+    /// Clear the solid-triangle batch buffer.
+    /// </summary>
+    public void BeginSolidBatch()
+    {
+        _solidBatchVertices.Clear();
+        _solidBatchVertexCount = 0;
     }
 
     /// <summary>
@@ -199,6 +256,23 @@ void main() { FragColor = vec4(vColor, 1.0); }";
     }
 
     /// <summary>
+    /// Add a solid triangle to the batch (3 vertices).
+    /// </summary>
+    public void BatchTriangle(Vector3 a, Vector3 b, Vector3 c, Vector3 color, float alpha)
+    {
+        AddSolidVertex(a, color, alpha);
+        AddSolidVertex(b, color, alpha);
+        AddSolidVertex(c, color, alpha);
+        _solidBatchVertexCount += 3;
+    }
+
+    private void AddSolidVertex(Vector3 pos, Vector3 color, float alpha)
+    {
+        _solidBatchVertices.Add(pos.X); _solidBatchVertices.Add(pos.Y); _solidBatchVertices.Add(pos.Z);
+        _solidBatchVertices.Add(color.X); _solidBatchVertices.Add(color.Y); _solidBatchVertices.Add(color.Z); _solidBatchVertices.Add(alpha);
+    }
+
+    /// <summary>
     /// Upload and draw all batched lines in a single draw call.
     /// </summary>
     public unsafe void FlushBatch(Matrix4x4 view, Matrix4x4 proj)
@@ -219,6 +293,30 @@ void main() { FragColor = vec4(vColor, 1.0); }";
             _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(span.Length * sizeof(float)), p, BufferUsageARB.StreamDraw);
 
         _gl.DrawArrays(PrimitiveType.Lines, 0, (uint)_batchLineVertexCount);
+        _gl.BindVertexArray(0);
+    }
+
+    /// <summary>
+    /// Upload and draw all batched solid triangles in a single draw call.
+    /// Caller is responsible for blend/depth state configuration.
+    /// </summary>
+    public unsafe void FlushSolidBatch(Matrix4x4 view, Matrix4x4 proj)
+    {
+        if (_solidBatchInitialized == 0 || _solidBatchVertexCount == 0) return;
+
+        var vp = view * proj;
+
+        _gl.UseProgram(_solidBatchShader);
+        _gl.UniformMatrix4(_solidBatchUVP, 1, false, (float*)&vp);
+
+        _gl.BindVertexArray(_solidBatchVao);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _solidBatchVbo);
+
+        var span = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_solidBatchVertices);
+        fixed (float* p = span)
+            _gl.BufferData(BufferTargetARB.ArrayBuffer, (nuint)(span.Length * sizeof(float)), p, BufferUsageARB.StreamDraw);
+
+        _gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)_solidBatchVertexCount);
         _gl.BindVertexArray(0);
     }
 
@@ -289,6 +387,9 @@ void main() { FragColor = vec4(vColor, 1.0); }";
             _gl.DeleteVertexArray(_batchVao);
             _gl.DeleteBuffer(_batchVbo);
             _gl.DeleteProgram(_batchShader);
+            _gl.DeleteVertexArray(_solidBatchVao);
+            _gl.DeleteBuffer(_solidBatchVbo);
+            _gl.DeleteProgram(_solidBatchShader);
             _initialized = false;
         }
     }

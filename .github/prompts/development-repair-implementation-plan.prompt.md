@@ -33,6 +33,7 @@ The intended end state is:
 
 - Treat `test_data/development/World/Maps/development` as the source of truth.
 - Treat museum exports and older generated outputs as reference-only, not canonical input.
+- Do not run `development-repair` with `test_data/WoWMuseum/335-dev/...` as input; that path is validation/reference-only.
 - Do not silently collapse all tile failures into one repair path.
 - Do not claim a tile is "fixed" unless the output manifest says exactly which repair route was used.
 - Do not hide rollback primitives behind ad hoc one-off shell workflows.

@@ -154,6 +154,12 @@ public partial class ViewerApp : IDisposable
     private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _sqlForceStreamRefresh;
     private string _wlLayerSelectedSourcePath = "";
+    private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
+    private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
+    private Vector3 _pm4SavedOverlayScale = Vector3.One;
+    private float _pm4TranslationStepUnits = 10f;
+    private float _pm4RotationStepDegrees = 90f;
+    private bool _showPm4AlignmentWindow;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -220,6 +226,34 @@ public partial class ViewerApp : IDisposable
     private readonly List<string> _vlmExportLog = new();
     private bool _vlmExportScrollToBottom = false;
     private VlmExportResult? _vlmExportResult = null;
+
+    // Terrain texture transfer state
+    private bool _showTerrainTextureTransferDialog = false;
+    private string _terrainTransferSourceDir = WoWMapConverter.Core.Services.DevelopmentMapAnalyzer.DefaultDevelopmentMapDirectory;
+    private string _terrainTransferTargetDir = WoWMapConverter.Core.Services.DevelopmentMapAnalyzer.DefaultDevelopmentMapDirectory;
+    private string _terrainTransferOutputDir = Path.Combine("output", "terrain-texture-transfer-ui");
+    private bool _terrainTransferApplyMode = false;
+    private bool _terrainTransferUseGlobalDelta = false;
+    private int _terrainTransferSourceTileX = 0;
+    private int _terrainTransferSourceTileY = 0;
+    private int _terrainTransferTargetTileX = 0;
+    private int _terrainTransferTargetTileY = 0;
+    private int _terrainTransferDeltaX = 0;
+    private int _terrainTransferDeltaY = 0;
+    private int _terrainTransferTileLimit = 1;
+    private int _terrainTransferChunkOffsetX = 0;
+    private int _terrainTransferChunkOffsetY = 0;
+    private bool _terrainTransferCopyMtex = true;
+    private bool _terrainTransferCopyMcly = true;
+    private bool _terrainTransferCopyMcal = true;
+    private bool _terrainTransferCopyMcsh = true;
+    private bool _terrainTransferCopyHoles = true;
+    private string _terrainTransferManifestPath = "";
+    private bool _terrainTransferRunning = false;
+    private readonly List<string> _terrainTransferLog = new();
+    private bool _terrainTransferScrollToBottom = false;
+    private string? _terrainTransferError = null;
+    private WoWMapConverter.Core.Services.TerrainTextureTransferExecutionReport? _terrainTransferReport = null;
 
     public void Run(string[]? initialArgs = null)
     {
@@ -781,6 +815,10 @@ void main() {
         if (_showPerfWindow)
             DrawPerfWindow();
 
+        // PM4 alignment (floating window)
+        if (_showPm4AlignmentWindow)
+            DrawPm4AlignmentWindow();
+
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
@@ -788,6 +826,8 @@ void main() {
             DrawListfileInputDialog();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
+        if (_showTerrainTextureTransferDialog)
+            DrawTerrainTextureTransferDialog();
         if (_showMapConverterDialog)
             DrawMapConverterDialog();
         if (_showWmoConverterDialog)
@@ -864,6 +904,9 @@ void main() {
 
                 if (ImGui.MenuItem("Generate VLM Dataset..."))
                     _showVlmExportDialog = true;
+
+                if (ImGui.MenuItem("Terrain Texture Transfer..."))
+                    _showTerrainTextureTransferDialog = true;
 
                 if (ImGui.MenuItem("Map Converter..."))
                     _showMapConverterDialog = true;
@@ -1122,6 +1165,283 @@ void main() {
         ImGui.TextDisabled("Stats are for the last terrain Render() call.");
 
         ImGui.End();
+    }
+
+    private void DrawPm4AlignmentWindow()
+    {
+        if (_worldScene == null)
+        {
+            _showPm4AlignmentWindow = false;
+            return;
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("PM4 Alignment", ref _showPm4AlignmentWindow, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.TextWrapped("Use button-based PM4 alignment controls. Translation is available for coordinate-plane matching.");
+
+        ImGui.Text("Translation Step:");
+        if (ImGui.RadioButton("0.5u", MathF.Abs(_pm4TranslationStepUnits - 0.5f) < 0.001f))
+            _pm4TranslationStepUnits = 0.5f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("1u", MathF.Abs(_pm4TranslationStepUnits - 1f) < 0.001f))
+            _pm4TranslationStepUnits = 1f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("10u", MathF.Abs(_pm4TranslationStepUnits - 10f) < 0.001f))
+            _pm4TranslationStepUnits = 10f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("100u", MathF.Abs(_pm4TranslationStepUnits - 100f) < 0.001f))
+            _pm4TranslationStepUnits = 100f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("533.333u", MathF.Abs(_pm4TranslationStepUnits - 533.3333f) < 0.01f))
+            _pm4TranslationStepUnits = 533.3333f;
+
+        Vector3 currentTranslation = _worldScene.Pm4OverlayTranslation;
+        bool translationChanged = false;
+
+        ImGui.Text("Move X:");
+        if (ImGui.Button("X <<"))
+        {
+            currentTranslation.X -= _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("X >>"))
+        {
+            currentTranslation.X += _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+
+        ImGui.Text("Move Y:");
+        if (ImGui.Button("Y <<"))
+        {
+            currentTranslation.Y -= _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Y >>"))
+        {
+            currentTranslation.Y += _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+
+        ImGui.Text("Move Z:");
+        if (ImGui.Button("Z <<"))
+        {
+            currentTranslation.Z -= _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Z >>"))
+        {
+            currentTranslation.Z += _pm4TranslationStepUnits;
+            translationChanged = true;
+        }
+
+        if (translationChanged)
+            _worldScene.Pm4OverlayTranslation = currentTranslation;
+
+        ImGui.Separator();
+
+        ImGui.Text("Plane Snap:");
+        ImGui.TextDisabled("Use this when PM4 is on a wall/ceiling instead of the terrain plane.");
+
+        float currentYaw = _worldScene.Pm4OverlayRotationDegrees.Y;
+
+        if (ImGui.Button("Floor"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, 0f));
+        ImGui.SameLine();
+        if (ImGui.Button("Ceiling"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(180f, currentYaw, 0f));
+
+        if (ImGui.Button("Wall +X"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, 90f));
+        ImGui.SameLine();
+        if (ImGui.Button("Wall -X"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, -90f));
+
+        if (ImGui.Button("Wall +Z"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(-90f, currentYaw, 0f));
+        ImGui.SameLine();
+        if (ImGui.Button("Wall -Z"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(90f, currentYaw, 0f));
+
+        ImGui.Text("Quick Macros:");
+        ImGui.TextDisabled("Use when PM4 is stuck on an adjacent wall/ceiling plane.");
+
+        Vector3 macroRotation = _worldScene.Pm4OverlayRotationDegrees;
+        if (ImGui.Button("Left Wall -> Floor"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X, macroRotation.Y, macroRotation.Z + 90f));
+        ImGui.SameLine();
+        if (ImGui.Button("Right Wall -> Floor"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X, macroRotation.Y, macroRotation.Z - 90f));
+
+        if (ImGui.Button("Ceiling -> Floor"))
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X + 180f, macroRotation.Y, macroRotation.Z));
+
+        ImGui.Separator();
+
+        ImGui.Text("Rotation Step:");
+        if (ImGui.RadioButton("1°", MathF.Abs(_pm4RotationStepDegrees - 1f) < 0.001f))
+            _pm4RotationStepDegrees = 1f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("5°", MathF.Abs(_pm4RotationStepDegrees - 5f) < 0.001f))
+            _pm4RotationStepDegrees = 5f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("15°", MathF.Abs(_pm4RotationStepDegrees - 15f) < 0.001f))
+            _pm4RotationStepDegrees = 15f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("45°", MathF.Abs(_pm4RotationStepDegrees - 45f) < 0.001f))
+            _pm4RotationStepDegrees = 45f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("90°", MathF.Abs(_pm4RotationStepDegrees - 90f) < 0.001f))
+            _pm4RotationStepDegrees = 90f;
+
+        Vector3 currentRotation = _worldScene.Pm4OverlayRotationDegrees;
+        bool rotationChanged = false;
+
+        ImGui.Text("Rotate X:");
+        if (ImGui.Button("X -"))
+        {
+            currentRotation.X -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("X +"))
+        {
+            currentRotation.X += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+
+        ImGui.Text("Rotate Y:");
+        if (ImGui.Button("Y -"))
+        {
+            currentRotation.Y -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Y +"))
+        {
+            currentRotation.Y += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Y + 180"))
+        {
+            currentRotation.Y += 180f;
+            rotationChanged = true;
+        }
+
+        ImGui.Text("Rotate Z:");
+        if (ImGui.Button("Z -"))
+        {
+            currentRotation.Z -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Z +"))
+        {
+            currentRotation.Z += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+
+        Vector3 currentScale = _worldScene.Pm4OverlayScale;
+        bool scaleChanged = false;
+        ImGui.Text("Axis Flips:");
+        if (ImGui.Button("Flip X"))
+        {
+            currentScale.X = -currentScale.X;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Y"))
+        {
+            currentScale.Y = -currentScale.Y;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Z"))
+        {
+            currentScale.Z = -currentScale.Z;
+            scaleChanged = true;
+        }
+
+        if (rotationChanged)
+            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(currentRotation);
+
+        if (scaleChanged)
+            _worldScene.Pm4OverlayScale = currentScale;
+
+        if (ImGui.Button("Reset Current"))
+        {
+            _worldScene.Pm4OverlayTranslation = Vector3.Zero;
+            _worldScene.Pm4OverlayRotationDegrees = Vector3.Zero;
+            _worldScene.Pm4OverlayScale = Vector3.One;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Revert Saved"))
+            ApplySavedPm4AlignmentToScene();
+
+        if (ImGui.Button("Save Current Alignment"))
+            SaveCurrentPm4Alignment();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Print Alignment"))
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[PM4 Align] Trans=({_worldScene.Pm4OverlayTranslation.X:F3},{_worldScene.Pm4OverlayTranslation.Y:F3},{_worldScene.Pm4OverlayTranslation.Z:F3}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F3},{_worldScene.Pm4OverlayRotationDegrees.Y:F3},{_worldScene.Pm4OverlayRotationDegrees.Z:F3}) Scale=({_worldScene.Pm4OverlayScale.X:F4},{_worldScene.Pm4OverlayScale.Y:F4},{_worldScene.Pm4OverlayScale.Z:F4})");
+        }
+
+        ImGui.TextDisabled($"Current: T=({_worldScene.Pm4OverlayTranslation.X:F3}, {_worldScene.Pm4OverlayTranslation.Y:F3}, {_worldScene.Pm4OverlayTranslation.Z:F3}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F3}, {_worldScene.Pm4OverlayRotationDegrees.Y:F3}, {_worldScene.Pm4OverlayRotationDegrees.Z:F3})° S=({_worldScene.Pm4OverlayScale.X:F4}, {_worldScene.Pm4OverlayScale.Y:F4}, {_worldScene.Pm4OverlayScale.Z:F4})");
+        ImGui.TextDisabled($"Saved: T=({_pm4SavedOverlayTranslation.X:F3}, {_pm4SavedOverlayTranslation.Y:F3}, {_pm4SavedOverlayTranslation.Z:F3}) Rot=({_pm4SavedOverlayRotationDegrees.X:F3}, {_pm4SavedOverlayRotationDegrees.Y:F3}, {_pm4SavedOverlayRotationDegrees.Z:F3})° S=({_pm4SavedOverlayScale.X:F4}, {_pm4SavedOverlayScale.Y:F4}, {_pm4SavedOverlayScale.Z:F4})");
+
+        ImGui.End();
+    }
+
+    private void SaveCurrentPm4Alignment()
+    {
+        if (_worldScene == null)
+            return;
+
+        _pm4SavedOverlayTranslation = _worldScene.Pm4OverlayTranslation;
+        _pm4SavedOverlayRotationDegrees = _worldScene.Pm4OverlayRotationDegrees;
+        _pm4SavedOverlayScale = _worldScene.Pm4OverlayScale;
+        SaveViewerSettings();
+
+        _statusMessage = $"Saved PM4 alignment: T=({_pm4SavedOverlayTranslation.X:F2}, {_pm4SavedOverlayTranslation.Y:F2}, {_pm4SavedOverlayTranslation.Z:F2}) Rot=({_pm4SavedOverlayRotationDegrees.X:F2}, {_pm4SavedOverlayRotationDegrees.Y:F2}, {_pm4SavedOverlayRotationDegrees.Z:F2})° S=({_pm4SavedOverlayScale.X:F3}, {_pm4SavedOverlayScale.Y:F3}, {_pm4SavedOverlayScale.Z:F3})";
+    }
+
+    private void ApplySavedPm4AlignmentToScene()
+    {
+        if (_worldScene == null)
+            return;
+
+        _worldScene.Pm4OverlayTranslation = _pm4SavedOverlayTranslation;
+        _worldScene.Pm4OverlayRotationDegrees = _pm4SavedOverlayRotationDegrees;
+        _worldScene.Pm4OverlayScale = _pm4SavedOverlayScale;
+    }
+
+    private static Vector3 NormalizeRotationDegrees(Vector3 rotation)
+    {
+        return new Vector3(
+            NormalizeDegrees(rotation.X),
+            NormalizeDegrees(rotation.Y),
+            NormalizeDegrees(rotation.Z));
+    }
+
+    private static float NormalizeDegrees(float value)
+    {
+        float wrapped = value % 360f;
+        if (wrapped < -180f)
+            wrapped += 360f;
+        else if (wrapped > 180f)
+            wrapped -= 360f;
+        return wrapped;
     }
 
     private void DrawFolderInputDialog()
@@ -1888,6 +2208,160 @@ void main() {
         ImGui.End();
     }
 
+    private void DrawTerrainTextureTransferDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(650, 620), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(
+            ImGui.GetIO().DisplaySize.X / 2 - 325,
+            ImGui.GetIO().DisplaySize.Y / 2 - 310), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("Terrain Texture Transfer", ref _showTerrainTextureTransferDialog))
+        {
+            ImGui.TextWrapped("Run mapped terrain texture transfer using the backend service (MTEX/MCLY/MCAL/MCSH/holes). " +
+                "Use explicit tile pair mode for surgical edits or global delta mode for batched remap runs.");
+            ImGui.Spacing();
+
+            ImGui.Text("Source Map Directory:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##ttt_source", ref _terrainTransferSourceDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##ttt_source"))
+            {
+                string? picked = ShowFolderDialogSTA("Select source map directory", _terrainTransferSourceDir);
+                if (!string.IsNullOrWhiteSpace(picked))
+                    _terrainTransferSourceDir = picked;
+            }
+
+            ImGui.Text("Target Map Directory:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##ttt_target", ref _terrainTransferTargetDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##ttt_target"))
+            {
+                string? picked = ShowFolderDialogSTA("Select target map directory", _terrainTransferTargetDir);
+                if (!string.IsNullOrWhiteSpace(picked))
+                    _terrainTransferTargetDir = picked;
+            }
+
+            ImGui.Text("Output Directory:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##ttt_output", ref _terrainTransferOutputDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##ttt_output"))
+            {
+                string? picked = ShowFolderDialogSTA("Select output directory", _terrainTransferOutputDir);
+                if (!string.IsNullOrWhiteSpace(picked))
+                    _terrainTransferOutputDir = picked;
+            }
+
+            ImGui.Text("Mode:");
+            if (ImGui.RadioButton("Dry Run", !_terrainTransferApplyMode))
+                _terrainTransferApplyMode = false;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Apply", _terrainTransferApplyMode))
+                _terrainTransferApplyMode = true;
+
+            ImGui.Text("Mapping:");
+            if (ImGui.RadioButton("Explicit Pair", !_terrainTransferUseGlobalDelta))
+                _terrainTransferUseGlobalDelta = false;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Global Delta", _terrainTransferUseGlobalDelta))
+                _terrainTransferUseGlobalDelta = true;
+
+            if (_terrainTransferUseGlobalDelta)
+            {
+                ImGui.InputInt("Delta X", ref _terrainTransferDeltaX);
+                ImGui.InputInt("Delta Y", ref _terrainTransferDeltaY);
+                ImGui.InputInt("Tile Limit (0=all)", ref _terrainTransferTileLimit);
+                if (_terrainTransferTileLimit < 0)
+                    _terrainTransferTileLimit = 0;
+            }
+            else
+            {
+                ImGui.InputInt("Source Tile X", ref _terrainTransferSourceTileX);
+                ImGui.InputInt("Source Tile Y", ref _terrainTransferSourceTileY);
+                ImGui.InputInt("Target Tile X", ref _terrainTransferTargetTileX);
+                ImGui.InputInt("Target Tile Y", ref _terrainTransferTargetTileY);
+            }
+
+            ImGui.InputInt("Chunk Offset X", ref _terrainTransferChunkOffsetX);
+            ImGui.InputInt("Chunk Offset Y", ref _terrainTransferChunkOffsetY);
+
+            ImGui.Text("Payload:");
+            ImGui.Checkbox("MTEX", ref _terrainTransferCopyMtex);
+            ImGui.SameLine();
+            ImGui.Checkbox("MCLY", ref _terrainTransferCopyMcly);
+            ImGui.SameLine();
+            ImGui.Checkbox("MCAL", ref _terrainTransferCopyMcal);
+            ImGui.SameLine();
+            ImGui.Checkbox("MCSH", ref _terrainTransferCopyMcsh);
+            ImGui.SameLine();
+            ImGui.Checkbox("Holes", ref _terrainTransferCopyHoles);
+
+            ImGui.Text("Summary Manifest Path (optional):");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputText("##ttt_manifest", ref _terrainTransferManifestPath, 512);
+
+            ImGui.Spacing();
+            bool canRun = !_terrainTransferRunning
+                && !string.IsNullOrWhiteSpace(_terrainTransferSourceDir)
+                && !string.IsNullOrWhiteSpace(_terrainTransferTargetDir)
+                && !string.IsNullOrWhiteSpace(_terrainTransferOutputDir);
+
+            if (!canRun)
+                ImGui.BeginDisabled();
+
+            if (ImGui.Button(_terrainTransferRunning ? "Running..." : "Run Transfer", new Vector2(140, 30)))
+            {
+                StartTerrainTextureTransfer();
+            }
+
+            if (!canRun)
+                ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(80, 30)))
+                _showTerrainTextureTransferDialog = false;
+
+            if (_terrainTransferRunning)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Running...");
+            }
+            else if (_terrainTransferReport != null && _terrainTransferError == null)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f),
+                    $"Done: {_terrainTransferReport.TilesProcessed} processed, {_terrainTransferReport.TilesWritten} written, {_terrainTransferReport.TilesNeedingManualReview} review");
+            }
+
+            if (_terrainTransferError != null)
+            {
+                ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), $"Error: {_terrainTransferError}");
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Log:");
+            float logHeight = ImGui.GetContentRegionAvail().Y - 4;
+            if (ImGui.BeginChild("TerrainTextureTransferLog", new Vector2(-1, logHeight), true))
+            {
+                lock (_terrainTransferLog)
+                {
+                    foreach (string line in _terrainTransferLog)
+                        ImGui.TextWrapped(line);
+                }
+
+                if (_terrainTransferScrollToBottom)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    _terrainTransferScrollToBottom = false;
+                }
+            }
+            ImGui.EndChild();
+        }
+        ImGui.End();
+    }
+
     /// <summary>
     /// Generate a versioned output folder path for VLM dataset export.
     /// Format: {clientParent}/vlm_datasets/{mapName}_v{N}
@@ -2053,6 +2527,113 @@ void main() {
         });
     }
 
+    private void StartTerrainTextureTransfer()
+    {
+        _terrainTransferRunning = true;
+        _terrainTransferError = null;
+        _terrainTransferReport = null;
+        lock (_terrainTransferLog)
+        {
+            _terrainTransferLog.Clear();
+        }
+
+        string sourceDir = _terrainTransferSourceDir;
+        string targetDir = _terrainTransferTargetDir;
+        string outputDir = _terrainTransferOutputDir;
+        bool applyMode = _terrainTransferApplyMode;
+        bool useGlobalDelta = _terrainTransferUseGlobalDelta;
+        int srcX = _terrainTransferSourceTileX;
+        int srcY = _terrainTransferSourceTileY;
+        int dstX = _terrainTransferTargetTileX;
+        int dstY = _terrainTransferTargetTileY;
+        int deltaX = _terrainTransferDeltaX;
+        int deltaY = _terrainTransferDeltaY;
+        int tileLimit = _terrainTransferTileLimit;
+        int chunkOffsetX = _terrainTransferChunkOffsetX;
+        int chunkOffsetY = _terrainTransferChunkOffsetY;
+        bool copyMtex = _terrainTransferCopyMtex;
+        bool copyMcly = _terrainTransferCopyMcly;
+        bool copyMcal = _terrainTransferCopyMcal;
+        bool copyMcsh = _terrainTransferCopyMcsh;
+        bool copyHoles = _terrainTransferCopyHoles;
+        string manifestPath = _terrainTransferManifestPath;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                var pairs = new List<WoWMapConverter.Core.Services.TerrainTilePair>();
+                int? globalDeltaX = null;
+                int? globalDeltaY = null;
+
+                if (useGlobalDelta)
+                {
+                    globalDeltaX = deltaX;
+                    globalDeltaY = deltaY;
+                }
+                else
+                {
+                    pairs.Add(new WoWMapConverter.Core.Services.TerrainTilePair(srcX, srcY, dstX, dstY));
+                }
+
+                var options = new WoWMapConverter.Core.Services.TerrainTextureTransferOptions(
+                    SourceDirectory: sourceDir,
+                    TargetDirectory: targetDir,
+                    OutputDirectory: outputDir,
+                    Mode: applyMode ? "apply" : "dry-run",
+                    Pairs: pairs,
+                    TileLimit: tileLimit > 0 ? tileLimit : null,
+                    GlobalDeltaX: globalDeltaX,
+                    GlobalDeltaY: globalDeltaY,
+                    ChunkOffsetX: chunkOffsetX,
+                    ChunkOffsetY: chunkOffsetY,
+                    CopyMtex: copyMtex,
+                    CopyMcly: copyMcly,
+                    CopyMcal: copyMcal,
+                    CopyMcsh: copyMcsh,
+                    CopyHoles: copyHoles,
+                    ManifestPath: string.IsNullOrWhiteSpace(manifestPath) ? null : manifestPath);
+
+                WoWMapConverter.Core.Services.TerrainTextureTransferExecutionReport report =
+                    WoWMapConverter.Core.Services.TerrainTextureTransferService.Execute(options);
+
+                _terrainTransferReport = report;
+                lock (_terrainTransferLog)
+                {
+                    _terrainTransferLog.Add($"Source map: {report.SourceMapName}");
+                    _terrainTransferLog.Add($"Target map: {report.TargetMapName}");
+                    _terrainTransferLog.Add($"Tiles planned: {report.TilesPlanned}");
+                    _terrainTransferLog.Add($"Tiles processed: {report.TilesProcessed}");
+                    _terrainTransferLog.Add($"Tiles written: {report.TilesWritten}");
+                    _terrainTransferLog.Add($"Manual review: {report.TilesNeedingManualReview}");
+                    _terrainTransferLog.Add($"Chunk pairs: {report.ChunkPairsApplied}");
+                    _terrainTransferLog.Add($"Summary manifest: {report.SummaryManifestPath}");
+
+                    foreach (var tile in report.Tiles.Where(tile => tile.NeedsManualReview || tile.Warnings.Count > 0).Take(20))
+                    {
+                        _terrainTransferLog.Add($"Pair {tile.SourceTileName} -> {tile.TargetTileName}: touched={tile.TargetChunksTouched}, missingSource={tile.MissingSourceChunkCount}, outOfRange={tile.OutOfRangeChunkRemapCount}");
+                        if (tile.Warnings.Count > 0)
+                            _terrainTransferLog.Add($"  warning: {tile.Warnings[0]}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _terrainTransferError = ex.Message;
+                lock (_terrainTransferLog)
+                {
+                    _terrainTransferLog.Add($"ERROR: {ex.Message}");
+                    _terrainTransferLog.Add(ex.StackTrace ?? "");
+                }
+            }
+            finally
+            {
+                _terrainTransferRunning = false;
+                _terrainTransferScrollToBottom = true;
+            }
+        });
+    }
+
     private void DrawToolbar()
     {
         var io = ImGui.GetIO();
@@ -2142,6 +2723,13 @@ void main() {
                     bool showBB = _worldScene.ShowBoundingBoxes;
                     if (ImGui.Checkbox("BBs", ref showBB))
                         _worldScene.ShowBoundingBoxes = showBB;
+
+                    ImGui.SameLine();
+                    bool showPm4 = _worldScene.ShowPm4Overlay;
+                    if (ImGui.Checkbox("PM4", ref showPm4))
+                        _worldScene.ShowPm4Overlay = showPm4;
+                    if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+                        ImGui.SetTooltip(_worldScene.Pm4Status);
                 }
             }
         }
@@ -2694,6 +3282,44 @@ void main() {
 
         ImGui.TextDisabled($"Status: {_sqlSpawnStatus}");
         ImGui.TextDisabled($"Injected: {_worldScene.ExternalSpawnInstanceCount} total ({_worldScene.ExternalSpawnMdxCount} MDX, {_worldScene.ExternalSpawnWmoCount} WMO)");
+
+        bool showPm4Overlay = _worldScene.ShowPm4Overlay;
+        if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
+            _worldScene.ShowPm4Overlay = showPm4Overlay;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Reload PM4"))
+            _worldScene.ReloadPm4Overlay();
+        ImGui.SameLine();
+        if (ImGui.SmallButton("PM4 Align"))
+            _showPm4AlignmentWindow = true;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Save PM4 Align"))
+            SaveCurrentPm4Alignment();
+
+        bool showPm4Solid = _worldScene.ShowPm4SolidOverlay;
+        if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
+            _worldScene.ShowPm4SolidOverlay = showPm4Solid;
+
+        bool showType40 = _worldScene.ShowPm4Type40;
+        if (ImGui.Checkbox("CK24 0x40", ref showType40))
+            _worldScene.ShowPm4Type40 = showType40;
+        ImGui.SameLine();
+        bool showType80 = _worldScene.ShowPm4Type80;
+        if (ImGui.Checkbox("CK24 0x80", ref showType80))
+            _worldScene.ShowPm4Type80 = showType80;
+        ImGui.SameLine();
+        bool showTypeOther = _worldScene.ShowPm4TypeOther;
+        if (ImGui.Checkbox("CK24 Other", ref showTypeOther))
+            _worldScene.ShowPm4TypeOther = showTypeOther;
+
+        if (_worldScene.Pm4LoadAttempted)
+            ImGui.TextDisabled($"PM4: {_worldScene.Pm4LoadedFiles}/{_worldScene.Pm4TotalFiles} files, {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} objects, {_worldScene.Pm4VisibleLineCount}/{_worldScene.Pm4LineCount} lines, {_worldScene.Pm4VisibleTriangleCount}/{_worldScene.Pm4TriangleCount} tris");
+        else
+            ImGui.TextDisabled("PM4: toggle overlay to lazy-load navmesh debug lines");
+        if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+            ImGui.SetTooltip(_worldScene.Pm4Status);
+        ImGui.TextDisabled($"PM4 Align: T=({_worldScene.Pm4OverlayTranslation.X:F2}, {_worldScene.Pm4OverlayTranslation.Y:F2}, {_worldScene.Pm4OverlayTranslation.Z:F2}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F2}, {_worldScene.Pm4OverlayRotationDegrees.Y:F2}, {_worldScene.Pm4OverlayRotationDegrees.Z:F2})° S=({_worldScene.Pm4OverlayScale.X:F3}, {_worldScene.Pm4OverlayScale.Y:F3}, {_worldScene.Pm4OverlayScale.Z:F3})");
+
         ImGui.Separator();
 
         // POI toggle — lazy-loaded on first request
@@ -3830,25 +4456,30 @@ void main() {
             return;
         }
 
-        string? overlayRoot = ResolveLooseMapOverlayRoot(selectedPath);
+        string selectedFullPath = Path.GetFullPath(selectedPath);
+        string? overlayRoot = ResolveLooseMapOverlayRoot(selectedFullPath);
         if (string.IsNullOrWhiteSpace(overlayRoot))
         {
-            _statusMessage = "Selected folder must contain World\\Maps or be a map directory under World\\Maps.";
+            _statusMessage = $"Selected folder must contain World\\Maps or be a map directory under World\\Maps. Selected: {selectedFullPath}";
             return;
         }
 
         if (!mpqDataSource.AddOverlayRoot(overlayRoot, out string normalizedRoot, out string message))
         {
-            _statusMessage = message;
+            _statusMessage = $"{message} (selected: {selectedFullPath}; resolved root: {overlayRoot})";
+            ViewerLog.Important(ViewerLog.Category.MpqData,
+                $"Loose overlay attach failed. selected='{selectedFullPath}', resolvedRoot='{overlayRoot}', reason='{message}'");
             return;
         }
 
-        _lastLooseOverlayPath = Path.GetFullPath(selectedPath);
+        _lastLooseOverlayPath = selectedFullPath;
         _standaloneSkinPathCache.Clear();
         ResetWdlPreviewSupport();
         InitializeWdlPreviewSupport();
         RefreshDiscoveredMaps();
         RefreshFileList();
+        if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
+            _worldScene.ReloadPm4Overlay();
         _statusMessage = $"Attached loose map overlay: {normalizedRoot}";
     }
 
@@ -3881,10 +4512,27 @@ void main() {
             return directoryInfo.Parent.Parent.Parent?.FullName;
         }
 
+        // Only resolve ancestors that are part of the selected World\Maps tree.
+        // Avoid broad drive-root fallback if an unrelated World\Maps exists elsewhere under the same root.
         for (DirectoryInfo? current = directoryInfo; current != null; current = current.Parent)
         {
-            if (Directory.Exists(Path.Combine(current.FullName, "World", "Maps")))
-                return current.FullName;
+            if (current.Name.Equals("World", StringComparison.OrdinalIgnoreCase) &&
+                Directory.Exists(Path.Combine(current.FullName, "Maps")))
+            {
+                return current.Parent?.FullName;
+            }
+
+            if (current.Name.Equals("Maps", StringComparison.OrdinalIgnoreCase) &&
+                current.Parent?.Name.Equals("World", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return current.Parent.Parent?.FullName;
+            }
+
+            if (current.Parent?.Name.Equals("Maps", StringComparison.OrdinalIgnoreCase) == true &&
+                current.Parent.Parent?.Name.Equals("World", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return current.Parent.Parent.Parent?.FullName;
+            }
         }
 
         return null;
@@ -5515,6 +6163,7 @@ void main() {
 
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene;
+            ApplySavedPm4AlignmentToScene();
 
             // Full-load mode: load all tiles synchronously during loading screen
             if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
@@ -5799,6 +6448,12 @@ void main() {
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
+            _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
+            _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
+            if (_pm4SavedOverlayRotationDegrees == Vector3.Zero && MathF.Abs(settings.Pm4YawDegrees) > 0.001f)
+                _pm4SavedOverlayRotationDegrees = new Vector3(0f, 0f, settings.Pm4YawDegrees);
+
+            ApplySavedPm4AlignmentToScene();
         }
         catch (Exception ex)
         {
@@ -5817,7 +6472,14 @@ void main() {
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
-                KnownGoodClientPaths = _knownGoodClientPaths
+                KnownGoodClientPaths = _knownGoodClientPaths,
+                Pm4TranslationX = _pm4SavedOverlayTranslation.X,
+                Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
+                Pm4TranslationZ = _pm4SavedOverlayTranslation.Z,
+                Pm4RotationX = _pm4SavedOverlayRotationDegrees.X,
+                Pm4RotationY = _pm4SavedOverlayRotationDegrees.Y,
+                Pm4RotationZ = _pm4SavedOverlayRotationDegrees.Z,
+                Pm4YawDegrees = _pm4SavedOverlayRotationDegrees.Z
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -5916,6 +6578,13 @@ void main() {
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
+        public float Pm4TranslationX { get; set; }
+        public float Pm4TranslationY { get; set; }
+        public float Pm4TranslationZ { get; set; }
+        public float Pm4RotationX { get; set; }
+        public float Pm4RotationY { get; set; }
+        public float Pm4RotationZ { get; set; }
+        public float Pm4YawDegrees { get; set; }
     }
 
     private sealed class KnownGoodClientPath

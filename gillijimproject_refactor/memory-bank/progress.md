@@ -1,5 +1,73 @@
 # Progress
 
+### Mar 19, 2026 - Terrain Texture Transfer Command (Backend Slice)
+
+- Added first backend/library + CLI slice for mapped terrain texture transfer:
+	- command: `terrain-texture-transfer`
+	- payload scope: `MTEX`, `MCLY`, `MCAL`, `MCSH`, and MCNK holes
+	- mapping modes: explicit `--pair` and auto `--global-delta`
+	- supports `dry-run` manifests and `apply` output ADT writing
+- Added split-ADT resilience for the active development dataset:
+	- if `SplitAdtMerger` serialization fails, command now composes transferable texture payload from root + `_tex0.adt`
+	- MCNK subchunk parsing now tolerates headerless tex0 MCNK payloads
+	- top-level chunk walk/rebuild now handles odd-size boundary variance seen in split files
+	- merge path now skips `obj0`-only sidecars (without `_tex0`) and uses root bytes directly for terrain-texture transfer
+- Real-data validation performed (fixed path):
+	- source/target: `test_data/development/World/Maps/development`
+	- dry-run sample: `development_0_0 -> development_0_0` (chunk pairs=256, copied flags true for MTEX/MCLY/MCAL/MCSH/holes)
+	- apply sample: same pair wrote output ADT + summary/tile manifests
+	- non-identity sample: `development_0_0 -> development_1_0` succeeded in both dry-run and apply with full payload transfer and no manual-review flags
+	- small global-delta batch (`--global-delta 1,0 --tile-limit 3`) completed; 2 tiles clean, 1 tile (`development_0_1 -> development_1_1`) still flagged manual-review due one target MCNK with no parseable subchunks
+- Validation limits:
+	- no viewer runtime visual signoff yet for transferred outputs in this pass
+	- no new automated tests added in this pass
+
+### Mar 19, 2026 - MdxViewer Thin UI Hook For Terrain Texture Transfer
+
+- Added a thin UI entry in `MdxViewer` (`ViewerApp`) for the backend terrain texture transfer flow:
+	- File menu item: `Terrain Texture Transfer...`
+	- dialog supports source/target/output folders, dry-run/apply toggle, explicit-pair or global-delta mapping, chunk offsets, payload toggles, and optional manifest path
+	- execution runs asynchronously via the existing app-thread pattern and surfaces summary + warnings in an in-dialog log panel
+- Build validation passed for the viewer after wiring:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- Validation limits:
+	- no new runtime visual validation in the viewer yet for this dialog path
+	- this UI slice does not resolve the known `development_0_1 -> development_1_1` target MCNK parse edge case from backend validation
+
+### Mar 19, 2026 - Canonical Fresh-Output Pass For 3.3.5 Development Map
+
+- Executed a full-map identity transfer pass to materialize a fresh canonical output folder for viewer use:
+	- command: `terrain-texture-transfer --source-dir ...335-dev... --target-dir ...335-dev... --global-delta 0,0 --mode apply`
+	- output root: `output/development-335-canonical-texture-transfer`
+- Real-data result summary:
+	- tiles planned/processed/written: 2303 / 2303 / 2303
+	- manual review: 0
+	- chunk pairs applied: 589,568
+	- missing source/out-of-range chunk remaps: 0 / 0
+	- summary manifest: `output/development-335-canonical-texture-transfer/manifests/summary.json`
+	- companion `development.wdt` and `development.wdl` copied into output root
+- Operational guidance:
+	- this is now a viable "open the generated folder in MdxViewer" workflow for the tested 3.3.5 development dataset
+	- this does not replace targeted non-identity remap validation when using non-zero global deltas or explicit cross-tile mappings
+
+### Mar 19, 2026 - Development Repair WL Attribution + Texture Payload Manifests
+
+- Reworked `DevelopmentRepairService` WL ingestion so repair no longer assumes tile-named `*.wl*` files.
+	- new behavior pre-indexes all map-level WL files (`.wlw/.wlm/.wlq/.wll`) once, converts to MH2O by world position, and applies per-tile liquids from that coordinate-attributed index
+	- tile manifests now record the actual WL source file paths used (for example `Clayton Test.wlw`) instead of synthetic `tileName.wlw` expectations
+- Expanded per-tile JSON payload (`TextureData`) with terrain texturing data modeled after the VLM chunk-layer shape:
+	- includes MTEX texture list
+	- includes per-chunk layers with texture id/path, flags, alpha offset, effect id, plus optional base64 alpha bytes and byte count
+	- extractor now chooses the richest source among output ADT, `_tex0.adt`, and root ADT so split-source tiles can still emit texture payload data
+- Real-data validation performed on fixed paths:
+	- command: `development-repair --mode repair --input-dir test_data/development/World/Maps/development --tile-limit 50`
+	- observed manifests with `WlLiquidsConverted=true` and map-level WL source filenames attached to those tiles
+	- reference check only: `development-repair --mode repair --input-dir test_data/WoWMuseum/335-dev/World/Maps/development --tile-limit 1` (used only to inspect payload shape, not as canonical pipeline input)
+	- policy now enforced in code: `development-repair` rejects WoWMuseum `335-dev` input and requires building clean outputs from `test_data/development/World/Maps/development` constituent parts
+- Validation limits:
+	- this pass did not include viewer-side visual validation of generated MH2O/texturing results
+	- no new automated regression tests were added in this pass
+
 ## Mar 17, 2026 - Recovery Branch Checkpoint (v0.4.0 base)
 
 - Active branch reset in main tree: recovery/v0.4.0-surgical-main-tree (base 343dadf).
