@@ -179,6 +179,7 @@ public class WorldScene : ISceneRenderer
     private const float Pm4MaxEdgeLength = 512f;
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
+    private bool _pm4OverlayIgnoreDepth = true;
     private bool _showPm4PositionRefs;
     private bool _showPm4ObjectCentroids;
     private bool _pm4SplitCk24ByConnectivity;
@@ -210,6 +211,8 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectTranslations = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectRotationsDegrees = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectScales = new();
     private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectKey;
 
     // Culling stats (updated each frame)
@@ -283,6 +286,7 @@ public class WorldScene : ISceneRenderer
     public int Pm4PositionRefCount => _pm4PositionRefCount;
     public int Pm4VisiblePositionRefCount => _pm4VisiblePositionRefCount;
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
+    public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
     public bool ShowPm4PositionRefs { get => _showPm4PositionRefs; set => _showPm4PositionRefs = value; }
     public bool ShowPm4ObjectCentroids { get => _showPm4ObjectCentroids; set => _showPm4ObjectCentroids = value; }
     public bool Pm4SplitCk24ByConnectivity { get => _pm4SplitCk24ByConnectivity; set => _pm4SplitCk24ByConnectivity = value; }
@@ -318,6 +322,51 @@ public class WorldScene : ISceneRenderer
                 _pm4ObjectTranslations[_selectedPm4ObjectKey.Value] = value;
         }
     }
+    public Vector3 SelectedPm4ObjectRotationDegrees
+    {
+        get
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return Vector3.Zero;
+
+            return _pm4ObjectRotationsDegrees.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 rotationDegrees)
+                ? rotationDegrees
+                : Vector3.Zero;
+        }
+        set
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return;
+
+            if (IsNearZeroVector(value))
+                _pm4ObjectRotationsDegrees.Remove(_selectedPm4ObjectKey.Value);
+            else
+                _pm4ObjectRotationsDegrees[_selectedPm4ObjectKey.Value] = value;
+        }
+    }
+    public Vector3 SelectedPm4ObjectScale
+    {
+        get
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return Vector3.One;
+
+            return _pm4ObjectScales.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 scale)
+                ? scale
+                : Vector3.One;
+        }
+        set
+        {
+            if (!_selectedPm4ObjectKey.HasValue)
+                return;
+
+            Vector3 sanitized = SanitizeScale(value);
+            if (IsNearOneVector(sanitized))
+                _pm4ObjectScales.Remove(_selectedPm4ObjectKey.Value);
+            else
+                _pm4ObjectScales[_selectedPm4ObjectKey.Value] = sanitized;
+        }
+    }
     public float Pm4OverlayYawDegrees
     {
         get => _pm4OverlayRotationDegrees.Z;
@@ -344,6 +393,10 @@ public class WorldScene : ISceneRenderer
                     {
                         var objectKey = (kvp.Key.tileX, kvp.Key.tileY, obj.Ck24, obj.ObjectPartId);
                         bool hasObjectOffset = _pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectOffset);
+                        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectKey, out Vector3 objectRotationDegrees)
+                            && !IsNearZeroVector(objectRotationDegrees);
+                        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectKey, out Vector3 objectScale)
+                            && !IsNearOneVector(objectScale);
 
                         return new
                         {
@@ -370,6 +423,10 @@ public class WorldScene : ISceneRenderer
                             },
                             hasObjectOffset,
                             objectOffset = hasObjectOffset ? ToArray(objectOffset) : ToArray(Vector3.Zero),
+                            hasObjectRotation,
+                            objectRotationDegrees = hasObjectRotation ? ToArray(objectRotationDegrees) : ToArray(Vector3.Zero),
+                            hasObjectScale,
+                            objectScale = hasObjectScale ? ToArray(objectScale) : ToArray(Vector3.One),
                             lineCount = obj.Lines.Count,
                             triangleCount = obj.Triangles.Count,
                             lines = includeGeometry
@@ -736,6 +793,19 @@ public class WorldScene : ISceneRenderer
 
         return terrainTileX is >= 0 and <= 63
             && terrainTileY is >= 0 and <= 63;
+    }
+
+    private bool ShouldRenderPm4Tile(int tileX, int tileY)
+    {
+        // PM4 can legitimately exist where no ADT tile exists (sparse development datasets).
+        // Only gate PM4 by AOI-loaded state when the tile is an actual terrain tile.
+        if (_terrainManager.LoadedTileCount <= 0)
+            return true;
+
+        if (!_terrainManager.Adapter.TileExists(tileX, tileY))
+            return true;
+
+        return _terrainManager.IsTileLoaded(tileX, tileY);
     }
 
     private static List<Pm4OverlayObject> RebasePm4ObjectParts(IReadOnlyList<Pm4OverlayObject> objects, int objectPartOffset)
@@ -2005,9 +2075,30 @@ public class WorldScene : ISceneRenderer
             : new List<Vector2>();
         bool hasExpectedYaw = TryComputeExpectedMprlYawRadians(scoringRefs, out float expectedYaw);
 
+        static bool IsCandidateBetter(
+            float score,
+            float yawDelta,
+            float bestScore,
+            float bestYawDelta,
+            bool useFootprintScoring,
+            bool hasExpectedYaw)
+        {
+            bool isBetterDistance = score < bestScore - 0.001f;
+            float tieDistanceThreshold = useFootprintScoring ? 256f : 4096f;
+            bool isNearDistance = MathF.Abs(score - bestScore) <= tieDistanceThreshold;
+            bool isBetterYaw = yawDelta + 0.01f < bestYawDelta;
+            bool yawCanOverrideDistance = useFootprintScoring
+                && hasExpectedYaw
+                && yawDelta + 0.02f < bestYawDelta
+                && score <= bestScore + 1024f;
+
+            return isBetterDistance || (isNearDistance && isBetterYaw) || yawCanOverrideDistance;
+        }
+
         Pm4PlanarTransform bestTransform = defaultTransform;
         float bestScore = float.MaxValue;
         float bestYawDelta = float.MaxValue;
+
         foreach (Pm4PlanarTransform candidate in EnumeratePlanarTransforms(useTileLocalCoordinates))
         {
             Vector3 candidateWorld = ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
@@ -2027,28 +2118,18 @@ public class WorldScene : ISceneRenderer
                 if (float.IsFinite(footprintScore))
                     score = footprintScore * 0.85f + centroidScore * 0.15f;
             }
-            float yawDelta = float.MaxValue;
 
+            float yawDelta = float.MaxValue;
             if (hasExpectedYaw
                 && TryComputePlanarPrincipalYaw(objectVertices, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate, out float candidateYaw))
             {
                 yawDelta = ComputeMprlYawDeltaWithQuarterTurnFallback(candidateYaw, expectedYaw);
             }
 
-            // Prefer transforms that do not invert winding when scores are close.
             if (candidate.InvertsWinding)
-                score += 0.5f;
+                score += useFootprintScoring ? 4096f : 1024f;
 
-            bool isBetterDistance = score < bestScore - 0.001f;
-            float tieDistanceThreshold = useFootprintScoring ? 256f : 4096f;
-            bool isNearDistance = MathF.Abs(score - bestScore) <= tieDistanceThreshold;
-            bool isBetterYaw = yawDelta + 0.01f < bestYawDelta;
-            bool yawCanOverrideDistance = useFootprintScoring
-                && hasExpectedYaw
-                && yawDelta + 0.02f < bestYawDelta
-                && score <= bestScore + 1024f;
-
-            if (isBetterDistance || (isNearDistance && isBetterYaw) || yawCanOverrideDistance)
+            if (IsCandidateBetter(score, yawDelta, bestScore, bestYawDelta, useFootprintScoring, hasExpectedYaw))
             {
                 bestScore = score;
                 bestYawDelta = yawDelta;
@@ -2083,10 +2164,11 @@ public class WorldScene : ISceneRenderer
             {
                 for (int invertV = 0; invertV <= 1; invertV++)
                 {
-                    yield return new Pm4PlanarTransform(
+                    var candidate = new Pm4PlanarTransform(
                         swap == 1,
                         invertU == 1,
                         invertV == 1);
+                    yield return candidate;
                 }
             }
         }
@@ -3433,7 +3515,6 @@ public class WorldScene : ISceneRenderer
 
             if (_showPm4Overlay && _pm4TileObjects.Count > 0)
             {
-                bool hasLoadedTiles = _terrainManager.LoadedTileCount > 0;
                 Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
                 bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
                     || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
@@ -3441,7 +3522,7 @@ public class WorldScene : ISceneRenderer
 
                 foreach (var (tileKey, objects) in _pm4TileObjects)
                 {
-                    if (hasLoadedTiles && !_terrainManager.IsTileLoaded(tileKey.tileX, tileKey.tileY))
+                    if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
                         continue;
 
                     if (_showPm4PositionRefs
@@ -3500,6 +3581,60 @@ public class WorldScene : ISceneRenderer
                         }
                     }
                 }
+            }
+
+            if (_showPm4Overlay)
+            {
+                bool pm4IgnoreDepth = _pm4OverlayIgnoreDepth;
+
+                if (_showPm4SolidOverlay && _pm4VisibleTriangleCount > 0)
+                {
+                    _gl.Enable(EnableCap.Blend);
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                    if (pm4IgnoreDepth)
+                    {
+                        _gl.Disable(EnableCap.DepthTest);
+                    }
+                    else
+                    {
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+                    }
+
+                    _gl.DepthMask(false);
+                    _gl.Disable(EnableCap.CullFace);
+                    _bbRenderer.FlushSolidBatch(view, proj);
+                    _gl.Enable(EnableCap.CullFace);
+                    _gl.Disable(EnableCap.Blend);
+                }
+
+                bool hasPm4LineGeometry = _pm4VisibleLineCount > 0
+                    || _pm4VisiblePositionRefCount > 0
+                    || (_showPm4ObjectCentroids && _pm4VisibleObjectCount > 0);
+                if (hasPm4LineGeometry)
+                {
+                    if (pm4IgnoreDepth)
+                    {
+                        _gl.Disable(EnableCap.DepthTest);
+                    }
+                    else
+                    {
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+                    }
+
+                    _gl.DepthMask(false);
+                    _bbRenderer.FlushBatch(view, proj);
+                }
+
+                // Reset default state and clear PM4 primitives so other overlays use their normal pass.
+                _gl.Enable(EnableCap.DepthTest);
+                _gl.DepthFunc(DepthFunction.Lequal);
+                _gl.DepthMask(true);
+                _gl.Disable(EnableCap.Blend);
+
+                _bbRenderer.BeginBatch();
+                _bbRenderer.BeginSolidBatch();
             }
 
             // POI pin markers (magenta)
@@ -3610,20 +3745,6 @@ public class WorldScene : ISceneRenderer
                         _bbRenderer.BatchLine(v3, v7, triggerColor);
                     }
                 }
-            }
-
-            if (_showPm4Overlay && _showPm4SolidOverlay && _pm4VisibleTriangleCount > 0)
-            {
-                _gl.Enable(EnableCap.Blend);
-                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                _gl.Enable(EnableCap.DepthTest);
-                _gl.DepthFunc(DepthFunction.Lequal);
-                _gl.DepthMask(false);
-                _gl.Disable(EnableCap.CullFace);
-                _bbRenderer.FlushSolidBatch(view, proj);
-                _gl.Enable(EnableCap.CullFace);
-                _gl.DepthMask(true);
-                _gl.Disable(EnableCap.Blend);
             }
 
             _bbRenderer.FlushBatch(view, proj);
@@ -3820,7 +3941,6 @@ public class WorldScene : ISceneRenderer
             return false;
         }
 
-        bool hasLoadedTiles = _terrainManager.LoadedTileCount > 0;
         Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
         bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
             || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
@@ -3831,7 +3951,7 @@ public class WorldScene : ISceneRenderer
 
         foreach (var (tileKey, objects) in _pm4TileObjects)
         {
-            if (hasLoadedTiles && !_terrainManager.IsTileLoaded(tileKey.tileX, tileKey.tileY))
+            if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
                 continue;
 
             foreach (Pm4OverlayObject obj in objects)
@@ -4208,6 +4328,36 @@ public class WorldScene : ISceneRenderer
         return Vector3.Transform(position, transform);
     }
 
+    private static bool IsNearZeroVector(Vector3 value)
+    {
+        return value.LengthSquared() < 0.0001f;
+    }
+
+    private static bool IsNearOneVector(Vector3 value)
+    {
+        return MathF.Abs(value.X - 1f) < 0.0001f
+            && MathF.Abs(value.Y - 1f) < 0.0001f
+            && MathF.Abs(value.Z - 1f) < 0.0001f;
+    }
+
+    private static Vector3 SanitizeScale(Vector3 scale)
+    {
+        const float minAbsScale = 0.0001f;
+
+        float SanitizeComponent(float component)
+        {
+            if (MathF.Abs(component) >= minAbsScale)
+                return component;
+
+            return component < 0f ? -minAbsScale : minAbsScale;
+        }
+
+        return new Vector3(
+            SanitizeComponent(scale.X),
+            SanitizeComponent(scale.Y),
+            SanitizeComponent(scale.Z));
+    }
+
     private Matrix4x4 BuildPm4ObjectTransform((int tileX, int tileY, uint ck24, int objectPart) objectKey,
         bool applyPm4Transform,
         in Matrix4x4 pm4Transform,
@@ -4222,8 +4372,47 @@ public class WorldScene : ISceneRenderer
             applyObjectTransform = true;
         }
 
-        if (_pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectTranslation)
-            && objectTranslation.LengthSquared() > 0.0001f)
+        bool hasObjectTranslation = _pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectTranslation)
+            && !IsNearZeroVector(objectTranslation);
+        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectKey, out Vector3 objectRotationDegrees)
+            && !IsNearZeroVector(objectRotationDegrees);
+        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectKey, out Vector3 objectScale)
+            && !IsNearOneVector(objectScale);
+
+        if (hasObjectRotation || hasObjectScale)
+        {
+            Vector3 pivot = Vector3.Zero;
+            if (_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? objectInfo))
+            {
+                pivot = objectInfo.Center;
+                if (applyPm4Transform)
+                    pivot = ApplyPm4OverlayTransform(pivot, pm4Transform);
+            }
+
+            Matrix4x4 rotationScale = Matrix4x4.Identity;
+            if (hasObjectScale)
+                rotationScale *= Matrix4x4.CreateScale(SanitizeScale(objectScale));
+
+            if (hasObjectRotation)
+            {
+                float objectRotX = objectRotationDegrees.X * MathF.PI / 180f;
+                float objectRotY = objectRotationDegrees.Y * MathF.PI / 180f;
+                float objectRotZ = objectRotationDegrees.Z * MathF.PI / 180f;
+                rotationScale *= Matrix4x4.CreateRotationX(objectRotX)
+                    * Matrix4x4.CreateRotationY(objectRotY)
+                    * Matrix4x4.CreateRotationZ(objectRotZ);
+            }
+
+            Matrix4x4 objectPivotTransform = Matrix4x4.CreateTranslation(-pivot)
+                * rotationScale
+                * Matrix4x4.CreateTranslation(pivot);
+            transform = applyObjectTransform
+                ? transform * objectPivotTransform
+                : objectPivotTransform;
+            applyObjectTransform = true;
+        }
+
+        if (hasObjectTranslation)
         {
             Matrix4x4 objectTranslationMatrix = Matrix4x4.CreateTranslation(objectTranslation);
             transform = applyObjectTransform
@@ -4282,6 +4471,8 @@ public class WorldScene : ISceneRenderer
         _pm4TilePositionRefs.Clear();
         _pm4ObjectLookup.Clear();
         _pm4ObjectTranslations.Clear();
+        _pm4ObjectRotationsDegrees.Clear();
+        _pm4ObjectScales.Clear();
     }
 }
 

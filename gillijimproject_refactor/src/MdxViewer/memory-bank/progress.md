@@ -5,6 +5,32 @@
 **Supported client versions: 0.5.3 through 0.12** — fully usable
 **3.3.5 WotLK: IN PROGRESS** — scaffolding exists but MH2O liquid and terrain texturing are broken
 
+## 2026-03-20 — PM4 Object-Local 9DoF Alignment Controls
+
+- Updated PM4 alignment tooling to operate on selected PM4 objects only (no global overlay transform edits in the alignment window).
+- `WorldScene` now supports per-object transform state keyed by `(tile, ck24, objectPart)`:
+	- translation offset
+	- rotation (degrees, XYZ)
+	- scale (XYZ, including axis mirrors)
+- Per-object transform application now rotates/scales around object-local pivot (object center) so flips/rotations are easier to evaluate against real ADT placements.
+- PM4 interchange JSON export now includes per-object rotation/scale alignment fields in addition to translation offset.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime visual signoff still pending
+
+## 2026-03-20 — PM4 Overlay Placement Rollback + Angle Visibility Debug Mode
+
+- Reverted the `WorldScene.ResolvePlanarTransform(...)` rigid-first candidate policy that forced non-mirrored transforms before mirrored fallback.
+- Restored unified candidate scoring across the full planar transform set (with existing mirror penalty/yaw tie-break intact) to undo the reported placement regression.
+- PM4 overlay rendering now supports an explicit debug visibility mode:
+	- new toggle: `PM4 X-Ray` (ViewerApp)
+	- when enabled, PM4 overlay flushes with depth test disabled so lines/fill stay visible across camera angles during alignment triage.
+	- PM4 is flushed in its own batch pass so POI/taxi overlays retain their normal render behavior.
+- Validation status:
+	- build/runtime validation pending for this checkpoint entry
+	- no automated tests were added or run
+
 ## What Works Today
 
 | Feature | Status |
@@ -219,6 +245,31 @@
 - Validation status:
 	- no automated tests were added or run
 	- runtime viewer-side signoff still pending
+
+## 2026-03-20 — PM4 Non-ADT Tile Visibility Gate Fix + Mirror Penalty
+
+- Follow-up after runtime report that tile `22_18` still showed no PM4 despite confirmed dense source geometry:
+	- PM4 render/pick paths in `WorldScene` no longer require the tile to be ADT-loaded when that tile does not exist in the terrain adapter (`ShouldRenderPm4Tile(...)`)
+	- this preserves AOI gating for real ADT-backed tiles, but allows PM4-only/sparse-map tiles to render instead of being silently skipped
+- Orientation follow-up for "flipped around axis" symptom:
+	- `ResolvePlanarTransform(...)` now strongly de-prioritizes mirrored (odd reflection parity) planar candidates to favor rigid transform alignment over axis reflection
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime visual signoff still pending
+
+## 2026-03-20 — PM4 Rigid-First Planar Solver Follow-up
+
+- Follow-up after runtime report that PM4 was still axis-flipped:
+	- `ResolvePlanarTransform(...)` now evaluates rigid (non-mirrored) planar candidates first and returns that result when finite
+	- mirrored candidates are only considered as fallback when rigid candidates do not produce a finite fit
+- Intent:
+	- force PM4 object alignment to stay in rigid-transform space relative to MPRL anchors
+	- eliminate persistent X/Y reflection artifacts while preserving prior MPRL scoring and yaw tie-break behavior
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime visual signoff still pending
 
 ## 2026-03-20 — PM4 Overlay Diagnostics/Grouping/Winding Update
 

@@ -259,6 +259,7 @@ public partial class ViewerApp : IDisposable
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
     private float _pm4TranslationStepUnits = 10f;
     private float _pm4RotationStepDegrees = 90f;
+    private float _pm4ScaleStepUnits = 0.1f;
     private bool _showPm4AlignmentWindow;
 
     // Camera speed (adjustable via UI)
@@ -3118,7 +3119,8 @@ void main() {
             return;
         }
 
-        ImGui.TextWrapped("Use button-based PM4 alignment controls. Translation is available for coordinate-plane matching.");
+        ImGui.TextWrapped("Object-local PM4 alignment only. Select one PM4 object, then adjust translation, rotation, and scale (including axis flips) on that object only.");
+        ImGui.TextDisabled("Global PM4 overlay transforms are no longer edited in this window.");
 
         ImGui.Text("Translation Step:");
         if (ImGui.RadioButton("0.5u", MathF.Abs(_pm4TranslationStepUnits - 0.5f) < 0.001f))
@@ -3136,286 +3138,259 @@ void main() {
         if (ImGui.RadioButton("533.333u", MathF.Abs(_pm4TranslationStepUnits - 533.3333f) < 0.01f))
             _pm4TranslationStepUnits = 533.3333f;
 
-        Vector3 currentTranslation = _worldScene.Pm4OverlayTranslation;
+        ImGui.Text("Rotation Step:");
+        if (ImGui.RadioButton("1 deg", MathF.Abs(_pm4RotationStepDegrees - 1f) < 0.001f))
+            _pm4RotationStepDegrees = 1f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("5 deg", MathF.Abs(_pm4RotationStepDegrees - 5f) < 0.001f))
+            _pm4RotationStepDegrees = 5f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("15 deg", MathF.Abs(_pm4RotationStepDegrees - 15f) < 0.001f))
+            _pm4RotationStepDegrees = 15f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("45 deg", MathF.Abs(_pm4RotationStepDegrees - 45f) < 0.001f))
+            _pm4RotationStepDegrees = 45f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("90 deg", MathF.Abs(_pm4RotationStepDegrees - 90f) < 0.001f))
+            _pm4RotationStepDegrees = 90f;
+
+        ImGui.Text("Scale Step:");
+        if (ImGui.RadioButton("0.01", MathF.Abs(_pm4ScaleStepUnits - 0.01f) < 0.0001f))
+            _pm4ScaleStepUnits = 0.01f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("0.1", MathF.Abs(_pm4ScaleStepUnits - 0.1f) < 0.0001f))
+            _pm4ScaleStepUnits = 0.1f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("0.25", MathF.Abs(_pm4ScaleStepUnits - 0.25f) < 0.0001f))
+            _pm4ScaleStepUnits = 0.25f;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("1.0", MathF.Abs(_pm4ScaleStepUnits - 1f) < 0.0001f))
+            _pm4ScaleStepUnits = 1f;
+
+        ImGui.Separator();
+
+        if (!_worldScene.HasSelectedPm4Object || !_worldScene.SelectedPm4ObjectKey.HasValue)
+        {
+            ImGui.TextDisabled("No PM4 object selected. Left-click PM4 geometry to pick an object.");
+            if (ImGui.Button("Clear PM4 Selection"))
+                _worldScene.ClearPm4ObjectSelection();
+            ImGui.SameLine();
+            if (ImGui.Button("Dump PM4 Objects JSON"))
+                ExportPm4ObjectsJson();
+            ImGui.End();
+            return;
+        }
+
+        var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
+        Vector3 selectedObjectTranslation = _worldScene.SelectedPm4ObjectTranslation;
+        Vector3 selectedObjectRotation = _worldScene.SelectedPm4ObjectRotationDegrees;
+        Vector3 selectedObjectScale = _worldScene.SelectedPm4ObjectScale;
         bool translationChanged = false;
+        bool rotationChanged = false;
+        bool scaleChanged = false;
 
-        ImGui.Text("Move X:");
-        if (ImGui.Button("X <<"))
+        ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
+        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
         {
-            currentTranslation.X -= _pm4TranslationStepUnits;
+            ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
+            ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+            ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
+            ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+            ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Object Translation:");
+
+        if (ImGui.Button("Obj X <<"))
+        {
+            selectedObjectTranslation.X -= _pm4TranslationStepUnits;
             translationChanged = true;
         }
         ImGui.SameLine();
-        if (ImGui.Button("X >>"))
+        if (ImGui.Button("Obj X >>"))
         {
-            currentTranslation.X += _pm4TranslationStepUnits;
+            selectedObjectTranslation.X += _pm4TranslationStepUnits;
             translationChanged = true;
         }
 
-        ImGui.Text("Move Y:");
-        if (ImGui.Button("Y <<"))
+        if (ImGui.Button("Obj Y <<"))
         {
-            currentTranslation.Y -= _pm4TranslationStepUnits;
+            selectedObjectTranslation.Y -= _pm4TranslationStepUnits;
             translationChanged = true;
         }
         ImGui.SameLine();
-        if (ImGui.Button("Y >>"))
+        if (ImGui.Button("Obj Y >>"))
         {
-            currentTranslation.Y += _pm4TranslationStepUnits;
+            selectedObjectTranslation.Y += _pm4TranslationStepUnits;
             translationChanged = true;
         }
 
-        ImGui.Text("Move Z:");
-        if (ImGui.Button("Z <<"))
+        if (ImGui.Button("Obj Z <<"))
         {
-            currentTranslation.Z -= _pm4TranslationStepUnits;
+            selectedObjectTranslation.Z -= _pm4TranslationStepUnits;
             translationChanged = true;
         }
         ImGui.SameLine();
-        if (ImGui.Button("Z >>"))
+        if (ImGui.Button("Obj Z >>"))
         {
-            currentTranslation.Z += _pm4TranslationStepUnits;
+            selectedObjectTranslation.Z += _pm4TranslationStepUnits;
             translationChanged = true;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Object Rotation:");
+
+        if (ImGui.Button("Obj Rot X -"))
+        {
+            selectedObjectRotation.X -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Rot X +"))
+        {
+            selectedObjectRotation.X += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+
+        if (ImGui.Button("Obj Rot Y -"))
+        {
+            selectedObjectRotation.Y -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Rot Y +"))
+        {
+            selectedObjectRotation.Y += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Rot Y +180"))
+        {
+            selectedObjectRotation.Y += 180f;
+            rotationChanged = true;
+        }
+
+        if (ImGui.Button("Obj Rot Z -"))
+        {
+            selectedObjectRotation.Z -= _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Rot Z +"))
+        {
+            selectedObjectRotation.Z += _pm4RotationStepDegrees;
+            rotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Rot Z +180"))
+        {
+            selectedObjectRotation.Z += 180f;
+            rotationChanged = true;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Object Scale:");
+
+        if (ImGui.Button("Obj Sx -"))
+        {
+            selectedObjectScale.X -= _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Sx +"))
+        {
+            selectedObjectScale.X += _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+
+        if (ImGui.Button("Obj Sy -"))
+        {
+            selectedObjectScale.Y -= _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Sy +"))
+        {
+            selectedObjectScale.Y += _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+
+        if (ImGui.Button("Obj Sz -"))
+        {
+            selectedObjectScale.Z -= _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Obj Sz +"))
+        {
+            selectedObjectScale.Z += _pm4ScaleStepUnits;
+            scaleChanged = true;
+        }
+
+        ImGui.Text("Axis Flips:");
+        if (ImGui.Button("Flip Obj X"))
+        {
+            selectedObjectScale.X = -selectedObjectScale.X;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Obj Y"))
+        {
+            selectedObjectScale.Y = -selectedObjectScale.Y;
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Obj Z"))
+        {
+            selectedObjectScale.Z = -selectedObjectScale.Z;
+            scaleChanged = true;
         }
 
         if (translationChanged)
-            _worldScene.Pm4OverlayTranslation = currentTranslation;
-
-        ImGui.Separator();
-        ImGui.Text("Per-Object PM4 Alignment:");
-        ImGui.TextDisabled("Left-click PM4 geometry to select an object, then nudge only that object.");
-
-        if (_worldScene.HasSelectedPm4Object && _worldScene.SelectedPm4ObjectKey.HasValue)
-        {
-            var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
-            Vector3 selectedObjectTranslation = _worldScene.SelectedPm4ObjectTranslation;
-            bool objectTranslationChanged = false;
-
-            ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
-            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
-            {
-                ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
-                ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
-                ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
-                ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
-                ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
-            }
-
-            ImGui.Text("Obj Move X:");
-            if (ImGui.Button("Obj X <<"))
-            {
-                selectedObjectTranslation.X -= _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Obj X >>"))
-            {
-                selectedObjectTranslation.X += _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-
-            ImGui.Text("Obj Move Y:");
-            if (ImGui.Button("Obj Y <<"))
-            {
-                selectedObjectTranslation.Y -= _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Obj Y >>"))
-            {
-                selectedObjectTranslation.Y += _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-
-            ImGui.Text("Obj Move Z:");
-            if (ImGui.Button("Obj Z <<"))
-            {
-                selectedObjectTranslation.Z -= _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Obj Z >>"))
-            {
-                selectedObjectTranslation.Z += _pm4TranslationStepUnits;
-                objectTranslationChanged = true;
-            }
-
-            if (objectTranslationChanged)
-                _worldScene.SelectedPm4ObjectTranslation = selectedObjectTranslation;
-
-            if (ImGui.Button("Reset Obj Offset"))
-                _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
-            ImGui.SameLine();
-            if (ImGui.Button("Clear PM4 Selection"))
-                _worldScene.ClearPm4ObjectSelection();
-
-            ImGui.TextDisabled($"Obj Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F3}, {_worldScene.SelectedPm4ObjectTranslation.Y:F3}, {_worldScene.SelectedPm4ObjectTranslation.Z:F3})");
-        }
-        else
-        {
-            ImGui.TextDisabled("No PM4 object selected.");
-            if (ImGui.Button("Clear PM4 Selection"))
-                _worldScene.ClearPm4ObjectSelection();
-        }
-
-        ImGui.Separator();
-
-        ImGui.Text("Plane Snap:");
-        ImGui.TextDisabled("Use this when PM4 is on a wall/ceiling instead of the terrain plane.");
-
-        float currentYaw = _worldScene.Pm4OverlayRotationDegrees.Y;
-
-        if (ImGui.Button("Floor"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, 0f));
-        ImGui.SameLine();
-        if (ImGui.Button("Ceiling"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(180f, currentYaw, 0f));
-
-        if (ImGui.Button("Wall +X"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, 90f));
-        ImGui.SameLine();
-        if (ImGui.Button("Wall -X"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(0f, currentYaw, -90f));
-
-        if (ImGui.Button("Wall +Z"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(-90f, currentYaw, 0f));
-        ImGui.SameLine();
-        if (ImGui.Button("Wall -Z"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(90f, currentYaw, 0f));
-
-        ImGui.Text("Quick Macros:");
-        ImGui.TextDisabled("Use when PM4 is stuck on an adjacent wall/ceiling plane.");
-
-        Vector3 macroRotation = _worldScene.Pm4OverlayRotationDegrees;
-        if (ImGui.Button("Left Wall -> Floor"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X, macroRotation.Y, macroRotation.Z + 90f));
-        ImGui.SameLine();
-        if (ImGui.Button("Right Wall -> Floor"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X, macroRotation.Y, macroRotation.Z - 90f));
-
-        if (ImGui.Button("Ceiling -> Floor"))
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(new Vector3(macroRotation.X + 180f, macroRotation.Y, macroRotation.Z));
-
-        ImGui.Separator();
-
-        ImGui.Text("Rotation Step:");
-        if (ImGui.RadioButton("1°", MathF.Abs(_pm4RotationStepDegrees - 1f) < 0.001f))
-            _pm4RotationStepDegrees = 1f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("5°", MathF.Abs(_pm4RotationStepDegrees - 5f) < 0.001f))
-            _pm4RotationStepDegrees = 5f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("15°", MathF.Abs(_pm4RotationStepDegrees - 15f) < 0.001f))
-            _pm4RotationStepDegrees = 15f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("45°", MathF.Abs(_pm4RotationStepDegrees - 45f) < 0.001f))
-            _pm4RotationStepDegrees = 45f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("90°", MathF.Abs(_pm4RotationStepDegrees - 90f) < 0.001f))
-            _pm4RotationStepDegrees = 90f;
-
-        Vector3 currentRotation = _worldScene.Pm4OverlayRotationDegrees;
-        bool rotationChanged = false;
-
-        ImGui.Text("Rotate X:");
-        if (ImGui.Button("X -"))
-        {
-            currentRotation.X -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("X +"))
-        {
-            currentRotation.X += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-
-        ImGui.Text("Rotate Y:");
-        if (ImGui.Button("Y -"))
-        {
-            currentRotation.Y -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Y +"))
-        {
-            currentRotation.Y += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Y + 180"))
-        {
-            currentRotation.Y += 180f;
-            rotationChanged = true;
-        }
-
-        ImGui.Text("Rotate Z:");
-        if (ImGui.Button("Z -"))
-        {
-            currentRotation.Z -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Z +"))
-        {
-            currentRotation.Z += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-
-        Vector3 currentScale = _worldScene.Pm4OverlayScale;
-        bool scaleChanged = false;
-        ImGui.Text("Axis Flips:");
-        if (ImGui.Button("Flip X"))
-        {
-            currentScale.X = -currentScale.X;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Flip Y"))
-        {
-            currentScale.Y = -currentScale.Y;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Flip Z"))
-        {
-            currentScale.Z = -currentScale.Z;
-            scaleChanged = true;
-        }
-
+            _worldScene.SelectedPm4ObjectTranslation = selectedObjectTranslation;
         if (rotationChanged)
-            _worldScene.Pm4OverlayRotationDegrees = NormalizeRotationDegrees(currentRotation);
-
+            _worldScene.SelectedPm4ObjectRotationDegrees = NormalizeRotationDegrees(selectedObjectRotation);
         if (scaleChanged)
-            _worldScene.Pm4OverlayScale = currentScale;
+            _worldScene.SelectedPm4ObjectScale = selectedObjectScale;
 
-        if (ImGui.Button("Reset Current"))
+        ImGui.Separator();
+
+        if (ImGui.Button("Reset Obj Move"))
+            _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Obj Rot"))
+            _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Obj Scale"))
+            _worldScene.SelectedPm4ObjectScale = Vector3.One;
+
+        if (ImGui.Button("Reset Obj 9DoF"))
         {
-            _worldScene.Pm4OverlayTranslation = Vector3.Zero;
-            _worldScene.Pm4OverlayRotationDegrees = Vector3.Zero;
-            _worldScene.Pm4OverlayScale = Vector3.One;
+            _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
+            _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
+            _worldScene.SelectedPm4ObjectScale = Vector3.One;
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Revert Saved"))
-            ApplySavedPm4AlignmentToScene();
+        if (ImGui.Button("Clear PM4 Selection"))
+            _worldScene.ClearPm4ObjectSelection();
 
-        if (ImGui.Button("Save Current Alignment"))
-            SaveCurrentPm4Alignment();
-
-        ImGui.SameLine();
         if (ImGui.Button("Dump PM4 Objects JSON"))
             ExportPm4ObjectsJson();
-
         ImGui.SameLine();
-        if (ImGui.Button("Print Alignment"))
+        if (ImGui.Button("Print Obj Alignment"))
         {
+            Vector3 t = _worldScene.SelectedPm4ObjectTranslation;
+            Vector3 r = _worldScene.SelectedPm4ObjectRotationDegrees;
+            Vector3 s = _worldScene.SelectedPm4ObjectScale;
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[PM4 Align] Trans=({_worldScene.Pm4OverlayTranslation.X:F3},{_worldScene.Pm4OverlayTranslation.Y:F3},{_worldScene.Pm4OverlayTranslation.Z:F3}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F3},{_worldScene.Pm4OverlayRotationDegrees.Y:F3},{_worldScene.Pm4OverlayRotationDegrees.Z:F3}) Scale=({_worldScene.Pm4OverlayScale.X:F4},{_worldScene.Pm4OverlayScale.Y:F4},{_worldScene.Pm4OverlayScale.Z:F4})");
+                $"[PM4 Obj Align] tile=({selectedPm4.tileX},{selectedPm4.tileY}) ck24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart} T=({t.X:F3},{t.Y:F3},{t.Z:F3}) Rot=({r.X:F3},{r.Y:F3},{r.Z:F3}) Scale=({s.X:F4},{s.Y:F4},{s.Z:F4})");
         }
 
-        ImGui.TextDisabled($"Current: T=({_worldScene.Pm4OverlayTranslation.X:F3}, {_worldScene.Pm4OverlayTranslation.Y:F3}, {_worldScene.Pm4OverlayTranslation.Z:F3}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F3}, {_worldScene.Pm4OverlayRotationDegrees.Y:F3}, {_worldScene.Pm4OverlayRotationDegrees.Z:F3})° S=({_worldScene.Pm4OverlayScale.X:F4}, {_worldScene.Pm4OverlayScale.Y:F4}, {_worldScene.Pm4OverlayScale.Z:F4})");
-        ImGui.TextDisabled($"Saved: T=({_pm4SavedOverlayTranslation.X:F3}, {_pm4SavedOverlayTranslation.Y:F3}, {_pm4SavedOverlayTranslation.Z:F3}) Rot=({_pm4SavedOverlayRotationDegrees.X:F3}, {_pm4SavedOverlayRotationDegrees.Y:F3}, {_pm4SavedOverlayRotationDegrees.Z:F3})° S=({_pm4SavedOverlayScale.X:F4}, {_pm4SavedOverlayScale.Y:F4}, {_pm4SavedOverlayScale.Z:F4})");
+        ImGui.TextDisabled($"Obj Move: ({_worldScene.SelectedPm4ObjectTranslation.X:F3}, {_worldScene.SelectedPm4ObjectTranslation.Y:F3}, {_worldScene.SelectedPm4ObjectTranslation.Z:F3})");
+        ImGui.TextDisabled($"Obj Rot: ({_worldScene.SelectedPm4ObjectRotationDegrees.X:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Y:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Z:F3}) deg");
+        ImGui.TextDisabled($"Obj Scale: ({_worldScene.SelectedPm4ObjectScale.X:F4}, {_worldScene.SelectedPm4ObjectScale.Y:F4}, {_worldScene.SelectedPm4ObjectScale.Z:F4})");
 
         ImGui.End();
     }
@@ -5435,6 +5410,10 @@ void main() {
         bool showPm4Solid = _worldScene.ShowPm4SolidOverlay;
         if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
             _worldScene.ShowPm4SolidOverlay = showPm4Solid;
+        ImGui.SameLine();
+        bool pm4IgnoreDepth = _worldScene.Pm4OverlayIgnoreDepth;
+        if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
+            _worldScene.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
 
         bool showType40 = _worldScene.ShowPm4Type40;
         if (ImGui.Checkbox("CK24 0x40", ref showType40))

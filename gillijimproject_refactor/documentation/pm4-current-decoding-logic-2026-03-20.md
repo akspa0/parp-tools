@@ -41,6 +41,11 @@ In `WorldScene` PM4 overlay loading:
 
 This prevents sparse-dataset drift and silent overwrite loss.
 
+Rendering contract follow-up:
+
+- PM4 overlay rendering/picking should not require ADT tile residency for tiles that do not exist as ADT terrain tiles.
+- AOI-loaded-tile gating remains for ADT-backed tiles, but PM4-only sparse tiles are allowed to render.
+
 ## Object Assembly Pipeline
 
 Implemented in `WorldScene.BuildPm4TileObjects(...)`:
@@ -81,6 +86,8 @@ For MPRL association:
   - when linked-footprint scoring is active, strong yaw agreement can override modest footprint-distance differences
 4. small penalty for winding inversion
 
+Current guardrail: planar solve evaluates the full candidate set under one scoring pass, while mirrored candidates keep an explicit score penalty so rigid mappings are preferred when fit quality is otherwise comparable.
+
 After planar transform selection, a CK24-scoped continuous yaw correction can be applied:
 
 - derive candidate principal yaw from reconstructed object footprint
@@ -119,6 +126,13 @@ Viewer-side export support now exists for offline PM4 comparison:
 
 - `WorldScene.BuildPm4OverlayInterchangeJson(...)` emits overlay summary, tile/object metadata, alignment state, and optional lines/triangles geometry
 - PM4 Alignment UI includes `Dump PM4 Objects JSON` to save this payload
+- object metadata now includes per-object local alignment state (translation/rotation/scale) keyed by `(tile, ck24, objectPart)`
+
+Current PM4 alignment workflow is object-local first:
+
+- PM4 Alignment window edits selected-object 9DoF only (XYZ translation, XYZ rotation, XYZ scale)
+- axis flips (`Flip Obj X/Y/Z`) are object-local mirror tests, useful for quickly testing suspected X-vs-Y winding/orientation mismatches
+- object-local rotation/scale are applied around object center so the object stays in-place while evaluating orientation parity
 
 External CLI sanity check on the reported-problem input (`development_22_18.pm4`) confirms source data is not empty:
 
