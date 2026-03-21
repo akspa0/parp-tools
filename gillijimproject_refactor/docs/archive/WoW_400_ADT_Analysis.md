@@ -1,47 +1,69 @@
 # WoW 4.0.0.11927 ADT Format Analysis
 
-**Analysis Date**: Jan 18 2026  
+**Analysis Date**: Mar 21 2026  
 **Binary**: `wow.exe` (4.0.0.11927 Cataclysm Beta)  
 **Tool**: Ghidra
 
-## 1. Key Functions Found
+This document supersedes the earlier simplified note that treated 4.0.0 terrain alpha as "just 3.3.5 plus RLE". The on-disk ADT format is still pre-split, but the runtime terrain texturing path is more sophisticated than the active viewer previously modeled.
 
-### 1.1 Alpha Map Unpacking
+## 1. Renamed Runtime Functions
+
+### 1.1 Alpha Decode Helpers
 | Function | Address | Description |
 |----------|---------|-------------|
-| `CMapChunk::UnpackAlphaBits` | `0x00674b70` | Main alpha unpacking dispatcher |
-| `CMapChunk::UnpackAlphaShadowBits` | `0x00674560` | Shadow+alpha combined unpacker |
+| `CMapChunk_UnpackAlphaBits` | `0x00674b70` | Main per-layer alpha dispatcher |
+| `CMapChunk_UnpackAlphaShadowBits` | `0x00674560` | Alpha decode with optional shadow modulation |
+| `CMapChunk_UnpackOneAlphaLayer` | `0x00675290` | Builds one layer alpha texture for a chunk |
+| `CMapChunk_UnpackChunkAlphaSet` | `0x00675330` | Builds a stitched alpha set using linked neighbor chunks |
 | `RLE_Decompress` | `0x00673230` | RLE decompression routine |
 
-### 1.2 String References
+### 1.2 Blend Texture Assembly
+| Function | Address | Description |
+|----------|---------|-------------|
+| `CMapChunk_BuildSingleLayerBlendTexture` | `0x00675b70` | Builds one chunk-level blend texture |
+| `CMapChunk_BuildChunkBlendTextureSet` | `0x00675c30` | Builds a stitched multi-chunk blend texture set |
+| `CMapChunk_RefreshBlendTextures` | `0x00675e30` | Top-level terrain blend refresh for a chunk |
+| `TerrainBlend_SingleLayerCallback` | `0x00675540` | Callback used by `TerrainBlend` resource creation |
+| `TerrainBlend_ChunkSetCallback` | `0x006755a0` | Callback used for stitched alpha-set generation |
+
+### 1.3 Relevant String References
 - `"CMapChunk::UnpackAlphaBits(): Bad genformat."` at `0x00a2402c`
 - `"CMapChunk::UnpackAlphaShadowBits(): Bad genformat."` at `0x00a23ff8`
-- `"terrainAlphaBitDepth"` at `0x00a24bfc` (CVar)
+- `"terrainAlphaBitDepth"` at `0x00a24bfc`
 - `"Alpha map bit depth set to %dbit on restart."` at `0x00a24430`
+- `"TerrainBlend"` resource creation string inside `FUN_006730f0`
 
-## 2. Dispatch Logic
+## 2. What Stayed The Same
 
-The `UnpackAlphaBits` function dispatches based on two flags:
+- 4.0.0.11927 still uses **pre-split ADTs**.
+- `WDT.MPHD` `0x4 | 0x80` still matters for 8-bit alpha support.
+- `MCLY 0x200` is still the per-layer compressed-alpha flag.
+- RLE still decompresses into a 64x64 output buffer.
 
-### 2.1 MCNK Flag Check
+These facts are true but incomplete. The missing piece was the runtime blend-texture assembly around those decoded alpha values.
+
+## 3. Alpha Dispatch Model
+
+`CMapChunk_UnpackOneAlphaLayer` selects `genformat` from chunk state:
+
 ```c
-if ((*(byte *)(this + 10) & 8) == 0)  // MCNK.flags.do_not_fix_alpha_map
+local_8 = 3;
+if ((*(byte *)(param_1 + 8) & 4) != 0) {
+    local_8 = 2;
+}
 ```
-- **Flag 0x8 clear**: Use "fixed" 63×63 alpha (expand to 64×64)
-- **Flag 0x8 set**: Use direct 64×64 alpha
 
-### 2.2 GenFormat Parameter
-- **genformat = 2**: 8-bit alpha (uncompressed or compressed)
-- **genformat = 3**: 4-bit alpha (2048 bytes)
+- `genformat = 3`: 4-bit alpha path
+- `genformat = 2`: 8-bit alpha path
 
-### 2.3 MCLY Compression Flag
-```c
-if ((*param_3 & 0x200) == 0)  // MCLY.flags.alpha_map_compressed
-```
-- **Flag 0x200 clear**: Read raw bytes directly
-- **Flag 0x200 set**: Call RLE decompression
+It then builds a per-layer descriptor from the chunk's layer table:
 
-## 3. RLE Decompression Algorithm
+- flags from `MCLY`
+- optional alpha pointer if `MCLY.use_alpha_map (0x100)` is set
+- optional shadow-mask pointer when shadow blending is active
+- chunk/header `0x8000` state passed separately into the unpackers
+
+## 4. RLE Decompression Is Still Standard
 
 Decompiled from `FUN_00673230`:
 
@@ -49,58 +71,117 @@ Decompiled from `FUN_00673230`:
 int RLE_Decompress(byte* src, byte* dest, int maxSize) {
     int iRead = 0;
     int iWrite = 0;
-    
+
     while (iWrite < maxSize) {
         byte ctrl = src[iRead++];
-        
-        if (ctrl & 0x80) {  // High bit set = FILL mode
-            byte fillValue = src[iRead++];
+
+        if (ctrl & 0x80) {
+            byte value = src[iRead++];
             int count = ctrl & 0x7F;
-            memset(&dest[iWrite], fillValue, count);
+            memset(&dest[iWrite], value, count);
             iWrite += count;
-        } else {  // COPY mode
+        }
+        else {
             int count = ctrl;
-            for (int i = 0; i < count; i++) {
+            for (int i = 0; i < count; i++)
                 dest[iWrite++] = src[iRead++];
-            }
         }
     }
+
     return iRead;
 }
 ```
 
-### Key Points:
-- Control byte: `bit 7 = mode`, `bits 0-6 = count`
-- **FILL (0x80+)**: Next byte repeated `count` times
-- **COPY (0x00-0x7F)**: Copy `count` bytes directly
-- Decompresses to exactly 4096 bytes (64×64)
+Key points:
+- control byte bit 7 selects fill vs copy
+- bits 0-6 contain the run count
+- output target is the runtime alpha buffer for the current decode width/height
 
-## 4. Shadow Multiplier
+## 5. 8-bit Alpha Has A Residual Synthesis Path
 
-When shadow exists at a position:
+This was the major missing behavior in the viewer.
+
+When `genformat == 2` and a layer has **no direct alpha payload pointer**, `CMapChunk_UnpackAlphaBits` does not leave the layer blank. Instead it routes to helpers that synthesize the layer as the residual of the other layer alphas.
+
+Relevant helpers:
+
+| Address | Meaning |
+|---------|---------|
+| `0x006748d0` | 8-bit residual synthesis helper A |
+| `0x006749c0` | 8-bit residual synthesis helper B |
+
+The core computation is structurally:
+
 ```c
-bVar4 = (byte)((uint)bVar4 * 0xb2 >> 8);  // ≈ 0.695 multiplier
+alpha = 255 - alpha_other_0 - alpha_other_1 - alpha_other_2;
 ```
-Alpha is multiplied by `178/256 ≈ 0.695` (close to the documented 0.7).
 
-## 5. Implementation Recommendations
+with optional shadow modulation applied afterward.
 
-### For LKMapService (C#):
-1. Check `WDT.MPHD` flags 0x4/0x80 for bit depth
-2. Check `MCLY.flags` bit 0x200 for compression
-3. Implement RLE decompression matching above algorithm
-4. Handle 63×63 → 64×64 expansion based on MCNK flag 0x8
+Practical implication:
+- a local MCAL-only decoder is insufficient for 4.0.0
+- missing direct alpha on an overlay layer is not automatically "full alpha" or "zero alpha"
+- the client can derive it from sibling layers at runtime
 
-### Helper Functions by Format:
-| Address | Description |
-|---------|-------------|
-| `0x006734f0` | 4-bit unfixed |
-| `0x006735c0` | 4-bit fixed |
-| `0x006748d0` | 8-bit uncompressed unfixed |
-| `0x006749c0` | 8-bit uncompressed fixed |
-| `0x00674640` | 8-bit compressed unfixed |
-| `0x00674720` | 8-bit compressed fixed |
+## 6. Runtime Blend Textures Are Neighbor-Aware
 
-## 6. Version Notes
+`CMapChunk_RefreshBlendTextures` does not only decode the current chunk. It refreshes `TerrainBlend` textures through one of two paths:
 
-4.0.0.11927 uses the **pre-split ADT format** (same as 3.3.5). Split ADTs (`_tex0.adt`, `_obj0.adt`) were introduced in 4.0.1+.
+1. `CMapChunk_BuildSingleLayerBlendTexture`
+2. `CMapChunk_BuildChunkBlendTextureSet`
+
+The second path calls `CMapChunk_UnpackChunkAlphaSet`, which does all of the following:
+
+- reads the current chunk's layer table
+- walks three linked neighbor chunk pointers from `chunk + 0x18`
+- matches neighbor layers against the current chunk by **texture id**, not by overlay slot index alone
+- builds a stitched alpha set before creating the final `TerrainBlend` resource
+
+This means the runtime blend model is seam-aware:
+- edge texels can come from neighboring chunks with the same texture id
+- different chunks may use different overlay slot indices for the same texture
+- a pure per-chunk local alpha decode can still be wrong even if MCAL bytes are decoded correctly
+
+## 7. Shadow Modulation Is Folded Into Some Runtime Helpers
+
+Multiple 8-bit helpers optionally modulate alpha by shadow bits using:
+
+```c
+alpha = (alpha * 0xB2) >> 8;
+```
+
+This is approximately `178 / 256 ~= 0.695`.
+
+In the active viewer, shadow is already carried separately through `MCSH` and the terrain renderer. That means we should be careful not to double-apply this modulation when porting 4.0 behavior.
+
+## 8. Important Correction To The Earlier Jan Note
+
+The earlier archive note oversimplified the fixed/unfixed selector as a direct `MCNK` bit-`0x8` rule.
+
+What is actually visible now:
+- `genformat` comes from chunk state (`chunk + 8` bit `0x4`)
+- helper family selection also depends on runtime blend-builder state around `TerrainBlend`
+- chunk/header `0x8000` is passed separately into the alpha/shadow unpackers
+
+The exact public-facing name/polarity of every involved runtime bit is still not fully closed. Do not collapse this into a one-line "MCNK bit X means Y" rule without another RE pass.
+
+## 9. Implementation Guidance For The Active Viewer
+
+The minimum behavior needed to get closer to 4.0.0 terrain texturing is:
+
+1. preserve the existing 4-bit / 8-bit / compressed local decode
+2. synthesize missing 8-bit layer alpha as residual coverage from sibling layers
+3. stitch chunk-edge alpha by matching neighbor layers via texture id
+4. keep shadow as a separate viewer path unless we deliberately port the runtime combined-alpha helpers end-to-end
+
+What is still out of scope for a minimal viewer recovery pass:
+
+- recreating the full internal `TerrainBlend` resource system
+- proving the exact fixed/unfixed runtime bit source beyond the current evidence
+- matching every blend-texture dimension/LOD case in `CMapChunk_BuildChunkBlendTextureSet`
+
+## 10. Version Notes
+
+4.0.0.11927 still uses the **pre-split ADT** file layout. Split ADTs (`_tex0.adt`, `_obj0.adt`) were introduced later.
+
+That does **not** mean terrain texturing behavior is identical to 3.3.5. The key 4.0 delta uncovered here is the runtime blend-texture assembly built on top of the same monolithic ADT inputs.

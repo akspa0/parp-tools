@@ -46,7 +46,7 @@ f:\buildserver\bs1\work\wow-code\trunk\wow\source\...
 .\engine\source\gx\CGxDevice.h
 ```
 
-## 3. Alpha Map Parsing (identical to 4.0.0)
+## 3. Alpha Map Parsing (same on-disk families as 4.0.0, runtime parity not fully identical)
 
 ### Functions Found
 | Function | Address | Description |
@@ -180,10 +180,11 @@ Shaders\Pixel\terrainpw1.bls - terrainpwN.bls
 ## 10. Key Findings for Data Pipeline
 
 ### Alpha Maps (3.0.1 - 4.0.0)
-- **Same format** across all Wrath and early Cata
-- RLE decompression algorithm unchanged
-- `terrainAlphaBitDepth` CVar controls 4/8 bit mode
-- WDT MPHD flag 0x4 controls big alpha maps
+- same on-disk monolithic ADT family across these builds
+- RLE decompression algorithm remains unchanged
+- `terrainAlphaBitDepth` CVar still exposes 4/8 bit mode
+- WDT MPHD big-alpha handling remains relevant
+- later 4.0.0 runtime work shows terrain blending is not fully captured by this file-format summary alone
 
 ### ADT Compatibility  
 - 3.0.1, 3.3.5, and 4.0.0.11927 all use **monolithic ADT**
@@ -195,4 +196,4 @@ Shaders\Pixel\terrainpw1.bls - terrainpwN.bls
 - BSP tree (MOBN) structure unchanged
 
 ### Recommendation
-The `LKMapService` fix (using WDT MPHD flags) will work for **all** versions from 3.0.1 through 4.0.0. No additional format changes needed.
+Treat the shared on-disk alpha format as a useful baseline, but do not assume 4.0.0 runtime terrain blending is fully covered by the same local MCAL decode logic. The 4.0.0 client adds stitched blend-texture assembly and residual alpha synthesis that need separate consideration.

@@ -1,5 +1,69 @@
 # Progress
 
+### Mar 21, 2026 - WMO Blend-Mode Correction + Loose PM4 Overlay Precedence
+
+- Corrected one concrete WMO material/rendering mismatch in `src/MdxViewer/Rendering/WmoRenderer.cs`:
+	- raw WMO material `BlendMode` is now mapped to `EGxBlend`
+	- opaque pass handles `Opaque` and `AlphaKey`
+	- transparent pass now handles only `Blend` and `Add` with matching blend funcs
+- Fixed loose overlay precedence in `src/MdxViewer/DataSources/MpqDataSource.cs`:
+	- loose-file resolution now searches `_looseRoots` newest-first so the most recently attached overlay overrides earlier roots
+	- PM4 loose-path failures now emit the same trace help that previously existed only for WMO failures
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Validation limits:
+	- no automated tests were added or run
+	- no runtime real-data validation yet for the WMO sheen symptom
+	- no runtime real-data validation yet for base+loose-overlay PM4 loading
+
+### Mar 21, 2026 - Explicit Base-Build Selection Restored For Viewer MPQ Loads
+
+- Restored explicit client build selection in `MdxViewer` instead of relying only on path-based build inference:
+	- added `src/MdxViewer/Terrain/BuildVersionCatalog.cs`
+	- `Open Game Folder (MPQ)...` now routes through a build-selection dialog before calling `LoadMpqDataSource(...)`
+	- build options are loaded from `WoWDBDefs/definitions/Map.dbd` when available, with a fallback list that includes `4.0.0.11927` and `4.0.1.12304`
+- Persisted base-build identity for saved clients:
+	- `KnownGoodClientPath` now stores `BuildVersion`
+	- viewer settings now also store `LastSelectedBuildVersion`
+	- reopening a saved base or loading a loose map folder against a saved base now reuses the saved explicit build when present
+- Added a runtime hint for PM4-era dataset mismatches:
+	- loose overlay attach inspects the first PM4 version marker it finds
+	- known markers currently map `11927 -> 4.0.0.11927` and `12304 -> 4.0.1.12304`
+	- viewer logs a warning when PM4 overlay hint and active base-client build disagree
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Validation limits:
+	- no automated tests were added or run
+	- no runtime real-data validation yet with the development PM4 overlay against a verified `4.0.1.12304` base client
+
+### Mar 21, 2026 - 4.0.0.11927 Terrain Blend Documentation + First Runtime Recovery Slice
+
+- Closed the stale documentation gap around 4.0 terrain texturing by recording the wow.exe-backed runtime model instead of repeating the older "same as 3.3.5" shorthand.
+- Reverse-engineered/runtime-documented behavior now preserved in repo docs and prompts:
+	- chunk alpha assembly is neighbor-aware, not chunk-local only
+	- neighbor layers are matched by texture id
+	- 8-bit layers without direct alpha payload can be synthesized as residual coverage
+	- runtime blend textures are created through the `TerrainBlend` path
+- Documentation and prompt updates landed in:
+	- `documentation/wow-400-terrain-blend-wow-exe-guide.md`
+	- `docs/archive/WoW_400_ADT_Analysis.md`
+	- `docs/archive/WoW_400_DeepDive_Analysis.md`
+	- `docs/archive/WoW_301_DeepDive_Analysis.md`
+	- `docs/ADT_WDT_Format_Specification.md`
+	- `specifications/ghidra/prompt-400.md`
+	- `.github/prompts/wow-400-terrain-blend-recovery.prompt.md`
+- Active viewer implementation now includes the first 4.0 recovery slice in `StandardTerrainAdapter` / `TerrainChunkData`:
+	- dedicated `Cataclysm400` alpha-decode mode stays separate from `LichKingStrict`
+	- preserves per-layer `AlphaSourceFlags`
+	- synthesizes missing residual 8-bit alpha when a layer lacks direct payload
+	- stitches same-tile chunk-edge alpha texels by matching neighbor layer texture ids
+- Build validation:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+- Validation limits:
+	- no new automated tests were added or run for this slice
+	- no real-data runtime verification yet on `test_data/development/World/Maps/development`
+	- this is the first runtime-backed recovery slice, not full `TerrainBlend` parity closure
+
 ### Mar 20, 2026 - PM4 Tile Mapping Normalization + Reboot Handoff
 
 - Applied PM4 viewer tile mapping guardrail in `WorldScene`:

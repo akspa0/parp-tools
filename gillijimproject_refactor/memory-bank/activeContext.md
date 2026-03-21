@@ -9,6 +9,63 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - .github metadata restored from main and committed: 845748b
 - .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
 
+### MPQ Base Build Selection Recovery (Mar 21)
+
+- The active viewer no longer relies only on `InferBuildFromPath(...)` for new MPQ loads.
+- `ViewerApp` now restores explicit build selection before loading a game folder:
+	- MPQ open flow now pauses on a build-selection dialog.
+	- build choices come from `Terrain/BuildVersionCatalog.cs` using `WoWDBDefs/definitions/Map.dbd` when available, with a built-in fallback list that includes `4.0.0.11927` and `4.0.1.12304`.
+	- path/build tokens are now treated as preselection hints, not authoritative routing.
+- Known-good base-client entries now persist `BuildVersion` in viewer settings and reuse it when reopening a saved base or attaching a loose overlay against that base.
+- Loose overlay attach now emits a PM4 build hint when the overlay contains PM4 files with known version markers:
+	- `12304` => `4.0.1.12304`
+	- `11927` => `4.0.0.11927`
+	- if that hint disagrees with the active base build, the viewer logs a warning instead of silently continuing with no build-era signal.
+- Validation status for this build-routing slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- No automated tests were added or run for this slice.
+	- No runtime real-data signoff yet on PM4/world-object matching with a `4.0.1.12304` base client.
+
+### 4.0.0.11927 Terrain Blend Recovery (Mar 21)
+
+- The earlier working assumption that 4.0 terrain texturing was effectively "3.3.5 MCAL decode with split files" is now documented as incomplete.
+- Latest wow.exe RE confirms the missing behavior is runtime blend assembly, not only local MCAL byte decode:
+	- `CMapChunk_UnpackChunkAlphaSet` stitches the current chunk with three linked neighbor chunks.
+	- Neighbor alpha is matched by texture id, not only by local overlay slot index.
+	- In 8-bit mode, layers without direct alpha payload can be synthesized as residual coverage `255 - other layer alphas`.
+	- Blend textures are rebuilt through the `TerrainBlend` resource path (`CMapChunk_BuildSingleLayerBlendTexture`, `CMapChunk_BuildChunkBlendTextureSet`, `CMapChunk_RefreshBlendTextures`).
+- Active viewer implementation now reflects the first verified slice of that model:
+	- `FormatProfileRegistry.AdtProfile40xUnknown` routes to `TerrainAlphaDecodeMode.Cataclysm400`.
+	- `StandardTerrainAdapter` captures per-layer source flags, synthesizes residual 8-bit alpha for missing direct payloads, and stitches same-tile chunk edges by matching neighbor layer texture ids.
+	- `TerrainChunkData` now preserves `AlphaSourceFlags` for runtime post-processing.
+- Documentation/handoff files updated for this recovery line:
+	- `documentation/wow-400-terrain-blend-wow-exe-guide.md`
+	- `docs/archive/WoW_400_ADT_Analysis.md`
+	- `docs/archive/WoW_400_DeepDive_Analysis.md`
+	- `docs/archive/WoW_301_DeepDive_Analysis.md`
+	- `docs/ADT_WDT_Format_Specification.md`
+	- `specifications/ghidra/prompt-400.md`
+	- `.github/prompts/wow-400-terrain-blend-recovery.prompt.md`
+- Validation status for this exact 4.0 recovery slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- No real-data runtime signoff yet on the fixed development terrain after residual synthesis + edge stitching.
+	- Do not claim 4.0 terrain correctness from build success or diagnostics alone.
+
+### WMO Blend + Loose PM4 Overlay Follow-Up (Mar 21)
+
+- WMO distant "foggy sheen" triage found one concrete renderer mismatch in `src/MdxViewer/Rendering/WmoRenderer.cs`:
+	- the active branch had flattened WMO material blend handling into opaque vs generic transparent
+	- current code now maps raw WMO `BlendMode` to `EGxBlend` semantics (`Opaque`, `Blend`, `Add`, `AlphaKey`)
+	- opaque pass now keeps `AlphaKey` with alpha-test, while transparent pass only handles `Blend` / `Add`
+- Loose overlay PM4 resolution now gives precedence to the most recently attached overlay root in `src/MdxViewer/DataSources/MpqDataSource.cs`.
+	- this matters when a base path and a later loose overlay both expose the same PM4 virtual path
+	- older behavior searched loose roots in insertion order, so base loose files could shadow the attached overlay
+	- current resolver searches newest overlay first and now traces PM4 loose-path misses like WMO misses
+- Validation status for these viewer fixes:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- No automated tests were added or run for these fixes.
+	- No runtime real-data signoff yet for the WMO sheen symptom or the loose-overlay PM4 workflow.
+
 ### Recovery Work Completed On This Branch
 
 - Re-established v0.4.0 baseline in the primary tree and validated build.

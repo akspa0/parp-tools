@@ -8,6 +8,63 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Base commit: 343dadf (tag v0.4.0)
 - .github instructions/skills/prompts restored from main and committed (845748b)
 
+### Explicit Base-Build Selection Recovery (Mar 21)
+
+- `ViewerApp` MPQ load flow no longer treats folder-path inference as the only build-selection mechanism.
+- Current viewer behavior:
+   - `Open Game Folder (MPQ)...` now opens a build-selection dialog before MPQ load.
+   - build options are sourced from `Terrain/BuildVersionCatalog.cs` via `WoWDBDefs/definitions/Map.dbd` when available.
+   - fallback build list now explicitly includes Cataclysm-era candidates `4.0.0.11927` and `4.0.1.12304`.
+   - selected build is passed directly into `LoadMpqDataSource(...)`.
+- Saved base clients now preserve build identity:
+   - `KnownGoodClientPath` stores `BuildVersion`
+   - viewer settings also store `LastSelectedBuildVersion`
+   - reopening a saved base or using `Load Loose Map Folder Against Saved Base` now reuses the saved explicit build when present
+- Loose PM4 overlay attach now surfaces build-era mismatch hints:
+   - first PM4 version marker found under the overlay can currently map `11927 -> 4.0.0.11927` or `12304 -> 4.0.1.12304`
+   - if the overlay hint disagrees with `_dbcBuild`, viewer log/status now says so instead of silently continuing
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no runtime signoff yet with the development PM4 overlay and a matching Cataclysm-beta base client
+
+### 4.0.0.11927 Terrain Blend Recovery (Mar 21)
+
+- 4.0 terrain texturing is now treated as a separate runtime-behavior track, not as a trivial extension of the validated 3.x path.
+- Latest wow.exe analysis established the missing model:
+   - `CMapChunk_UnpackChunkAlphaSet` builds chunk alpha with linked neighbors, not only local MCAL bytes
+   - neighbor layers are matched by texture id
+   - 8-bit layers with no direct payload can be synthesized as residual coverage from the other layers
+   - final blend textures are rebuilt through the `TerrainBlend` runtime path
+- Active viewer-side implementation now ports the first verified subset of that behavior:
+   - `FormatProfileRegistry` routes unknown 4.0 ADTs to `TerrainAlphaDecodeMode.Cataclysm400`
+   - `TerrainChunkData` stores per-layer `AlphaSourceFlags`
+   - `StandardTerrainAdapter` runs Cataclysm400 post-processing after chunk parse:
+      - residual alpha synthesis for 8-bit layers with missing direct payload
+      - same-tile chunk-edge stitching by neighbor texture id
+- Documentation/handoff has been expanded so future sessions start from the runtime-backed model instead of the old shorthand:
+   - `documentation/wow-400-terrain-blend-wow-exe-guide.md`
+   - `.github/prompts/wow-400-terrain-blend-recovery.prompt.md`
+   - updated archive/spec docs for 4.0 terrain behavior
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the implementation
+   - no real-data runtime signoff yet for the fixed development dataset
+   - do not describe this as full 4.0 terrain parity until viewer output is checked on real data
+
+### WMO Blend And Loose PM4 Overlay Recovery (Mar 21)
+
+- `WmoRenderer` was rendering WMO material blend modes too coarsely for the active branch state.
+- Current fix in `src/MdxViewer/Rendering/WmoRenderer.cs`:
+   - map raw WMO `BlendMode` values to `EGxBlend`
+   - keep `AlphaKey` batches in the opaque pass with alpha-test
+   - restrict transparent rendering to `Blend` / `Add` batches only
+- Loose overlay PM4 file resolution now honors overlay priority in `src/MdxViewer/DataSources/MpqDataSource.cs`:
+   - newest attached loose root wins when duplicate virtual paths exist
+   - this is the intended override behavior for base client + loose overlay workflows
+   - PM4 loose-path misses now log detailed trace paths, not only WMO misses
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the precedence fix on top of current viewer state
+   - runtime signoff is still pending for both the WMO sheen symptom and loose-overlay PM4 loading
+
 ### Terrain Decode Direction (Current)
 
 - Priority is profile-correct alpha decode behavior before broader feature intake.

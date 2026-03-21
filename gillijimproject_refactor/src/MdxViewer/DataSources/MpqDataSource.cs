@@ -513,9 +513,10 @@ public class MpqDataSource : IDataSource
     {
         var normalized = virtualPath.Replace('/', '\\').TrimStart('\\');
 
-        // Check each loose root
-        foreach (var root in _looseRoots)
+        // Search newest loose overlays first so attached overlays override earlier roots.
+        for (int i = _looseRoots.Count - 1; i >= 0; i--)
         {
+            var root = _looseRoots[i];
             var fullPath = Path.Combine(root, normalized);
             if (File.Exists(fullPath))
                 return fullPath;
@@ -530,12 +531,13 @@ public class MpqDataSource : IDataSource
         if (File.Exists(dataPath))
             return dataPath;
 
-        // Log failed resolution for .wmo files to help debug loose file issues
-        if (virtualPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase))
+        // Trace WMO/PM4 misses because both are commonly supplied by loose overlays.
+        if (virtualPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase)
+            || virtualPath.EndsWith(".pm4", StringComparison.OrdinalIgnoreCase))
         {
             ViewerLog.Trace($"[MpqDataSource] TryResolveLoosePath FAILED for '{normalized}':");
-            foreach (var root in _looseRoots)
-                ViewerLog.Trace($"  loose root: {Path.Combine(root, normalized)}");
+            for (int i = _looseRoots.Count - 1; i >= 0; i--)
+                ViewerLog.Trace($"  loose root[{i}]: {Path.Combine(_looseRoots[i], normalized)}");
             ViewerLog.Trace($"  gamePath: {directPath}");
             ViewerLog.Trace($"  dataPath: {dataPath}");
         }

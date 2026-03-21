@@ -283,8 +283,23 @@ public class WmoRenderer : ISceneRenderer
                 foreach (var batch in group.Batches)
                 {
                     int matId = ResolveBatchMaterialId(group, batch);
-                    uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
-                    if (blendMode != 0) continue; // Skip transparent batches
+                    uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                    EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                    if (blendMode != EGxBlend.Opaque && blendMode != EGxBlend.AlphaKey)
+                        continue;
+
+                    if (blendMode == EGxBlend.AlphaKey)
+                    {
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+                        _gl.Uniform1(_uAlphaTest, WoWConstants.AlphaKeyThreshold);
+                    }
+                    else
+                    {
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+                        _gl.Uniform1(_uAlphaTest, 0.0f);
+                    }
 
                     DrawBatch(gb, batch, matId);
                 }
@@ -387,20 +402,25 @@ public class WmoRenderer : ISceneRenderer
                 foreach (var batch in group.Batches)
                 {
                     int matId = ResolveBatchMaterialId(group, batch);
-                    uint blendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
-                    if (blendMode == 0) continue; // Skip opaque batches (already drawn)
+                    uint rawBlendMode = matId < _wmo.Materials.Count ? _wmo.Materials[matId].BlendMode : 0;
+                    EGxBlend blendMode = ResolveWmoBlendMode(rawBlendMode);
+                    if (blendMode == EGxBlend.Opaque || blendMode == EGxBlend.AlphaKey)
+                        continue;
 
-                    // BlendMode 1 = alpha key (cutout): use alpha test, keep depth writes
-                    // BlendMode 2+ = alpha blend: disable depth writes for proper blending
-                    if (blendMode == 1)
+                    _gl.DepthMask(false);
+                    _gl.Uniform1(_uAlphaTest, 0.0f);
+
+                    switch (blendMode)
                     {
-                        _gl.Uniform1(_uAlphaTest, 0.5f);
-                        _gl.DepthMask(true);
-                    }
-                    else
-                    {
-                        _gl.Uniform1(_uAlphaTest, 0.01f);
-                        _gl.DepthMask(false);
+                        case EGxBlend.Blend:
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            break;
+                        case EGxBlend.Add:
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                            break;
+                        default:
+                            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                            break;
                     }
 
                     DrawBatch(gb, batch, matId);
@@ -414,6 +434,18 @@ public class WmoRenderer : ISceneRenderer
         _gl.Uniform1(_uAlphaTest, 0.0f);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private static EGxBlend ResolveWmoBlendMode(uint rawBlendMode)
+    {
+        return rawBlendMode switch
+        {
+            0 => EGxBlend.Opaque,
+            1 => EGxBlend.Blend,
+            2 => EGxBlend.Add,
+            3 => EGxBlend.AlphaKey,
+            _ => EGxBlend.Blend,
+        };
     }
 
     private unsafe void DrawBatch(GroupBuffers gb, WmoV14ToV17Converter.WmoBatch batch, int matId)

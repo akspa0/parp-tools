@@ -54,6 +54,9 @@ public class TerrainChunkData
 
     /// <summary>Raw MCNK header flags. Bit 2=Water, Bit 3=Ocean, Bit 4=Magma, Bit 5=Slime, etc.</summary>
     public int McnkFlags { get; init; }
+
+    /// <summary>Raw flags from the chunk that supplied texture-layer and alpha data.</summary>
+    public int AlphaSourceFlags { get; init; }
 }
 
 /// <summary>

@@ -5,6 +5,26 @@
 **Supported client versions: 0.5.3 through 0.12** — fully usable
 **3.3.5 WotLK: IN PROGRESS** — scaffolding exists but MH2O liquid and terrain texturing are broken
 
+## 2026-03-20 — PM4 Render Hot-Path Reduction (Preprocess + Culling)
+
+- PM4 global `Flip All Obj Y` is now baked at PM4 object build/load time instead of being applied as a per-frame transform on every PM4 vertex.
+- PM4 group pivot lookup now uses precomputed group bounds cache (`tile + ck24 + linkGroupObjectId`) instead of repeated group scans in the frame render path.
+- PM4 render loop now performs object-level frustum culling before batching PM4 lines/triangles, so off-screen PM4 objects are skipped earlier.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime FPS and visual parity signoff still pending
+
+## 2026-03-20 — PM4 Whole-Object Selection + Global Y Flip Correction
+
+- PM4 picking/highlight now resolves and selects logical object groups (`tile + ck24 + linkGroupObjectId`) instead of individual `objectPart` sub-groups.
+- Per-object alignment state now applies at group scope, so edits affect all grouped sub-parts together.
+- Added map-wide correction toggle `Flip All Obj Y` (default ON) to apply Y-axis mirror to every PM4 object during transform composition.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests were added or run
+	- runtime visual signoff still pending
+
 ## 2026-03-20 — PM4 Object-Local 9DoF Alignment Controls
 
 - Updated PM4 alignment tooling to operate on selected PM4 objects only (no global overlay transform edits in the alignment window).

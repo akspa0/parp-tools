@@ -180,6 +180,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
     private bool _pm4OverlayIgnoreDepth = true;
+    private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
     private bool _showPm4ObjectCentroids;
     private bool _pm4SplitCk24ByConnectivity;
@@ -210,10 +211,12 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
-    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectTranslations = new();
-    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectRotationsDegrees = new();
-    private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Vector3> _pm4ObjectScales = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4ObjectGroupBounds = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectRotationsDegrees = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectScales = new();
     private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectKey;
+    private (int tileX, int tileY, uint ck24)? _selectedPm4ObjectGroupKey;
 
     // Culling stats (updated each frame)
     public int WmoRenderedCount { get; private set; }
@@ -287,6 +290,21 @@ public class WorldScene : ISceneRenderer
     public int Pm4VisiblePositionRefCount => _pm4VisiblePositionRefCount;
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
     public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
+    public bool Pm4FlipAllObjectsY
+    {
+        get => _pm4FlipAllObjectsY;
+        set
+        {
+            if (_pm4FlipAllObjectsY == value)
+                return;
+
+            _pm4FlipAllObjectsY = value;
+
+            // Bake global Y-flip at PM4 decode time to avoid per-frame vertex transform cost.
+            if (_pm4LoadAttempted)
+                ReloadPm4Overlay();
+        }
+    }
     public bool ShowPm4PositionRefs { get => _showPm4PositionRefs; set => _showPm4PositionRefs = value; }
     public bool ShowPm4ObjectCentroids { get => _showPm4ObjectCentroids; set => _showPm4ObjectCentroids = value; }
     public bool Pm4SplitCk24ByConnectivity { get => _pm4SplitCk24ByConnectivity; set => _pm4SplitCk24ByConnectivity = value; }
@@ -300,71 +318,92 @@ public class WorldScene : ISceneRenderer
     public Vector3 Pm4OverlayScale { get => _pm4OverlayScale; set => _pm4OverlayScale = value; }
     public bool HasSelectedPm4Object => _selectedPm4ObjectKey.HasValue;
     public (int tileX, int tileY, uint ck24, int objectPart)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
+
+    private static (int tileX, int tileY, uint ck24) BuildPm4ObjectGroupKey(
+        (int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        return (objectKey.tileX, objectKey.tileY, objectKey.ck24);
+    }
+
+    private (int tileX, int tileY, uint ck24) ResolvePm4ObjectGroupKey((int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        return BuildPm4ObjectGroupKey(objectKey);
+    }
+
+    private static bool IsPm4ObjectInGroup(
+        (int tileX, int tileY, uint ck24) groupKey,
+        (int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        return groupKey.tileX == objectKey.tileX
+            && groupKey.tileY == objectKey.tileY
+            && groupKey.ck24 == objectKey.ck24;
+    }
+
     public Vector3 SelectedPm4ObjectTranslation
     {
         get
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return Vector3.Zero;
 
-            return _pm4ObjectTranslations.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 translation)
+            return _pm4ObjectTranslations.TryGetValue(_selectedPm4ObjectGroupKey.Value, out Vector3 translation)
                 ? translation
                 : Vector3.Zero;
         }
         set
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return;
 
             if (value.LengthSquared() < 0.0001f)
-                _pm4ObjectTranslations.Remove(_selectedPm4ObjectKey.Value);
+                _pm4ObjectTranslations.Remove(_selectedPm4ObjectGroupKey.Value);
             else
-                _pm4ObjectTranslations[_selectedPm4ObjectKey.Value] = value;
+                _pm4ObjectTranslations[_selectedPm4ObjectGroupKey.Value] = value;
         }
     }
     public Vector3 SelectedPm4ObjectRotationDegrees
     {
         get
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return Vector3.Zero;
 
-            return _pm4ObjectRotationsDegrees.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 rotationDegrees)
+            return _pm4ObjectRotationsDegrees.TryGetValue(_selectedPm4ObjectGroupKey.Value, out Vector3 rotationDegrees)
                 ? rotationDegrees
                 : Vector3.Zero;
         }
         set
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return;
 
             if (IsNearZeroVector(value))
-                _pm4ObjectRotationsDegrees.Remove(_selectedPm4ObjectKey.Value);
+                _pm4ObjectRotationsDegrees.Remove(_selectedPm4ObjectGroupKey.Value);
             else
-                _pm4ObjectRotationsDegrees[_selectedPm4ObjectKey.Value] = value;
+                _pm4ObjectRotationsDegrees[_selectedPm4ObjectGroupKey.Value] = value;
         }
     }
     public Vector3 SelectedPm4ObjectScale
     {
         get
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return Vector3.One;
 
-            return _pm4ObjectScales.TryGetValue(_selectedPm4ObjectKey.Value, out Vector3 scale)
+            return _pm4ObjectScales.TryGetValue(_selectedPm4ObjectGroupKey.Value, out Vector3 scale)
                 ? scale
                 : Vector3.One;
         }
         set
         {
-            if (!_selectedPm4ObjectKey.HasValue)
+            if (!_selectedPm4ObjectGroupKey.HasValue)
                 return;
 
             Vector3 sanitized = SanitizeScale(value);
             if (IsNearOneVector(sanitized))
-                _pm4ObjectScales.Remove(_selectedPm4ObjectKey.Value);
+                _pm4ObjectScales.Remove(_selectedPm4ObjectGroupKey.Value);
             else
-                _pm4ObjectScales[_selectedPm4ObjectKey.Value] = sanitized;
+                _pm4ObjectScales[_selectedPm4ObjectGroupKey.Value] = sanitized;
         }
     }
     public float Pm4OverlayYawDegrees
@@ -392,10 +431,11 @@ public class WorldScene : ISceneRenderer
                     .Select(obj =>
                     {
                         var objectKey = (kvp.Key.tileX, kvp.Key.tileY, obj.Ck24, obj.ObjectPartId);
-                        bool hasObjectOffset = _pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectOffset);
-                        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectKey, out Vector3 objectRotationDegrees)
+                        var objectGroupKey = BuildPm4ObjectGroupKey(objectKey);
+                        bool hasObjectOffset = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectOffset);
+                        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)
                             && !IsNearZeroVector(objectRotationDegrees);
-                        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectKey, out Vector3 objectScale)
+                        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectGroupKey, out Vector3 objectScale)
                             && !IsNearOneVector(objectScale);
 
                         return new
@@ -405,6 +445,12 @@ public class WorldScene : ISceneRenderer
                             ck24ObjectId = obj.Ck24ObjectId,
                             objectPartId = obj.ObjectPartId,
                             linkGroupObjectId = obj.LinkGroupObjectId,
+                            objectGroupKey = new
+                            {
+                                tileX = objectGroupKey.tileX,
+                                tileY = objectGroupKey.tileY,
+                                ck24 = objectGroupKey.ck24,
+                            },
                             linkedPositionRefCount = obj.LinkedPositionRefCount,
                             surfaceCount = obj.SurfaceCount,
                             dominantGroupKey = obj.DominantGroupKey,
@@ -620,7 +666,9 @@ public class WorldScene : ISceneRenderer
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
         _pm4ObjectLookup.Clear();
+        _pm4ObjectGroupBounds.Clear();
         _selectedPm4ObjectKey = null;
+        _selectedPm4ObjectGroupKey = null;
         _pm4TotalFiles = 0;
         _pm4LoadedFiles = 0;
         _pm4ObjectCount = 0;
@@ -657,20 +705,34 @@ public class WorldScene : ISceneRenderer
         int remainingLineBudget = Pm4MaxLinesTotal;
         int remainingTriangleBudget = Pm4MaxTrianglesTotal;
         int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
+        int tileParseRejected = 0;
+        int tileRangeRejected = 0;
+        int readFailed = 0;
+        int decodeFailed = 0;
+        int zeroObjectFiles = 0;
         foreach (string pm4Path in pm4Candidates)
         {
             if (remainingLineBudget <= 0)
                 break;
 
             if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
+            {
+                tileParseRejected++;
                 continue;
+            }
 
             if (!TryMapPm4FileTileToTerrainTile(fileTileX, fileTileY, out int effectiveTileX, out int effectiveTileY))
+            {
+                tileRangeRejected++;
                 continue;
+            }
 
             byte[]? bytes = _dataSource.ReadFile(pm4Path);
             if (bytes == null || bytes.Length == 0)
+            {
+                readFailed++;
                 continue;
+            }
 
             try
             {
@@ -686,7 +748,12 @@ public class WorldScene : ISceneRenderer
                     ref remainingTriangleBudget,
                     ref rejectedLongEdges);
                 if (objects.Count == 0)
+                {
+                    zeroObjectFiles++;
+                    ViewerLog.Debug(ViewerLog.Category.Terrain,
+                        $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.Surfaces.Count}, meshVerts={pm4.MeshVertices.Count}, meshIndices={pm4.MeshIndices.Count}, links={pm4.LinkEntries.Count}, refs={pm4.PositionRefs.Count}) but produced 0 overlay objects.");
                     continue;
+                }
 
                 if (_pm4TileObjects.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
                 {
@@ -753,13 +820,15 @@ public class WorldScene : ISceneRenderer
             }
             catch (Exception ex)
             {
+                decodeFailed++;
                 ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] Failed to decode '{pm4Path}': {ex.Message}");
             }
         }
 
         if (_pm4LoadedFiles == 0)
         {
-            _pm4Status = $"PM4: {_pm4TotalFiles} files found, none decoded into overlay data.";
+            _pm4Status = $"PM4: {_pm4TotalFiles} files found, none decoded into overlay data (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
             return;
         }
 
@@ -768,6 +837,8 @@ public class WorldScene : ISceneRenderer
             _pm4MinObjectZ = 0f;
             _pm4MaxObjectZ = 1f;
         }
+
+        RebuildPm4ObjectGroupBounds();
 
         _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected.";
         ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
@@ -941,6 +1012,7 @@ public class WorldScene : ISceneRenderer
                         List<Pm4Triangle> triangles = tileTriangleBudget > 0
                             ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, ck24WorldPivot, ck24WorldYawCorrection, tileTriangleBudget)
                             : new List<Pm4Triangle>();
+
                         if (lines.Count == 0 && triangles.Count == 0)
                             continue;
 
@@ -3546,9 +3618,13 @@ public class WorldScene : ISceneRenderer
                         var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
                         Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
 
+                        if (!ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out Vector3 transformedCenter))
+                            continue;
+
                         _pm4VisibleObjectCount++;
                         Vector3 pm4Color = GetPm4ObjectColor(tileKey, obj);
-                        if (_selectedPm4ObjectKey.HasValue && _selectedPm4ObjectKey.Value == objectKey)
+                        if (_selectedPm4ObjectGroupKey.HasValue
+                            && IsPm4ObjectInGroup(_selectedPm4ObjectGroupKey.Value, objectKey))
                             pm4Color = new Vector3(1.0f, 1.0f, 0.2f);
 
                         if (_showPm4SolidOverlay && obj.Triangles.Count > 0)
@@ -3576,8 +3652,7 @@ public class WorldScene : ISceneRenderer
 
                         if (_showPm4ObjectCentroids)
                         {
-                            Vector3 center = applyObjectTransform ? ApplyPm4OverlayTransform(obj.Center, objectTransform) : obj.Center;
-                            _bbRenderer.BatchPin(center, 22f, 4f, pm4Color);
+                            _bbRenderer.BatchPin(transformedCenter, 22f, 4f, pm4Color);
                         }
                     }
                 }
@@ -3938,6 +4013,7 @@ public class WorldScene : ISceneRenderer
         if (!_showPm4Overlay || _pm4TileObjects.Count == 0)
         {
             _selectedPm4ObjectKey = null;
+            _selectedPm4ObjectGroupKey = null;
             return false;
         }
 
@@ -3948,6 +4024,7 @@ public class WorldScene : ISceneRenderer
 
         float bestT = float.MaxValue;
         (int tileX, int tileY, uint ck24, int objectPart)? bestKey = null;
+        (int tileX, int tileY, uint ck24)? bestGroupKey = null;
 
         foreach (var (tileKey, objects) in _pm4TileObjects)
         {
@@ -3973,11 +4050,13 @@ public class WorldScene : ISceneRenderer
                 {
                     bestT = t;
                     bestKey = objectKey;
+                    bestGroupKey = BuildPm4ObjectGroupKey(objectKey);
                 }
             }
         }
 
         _selectedPm4ObjectKey = bestKey;
+        _selectedPm4ObjectGroupKey = bestGroupKey;
         return bestKey.HasValue;
     }
 
@@ -3990,6 +4069,7 @@ public class WorldScene : ISceneRenderer
     public void ClearPm4ObjectSelection()
     {
         _selectedPm4ObjectKey = null;
+        _selectedPm4ObjectGroupKey = null;
     }
 
     public bool TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo info)
@@ -4328,6 +4408,30 @@ public class WorldScene : ISceneRenderer
         return Vector3.Transform(position, transform);
     }
 
+    private bool ShouldRenderPm4Object(
+        Pm4OverlayObject obj,
+        in Matrix4x4 objectTransform,
+        bool applyObjectTransform,
+        in Vector3 cameraPos,
+        out Vector3 transformedCenter)
+    {
+        Vector3 boundsMin = obj.BoundsMin;
+        Vector3 boundsMax = obj.BoundsMax;
+        transformedCenter = obj.Center;
+
+        if (applyObjectTransform)
+        {
+            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+            transformedCenter = ApplyPm4OverlayTransform(obj.Center, objectTransform);
+        }
+
+        float distSq = Vector3.DistanceSquared(cameraPos, transformedCenter);
+        if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(boundsMin, boundsMax))
+            return false;
+
+        return true;
+    }
+
     private static bool IsNearZeroVector(Vector3 value)
     {
         return value.LengthSquared() < 0.0001f;
@@ -4358,6 +4462,44 @@ public class WorldScene : ISceneRenderer
             SanitizeComponent(scale.Z));
     }
 
+    private void RebuildPm4ObjectGroupBounds()
+    {
+        _pm4ObjectGroupBounds.Clear();
+
+        foreach (var (objectKey, obj) in _pm4ObjectLookup)
+        {
+            var groupKey = BuildPm4ObjectGroupKey(objectKey);
+            if (_pm4ObjectGroupBounds.TryGetValue(groupKey, out var existingBounds))
+            {
+                _pm4ObjectGroupBounds[groupKey] = (
+                    Vector3.Min(existingBounds.min, obj.BoundsMin),
+                    Vector3.Max(existingBounds.max, obj.BoundsMax));
+            }
+            else
+            {
+                _pm4ObjectGroupBounds[groupKey] = (obj.BoundsMin, obj.BoundsMax);
+            }
+        }
+    }
+
+    private bool TryComputePm4ObjectGroupPivot(
+        (int tileX, int tileY, uint ck24) groupKey,
+        bool applyPm4Transform,
+        in Matrix4x4 pm4Transform,
+        out Vector3 pivot)
+    {
+        if (_pm4ObjectGroupBounds.TryGetValue(groupKey, out var groupBounds))
+        {
+            pivot = (groupBounds.min + groupBounds.max) * 0.5f;
+            if (applyPm4Transform)
+                pivot = ApplyPm4OverlayTransform(pivot, pm4Transform);
+            return true;
+        }
+
+        pivot = Vector3.Zero;
+        return false;
+    }
+
     private Matrix4x4 BuildPm4ObjectTransform((int tileX, int tileY, uint ck24, int objectPart) objectKey,
         bool applyPm4Transform,
         in Matrix4x4 pm4Transform,
@@ -4372,17 +4514,21 @@ public class WorldScene : ISceneRenderer
             applyObjectTransform = true;
         }
 
-        bool hasObjectTranslation = _pm4ObjectTranslations.TryGetValue(objectKey, out Vector3 objectTranslation)
+        var objectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
+
+        bool hasGlobalFlip = _pm4FlipAllObjectsY;
+        bool hasObjectTranslation = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectTranslation)
             && !IsNearZeroVector(objectTranslation);
-        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectKey, out Vector3 objectRotationDegrees)
+        bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)
             && !IsNearZeroVector(objectRotationDegrees);
-        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectKey, out Vector3 objectScale)
+        bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectGroupKey, out Vector3 objectScale)
             && !IsNearOneVector(objectScale);
 
-        if (hasObjectRotation || hasObjectScale)
+        if (hasGlobalFlip || hasObjectRotation || hasObjectScale)
         {
             Vector3 pivot = Vector3.Zero;
-            if (_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? objectInfo))
+            if (!TryComputePm4ObjectGroupPivot(objectGroupKey, applyPm4Transform, pm4Transform, out pivot)
+                && _pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? objectInfo))
             {
                 pivot = objectInfo.Center;
                 if (applyPm4Transform)
@@ -4390,6 +4536,12 @@ public class WorldScene : ISceneRenderer
             }
 
             Matrix4x4 rotationScale = Matrix4x4.Identity;
+            if (hasGlobalFlip)
+            {
+                // Mirror around the logical PM4 object group, not world origin.
+                rotationScale *= Matrix4x4.CreateScale(1f, -1f, 1f);
+            }
+
             if (hasObjectScale)
                 rotationScale *= Matrix4x4.CreateScale(SanitizeScale(objectScale));
 
@@ -4470,6 +4622,7 @@ public class WorldScene : ISceneRenderer
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
         _pm4ObjectLookup.Clear();
+        _pm4ObjectGroupBounds.Clear();
         _pm4ObjectTranslations.Clear();
         _pm4ObjectRotationsDegrees.Clear();
         _pm4ObjectScales.Clear();

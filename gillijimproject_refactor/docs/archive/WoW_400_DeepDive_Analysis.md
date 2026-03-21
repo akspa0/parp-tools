@@ -68,6 +68,11 @@ Standard `.dbc` format confirmed:
 - 8-bit uncompressed (4096 bytes)  
 - 8-bit RLE compressed (variable size)
 
+Runtime follow-up note:
+- the on-disk formats above are only the first stage
+- 4.0.0 also rebuilds terrain blend textures through a stitched neighbor-aware path (`CMapChunk_RefreshBlendTextures` -> `CMapChunk_BuildChunkBlendTextureSet` / `CMapChunk_BuildSingleLayerBlendTexture`)
+- in 8-bit mode, layers without direct alpha payload can be synthesized as residual coverage from sibling layers instead of being treated as blank/full by default
+
 Dispatch function at `0x00674b70` (`CMapChunk::UnpackAlphaBits`)
 
 ### 3.2 Terrain Shaders
@@ -196,7 +201,7 @@ d:\buildserver\wow\5\work\wow-code\trunk\storm\h\STPL.H
 |---------|-------------|-------------|------------|
 | **ADT Format** | Monolithic WDT | Monolithic ADT | Pre-split ADT |
 | **Audio** | Miles (MSS) | FMOD | FMOD Ex |
-| **Alpha Maps** | 4-bit only | 4/8-bit + RLE | 4/8-bit + RLE |
+| **Alpha Maps** | 4-bit only | 4/8-bit + RLE | 4/8-bit + RLE plus stitched runtime blend-texture assembly |
 | **Godmode** | Dead | Server-Gated | Server-Gated |
 | **Lua** | 5.0 | 5.1 compat | 5.1 compat |
 | **Vehicle System** | N/A | Active | Active (enhanced) |
@@ -206,10 +211,13 @@ d:\buildserver\wow\5\work\wow-code\trunk\storm\h\STPL.H
 
 WoW 4.0.0.11927 is a transitional build between WotLK (3.3.5) and Cataclysm (4.0.1+). Key characteristics:
 
-1. **Pre-Split ADT**: Uses 3.3.5-style monolithic ADT files, NOT split format
-2. **Full RLE Alpha Support**: Same compression as 3.3.5
+1. **Pre-Split ADT**: Uses monolithic ADT files, NOT split `_tex0` / `_obj0`
+2. **Full RLE Alpha Support**: Same compressed-alpha family still exists
 3. **Enhanced Vehicle/LFG**: New Cataclysm systems with debug logging
 4. **Clean Build Artifacts**: Debug paths reveal internal build server layout
 5. **FMOD Ex Audio**: Full sound engine with voice chat support
 
-**For LKMapService**: The alpha parsing code is identical to 3.3.5. Focus on implementing RLE decompression using the algorithm at `0x00673230`.
+**Terrain texturing correction**: 4.0.0 is not safely described as "identical to 3.3.5" for terrain alpha behavior. The file format is still pre-split, but runtime terrain blending adds at least two behaviors that matter for viewer parity:
+
+1. 8-bit residual alpha synthesis for layers without direct alpha payload
+2. texture-id-based stitching across linked neighbor chunks before building the final `TerrainBlend` texture resource

@@ -513,7 +513,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 var layers = ExtractLayers(layerSource.TextureLayers);
 
                 // Alpha maps
-                bool doNotFixAlphaMap = (((uint)layerSource.Header.Flags) & 0x8000u) != 0;
+                uint alphaSourceFlagsRaw = (uint)layerSource.Header.Flags;
+                bool doNotFixAlphaMap = (alphaSourceFlagsRaw & 0x8000u) != 0;
                 var alphaMaps = ExtractAlphaMaps(layerSource, _adtProfile.AlphaDecodeMode, _useBigAlpha, doNotFixAlphaMap);
 
                 // Shadow map
@@ -580,7 +581,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
                     Liquid = liquid,
                     WorldPosition = new Vector3(worldX, worldY, 0f),
                     AreaId = (int)mcnk.Header.AreaId,
-                    McnkFlags = (int)mcnkFlagsRaw
+                    McnkFlags = (int)mcnkFlagsRaw,
+                    AlphaSourceFlags = (int)alphaSourceFlagsRaw
                 });
 
                 LastLoadedChunkPositions.Add(new Vector3(worldX, worldY, 0f));
@@ -608,6 +610,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
         else
             ViewerLog.Important(ViewerLog.Category.Terrain,
                 $"ADT ({tileX},{tileY}): WARNING - 0 chunks parsed (no heightmaps found)");
+
+        if (_adtProfile.AlphaDecodeMode == TerrainAlphaDecodeMode.Cataclysm400)
+            PostProcessCataclysm400AlphaMaps(chunks, _useBigAlpha);
 
         result.Chunks.AddRange(chunks);
 
@@ -781,11 +786,12 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (mcnk.TextureLayers == null || mcnk.TextureLayers.Count <= 1)
             return maps;
 
-        if (decodeMode == TerrainAlphaDecodeMode.LichKingStrict)
+        if (decodeMode == TerrainAlphaDecodeMode.LichKingStrict || decodeMode == TerrainAlphaDecodeMode.Cataclysm400)
         {
             if (mcnk.McalRawData == null || mcnk.McalRawData.Length == 0)
                 return maps;
 
+            bool isCataclysm400 = decodeMode == TerrainAlphaDecodeMode.Cataclysm400;
             bool chunkBigAlpha = InferBigAlphaForChunk(mcnk, useBigAlpha);
             int mcalLength = mcnk.McalRawData.Length;
 
@@ -820,16 +826,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
                             : Math.Max(0, mcalLength - offset);
 
                         uint effectiveFlags = (uint)layer.Flags;
-                        if (ShouldForceCompressedAlpha(effectiveFlags, maxLength))
+                        if (!isCataclysm400 && ShouldForceCompressedAlpha(effectiveFlags, maxLength))
                             effectiveFlags |= (uint)MclyFlags.CompressedAlpha;
 
-                        alpha = AlphaMapService.ReadAlpha(
-                            mcnk.McalRawData,
-                            offset,
-                            effectiveFlags,
-                            layerBigAlpha,
-                            doNotFixAlphaMap,
-                            maxLength);
+                        alpha = isCataclysm400
+                            ? DecodeCataclysm400Alpha(
+                                mcnk.McalRawData,
+                                offset,
+                                effectiveFlags,
+                                layerBigAlpha,
+                                doNotFixAlphaMap,
+                                maxLength)
+                            : AlphaMapService.ReadAlpha(
+                                mcnk.McalRawData,
+                                offset,
+                                effectiveFlags,
+                                layerBigAlpha,
+                                doNotFixAlphaMap,
+                                maxLength);
                     }
                     catch
                     {
@@ -872,6 +886,116 @@ public class StandardTerrainAdapter : ITerrainAdapter
         }
 
         return maps;
+    }
+
+    private static void PostProcessCataclysm400AlphaMaps(List<TerrainChunkData> chunks, bool useBigAlpha)
+    {
+        if (!useBigAlpha || chunks.Count == 0)
+            return;
+
+        var chunkLookup = new Dictionary<(int chunkX, int chunkY), TerrainChunkData>();
+        foreach (var chunk in chunks)
+            chunkLookup[(chunk.ChunkX, chunk.ChunkY)] = chunk;
+
+        foreach (var chunk in chunks)
+            SynthesizeCataclysm400ResidualAlpha(chunk, useBigAlpha);
+
+        foreach (var chunk in chunks)
+        {
+            bool doNotFixAlphaMap = (((uint)chunk.AlphaSourceFlags) & 0x8000u) != 0;
+            if (!doNotFixAlphaMap)
+                StitchCataclysm400ChunkEdges(chunk, chunkLookup);
+        }
+    }
+
+    private static void SynthesizeCataclysm400ResidualAlpha(TerrainChunkData chunk, bool useBigAlpha)
+    {
+        if (!useBigAlpha || chunk.Layers.Length <= 1)
+            return;
+
+        int layerCount = Math.Min(4, chunk.Layers.Length);
+        for (int targetLayerIndex = 1; targetLayerIndex < layerCount; targetLayerIndex++)
+        {
+            if (chunk.AlphaMaps.ContainsKey(targetLayerIndex))
+                continue;
+
+            if ((chunk.Layers[targetLayerIndex].Flags & 0x100u) != 0)
+                continue;
+
+            var residualAlpha = new byte[64 * 64];
+            for (int pixelIndex = 0; pixelIndex < residualAlpha.Length; pixelIndex++)
+            {
+                int residual = 255;
+                for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
+                {
+                    if (layerIndex == targetLayerIndex)
+                        continue;
+
+                    if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var otherAlpha) || otherAlpha.Length <= pixelIndex)
+                        continue;
+
+                    residual -= otherAlpha[pixelIndex];
+                }
+
+                residualAlpha[pixelIndex] = (byte)Math.Clamp(residual, 0, 255);
+            }
+
+            chunk.AlphaMaps[targetLayerIndex] = residualAlpha;
+        }
+    }
+
+    private static void StitchCataclysm400ChunkEdges(
+        TerrainChunkData chunk,
+        IReadOnlyDictionary<(int chunkX, int chunkY), TerrainChunkData> chunkLookup)
+    {
+        int layerCount = Math.Min(4, chunk.Layers.Length);
+        for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
+        {
+            if (!chunk.AlphaMaps.TryGetValue(layerIndex, out var alpha) || alpha.Length < 64 * 64)
+                continue;
+
+            int textureIndex = chunk.Layers[layerIndex].TextureIndex;
+
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX, chunk.ChunkY + 1, textureIndex, out var eastAlpha))
+            {
+                for (int row = 0; row < 64; row++)
+                    alpha[row * 64 + 63] = eastAlpha[row * 64];
+            }
+
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY, textureIndex, out var southAlpha))
+                Buffer.BlockCopy(southAlpha, 0, alpha, 63 * 64, 64);
+
+            if (TryGetMatchingNeighborAlpha(chunkLookup, chunk.ChunkX + 1, chunk.ChunkY + 1, textureIndex, out var diagonalAlpha))
+                alpha[(64 * 64) - 1] = diagonalAlpha[0];
+        }
+    }
+
+    private static bool TryGetMatchingNeighborAlpha(
+        IReadOnlyDictionary<(int chunkX, int chunkY), TerrainChunkData> chunkLookup,
+        int neighborChunkX,
+        int neighborChunkY,
+        int textureIndex,
+        out byte[] alpha)
+    {
+        alpha = Array.Empty<byte>();
+
+        if (!chunkLookup.TryGetValue((neighborChunkX, neighborChunkY), out var neighborChunk))
+            return false;
+
+        int layerCount = Math.Min(4, neighborChunk.Layers.Length);
+        for (int layerIndex = 1; layerIndex < layerCount; layerIndex++)
+        {
+            if (neighborChunk.Layers[layerIndex].TextureIndex != textureIndex)
+                continue;
+
+            if (!neighborChunk.AlphaMaps.TryGetValue(layerIndex, out alpha) || alpha.Length < 64 * 64)
+                continue;
+
+            return true;
+        }
+
+        alpha = Array.Empty<byte>();
+        return false;
     }
 
     private static int? GetNextLayerAlphaOffset(List<MclyEntry> textureLayers, int currentLayerIndex, int mcalLength)
@@ -918,6 +1042,63 @@ public class StandardTerrainAdapter : ITerrainAdapter
         // Real 3.x chunks can omit the compressed flag while still storing tiny RLE payloads.
         // Any positive span smaller than the 2048-byte packed format cannot be valid 4-bit or 8-bit alpha.
         return maxLength > 0 && maxLength < 2048;
+    }
+
+    private static byte[]? DecodeCataclysm400Alpha(byte[] mcalRawData, int offset, uint flags, bool useBigAlpha, bool doNotFixAlphaMap, int maxLength)
+    {
+        if ((flags & (uint)MclyFlags.CompressedAlpha) != 0)
+        {
+            return AlphaMapService.ReadAlpha(
+                mcalRawData,
+                offset,
+                flags,
+                useBigAlpha,
+                doNotFixAlphaMap,
+                maxLength);
+        }
+
+        if (!useBigAlpha)
+        {
+            return AlphaMapService.ReadAlpha(
+                mcalRawData,
+                offset,
+                flags,
+                false,
+                doNotFixAlphaMap,
+                maxLength);
+        }
+
+        int available = Math.Max(0, Math.Min(maxLength, mcalRawData.Length - offset));
+        if (available <= 0)
+            return null;
+
+        if (!doNotFixAlphaMap && available >= 63 * 63 && available < 64 * 64)
+            return ExpandFixedBigAlpha(mcalRawData, offset, available);
+
+        var alpha = new byte[64 * 64];
+        Buffer.BlockCopy(mcalRawData, offset, alpha, 0, Math.Min(alpha.Length, available));
+        return alpha;
+    }
+
+    private static byte[] ExpandFixedBigAlpha(byte[] source, int offset, int available)
+    {
+        var alpha = new byte[64 * 64];
+        int readPos = offset;
+        int sourceEnd = Math.Min(source.Length, offset + available);
+
+        for (int y = 0; y < 63 && readPos < sourceEnd; y++)
+        {
+            int rowStart = y * 64;
+            int rowBytes = Math.Min(63, sourceEnd - readPos);
+            Buffer.BlockCopy(source, readPos, alpha, rowStart, rowBytes);
+            readPos += rowBytes;
+
+            int edgeSource = rowStart + Math.Max(0, rowBytes - 1);
+            alpha[rowStart + 63] = alpha[edgeSource];
+        }
+
+        Buffer.BlockCopy(alpha, 62 * 64, alpha, 63 * 64, 64);
+        return alpha;
     }
 
     private static byte[]? DecodeLayerBySpan(byte[] mcalRawData, int offset, int? nextOffset, bool useBigAlpha, bool doNotFixAlphaMap)

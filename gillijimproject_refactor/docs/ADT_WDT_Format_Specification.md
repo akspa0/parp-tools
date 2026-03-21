@@ -234,12 +234,26 @@ int RLE_Decompress(byte* src, byte* dest, int maxSize) {
 }
 ```
 
-### MCNK Flag 0x8000 (Shadow Multiply)
+### Runtime 4.0.0 Alpha Notes
 
-When set, alpha values are multiplied by `178/256 ≈ 0.695` at positions with shadow:
+The 4.0.0 runtime path is more than a local MCAL decoder.
+
+- `CMapChunk_UnpackOneAlphaLayer()` still handles direct 4-bit / 8-bit / compressed decode.
+- In 8-bit mode, if a layer has no direct alpha payload, helpers at `0x006748d0` / `0x006749c0` can synthesize that layer as residual coverage from sibling layers rather than treating it as missing.
+- `CMapChunk_UnpackChunkAlphaSet()` then stitches alpha across the current chunk plus three linked neighbor chunks, matching neighbor layers by texture id.
+- `CMapChunk_RefreshBlendTextures()` builds a final `TerrainBlend` resource from those decoded results.
+
+Shadow-aware helpers still use the familiar modulation:
+
 ```c
-if (hasShadow) alpha = (alpha * 0xB2) >> 8;  // Ghidra: 0x00674720
+if (hasShadow) alpha = (alpha * 0xB2) >> 8;
 ```
+
+For the active viewer, this means:
+
+1. local MCAL decode alone is insufficient for full 4.0.0 parity
+2. residual-alpha synthesis and neighbor-aware edge stitching are the minimum practical behaviors to port first
+3. shadow handling should remain carefully separated unless the full runtime combined-alpha path is ported end-to-end
 
 ---
 

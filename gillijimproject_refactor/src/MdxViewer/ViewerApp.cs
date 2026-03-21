@@ -18,6 +18,7 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WoWMapConverter.Core.Converters;
+using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer;
@@ -49,6 +50,20 @@ public partial class ViewerApp : IDisposable
     private DBCD.Providers.IDBCProvider? _dbcProvider;
     private string? _dbdDir;
     private string? _dbcBuild;
+    private static readonly ClientBuildOption[] FallbackClientBuildOptions =
+    {
+        new("Alpha (0.x) - 0.5.3.3368", "0.5.3.3368"),
+        new("Alpha (0.x) - 0.7.0.3694", "0.7.0.3694"),
+        new("Alpha (0.x) - 0.8.0.3734", "0.8.0.3734"),
+        new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
+        new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
+        new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
+        new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
+        new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340"),
+        new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
+        new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
+    };
+    private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
     private AreaTableService? _areaTableService;
@@ -277,12 +292,18 @@ public partial class ViewerApp : IDisposable
     // Folder dialog workaround (ImGui doesn't have native dialogs)
     private bool _showFolderInput = false;
     private string _folderInputBuf = "";
+    private bool _showBuildSelectionDialog;
+    private string? _pendingGameFolderPath;
+    private int _selectedBuildOptionIndex;
+    private string _buildSelectionFilter = "";
+    private string? _buildSelectionHint;
     private bool _showListfileInput = false;
     private string _listfileInputBuf = "";
     private string _lastGameFolderPath = "";
     private string _lastLooseOverlayPath = "";
     private List<KnownGoodClientPath> _knownGoodClientPaths = new();
     private string? _pendingKnownGoodClientPath;
+    private string? _pendingKnownGoodClientBuildVersion;
     private bool _pendingKnownGoodClientAttachLooseFolder;
 
     // FPS counter
@@ -968,6 +989,8 @@ void main() {
         // Modal dialogs
         if (_showFolderInput)
             DrawFolderInputDialog();
+        if (_showBuildSelectionDialog)
+            DrawBuildSelectionDialog();
         if (_showListfileInput)
             DrawListfileInputDialog();
         if (_showVlmExportDialog)
@@ -1004,10 +1027,10 @@ void main() {
                     foreach (var knownClient in _knownGoodClientPaths)
                     {
                         if (ImGui.MenuItem($"{knownClient.Name}##open_saved_{knownClient.Path}"))
-                            QueueKnownGoodClientAction(knownClient.Path, attachLooseFolder: false);
+                            QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: false);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(knownClient.Path);
+                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -1021,10 +1044,10 @@ void main() {
                     foreach (var knownClient in _knownGoodClientPaths)
                     {
                         if (ImGui.MenuItem($"{knownClient.Name}##attach_saved_{knownClient.Path}"))
-                            QueueKnownGoodClientAction(knownClient.Path, attachLooseFolder: true);
+                            QueueKnownGoodClientAction(knownClient.Path, knownClient.BuildVersion, attachLooseFolder: true);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(knownClient.Path);
+                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -1315,8 +1338,10 @@ void main() {
         if (!string.IsNullOrWhiteSpace(_pendingKnownGoodClientPath))
         {
             string savedBasePath = _pendingKnownGoodClientPath!;
+            string? savedBuildVersion = _pendingKnownGoodClientBuildVersion;
             bool attachLooseFolder = _pendingKnownGoodClientAttachLooseFolder;
             _pendingKnownGoodClientPath = null;
+            _pendingKnownGoodClientBuildVersion = null;
             _pendingKnownGoodClientAttachLooseFolder = false;
 
             if (!Directory.Exists(savedBasePath))
@@ -1332,13 +1357,13 @@ void main() {
 
                 if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
                 {
-                    LoadMpqDataSource(savedBasePath, null);
+                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion);
                     AttachLooseMapOverlay(overlayPath);
                 }
             }
             else
             {
-                LoadMpqDataSource(savedBasePath, null);
+                LoadMpqDataSource(savedBasePath, null, savedBuildVersion);
             }
         }
 
@@ -3121,6 +3146,7 @@ void main() {
 
         ImGui.TextWrapped("Object-local PM4 alignment only. Select one PM4 object, then adjust translation, rotation, and scale (including axis flips) on that object only.");
         ImGui.TextDisabled("Global PM4 overlay transforms are no longer edited in this window.");
+        ImGui.TextDisabled("Use Overlay > Flip All Obj Y for map-wide Y mirror correction.");
 
         ImGui.Text("Translation Step:");
         if (ImGui.RadioButton("0.5u", MathF.Abs(_pm4TranslationStepUnits - 0.5f) < 0.001f))
@@ -3494,13 +3520,192 @@ void main() {
         if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
         {
             _folderInputBuf = selectedPath;
-            LoadMpqDataSource(selectedPath, null);
+            PrepareBuildSelectionDialog(selectedPath);
         }
     }
 
-    private void QueueKnownGoodClientAction(string gamePath, bool attachLooseFolder)
+    private void DrawBuildSelectionDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(560, 220), ImGuiCond.FirstUseEver);
+        bool open = _showBuildSelectionDialog;
+        if (!ImGui.Begin("Select Client Build", ref open, ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.End();
+            _showBuildSelectionDialog = open;
+            if (!_showBuildSelectionDialog)
+                _pendingGameFolderPath = null;
+            return;
+        }
+
+        _showBuildSelectionDialog = open;
+        if (!_showBuildSelectionDialog)
+            _pendingGameFolderPath = null;
+
+        ImGui.TextWrapped("Explicit client version selection is required before loading MPQs. Path hints only preselect the most likely build.");
+        if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath))
+            ImGui.TextWrapped($"Folder: {_pendingGameFolderPath}");
+        if (!string.IsNullOrWhiteSpace(_buildSelectionHint))
+            ImGui.TextDisabled(_buildSelectionHint);
+
+        ImGui.Separator();
+
+        if (_clientBuildOptions.Count == 0)
+        {
+            ImGui.TextWrapped("No build profiles are available. Ensure WoWDBDefs/definitions/Map.dbd exists, or rely on the built-in fallback list.");
+            if (ImGui.Button("Cancel"))
+            {
+                _pendingGameFolderPath = null;
+                _showBuildSelectionDialog = false;
+                _buildSelectionHint = null;
+            }
+
+            ImGui.End();
+            return;
+        }
+
+        _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+        string preview = _clientBuildOptions[_selectedBuildOptionIndex].Label;
+        ImGui.InputTextWithHint("##build_filter", "Filter by build or family", ref _buildSelectionFilter, 128);
+
+        if (ImGui.BeginCombo("Client version family", preview))
+        {
+            for (int i = 0; i < _clientBuildOptions.Count; i++)
+            {
+                if (!string.IsNullOrWhiteSpace(_buildSelectionFilter))
+                {
+                    string filter = _buildSelectionFilter.Trim();
+                    bool matches = _clientBuildOptions[i].Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                        || _clientBuildOptions[i].BuildVersion.Contains(filter, StringComparison.OrdinalIgnoreCase);
+                    if (!matches)
+                        continue;
+                }
+
+                bool isSelected = i == _selectedBuildOptionIndex;
+                if (ImGui.Selectable(_clientBuildOptions[i].Label, isSelected))
+                    _selectedBuildOptionIndex = i;
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextDisabled($"Selected build: {_clientBuildOptions[_selectedBuildOptionIndex].BuildVersion}");
+
+        if (ImGui.Button("Load MPQs"))
+        {
+            if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath) && Directory.Exists(_pendingGameFolderPath))
+            {
+                string selectedPath = _pendingGameFolderPath;
+                string buildVersion = _clientBuildOptions[_selectedBuildOptionIndex].BuildVersion;
+                _pendingGameFolderPath = null;
+                _showBuildSelectionDialog = false;
+                _buildSelectionHint = null;
+                LoadMpqDataSource(selectedPath, null, buildVersion);
+            }
+            else
+            {
+                _statusMessage = "Game folder is missing or no longer accessible.";
+            }
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _pendingGameFolderPath = null;
+            _showBuildSelectionDialog = false;
+            _buildSelectionHint = null;
+        }
+
+        ImGui.End();
+    }
+
+    private void PrepareBuildSelectionDialog(string selectedPath)
+    {
+        _pendingGameFolderPath = selectedPath;
+        _buildSelectionFilter = string.Empty;
+        RefreshClientBuildOptions();
+
+        if (_clientBuildOptions.Count == 0)
+        {
+            _selectedBuildOptionIndex = 0;
+            _buildSelectionHint = "No build profiles available from Map.dbd.";
+            _showBuildSelectionDialog = true;
+            return;
+        }
+
+        if (BuildVersionCatalog.TryInferBuildIndexFromPath(_clientBuildOptions, selectedPath, out int inferredIndex))
+        {
+            _selectedBuildOptionIndex = inferredIndex;
+            _buildSelectionHint = $"Path hint matched build {_clientBuildOptions[inferredIndex].BuildVersion}. Confirm before loading.";
+        }
+        else
+        {
+            _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+            _buildSelectionHint = "No clear build token found in the folder path. Select the client build manually.";
+        }
+
+        _showBuildSelectionDialog = true;
+    }
+
+    private void RefreshClientBuildOptions()
+    {
+        string? previouslySelected = null;
+        if (_clientBuildOptions.Count > 0)
+        {
+            int currentIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+            previouslySelected = _clientBuildOptions[currentIndex].BuildVersion;
+        }
+
+        _clientBuildOptions.Clear();
+
+        string? dbdDir = ResolveDbdDefinitionsDir();
+        if (!string.IsNullOrWhiteSpace(dbdDir))
+            _clientBuildOptions.AddRange(BuildVersionCatalog.LoadOptionsFromMapDbd(dbdDir));
+
+        if (_clientBuildOptions.Count == 0)
+            _clientBuildOptions.AddRange(FallbackClientBuildOptions);
+
+        _selectedBuildOptionIndex = FindBuildOptionIndex(previouslySelected);
+    }
+
+    private static string? ResolveDbdDefinitionsDir()
+    {
+        string[] dbdSearchPaths =
+        {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
+        };
+
+        foreach (var path in dbdSearchPaths)
+        {
+            var resolved = Path.GetFullPath(path);
+            if (Directory.Exists(resolved) && File.Exists(Path.Combine(resolved, "Map.dbd")))
+                return resolved;
+        }
+
+        return null;
+    }
+
+    private int FindBuildOptionIndex(string? buildVersion)
+    {
+        if (string.IsNullOrWhiteSpace(buildVersion) || _clientBuildOptions.Count == 0)
+            return 0;
+
+        for (int i = 0; i < _clientBuildOptions.Count; i++)
+        {
+            if (string.Equals(_clientBuildOptions[i].BuildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return 0;
+    }
+
+    private void QueueKnownGoodClientAction(string gamePath, string? buildVersion, bool attachLooseFolder)
     {
         _pendingKnownGoodClientPath = gamePath;
+        _pendingKnownGoodClientBuildVersion = buildVersion;
         _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
     }
 
@@ -3528,7 +3733,8 @@ void main() {
         var entry = new KnownGoodClientPath
         {
             Name = displayName,
-            Path = normalizedPath
+            Path = normalizedPath,
+            BuildVersion = string.IsNullOrWhiteSpace(buildVersion) ? null : buildVersion
         };
 
         if (existingIndex >= 0)
@@ -3562,6 +3768,13 @@ void main() {
         return string.IsNullOrWhiteSpace(buildVersion)
             ? folderName
             : $"{folderName} [{buildVersion}]";
+    }
+
+    private static string BuildKnownGoodClientTooltip(KnownGoodClientPath knownClient)
+    {
+        return string.IsNullOrWhiteSpace(knownClient.BuildVersion)
+            ? knownClient.Path
+            : $"{knownClient.Path}\nBuild: {knownClient.BuildVersion}";
     }
 
     private void DrawListfileInputDialog()
@@ -5414,6 +5627,10 @@ void main() {
         bool pm4IgnoreDepth = _worldScene.Pm4OverlayIgnoreDepth;
         if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
             _worldScene.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
+        ImGui.SameLine();
+        bool pm4FlipAllObjY = _worldScene.Pm4FlipAllObjectsY;
+        if (ImGui.Checkbox("Flip All Obj Y", ref pm4FlipAllObjY))
+            _worldScene.Pm4FlipAllObjectsY = pm4FlipAllObjY;
 
         bool showType40 = _worldScene.ShowPm4Type40;
         if (ImGui.Checkbox("CK24 0x40", ref showType40))
@@ -6508,7 +6725,7 @@ void main() {
         WarmDiscoveredWdlPreviews();
     }
 
-    private void LoadMpqDataSource(string gamePath, string? listfilePath)
+    private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null)
     {
         try
         {
@@ -6544,31 +6761,16 @@ void main() {
                 _minimapRenderer?.Dispose();
                 _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index);
 
-                // Find WoWDBDefs definitions directory
-                string[] dbdSearchPaths = {
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
-                };
-
-                string? dbdDir = null;
-                foreach (var path in dbdSearchPaths)
-                {
-                    var resolved = Path.GetFullPath(path);
-                    if (Directory.Exists(resolved) && Directory.GetFiles(resolved, "*.dbd").Length > 0)
-                    {
-                        dbdDir = resolved;
-                        break;
-                    }
-                }
+                string? dbdDir = ResolveDbdDefinitionsDir();
 
                 if (dbdDir != null)
                 {
                     _dbdDir = dbdDir;
 
-                    // Infer build version from game path, validated against WoWDBDefs
-                    string buildAlias = InferBuildFromPath(gamePath, dbdDir);
-                    ViewerLog.Trace($"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}");
+                    string buildAlias = explicitBuildVersion ?? InferBuildFromPath(gamePath, dbdDir);
+                    ViewerLog.Trace(explicitBuildVersion == null
+                        ? $"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}"
+                        : $"[MdxViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
@@ -6635,7 +6837,45 @@ void main() {
         RefreshFileList();
         if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
             _worldScene.ReloadPm4Overlay();
-        _statusMessage = $"Attached loose map overlay: {normalizedRoot}";
+
+        string? overlayBuildHint = TryDetectLooseOverlayBuildHint(normalizedRoot);
+        if (!string.IsNullOrWhiteSpace(overlayBuildHint) && !string.Equals(_dbcBuild, overlayBuildHint, StringComparison.OrdinalIgnoreCase))
+        {
+            ViewerLog.Important(ViewerLog.Category.MpqData,
+                $"Loose overlay at '{normalizedRoot}' hints build {overlayBuildHint} from PM4 files, but the active base client build is {_dbcBuild ?? "unknown"}. If PM4-linked objects do not match, load a {overlayBuildHint} base client instead.");
+            _statusMessage = $"Attached loose map overlay: {normalizedRoot} (PM4 hint {overlayBuildHint}; current base {_dbcBuild ?? "unknown"})";
+        }
+        else
+        {
+            _statusMessage = $"Attached loose map overlay: {normalizedRoot}";
+        }
+    }
+
+    private static string? TryDetectLooseOverlayBuildHint(string overlayRoot)
+    {
+        try
+        {
+            string worldMapsRoot = Path.Combine(overlayRoot, "World", "Maps");
+            if (!Directory.Exists(worldMapsRoot))
+                return null;
+
+            string? pm4Path = Directory.EnumerateFiles(worldMapsRoot, "*.pm4", SearchOption.AllDirectories)
+                .FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(pm4Path))
+                return null;
+
+            var pm4 = Pm4File.FromFile(pm4Path);
+            return pm4.Version switch
+            {
+                11927 => "4.0.0.11927",
+                12304 => "4.0.1.12304",
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ResolveLooseMapOverlayRoot(string selectedPath)
@@ -8623,6 +8863,8 @@ void main() {
     {
         try
         {
+            RefreshClientBuildOptions();
+
             if (!File.Exists(ViewerSettingsPath))
             {
                 // First run: default WMO liquid rotation for 3.3.5.
@@ -8639,6 +8881,7 @@ void main() {
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
+            _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
             _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
             _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
             _pm4SavedOverlayScale = new Vector3(settings.Pm4ScaleX, settings.Pm4ScaleY, settings.Pm4ScaleZ);
@@ -8682,6 +8925,9 @@ void main() {
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
+                LastSelectedBuildVersion = _clientBuildOptions.Count > 0
+                    ? _clientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1)].BuildVersion
+                    : null,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 Pm4TranslationX = _pm4SavedOverlayTranslation.X,
                 Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
@@ -8741,7 +8987,8 @@ void main() {
             normalizedEntries.Add(new KnownGoodClientPath
             {
                 Name = name,
-                Path = normalizedPath
+                Path = normalizedPath,
+                BuildVersion = string.IsNullOrWhiteSpace(entry.BuildVersion) ? null : entry.BuildVersion.Trim()
             });
         }
 
@@ -8791,6 +9038,7 @@ void main() {
         public int WmoMliqRotationQuarterTurns { get; set; }
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
+        public string? LastSelectedBuildVersion { get; set; }
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public float Pm4TranslationX { get; set; }
         public float Pm4TranslationY { get; set; }
@@ -8808,5 +9056,6 @@ void main() {
     {
         public string Name { get; set; } = "";
         public string Path { get; set; } = "";
+        public string? BuildVersion { get; set; }
     }
 }

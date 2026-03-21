@@ -3,6 +3,40 @@
 Date: 2026-02-14
 Project: `src/MdxViewer`
 
+## Mar 21, 2026 Addendum - 4.0.0.11927 Runtime Blend Recovery
+
+This plan started as a 3.3.5-focused terrain-editing roadmap. It is now missing a critical later-era runtime detail that must stay explicit in future work:
+
+- 4.0 terrain texturing is not solved by MCAL byte decode alone.
+- wow.exe `4.0.0.11927` builds chunk blend textures through a runtime `TerrainBlend` path after chunk-local alpha unpack.
+- The runtime path can:
+  - synthesize residual 8-bit alpha for layers without direct payload
+  - stitch current chunk alpha with linked neighbor chunks
+  - match neighbor layers by texture id instead of only local layer slot
+
+### Recovery status now landed in active code
+
+- `FormatProfileRegistry` has a dedicated `TerrainAlphaDecodeMode.Cataclysm400` route for unknown 4.0 ADTs.
+- `StandardTerrainAdapter` now carries per-layer source flags into `TerrainChunkData` and runs a Cataclysm400 post-process pass for:
+  - residual 8-bit alpha synthesis
+  - same-tile chunk-edge stitching by texture id
+- This is the first runtime-backed 4.0 recovery slice, not a complete port of all `TerrainBlend` semantics.
+
+### Required 4.0 guardrails for future terrain work
+
+1. Do not collapse 4.0 back into the generic 3.x strict path.
+2. Do not assume local MCAL decode parity proves visual parity on Cataclysm-era terrain.
+3. Validate against real development data under `test_data/development/World/Maps/development`.
+4. Keep documentation aligned with the wow.exe guide and recovery prompt:
+   - `documentation/wow-400-terrain-blend-wow-exe-guide.md`
+   - `.github/prompts/wow-400-terrain-blend-recovery.prompt.md`
+
+### Next 4.0-specific follow-up after this addendum
+
+1. Run runtime viewer validation on the fixed development dataset.
+2. If seams still persist, continue RE against `TerrainBlend_*` creation/modulation behavior rather than broadening MCAL heuristics blindly.
+3. Keep 3.3.5 editing/import-export work separate from 4.0 runtime blend reconstruction.
+
 ## Objective
 Add robust terrain data support for post-0.12 ADTs (focus: 3.3.5):
 1. Correct big alpha-map handling (`MCAL` variants)

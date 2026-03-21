@@ -8,11 +8,11 @@
 
 ## Context for the LLM
 
-You are reverse engineering WoW Cataclysm Alpha (4.0.0 build 11927) using Ghidra. This is an **early Cataclysm build** that still uses **3.3.5-style data file formats** — unified ADTs (not split), same WDT/MCNK structure, same WMO v17, same M2 format. It does NOT have split ADTs (_tex0/_obj0). Use 3.3.5 findings as a baseline and focus on what's different or new in this transitional build.
+You are reverse engineering WoW Cataclysm Alpha (4.0.0 build 11927) using Ghidra. This is an **early Cataclysm build** that still uses **3.3.5-style data file formats** on disk — unified ADTs (not split), same WDT/MCNK structure, same WMO v17, same M2 format. It does NOT have split ADTs (_tex0/_obj0). Use 3.3.5 findings as a baseline for file layout, but do not assume the runtime terrain texturing path is identical; recent RE showed a stitched `TerrainBlend` build path and residual alpha synthesis that need separate tracing.
 
 ### Key Facts About This Build
 
-1. **Data formats are 3.3.5-compatible** — unified ADT files, no split _tex0/_obj0
+1. **Data formats are 3.3.5-compatible on disk** — unified ADT files, no split _tex0/_obj0
 2. **Chunk FourCCs** are **reversed** on disk (same as 3.3.5)
 3. **MCVT/MCNR** are **interleaved** (same as 3.3.5)
 4. **WDT MAIN** is **row-major** (same as 3.3.5)
@@ -50,7 +50,18 @@ Same as 3.3.5: X=North, Y=West, Z=Up. File positions stored as (X, Z, Y).
 
 **Key question**: Is split ADT support present in code but not yet used by data files?
 
-### Task 2: New MPHD Flags
+### Task 2: Terrain Blend Runtime
+
+**Goal**: Map the runtime terrain blend assembly beyond local MCAL decode.
+
+**Method**:
+1. Trace `CMapChunk_RefreshBlendTextures`
+2. Identify how `CMapChunk_BuildSingleLayerBlendTexture` and `CMapChunk_BuildChunkBlendTextureSet` differ
+3. Confirm what the linked neighbor pointers at `chunk + 0x18` represent
+4. Confirm how texture-id matching is performed across neighbor chunks
+5. Confirm when residual alpha synthesis is used instead of direct alpha payloads
+
+### Task 3: New MPHD Flags
 
 **Goal**: Check if MPHD has new flag bits compared to 3.3.5.
 
@@ -64,7 +75,7 @@ Same as 3.3.5: X=North, Y=West, Z=Up. File positions stored as (X, Z, Y).
    - 0x0008: AdtHasDoodadRefsSortedBySizeCat
 4. Look for checks of bits 0x0010+ that don't exist in 3.3.5
 
-### Task 3: MCNK Subchunk Inventory
+### Task 4: MCNK Subchunk Inventory
 
 **Goal**: Check for new MCNK subchunks not present in 3.3.5.
 
@@ -78,7 +89,7 @@ Same as 3.3.5: X=North, Y=West, Z=Up. File positions stored as (X, Z, Y).
 - MCLV — vertex lighting (Cata feature, may already be present)
 - MTXF — height-based texturing (Cata feature)
 
-### Task 4: M2 Header Version
+### Task 5: M2 Header Version
 
 **Goal**: Check if M2 version field has incremented from 3.3.5's 264.
 
@@ -88,7 +99,7 @@ Same as 3.3.5: X=North, Y=West, Z=Up. File positions stored as (X, Z, Y).
 3. Look for any new chunk handlers in the MD21 wrapper path
 4. Check for TXID (texture file data IDs) or SFID (skin file data IDs) handling
 
-### Task 5: Water/Liquid Rendering Changes
+### Task 6: Water/Liquid Rendering Changes
 
 **Goal**: Check if liquid rendering has changed from 3.3.5.
 
@@ -98,7 +109,7 @@ Same as 3.3.5: X=North, Y=West, Z=Up. File positions stored as (X, Z, Y).
 3. Compare water vertex format against 3.3.5
 4. Look for new water shaders or rendering paths
 
-### Task 6: Rendering Pipeline Changes
+### Task 7: Rendering Pipeline Changes
 
 **Goal**: Identify any rendering changes (shaders, techniques).
 

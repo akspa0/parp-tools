@@ -3,7 +3,8 @@ namespace MdxViewer.Terrain;
 public enum TerrainAlphaDecodeMode
 {
     LegacySequential,
-    LichKingStrict
+    LichKingStrict,
+    Cataclysm400
 }
 
 public sealed class AdtProfile
@@ -464,7 +465,7 @@ public static class FormatProfileRegistry
         PreferObj0ForPlacementData = true,
         UseMcnkHeaderAlphaSize = true,
         UseMcnkHeaderShadowSize = true,
-        AlphaDecodeMode = TerrainAlphaDecodeMode.LichKingStrict
+        AlphaDecodeMode = TerrainAlphaDecodeMode.Cataclysm400
     };
 
     public static readonly AdtProfile AdtProfile50xUnknown = new()
