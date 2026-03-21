@@ -1,5 +1,28 @@
 # Progress
 
+### Mar 21, 2026 - PM4 Decode Triage Framed + Renderer Parity Planned
+
+- PM4 overlay debugging is now in a more precise phase than the earlier loose-overlay indexing/precedence work:
+	- user runtime symptom: `PM4: 2674 files found, none decoded into overlay data`
+	- status interpretation: files are being discovered, but none survive into renderable overlay objects
+	- `WorldScene` now has failure-bucket instrumentation for tile parse, tile range, read, decode, and parsed-but-zero-object cases
+- Current root-cause direction for the `4.0` base-client failure versus `3.3.5`:
+	- PM4 parser/object builder does not appear to key directly on `_dbcBuild`
+	- map discovery / WDT resolution / active candidate set still does
+	- the `2674` PM4 candidate count should be investigated against the fixed development dataset expectation of `616` PM4 files
+- Formalized the rendering recovery program needed for PM4 object-variant matching:
+	1. M2 material, transparency, and reflective parity
+	2. lighting DBC expansion
+	3. skybox / environment parity
+- Added dedicated prompt plans for each implementation slice:
+	- `.github/prompts/m2-material-parity-implementation-plan.prompt.md`
+	- `.github/prompts/lighting-dbc-expansion-implementation-plan.prompt.md`
+	- `.github/prompts/sky-environment-parity-implementation-plan.prompt.md`
+- Validation limits for this update:
+	- no new implementation code landed for the three rendering tracks yet
+	- no automated tests were added or run in this planning pass
+	- no runtime signoff yet for PM4 failure-bucket output or the rendering program
+
 ### Mar 21, 2026 - WMO Blend-Mode Correction + Loose PM4 Overlay Precedence
 
 - Corrected one concrete WMO material/rendering mismatch in `src/MdxViewer/Rendering/WmoRenderer.cs`:

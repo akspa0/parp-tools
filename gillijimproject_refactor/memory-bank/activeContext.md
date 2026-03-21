@@ -66,6 +66,35 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- No automated tests were added or run for these fixes.
 	- No runtime real-data signoff yet for the WMO sheen symptom or the loose-overlay PM4 workflow.
 
+### PM4 Decode Triage + Rendering Parity Program (Mar 21)
+
+- Current PM4 overlay failure state has moved past indexing/attach into decode-or-reconstruction triage:
+	- runtime symptom seen by the user: `PM4: 2674 files found, none decoded into overlay data.`
+	- this means PM4 candidates are being found, but none produced renderable overlay objects
+	- latest `WorldScene.LazyLoadPm4Overlay()` instrumentation now buckets that failure into:
+		- tile-parse rejection
+		- tile-range rejection
+		- read failure
+		- decode failure
+		- parsed-but-zero-object files
+- Working hypothesis for the `4.0` versus `3.3.5` split:
+	- PM4 parsing/object assembly itself appears build-agnostic
+	- the likely seam is build-dependent map discovery / WDT resolution / candidate-set selection through `_dbcBuild`
+	- the observed `2674` candidate count is suspicious versus the fixed development dataset note in `memory-bank/data-paths.md` (`616 PM4 files`) and should be treated as a clue, not normal noise
+- Rendering work is now explicitly grouped as one coordinated program because PM4 object-variant matching depends on visually trustworthy output, not only PM4 geometry placement.
+- The ordered rendering program is now:
+	1. M2 material, transparency, and reflective-surface parity
+	2. lighting DBC expansion beyond the current `Light` + `LightData` subset
+	3. skybox / environment parity so backdrop and lighting context stop misleading object matching
+- Planning artifacts created for this program live under `.github/prompts/`:
+	- `m2-material-parity-implementation-plan.prompt.md`
+	- `lighting-dbc-expansion-implementation-plan.prompt.md`
+	- `sky-environment-parity-implementation-plan.prompt.md`
+- Validation status for this planning slice:
+	- no rendering code changes landed yet from this program
+	- no automated tests were added or run for the planning-only pass
+	- no runtime real-data validation yet on the new PM4 failure-bucket diagnostics
+
 ### Recovery Work Completed On This Branch
 
 - Re-established v0.4.0 baseline in the primary tree and validated build.

@@ -65,6 +65,34 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the precedence fix on top of current viewer state
    - runtime signoff is still pending for both the WMO sheen symptom and loose-overlay PM4 loading
 
+### PM4 Decode Triage And Renderer Parity Queue (Mar 21)
+
+- Current PM4 overlay failure in the viewer is no longer treated as an attach/indexing problem first.
+- User-observed runtime state:
+   - `PM4: 2674 files found, none decoded into overlay data`
+   - interpret this as: PM4 candidates are being found, but every file is currently being rejected before it yields renderable overlay objects
+- `WorldScene.LazyLoadPm4Overlay()` now has explicit failure buckets for:
+   - tile parse rejection
+   - tile range rejection
+   - loose/base read failure
+   - PM4 parse/decode failure
+   - parsed PM4 files that still yield zero overlay objects
+- Working explanation for `4.0` versus `3.3.5` behavior:
+   - PM4 object reconstruction path itself does not look build-specific
+   - viewer map discovery / WDT resolution still is build-specific through `_dbcBuild`
+   - the current `2674` PM4 candidate count is likely a signal that the wrong map context or candidate set is being used; fixed development data in `memory-bank/data-paths.md` documents `616 PM4 files`
+- Renderer work for PM4 matching is now grouped into one deliberate queue rather than ad hoc fixes:
+   1. M2 material, transparency, and reflective parity
+   2. lighting DBC expansion beyond current `LightService` coverage
+   3. skybox / environment parity so object lighting context is trustworthy
+- Planning prompts now exist under workspace `.github/prompts/` for each queue item:
+   - `m2-material-parity-implementation-plan.prompt.md`
+   - `lighting-dbc-expansion-implementation-plan.prompt.md`
+   - `sky-environment-parity-implementation-plan.prompt.md`
+- Status correction:
+   - this section is planning + handoff only
+   - no renderer implementation slice from this queue has landed yet
+
 ### Terrain Decode Direction (Current)
 
 - Priority is profile-correct alpha decode behavior before broader feature intake.
@@ -80,6 +108,7 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 2. Continue surgical intake from v0.4.0..main with SAFE-first triage.
 3. Keep UI evolution incremental (no drastic layout churn).
 4. Bring import/export enhancements in small, build-gated batches after decode path stabilization.
+5. Run the renderer parity queue in order for PM4 object-matching work: materials first, lighting second, sky/environment third.
 
 ### Current Intake Decision
 
