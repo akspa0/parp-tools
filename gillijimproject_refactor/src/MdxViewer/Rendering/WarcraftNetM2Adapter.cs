@@ -284,13 +284,19 @@ internal static class WarcraftNetM2Adapter
         {
             try
             {
-                return ParsedModelData.FromWarcraftNet(new MD21(m2Bytes));
+                ParsedModelData data = ParsedModelData.FromWarcraftNet(new MD21(m2Bytes));
+                TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                return data;
             }
             catch (Exception rawMd20Ex)
             {
                 var wrapped = new Model(m2Bytes);
                 if (wrapped.ModelInformation != null)
-                    return ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
+                {
+                    ParsedModelData data = ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
+                    TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+                    return data;
+                }
 
                 throw new InvalidDataException($"M2 is missing MD21 model information for '{fileName}'.", rawMd20Ex);
             }
@@ -301,7 +307,9 @@ internal static class WarcraftNetM2Adapter
         {
             if (IsMd21(m2Bytes))
                 ViewerLog.Trace($"[M2] Parsed MD21 container via Warcraft.NET Model wrapper: {fileName}");
-            return ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
+            ParsedModelData data = ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
+            TrySupplementRawModelMetadata(m2Bytes, fileName, data);
+            return data;
         }
 
         throw new InvalidDataException("M2 is missing MD21 model information.");
@@ -389,14 +397,16 @@ internal static class WarcraftNetM2Adapter
                 sectionMaterialIds[batch.SkinSectionIndex] = materialId;
             }
 
+            int coordId = ResolveTextureCoordId(model, batch);
+
             material.Layers.Add(new MdlTexLayer
             {
                 BlendMode = MapBlendMode(blendMode),
                 TextureId = textureId,
-                CoordId = 0,
+                CoordId = coordId,
                 TransformId = -1,
                 StaticAlpha = 1.0f,
-                Flags = MapLayerFlags(renderFlagBits, textureFlags),
+                Flags = MapLayerFlags(renderFlagBits, textureFlags, coordId),
             });
         }
 
@@ -414,6 +424,15 @@ internal static class WarcraftNetM2Adapter
         }
 
         return model.Textures.Count > 0 ? 0 : -1;
+    }
+
+    private static int ResolveTextureCoordId(ParsedModelData model, SkinTextureUnitData batch)
+    {
+        int lookupIndex = batch.TextureCoordComboIndex;
+        if (lookupIndex >= 0 && lookupIndex < model.TextureCoordLookup.Count)
+            return model.TextureCoordLookup[lookupIndex].CoordId;
+
+        return 0;
     }
 
     private static MdlMaterial CreateFallbackMaterial()
@@ -468,10 +487,7 @@ internal static class WarcraftNetM2Adapter
                     mappedIndex = (ushort)geoset.Vertices.Count;
                     remap[localSkinVertexIndex] = mappedIndex;
 
-                    geoset.Vertices.Add(new C3Vector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
-                    geoset.Normals.Add(new C3Vector(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
-                    geoset.TexCoords.Add(new C2Vector(vertex.TextureCoordX, vertex.TextureCoordY));
-                    geoset.VertexGroups.Add(0);
+                    AddVertexToGeoset(geoset, vertex);
                 }
 
                 geoset.Indices.Add(mappedIndex);
@@ -505,10 +521,7 @@ internal static class WarcraftNetM2Adapter
                 mappedIndex = (ushort)geoset.Vertices.Count;
                 remap[localSkinVertexIndex] = mappedIndex;
 
-                geoset.Vertices.Add(new C3Vector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
-                geoset.Normals.Add(new C3Vector(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
-                geoset.TexCoords.Add(new C2Vector(vertex.TextureCoordX, vertex.TextureCoordY));
-                geoset.VertexGroups.Add(0);
+                AddVertexToGeoset(geoset, vertex);
             }
 
             geoset.Indices.Add(mappedIndex);
@@ -519,6 +532,15 @@ internal static class WarcraftNetM2Adapter
             geoset.Indices.RemoveRange(trimmed, geoset.Indices.Count - trimmed);
 
         return geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3 ? geoset : null;
+    }
+
+    private static void AddVertexToGeoset(MdlGeoset geoset, ParsedVertexData vertex)
+    {
+        geoset.Vertices.Add(new C3Vector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
+        geoset.Normals.Add(new C3Vector(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
+        geoset.TexCoords.Add(new C2Vector(vertex.TextureCoord0X, vertex.TextureCoord0Y));
+        geoset.TexCoords.Add(new C2Vector(vertex.TextureCoord1X, vertex.TextureCoord1Y));
+        geoset.VertexGroups.Add(0);
     }
 
     private static bool TryGetVertex(ParsedModelData model, SkinData skin, ushort localSkinVertexIndex, out ParsedVertexData vertex)
@@ -546,7 +568,9 @@ internal static class WarcraftNetM2Adapter
         try
         {
             var skin = new Skin(skinBytes);
-            return SkinData.FromWarcraftSkin(skin);
+            var parsed = SkinData.FromWarcraftSkin(skin);
+            TrySupplementSkinBatchMetadata(skinBytes, modelPath, parsed, profile);
+            return parsed;
         }
         catch (Exception ex)
         {
@@ -563,6 +587,54 @@ internal static class WarcraftNetM2Adapter
                     $"Failed to parse skin for '{Path.GetFileName(modelPath)}' with both Warcraft.NET and legacy fallback parsers.",
                     new AggregateException(ex, fallbackEx));
             }
+        }
+    }
+
+    private static void TrySupplementSkinBatchMetadata(byte[] skinBytes, string modelPath, SkinData parsedSkin, M2Profile? profile)
+    {
+        try
+        {
+            SkinData? supplement = TryParseSupplementalSkinData(skinBytes, profile);
+            if (supplement == null)
+                return;
+
+            int mergeCount = Math.Min(parsedSkin.TextureUnits.Count, supplement.TextureUnits.Count);
+            for (int i = 0; i < mergeCount; i++)
+                parsedSkin.TextureUnits[i].TextureCoordComboIndex = supplement.TextureUnits[i].TextureCoordComboIndex;
+
+            if (parsedSkin.TextureUnits.Count != supplement.TextureUnits.Count)
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"[M2] Skin batch metadata supplement count mismatch for {Path.GetFileName(modelPath)}: parsed={parsedSkin.TextureUnits.Count}, raw={supplement.TextureUnits.Count}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] Skin batch metadata supplement skipped for {Path.GetFileName(modelPath)}: {ex.Message}");
+        }
+    }
+
+    private static SkinData? TryParseSupplementalSkinData(byte[] skinBytes, M2Profile? profile)
+    {
+        if (profile != null)
+        {
+            try
+            {
+                return ParseProfiledSkin(skinBytes, profile);
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            return ParseLegacySkin(skinBytes);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -629,20 +701,25 @@ internal static class WarcraftNetM2Adapter
                 br.BaseStream.Position = entryPos + 20;
                 Vector3 normal = ReadVector3(br);
                 br.BaseStream.Position = entryPos + 32;
-                float textureCoordX = br.ReadSingle();
-                float textureCoordY = br.ReadSingle();
+                float textureCoord0X = br.ReadSingle();
+                float textureCoord0Y = br.ReadSingle();
+                float textureCoord1X = br.ReadSingle();
+                float textureCoord1Y = br.ReadSingle();
 
                 data.Vertices.Add(new ParsedVertexData
                 {
                     Position = position,
                     Normal = normal,
-                    TextureCoordX = textureCoordX,
-                    TextureCoordY = textureCoordY,
+                    TextureCoord0X = textureCoord0X,
+                    TextureCoord0Y = textureCoord0Y,
+                    TextureCoord1X = textureCoord1X,
+                    TextureCoord1Y = textureCoord1Y,
                 });
             }
         }
 
         TrySupplementMetadataFromWarcraftNet(modelBytes, fileName, data);
+        TrySupplementRawModelMetadata(modelBytes, fileName, data);
         TryParseProfiledMaterialMetadata(modelBytes, fileName, data);
 
         ViewerLog.Info(ViewerLog.Category.Mdx,
@@ -671,6 +748,67 @@ internal static class WarcraftNetM2Adapter
             ViewerLog.Debug(ViewerLog.Category.Mdx,
                 $"[M2] Warcraft.NET metadata supplement skipped for {fileName}: {ex.Message}");
         }
+    }
+
+    private static void TrySupplementRawModelMetadata(byte[] modelBytes, string fileName, ParsedModelData data)
+    {
+        if (!IsMd20(modelBytes))
+            return;
+
+        TrySupplementRawVertexTextureCoords(modelBytes, fileName, data);
+
+        if (data.TextureCoordLookup.Count == 0)
+        {
+            var textureCoordLookup = ReadRawTextureCoordLookup(modelBytes, fileName);
+            if (textureCoordLookup != null)
+                data.TextureCoordLookup.AddRange(textureCoordLookup);
+        }
+    }
+
+    private static void TrySupplementRawVertexTextureCoords(byte[] modelBytes, string fileName, ParsedModelData data)
+    {
+        const int VertexCountOffset = 0x44;
+        const int VertexDataOffset = 0x48;
+
+        if (data.Vertices.Count == 0 || modelBytes.Length < VertexDataOffset + 4)
+            return;
+
+        uint vertexCount = ReadUInt32(modelBytes, VertexCountOffset);
+        uint vertexOffset = ReadUInt32(modelBytes, VertexDataOffset);
+        if (!TryValidateOptionalSpan(vertexCount, vertexOffset, 0x30, modelBytes.Length, fileName, "raw.vertices"))
+            return;
+
+        int count = Math.Min(data.Vertices.Count, (int)vertexCount);
+        using var ms = new MemoryStream(modelBytes);
+        using var br = new BinaryReader(ms);
+
+        for (int i = 0; i < count; i++)
+        {
+            long entryPos = vertexOffset + (i * 0x30L);
+            br.BaseStream.Position = entryPos + 32;
+
+            var vertex = data.Vertices[i];
+            vertex.TextureCoord0X = br.ReadSingle();
+            vertex.TextureCoord0Y = br.ReadSingle();
+            vertex.TextureCoord1X = br.ReadSingle();
+            vertex.TextureCoord1Y = br.ReadSingle();
+            data.Vertices[i] = vertex;
+        }
+    }
+
+    private static List<ParsedTextureCoordLookupData>? ReadRawTextureCoordLookup(byte[] modelBytes, string fileName)
+    {
+        const int TextureCoordLookupCountOffset = 0x88;
+        const int TextureCoordLookupDataOffset = 0x8C;
+
+        if (modelBytes.Length < TextureCoordLookupDataOffset + 4)
+            return null;
+
+        uint count = ReadUInt32(modelBytes, TextureCoordLookupCountOffset);
+        uint dataOffset = ReadUInt32(modelBytes, TextureCoordLookupDataOffset);
+        return TryReadTextureCoordLookup(modelBytes, fileName, count, dataOffset, out List<ParsedTextureCoordLookupData>? lookup)
+            ? lookup
+            : null;
     }
 
     private static void TryParseProfiledMaterialMetadata(byte[] modelBytes, string fileName, ParsedModelData data)
@@ -985,6 +1123,31 @@ internal static class WarcraftNetM2Adapter
         score = (validEntries * 4) + (int)Math.Min(count, 256);
         lookup = parsed;
         return true;
+    }
+
+    private static bool TryReadTextureCoordLookup(byte[] modelBytes, string fileName, uint count, uint dataOffset, out List<ParsedTextureCoordLookupData>? lookup)
+    {
+        lookup = null;
+
+        if (count == 0 || count > 8192 || dataOffset == 0)
+            return false;
+
+        if (!TryValidateOptionalSpan(count, dataOffset, 0x02, modelBytes.Length, fileName, "raw.textureCoordLookup"))
+            return false;
+
+        var parsed = new List<ParsedTextureCoordLookupData>((int)count);
+        for (uint i = 0; i < count; i++)
+        {
+            int entryOffset = checked((int)(dataOffset + (i * 0x02u)));
+            short coordId = BitConverter.ToInt16(modelBytes, entryOffset);
+            if (coordId < -1 || coordId > 1)
+                return false;
+
+            parsed.Add(new ParsedTextureCoordLookupData { CoordId = coordId });
+        }
+
+        lookup = parsed;
+        return parsed.Count > 0;
     }
 
     private static string ReadUtf8String(byte[] data, int offset, int length)
@@ -1314,6 +1477,9 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
+                ushort textureCoordComboIndex = profile.SkinLikeBStride >= 20 && entryPos + 20 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
 
                 _ = flags;
 
@@ -1323,6 +1489,7 @@ internal static class WarcraftNetM2Adapter
                     SkinSectionIndex = submeshIndex,
                     MaterialIndex = materialIndex,
                     TextureComboIndex = textureComboIndex,
+                    TextureCoordComboIndex = textureCoordComboIndex,
                 });
             }
         }
@@ -1437,6 +1604,9 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
+                ushort textureCoordComboIndex = textureUnitStride >= 20 && entryPos + 20 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
 
                 _ = flags;
 
@@ -1446,6 +1616,7 @@ internal static class WarcraftNetM2Adapter
                     SkinSectionIndex = submeshIndex,
                     MaterialIndex = materialIndex,
                     TextureComboIndex = textureComboIndex,
+                    TextureCoordComboIndex = textureCoordComboIndex,
                 });
             }
         }
@@ -1554,10 +1725,11 @@ internal static class WarcraftNetM2Adapter
 
     private sealed class SkinTextureUnitData
     {
-        public int MaterialIndex { get; init; }
-        public int TextureComboIndex { get; init; }
-        public int SkinSectionIndex { get; init; }
-        public ushort PriorityPlane { get; init; }
+        public int MaterialIndex { get; set; }
+        public int TextureComboIndex { get; set; }
+        public int TextureCoordComboIndex { get; set; }
+        public int SkinSectionIndex { get; set; }
+        public ushort PriorityPlane { get; set; }
     }
 
     private sealed class ParsedModelData
@@ -1570,6 +1742,7 @@ internal static class WarcraftNetM2Adapter
         public List<ParsedTextureData> Textures { get; } = new();
         public List<ParsedRenderFlagData> RenderFlags { get; } = new();
         public List<ParsedTextureLookupData> TextureLookup { get; } = new();
+        public List<ParsedTextureCoordLookupData> TextureCoordLookup { get; } = new();
 
         public static ParsedModelData FromWarcraftNet(MD21 md21)
         {
@@ -1586,8 +1759,8 @@ internal static class WarcraftNetM2Adapter
                 {
                     Position = vertex.Position,
                     Normal = vertex.Normal,
-                    TextureCoordX = vertex.TextureCoordX,
-                    TextureCoordY = vertex.TextureCoordY,
+                    TextureCoord0X = vertex.TextureCoordX,
+                    TextureCoord0Y = vertex.TextureCoordY,
                 });
             }
 
@@ -1626,8 +1799,10 @@ internal static class WarcraftNetM2Adapter
     {
         public Vector3 Position;
         public Vector3 Normal;
-        public float TextureCoordX;
-        public float TextureCoordY;
+        public float TextureCoord0X;
+        public float TextureCoord0Y;
+        public float TextureCoord1X;
+        public float TextureCoord1Y;
     }
 
     private sealed class ParsedTextureData
@@ -1648,6 +1823,11 @@ internal static class WarcraftNetM2Adapter
         public int TextureId;
     }
 
+    private struct ParsedTextureCoordLookupData
+    {
+        public int CoordId;
+    }
+
     private struct EmbeddedProfileHeader
     {
         public uint VertexMapCount;
@@ -1666,22 +1846,25 @@ internal static class WarcraftNetM2Adapter
     private static MdlTexOp MapBlendMode(ushort blendMode)
     {
         // WoW M2 blend modes differ from MDX's texop names; we map them to the closest MDX renderer behavior.
-        // Reference semantics (wowdev): 0=Opaque, 1=AlphaKey (cutout), 2=Alpha (blend), 3=Add, 4=Mod, 5=Mod2x.
-        // Modes beyond that are engine-/version-specific; default to Blend.
+        // Reference semantics (wowdev):
+        //   0=Opaque, 1=AlphaKey, 2=Alpha, 3=NoAlphaAdd, 4=Add, 5=Mod, 6=Mod2x, 7=BlendAdd.
+        // The local MDX renderer does not expose distinct NoAlphaAdd / BlendAdd states, so collapse those to
+        // the nearest additive family deliberately instead of shifting every later mode by one.
         return blendMode switch
         {
             0 => MdlTexOp.Load,          // Opaque
             1 => MdlTexOp.Transparent,   // AlphaKey (cutout)
             2 => MdlTexOp.Blend,         // Alpha blend
-            3 => MdlTexOp.Add,           // Add
-            4 => MdlTexOp.Modulate,      // Modulate
-            5 => MdlTexOp.Modulate2X,    // Mod2x
-            6 => MdlTexOp.AddAlpha,      // Commonly treated as additive-with-alpha
+            3 => MdlTexOp.Add,           // NoAlphaAdd
+            4 => MdlTexOp.Add,           // Add
+            5 => MdlTexOp.Modulate,      // Mod
+            6 => MdlTexOp.Modulate2X,    // Mod2x
+            7 => MdlTexOp.AddAlpha,      // BlendAdd
             _ => MdlTexOp.Blend,
         };
     }
 
-    private static MdlGeoFlags MapLayerFlags(ushort renderFlags, TextureFlags textureFlags)
+    private static MdlGeoFlags MapLayerFlags(ushort renderFlags, TextureFlags textureFlags, int coordId)
     {
         var flags = MdlGeoFlags.None;
 
@@ -1695,6 +1878,9 @@ internal static class WarcraftNetM2Adapter
         // Do not infer NoDepthTest / NoDepthSet from Warcraft.NET M2 render flags here.
         // The bit layout is not stable across client versions, and treating 0x8/0x10
         // as depth disables causes reflective or fog-like world models to render through terrain.
+
+        if (coordId < 0)
+            flags |= MdlGeoFlags.SphereEnvMap;
 
         if (textureFlags.HasFlag(TextureFlags.Flag_0x1_WrapX))
             flags |= MdlGeoFlags.WrapWidth;

@@ -94,7 +94,7 @@ Supports WMO format versions v14 (Alpha 0.5.3), v16 (Alpha 0.6.0), and v17 (3.3.
 ### 5. MDX/M2 Model Rendering
 
 Models (trees, creatures, props, etc.) are rendered with:
-- **Blend modes 0–6**: All standard WoW blend modes (Opaque, AlphaKey, Alpha, Additive, Mod, Mod2x, Blend)
+- **Blend modes 0–7**: Opaque, AlphaKey, Alpha, additive, modulate, modulate 2x, and BlendAdd are mapped into the local renderer's supported material families
 - **Alpha cutout**: Hard discard for tree canopies and foliage
 - **Sphere environment mapping**: Reflective surfaces
 - **Unshaded flag**: Fullbright materials that ignore lighting

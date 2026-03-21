@@ -558,6 +558,7 @@ public class MdxRenderer : ISceneRenderer
 
                     // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
                     var geoFlags = layer.Flags;
+                    string materialFamily = DescribeMaterialFamily(isAlphaCutout, effectiveBlendMode, geoFlags);
 
                     // TwoSided (0x10): culling handled globally
                     _gl.Disable(EnableCap.CullFace);
@@ -589,6 +590,12 @@ public class MdxRenderer : ISceneRenderer
                     int requestedUvSet = layer.CoordId >= 0 ? layer.CoordId : 0;
                     int activeUvSet = requestedUvSet == 1 && gb.UvSetCount > 1 ? 1 : 0;
                     _gl.Uniform1(_uUvSet, activeUvSet);
+
+                    if (_mdxDebugFocus && _isM2AdapterModel)
+                    {
+                        ViewerLog.Trace(
+                            $"[M2-PASS] pass={pass} geoset={gb.GeosetIndex} layer={l} family={materialFamily} blend={effectiveBlendMode} coordId={layer.CoordId} uvSet={activeUvSet} env={(geoFlags.HasFlag(MdlGeoFlags.SphereEnvMap) ? 1 : 0)} tex={texId}");
+                    }
 
                     if (isAlphaCutout)
                     {
@@ -1536,13 +1543,13 @@ void main() {
 
             if (blpData != null && blpData.Length > 0)
             {
-                // Keep classic MDX on the older working wrap interpretation.
-                // The newer repeat/clamp inversion is only for M2-adapted models.
+                // Classic MDX keeps the legacy clamp-flag interpretation.
+                // M2 texture flags are repeat flags, so clamp only when the flag is absent.
                 var texFlags = (MdlGeoFlags)tex.Flags;
-                bool clampS = _usesPreRelease301M2Profile
+                bool clampS = _isM2AdapterModel
                     ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
                     : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-                bool clampT = _usesPreRelease301M2Profile
+                bool clampT = _isM2AdapterModel
                     ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
                     : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
                 
@@ -1634,6 +1641,23 @@ void main() {
             return alphaKind;
 
         return TextureAlphaKind.Opaque;
+    }
+
+    private static string DescribeMaterialFamily(bool isAlphaCutout, MdlTexOp blendMode, MdlGeoFlags geoFlags)
+    {
+        bool isReflective = geoFlags.HasFlag(MdlGeoFlags.SphereEnvMap);
+        string baseFamily = isAlphaCutout
+            ? "AlphaCutout"
+            : blendMode switch
+            {
+                MdlTexOp.Load => "Opaque",
+                MdlTexOp.Transparent or MdlTexOp.Blend => "BlendedTransparency",
+                MdlTexOp.Add or MdlTexOp.AddAlpha => "Additive",
+                MdlTexOp.Modulate or MdlTexOp.Modulate2X => "Modulated",
+                _ => blendMode.ToString(),
+            };
+
+        return isReflective ? $"Reflective/{baseFamily}" : baseFamily;
     }
 
     private void ReleaseSharedTexture(string cacheKey)

@@ -5672,6 +5672,10 @@ void main() {
             _worldScene.ReloadPm4Overlay();
         }
 
+        bool showPm4Bounds = _worldScene.ShowPm4ObjectBounds;
+        if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
+            _worldScene.ShowPm4ObjectBounds = showPm4Bounds;
+        ImGui.SameLine();
         bool showPm4Refs = _worldScene.ShowPm4PositionRefs;
         if (ImGui.Checkbox("PM4 MPRL Refs", ref showPm4Refs))
             _worldScene.ShowPm4PositionRefs = showPm4Refs;
@@ -8722,7 +8726,51 @@ void main() {
         float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-        _worldScene.SelectObjectByRay(rayOrigin, rayDir);
+        bool hasSceneHit = _worldScene.TryPickSceneObjectByRay(rayOrigin, rayDir, out Terrain.ObjectType sceneHitType, out int sceneHitIndex, out float sceneHitDistance);
+        bool hasPm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out float pm4HitDistance);
+
+        if (hasPm4Hit && (!hasSceneHit || pm4HitDistance <= sceneHitDistance))
+        {
+            _worldScene.ClearSelection();
+            _worldScene.SelectPm4ObjectByRay(rayOrigin, rayDir);
+
+            _selectedObjectType = "PM4";
+
+            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
+            {
+                string nearestRef = float.IsNaN(debugInfo.NearestPositionRefDistance)
+                    ? "n/a"
+                    : $"{debugInfo.NearestPositionRefDistance:F2}";
+
+                _selectedObjectInfo =
+                    $"PM4 Object\n" +
+                    $"Tile: ({debugInfo.TileX}, {debugInfo.TileY})\n" +
+                    $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, part={debugInfo.ObjectPartId})\n" +
+                    $"MSLK Group: 0x{debugInfo.LinkGroupObjectId:X8}\n" +
+                    $"Linked MPRL refs: {debugInfo.LinkedPositionRefCount}\n" +
+                    $"Surfaces: {debugInfo.SurfaceCount}\n" +
+                    $"GroupKey: 0x{debugInfo.DominantGroupKey:X2}  AttrMask: 0x{debugInfo.DominantAttributeMask:X2}  Mdos: {debugInfo.DominantMdosIndex}\n" +
+                    $"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}\n" +
+                    $"Center: ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})\n" +
+                    $"Nearest MPRL: {nearestRef}\n" +
+                    $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
+            }
+            else if (pm4HitKey.HasValue)
+            {
+                var selectedPm4 = pm4HitKey.Value;
+                _selectedObjectInfo =
+                    $"PM4 Object\n" +
+                    $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
+                    $"CK24: 0x{selectedPm4.ck24:X6} (part={selectedPm4.objectPart})\n" +
+                    $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
+            }
+            return;
+        }
+
+        if (hasSceneHit)
+            _worldScene.SelectObjectByRay(rayOrigin, rayDir);
+        else
+            _worldScene.ClearSelection();
 
         // Build info string from the selected instance's embedded metadata
         var sel = _worldScene.SelectedInstance;
@@ -8747,41 +8795,6 @@ void main() {
                 $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
                 $"Scale: {inst.PlacementScale:F3}\n" +
                 $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
-            return;
-        }
-
-        if (_worldScene.SelectPm4ObjectByRay(rayOrigin, rayDir) && _worldScene.SelectedPm4ObjectKey.HasValue)
-        {
-            _selectedObjectType = "PM4";
-
-            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
-            {
-                string nearestRef = float.IsNaN(debugInfo.NearestPositionRefDistance)
-                    ? "n/a"
-                    : $"{debugInfo.NearestPositionRefDistance:F2}";
-
-                _selectedObjectInfo =
-                    $"PM4 Object\n" +
-                    $"Tile: ({debugInfo.TileX}, {debugInfo.TileY})\n" +
-                    $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, part={debugInfo.ObjectPartId})\n" +
-                    $"MSLK Group: 0x{debugInfo.LinkGroupObjectId:X8}\n" +
-                    $"Linked MPRL refs: {debugInfo.LinkedPositionRefCount}\n" +
-                    $"Surfaces: {debugInfo.SurfaceCount}\n" +
-                    $"GroupKey: 0x{debugInfo.DominantGroupKey:X2}  AttrMask: 0x{debugInfo.DominantAttributeMask:X2}  Mdos: {debugInfo.DominantMdosIndex}\n" +
-                    $"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}\n" +
-                    $"Center: ({debugInfo.Center.X:F1}, {debugInfo.Center.Y:F1}, {debugInfo.Center.Z:F1})\n" +
-                    $"Nearest MPRL: {nearestRef}\n" +
-                    $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
-            }
-            else
-            {
-                var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
-                _selectedObjectInfo =
-                    $"PM4 Object\n" +
-                    $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
-                    $"CK24: 0x{selectedPm4.ck24:X6} (part={selectedPm4.objectPart})\n" +
-                    $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
-            }
             return;
         }
 

@@ -1,5 +1,81 @@
 # Progress
 
+### Mar 21, 2026 - PM4 Per-Object Bounds Overlay
+
+- Added a PM4-specific bounds overlay in `src/MdxViewer/Terrain/WorldScene.cs` so PM4 object-part AABBs are visible in the main scene instead of only existing implicitly for picking/culling/debug text.
+- Added a matching `PM4 Bounds` toggle in `src/MdxViewer/ViewerApp.cs` beside the existing PM4 MPRL and centroid toggles.
+- Current behavior:
+	- PM4 bounds draw through the existing `BoundingBoxRenderer` pass.
+	- selected PM4 groups are highlighted, and the exact selected PM4 object is drawn white.
+	- PM4 bounds rendering respects existing PM4 tile/object visibility checks and per-object transforms.
+- Important limit:
+	- the current PM4 object bounds still come from the rendered PM4 object geometry path, not from `MSCN` directly.
+	- this is a debugging/visibility slice to validate extent mismatch hypotheses, not a solved MSCN container correction.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing solution warnings only
+	- no automated tests added or run
+	- no runtime signoff yet on the reported PM4 extent mismatch case
+
+### Mar 21, 2026 - PM4 World-Space Orientation Solver Fix
+
+- Fixed one concrete PM4 handedness bug in `src/MdxViewer/Terrain/WorldScene.cs` after runtime evidence showed mirrored solutions like `swap=True` / `windingFlip=True` on structures that should only need a quarter-turn basis correction.
+- Root cause:
+	- `ResolvePlanarTransform(...)` only tested `identity` and `swap` for world-space PM4 data
+	- this forced some world-space objects into mirrored fits because the rigid `+/-90` degree candidates were never evaluated
+- Current behavior:
+	- world-space PM4 now evaluates the rigid planar transforms first (`identity`, `180`, `+90`, `-90`)
+	- mirrored candidates remain as fallback only and now carry a stronger world-space penalty so they do not win unless they are clearly required by the data
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no automated tests added or run
+	- no runtime signoff yet on the guardtower staircase case
+
+### Mar 21, 2026 - PM4 Picking Arbitration Fix
+
+- Fixed a viewer interaction bug where visible PM4 overlay objects could not be selected because `ViewerApp.PickObjectAtMouse(...)` returned on WMO/MDX selection before PM4 picking ran.
+- Current behavior:
+	- `WorldScene` now provides nearest-hit helpers for regular scene objects and PM4 overlay objects.
+	- `ViewerApp` compares both hit distances from the same mouse ray and selects the closer target instead of hard-prioritizing WMO/MDX.
+- Why this matters:
+	- PM4 alignment tooling depends on left-click selection, and PM4 geometry commonly overlaps the same world objects whose WMO/MDX AABBs were previously swallowing the click.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
+	- no automated tests added or run
+	- no runtime click-validation yet on a live PM4 overlay session
+
+### Mar 21, 2026 - 4.0.0.11927 M2 Wrap + Blend Correction
+
+- Follow-up after the first M2 parity slice focused on the remaining Cataclysm-era runtime symptoms the user reported: texture clamping/stretching and incorrect blend family selection on `4.0.0.11927` assets.
+- Root gaps corrected in the active viewer path:
+	- `src/MdxViewer/Rendering/ModelRenderer.cs` now treats `WrapWidth` / `WrapHeight` as repeat flags for all M2-adapted models, while classic MDX keeps the legacy clamp-flag interpretation.
+	- `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` no longer shifts M2 blend ids after mode `2`; ids `3`..`7` now map deliberately into the closest local renderer families.
+- Current mapping details:
+	- `0=Load`, `1=Transparent`, `2=Blend`, `3=Add` (`NoAlphaAdd`), `4=Add`, `5=Modulate`, `6=Modulate2X`, `7=AddAlpha` (`BlendAdd`)
+	- `NoAlphaAdd` and `BlendAdd` are still approximations because the local MDX renderer has no separate states for them yet
+- Validation limits for this checkpoint:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing solution warnings only
+	- no automated tests added or run
+	- no runtime real-data validation yet on the affected Cataclysm-era M2 assets
+
+### Mar 21, 2026 - M2 Material Parity Slice: Explicit Env-Map + UV Selector Recovery
+
+- Landed the first non-heuristic M2 material-parity implementation slice in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` and `src/MdxViewer/Rendering/ModelRenderer.cs`.
+- Confirmed root gap before editing:
+	- `ModelRenderer` already had separate alpha-cutout / blended / additive / env-map shader-state paths
+	- `WarcraftNetM2Adapter` was still flattening M2 batch intent by hardcoding `CoordId = 0`, dropping raw `.skin` texture-coordinate lookup metadata, and only preserving the first UV set from vertex data
+- Current code change:
+	- merges raw `.skin` `textureCoordComboIndex` metadata back into the Warcraft.NET skin path
+	- preserves both M2 UV sets from raw `MD20` vertex data
+	- reads raw `textureCoordCombos` so `-1` now drives reflective `SphereEnvMap` and `1` can route to UV1
+	- adds focused renderer trace output showing pass + resolved material family for M2 batches under debug focus
+- Current scope/limits:
+	- improved: reflective / env-mapped family selection and UV-set fidelity where metadata exists
+	- still open: texture transform animation, transparency/color track parity, broader shader-combo parity, and real-data visible validation on heavy reflection/transparency assets
+- Validation limits at this checkpoint:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed (warnings only)
+	- no automated tests added or run
+	- no runtime validation yet on real assets
+
 ### Mar 21, 2026 - PM4 Decode Triage Framed + Renderer Parity Planned
 
 - PM4 overlay debugging is now in a more precise phase than the earlier loose-overlay indexing/precedence work:

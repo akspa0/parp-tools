@@ -179,6 +179,7 @@ public class WorldScene : ISceneRenderer
     private const float Pm4MaxEdgeLength = 512f;
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
+    private bool _showPm4ObjectBounds = true;
     private bool _pm4OverlayIgnoreDepth = true;
     private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
@@ -289,6 +290,7 @@ public class WorldScene : ISceneRenderer
     public int Pm4PositionRefCount => _pm4PositionRefCount;
     public int Pm4VisiblePositionRefCount => _pm4VisiblePositionRefCount;
     public bool ShowPm4SolidOverlay { get => _showPm4SolidOverlay; set => _showPm4SolidOverlay = value; }
+    public bool ShowPm4ObjectBounds { get => _showPm4ObjectBounds; set => _showPm4ObjectBounds = value; }
     public bool Pm4OverlayIgnoreDepth { get => _pm4OverlayIgnoreDepth; set => _pm4OverlayIgnoreDepth = value; }
     public bool Pm4FlipAllObjectsY
     {
@@ -2199,7 +2201,9 @@ public class WorldScene : ISceneRenderer
             }
 
             if (candidate.InvertsWinding)
-                score += useFootprintScoring ? 4096f : 1024f;
+                score += useTileLocalCoordinates
+                    ? (useFootprintScoring ? 4096f : 1024f)
+                    : (useFootprintScoring ? 8192f : 4096f);
 
             if (IsCandidateBetter(score, yawDelta, bestScore, bestYawDelta, useFootprintScoring, hasExpectedYaw))
             {
@@ -2221,29 +2225,24 @@ public class WorldScene : ISceneRenderer
 
     private static IEnumerable<Pm4PlanarTransform> EnumeratePlanarTransforms(bool useTileLocalCoordinates)
     {
-        // For tile-local PM4 data, evaluate all swap/axis-inversion combinations.
-        // For world-space PM4 data, keep inversion disabled and only test swap parity.
-        if (!useTileLocalCoordinates)
-        {
-            yield return new Pm4PlanarTransform(false, false, false);
-            yield return new Pm4PlanarTransform(true, false, false);
-            yield break;
-        }
+        // Always try the rigid transforms first. World-space PM4 can legitimately need a
+        // quarter-turn basis change, and testing only identity+swap forces those cases into
+        // mirrored solutions that reverse staircase / ramp handedness.
+        yield return new Pm4PlanarTransform(false, false, false);
+        yield return new Pm4PlanarTransform(false, true, true);
+        yield return new Pm4PlanarTransform(true, true, false);
+        yield return new Pm4PlanarTransform(true, false, true);
 
-        for (int swap = 0; swap <= 1; swap++)
-        {
-            for (int invertU = 0; invertU <= 1; invertU++)
-            {
-                for (int invertV = 0; invertV <= 1; invertV++)
-                {
-                    var candidate = new Pm4PlanarTransform(
-                        swap == 1,
-                        invertU == 1,
-                        invertV == 1);
-                    yield return candidate;
-                }
-            }
-        }
+        // Tile-local PM4 still needs the reflected candidates because some files only align
+        // after the tile-origin remap plus a planar mirror. World-space data can also fall back
+        // to these, but they are enumerated after the rigid set and scored with a stronger penalty.
+        yield return new Pm4PlanarTransform(true, false, false);
+        yield return new Pm4PlanarTransform(false, true, false);
+        yield return new Pm4PlanarTransform(false, false, true);
+        yield return new Pm4PlanarTransform(true, true, true);
+
+        if (!useTileLocalCoordinates)
+            yield break;
     }
 
     private static float NearestPositionRefDistanceSquared(IReadOnlyList<MprlEntry> positionRefs, Vector3 world)
@@ -3546,7 +3545,7 @@ public class WorldScene : ISceneRenderer
         _gl.BindVertexArray(0);
 
         // 4. Debug bounding boxes for all placements
-        if (_showBoundingBoxes && _bbRenderer != null)
+        if ((_showBoundingBoxes || _showPm4ObjectBounds) && _bbRenderer != null)
         {
             // Depth test ON so boxes behind terrain/objects are hidden,
             // depth write OFF so box lines don't occlude models
@@ -3554,22 +3553,64 @@ public class WorldScene : ISceneRenderer
             _gl.DepthFunc(DepthFunction.Lequal);
             _gl.DepthMask(false);
 
-            var adapter = _terrainManager.Adapter;
-            if (!_renderDiagPrinted)
-            ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
-
-            // Draw selected object highlight first (thicker visual via slightly larger box)
-            if (SelectedInstance is ObjectInstance sel)
+            if (_showBoundingBoxes)
             {
-                _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
+                var adapter = _terrainManager.Adapter;
+                if (!_renderDiagPrinted)
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
+
+                // Draw selected object highlight first (thicker visual via slightly larger box)
+                if (SelectedInstance is ObjectInstance sel)
+                {
+                    _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
+                }
+
+                // MDDF bounding boxes (magenta)
+                foreach (var inst in _mdxInstances)
+                    _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
+                // MODF bounding boxes (cyan)
+                foreach (var inst in _wmoInstances)
+                    _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
             }
 
-            // MDDF bounding boxes (magenta)
-            foreach (var inst in _mdxInstances)
-                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
-            // MODF bounding boxes (cyan)
-            foreach (var inst in _wmoInstances)
-                _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+            if (_showPm4ObjectBounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
+            {
+                Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+                bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+                    || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                    || _pm4OverlayScale != Vector3.One;
+
+                foreach (var (tileKey, objects) in _pm4TileObjects)
+                {
+                    if (!ShouldRenderPm4Tile(tileKey.tileX, tileKey.tileY))
+                        continue;
+
+                    foreach (Pm4OverlayObject obj in objects)
+                    {
+                        if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
+                            continue;
+
+                        var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                        Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                        if (!ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out _))
+                            continue;
+
+                        Vector3 boundsMin = obj.BoundsMin;
+                        Vector3 boundsMax = obj.BoundsMax;
+                        if (applyObjectTransform)
+                            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+                        Vector3 boxColor = GetPm4ObjectColor(tileKey, obj) * 0.75f + new Vector3(0.20f, 0.20f, 0.20f);
+                        if (_selectedPm4ObjectGroupKey.HasValue
+                            && IsPm4ObjectInGroup(_selectedPm4ObjectGroupKey.Value, objectKey))
+                            boxColor = new Vector3(1.0f, 0.9f, 0.2f);
+                        if (_selectedPm4ObjectKey.HasValue && _selectedPm4ObjectKey.Value == objectKey)
+                            boxColor = new Vector3(1.0f, 1.0f, 1.0f);
+
+                        _bbRenderer.DrawBoxMinMax(boundsMin, boundsMax, view, proj, boxColor);
+                    }
+                }
+            }
 
             _gl.DepthMask(true);
         }
@@ -3959,6 +4000,19 @@ public class WorldScene : ISceneRenderer
     /// </summary>
     public void SelectObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
     {
+        if (TryPickSceneObjectByRay(rayOrigin, rayDir, out ObjectType bestType, out int bestIndex, out _))
+        {
+            _selectedObjectType = bestType;
+            _selectedObjectIndex = bestIndex;
+            return;
+        }
+
+        _selectedObjectType = ObjectType.None;
+        _selectedObjectIndex = -1;
+    }
+
+    public bool TryPickSceneObjectByRay(Vector3 rayOrigin, Vector3 rayDir, out ObjectType objectType, out int objectIndex, out float distance)
+    {
         if (_instancesDirty)
             RebuildInstanceLists();
 
@@ -4004,16 +4058,38 @@ public class WorldScene : ISceneRenderer
                 ViewerLog.Debug(ViewerLog.Category.Terrain, $"  ... and {sorted.Count - 5} more");
         }
 
-        _selectedObjectType = bestType;
-        _selectedObjectIndex = bestIndex;
+        objectType = bestType;
+        objectIndex = bestIndex;
+        distance = bestT;
+        return bestType != ObjectType.None && bestIndex >= 0;
     }
 
     public bool SelectPm4ObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
     {
+        if (TryPickPm4ObjectByRay(rayOrigin, rayDir, out var bestKey, out var bestGroupKey, out _))
+        {
+            _selectedPm4ObjectKey = bestKey;
+            _selectedPm4ObjectGroupKey = bestGroupKey;
+            return true;
+        }
+
+        _selectedPm4ObjectKey = null;
+        _selectedPm4ObjectGroupKey = null;
+        return false;
+    }
+
+    public bool TryPickPm4ObjectByRay(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        out (int tileX, int tileY, uint ck24, int objectPart)? objectKey,
+        out (int tileX, int tileY, uint ck24)? objectGroupKey,
+        out float distance)
+    {
         if (!_showPm4Overlay || _pm4TileObjects.Count == 0)
         {
-            _selectedPm4ObjectKey = null;
-            _selectedPm4ObjectGroupKey = null;
+            objectKey = null;
+            objectGroupKey = null;
+            distance = float.MaxValue;
             return false;
         }
 
@@ -4036,8 +4112,8 @@ public class WorldScene : ISceneRenderer
                 if (!ShouldRenderPm4ObjectType(obj.Ck24Type))
                     continue;
 
-                var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
-                Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                var candidateKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
+                Matrix4x4 objectTransform = BuildPm4ObjectTransform(candidateKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
 
                 Vector3 boundsMin = obj.BoundsMin;
                 Vector3 boundsMax = obj.BoundsMax;
@@ -4049,14 +4125,15 @@ public class WorldScene : ISceneRenderer
                 if (t >= 0f && t < bestT)
                 {
                     bestT = t;
-                    bestKey = objectKey;
-                    bestGroupKey = BuildPm4ObjectGroupKey(objectKey);
+                    bestKey = candidateKey;
+                    bestGroupKey = BuildPm4ObjectGroupKey(candidateKey);
                 }
             }
         }
 
-        _selectedPm4ObjectKey = bestKey;
-        _selectedPm4ObjectGroupKey = bestGroupKey;
+        objectKey = bestKey;
+        objectGroupKey = bestGroupKey;
+        distance = bestT;
         return bestKey.HasValue;
     }
 

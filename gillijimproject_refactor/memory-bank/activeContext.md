@@ -9,6 +9,65 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - .github metadata restored from main and committed: 845748b
 - .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
 
+### M2 Material Parity Slice: Explicit Env-Map + UV Selector Recovery (Mar 21)
+
+- The active M2-family renderer gap was confirmed to be material-state flattening inside `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`, not missing shader hooks in `ModelRenderer` first.
+- Current landed slice recovers one explicit source seam instead of adding new transparency heuristics:
+	- M2 skin batch metadata now preserves `textureCoordComboIndex` from raw `.skin` data and merges it back into the Warcraft.NET-derived skin path.
+	- raw `MD20` vertex decode now preserves both UV sets instead of dropping everything to the first texture coordinate pair.
+	- `textureCoordCombos` lookup now drives `MdlTexLayer.CoordId`; lookup value `-1` now marks the layer as `SphereEnvMap`, and lookup value `1` can select UV1 where present.
+	- `ModelRenderer` now emits focused debug traces showing pass + resolved material family for M2-adapted batches when MDX debug focus is enabled.
+- Scope of this slice:
+	- improved family: reflective / env-mapped M2 surfaces, plus UV1-routed layers that were previously flattened to UV0
+	- unchanged gaps: texture transform animation, color/transparency tracks, broader per-batch shader/material combo parity, and any runtime sorting issues beyond the existing pass split
+- Validation status for this exact slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run for this slice
+	- no runtime real-data signoff yet on reflective/env-mapped assets; do not claim PM4 matching benefit from this change alone
+
+### M2 Material Parity Follow-Up: 4.0.0.11927 Wrap + Blend Correction (Mar 21)
+
+- Follow-up runtime triage on Cataclysm-era M2 assets found two concrete material-state mismatches after the env-map / UV recovery slice:
+	- `ModelRenderer` was only treating `WrapWidth` / `WrapHeight` as M2 repeat flags for the pre-release `3.0.1` profile, leaving later M2 builds on the old classic-MDX clamp interpretation.
+	- `WarcraftNetM2Adapter.MapBlendMode(...)` was shifted after mode `2`, so M2 blend ids `4`..`7` were routed into the wrong local material families.
+- Current correction:
+	- all M2-adapted models now interpret wrap X/Y as repeat flags; classic MDX keeps the legacy clamp-flag behavior.
+	- M2 blend ids now map as `0=Load`, `1=Transparent`, `2=Blend`, `3=Add` (`NoAlphaAdd`), `4=Add`, `5=Modulate`, `6=Modulate2X`, `7=AddAlpha` (`BlendAdd`).
+	- the local renderer still has no distinct `NoAlphaAdd` or `BlendAdd` states, so those cases are now collapsed intentionally into the nearest additive families instead of landing there because of an off-by-one bug.
+- Validation status for this exact follow-up slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run for this slice
+	- no runtime real-data signoff yet on `4.0.0.11927` M2 assets; do not claim visual parity from build success alone
+
+### PM4 Orientation Follow-Up: World-Space Solver No Longer Forces Mirrored Swap Fits (Mar 21)
+
+- Runtime PM4 alignment evidence showed some objects resolving to mirrored planar transforms like `swap=True, invertU=False, invertV=False`, which reverses handedness and makes stairs/ramps wind the wrong way around structures.
+- Root cause in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- world-space PM4 candidate enumeration only tested `identity` and `swap`
+	- rigid quarter-turn candidates were never considered, so some world-space objects could only be approximated by mirrored solutions
+- Current correction:
+	- world-space PM4 now evaluates the rigid planar set first: identity, 180 degree, +90 degree, and -90 degree basis changes
+	- mirrored candidates remain as fallback only and now carry a stronger score penalty for world-space PM4 data
+- Validation status for this exact PM4 solver slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run for this slice
+	- no runtime real-data signoff yet on the guardtower staircase case; do not claim closure from build success alone
+
+### PM4 Bounds Overlay Follow-Up: Per-Object PM4 Bounds Are Now Visible In-Scene (Mar 21)
+
+- Latest PM4 alignment feedback showed MPRL anchors lining up while other PM4 object extents still felt offset or nested inside the wrong container, making click-and-compare work too opaque.
+- Current correction in `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp.cs`:
+	- PM4 per-object bounds that were already computed for picking/culling/debug info are now rendered directly in-scene through the existing `BoundingBoxRenderer` path.
+	- the PM4 alignment controls now expose a dedicated `PM4 Bounds` toggle beside `PM4 MPRL Refs` and `PM4 Centroids`.
+	- selected PM4 object groups get a highlighted bounds color, and the exact selected PM4 object gets a white bounds box.
+- Important scope note:
+	- these bounds are currently built from the rendered PM4 object geometry (`MSVT`/`MSVI`/`MSUR` path), not from `MSCN`.
+	- treat this as a visibility/debugging aid for the current PM4 reconstruction path, not proof yet that the active PM4 extents are sourced from the final correct container.
+- Validation status for this exact PM4 bounds slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026 with existing solution warnings only.
+	- no automated tests were added or run for this slice.
+	- no runtime real-data signoff yet on PM4 bounds usefulness or on the MSCN-versus-MSVT extent question.
+
 ### MPQ Base Build Selection Recovery (Mar 21)
 
 - The active viewer no longer relies only on `InferBuildFromPath(...)` for new MPQ loads.

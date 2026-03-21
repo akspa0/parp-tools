@@ -27,6 +27,39 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
    - no runtime signoff yet with the development PM4 overlay and a matching Cataclysm-beta base client
 
+### M2 Material Parity Slice: Explicit Env-Map + UV Selector Recovery (Mar 21)
+
+- Current renderer-gap correction is now implementation, not planning only:
+   - `WarcraftNetM2Adapter` no longer hardcodes every M2 layer to `CoordId = 0`
+   - raw `.skin` batch metadata now preserves `textureCoordComboIndex` and merges it into the Warcraft.NET skin path
+   - raw `MD20` vertex supplement now preserves both UV sets for M2-family assets instead of dropping to UV0 only
+   - raw `textureCoordCombos` lookup now feeds `MdlTexLayer.CoordId`; `-1` marks reflective `SphereEnvMap`, `1` can select UV1
+   - `ModelRenderer` debug traces now show pass + resolved material family for focused M2 batch runs
+- Why this slice first:
+   - the renderer already had environment-map and UV-set hooks
+   - the active flattening seam was source metadata extraction, so this slice improves reflective/env-mapped appearance without broad new transparency heuristics
+- Current scope limits:
+   - improved family: reflective / env-mapped surfaces and explicit UV1 routing where source data requests it
+   - still flattened: texture transform animation, color/transparency tracks, and broader shader-combo parity beyond existing blend/cutout/add routing
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no automated tests were added or run
+   - no runtime real-data signoff yet on reflection-heavy M2 assets; do not over-claim PM4 matching benefit from this slice alone
+
+### M2 Material Parity Follow-Up: 4.0.0.11927 Wrap + Blend Correction (Mar 21)
+
+- Cataclysm-era M2 runtime triage found two concrete material-state mismatches after the env-map / UV recovery slice:
+   - `ModelRenderer` was only treating `WrapWidth` / `WrapHeight` as M2 repeat flags for the pre-release `3.0.1` profile; Cataclysm-era M2 was still using the classic MDX clamp-flag interpretation.
+   - `WarcraftNetM2Adapter.MapBlendMode(...)` was off by one after mode `2`, so M2 modes `4`..`7` were being translated into the wrong local blend families.
+- Current correction:
+   - all M2-adapted models now use repeat-flag semantics for wrap X/Y; classic MDX keeps the older clamp-flag behavior.
+   - M2 blend ids now map as: `0=Load`, `1=Transparent`, `2=Blend`, `3=Add` (`NoAlphaAdd`), `4=Add`, `5=Modulate`, `6=Modulate2X`, `7=AddAlpha` (`BlendAdd`).
+   - note: the local renderer still does not expose distinct `NoAlphaAdd` or `BlendAdd` states, so those cases intentionally collapse into the nearest additive families instead of being shifted accidentally.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this follow-up slice
+   - no automated tests were added or run for this slice
+   - no runtime real-data signoff yet on `4.0.0.11927` M2 assets; do not claim visual parity from code inspection alone
+
 ### 4.0.0.11927 Terrain Blend Recovery (Mar 21)
 
 - 4.0 terrain texturing is now treated as a separate runtime-behavior track, not as a trivial extension of the validated 3.x path.
@@ -64,6 +97,47 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Validation status:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the precedence fix on top of current viewer state
    - runtime signoff is still pending for both the WMO sheen symptom and loose-overlay PM4 loading
+
+### PM4 Picking Follow-Up: Overlay Selection No Longer Loses To WMO/MDX First-Hit Routing (Mar 21)
+
+- PM4 objects in the viewport could be visible but effectively unclickable because `ViewerApp.PickObjectAtMouse(...)` selected WMO/MDX first and returned before PM4 selection ran.
+- Current fix:
+   - `WorldScene` now exposes hit-test helpers for both scene objects and PM4 objects that return nearest hit distance without mutating selection first.
+   - `ViewerApp` now compares the nearest scene-object hit against the nearest PM4 hit from the same ray and selects whichever is closer.
+   - this preserves normal WMO/MDX picking when they are actually in front, but allows PM4 alignment work when the PM4 object is the nearest hit.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this picking fix
+   - no automated tests were added or run for this slice
+   - no runtime signoff yet; selection behavior still needs an in-view click check on real PM4 overlay data
+
+### PM4 Orientation Follow-Up: World-Space Solver No Longer Forces Mirrored Swap-Only Fits (Mar 21)
+
+- Latest runtime evidence from the PM4 alignment window showed mirrored solutions like `swap=True, invertU=False, invertV=False, windingFlip=True` on objects whose real mismatch was a rigid quarter-turn, not a true reflection.
+- Root cause in `WorldScene.ResolvePlanarTransform(...)`:
+   - world-space PM4 candidate enumeration only tested `identity` and `swap`
+   - that meant a world-space object that actually needed a rigid `+/-90` degree basis change could only be approximated by the mirrored `swap` candidate, which reverses object handedness and makes stair/ramp winding run the wrong way around the structure
+- Current correction:
+   - world-space PM4 now evaluates the full rigid planar set first: identity, 180 degree, +90 degree, and -90 degree basis changes
+   - mirrored candidates still exist as fallback, but they are enumerated after the rigid set and carry a stronger score penalty for world-space PM4 data
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this solver fix
+   - no automated tests were added or run for this slice
+   - no runtime real-data signoff yet on the guardtower / clockwise-staircase PM4 case; do not claim closure from build success alone
+
+### PM4 Bounds Follow-Up: Per-Object PM4 Bounds Can Now Be Rendered In The Scene (Mar 21)
+
+- PM4 object bounds already existed internally for culling, picking, and selected-object debug output, but they were not visible in the world, which made nested-object extent triage much harder.
+- Current fix:
+   - `WorldScene` now exposes a dedicated PM4 bounds render path that draws per-object PM4 AABBs through `BoundingBoxRenderer`.
+   - `ViewerApp` now exposes a `PM4 Bounds` checkbox in the PM4 controls next to `PM4 MPRL Refs` and `PM4 Centroids`.
+   - selected PM4 groups are highlighted and the exact selected PM4 object gets a white bounds box for click/rotation triage.
+- Important scope limit:
+   - current PM4 bounds are still computed from the rendered PM4 object geometry path, not directly from `Pm4File.ExteriorVertices` / `MSCN`.
+   - this slice makes the current extent source visible for runtime comparison; it does not yet close the MSCN-versus-MSVT bounds question.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this PM4 bounds overlay change
+   - no automated tests were added or run for this slice
+   - no runtime real-data signoff yet on whether the visible PM4 bounds now explain the reported mismatch
 
 ### PM4 Decode Triage And Renderer Parity Queue (Mar 21)
 
