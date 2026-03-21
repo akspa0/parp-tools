@@ -1559,7 +1559,12 @@ public class WorldScene : ISceneRenderer
             return false;
 
         float delta = ComputeBestSignedYawDeltaWithBasisFallback(candidateYaw, expectedYaw);
-        if (MathF.Abs(delta) < (2f * MathF.PI / 180f))
+
+        // The principal-axis solve is reliable for coarse basis recovery, but it is too noisy to
+        // drive small final yaw tweaks. Let MPRL remain authoritative unless the residual error is
+        // clearly larger than the "almost right" 5-10 degree band seen in runtime PM4 alignment.
+        const float minimumMeaningfulYawCorrectionRadians = 12f * MathF.PI / 180f;
+        if (MathF.Abs(delta) < minimumMeaningfulYawCorrectionRadians)
             return false;
 
         yawCorrectionRadians = delta;

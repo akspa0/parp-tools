@@ -9,6 +9,15 @@ using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Terrain;
 
+public readonly record struct WorldAssetReadStats(
+    long ReadRequests,
+    long FileCacheHits,
+    long ResolvedPathCacheHits,
+    long PathProbeAttempts,
+    long PathProbeResolutions,
+    long PathProbeMisses,
+    int ResolvedPathCacheCount);
+
 /// <summary>
 /// Centralized asset manager for world scene rendering.
 /// Ensures each model and texture is loaded exactly once into GPU memory,
@@ -45,6 +54,7 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, byte[]?> _fileDataCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _fileLru = new();
     private readonly Dictionary<string, LinkedListNode<string>> _fileLruMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _resolvedReadPathCache = new(StringComparer.OrdinalIgnoreCase);
     private const int MaxFileCached = 1000; // Max raw file entries cached
 
     // Deferred world-asset loading keeps tile streaming responsive.
@@ -67,6 +77,13 @@ public class WorldAssetManager : IDisposable
     public int FileCacheCount => _fileDataCache.Count;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
 
+    private long _fileReadRequests;
+    private long _fileReadCacheHits;
+    private long _resolvedPathCacheHits;
+    private long _pathProbeAttempts;
+    private long _pathProbeResolutions;
+    private long _pathProbeMisses;
+
     public WorldAssetManager(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null)
     {
         _gl = gl;
@@ -79,6 +96,16 @@ public class WorldAssetManager : IDisposable
     {
         _buildVersion = buildVersion;
     }
+
+    public WorldAssetReadStats GetReadStats()
+        => new(
+            _fileReadRequests,
+            _fileReadCacheHits,
+            _resolvedPathCacheHits,
+            _pathProbeAttempts,
+            _pathProbeResolutions,
+            _pathProbeMisses,
+            _resolvedReadPathCache.Count);
 
     /// <summary>
     /// Pre-register all model names referenced by the map so we know the full asset set.
@@ -405,71 +432,39 @@ public class WorldAssetManager : IDisposable
     public byte[]? ReadFileData(string virtualPath)
     {
         string key = NormalizeKey(virtualPath);
+        _fileReadRequests++;
         if (_fileDataCache.TryGetValue(key, out var cached))
+        {
+            _fileReadCacheHits++;
             return cached;
+        }
 
-        byte[]? data = _dataSource?.ReadFile(virtualPath);
-        if (data == null)
-            data = _dataSource?.ReadFile(key);
+        byte[]? data = null;
+        string? resolvedPath = null;
 
-        // MDL/MDX/M2 aliases appear in different client eras and listfiles.
+        if (_resolvedReadPathCache.TryGetValue(key, out string? cachedResolvedPath))
+        {
+            _resolvedPathCacheHits++;
+            data = TryReadCandidate(cachedResolvedPath, out resolvedPath);
+        }
+
         if (data == null)
         {
-            foreach (string altPath in GetAlternateModelPaths(key))
+            foreach (string candidate in EnumerateReadCandidates(key))
             {
-                data = _dataSource?.ReadFile(altPath);
+                if (!string.IsNullOrWhiteSpace(cachedResolvedPath) && candidate.Equals(cachedResolvedPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                data = TryReadCandidate(candidate, out resolvedPath);
                 if (data != null)
                     break;
             }
         }
 
-        // Alpha 0.5.3: WMO/WDT/WDL files are stored as .ext.mpq — try appending .mpq
-        if (data == null)
-        {
-            data = _dataSource?.ReadFile(virtualPath + ".mpq");
-            if (data == null)
-                data = _dataSource?.ReadFile(key + ".mpq");
-        }
-
-        // Fallback: try stripping leading path components (e.g., "World\" prefix)
-        // Some MDNM entries may have paths that don't match the MPQ internal structure
-        if (data == null)
-        {
-            // Try just the filename
-            string fileName = Path.GetFileName(key);
-            if (!string.IsNullOrEmpty(fileName) && fileName != key)
-            {
-                data = _dataSource?.ReadFile(fileName);
-            }
-
-            // Try with common prefixes
-            if (data == null)
-            {
-                string[] prefixes = { "Creature\\", "World\\", "Environment\\" };
-                foreach (var prefix in prefixes)
-                {
-                    if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                    {
-                        data = _dataSource?.ReadFile(prefix + key);
-                        if (data != null) break;
-                        // Also try prefix + just filename
-                        data = _dataSource?.ReadFile(prefix + fileName);
-                        if (data != null) break;
-                    }
-                }
-            }
-        }
-
-        if (data == null)
-        {
-            string? resolvedPath = TryResolveFromFileSet(key);
-            if (!string.IsNullOrWhiteSpace(resolvedPath))
-            {
-                data = _dataSource?.ReadFile(resolvedPath);
-                if (data != null)
-                    ViewerLog.Trace($"[WorldAssetManager] Resolved '{virtualPath}' via file set: '{resolvedPath}'");
-            }
-        }
+        if (data != null && !string.IsNullOrWhiteSpace(resolvedPath))
+            _resolvedReadPathCache[key] = NormalizeKey(resolvedPath);
+        else if (data == null)
+            _pathProbeMisses++;
 
         _fileDataCache[key] = data;
         TouchLru(_fileLru, _fileLruMap, key);
@@ -575,6 +570,82 @@ public class WorldAssetManager : IDisposable
         yield return ".mdx";
         yield return ".mdl";
         yield return ".m2";
+    }
+
+    private byte[]? TryReadCandidate(string candidate, out string? resolvedPath)
+    {
+        resolvedPath = candidate;
+        _pathProbeAttempts++;
+
+        byte[]? data = _dataSource?.ReadFile(candidate);
+        if (data != null)
+        {
+            _pathProbeResolutions++;
+            return data;
+        }
+
+        resolvedPath = null;
+        return null;
+    }
+
+    private IEnumerable<string> EnumerateReadCandidates(string normalizedPath)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        bool TryYield(string? candidate, out string yielded)
+        {
+            yielded = string.Empty;
+            if (string.IsNullOrWhiteSpace(candidate))
+                return false;
+
+            string normalizedCandidate = NormalizeKey(candidate);
+            if (!seen.Add(normalizedCandidate))
+                return false;
+
+            yielded = normalizedCandidate;
+            return true;
+        }
+
+        if (TryYield(normalizedPath, out string exactPath))
+            yield return exactPath;
+
+        string? resolvedFileSetPath = TryResolveFromFileSet(normalizedPath);
+        if (TryYield(resolvedFileSetPath, out string resolvedExactPath))
+            yield return resolvedExactPath;
+
+        foreach (string alternatePath in GetAlternateModelPaths(normalizedPath))
+        {
+            if (TryYield(alternatePath, out string yieldedAlternatePath))
+                yield return yieldedAlternatePath;
+
+            string? resolvedAlternatePath = TryResolveFromFileSet(alternatePath);
+            if (TryYield(resolvedAlternatePath, out string yieldedResolvedAlternatePath))
+                yield return yieldedResolvedAlternatePath;
+        }
+
+        string fileName = Path.GetFileName(normalizedPath);
+        if (!string.IsNullOrWhiteSpace(fileName) && !fileName.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            if (TryYield(fileName, out string yieldedFileName))
+                yield return yieldedFileName;
+
+            string? resolvedFileName = TryResolveFromFileSet(fileName);
+            if (TryYield(resolvedFileName, out string yieldedResolvedFileName))
+                yield return yieldedResolvedFileName;
+
+            string[] prefixes = { "Creature\\", "World\\", "Environment\\" };
+            foreach (string prefix in prefixes)
+            {
+                if (normalizedPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (TryYield(prefix + normalizedPath, out string yieldedPrefixedPath))
+                    yield return yieldedPrefixedPath;
+
+                if (TryYield(prefix + fileName, out string yieldedPrefixedFileName))
+                    yield return yieldedPrefixedFileName;
+            }
+        }
     }
 
     private bool TryDequeuePendingLoad(out bool isMdx, out string? key)
@@ -864,18 +935,29 @@ public class WorldAssetManager : IDisposable
         if (_dataSource is not MpqDataSource mpqDataSource)
             return;
 
-        mpqDataSource.PrefetchFile(normalizedKey);
+        string canonicalModelPath = ResolveCanonicalModelPath(normalizedKey);
+        mpqDataSource.PrefetchFile(canonicalModelPath);
 
-        foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
-            mpqDataSource.PrefetchFile(alternatePath);
-
-        foreach (string skinCandidate in WarcraftNetM2Adapter.BuildSkinCandidates(normalizedKey))
-            mpqDataSource.PrefetchFile(skinCandidate);
-
-        foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
+        if (canonicalModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
         {
-            foreach (string skinCandidate in WarcraftNetM2Adapter.BuildSkinCandidates(alternatePath))
-                mpqDataSource.PrefetchFile(skinCandidate);
+            foreach (string alternatePath in GetAlternateModelPaths(normalizedKey))
+            {
+                string resolvedAlternatePath = ResolveCanonicalModelPath(alternatePath);
+                if (!resolvedAlternatePath.Equals(canonicalModelPath, StringComparison.OrdinalIgnoreCase))
+                    mpqDataSource.PrefetchFile(resolvedAlternatePath);
+            }
+        }
+
+        string? bestSkinPath = ResolveBestSkinPath(canonicalModelPath);
+        if (!string.IsNullOrWhiteSpace(bestSkinPath))
+        {
+            mpqDataSource.PrefetchFile(bestSkinPath);
+            return;
+        }
+
+        foreach (string skinCandidate in WarcraftNetM2Adapter.BuildSkinCandidates(canonicalModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            mpqDataSource.PrefetchFile(skinCandidate);
         }
     }
 

@@ -2,6 +2,38 @@
 
 ### Mar 21, 2026 - PM4 Per-Object Bounds Overlay
 
+### Mar 21, 2026 - PM4 Small-Yaw Correction Clamp
+
+- Follow-up after user runtime report that PM4 objects were now almost correct but still carried a coherent `5..10` degree vertical-axis offset.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- `TryComputeWorldYawCorrectionRadians(...)` no longer applies tiny geometry-derived residual yaw corrections.
+	- the CK24 world-yaw correction threshold moved from `2°` to `12°` so principal-axis noise does not override near-correct MPRL rotation.
+- Why this is narrower than a raw-angle constant rewrite:
+	- the PM4 repo tooling and format notes still treat MPRL `Unk04` / low-16 rotation as a standard `360 * value / 65536` angle.
+	- the likely over-correction seam was the viewer-only continuous principal-axis fit, not the packed-angle scale itself.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- no automated tests added or run
+	- no runtime signoff yet on the affected PM4 objects after this clamp
+
+### Mar 21, 2026 - Archive I/O Performance Slice
+
+- Reduced confirmed archive/path-resolution waste on the active MPQ-era viewer path without changing renderer or terrain behavior.
+- `src/MdxViewer/DataSources/MpqDataSource.cs`
+	- added `MpqDataSourceStats` instrumentation for `FileExists`, `ReadFile`, raw-byte cache behavior, and prefetch queue / worker timing
+	- preserved the separate read-only prefetch MPQ workers, but now measures queue wait and worker read time explicitly
+	- removed redundant normalized-vs-original duplicate MPQ existence probes in the MPQ-backed path
+- `src/MdxViewer/Terrain/WorldAssetManager.cs`
+	- added `WorldAssetReadStats` plus a resolved-read-path cache for world asset loads
+	- `ReadFileData(...)` now caches the winning fallback path and no longer retries duplicate lowercase or `.mpq` forms that `MpqDataSource` already resolves internally
+	- prefetch now warms the canonical model path and strongest `.skin` candidate first instead of broadly spraying alias permutations on every queued asset
+- `src/MdxViewer/ViewerApp.cs`
+	- world stats panel now shows asset-read probe counters plus MPQ read/prefetch counters so runtime profiling has exact signal instead of guesswork
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing solution warnings
+	- no automated tests added or run
+	- no runtime real-data validation yet on fixed MPQ-era datasets, so streaming-latency benefit is still instrumentation-backed but unproven in a live scene
+
 - Added a PM4-specific bounds overlay in `src/MdxViewer/Terrain/WorldScene.cs` so PM4 object-part AABBs are visible in the main scene instead of only existing implicitly for picking/culling/debug text.
 - Added a matching `PM4 Bounds` toggle in `src/MdxViewer/ViewerApp.cs` beside the existing PM4 MPRL and centroid toggles.
 - Current behavior:

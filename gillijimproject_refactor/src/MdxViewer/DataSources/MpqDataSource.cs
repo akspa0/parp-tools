@@ -1,10 +1,50 @@
 using MdxViewer.Logging;
 using WoWMapConverter.Core.Services;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace MdxViewer.DataSources;
+
+public readonly record struct MpqDataSourceStats(
+    long FileExistsRequests,
+    long FileExistsCacheHits,
+    long FileExistsLooseHits,
+    long FileExistsAlphaHits,
+    long FileExistsMpqHits,
+    long FileExistsCanonicalHits,
+    long FileExistsMisses,
+    long ReadRequests,
+    long ReadCacheHits,
+    long ReadCacheMisses,
+    long ReadLooseHits,
+    long ReadAlphaHits,
+    long ReadMpqHits,
+    long ReadMisses,
+    double AverageUncachedReadMs,
+    long PrefetchRequests,
+    long PrefetchCacheSkips,
+    long PrefetchDuplicateSkips,
+    long PrefetchEnqueued,
+    long PrefetchCompleted,
+    long PrefetchReadHits,
+    long PrefetchReadMisses,
+    double AveragePrefetchQueueMs,
+    double AveragePrefetchReadMs,
+    int ReadCacheEntryCount,
+    long ReadCacheBytes,
+    int PrefetchQueueDepth);
+
+internal readonly record struct PrefetchRequest(string Path, long EnqueuedTimestamp);
+
+internal enum MpqReadResolutionKind
+{
+    Loose,
+    AlphaWrapper,
+    Mpq,
+    Miss,
+}
 
 /// <summary>
 /// Data source backed by MPQ archives + loose files on disk.
@@ -61,7 +101,7 @@ public class MpqDataSource : IDataSource
     private const int MaxReadCacheEntries = 4096;
     private const long MaxReadCacheBytes = 256L * 1024 * 1024;
 
-    private readonly ConcurrentQueue<string> _prefetchQueue = new();
+    private readonly ConcurrentQueue<PrefetchRequest> _prefetchQueue = new();
     private readonly HashSet<string> _prefetchQueued = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _prefetchLock = new();
     private SemaphoreSlim? _prefetchSignal;
@@ -70,12 +110,94 @@ public class MpqDataSource : IDataSource
     private List<NativeMpqService>? _prefetchMpqServices;
     private const int PrefetchWorkerCount = 2;
 
+    private long _fileExistsRequests;
+    private long _fileExistsCacheHits;
+    private long _fileExistsLooseHits;
+    private long _fileExistsAlphaHits;
+    private long _fileExistsMpqHits;
+    private long _fileExistsCanonicalHits;
+    private long _fileExistsMisses;
+    private long _readRequests;
+    private long _readCacheHits;
+    private long _readCacheMisses;
+    private long _readLooseHits;
+    private long _readAlphaHits;
+    private long _readMpqHits;
+    private long _readMisses;
+    private long _uncachedReadCount;
+    private long _uncachedReadTicks;
+    private long _prefetchRequests;
+    private long _prefetchCacheSkips;
+    private long _prefetchDuplicateSkips;
+    private long _prefetchEnqueued;
+    private long _prefetchCompleted;
+    private long _prefetchReadHits;
+    private long _prefetchReadMisses;
+    private long _prefetchQueueTicks;
+    private long _prefetchReadTicks;
+
     public string GamePath => _gamePath;
     public IReadOnlyList<string> OverlayRoots => _overlayRoots;
     public string Name => _overlayRoots.Count == 0
         ? $"Game: {Path.GetFileName(_gamePath)}"
         : $"Game: {Path.GetFileName(_gamePath)} + {_overlayRoots.Count} loose overlay(s)";
     public bool IsLoaded => _loaded;
+
+    public MpqDataSourceStats GetStatsSnapshot()
+    {
+        int readCacheEntryCount;
+        long readCacheBytes;
+        lock (_readCacheLock)
+        {
+            readCacheEntryCount = _readCache.Count;
+            readCacheBytes = _readCacheBytes;
+        }
+
+        long uncachedReadCount = Interlocked.Read(ref _uncachedReadCount);
+        long uncachedReadTicks = Interlocked.Read(ref _uncachedReadTicks);
+        long prefetchCompleted = Interlocked.Read(ref _prefetchCompleted);
+        long prefetchQueueTicks = Interlocked.Read(ref _prefetchQueueTicks);
+        long prefetchReadTicks = Interlocked.Read(ref _prefetchReadTicks);
+
+        double avgUncachedReadMs = uncachedReadCount > 0
+            ? (uncachedReadTicks * 1000.0) / Stopwatch.Frequency / uncachedReadCount
+            : 0.0;
+        double avgPrefetchQueueMs = prefetchCompleted > 0
+            ? (prefetchQueueTicks * 1000.0) / Stopwatch.Frequency / prefetchCompleted
+            : 0.0;
+        double avgPrefetchReadMs = prefetchCompleted > 0
+            ? (prefetchReadTicks * 1000.0) / Stopwatch.Frequency / prefetchCompleted
+            : 0.0;
+
+        return new MpqDataSourceStats(
+            Interlocked.Read(ref _fileExistsRequests),
+            Interlocked.Read(ref _fileExistsCacheHits),
+            Interlocked.Read(ref _fileExistsLooseHits),
+            Interlocked.Read(ref _fileExistsAlphaHits),
+            Interlocked.Read(ref _fileExistsMpqHits),
+            Interlocked.Read(ref _fileExistsCanonicalHits),
+            Interlocked.Read(ref _fileExistsMisses),
+            Interlocked.Read(ref _readRequests),
+            Interlocked.Read(ref _readCacheHits),
+            Interlocked.Read(ref _readCacheMisses),
+            Interlocked.Read(ref _readLooseHits),
+            Interlocked.Read(ref _readAlphaHits),
+            Interlocked.Read(ref _readMpqHits),
+            Interlocked.Read(ref _readMisses),
+            avgUncachedReadMs,
+            Interlocked.Read(ref _prefetchRequests),
+            Interlocked.Read(ref _prefetchCacheSkips),
+            Interlocked.Read(ref _prefetchDuplicateSkips),
+            Interlocked.Read(ref _prefetchEnqueued),
+            prefetchCompleted,
+            Interlocked.Read(ref _prefetchReadHits),
+            Interlocked.Read(ref _prefetchReadMisses),
+            avgPrefetchQueueMs,
+            avgPrefetchReadMs,
+            readCacheEntryCount,
+            readCacheBytes,
+            _prefetchQueue.Count);
+    }
 
     public MpqDataSource(string gamePath, string? listfilePath = null, IEnumerable<string>? overlayRoots = null)
     {
@@ -394,37 +516,57 @@ public class MpqDataSource : IDataSource
         if (string.IsNullOrWhiteSpace(virtualPath))
             return false;
 
+        Interlocked.Increment(ref _fileExistsRequests);
         var normalized = virtualPath.Replace('/', '\\');
 
         lock (_existsCacheLock)
         {
             if (_existsCache.TryGetValue(normalized, out bool cached))
+            {
+                Interlocked.Increment(ref _fileExistsCacheHits);
                 return cached;
+            }
         }
 
         // Check loose files first (faster), then alpha MPQ cache, then file set, then StormLib
         if (TryResolveLoosePath(virtualPath) != null)
+        {
+            Interlocked.Increment(ref _fileExistsLooseHits);
             return CacheExistsResult(normalized, true);
+        }
 
         // Alpha 0.5.3: .ext.MPQ archives (WMO, WDT, WDL) are indexed in _alphaMpqCache
-        if (_alphaMpqCache.ContainsKey(normalized) || _alphaMpqCache.ContainsKey(virtualPath))
+        if (_alphaMpqCache.ContainsKey(normalized))
+        {
+            Interlocked.Increment(ref _fileExistsAlphaHits);
             return CacheExistsResult(normalized, true);
+        }
 
         // Also try with .mpq suffix (e.g. "development.wdt" → "development.wdt.mpq" in cache)
-        if (_alphaMpqCache.ContainsKey(normalized + ".mpq") || _alphaMpqCache.ContainsKey(virtualPath + ".mpq"))
+        if (_alphaMpqCache.ContainsKey(normalized + ".mpq"))
+        {
+            Interlocked.Increment(ref _fileExistsAlphaHits);
             return CacheExistsResult(normalized, true);
+        }
 
         // Check direct path in loaded MPQ archives.
-        if (_mpq.FileExists(normalized) || _mpq.FileExists(virtualPath))
+        if (_mpq.FileExists(normalized))
+        {
+            Interlocked.Increment(ref _fileExistsMpqHits);
             return CacheExistsResult(normalized, true);
+        }
 
         // Try canonical file-set spelling/casing as a fallback probe.
         if (_canonicalPathMap.TryGetValue(normalized, out string? canonicalPath))
         {
             if (_mpq.FileExists(canonicalPath))
+            {
+                Interlocked.Increment(ref _fileExistsCanonicalHits);
                 return CacheExistsResult(normalized, true);
+            }
         }
 
+        Interlocked.Increment(ref _fileExistsMisses);
         return CacheExistsResult(normalized, false);
     }
 
@@ -466,28 +608,41 @@ public class MpqDataSource : IDataSource
         if (string.IsNullOrWhiteSpace(normalized))
             return;
 
+        Interlocked.Increment(ref _prefetchRequests);
         if (TryGetCachedRead(normalized, out _))
+        {
+            Interlocked.Increment(ref _prefetchCacheSkips);
             return;
+        }
 
         EnsurePrefetchWorkers();
 
         lock (_prefetchLock)
         {
             if (!_prefetchQueued.Add(normalized))
+            {
+                Interlocked.Increment(ref _prefetchDuplicateSkips);
                 return;
+            }
         }
 
-        _prefetchQueue.Enqueue(normalized);
+        Interlocked.Increment(ref _prefetchEnqueued);
+        _prefetchQueue.Enqueue(new PrefetchRequest(normalized, Stopwatch.GetTimestamp()));
         _prefetchSignal?.Release();
     }
 
     public byte[]? ReadFile(string virtualPath)
     {
+        Interlocked.Increment(ref _readRequests);
         string normalized = virtualPath.Replace('/', '\\');
         if (TryGetCachedRead(normalized, out var cached))
+        {
+            Interlocked.Increment(ref _readCacheHits);
             return cached;
+        }
 
-        var data = ReadFileUncached(normalized, _mpq, logFailures: true);
+        Interlocked.Increment(ref _readCacheMisses);
+        var data = ReadFileUncached(normalized, _mpq, logFailures: true, isPrefetch: false);
         CacheRead(normalized, data);
         return data;
     }
@@ -682,13 +837,52 @@ public class MpqDataSource : IDataSource
         }
     }
 
-    private byte[]? ReadFileUncached(string virtualPath, NativeMpqService mpqService, bool logFailures)
+    private byte[]? CompleteRead(MpqReadResolutionKind resolutionKind, byte[]? data, long startTimestamp, bool isPrefetch)
     {
+        long elapsedTicks = Stopwatch.GetTimestamp() - startTimestamp;
+
+        if (isPrefetch)
+        {
+            Interlocked.Increment(ref _prefetchCompleted);
+            Interlocked.Add(ref _prefetchReadTicks, elapsedTicks);
+            if (resolutionKind == MpqReadResolutionKind.Miss)
+                Interlocked.Increment(ref _prefetchReadMisses);
+            else
+                Interlocked.Increment(ref _prefetchReadHits);
+        }
+        else
+        {
+            Interlocked.Increment(ref _uncachedReadCount);
+            Interlocked.Add(ref _uncachedReadTicks, elapsedTicks);
+        }
+
+        switch (resolutionKind)
+        {
+            case MpqReadResolutionKind.Loose:
+                Interlocked.Increment(ref _readLooseHits);
+                break;
+            case MpqReadResolutionKind.AlphaWrapper:
+                Interlocked.Increment(ref _readAlphaHits);
+                break;
+            case MpqReadResolutionKind.Mpq:
+                Interlocked.Increment(ref _readMpqHits);
+                break;
+            case MpqReadResolutionKind.Miss:
+                Interlocked.Increment(ref _readMisses);
+                break;
+        }
+
+        return data;
+    }
+
+    private byte[]? ReadFileUncached(string virtualPath, NativeMpqService mpqService, bool logFailures, bool isPrefetch)
+    {
+        long startTimestamp = Stopwatch.GetTimestamp();
         var loosePath = TryResolveLoosePath(virtualPath);
         if (loosePath != null)
         {
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → loose file: {loosePath}");
-            return File.ReadAllBytes(loosePath);
+            return CompleteRead(MpqReadResolutionKind.Loose, File.ReadAllBytes(loosePath), startTimestamp, isPrefetch);
         }
 
         string? alphaMpqPath = null;
@@ -705,7 +899,7 @@ public class MpqDataSource : IDataSource
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ: {alphaMpqPath}");
             var alphaData = ReadFromAlphaMpq(alphaMpqPath, alphaMpqKey);
             if (alphaData != null)
-                return alphaData;
+                return CompleteRead(MpqReadResolutionKind.AlphaWrapper, alphaData, startTimestamp, isPrefetch);
 
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
         }
@@ -714,13 +908,13 @@ public class MpqDataSource : IDataSource
         if (mpqData != null)
         {
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → standard MPQ ({mpqData.Length} bytes)");
-            return mpqData;
+            return CompleteRead(MpqReadResolutionKind.Mpq, mpqData, startTimestamp, isPrefetch);
         }
 
         if (logFailures)
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → NOT FOUND (loose={_looseRoots.Count} roots, alphaMpq={_alphaMpqCache.ContainsKey(virtualPath)})");
 
-        return null;
+        return CompleteRead(MpqReadResolutionKind.Miss, null, startTimestamp, isPrefetch);
     }
 
     private void EnsurePrefetchWorkers()
@@ -761,15 +955,18 @@ public class MpqDataSource : IDataSource
                 break;
             }
 
-            while (_prefetchQueue.TryDequeue(out var normalizedPath))
+            while (_prefetchQueue.TryDequeue(out var request))
             {
+                string normalizedPath = request.Path;
                 lock (_prefetchLock)
                     _prefetchQueued.Remove(normalizedPath);
+
+                Interlocked.Add(ref _prefetchQueueTicks, Stopwatch.GetTimestamp() - request.EnqueuedTimestamp);
 
                 if (TryGetCachedRead(normalizedPath, out _))
                     continue;
 
-                var data = ReadFileUncached(normalizedPath, mpqService, logFailures: false);
+                var data = ReadFileUncached(normalizedPath, mpqService, logFailures: false, isPrefetch: true);
                 CacheRead(normalizedPath, data);
             }
         }

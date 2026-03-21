@@ -11,6 +11,32 @@ Working branch is now reset in the main tree, not only in side worktrees.
 
 ### M2 Material Parity Slice: Explicit Env-Map + UV Selector Recovery (Mar 21)
 
+### Archive I/O Performance Slice: Read-Path Probe Reduction + Useful Prefetch Instrumentation (Mar 21)
+
+- Confirmed hot seam on the active viewer path:
+	- `WorldAssetManager.ReadFileData(...)` was still issuing repeated alias/fallback `ReadFile(...)` probes on top of `MpqDataSource`, including duplicate lowercase and `.mpq` retries that the MPQ data source already handled internally through case-insensitive normalization and Alpha wrapper resolution.
+	- `MpqDataSource` had a raw-byte cache and worker prefetch path already, but it did not expose exact counters for direct read cache behavior, resolution source, or prefetch queue latency.
+- Current implementation change:
+	- `MpqDataSource` now exposes precise archive-I/O counters through `MpqDataSourceStats`:
+		- `FileExists` request/cache/source counters
+		- `ReadFile` request/cache/source counters (`loose`, `alpha wrapper`, `MPQ`, `miss`)
+		- average uncached read latency
+		- prefetch enqueue/dedup/cache-skip/completion counters plus average queue-wait and worker-read latency
+	- `WorldAssetManager` now exposes `WorldAssetReadStats` and caches the winning resolved asset path per requested model/WMO read so later retries can jump straight to the known-good candidate instead of replaying the whole fallback chain.
+	- Redundant work removed from the active world-asset path:
+		- removed duplicate lowercase retry in `WorldAssetManager.ReadFileData(...)`
+		- removed duplicate `.mpq` retry there for Alpha wrapper reads because `MpqDataSource.ReadFile(...)` already resolves the wrapper path directly
+		- deduped candidate enumeration before trying alternates / stripped-filename / prefixed fallbacks
+	- Prefetch policy is now narrower and more scene-aligned:
+		- prefetch uses the canonical resolved model path first
+		- if that canonical path is known, it no longer fans out across all extension aliases
+		- M2 prefetch now warms the best resolved `.skin` path first and only falls back to generic skin candidates when no indexed best match exists
+	- Viewer terrain/world stats panel now surfaces both `WorldAssetManager` probe counters and `MpqDataSource` cache/prefetch counters for runtime measurement.
+- Validation status for this slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run for this slice.
+	- no runtime real-data validation has been run yet on fixed MPQ-era data; do not claim generalized scene-streaming improvement from build success alone.
+
 - The active M2-family renderer gap was confirmed to be material-state flattening inside `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`, not missing shader hooks in `ModelRenderer` first.
 - Current landed slice recovers one explicit source seam instead of adding new transparency heuristics:
 	- M2 skin batch metadata now preserves `textureCoordComboIndex` from raw `.skin` data and merges it back into the Warcraft.NET-derived skin path.
@@ -54,6 +80,20 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- no runtime real-data signoff yet on the guardtower staircase case; do not claim closure from build success alone
 
 ### PM4 Bounds Overlay Follow-Up: Per-Object PM4 Bounds Are Now Visible In-Scene (Mar 21)
+
+### PM4 Yaw Follow-Up: Small Principal-Axis Corrections No Longer Override Near-Correct MPRL Rotation (Mar 21)
+
+- Latest runtime user feedback on PM4 overlay alignment: objects were no longer wildly mis-rotated, but many still looked consistently off by roughly `5..10` degrees around the vertical axis.
+- Root cause narrowed in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- PM4 MPRL yaw decode was already being rebased and then compared against a geometry-derived principal-axis yaw.
+	- the follow-up CK24 world-yaw correction stage was still applying small residual deltas (`>= 2°`), which is too aggressive for irregular object footprints and can turn "almost correct" PM4 orientation into a visible small bias.
+- Current correction:
+	- CK24 continuous yaw correction is now treated as a coarse recovery step only.
+	- residual yaw deltas below `12°` are ignored, leaving MPRL-derived orientation authoritative for near-correct objects.
+- Validation status for this exact follow-up:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run for this follow-up.
+	- no runtime real-data signoff yet after the threshold change; do not claim PM4 rotation closure from build success alone.
 
 - Latest PM4 alignment feedback showed MPRL anchors lining up while other PM4 object extents still felt offset or nested inside the wrong container, making click-and-compare work too opaque.
 - Current correction in `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp.cs`:

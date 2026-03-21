@@ -10,6 +10,22 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 
 ### Explicit Base-Build Selection Recovery (Mar 21)
 
+### Archive I/O Performance Slice: Read-Path Probe Reduction + Prefetch Signal (Mar 21)
+
+- Confirmed archive/path hot seam before editing:
+   - `WorldAssetManager.ReadFileData(...)` still replayed alias and fallback probes after the viewer already had `MpqDataSource` normalization, Alpha-wrapper resolution, raw-byte caching, and file-set indexes.
+   - duplicate lowercase and `.mpq` retries in that method were confirmed redundant for the active MPQ data source path.
+- Current code change:
+   - `MpqDataSource` now exposes `MpqDataSourceStats` with exact counters for `FileExists`, `ReadFile`, read-cache behavior, read-source buckets (`loose`, `alpha wrapper`, `MPQ`, `miss`), and prefetch queue/read timing.
+   - `WorldAssetManager` now exposes `WorldAssetReadStats` and caches the winning resolved read path for each requested asset key so retries do not replay the full candidate chain.
+   - `WorldAssetManager.ReadFileData(...)` now dedupes candidate probes and removes the duplicate lowercase and `.mpq` retries that the MPQ data source already handled.
+   - model prefetch now warms the canonical resolved root asset first and prefers the best indexed `.skin` path instead of fanning out across all alias + skin permutations by default.
+   - `ViewerApp` world stats now surface these counters directly for runtime measurement.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this slice.
+   - no automated tests were added or run.
+   - no runtime real-data validation has been run yet; do not claim scene-streaming improvement from build success alone.
+
 - `ViewerApp` MPQ load flow no longer treats folder-path inference as the only build-selection mechanism.
 - Current viewer behavior:
    - `Open Game Folder (MPQ)...` now opens a build-selection dialog before MPQ load.
@@ -125,6 +141,20 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - no runtime real-data signoff yet on the guardtower / clockwise-staircase PM4 case; do not claim closure from build success alone
 
 ### PM4 Bounds Follow-Up: Per-Object PM4 Bounds Can Now Be Rendered In The Scene (Mar 21)
+
+### PM4 Yaw Follow-Up: Small Principal-Axis Corrections Are Now Suppressed (Mar 21)
+
+- Runtime user feedback after the earlier PM4 yaw-basis and continuous-yaw-correction work: many PM4 objects were now close, but still looked coherently off by about `5..10` degrees.
+- Current viewer-side correction:
+   - `WorldScene.TryComputeWorldYawCorrectionRadians(...)` now treats the geometry-derived CK24 yaw correction as coarse-only recovery.
+   - residual deltas below `12°` are ignored so MPRL-derived orientation remains authoritative when the object is already near-correct.
+- Reasoning:
+   - PM4 principal-axis yaw from reconstructed geometry is useful for fixing large basis mistakes.
+   - it is not reliable enough to drive small final alignment tweaks across irregular object footprints.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change.
+   - no automated tests were added or run.
+   - no runtime real-data signoff yet after the threshold change.
 
 - PM4 object bounds already existed internally for culling, picking, and selected-object debug output, but they were not visible in the world, which made nested-object extent triage much harder.
 - Current fix:
