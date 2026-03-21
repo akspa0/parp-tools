@@ -1,0 +1,293 @@
+using System.Numerics;
+using ImGuiNET;
+using MdxViewer.Rendering;
+using MdxViewer.Terrain;
+
+namespace MdxViewer;
+
+/// <summary>
+/// Partial class containing status and minimap windows.
+/// </summary>
+public partial class ViewerApp
+{
+    private void DrawStatusBar()
+    {
+        var io = ImGui.GetIO();
+        var windowHeight = io.DisplaySize.Y;
+        ImGui.SetNextWindowPos(new Vector2(0, windowHeight - 24));
+        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, 24));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 4));
+        if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
+        {
+            ImGui.Text(_statusMessage);
+            if (!string.IsNullOrEmpty(_currentAreaName))
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
+            }
+
+            if (_terrainManager != null || _vlmTerrainManager != null)
+            {
+                var pos = _camera.Position;
+                float wowX = WoWConstants.MapOrigin - pos.Y;
+                float wowY = WoWConstants.MapOrigin - pos.X;
+                float wowZ = pos.Z;
+                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})";
+                float coordWidth = ImGui.CalcTextSize(coordText).X;
+                float centerX = (io.DisplaySize.X - coordWidth) * 0.5f;
+                ImGui.SameLine(centerX);
+                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
+            }
+
+            string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
+            float textWidth = ImGui.CalcTextSize(fpsText).X;
+            ImGui.SameLine(io.DisplaySize.X - textWidth - 16);
+            var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
+                         : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
+                         : new Vector4(1f, 0.4f, 0.4f, 1f);
+            ImGui.TextColored(fpsColor, fpsText);
+        }
+        ImGui.End();
+        ImGui.PopStyleVar();
+    }
+
+    private void DrawMinimapWindow()
+    {
+        List<(int tx, int ty)>? existingTiles = null;
+        Func<int, int, bool>? isTileLoaded = null;
+        string? mapName = null;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            mapName = _terrainManager.MapName;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            mapName = _vlmTerrainManager.MapName;
+        }
+        else return;
+
+        var io = ImGui.GetIO();
+
+        float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
+        ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+
+        if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
+            ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+        {
+            ImGui.End();
+            return;
+        }
+
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+        int ctX = (int)MathF.Floor(camTileX);
+        int ctY = (int)MathF.Floor(camTileY);
+
+        ImGui.Text($"Tile: ({ctX},{ctY})");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("-##minimapZoomOut"))
+            _minimapZoom = Math.Clamp(_minimapZoom + 0.5f, 1f, 32f);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+##minimapZoomIn"))
+            _minimapZoom = Math.Clamp(_minimapZoom - 0.5f, 1f, 32f);
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Zoom {_minimapZoom:F1}x");
+
+        float controlsHeight = ImGui.GetCursorPosY() + 8f;
+        float mapAvailableWidth = ImGui.GetContentRegionAvail().X;
+        float mapAvailableHeight = ImGui.GetContentRegionAvail().Y - 4f;
+        float mapSize = MathF.Max(64f, MathF.Min(mapAvailableWidth, mapAvailableHeight));
+
+        var cursorPos = ImGui.GetCursorScreenPos();
+
+        if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
+        {
+            float wheel = io.MouseWheel;
+            if (wheel != 0)
+                _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+        }
+
+        MinimapHelpers.RenderMinimapContent(
+            cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+            camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+            out float viewMinTx, out float viewMinTy, out float cellSize);
+
+        ImGui.SetCursorScreenPos(cursorPos);
+        ImGui.InvisibleButton("##minimapInteraction", new Vector2(mapSize, mapSize));
+        bool isHovered = ImGui.IsItemHovered();
+        bool isActive = ImGui.IsItemActive();
+
+        var mousePos = ImGui.GetMousePos();
+
+        if (isHovered || isActive)
+        {
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _minimapDragging = true;
+                _minimapDragStart = mousePos;
+            }
+            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 delta = mousePos - _minimapDragStart;
+                if (delta.LengthSquared() > 0.01f)
+                {
+                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
+                    _minimapDragStart = mousePos;
+                }
+            }
+            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 delta = mousePos - _minimapDragStart;
+                if (delta.Length() <= 3f)
+                {
+                    float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+                    float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
+                    if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
+                    {
+                        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+                        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+                        _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
+                    }
+                }
+                _minimapDragging = false;
+            }
+        }
+        else if (_minimapDragging)
+        {
+            _minimapDragging = false;
+        }
+
+        ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
+
+        ImGui.End();
+    }
+
+    private void DrawFullscreenMinimap()
+    {
+        List<(int tx, int ty)>? existingTiles = null;
+        Func<int, int, bool>? isTileLoaded = null;
+        int loadedTileCount = 0;
+        string? mapName = null;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
+            mapName = _terrainManager.MapName;
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+            mapName = _vlmTerrainManager.MapName;
+        }
+        else return;
+
+        var io = ImGui.GetIO();
+        float mapSize = MathF.Min(io.DisplaySize.X * 0.8f, io.DisplaySize.Y * 0.8f);
+        float padding = (io.DisplaySize.X - mapSize) * 0.5f;
+        float topPadding = (io.DisplaySize.Y - mapSize) * 0.5f;
+
+        ImGui.SetNextWindowPos(Vector2.Zero);
+        ImGui.SetNextWindowSize(io.DisplaySize);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0, 0, 0, 0.85f));
+
+        if (ImGui.Begin("##FullscreenMinimap", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoScrollbar))
+        {
+            ImGui.SetCursorPos(new Vector2(padding, topPadding));
+            var cursorPos = ImGui.GetCursorScreenPos();
+
+            if (ImGui.IsWindowHovered())
+            {
+                float wheel = io.MouseWheel;
+                if (wheel != 0)
+                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+            }
+
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+
+            MinimapHelpers.RenderMinimapContent(
+                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+                out float viewMinTx, out float viewMinTy, out float cellSize);
+
+            ImGui.SetCursorPos(new Vector2(padding, topPadding));
+            ImGui.InvisibleButton("##fullscreenMinimapInteraction", new Vector2(mapSize, mapSize));
+            bool isHovered = ImGui.IsItemHovered();
+            bool isActive = ImGui.IsItemActive();
+
+            var mousePos = ImGui.GetMousePos();
+
+            if (isHovered || isActive)
+            {
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    _minimapDragging = true;
+                    _minimapDragStart = mousePos;
+                }
+                else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
+                {
+                    Vector2 delta = mousePos - _minimapDragStart;
+                    if (delta.LengthSquared() > 0.01f)
+                    {
+                        _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
+                        _minimapDragStart = mousePos;
+                    }
+                }
+                else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
+                {
+                    Vector2 delta = mousePos - _minimapDragStart;
+                    if (delta.Length() <= 3f)
+                    {
+                        float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+                        float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
+                        if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
+                        {
+                            float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+                            float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+                            _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
+                        }
+                    }
+                    _minimapDragging = false;
+                }
+            }
+            else if (_minimapDragging)
+            {
+                _minimapDragging = false;
+            }
+
+            ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
+            int ctX = (int)MathF.Floor(camTileX);
+            int ctY = (int)MathF.Floor(camTileY);
+            ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click to teleport");
+
+            if (_minimapPanOffset != Vector2.Zero)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Reset Pan"))
+                    _minimapPanOffset = Vector2.Zero;
+            }
+        }
+        ImGui.End();
+        ImGui.PopStyleColor();
+        ImGui.PopStyleVar();
+    }
+}

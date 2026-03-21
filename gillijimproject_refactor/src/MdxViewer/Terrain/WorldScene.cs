@@ -2230,24 +2230,30 @@ public class WorldScene : ISceneRenderer
 
     private static IEnumerable<Pm4PlanarTransform> EnumeratePlanarTransforms(bool useTileLocalCoordinates)
     {
-        // Always try the rigid transforms first. World-space PM4 can legitimately need a
-        // quarter-turn basis change, and testing only identity+swap forces those cases into
-        // mirrored solutions that reverse staircase / ramp handedness.
+        if (useTileLocalCoordinates)
+        {
+            // Tile-local PM4 already has an established south-west tile basis.
+            // Let the solver test only the non-swapped mirror set inside that basis;
+            // quarter-turn swap candidates were meant for world-space PM4 and can turn
+            // a whole tile into a coherent 90-degree rotation once tile indices move
+            // away from the origin.
+            yield return new Pm4PlanarTransform(false, true, true);
+            yield return new Pm4PlanarTransform(false, false, false);
+            yield return new Pm4PlanarTransform(false, true, false);
+            yield return new Pm4PlanarTransform(false, false, true);
+            yield break;
+        }
+
+        // World-space PM4 can legitimately need a quarter-turn basis change, so keep the
+        // full rigid set first and only fall back to mirrored candidates afterward.
         yield return new Pm4PlanarTransform(false, false, false);
         yield return new Pm4PlanarTransform(false, true, true);
         yield return new Pm4PlanarTransform(true, true, false);
         yield return new Pm4PlanarTransform(true, false, true);
-
-        // Tile-local PM4 still needs the reflected candidates because some files only align
-        // after the tile-origin remap plus a planar mirror. World-space data can also fall back
-        // to these, but they are enumerated after the rigid set and scored with a stronger penalty.
         yield return new Pm4PlanarTransform(true, false, false);
         yield return new Pm4PlanarTransform(false, true, false);
         yield return new Pm4PlanarTransform(false, false, true);
         yield return new Pm4PlanarTransform(true, true, true);
-
-        if (!useTileLocalCoordinates)
-            yield break;
     }
 
     private static float NearestPositionRefDistanceSquared(IReadOnlyList<MprlEntry> positionRefs, Vector3 world)

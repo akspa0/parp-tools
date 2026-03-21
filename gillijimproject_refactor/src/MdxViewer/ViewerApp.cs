@@ -122,10 +122,12 @@ public partial class ViewerApp : IDisposable
     private bool _showFileBrowser = true;
     private bool _showModelInfo = true;
     private bool _showTerrainControls = true;
+    private bool _hideUiChrome;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
+    private bool _useDockspaceUi = true;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
@@ -400,6 +402,7 @@ public partial class ViewerApp : IDisposable
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
+        ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
         _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
         _gl.Enable(EnableCap.DepthTest);
@@ -636,6 +639,7 @@ public partial class ViewerApp : IDisposable
     }
 
     private bool _mKeyWasPressed = false;
+    private bool _tabKeyWasPressed = false;
     private bool _leftArrowWasPressed = false;
     private bool _rightArrowWasPressed = false;
     private bool _spaceWasPressed = false;
@@ -667,6 +671,11 @@ public partial class ViewerApp : IDisposable
             _chunkClipboardCtrlCWasPressed = ctrlCDown;
             _chunkClipboardCtrlVWasPressed = ctrlVDown;
         }
+
+        bool tabPressed = kb.IsKeyPressed(Key.Tab);
+        if (!ImGui.GetIO().WantTextInput && tabPressed && !_tabKeyWasPressed)
+            _hideUiChrome = !_hideUiChrome;
+        _tabKeyWasPressed = tabPressed;
 
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
@@ -945,46 +954,51 @@ void main() {
 
     private void DrawUI()
     {
-        DrawMenuBar();
+        if (!_hideUiChrome)
+        {
+            DrawMenuBar();
 
-        // Top toolbar with visibility checkboxes (only when terrain is loaded)
-        if (_terrainManager != null || _vlmTerrainManager != null)
-            DrawToolbar();
+            // Top toolbar with visibility checkboxes (only when terrain is loaded)
+            if (_terrainManager != null || _vlmTerrainManager != null)
+                DrawToolbar();
 
-        // Fixed sidebar layout
-        if (_showLeftSidebar)
-            DrawLeftSidebar();
-        if (_showRightSidebar)
-            DrawRightSidebar();
+            if (_useDockspaceUi)
+                DrawDockspaceHost();
 
-        DrawStatusBar();
-        
+            if (_showLeftSidebar)
+                DrawLeftSidebar();
+            if (_showRightSidebar)
+                DrawRightSidebar();
+
+            DrawStatusBar();
+
+            // Asset Catalog (floating window)
+            _catalogView?.Draw();
+
+            // Log Viewer (floating window)
+            if (_showLogViewer)
+                DrawLogViewer();
+
+            // WDL Preview (floating window)
+            if (_showWdlPreview)
+                DrawWdlPreviewDialog();
+
+            // Minimap (floating window)
+            if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
+                DrawMinimapWindow();
+
+            // Perf (floating window)
+            if (_showPerfWindow)
+                DrawPerfWindow();
+
+            // PM4 alignment (floating window)
+            if (_showPm4AlignmentWindow)
+                DrawPm4AlignmentWindow();
+        }
+
         // Fullscreen minimap overlay (M key toggle)
         if (_fullscreenMinimap && (_worldScene != null || _vlmTerrainManager != null))
             DrawFullscreenMinimap();
-
-        // Asset Catalog (floating window)
-        _catalogView?.Draw();
-
-        // Log Viewer (floating window)
-        if (_showLogViewer)
-            DrawLogViewer();
-
-        // WDL Preview (floating window)
-        if (_showWdlPreview)
-            DrawWdlPreviewDialog();
-
-        // Minimap (floating window)
-        if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
-            DrawMinimapWindow();
-
-        // Perf (floating window)
-        if (_showPerfWindow)
-            DrawPerfWindow();
-
-        // PM4 alignment (floating window)
-        if (_showPm4AlignmentWindow)
-            DrawPm4AlignmentWindow();
 
         // Modal dialogs
         if (_showFolderInput)
@@ -1110,10 +1124,14 @@ void main() {
                 if (ImGui.MenuItem("Reset Camera"))
                     ResetCamera();
 
+                if (ImGui.MenuItem("Hide UI Chrome", "Tab", _hideUiChrome))
+                    _hideUiChrome = !_hideUiChrome;
+
                 ImGui.Separator();
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "", ref _showRightSidebar);
+                ImGui.MenuItem("Dock Panels", "", ref _useDockspaceUi);
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
@@ -1471,6 +1489,38 @@ void main() {
                 _statusMessage = $"Map GLB export failed: {ex.Message}";
             }
         }
+    }
+
+    private void DrawDockspaceHost()
+    {
+        var io = ImGui.GetIO();
+        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float dockHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        if (dockHeight <= 10f)
+            return;
+
+        ImGui.SetNextWindowPos(new Vector2(0f, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, dockHeight), ImGuiCond.Always);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar
+            | ImGuiWindowFlags.NoCollapse
+            | ImGuiWindowFlags.NoResize
+            | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.NoBringToFrontOnFocus
+            | ImGuiWindowFlags.NoNavFocus
+            | ImGuiWindowFlags.NoBackground;
+
+        if (ImGui.Begin("##MainDockspaceHost", flags))
+        {
+            uint dockspaceId = ImGui.GetID("MainDockspace");
+            ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.PassthruCentralNode);
+        }
+
+        ImGui.End();
+        ImGui.PopStyleVar(3);
     }
 
     private void RunMapGlbTilesExport()
@@ -3106,683 +3156,6 @@ void main() {
         return clone;
     }
 
-    private void DrawPerfWindow()
-    {
-        ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("Perf", ref _showPerfWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
-            return;
-        }
-
-        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (terrainRenderer == null)
-        {
-            ImGui.Text("No terrain loaded.");
-            ImGui.End();
-            return;
-        }
-
-        ImGui.Text($"Chunks: {terrainRenderer.ChunksRendered} rendered, {terrainRenderer.ChunksCulled} culled");
-        ImGui.TextDisabled("Stats are for the last terrain Render() call.");
-
-        ImGui.End();
-    }
-
-    private void DrawPm4AlignmentWindow()
-    {
-        if (_worldScene == null)
-        {
-            _showPm4AlignmentWindow = false;
-            return;
-        }
-
-        ImGui.SetNextWindowSize(new Vector2(430, 0), ImGuiCond.FirstUseEver);
-        if (!ImGui.Begin("PM4 Alignment", ref _showPm4AlignmentWindow, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.End();
-            return;
-        }
-
-        ImGui.TextWrapped("Object-local PM4 alignment only. Select one PM4 object, then adjust translation, rotation, and scale (including axis flips) on that object only.");
-        ImGui.TextDisabled("Global PM4 overlay transforms are no longer edited in this window.");
-        ImGui.TextDisabled("Use Overlay > Flip All Obj Y for map-wide Y mirror correction.");
-
-        ImGui.Text("Translation Step:");
-        if (ImGui.RadioButton("0.5u", MathF.Abs(_pm4TranslationStepUnits - 0.5f) < 0.001f))
-            _pm4TranslationStepUnits = 0.5f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("1u", MathF.Abs(_pm4TranslationStepUnits - 1f) < 0.001f))
-            _pm4TranslationStepUnits = 1f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("10u", MathF.Abs(_pm4TranslationStepUnits - 10f) < 0.001f))
-            _pm4TranslationStepUnits = 10f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("100u", MathF.Abs(_pm4TranslationStepUnits - 100f) < 0.001f))
-            _pm4TranslationStepUnits = 100f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("533.333u", MathF.Abs(_pm4TranslationStepUnits - 533.3333f) < 0.01f))
-            _pm4TranslationStepUnits = 533.3333f;
-
-        ImGui.Text("Rotation Step:");
-        if (ImGui.RadioButton("1 deg", MathF.Abs(_pm4RotationStepDegrees - 1f) < 0.001f))
-            _pm4RotationStepDegrees = 1f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("5 deg", MathF.Abs(_pm4RotationStepDegrees - 5f) < 0.001f))
-            _pm4RotationStepDegrees = 5f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("15 deg", MathF.Abs(_pm4RotationStepDegrees - 15f) < 0.001f))
-            _pm4RotationStepDegrees = 15f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("45 deg", MathF.Abs(_pm4RotationStepDegrees - 45f) < 0.001f))
-            _pm4RotationStepDegrees = 45f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("90 deg", MathF.Abs(_pm4RotationStepDegrees - 90f) < 0.001f))
-            _pm4RotationStepDegrees = 90f;
-
-        ImGui.Text("Scale Step:");
-        if (ImGui.RadioButton("0.01", MathF.Abs(_pm4ScaleStepUnits - 0.01f) < 0.0001f))
-            _pm4ScaleStepUnits = 0.01f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("0.1", MathF.Abs(_pm4ScaleStepUnits - 0.1f) < 0.0001f))
-            _pm4ScaleStepUnits = 0.1f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("0.25", MathF.Abs(_pm4ScaleStepUnits - 0.25f) < 0.0001f))
-            _pm4ScaleStepUnits = 0.25f;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("1.0", MathF.Abs(_pm4ScaleStepUnits - 1f) < 0.0001f))
-            _pm4ScaleStepUnits = 1f;
-
-        ImGui.Separator();
-
-        if (!_worldScene.HasSelectedPm4Object || !_worldScene.SelectedPm4ObjectKey.HasValue)
-        {
-            ImGui.TextDisabled("No PM4 object selected. Left-click PM4 geometry to pick an object.");
-            if (ImGui.Button("Clear PM4 Selection"))
-                _worldScene.ClearPm4ObjectSelection();
-            ImGui.SameLine();
-            if (ImGui.Button("Dump PM4 Objects JSON"))
-                ExportPm4ObjectsJson();
-            ImGui.End();
-            return;
-        }
-
-        var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
-        Vector3 selectedObjectTranslation = _worldScene.SelectedPm4ObjectTranslation;
-        Vector3 selectedObjectRotation = _worldScene.SelectedPm4ObjectRotationDegrees;
-        Vector3 selectedObjectScale = _worldScene.SelectedPm4ObjectScale;
-        bool translationChanged = false;
-        bool rotationChanged = false;
-        bool scaleChanged = false;
-
-        ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
-        if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
-        {
-            ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
-            ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
-            ImGui.TextDisabled($"Part={debugInfo.ObjectPartId} MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8}");
-            ImGui.TextDisabled($"Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
-            ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Object Translation:");
-
-        if (ImGui.Button("Obj X <<"))
-        {
-            selectedObjectTranslation.X -= _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj X >>"))
-        {
-            selectedObjectTranslation.X += _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-
-        if (ImGui.Button("Obj Y <<"))
-        {
-            selectedObjectTranslation.Y -= _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Y >>"))
-        {
-            selectedObjectTranslation.Y += _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-
-        if (ImGui.Button("Obj Z <<"))
-        {
-            selectedObjectTranslation.Z -= _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Z >>"))
-        {
-            selectedObjectTranslation.Z += _pm4TranslationStepUnits;
-            translationChanged = true;
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Object Rotation:");
-
-        if (ImGui.Button("Obj Rot X -"))
-        {
-            selectedObjectRotation.X -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Rot X +"))
-        {
-            selectedObjectRotation.X += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-
-        if (ImGui.Button("Obj Rot Y -"))
-        {
-            selectedObjectRotation.Y -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Rot Y +"))
-        {
-            selectedObjectRotation.Y += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Rot Y +180"))
-        {
-            selectedObjectRotation.Y += 180f;
-            rotationChanged = true;
-        }
-
-        if (ImGui.Button("Obj Rot Z -"))
-        {
-            selectedObjectRotation.Z -= _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Rot Z +"))
-        {
-            selectedObjectRotation.Z += _pm4RotationStepDegrees;
-            rotationChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Rot Z +180"))
-        {
-            selectedObjectRotation.Z += 180f;
-            rotationChanged = true;
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Object Scale:");
-
-        if (ImGui.Button("Obj Sx -"))
-        {
-            selectedObjectScale.X -= _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Sx +"))
-        {
-            selectedObjectScale.X += _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-
-        if (ImGui.Button("Obj Sy -"))
-        {
-            selectedObjectScale.Y -= _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Sy +"))
-        {
-            selectedObjectScale.Y += _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-
-        if (ImGui.Button("Obj Sz -"))
-        {
-            selectedObjectScale.Z -= _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Obj Sz +"))
-        {
-            selectedObjectScale.Z += _pm4ScaleStepUnits;
-            scaleChanged = true;
-        }
-
-        ImGui.Text("Axis Flips:");
-        if (ImGui.Button("Flip Obj X"))
-        {
-            selectedObjectScale.X = -selectedObjectScale.X;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Flip Obj Y"))
-        {
-            selectedObjectScale.Y = -selectedObjectScale.Y;
-            scaleChanged = true;
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Flip Obj Z"))
-        {
-            selectedObjectScale.Z = -selectedObjectScale.Z;
-            scaleChanged = true;
-        }
-
-        if (translationChanged)
-            _worldScene.SelectedPm4ObjectTranslation = selectedObjectTranslation;
-        if (rotationChanged)
-            _worldScene.SelectedPm4ObjectRotationDegrees = NormalizeRotationDegrees(selectedObjectRotation);
-        if (scaleChanged)
-            _worldScene.SelectedPm4ObjectScale = selectedObjectScale;
-
-        ImGui.Separator();
-
-        if (ImGui.Button("Reset Obj Move"))
-            _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
-        ImGui.SameLine();
-        if (ImGui.Button("Reset Obj Rot"))
-            _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
-        ImGui.SameLine();
-        if (ImGui.Button("Reset Obj Scale"))
-            _worldScene.SelectedPm4ObjectScale = Vector3.One;
-
-        if (ImGui.Button("Reset Obj 9DoF"))
-        {
-            _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
-            _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
-            _worldScene.SelectedPm4ObjectScale = Vector3.One;
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Clear PM4 Selection"))
-            _worldScene.ClearPm4ObjectSelection();
-
-        if (ImGui.Button("Dump PM4 Objects JSON"))
-            ExportPm4ObjectsJson();
-        ImGui.SameLine();
-        if (ImGui.Button("Print Obj Alignment"))
-        {
-            Vector3 t = _worldScene.SelectedPm4ObjectTranslation;
-            Vector3 r = _worldScene.SelectedPm4ObjectRotationDegrees;
-            Vector3 s = _worldScene.SelectedPm4ObjectScale;
-            ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[PM4 Obj Align] tile=({selectedPm4.tileX},{selectedPm4.tileY}) ck24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart} T=({t.X:F3},{t.Y:F3},{t.Z:F3}) Rot=({r.X:F3},{r.Y:F3},{r.Z:F3}) Scale=({s.X:F4},{s.Y:F4},{s.Z:F4})");
-        }
-
-        ImGui.TextDisabled($"Obj Move: ({_worldScene.SelectedPm4ObjectTranslation.X:F3}, {_worldScene.SelectedPm4ObjectTranslation.Y:F3}, {_worldScene.SelectedPm4ObjectTranslation.Z:F3})");
-        ImGui.TextDisabled($"Obj Rot: ({_worldScene.SelectedPm4ObjectRotationDegrees.X:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Y:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Z:F3}) deg");
-        ImGui.TextDisabled($"Obj Scale: ({_worldScene.SelectedPm4ObjectScale.X:F4}, {_worldScene.SelectedPm4ObjectScale.Y:F4}, {_worldScene.SelectedPm4ObjectScale.Z:F4})");
-
-        ImGui.End();
-    }
-
-    private void SaveCurrentPm4Alignment()
-    {
-        if (_worldScene == null)
-            return;
-
-        _pm4SavedOverlayTranslation = _worldScene.Pm4OverlayTranslation;
-        _pm4SavedOverlayRotationDegrees = _worldScene.Pm4OverlayRotationDegrees;
-        _pm4SavedOverlayScale = _worldScene.Pm4OverlayScale;
-        SaveViewerSettings();
-
-        _statusMessage = $"Saved PM4 alignment: T=({_pm4SavedOverlayTranslation.X:F2}, {_pm4SavedOverlayTranslation.Y:F2}, {_pm4SavedOverlayTranslation.Z:F2}) Rot=({_pm4SavedOverlayRotationDegrees.X:F2}, {_pm4SavedOverlayRotationDegrees.Y:F2}, {_pm4SavedOverlayRotationDegrees.Z:F2})° S=({_pm4SavedOverlayScale.X:F3}, {_pm4SavedOverlayScale.Y:F3}, {_pm4SavedOverlayScale.Z:F3})";
-    }
-
-    private void ExportPm4ObjectsJson()
-    {
-        if (_worldScene == null)
-            return;
-
-        string defaultName = $"pm4_objects_{DateTime.Now:yyyyMMdd_HHmmss}.json";
-        string? picked = ShowSaveFileDialogSTA(
-            "Save PM4 Objects JSON",
-            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
-            ExportDir,
-            defaultName);
-
-        if (string.IsNullOrWhiteSpace(picked))
-            return;
-
-        try
-        {
-            string json = _worldScene.BuildPm4OverlayInterchangeJson(includeGeometry: true);
-            File.WriteAllText(picked, json, Encoding.UTF8);
-            _statusMessage = $"Exported PM4 objects JSON: {picked}";
-        }
-        catch (Exception ex)
-        {
-            _statusMessage = $"PM4 JSON export failed: {ex.Message}";
-            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
-        }
-    }
-
-    private void ApplySavedPm4AlignmentToScene()
-    {
-        if (_worldScene == null)
-            return;
-
-        _worldScene.Pm4OverlayTranslation = _pm4SavedOverlayTranslation;
-        _worldScene.Pm4OverlayRotationDegrees = _pm4SavedOverlayRotationDegrees;
-        _worldScene.Pm4OverlayScale = _pm4SavedOverlayScale;
-    }
-
-    private static Vector3 NormalizeRotationDegrees(Vector3 rotation)
-    {
-        return new Vector3(
-            NormalizeDegrees(rotation.X),
-            NormalizeDegrees(rotation.Y),
-            NormalizeDegrees(rotation.Z));
-    }
-
-    private static float NormalizeDegrees(float value)
-    {
-        float wrapped = value % 360f;
-        if (wrapped < -180f)
-            wrapped += 360f;
-        else if (wrapped > 180f)
-            wrapped -= 360f;
-        return wrapped;
-    }
-
-    private static string GetPm4ColorModeLabel(Pm4OverlayColorMode mode)
-    {
-        return mode switch
-        {
-            Pm4OverlayColorMode.Ck24Type => "CK24 Type",
-            Pm4OverlayColorMode.Ck24ObjectId => "CK24 Object Id",
-            Pm4OverlayColorMode.Ck24Key => "CK24 Full Key",
-            Pm4OverlayColorMode.Tile => "Tile",
-            Pm4OverlayColorMode.GroupKey => "MSUR GroupKey",
-            Pm4OverlayColorMode.AttributeMask => "MSUR Attr Mask",
-            Pm4OverlayColorMode.Height => "Height Gradient",
-            _ => mode.ToString()
-        };
-    }
-
-    private void DrawFolderInputDialog()
-    {
-        if (!_showFolderInput) return;
-
-        // Use WinForms folder browser for native experience
-        _showFolderInput = false;
-
-        string? selectedPath = ShowFolderDialogSTA(
-            "Select WoW game folder (containing Data/ with MPQs)",
-            initialDir: string.IsNullOrEmpty(_folderInputBuf) ? null : _folderInputBuf,
-            showNewFolderButton: false);
-
-        if (!string.IsNullOrEmpty(selectedPath) && Directory.Exists(selectedPath))
-        {
-            _folderInputBuf = selectedPath;
-            PrepareBuildSelectionDialog(selectedPath);
-        }
-    }
-
-    private void DrawBuildSelectionDialog()
-    {
-        ImGui.SetNextWindowSize(new Vector2(560, 220), ImGuiCond.FirstUseEver);
-        bool open = _showBuildSelectionDialog;
-        if (!ImGui.Begin("Select Client Build", ref open, ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.End();
-            _showBuildSelectionDialog = open;
-            if (!_showBuildSelectionDialog)
-                _pendingGameFolderPath = null;
-            return;
-        }
-
-        _showBuildSelectionDialog = open;
-        if (!_showBuildSelectionDialog)
-            _pendingGameFolderPath = null;
-
-        ImGui.TextWrapped("Explicit client version selection is required before loading MPQs. Path hints only preselect the most likely build.");
-        if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath))
-            ImGui.TextWrapped($"Folder: {_pendingGameFolderPath}");
-        if (!string.IsNullOrWhiteSpace(_buildSelectionHint))
-            ImGui.TextDisabled(_buildSelectionHint);
-
-        ImGui.Separator();
-
-        if (_clientBuildOptions.Count == 0)
-        {
-            ImGui.TextWrapped("No build profiles are available. Ensure WoWDBDefs/definitions/Map.dbd exists, or rely on the built-in fallback list.");
-            if (ImGui.Button("Cancel"))
-            {
-                _pendingGameFolderPath = null;
-                _showBuildSelectionDialog = false;
-                _buildSelectionHint = null;
-            }
-
-            ImGui.End();
-            return;
-        }
-
-        _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
-        string preview = _clientBuildOptions[_selectedBuildOptionIndex].Label;
-        ImGui.InputTextWithHint("##build_filter", "Filter by build or family", ref _buildSelectionFilter, 128);
-
-        if (ImGui.BeginCombo("Client version family", preview))
-        {
-            for (int i = 0; i < _clientBuildOptions.Count; i++)
-            {
-                if (!string.IsNullOrWhiteSpace(_buildSelectionFilter))
-                {
-                    string filter = _buildSelectionFilter.Trim();
-                    bool matches = _clientBuildOptions[i].Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
-                        || _clientBuildOptions[i].BuildVersion.Contains(filter, StringComparison.OrdinalIgnoreCase);
-                    if (!matches)
-                        continue;
-                }
-
-                bool isSelected = i == _selectedBuildOptionIndex;
-                if (ImGui.Selectable(_clientBuildOptions[i].Label, isSelected))
-                    _selectedBuildOptionIndex = i;
-                if (isSelected)
-                    ImGui.SetItemDefaultFocus();
-            }
-
-            ImGui.EndCombo();
-        }
-
-        ImGui.TextDisabled($"Selected build: {_clientBuildOptions[_selectedBuildOptionIndex].BuildVersion}");
-
-        if (ImGui.Button("Load MPQs"))
-        {
-            if (!string.IsNullOrWhiteSpace(_pendingGameFolderPath) && Directory.Exists(_pendingGameFolderPath))
-            {
-                string selectedPath = _pendingGameFolderPath;
-                string buildVersion = _clientBuildOptions[_selectedBuildOptionIndex].BuildVersion;
-                _pendingGameFolderPath = null;
-                _showBuildSelectionDialog = false;
-                _buildSelectionHint = null;
-                LoadMpqDataSource(selectedPath, null, buildVersion);
-            }
-            else
-            {
-                _statusMessage = "Game folder is missing or no longer accessible.";
-            }
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Cancel"))
-        {
-            _pendingGameFolderPath = null;
-            _showBuildSelectionDialog = false;
-            _buildSelectionHint = null;
-        }
-
-        ImGui.End();
-    }
-
-    private void PrepareBuildSelectionDialog(string selectedPath)
-    {
-        _pendingGameFolderPath = selectedPath;
-        _buildSelectionFilter = string.Empty;
-        RefreshClientBuildOptions();
-
-        if (_clientBuildOptions.Count == 0)
-        {
-            _selectedBuildOptionIndex = 0;
-            _buildSelectionHint = "No build profiles available from Map.dbd.";
-            _showBuildSelectionDialog = true;
-            return;
-        }
-
-        if (BuildVersionCatalog.TryInferBuildIndexFromPath(_clientBuildOptions, selectedPath, out int inferredIndex))
-        {
-            _selectedBuildOptionIndex = inferredIndex;
-            _buildSelectionHint = $"Path hint matched build {_clientBuildOptions[inferredIndex].BuildVersion}. Confirm before loading.";
-        }
-        else
-        {
-            _selectedBuildOptionIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
-            _buildSelectionHint = "No clear build token found in the folder path. Select the client build manually.";
-        }
-
-        _showBuildSelectionDialog = true;
-    }
-
-    private void RefreshClientBuildOptions()
-    {
-        string? previouslySelected = null;
-        if (_clientBuildOptions.Count > 0)
-        {
-            int currentIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
-            previouslySelected = _clientBuildOptions[currentIndex].BuildVersion;
-        }
-
-        _clientBuildOptions.Clear();
-
-        string? dbdDir = ResolveDbdDefinitionsDir();
-        if (!string.IsNullOrWhiteSpace(dbdDir))
-            _clientBuildOptions.AddRange(BuildVersionCatalog.LoadOptionsFromMapDbd(dbdDir));
-
-        if (_clientBuildOptions.Count == 0)
-            _clientBuildOptions.AddRange(FallbackClientBuildOptions);
-
-        _selectedBuildOptionIndex = FindBuildOptionIndex(previouslySelected);
-    }
-
-    private static string? ResolveDbdDefinitionsDir()
-    {
-        string[] dbdSearchPaths =
-        {
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
-        };
-
-        foreach (var path in dbdSearchPaths)
-        {
-            var resolved = Path.GetFullPath(path);
-            if (Directory.Exists(resolved) && File.Exists(Path.Combine(resolved, "Map.dbd")))
-                return resolved;
-        }
-
-        return null;
-    }
-
-    private int FindBuildOptionIndex(string? buildVersion)
-    {
-        if (string.IsNullOrWhiteSpace(buildVersion) || _clientBuildOptions.Count == 0)
-            return 0;
-
-        for (int i = 0; i < _clientBuildOptions.Count; i++)
-        {
-            if (string.Equals(_clientBuildOptions[i].BuildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
-                return i;
-        }
-
-        return 0;
-    }
-
-    private void QueueKnownGoodClientAction(string gamePath, string? buildVersion, bool attachLooseFolder)
-    {
-        _pendingKnownGoodClientPath = gamePath;
-        _pendingKnownGoodClientBuildVersion = buildVersion;
-        _pendingKnownGoodClientAttachLooseFolder = attachLooseFolder;
-    }
-
-    private void SaveCurrentGameFolderAsKnownGoodBase()
-    {
-        if (_dataSource is not MpqDataSource mpqDataSource)
-        {
-            _statusMessage = "Load a base MPQ game folder before saving it as a known-good client path.";
-            return;
-        }
-
-        AddOrUpdateKnownGoodClientPath(mpqDataSource.GamePath, _dbcBuild);
-        SaveViewerSettings();
-        _statusMessage = $"Saved known-good client path: {mpqDataSource.GamePath}";
-    }
-
-    private void AddOrUpdateKnownGoodClientPath(string gamePath, string? buildVersion)
-    {
-        string normalizedPath = Path.GetFullPath(gamePath);
-        string displayName = BuildKnownGoodClientDisplayName(normalizedPath, buildVersion);
-
-        int existingIndex = _knownGoodClientPaths.FindIndex(entry =>
-            string.Equals(entry.Path, normalizedPath, StringComparison.OrdinalIgnoreCase));
-
-        var entry = new KnownGoodClientPath
-        {
-            Name = displayName,
-            Path = normalizedPath,
-            BuildVersion = string.IsNullOrWhiteSpace(buildVersion) ? null : buildVersion
-        };
-
-        if (existingIndex >= 0)
-            _knownGoodClientPaths[existingIndex] = entry;
-        else
-            _knownGoodClientPaths.Add(entry);
-
-        _knownGoodClientPaths = _knownGoodClientPaths
-            .OrderBy(client => client.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private void ForgetKnownGoodClientPath(string gamePath)
-    {
-        int removed = _knownGoodClientPaths.RemoveAll(entry =>
-            string.Equals(entry.Path, gamePath, StringComparison.OrdinalIgnoreCase));
-
-        if (removed > 0)
-        {
-            SaveViewerSettings();
-            _statusMessage = $"Removed known-good client path: {gamePath}";
-        }
-    }
-
-    private static string BuildKnownGoodClientDisplayName(string gamePath, string? buildVersion)
-    {
-        string folderName = Path.GetFileName(Path.TrimEndingDirectorySeparator(gamePath));
-        if (string.IsNullOrWhiteSpace(folderName))
-            folderName = gamePath;
-
-        return string.IsNullOrWhiteSpace(buildVersion)
-            ? folderName
-            : $"{folderName} [{buildVersion}]";
-    }
-
-    private static string BuildKnownGoodClientTooltip(KnownGoodClientPath knownClient)
-    {
-        return string.IsNullOrWhiteSpace(knownClient.BuildVersion)
-            ? knownClient.Path
-            : $"{knownClient.Path}\nBuild: {knownClient.BuildVersion}";
-    }
-
-    private void DrawListfileInputDialog()
-    {
-        // No longer needed — listfile is auto-downloaded
-        _showListfileInput = false;
-    }
-
     private void DrawMapConverterDialog()
     {
         ImGui.SetNextWindowSize(new Vector2(580, 520), ImGuiCond.FirstUseEver);
@@ -4882,687 +4255,7 @@ void main() {
         });
     }
 
-    private void DrawToolbar()
-    {
-        var io = ImGui.GetIO();
-        // Full-width toolbar (no gaps above sidebars)
-        ImGui.SetNextWindowPos(new Vector2(0, MenuBarHeight));
-        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, ToolbarHeight));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
-        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
-        if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
-        {
-            TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-            LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
-
-            if (renderer != null)
-            {
-                // Terrain layers
-                bool l0 = renderer.ShowLayer0;
-                if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-                ImGui.SameLine();
-                bool l1 = renderer.ShowLayer1;
-                if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-                ImGui.SameLine();
-                bool l2 = renderer.ShowLayer2;
-                if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-                ImGui.SameLine();
-                bool l3 = renderer.ShowLayer3;
-                if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
-
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                ImGui.SameLine();
-
-                // Grid overlays
-                bool chunkGrid = renderer.ShowChunkGrid;
-                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-                ImGui.SameLine();
-                bool tileGrid = renderer.ShowTileGrid;
-                if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                ImGui.SameLine();
-
-                // Debug overlays
-                bool alphaMask = renderer.ShowAlphaMask;
-                if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-                ImGui.SameLine();
-                bool shadowMap = renderer.ShowShadowMap;
-                if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-                ImGui.SameLine();
-                bool contours = renderer.ShowContours;
-                if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-
-                // Liquid
-                if (liquidRenderer != null)
-                {
-                    ImGui.SameLine();
-                    bool showLiquid = liquidRenderer.ShowLiquid;
-                    if (ImGui.Checkbox($"Liquid Terrain ({liquidRenderer.MeshCount})", ref showLiquid))
-                        liquidRenderer.ShowLiquid = showLiquid;
-                }
-
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    int wlCount = liquidRenderer?.WlMeshCount ?? 0;
-                    bool showWlTop = _worldScene.ShowWlLiquids;
-                    if (ImGui.Checkbox($"WL* ({wlCount})", ref showWlTop))
-                        _worldScene.ShowWlLiquids = showWlTop;
-                }
-
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    bool showWdl = _worldScene.ShowWdlTerrain;
-                    if (ImGui.Checkbox("WDL", ref showWdl))
-                        _worldScene.ShowWdlTerrain = showWdl;
-                }
-
-                // World objects
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                    ImGui.SameLine();
-                    bool showBB = _worldScene.ShowBoundingBoxes;
-                    if (ImGui.Checkbox("BBs", ref showBB))
-                        _worldScene.ShowBoundingBoxes = showBB;
-
-                    ImGui.SameLine();
-                    bool showPm4 = _worldScene.ShowPm4Overlay;
-                    if (ImGui.Checkbox("PM4", ref showPm4))
-                        _worldScene.ShowPm4Overlay = showPm4;
-                    if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
-                        ImGui.SetTooltip(_worldScene.Pm4Status);
-                }
-            }
-        }
-        ImGui.End();
-        ImGui.PopStyleVar(2);
-    }
-
-    private void DrawLeftSidebar()
-    {
-        var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(0, topOffset));
-        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
-        {
-            // ── File Browser section ──
-            if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                DrawFileBrowserContent();
-            }
-
-            // ── World Maps section ──
-            if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                DrawMapDiscoveryContent();
-            }
-        }
-        ImGui.End();
-        ImGui.PopStyleVar();
-    }
-
-    private void DrawMapDiscoveryContent()
-    {
-        if (_discoveredMaps.Count == 0) return;
-
-        ImGui.Text($"{_discoveredMaps.Count} maps discovered");
-        var previewWarmup = GetWdlPreviewWarmupStats();
-        if (previewWarmup.total > 0)
-            ImGui.TextDisabled($"WDL previews: {previewWarmup.ready}/{previewWarmup.total} cached, {previewWarmup.loading} warming, {previewWarmup.failed} failed");
-        ImGui.Separator();
-
-        // Map list — use remaining height or fixed height
-        float listHeight = 300f; // Fixed height for map list
-        if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
-        {
-            foreach (var map in _discoveredMaps)
-            {
-                bool hasWdt = map.HasWdt;
-                bool hasWdl = map.HasWdl;
-                string label = map.HasDbcEntry
-                    ? $"[{map.Id:D3}] {map.Name}"
-                    : $"[custom] {map.Name}";
-                if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
-
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
-                {
-                    if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        LoadMapAtDefaultSpawn(map);
-                }
-
-                if (!hasWdt) ImGui.PopStyleColor();
-
-                if (hasWdt)
-                {
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"Load##{map.Directory}"))
-                        LoadMapAtDefaultSpawn(map);
-                }
-
-                bool canPreview = hasWdl && CanUseWdlPreviewFeature();
-                WdlPreviewWarmState previewState = canPreview && _wdlPreviewCacheService != null
-                    ? _wdlPreviewCacheService.GetState(map.Directory)
-                    : (canPreview ? WdlPreviewWarmState.Ready : WdlPreviewWarmState.NotQueued);
-                bool canSelectSpawn = hasWdt && canPreview && previewState == WdlPreviewWarmState.Ready;
-
-                ImGui.SameLine();
-                if (!canSelectSpawn) ImGui.BeginDisabled();
-                if (ImGui.SmallButton($"Spawn##{map.Directory}") && canSelectSpawn)
-                    OpenWdlPreview(map);
-                if (!canSelectSpawn) ImGui.EndDisabled();
-
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Directory: {map.Directory}");
-                    ImGui.Text($"Source: {(map.HasDbcEntry ? "Map.dbc + data source" : "Loose data source only")}");
-                    ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
-                    ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
-                    if (canSelectSpawn)
-                        ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "WDL preview ready. Click 'Spawn' to choose a start tile.");
-                    else if (!hasWdl)
-                        ImGui.TextDisabled("No WDL preview is available. 'Load' will use the default map spawn.");
-                    else if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
-                        ImGui.TextDisabled("WDL preview is preparing in the background.");
-                    else if (previewState == WdlPreviewWarmState.Failed)
-                        ImGui.TextDisabled("WDL preview failed. 'Load' will fall back to the default map spawn.");
-                    ImGui.EndTooltip();
-                }
-            }
-            ImGui.EndChild();
-        }
-    }
-
-    private void DrawFileBrowserContent()
-    {
-        if (_dataSource == null || !_dataSource.IsLoaded)
-        {
-            ImGui.TextWrapped("No data source loaded.\nUse File > Open Game Folder to load MPQ archives.");
-            return;
-        }
-
-        ImGui.Text($"Source: {_dataSource.Name}");
-        ImGui.Separator();
-
-        // Extension filter
-        if (ImGui.BeginCombo("Type", _extensionFilter))
-        {
-            string[] filters = { ".mdx", ".wmo", ".m2", ".blp", ".wdt" };
-            foreach (var f in filters)
-            {
-                if (ImGui.Selectable(f, _extensionFilter == f))
-                {
-                    _extensionFilter = f;
-                    RefreshFileList();
-                }
-            }
-            ImGui.EndCombo();
-        }
-
-        // Search filter
-        var search = _searchFilter;
-        if (ImGui.InputText("Search", ref search, 256))
-        {
-            _searchFilter = search;
-            RefreshFileList();
-        }
-
-        ImGui.Text($"{_filteredFiles.Count} files");
-        ImGui.Separator();
-
-        // File list — reserve space for World Maps section if present
-        float remainingH = ImGui.GetContentRegionAvail().Y;
-        if (_discoveredMaps.Count > 0)
-            remainingH = MathF.Max(remainingH - 360f, 100f); // Reserve ~360px for World Maps header + list
-        if (ImGui.BeginChild("FileList", new Vector2(0, remainingH), true))
-        {
-            for (int i = 0; i < _filteredFiles.Count; i++)
-            {
-                var file = _filteredFiles[i];
-                var displayName = Path.GetFileName(file);
-                bool selected = i == _selectedFileIndex;
-
-                if (ImGui.Selectable(displayName, selected, ImGuiSelectableFlags.AllowDoubleClick))
-                {
-                    _selectedFileIndex = i;
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                    {
-                        LoadFileFromDataSource(file);
-                    }
-                }
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip(file);
-            }
-            ImGui.EndChild();
-        }
-    }
-
-    private void DrawRightSidebar()
-    {
-        var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
-        float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset));
-        ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
-        {
-            // ── Selected Object section (always visible when something is selected) ──
-            if (!string.IsNullOrEmpty(_selectedObjectInfo))
-            {
-                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
-                ImGui.Separator();
-                ImGui.TextWrapped(_selectedObjectInfo);
-                DrawSelectedSqlGameObjectAnimationControls();
-                ImGui.Spacing();
-            }
-
-            // ── Model Info section ──
-            if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                DrawModelInfoContent();
-            }
-
-            // ── Camera section ──
-            if (ImGui.CollapsingHeader("Camera", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
-                ImGui.Text("Hold Shift for 5x boost");
-                ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
-            }
-
-            // ── Terrain Controls section ──
-            if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
-            {
-                if (ImGui.CollapsingHeader("Terrain Controls", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    DrawTerrainControlsContent();
-                }
-            }
-
-            // ── World Objects section ──
-            if (_worldScene != null)
-            {
-                if (ImGui.CollapsingHeader("World Objects", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    DrawWorldObjectsContent();
-                }
-            }
-        }
-        ImGui.End();
-        ImGui.PopStyleVar();
-    }
-
-    private void DrawModelInfoContent()
-    {
-        if (string.IsNullOrEmpty(_modelInfo))
-        {
-            ImGui.TextWrapped("No model loaded.");
-            return;
-        }
-
-        ImGui.TextWrapped(_modelInfo);
-
-        if (_renderer is MdxRenderer || _renderer is WmoRenderer)
-        {
-            ImGui.Separator();
-            ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
-            if (ImGui.Button("Frame Model"))
-                FrameCurrentModel();
-        }
-
-        // DoodadSet selection (WMO only)
-        if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Doodad Set:");
-            int activeSet = wmoR.ActiveDoodadSet;
-            string currentSetName = wmoR.GetDoodadSetName(activeSet);
-            if (ImGui.BeginCombo("##DoodadSet", currentSetName))
-            {
-                for (int s = 0; s < wmoR.DoodadSetCount; s++)
-                {
-                    bool selected = s == activeSet;
-                    if (ImGui.Selectable(wmoR.GetDoodadSetName(s), selected))
-                        wmoR.SetActiveDoodadSet(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-        }
-
-        if (_renderer is WmoRenderer)
-        {
-            ImGui.Separator();
-            DrawWmoLiquidRotationControls("standalone");
-        }
-
-        // Animation sequence selection (MDX only)
-        if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Animation:");
-            
-            var animator = mdxR.Animator;
-            int currentSeq = animator.CurrentSequence;
-            string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count 
-                ? animator.Sequences[currentSeq].Name 
-                : "None";
-            
-            if (ImGui.BeginCombo("##AnimSequence", currentSeqName))
-            {
-                for (int s = 0; s < animator.Sequences.Count; s++)
-                {
-                    bool selected = s == currentSeq;
-                    string seqName = animator.Sequences[s].Name;
-                    if (string.IsNullOrEmpty(seqName))
-                        seqName = $"Sequence {s}";
-                    
-                    if (ImGui.Selectable(seqName, selected))
-                        animator.SetSequence(s);
-                    if (selected) ImGui.SetItemDefaultFocus();
-                }
-                ImGui.EndCombo();
-            }
-            
-            // Timeline controls
-            if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
-            {
-                var seq = animator.Sequences[currentSeq];
-                float seqStart = seq.Time.Start;
-                float seqEnd = seq.Time.End;
-                float duration = seqEnd - seqStart;
-                float currentAbs = animator.CurrentFrame;
-                float currentRel = currentAbs - seqStart;
-                
-                // Play/Pause button
-                bool isPlaying = animator.IsPlaying;
-                if (ImGui.Button(isPlaying ? "⏸ Pause" : "▶ Play"))
-                    animator.IsPlaying = !isPlaying;
-                
-                ImGui.SameLine();
-                
-                // Step backward button
-                if (ImGui.Button("◀"))
-                {
-                    animator.IsPlaying = false;
-                    animator.StepToPrevKeyframe();
-                }
-                
-                ImGui.SameLine();
-                
-                // Step forward button
-                if (ImGui.Button("▶"))
-                {
-                    animator.IsPlaying = false;
-                    animator.StepToNextKeyframe();
-                }
-                
-                // Frame slider
-                ImGui.SetNextItemWidth(-1);
-                if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
-                {
-                    animator.IsPlaying = false;
-                    animator.CurrentFrame = seqStart + currentRel;
-                }
-                
-                // Duration info
-                ImGui.Text($"Duration: {duration:F0}ms ({duration / 1000.0f:F2}s)");
-
-                if (ImGui.TreeNode("Animation Debug"))
-                {
-                    ImGui.Text($"Current Seq: {currentSeq}");
-                    ImGui.Text($"Current Abs Frame: {currentAbs:F2}");
-                    ImGui.Text($"Seq Range: [{seqStart}, {seqEnd}]");
-
-                    var stats = animator.GetTrackDebugStatsForCurrentSequence();
-                    ImGui.Text($"T keys total/in-range: {stats.TranslationKeysTotal}/{stats.TranslationKeysInSequence}");
-                    ImGui.Text($"R keys total/in-range: {stats.RotationKeysTotal}/{stats.RotationKeysInSequence}");
-                    ImGui.Text($"S keys total/in-range: {stats.ScalingKeysTotal}/{stats.ScalingKeysInSequence}");
-
-                    string minKey = stats.MinKeyTime?.ToString() ?? "n/a";
-                    string maxKey = stats.MaxKeyTime?.ToString() ?? "n/a";
-                    ImGui.Text($"All key range: [{minKey}, {maxKey}]");
-
-                    ImGui.Separator();
-                    ImGui.Text("Sequences (first 12):");
-                    int previewCount = Math.Min(12, animator.Sequences.Count);
-                    for (int i = 0; i < previewCount; i++)
-                    {
-                        var s = animator.Sequences[i];
-                        string name = string.IsNullOrWhiteSpace(s.Name) ? "<empty>" : s.Name;
-                        ImGui.Text($"{i}: {name} [{s.Time.Start}-{s.Time.End}]");
-                    }
-
-                    ImGui.TreePop();
-                }
-            }
-        }
-
-        // Geoset / Group visibility toggles
-        if (_renderer != null && _renderer.SubObjectCount > 0)
-        {
-            ImGui.Separator();
-            ImGui.Text("Visibility:");
-
-            if (ImGui.SmallButton("All On"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, true);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("All Off"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, false);
-
-            for (int i = 0; i < _renderer.SubObjectCount; i++)
-            {
-                bool vis = _renderer.GetSubObjectVisible(i);
-                if (ImGui.Checkbox(_renderer.GetSubObjectName(i), ref vis))
-                    _renderer.SetSubObjectVisible(i, vis);
-            }
-        }
-    }
-
-    private void FrameCurrentModel()
-    {
-        if (_renderer is MdxRenderer mdxR)
-        {
-            var bmin = mdxR.BoundsMin;
-            var bmax = mdxR.BoundsMax;
-            FrameBounds(bmin, bmax, mdxMirrorX: true);
-        }
-        else if (_renderer is WmoRenderer wmoR)
-        {
-            FrameBounds(wmoR.BoundsMin, wmoR.BoundsMax, mdxMirrorX: false);
-        }
-    }
-
-    private void FrameBounds(Vector3 boundsMin, Vector3 boundsMax, bool mdxMirrorX)
-    {
-        var center = (boundsMin + boundsMax) * 0.5f;
-        var extent = boundsMax - boundsMin;
-        float radius = MathF.Max(extent.Length() * 0.5f, 1f);
-
-        // MDX standalone rendering applies a MirrorX scale at draw time. Keep the previous convention.
-        if (mdxMirrorX)
-            center.X = -center.X;
-
-        float dist = MathF.Max(radius * 3.0f, 10f);
-        _camera.Position = center + new Vector3(-dist, 0, radius * 0.6f);
-        _camera.Yaw = 0f;
-        _camera.Pitch = -15f;
-    }
-
-    private void DrawTerrainControlsContent()
-    {
-        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
-        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (lighting == null || renderer == null) return;
-
-        // Day/night cycle
-        float gameTime = lighting.GameTime;
-        if (ImGui.SliderFloat("Time of Day", ref gameTime, 0f, 1f, "%.2f"))
-            lighting.GameTime = gameTime;
-        string timeLabel = gameTime switch
-        {
-            < 0.15f => "Night",
-            < 0.25f => "Dawn",
-            < 0.35f => "Morning",
-            < 0.65f => "Day",
-            < 0.75f => "Evening",
-            < 0.85f => "Dusk",
-            _ => "Night"
-        };
-        ImGui.SameLine();
-        ImGui.Text(timeLabel);
-
-        // Fog
-        float fogStart = lighting.FogStart;
-        float fogEnd = lighting.FogEnd;
-        if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
-            lighting.FogStart = fogStart;
-        if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
-            lighting.FogEnd = fogEnd;
-
-        if (_worldScene != null)
-        {
-            bool showWdl = _worldScene.ShowWdlTerrain;
-            if (ImGui.Checkbox("Show WDL Far Terrain", ref showWdl))
-                _worldScene.ShowWdlTerrain = showWdl;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
-        }
-
-        // Contour interval (only when contours enabled via toolbar)
-        if (renderer.ShowContours)
-        {
-            ImGui.Separator();
-            float interval = renderer.ContourInterval;
-            if (ImGui.SliderFloat("Contour Interval", ref interval, 0.5f, 20.0f, "%.1f"))
-                renderer.ContourInterval = interval;
-        }
-
-        ImGui.Separator();
-        if (ImGui.Button("Toggle Wireframe"))
-            _renderer?.ToggleWireframe();
-
-        // Stats
-        ImGui.Separator();
-        int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
-        int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
-        var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
-        if (terrainRenderer != null)
-            ImGui.Text($"Tiles: {tiles}  Chunks: {terrainRenderer.ChunksRendered}/{chunks}");
-        else
-            ImGui.Text($"Tiles: {tiles}  Chunks: {chunks}");
-
-        // Culling stats from WorldScene
-        if (_worldScene != null)
-        {
-            ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
-            ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
-
-            var assetReadStats = _worldScene.Assets.GetReadStats();
-            ImGui.Text($"Asset I/O req/cache: {assetReadStats.ReadRequests}/{assetReadStats.FileCacheHits}  resolved-cache: {assetReadStats.ResolvedPathCacheHits}  probes hit/miss: {assetReadStats.PathProbeResolutions}/{assetReadStats.PathProbeMisses}");
-
-            if (_dataSource is MpqDataSource mpqDataSource)
-            {
-                var mpqStats = mpqDataSource.GetStatsSnapshot();
-                ImGui.Text($"MPQ I/O read cache/miss: {mpqStats.ReadCacheHits}/{mpqStats.ReadCacheMisses}  loose/alpha/mpq/miss: {mpqStats.ReadLooseHits}/{mpqStats.ReadAlphaHits}/{mpqStats.ReadMpqHits}/{mpqStats.ReadMisses}  uncached avg: {mpqStats.AverageUncachedReadMs:0.00} ms");
-                ImGui.Text($"MPQ prefetch enq/done/dup/cache: {mpqStats.PrefetchEnqueued}/{mpqStats.PrefetchCompleted}/{mpqStats.PrefetchDuplicateSkips}/{mpqStats.PrefetchCacheSkips}  queue avg: {mpqStats.AveragePrefetchQueueMs:0.00} ms  read avg: {mpqStats.AveragePrefetchReadMs:0.00} ms");
-            }
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Chunk Clipboard");
-        ImGui.Checkbox("Enable Chunk Tool", ref _chunkToolEnabled);
-        ImGui.SameLine();
-        ImGui.Checkbox("Show Overlay", ref _chunkClipboardShowOverlay);
-
-        ImGui.TextDisabled("Shift+LMB: toggle selection | Ctrl+LMB: lock paste target | Ctrl+C/Ctrl+V: copy/paste");
-
-        ImGui.Checkbox("Copy Target: Use Mouse", ref _chunkClipboardUseMouse);
-        ImGui.Checkbox("Paste Relative Heights", ref _chunkClipboardPasteRelativeHeights);
-        ImGui.Checkbox("Include Alpha/Shadow", ref _chunkClipboardIncludeAlphaShadow);
-        ImGui.Checkbox("Include Textures", ref _chunkClipboardIncludeTextures);
-
-        ImGui.SetNextItemWidth(160f);
-        string[] rotLabels = { "0°", "90°", "180°", "270°" };
-        ImGui.Combo("Paste Rotation", ref _chunkClipboardSelectionRotation, rotLabels, rotLabels.Length);
-
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Clear Locked Target##chunkTargetClear"))
-        {
-            _chunkClipboardLockedTargetKey = null;
-            _chunkClipboardStatus = "Cleared locked paste target.";
-        }
-
-        ImGui.TextDisabled($"Selected: {_selectedChunks.Count}");
-        if (_selectedChunks.Count > 0)
-        {
-            ImGui.SameLine();
-            if (ImGui.SmallButton("Clear##chunkSelClear"))
-                _selectedChunks.Clear();
-        }
-
-        if (_chunkClipboardLockedTargetKey is { } locked)
-            ImGui.Text($"Locked Paste Target: tile({locked.tileX},{locked.tileY}) chunk({locked.chunkX},{locked.chunkY})");
-        else
-            ImGui.TextDisabled("Locked Paste Target: (none)  (Ctrl+LMB to set)");
-
-        var targetChunk = GetChunkClipboardTarget(renderer);
-        bool hasChunk = targetChunk.HasValue;
-        string targetLabel = _chunkClipboardUseMouse ? "Mouse" : "Camera";
-        if (hasChunk)
-        {
-            var c = targetChunk.Value;
-            ImGui.TextDisabled($"Copy Target ({targetLabel}): tile({c.TileX},{c.TileY}) chunk({c.ChunkX},{c.ChunkY})");
-        }
-        else
-        {
-            ImGui.TextDisabled($"Copy Target ({targetLabel}): (none loaded)");
-        }
-
-        if (!hasChunk) ImGui.BeginDisabled();
-        if (ImGui.Button(_selectedChunks.Count > 0 ? "Copy Selection" : "Copy Chunk"))
-        {
-            if (_selectedChunks.Count > 0)
-                CopySelectedChunks(renderer);
-            else
-                CopyChunkAtTarget(renderer);
-        }
-        if (!hasChunk) ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        bool canPaste = (_chunkClipboardSet != null || _chunkClipboard != null);
-        if (!canPaste) ImGui.BeginDisabled();
-        if (ImGui.Button(_chunkClipboardSet != null ? "Paste Selection" : "Paste Chunk"))
-        {
-            if (_chunkClipboardSet != null)
-                PasteClipboardSetAtTarget(renderer);
-            else
-                PasteChunkAtTarget(renderer);
-        }
-        if (!canPaste) ImGui.EndDisabled();
-
-        if (!string.IsNullOrWhiteSpace(_chunkClipboardStatus))
-            ImGui.TextWrapped(_chunkClipboardStatus);
-
-    }
-
-    private void DrawWorldObjectsContent()
+    private void DrawWorldObjectsContentCore()
     {
         if (_worldScene == null) return;
 
@@ -5893,29 +4586,42 @@ void main() {
         // WMO placements
         if (_worldScene.ModfPlacements.Count > 0 && ImGui.TreeNode($"WMO Placements ({_worldScene.ModfPlacements.Count})"))
         {
-            for (int i = 0; i < _worldScene.ModfPlacements.Count; i++)
+            if (ImGui.BeginChild("##WmoPlacements", new Vector2(0, 220f), true))
             {
-                var p = _worldScene.ModfPlacements[i];
-                string name = p.NameIndex < _worldScene.WmoModelNames.Count
-                    ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
-                string label = $"[{i}] {name}";
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                float rowHeight = GetUniformListRowHeight();
+                GetVisibleListRange(_worldScene.ModfPlacements.Count, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
                 {
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    var p = _worldScene.ModfPlacements[i];
+                    string name = p.NameIndex < _worldScene.WmoModelNames.Count
+                        ? Path.GetFileName(_worldScene.WmoModelNames[p.NameIndex]) : "?";
+                    string label = $"[{i}] {name}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
-                        _camera.Pitch = -30f;
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 50);
+                            _camera.Pitch = -30f;
+                        }
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                        ImGui.Text($"Flags: 0x{p.Flags:X4}");
+                        ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
+                        ImGui.EndTooltip();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                    ImGui.Text($"Flags: 0x{p.Flags:X4}");
-                    ImGui.Text($"Bounds: ({p.BoundsMin.X:F0},{p.BoundsMin.Y:F0},{p.BoundsMin.Z:F0}) - ({p.BoundsMax.X:F0},{p.BoundsMax.Y:F0},{p.BoundsMax.Z:F0})");
-                    ImGui.EndTooltip();
-                }
+
+                if (endIndex < _worldScene.ModfPlacements.Count)
+                    ImGui.Dummy(new Vector2(0, (_worldScene.ModfPlacements.Count - endIndex) * rowHeight));
+
+                ImGui.EndChild();
             }
             ImGui.TreePop();
         }
@@ -5925,28 +4631,41 @@ void main() {
         int mddfShow = Math.Min(mddfCount, 200);
         if (mddfCount > 0 && ImGui.TreeNode($"MDX Placements ({mddfCount}{(mddfCount > mddfShow ? $", showing {mddfShow}" : "")})"))
         {
-            for (int i = 0; i < mddfShow; i++)
+            if (ImGui.BeginChild("##MdxPlacements", new Vector2(0, 220f), true))
             {
-                var p = _worldScene.MddfPlacements[i];
-                string name = p.NameIndex < _worldScene.MdxModelNames.Count
-                    ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
-                string label = $"[{i}] {name} s={p.Scale:F2}";
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                float rowHeight = GetUniformListRowHeight();
+                GetVisibleListRange(mddfShow, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
                 {
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    var p = _worldScene.MddfPlacements[i];
+                    string name = p.NameIndex < _worldScene.MdxModelNames.Count
+                        ? Path.GetFileName(_worldScene.MdxModelNames[p.NameIndex]) : "?";
+                    string label = $"[{i}] {name} s={p.Scale:F2}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
-                        _camera.Pitch = -30f;
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = p.Position + new System.Numerics.Vector3(0, 0, 20);
+                            _camera.Pitch = -30f;
+                        }
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
+                        ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
+                        ImGui.Text($"Scale: {p.Scale:F3}");
+                        ImGui.EndTooltip();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Position: ({p.Position.X:F1}, {p.Position.Y:F1}, {p.Position.Z:F1})");
-                    ImGui.Text($"Rotation: ({p.Rotation.X:F1}, {p.Rotation.Y:F1}, {p.Rotation.Z:F1})");
-                    ImGui.Text($"Scale: {p.Scale:F3}");
-                    ImGui.EndTooltip();
-                }
+
+                if (endIndex < mddfShow)
+                    ImGui.Dummy(new Vector2(0, (mddfShow - endIndex) * rowHeight));
+
+                ImGui.EndChild();
             }
             ImGui.TreePop();
         }
@@ -5955,25 +4674,40 @@ void main() {
         if (_worldScene.PoiLoader != null && _worldScene.PoiLoader.Entries.Count > 0 &&
             ImGui.TreeNode($"Area POIs ({_worldScene.PoiLoader.Entries.Count})"))
         {
-            foreach (var poi in _worldScene.PoiLoader.Entries)
+            if (ImGui.BeginChild("##AreaPoiList", new Vector2(0, 200f), true))
             {
-                string label = $"[{poi.Id}] {poi.Name}";
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                float rowHeight = GetUniformListRowHeight();
+                int poiCount = _worldScene.PoiLoader.Entries.Count;
+                GetVisibleListRange(poiCount, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
                 {
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    var poi = _worldScene.PoiLoader.Entries[i];
+                    string label = $"[{poi.Id}] {poi.Name}";
+                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
-                        _camera.Pitch = -30f;
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
+                            _camera.Pitch = -30f;
+                        }
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
+                        ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
+                        ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
+                        ImGui.EndTooltip();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})");
-                    ImGui.Text($"WoW Pos: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})");
-                    ImGui.Text($"Icon: {poi.Icon}  Importance: {poi.Importance}  Flags: 0x{poi.Flags:X}");
-                    ImGui.EndTooltip();
-                }
+
+                if (endIndex < poiCount)
+                    ImGui.Dummy(new Vector2(0, (poiCount - endIndex) * rowHeight));
+
+                ImGui.EndChild();
             }
             ImGui.TreePop();
         }
@@ -5982,32 +4716,47 @@ void main() {
         if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Nodes.Count > 0 &&
             ImGui.TreeNode($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})"))
         {
-            foreach (var node in _worldScene.TaxiLoader.Nodes)
+            if (ImGui.BeginChild("##TaxiNodeList", new Vector2(0, 220f), true))
             {
-                bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
-                string label = $"[{node.Id}] {node.Name}";
-                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                float rowHeight = GetUniformListRowHeight();
+                int nodeCount = _worldScene.TaxiLoader.Nodes.Count;
+                GetVisibleListRange(nodeCount, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
                 {
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                    var node = _worldScene.TaxiLoader.Nodes[i];
+                    bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
+                    string label = $"[{node.Id}] {node.Name}";
+                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        _camera.Position = node.Position + new System.Numerics.Vector3(0, 0, 50);
-                        _camera.Pitch = -30f;
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        {
+                            _camera.Position = node.Position + new System.Numerics.Vector3(0, 0, 50);
+                            _camera.Pitch = -30f;
+                        }
+                        else
+                        {
+                            // Toggle selection: click again to deselect
+                            _worldScene.SelectedTaxiNodeId = isSelected ? -1 : node.Id;
+                        }
                     }
-                    else
+                    if (ImGui.IsItemHovered())
                     {
-                        // Toggle selection: click again to deselect
-                        _worldScene.SelectedTaxiNodeId = isSelected ? -1 : node.Id;
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
+                        int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
+                        ImGui.Text($"Routes: {routeCount}");
+                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.EndTooltip();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
-                    int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
-                    ImGui.Text($"Routes: {routeCount}");
-                    ImGui.Text("Click to filter, double-click to teleport");
-                    ImGui.EndTooltip();
-                }
+
+                if (endIndex < nodeCount)
+                    ImGui.Dummy(new Vector2(0, (nodeCount - endIndex) * rowHeight));
+
+                ImGui.EndChild();
             }
             ImGui.TreePop();
         }
@@ -6016,65 +4765,59 @@ void main() {
         if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0 &&
             ImGui.TreeNode($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})"))
         {
-            foreach (var route in _worldScene.TaxiLoader.Routes)
+            if (ImGui.BeginChild("##TaxiRouteList", new Vector2(0, 220f), true))
             {
-                bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
-                string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-                string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
-                string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
-                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                float rowHeight = GetUniformListRowHeight();
+                int routeCount = _worldScene.TaxiLoader.Routes.Count;
+                GetVisibleListRange(routeCount, rowHeight, out int startIndex, out int endIndex);
+                if (startIndex > 0)
+                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+                for (int i = startIndex; i < endIndex; i++)
                 {
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && route.Waypoints.Count > 0)
+                    var route = _worldScene.TaxiLoader.Routes[i];
+                    bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
+                    string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+                    string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+                    string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
+                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
-                        var mid = route.Waypoints[route.Waypoints.Count / 2];
-                        _camera.Position = mid + new System.Numerics.Vector3(0, 0, 100);
-                        _camera.Pitch = -30f;
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && route.Waypoints.Count > 0)
+                        {
+                            var mid = route.Waypoints[route.Waypoints.Count / 2];
+                            _camera.Position = mid + new System.Numerics.Vector3(0, 0, 100);
+                            _camera.Pitch = -30f;
+                        }
+                        else
+                        {
+                            // Toggle selection: click again to deselect
+                            _worldScene.SelectedTaxiRouteId = isSelected ? -1 : route.PathId;
+                        }
                     }
-                    else
+                    if (ImGui.IsItemHovered())
                     {
-                        // Toggle selection: click again to deselect
-                        _worldScene.SelectedTaxiRouteId = isSelected ? -1 : route.PathId;
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Cost: {route.Cost}");
+                        ImGui.Text($"Waypoints: {route.Waypoints.Count}");
+                        if (route.Waypoints.Count > 0)
+                        {
+                            var first = route.Waypoints[0];
+                            var last = route.Waypoints[^1];
+                            ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
+                            ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
+                        }
+                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.EndTooltip();
                     }
                 }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Cost: {route.Cost}");
-                    ImGui.Text($"Waypoints: {route.Waypoints.Count}");
-                    if (route.Waypoints.Count > 0)
-                    {
-                        var first = route.Waypoints[0];
-                        var last = route.Waypoints[^1];
-                        ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
-                        ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
-                    }
-                    ImGui.Text("Click to filter, double-click to teleport");
-                    ImGui.EndTooltip();
-                }
+
+                if (endIndex < routeCount)
+                    ImGui.Dummy(new Vector2(0, (routeCount - endIndex) * rowHeight));
+
+                ImGui.EndChild();
             }
             ImGui.TreePop();
         }
-    }
-
-    private static void DrawWmoLiquidRotationControls(string idSuffix)
-    {
-        int quarterTurns = WmoRenderer.MliqRotationQuarterTurns;
-        string currentLabel = WmoLiquidRotationLabels[Math.Clamp(quarterTurns, 0, WmoLiquidRotationLabels.Length - 1)];
-
-        if (ImGui.BeginCombo($"WMO MLIQ Rotation##{idSuffix}", currentLabel))
-        {
-            for (int i = 0; i < WmoLiquidRotationLabels.Length; i++)
-            {
-                bool selected = i == quarterTurns;
-                if (ImGui.Selectable(WmoLiquidRotationLabels[i], selected))
-                    WmoRenderer.MliqRotationQuarterTurns = i;
-                if (selected)
-                    ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
-        }
-
-        ImGui.TextDisabled("Applies to all WMO MLIQ surfaces. Changes are live.");
     }
 
     private void LoadSqlSpawnsForCurrentMap()
@@ -6189,309 +4932,6 @@ void main() {
             result.Add(inRange[i].spawn);
 
         return result;
-    }
-
-    private void DrawStatusBar()
-    {
-        var io = ImGui.GetIO();
-        var windowHeight = io.DisplaySize.Y;
-        ImGui.SetNextWindowPos(new Vector2(0, windowHeight - 24));
-        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, 24));
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 4));
-        if (ImGui.Begin("##statusbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
-        {
-            ImGui.Text(_statusMessage);
-            if (!string.IsNullOrEmpty(_currentAreaName))
-            {
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
-            }
-
-            // Camera coordinates (local + WoW world) in the center-ish area
-            if (_terrainManager != null || _vlmTerrainManager != null)
-            {
-                var pos = _camera.Position;
-                float wowX = WoWConstants.MapOrigin - pos.Y;
-                float wowY = WoWConstants.MapOrigin - pos.X;
-                float wowZ = pos.Z;
-                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})";
-                float coordWidth = ImGui.CalcTextSize(coordText).X;
-                float centerX = (io.DisplaySize.X - coordWidth) * 0.5f;
-                ImGui.SameLine(centerX);
-                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
-            }
-
-            // FPS counter on the right side
-            string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
-            float textWidth = ImGui.CalcTextSize(fpsText).X;
-            ImGui.SameLine(io.DisplaySize.X - textWidth - 16);
-            var fpsColor = _currentFps >= 30 ? new Vector4(0.4f, 1f, 0.4f, 1f)
-                         : _currentFps >= 15 ? new Vector4(1f, 1f, 0.4f, 1f)
-                         : new Vector4(1f, 0.4f, 0.4f, 1f);
-            ImGui.TextColored(fpsColor, fpsText);
-        }
-        ImGui.End();
-        ImGui.PopStyleVar();
-    }
-
-    private void DrawMinimapWindow()
-    {
-        // Gather tile data
-        List<(int tx, int ty)>? existingTiles = null;
-        Func<int, int, bool>? isTileLoaded = null;
-        string? mapName = null;
-
-        if (_terrainManager != null)
-        {
-            var adapter = _terrainManager.Adapter;
-            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
-            isTileLoaded = _terrainManager.IsTileLoaded;
-            mapName = _terrainManager.MapName;
-        }
-        else if (_vlmTerrainManager != null)
-        {
-            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
-            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
-            mapName = _vlmTerrainManager.MapName;
-        }
-        else return;
-
-        var io = ImGui.GetIO();
-        
-        // Position in top-right, but accounting for right sidebar if visible
-        float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
-        ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
-
-        if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
-            ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
-        {
-            ImGui.End();
-            return;
-        }
-
-        // Compact controls: tile readout + zoom in/out (+ wheel zoom while hovered).
-        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-        int ctX = (int)MathF.Floor(camTileX);
-        int ctY = (int)MathF.Floor(camTileY);
-
-        ImGui.Text($"Tile: ({ctX},{ctY})");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("-##minimapZoomOut"))
-            _minimapZoom = Math.Clamp(_minimapZoom + 0.5f, 1f, 32f);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("+##minimapZoomIn"))
-            _minimapZoom = Math.Clamp(_minimapZoom - 0.5f, 1f, 32f);
-        ImGui.SameLine();
-        ImGui.TextDisabled($"Zoom {_minimapZoom:F1}x");
-
-        float controlsHeight = ImGui.GetCursorPosY() + 8f;
-        float mapAvailableWidth = ImGui.GetContentRegionAvail().X;
-        float mapAvailableHeight = ImGui.GetContentRegionAvail().Y - 4f;
-        float mapSize = MathF.Max(64f, MathF.Min(mapAvailableWidth, mapAvailableHeight));
-        
-        var cursorPos = ImGui.GetCursorScreenPos();
-
-        // Scroll-wheel zoom (map region only)
-        if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
-        {
-            float wheel = io.MouseWheel;
-            if (wheel != 0)
-                _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
-        }
-
-        MinimapHelpers.RenderMinimapContent(
-            cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
-            camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
-            out float viewMinTx, out float viewMinTy, out float cellSize);
-
-        // Make minimap area interactive with invisible button overlay
-        ImGui.SetCursorScreenPos(cursorPos);
-        ImGui.InvisibleButton("##minimapInteraction", new Vector2(mapSize, mapSize));
-        bool isHovered = ImGui.IsItemHovered();
-        bool isActive = ImGui.IsItemActive();
-
-        // Handle click-and-drag panning or click-to-teleport
-        var mousePos = ImGui.GetMousePos();
-
-        if (isHovered || isActive)
-        {
-            // Start drag on mouse down
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            {
-                _minimapDragging = true;
-                _minimapDragStart = mousePos;
-            }
-            // Continue drag while mouse is down
-            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 delta = mousePos - _minimapDragStart;
-                if (delta.LengthSquared() > 0.01f) // Any movement counts as drag
-                {
-                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
-                    _minimapDragStart = mousePos;
-                }
-            }
-            // Mouse released - check if it was a click or drag
-            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 delta = mousePos - _minimapDragStart;
-                if (delta.Length() <= 3f) // Was a click, not a drag
-                {
-                    // Teleport on single click
-                    float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
-                    float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
-                    if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
-                    {
-                        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
-                        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
-                        _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
-                    }
-                }
-                _minimapDragging = false;
-            }
-        }
-        else if (_minimapDragging)
-        {
-            _minimapDragging = false;
-        }
-
-        // Keep cursor aligned under map to avoid adding overflow content that creates scrollbars.
-        ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
-
-        ImGui.End();
-    }
-
-    private void DrawFullscreenMinimap()
-    {
-        // Gather tile data
-        List<(int tx, int ty)>? existingTiles = null;
-        Func<int, int, bool>? isTileLoaded = null;
-        int loadedTileCount = 0;
-        string? mapName = null;
-
-        if (_terrainManager != null)
-        {
-            var adapter = _terrainManager.Adapter;
-            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
-            isTileLoaded = _terrainManager.IsTileLoaded;
-            loadedTileCount = _terrainManager.LoadedTileCount;
-            mapName = _terrainManager.MapName;
-        }
-        else if (_vlmTerrainManager != null)
-        {
-            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
-            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
-            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
-            mapName = _vlmTerrainManager.MapName;
-        }
-        else return;
-
-        var io = ImGui.GetIO();
-        float mapSize = MathF.Min(io.DisplaySize.X * 0.8f, io.DisplaySize.Y * 0.8f);
-        float padding = (io.DisplaySize.X - mapSize) * 0.5f;
-        float topPadding = (io.DisplaySize.Y - mapSize) * 0.5f;
-
-        ImGui.SetNextWindowPos(Vector2.Zero);
-        ImGui.SetNextWindowSize(io.DisplaySize);
-        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(0, 0, 0, 0.85f));
-        
-        if (ImGui.Begin("##FullscreenMinimap", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
-            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings |
-            ImGuiWindowFlags.NoScrollbar))
-        {
-            ImGui.SetCursorPos(new Vector2(padding, topPadding));
-            var cursorPos = ImGui.GetCursorScreenPos();
-
-            // Scroll-wheel zoom
-            if (ImGui.IsWindowHovered())
-            {
-                float wheel = io.MouseWheel;
-                if (wheel != 0)
-                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
-            }
-
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
-
-            MinimapHelpers.RenderMinimapContent(
-                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
-                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
-                out float viewMinTx, out float viewMinTy, out float cellSize);
-
-            // Make minimap area interactive with invisible button overlay
-            ImGui.SetCursorPos(new Vector2(padding, topPadding));
-            ImGui.InvisibleButton("##fullscreenMinimapInteraction", new Vector2(mapSize, mapSize));
-            bool isHovered = ImGui.IsItemHovered();
-            bool isActive = ImGui.IsItemActive();
-
-            // Handle click-and-drag panning or click-to-teleport
-            var mousePos = ImGui.GetMousePos();
-
-            if (isHovered || isActive)
-            {
-                // Start drag on mouse down
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                {
-                    _minimapDragging = true;
-                    _minimapDragStart = mousePos;
-                }
-                // Continue drag while mouse is down
-                else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
-                {
-                    Vector2 delta = mousePos - _minimapDragStart;
-                    if (delta.LengthSquared() > 0.01f) // Any movement counts as drag
-                    {
-                        _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
-                        _minimapDragStart = mousePos;
-                    }
-                }
-                // Mouse released - check if it was a click or drag
-                else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
-                {
-                    Vector2 delta = mousePos - _minimapDragStart;
-                    if (delta.Length() <= 3f) // Was a click, not a drag
-                    {
-                        // Teleport on single click
-                        float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
-                        float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
-                        if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
-                        {
-                            float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
-                            float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
-                            _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
-                        }
-                    }
-                    _minimapDragging = false;
-                }
-            }
-            else if (_minimapDragging)
-            {
-                _minimapDragging = false;
-            }
-
-            // Info overlay
-            ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
-            int ctX = (int)MathF.Floor(camTileX);
-            int ctY = (int)MathF.Floor(camTileY);
-            ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click to teleport");
-            
-            if (_minimapPanOffset != Vector2.Zero)
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Reset Pan"))
-                    _minimapPanOffset = Vector2.Zero;
-            }
-        }
-        ImGui.End();
-        ImGui.PopStyleColor();
-        ImGui.PopStyleVar();
     }
 
     private void DrawMinimap_OLD()
@@ -8848,12 +7288,9 @@ void main() {
     {
         var io = ImGui.GetIO();
         float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
-        float leftInset = _showLeftSidebar ? SidebarWidth : 0f;
-        float rightInset = _showRightSidebar ? SidebarWidth : 0f;
-
-        x = leftInset;
+        x = 0f;
         y = topOffset;
-        width = io.DisplaySize.X - leftInset - rightInset;
+        width = io.DisplaySize.X;
         height = io.DisplaySize.Y - topOffset - StatusBarHeight;
         return width > 10f && height > 10f;
     }

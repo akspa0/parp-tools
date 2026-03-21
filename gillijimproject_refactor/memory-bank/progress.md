@@ -1,8 +1,93 @@
 # Progress
 
+### Mar 21, 2026 - PM4 Documentation Refresh
+
+- Refreshed `documentation/pm4-current-decoding-logic-2026-03-20.md` into a current viewer-side PM4 reconstruction contract instead of leaving PM4 behavior spread across many memory-bank entries and stale experiments.
+- The updated document now records:
+	- the three distinct PM4 reading layers: raw file data, linked object assembly, and final viewer render derivation
+	- the active CK24 reconstruction pipeline in `WorldScene.BuildPm4TileObjects(...)`
+	- the current `MPRL` contract as anchor/scoring input, not linked-center translation ownership
+	- the stronger negative result from runtime evidence: current PM4 viewer behavior does not support an `MPRL` bounding-box/container paradigm
+	- the split planar-candidate policy for tile-local versus world-space PM4
+	- the `12°` coarse-only yaw correction guardrail
+	- the list of rejected experiments that should not be reintroduced casually
+- Updated memory-bank active-context files to point future PM4 work at that document first.
+- Validation limits:
+	- documentation and memory-bank update only; no code changes were made in this slice.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - Dockspace UI Recovery + PM4 Translation Rollback
+
+- Latest user report after the ViewerApp partial split and earlier PM4 MPRL-frame experiment:
+	- `World Maps` starting collapsed was wrong.
+	- PM4 alignment had gotten worse.
+	- the viewer still needed a real dock-panel UI.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- removed the linked-`MPRL` bounds-center translation path from `BuildPm4TileObjects(...)`.
+	- removed the viewer-only `TryResolveMprlAuthoritativeAdjustment(...)` translation stage and the extra `worldTranslation` plumbing through PM4 line/triangle conversion.
+	- kept the earlier geometry-pivot path plus coarse yaw-correction logic instead of forcing linked CK24 groups into one translated `MPRL` center.
+- `src/MdxViewer/ViewerApp.cs`
+	- enabled ImGui docking in source.
+	- added a dockspace host between the menu/toolbar region and the status bar.
+	- added a `View -> Dock Panels` toggle.
+	- scene viewport math no longer subtracts fixed sidebar widths.
+- `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- restored `World Maps` to default-open on first draw.
+	- left/right shell panels can now run as normal titled dockable windows (`Navigator`, `Inspector`) when dock panels are enabled, while preserving the older fixed-sidebar mode as fallback.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings.
+	- no automated tests added or run.
+	- no runtime real-data signoff yet on PM4 alignment recovery or on the dock-panel workflow.
+
+### Mar 21, 2026 - ViewerApp Partial-Class Refactor
+
+- User asked for the oversized viewer shell file to be broken up instead of continuing to grow `src/MdxViewer/ViewerApp.cs` as one 6000+ line class.
+- `src/MdxViewer/ViewerApp.cs`
+	- removed the moved client-dialog, PM4 utility, minimap/status, and sidebar-heavy UI method bodies from the main file.
+	- kept the remaining world-objects implementation in-place as `DrawWorldObjectsContentCore()` so the split stayed low-risk and behavior-preserving.
+- Added new partials:
+	- `src/MdxViewer/ViewerApp_ClientDialogs.cs`
+	- `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+	- `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`
+	- `src/MdxViewer/ViewerApp_Sidebars.cs`
+- Why this shape:
+	- the repo already used partial-class decomposition for `ViewerApp`, so continuing that pattern was safer than a broad UI architecture rewrite.
+	- this is a maintainability slice, not a user-facing viewer redesign.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings after fixing missing imports in the new partial files.
+	- no automated tests added or run.
+
+### Mar 21, 2026 - PM4 MPRL-Authoritative CK24 Frame Follow-Up
+
+- This earlier viewer-side linked-`MPRL` translation experiment is no longer active.
+- Runtime user validation reported that it made PM4 alignment worse, and the translation path was later removed in the `Dockspace UI Recovery + PM4 Translation Rollback` follow-up above.
+- Keep this in mind when continuing PM4 work:
+	- `MPRL` ownership as a semantic hypothesis is still open.
+	- the specific implementation that translated CK24 groups into linked `MPRL` bounds centers should be treated as a regressed experiment, not current behavior.
+
 ### Mar 21, 2026 - PM4 Per-Object Bounds Overlay
 
 ### Mar 21, 2026 - PM4 Small-Yaw Correction Clamp
+
+### Mar 21, 2026 - Viewer UI / Perf Slice: Hideable Chrome + Clipped Lists
+
+- User priority shifted to viewer-shell usability and UI render cost because the fixed sidebar layout was getting in the way of PM4 debugging itself.
+- `src/MdxViewer/ViewerApp.cs`
+	- added `Tab`-driven hide-chrome mode so the menu bar, toolbar, sidebars, status bar, and floating utility windows can be suppressed quickly during scene inspection.
+	- reduced default shell noise by no longer forcing every major sidebar section open on first draw.
+	- clipped the obvious large per-frame UI lists instead of rendering every row:
+		- file browser
+		- discovered world maps
+		- renderer subobject visibility toggles
+		- WMO / MDX placement lists
+		- POI / taxi node / taxi route lists
+- Why this is scoped this way:
+	- it attacks the two immediately visible pain points without doing a high-risk full UI rewrite: constant shell clutter and unbounded list drawing.
+	- it does not attempt to restore the old dockspace/panel architecture yet.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing solution warnings
+	- no automated tests added or run
+	- no runtime signoff yet on actual frame-time improvement or on whether the new defaults are the right interaction model for PM4-heavy sessions
 
 - Follow-up after user runtime report that PM4 objects were now almost correct but still carried a coherent `5..10` degree vertical-axis offset.
 - `src/MdxViewer/Terrain/WorldScene.cs`
@@ -49,6 +134,20 @@
 	- no runtime signoff yet on the reported PM4 extent mismatch case
 
 ### Mar 21, 2026 - PM4 World-Space Orientation Solver Fix
+
+### Mar 21, 2026 - PM4 Tile-Local Orientation Guardrail
+
+- Follow-up after runtime report that PM4 tiles other than `0_0` and `0_1` were coherently rotated about `90°` counter-clockwise.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- `EnumeratePlanarTransforms(...)` now keeps tile-local PM4 on the established non-swapped south-west tile basis and only tests non-swapped mirror variants there.
+	- quarter-turn `swap` candidates remain available only for world-space PM4, where the earlier handedness fix was actually needed.
+- Why this is narrower than reverting the whole solver expansion:
+	- the quarter-turn solve is still needed for world-space PM4 cases.
+	- the regression came from applying that same basis search to tile-local PM4, which already has a stable tile-frame mapping.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- no automated tests added or run
+	- no runtime signoff yet on the reported non-origin tile orientation case
 
 - Fixed one concrete PM4 handedness bug in `src/MdxViewer/Terrain/WorldScene.cs` after runtime evidence showed mirrored solutions like `swap=True` / `windingFlip=True` on structures that should only need a quarter-turn basis correction.
 - Root cause:
