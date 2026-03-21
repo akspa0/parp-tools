@@ -6,6 +6,41 @@ PM4 work in the viewer has accumulated several useful fixes, several misleading 
 
 This is not a final PM4 format specification. It is the authoritative description of what the active viewer does today, what assumptions are still open, and what should not be reintroduced.
 
+## How To Use This Reference
+
+Use this document by question, not by reading top-to-bottom every time.
+
+| If you need to know... | Start here |
+| --- | --- |
+| which PM4 chunks the viewer actually consumes | `Active Data Contract In Use`, `Chunk Extraction: Parser To Pm4File` |
+| how raw PM4 bytes become viewer objects | `Mermaid: Chunk-To-Viewer Reconstruction Flow` |
+| where CK24 grouping/orientation decisions happen | `Object Assembly Pipeline`, `Step-By-Step Reconstruction Walkthrough` |
+| how coordinate mode and planar transform are chosen | `Orientation Solver (Current)`, `Mermaid: Orientation Solver Decision Flow` |
+| what `MPRL` is and is not allowed to mean right now | `MPRL Contract In The Active Viewer` |
+| which fields are safe to build new logic on | `Appendix: Compact Chunk-Field Trust Map` |
+| what not to resurrect from earlier experiments | `Confirmed Rejected Experiments` |
+
+### Reading Order By Task
+
+For parser work:
+
+1. `Active Data Contract In Use`
+2. `Chunk Extraction: Parser To Pm4File`
+3. `Appendix: Compact Chunk-Field Trust Map`
+
+For viewer reconstruction work:
+
+1. `Object Assembly Pipeline`
+2. `Step-By-Step Reconstruction Walkthrough`
+3. `Orientation Solver (Current)`
+
+For PM4 alignment triage:
+
+1. `MPRL Contract In The Active Viewer`
+2. `Orientation Solver (Current)`
+3. `Diagnostics And Viewer Tooling`
+4. `Confirmed Rejected Experiments`
+
 ## Validation Discipline
 
 - Build validation is useful for guarding refactors and keeping the branch coherent.
@@ -26,7 +61,7 @@ This is not a final PM4 format specification. It is the authoritative descriptio
 - Open: `MSCN` is parsed and important to the broader PM4 pipeline, but it is not yet the authoritative source for active viewer object extents/orientation.
 - Open: runtime visual signoff is still pending for remaining alignment and visibility edge cases.
 
-## PM4 Must Be Read At Three Layers
+## Reference Model: Three PM4 Reading Layers
 
 This is the cleanest mental model for the active codebase.
 
@@ -57,6 +92,282 @@ The active overlay path reads from `WoWMapConverter.Core.Formats.PM4.Pm4File` an
 - `MPRL`: placement refs via `Pm4File.PositionRefs`
   - currently used as anchor and scoring input, especially for coordinate-mode selection, planar solve, and yaw comparison
 - `MSCN`: parsed but not authoritative for the current viewer object reconstruction contract
+
+## Chunk Extraction: Parser To `Pm4File`
+
+The current parser path is:
+
+- `Pm4Decoder.Decode(byte[])`
+- read chunk signature + chunk size
+- dispatch by FourCC
+- build `Pm4FileStructure`
+- `Pm4File.PopulateLegacyView(...)`
+- expose the legacy/viewer-facing lists consumed by `WorldScene`
+
+### Chunk Dispatch In `Pm4Decoder`
+
+- `MVER` -> PM4 version
+- `MSHD` -> PM4 header fields
+- `MSLK` -> link entries
+- `MSPV` -> path vertices
+- `MSPI` -> path indices
+- `MSVT` -> mesh vertices
+- `MSVI` -> mesh indices
+- `MSUR` -> surface descriptors
+- `MSCN` -> scene/exterior vertices
+- `MPRL` -> position refs
+- `MPRR` -> graph/reference entries
+- unknown chunks -> `UnparsedChunks`
+
+The decoder also records per-chunk byte sizes in `ChunkSizes`, which is useful for diagnostics and format drift detection.
+
+### Viewer-Relevant Extraction Table
+
+| Chunk | Decoder output | `Pm4File` view | Fields the viewer actually uses | Current role in `MdxViewer` |
+| --- | --- | --- | --- | --- |
+| `MSVT` | `List<Vector3>` | `MeshVertices` | raw PM4 mesh vertex positions | source geometry for CK24 reconstruction |
+| `MSVI` | `List<uint>` | `MeshIndices` | per-surface index references | drives loop edges and triangle fans |
+| `MSUR` | `List<MsurChunk>` | `Surfaces` | `Ck24`, `MsviFirstIndex`, `IndexCount`, `MdosIndex`, `GroupKey`, `AttributeMask`, `Height` | defines CK24 grouping and surface membership |
+| `MSLK` | `List<MslkChunk>` | `LinkEntries` | `GroupObjectId`, `MsurIndex`, `RefIndex` | links surfaces to linked groups and position refs |
+| `MPRL` | `List<MprlChunk>` | `PositionRefs` | `Position`, low-16 `RotationOrFlags` | anchor/scoring/yaw reference input |
+| `MSCN` | `List<Vector3>` | `ExteriorVertices` | parsed only | not authoritative for active viewer reconstruction |
+| `MPRR` | `List<MprrChunk>` | `MprrEntries` | graph edge values | not part of the active viewer orientation path |
+
+### Important Field-Level Notes
+
+`MSUR`:
+
+- `Ck24` is decoded from `PackedParams >> 8`
+- `Ck24Type` is the top byte of `PackedParams`
+- `Ck24ObjectId` is the low 16 bits of decoded `Ck24`
+- `MsviFirstIndex` and `IndexCount` define the index span used to reconstruct the surface loop
+
+`MSLK`:
+
+- the viewer prefers `MsurIndex` when linking a link entry to a surface
+- it only falls back to `RefIndex` as a surface id when `MsurIndex` does not resolve
+- `RefIndex` is also treated as a position-ref index when it falls in `MPRL` range
+
+`MPRL`:
+
+- `Position` is stored as `(PositionX, PositionY, PositionZ)`
+- active viewer logic interprets this as ADT-style placement data: planar `X/Z`, vertical `Y`
+- `RotationOrFlags` currently aliases the low 16 bits of `Unk04`
+
+## Mermaid: Chunk-To-Viewer Reconstruction Flow
+
+```mermaid
+flowchart TD
+      A[PM4 file bytes] --> B[Pm4Decoder.Decode]
+
+      B --> C1[MVER -> version]
+      B --> C2[MSHD -> header]
+      B --> C3[MSVT -> MeshVertices]
+      B --> C4[MSVI -> MeshIndices]
+      B --> C5[MSUR -> Surfaces]
+      B --> C6[MSLK -> LinkEntries]
+      B --> C7[MPRL -> PositionRefs]
+      B --> C8[MSCN -> ExteriorVertices]
+      B --> C9[MPRR -> MprrEntries]
+      B --> C10[Unknown chunks -> UnparsedChunks]
+
+      C3 --> D[Pm4File.PopulateLegacyView]
+      C4 --> D
+      C5 --> D
+      C6 --> D
+      C7 --> D
+      C8 --> D
+      C9 --> D
+
+      D --> E[WorldScene PM4 tile load]
+      E --> F[Parse filename tile x_y]
+      F --> G[Merge PM4 payload into tile bucket]
+
+      G --> H[BuildPm4TileObjects]
+      H --> I[Filter MSUR to CK24 != 0]
+      I --> J[Group surfaces by CK24]
+
+      J --> K[Detect axis convention from PM4 geometry]
+      J --> L[Collect linked MPRL refs through MSLK]
+      J --> M[Resolve coordinate mode<br/>tile-local vs world-space]
+      J --> N[Resolve shared planar transform per CK24]
+
+      L --> M
+      L --> N
+      K --> M
+      K --> N
+
+      N --> O[Compute CK24 world pivot from reconstructed geometry]
+      L --> P[Compute expected MPRL yaw]
+      O --> Q[Optional coarse yaw correction]
+      P --> Q
+
+      Q --> R[Split CK24 by MSLK linked groups]
+      R --> S[Optional split by dominant MDOS]
+      S --> T[Optional split by connectivity]
+
+      T --> U[Build line loops from MSVI spans]
+      T --> V[Build triangle fans from MSVI spans]
+
+      U --> W[Convert PM4 local -> world]
+      V --> W
+      W --> X[Apply shared CK24 yaw correction if needed]
+      X --> Y[Convert world -> renderer basis]
+      Y --> Z[Emit PM4 overlay objects<br/>keyed by tile, ck24, objectPart]
+
+      C8 -. parsed but not authoritative today .-> Z
+      C7 -. anchor/scoring input, not bounds ownership .-> N
+```
+
+### Implementation Map: Chunk-To-Viewer Flow
+
+Line numbers below are anchor points for this branch state. If they drift, the function names are the stable reference.
+
+| Flow step | Primary implementation site | Notes |
+| --- | --- | --- |
+| PM4 file bytes -> decoder entry | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4Decoder.cs`, `Pm4Decoder.Decode(byte[])` at line 11 | top-level byte-array decode entry |
+| decoder stream walk | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4Decoder.cs`, `Pm4Decoder.Decode(BinaryReader)` at line 18 | reads FourCC + size and dispatches by chunk |
+| `MVER` / `MSHD` / `MSLK` / `MSUR` / `MPRL` chunk readers | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4Decoder.cs`, `ReadMshd` line 115, `ReadMslk` line 128, `ReadMsur` line 156, `ReadMprl` line 184, `ReadMprr` line 208 | exact chunk-layout decode lives here |
+| vector and index chunk readers | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4Decoder.cs`, `ReadVectors` line 215, `ReadUints` line 222, `ReadSignedInt24` line 229 | used by `MSPV`, `MSPI`, `MSVT`, `MSVI`, `MSCN` |
+| `Pm4File` construction | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4File.cs`, constructor path at lines 34-35 | `Pm4Decoder.Decode(data)` then `PopulateLegacyView(Structure)` |
+| structure -> viewer-facing lists | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4File.cs`, `PopulateLegacyView(...)` at line 38 | converts canonical chunk records into `MeshVertices`, `MeshIndices`, `Surfaces`, `LinkEntries`, `PositionRefs`, `ExteriorVertices` |
+| surface-level triangle extraction helper | `src/WoWMapConverter/WoWMapConverter.Core/Formats/PM4/Pm4File.cs`, `GetSurfaceTriangles(...)` at line 125 | useful for sanity-checking mesh-side reconstruction |
+| PM4 tile load -> object build call | `src/MdxViewer/Terrain/WorldScene.cs`, PM4 tile build call at line 743 | tile payloads are converted into overlay objects here |
+| CK24 object reconstruction entry | `src/MdxViewer/Terrain/WorldScene.cs`, `BuildPm4TileObjects(...)` at line 924 | main viewer reconstruction pipeline |
+| linked `MPRL` collection | `src/MdxViewer/Terrain/WorldScene.cs`, `CollectLinkedPositionRefs(...)` at line 1341 | extracts linked refs from `MSLK`/surface membership |
+| coordinate mode selection | `src/MdxViewer/Terrain/WorldScene.cs`, `ResolveCk24CoordinateMode(...)` at line 1055 | chooses tile-local vs world-space per CK24 |
+| axis convention detection | `src/MdxViewer/Terrain/WorldScene.cs`, `DetectPm4AxisConvention(...)` at lines 2056 and 2085 | file-wide and per-surface-group variants |
+| planar transform solve | `src/MdxViewer/Terrain/WorldScene.cs`, `ResolvePlanarTransform(...)` at line 2119 | selects the shared CK24 planar basis |
+| coarse yaw correction solve | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeWorldYawCorrectionRadians(...)` at line 1536 | applies the `12°` guardrail |
+| linked-group split | `src/MdxViewer/Terrain/WorldScene.cs`, `SplitSurfaceGroupByMslk(...)` at line 1168 | separates CK24 into linked components |
+| line emission | `src/MdxViewer/Terrain/WorldScene.cs`, `BuildCk24ObjectLines(...)` at line 1670 | reconstructs loop edges from `MSVI` spans |
+| triangle emission | `src/MdxViewer/Terrain/WorldScene.cs`, `BuildCk24ObjectTriangles(...)` at line 1728 | reconstructs triangle fans from `MSVI` spans |
+| PM4 local -> world | `src/MdxViewer/Terrain/WorldScene.cs`, `ConvertPm4VertexToWorld(...)` at line 2458 | canonical PM4 basis conversion |
+| world -> renderer | `src/MdxViewer/Terrain/WorldScene.cs`, `ConvertPm4VertexToRenderer(...)` at line 2535 | world-space PM4 into viewer render basis |
+| interchange dump for offline triage | `src/MdxViewer/Terrain/WorldScene.cs`, `BuildPm4OverlayInterchangeJson(...)` at line 418 | emits tile/object/geometry debug export |
+| UI entry for JSON dump | `src/MdxViewer/ViewerApp_Pm4Utilities.cs`, `Dump PM4 Objects JSON` button at lines 109, 310 and `_worldScene.BuildPm4OverlayInterchangeJson(...)` call at line 359 | easiest runtime export hook |
+
+## Step-By-Step Reconstruction Walkthrough
+
+This is the actual extraction path that leads to the PM4 data the viewer can currently orient with some confidence.
+
+### 1. Raw mesh comes from `MSVT` + `MSVI` + `MSUR`
+
+- `MSVT` provides the raw 3D points
+- `MSVI` provides the shared index pool
+- `MSUR` tells the viewer which contiguous span inside `MSVI` belongs to a surface, and which `CK24` that surface belongs to
+
+The viewer does not build oriented objects straight from `MSCN` today. The oriented objects are reconstructed from the mesh-side path above.
+
+### 2. `MSUR.CK24` is the first durable object key
+
+`BuildPm4TileObjects(...)` ignores surfaces where `CK24 == 0` and starts object reconstruction by grouping surfaces on `CK24`.
+
+That CK24-scoped bucket is the first place where the viewer has enough structure to ask:
+
+- which axis convention fits this data?
+- does this look tile-local or world-space?
+- which planar mapping best fits linked references?
+
+### 3. `MSLK` tells the viewer how to narrow linkage
+
+After the CK24 bucket is built, `MSLK` is used to:
+
+- split a CK24 into linked groups
+- find the dominant `GroupObjectId`
+- discover which `MPRL` refs are linked to those surfaces
+
+This is why `MSLK` sits in the middle of the viewer reconstruction path rather than only being a side-channel.
+
+### 4. `MPRL` is used as scoring input, not direct ownership
+
+For each CK24 bucket, linked `MPRL` refs feed three decisions:
+
+- coordinate mode selection: tile-local vs world-space
+- planar transform scoring
+- expected yaw comparison against reconstructed principal yaw
+
+The important constraint is what does **not** happen anymore:
+
+- the viewer does not translate the CK24 into a linked `MPRL` center frame
+- the viewer does not assume the CK24 should fit inside an `MPRL` bounds container
+
+### 5. Axis convention is chosen from geometry, not from a chunk flag
+
+`DetectPm4AxisConvention(...)` evaluates candidate bases:
+
+- `XZ + Y up`
+- `XY + Z up`
+- `YZ + X up`
+
+The score prefers the basis that produces the most horizontal, floor-like triangles or surface normals. If that is inconclusive, it falls back to range-based heuristics.
+
+### 6. Coordinate mode is solved per CK24
+
+`ResolveCk24CoordinateMode(...)` compares:
+
+- tile-local interpretation
+- world-space interpretation
+
+Each side is scored by:
+
+- `MPRL` footprint fit
+- centroid distance to nearest `MPRL` ref
+
+This is not one file-wide switch. One PM4 file can contain CK24 buckets that prefer different interpretations.
+
+### 7. Planar transform candidates differ by coordinate mode
+
+Tile-local PM4 candidates:
+
+- remain inside the established south-west tile basis
+- test only non-swapped mirror combinations
+
+World-space PM4 candidates:
+
+- test rigid identity and quarter-turn variants first
+- only then fall back to mirrored candidates
+
+This split exists because applying the world-space quarter-turn search to tile-local PM4 produced the coherent `90°` non-origin tile rotation regression.
+
+### 8. Continuous yaw correction is a coarse final adjustment only
+
+After planar transform resolution:
+
+- the viewer computes a geometry-derived principal yaw
+- it computes an expected yaw from linked `MPRL` refs
+- it applies the delta only if the residual is larger than `12°`
+
+This keeps principal-axis noise from performing small destructive "corrections" on already-near-correct objects.
+
+### 9. The viewer builds the actual renderable objects from surface loops
+
+Once the CK24 basis is fixed, the viewer emits render geometry by walking the `MSVI` spans defined by each `MSUR`:
+
+- `BuildCk24ObjectLines(...)` reconstructs loop edges and explicitly closes each surface loop
+- `BuildCk24ObjectTriangles(...)` triangulates each surface as a fan from the first indexed vertex
+- mirrored transforms flip triangle winding during emission
+
+This is the point where the viewer produces the PM4 data it actually knows how to orient and render today.
+
+## What We Currently Know How To Orient Reliably
+
+The active viewer has the best footing on PM4 data built through this path:
+
+- `MSUR` surfaces with nonzero `CK24`
+- mesh geometry reconstructed from `MSVT` + `MSVI`
+- CK24-level axis convention
+- CK24-level coordinate-mode selection
+- CK24-level planar transform resolution
+- linked-group / MDOS / connectivity splitting after the shared CK24 basis is chosen
+
+That is the current "known orientation" zone.
+
+What is outside that zone today:
+
+- treating `MSCN` as the authoritative source for oriented viewer objects
+- treating `MPRL` as an enclosing bounding-box/container frame
+- any theory that bypasses CK24 surface reconstruction and still claims to explain the visible viewer objects
 
 ## Tile Mapping Contract
 
@@ -173,6 +484,87 @@ Guardrail:
 - residual yaw deltas below `12°` are ignored
 - this is intentional because the principal-axis solve is useful for coarse basis recovery, but too noisy for small final alignment tweaks
 
+## Mermaid: Orientation Solver Decision Flow
+
+```mermaid
+flowchart TD
+   A[CK24 surface bucket] --> B[Detect axis convention]
+   A --> C[Collect linked MPRL refs via MSLK]
+   A --> D[Collect surface vertices]
+
+   B --> E[Resolve coordinate mode]
+   C --> E
+   D --> E
+
+   E --> F{Tile-local or world-space?}
+   F -->|Tile-local| G[Enumerate non-swapped mirror candidates<br/>inside tile basis]
+   F -->|World-space| H[Enumerate rigid candidates first<br/>identity, 180, +90, -90]
+   H --> I[Then allow mirrored fallbacks]
+
+   G --> J[Score each candidate]
+   I --> J
+
+   J --> K[Centroid-to-nearest-MPRL distance]
+   J --> L[Footprint score vs linked MPRL planar points]
+   J --> M[Yaw tie-break vs expected MPRL yaw]
+   J --> N[Penalty for inverted winding / mirrored fits]
+
+   K --> O[Choose best planar transform]
+   L --> O
+   M --> O
+   N --> O
+
+   O --> P[Compute CK24 world pivot from geometry]
+   C --> Q[Compute expected MPRL yaw]
+   D --> R[Compute principal yaw from reconstructed geometry]
+
+   P --> S[Compute signed yaw delta]
+   Q --> S
+   R --> S
+
+   S --> T{Is abs delta >= 12 degrees?}
+   T -->|No| U[Keep shared planar transform only]
+   T -->|Yes| V[Apply one coarse shared yaw correction<br/>around CK24 world pivot]
+
+   U --> W[Emit oriented CK24 basis]
+   V --> W
+```
+
+### Implementation Map: Orientation Solver Flow
+
+Line numbers below are anchor points for this branch state. If they drift, the function names are the stable reference.
+
+| Solver step | Primary implementation site | Notes |
+| --- | --- | --- |
+| axis convention detection | `src/MdxViewer/Terrain/WorldScene.cs`, `DetectPm4AxisConvention(Pm4File)` line 2056 and `DetectPm4AxisConvention(Pm4File, IEnumerable<MsurEntry>)` line 2085 | chooses `XZ+Yup`, `XY+Zup`, or `YZ+Xup` |
+| linked `MPRL` ref collection | `src/MdxViewer/Terrain/WorldScene.cs`, `CollectLinkedPositionRefs(...)` line 1341 | links `MPRL` refs to the current surface bucket |
+| coordinate mode selection | `src/MdxViewer/Terrain/WorldScene.cs`, `ResolveCk24CoordinateMode(...)` line 1055 | compares tile-local and world-space scoring |
+| coordinate-mode scoring helper | `src/MdxViewer/Terrain/WorldScene.cs`, `EvaluateCoordinateModeScore(...)` just below line 1055 | footprint + centroid score blend |
+| planar transform solve | `src/MdxViewer/Terrain/WorldScene.cs`, `ResolvePlanarTransform(...)` line 2119 | shared CK24 transform selection |
+| planar candidate enumeration | `src/MdxViewer/Terrain/WorldScene.cs`, `EnumeratePlanarTransforms(...)` in the `ResolvePlanarTransform` block around line 2231 | different candidate sets for tile-local vs world-space |
+| expected `MPRL` yaw | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeExpectedMprlYawRadians(...)` line 1381 | decodes current low-16 yaw signal |
+| principal yaw from reconstructed geometry | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputePlanarPrincipalYaw(...)` immediately below the `TryComputeExpectedMprlYawRadians(...)` block | geometry-driven comparison yaw |
+| coarse yaw delta gate | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeWorldYawCorrectionRadians(...)` line 1536 | rejects residual deltas under `12°` |
+| CK24 world pivot | `src/MdxViewer/Terrain/WorldScene.cs`, `ComputeSurfaceWorldCentroid(...)` just below the yaw-correction helper | shared rotation pivot for the CK24 |
+| final world-space emission path | `src/MdxViewer/Terrain/WorldScene.cs`, `BuildCk24ObjectLines(...)` line 1670, `BuildCk24ObjectTriangles(...)` line 1728, `ConvertPm4VertexToWorld(...)` line 2458, `ConvertPm4VertexToRenderer(...)` line 2535 | where the chosen basis becomes visible geometry |
+
+### Solver Interpretation Notes
+
+- Axis convention is decided from geometry first, not from a PM4 chunk flag.
+- Coordinate mode is chosen before the final planar transform because tile-local and world-space PM4 do not use the same candidate set anymore.
+- `MPRL` helps score the solve, but does not contribute a trusted bounding box or enclosing frame.
+- The final continuous yaw correction is intentionally conservative and only exists to recover obvious basis misses.
+
+### Solver Debug Checklist
+
+When a PM4 object looks wrong in the viewer, check these in order:
+
+1. Did the object come from `MSUR`/`CK24` reconstruction, or are you reasoning from `MSCN`/bounds instead?
+2. Did the CK24 choose tile-local or world-space mode?
+3. Which planar candidate won, and was it rigid or mirrored?
+4. Did the object receive a coarse yaw correction, or was the delta under `12°` and intentionally suppressed?
+5. Are you looking at geometry output, PM4 bounds output, or `MPRL` refs and assuming they should coincide exactly?
+
 ## Coordinate Conversion Contract
 
 ### PM4 Local To World
@@ -211,6 +603,77 @@ Important scope note:
 - current PM4 bounds come from rendered PM4 object geometry, not from `MSCN` directly
 - they are a debugging aid, not final proof of authoritative PM4 extents
 
+## Appendix: Compact Chunk-Field Trust Map
+
+This appendix is intentionally narrow. It covers the chunk fields the active parser and viewer currently trust enough to use, and flags the ones still treated as opaque or only partially understood.
+
+### Trusted Enough To Drive Active Viewer Behavior
+
+| Chunk | Layout detail currently trusted | Why it is trusted in the active path |
+| --- | --- | --- |
+| `MVER` | 4-byte version value | parsed directly and stable |
+| `MSVT` | repeated `Vector3` entries, 12 bytes each | directly consumed as PM4 mesh geometry |
+| `MSVI` | repeated `uint32` indices, 4 bytes each | directly consumed as the mesh index pool |
+| `MSUR` | 32-byte entries | size is explicit in decoder and stable under active datasets |
+| `MSUR.GroupKey` | byte 0 | used in object metadata/debugging |
+| `MSUR.IndexCount` | byte 1 | used as the surface loop span length |
+| `MSUR.AttributeMask` | byte 2 | used in object metadata/debugging |
+| `MSUR.Normal` | bytes 4..15 as 3 floats | used in surface/axis scoring context |
+| `MSUR.Height` | bytes 16..19 float | used in object metadata/debugging |
+| `MSUR.MsviFirstIndex` | bytes 20..23 uint32 | used to locate the surface index span inside `MSVI` |
+| `MSUR.MdosIndex` | bytes 24..27 uint32 | used for optional MDOS-based splitting |
+| `MSUR.PackedParams` | bytes 28..31 uint32 | used to derive `Ck24`, `Ck24Type`, `Ck24ObjectId` |
+| `MSLK` | 20-byte entries | size is explicit in decoder and stable under active datasets |
+| `MSLK.GroupObjectId` | bytes 4..7 uint32 | used to split a CK24 into linked groups and choose dominant group id |
+| `MSLK.MsurIndex` | legacy-viewer field reconstructed from the 24-bit index slot | preferred surface reference when linking surfaces |
+| `MSLK.RefIndex` | bytes 16..17 uint16 | used as fallback surface id or as `MPRL` ref index depending on context |
+| `MPRL` | 24-byte entries | size is explicit in decoder and stable under active datasets |
+| `MPRL.Position` | bytes 8..19 as 3 floats | used as anchor/scoring data after `X/Z` planar, `Y` vertical interpretation |
+| `MPRL.RotationOrFlags` | low 16 bits aliased from `Unk04` | used as the current best available yaw signal |
+| `MSCN` | repeated `Vector3` entries, 12 bytes each | parsing is trusted; semantic ownership in the viewer is not |
+| `MPRR` | 4-byte entries as two uint16s | parsing is trusted even though the active viewer orientation path does not use it |
+
+### Parsed Correctly But Not Trusted As Viewer Semantics Yet
+
+| Chunk / field | Current status |
+| --- | --- |
+| `MSCN` extents / object ownership | parsed, but not trusted as the authoritative source for active viewer object bounds or orientation |
+| `MPRL` as container / bounding-box frame | explicitly not trusted; runtime evidence contradicts this paradigm |
+| `MPRL` low-16 angle exact semantic meaning beyond current yaw comparison use | partially trusted for scoring, not treated as a closed full-orientation spec |
+| `MPRR` graph semantics | parsed, not part of the active `WorldScene` orientation path |
+| `MSPV` / `MSPI` path mesh | parsed in core, not part of the active viewer object reconstruction path |
+
+### Still Opaque Or Poorly Named In Active Code
+
+| Field | Current handling |
+| --- | --- |
+| `MSHD.Field00 .. Field1C` | preserved as header values, not used as trusted viewer semantics |
+| `MPRL.Unk00`, `Unk02`, `Unk06`, `Unk14`, `Unk16` | preserved, but not part of active viewer orientation rules |
+| `MSLK.TypeFlags`, `Subtype`, `Padding`, `LinkId`, `SystemFlag` | parsed and preserved, but not central to the active orientation contract |
+| `MSUR.Padding` | parsed only |
+
+### Size Summary Used By The Current Decoder
+
+| Chunk | Entry size in active decoder |
+| --- | --- |
+| `MSLK` | 20 bytes per entry |
+| `MSUR` | 32 bytes per entry |
+| `MPRL` | 24 bytes per entry |
+| `MPRR` | 4 bytes per entry |
+| `MSVT` / `MSPV` / `MSCN` | 12 bytes per `Vector3` |
+| `MSVI` / `MSPI` | 4 bytes per `uint32` |
+
+### Practical Rule For Future Edits
+
+- If a field is only in the "parsed correctly but not trusted" or "opaque" buckets, do not promote it into viewer placement/orientation logic without runtime evidence.
+- If a future pass needs a new PM4 theory, attach it to one of these specific fields and say exactly what changed in the trust level.
+
+### Safe Extension Rules
+
+- New parser work is safer when it adds preserved data first and viewer semantics second.
+- New viewer semantics should attach to one specific trusted field or one specific new runtime observation.
+- Do not promote a whole paradigm such as "MPRL is the object box" without naming the exact field and exact behavioral evidence.
+
 ## Confirmed Rejected Experiments
 
 Do not silently reintroduce these without fresh runtime evidence:
@@ -227,7 +690,7 @@ Do not silently reintroduce these without fresh runtime evidence:
 - whether `MPRL` has a narrower semantic role than the earlier "container/bounds frame" hypothesis suggested
 - whether any remaining misalignment is now in reconstruction, visibility/culling, or asset/render parity rather than PM4 basis solving itself
 
-## Practical Next Steps
+## Next Investigations
 
 1. Use `Dump PM4 Objects JSON` on a known failing live scene.
 2. Compare tile/object counts, bounds, and transform metadata against what is visible in the viewer.
