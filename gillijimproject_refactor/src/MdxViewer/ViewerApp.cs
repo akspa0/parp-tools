@@ -278,6 +278,7 @@ public partial class ViewerApp : IDisposable
     private float _pm4RotationStepDegrees = 90f;
     private float _pm4ScaleStepUnits = 0.1f;
     private bool _showPm4AlignmentWindow;
+    private bool _showChunkClipboardWindow = true;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -991,6 +992,10 @@ void main() {
             if (_showPerfWindow)
                 DrawPerfWindow();
 
+            // Chunk Clipboard (floating window)
+            if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
+                DrawChunkClipboardWindow();
+
             // PM4 alignment (floating window)
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
@@ -1139,6 +1144,7 @@ void main() {
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
+                ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow);
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {

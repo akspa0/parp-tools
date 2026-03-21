@@ -70,6 +70,9 @@ public class Pm4File
                 GroupObjectId = link.GroupObjectId,
                 MspiFirstIndex = link.MspiFirstIndex,
                 MspiIndexCount = link.MspiIndexCount,
+                MsviFirstIndex = -1,
+                MsviIndexCount = 0,
+                MsurIndex = uint.MaxValue,
                 LinkId = link.LinkId,
                 RefIndex = link.RefIndex,
                 SystemFlag = link.SystemFlag

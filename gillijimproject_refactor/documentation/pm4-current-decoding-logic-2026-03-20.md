@@ -74,7 +74,7 @@ This is the cleanest mental model for the active codebase.
    - this is where coordinate mode, axis convention, planar transform, and linked-group splitting are decided
 
 3. Final viewer render derivation
-   - world-space lines/triangles, renderer-basis conversion, object-local debug transforms, bounds, and pickability
+   - object-local PM4 lines/triangles plus a baked base placement transform, renderer-basis conversion, object-local debug transforms, bounds, and pickability
    - this is where many regressions show up even when raw PM4 decode is technically present
 
 Confusing these layers caused several previous dead ends. A raw chunk fact is not automatically a viewer placement rule.
@@ -151,7 +151,8 @@ The decoder also records per-chunk byte sizes in `ChunkSizes`, which is useful f
 `MPRL`:
 
 - `Position` is stored as `(PositionX, PositionY, PositionZ)`
-- active viewer logic interprets this as ADT-style placement data: planar `X/Z`, vertical `Y`
+- active viewer now converts this to world as `(PositionX, PositionZ, PositionY)` when scoring against `MSVT`-derived geometry and when drawing PM4 position-ref markers
+- this is paired with the restored fixed `MSVT` viewer/world basis of `(Y, X, Z)` that older PM4 R&D used when the mesh lined up with placed WMO/M2 assets
 - `RotationOrFlags` currently aliases the low 16 bits of `Unk04`
 
 ## Mermaid: Chunk-To-Viewer Reconstruction Flow
@@ -350,6 +351,14 @@ Once the CK24 basis is fixed, the viewer emits render geometry by walking the `M
 
 This is the point where the viewer produces the PM4 data it actually knows how to orient and render today.
 
+After that geometry is emitted, each `Pm4OverlayObject` keeps:
+
+- placed-space bounds and center for picking/culling/debugging
+- object-local line/triangle geometry rebased around a preserved pre-split linked-group placement anchor
+- a baked base placement transform that restores that anchored local geometry into the solved placed frame during rendering/export
+
+This is an important guardrail: if a CK24 is later split by linked-group, `MdosIndex`, or connectivity, the split fragments must keep the original linked-group placement anchor instead of inventing new per-fragment centers, otherwise the viewer loses the source placement offsets that existed before the split.
+
 ## What We Currently Know How To Orient Reliably
 
 The active viewer has the best footing on PM4 data built through this path:
@@ -401,6 +410,12 @@ Implemented in `WorldScene.BuildPm4TileObjects(...)`:
 9. Optionally split by dominant `MDOS` index
 10. Optionally split by connectivity
 11. Emit per-component overlay objects keyed by `(tile, ck24, objectPart)`
+
+Current render-derivation detail:
+
+- `Pm4OverlayObject` now stores its line/triangle geometry in object-local space around the placed object center.
+- each object also carries a baked base placement transform that translates that local geometry back into the solved placed frame.
+- overlay-wide transforms and user PM4 alignment transforms are applied on top of that baked base frame instead of assuming the geometry itself is already the final placed frame.
 
 Important guardrail: transform resolution is shared per CK24, not solved independently per linked subgroup or per tiny fragment. That keeps one real object from exploding into internally inconsistent orientations.
 
@@ -570,12 +585,15 @@ When a PM4 object looks wrong in the viewer, check these in order:
 ### PM4 Local To World
 
 - choose planar/up axes from detected convention: `XY+Zup`, `XZ+Yup`, or `YZ+Xup`
+- for the common `XY+Zup` case, the active viewer uses the older fixed `MSVT` planar order `(Y, X, Z)` instead of raw `(X, Y, Z)`
 - apply the chosen planar transform
 - if tile-local:
-  - `worldX = tileX * TileSize + mappedU`
-  - `worldY = tileY * TileSize + mappedV`
+   - `worldX = tileY * TileSize + mappedU`
+   - `worldY = tileX * TileSize + mappedV`
   - `worldZ = localUp`
 - else use world-like planar values directly
+
+This swap is intentional in viewer world space. File `tileX` advances along world `Y`, and file `tileY` advances along world `X`; leaving them unswapped only happens to look correct on origin tiles and shifts non-origin tile-local PM4 onto the wrong grid.
 
 ### World To Renderer Space
 
@@ -602,6 +620,7 @@ Important scope note:
 
 - current PM4 bounds come from rendered PM4 object geometry, not from `MSCN` directly
 - they are a debugging aid, not final proof of authoritative PM4 extents
+- current PM4 JSON export emits placed-space geometry by reapplying each object's baked base placement transform to its object-local geometry
 
 ## Appendix: Compact Chunk-Field Trust Map
 
@@ -628,7 +647,7 @@ This appendix is intentionally narrow. It covers the chunk fields the active par
 | `MSLK.MsurIndex` | legacy-viewer field reconstructed from the 24-bit index slot | preferred surface reference when linking surfaces |
 | `MSLK.RefIndex` | bytes 16..17 uint16 | used as fallback surface id or as `MPRL` ref index depending on context |
 | `MPRL` | 24-byte entries | size is explicit in decoder and stable under active datasets |
-| `MPRL.Position` | bytes 8..19 as 3 floats | used as anchor/scoring data after `X/Z` planar, `Y` vertical interpretation |
+| `MPRL.Position` | bytes 8..19 as 3 floats | used as anchor/scoring data after the active viewer/world interpretation `(X, Z, Y)`, paired with `MSVT -> (Y, X, Z)` |
 | `MPRL.RotationOrFlags` | low 16 bits aliased from `Unk04` | used as the current best available yaw signal |
 | `MSCN` | repeated `Vector3` entries, 12 bytes each | parsing is trusted; semantic ownership in the viewer is not |
 | `MPRR` | 4-byte entries as two uint16s | parsing is trusted even though the active viewer orientation path does not use it |

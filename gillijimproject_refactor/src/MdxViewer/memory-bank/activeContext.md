@@ -179,6 +179,45 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 
 ### PM4 Orientation Follow-Up: World-Space Solver No Longer Forces Mirrored Swap-Only Fits (Mar 21)
 
+### PM4 Render-Derivation Follow-Up: Object-Local Geometry + Baked Base Placement (Mar 21)
+
+### PM4 MPRL Axis Contract Correction (Mar 21)
+
+- Current viewer behavior in `WorldScene`:
+   - the common `XY+Zup` PM4 mesh path now preserves the older fixed `MSVT` viewer/world basis `(Y, X, Z)` that matched placed WMO/M2 assets during earlier R&D.
+   - PM4 `MPRL.Position` is now converted to world as `(PositionX, PositionZ, PositionY)` for planar scoring, nearest-ref distance checks, and in-scene PM4 ref markers so the ref data follows that same basis.
+   - the earlier viewer-side assumption that `MPRL` was ADT-style planar `X/Z`, vertical `Y` was inconsistent with older PM4 forensic notes on the development dataset.
+- Why this matters:
+   - if the `MPRL` axis contract is wrong, the PM4 planar solver can pick the wrong swap/inversion basis even when raw `MSVT` geometry is otherwise present and coherent.
+
+- PM4 overlay objects in `WorldScene` no longer exist only as already-placed line/triangle geometry.
+- current viewer behavior:
+   - PM4 object geometry is localized around a preserved linked-group placement anchor instead of each split fragment center.
+   - each `Pm4OverlayObject` carries a baked base placement transform that restores that anchored local geometry into the solved placed frame.
+   - split CK24 fragments keep the original pre-split placement anchor so linked-group offsets survive MDOS/connectivity splitting.
+   - overlay-wide PM4 transforms and object-local alignment edits now layer on top of that base transform during rendering.
+- important limit:
+   - this does not change the CK24 solve boundary or claim final PM4 natural-rotation closure.
+   - it is structural groundwork so future PM4 placement/container work stops flattening local object geometry into final placed space too early.
+
+### PM4 Link-Decode Follow-Up: Linked `MPRL` Forensics On `development_00_00.pm4` (Mar 21)
+
+- Current runtime-forensics checkpoint for the selected `development_00_00.pm4` object family:
+   - raw dump + rollback analyzers show `CK24=0x421809` is one raw CK24/object-id family at the `MSUR` layer (`objId=0x1809`) and the viewer's many `objectPartId` values are reconstruction splits, not separate raw CK24 ids
+   - raw `MPRL.Unk04` on this tile spans only about `0°..22.3°`, so do not treat it as already-proven absolute object yaw for this file
+   - `Unk06` is constant `0x8000` on this tile
+   - `Unk16` still behaves like normal vs terminator typing
+   - `Unk14` still behaves like floor/level bucketing
+- Active-code fix landed during this forensic pass:
+   - `Pm4File.PopulateLegacyView(...)` no longer leaves unsupported legacy `MSLK` fields at zero
+   - unsupported fields now use sentinels so `WorldScene` does not accidentally read fake `MsurIndex = 0` data when linking/grouping PM4 surfaces and `MPRL` refs
+- Active viewer instrumentation added:
+   - selected PM4 object debug info now shows linked `MPRL` summary stats (normal/terminator counts, floor range, heading min/max/mean)
+   - PM4 interchange JSON now includes the same summary per object
+- Practical implication:
+   - before inventing pitch/roll from `MPRL`, inspect the selected object's linked-`MPRL` heading/floor summary in the viewer first
+   - if the selected object still needs a large manual rotation while linked `MPRL` headings stay in a narrow low-angle band, the missing orientation is likely not a trivial direct `Unk04 -> absolute yaw` decode
+
 - Authoritative PM4 viewer contract doc: `documentation/pm4-current-decoding-logic-2026-03-20.md`.
 - The document was refreshed on Mar 21, 2026 to reflect current `WorldScene` behavior rather than the reverted linked-`MPRL` center-translation experiment.
 - Start from that doc before changing PM4 grouping, transform solving, or viewer-side placement rules.
@@ -191,11 +230,12 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - tile-local PM4 already has a fixed south-west tile basis, so letting the solver choose `swap` candidates per tile could rotate whole tiles once tile coordinates moved away from the origin
 - Current correction:
    - tile-local PM4 planar solving now tests only the non-swapped mirror set inside the existing tile basis
+   - tile-local PM4 world assembly now uses viewer-world tile ordering (`tileY -> worldX`, `tileX -> worldY`) so non-origin tile-local PM4 no longer lands on the wrong tile grid cell
    - quarter-turn `swap` candidates remain enabled for world-space PM4 only
 - Validation status:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
    - no automated tests were added or run
-   - no runtime real-data signoff yet on the reported non-origin tile rotation case
+	- no runtime real-data signoff yet on the reported non-origin tile placement/orientation case
 
 - Latest runtime evidence from the PM4 alignment window showed mirrored solutions like `swap=True, invertU=False, invertV=False, windingFlip=True` on objects whose real mismatch was a rigid quarter-turn, not a true reflection.
 - Root cause in `WorldScene.ResolvePlanarTransform(...)`:

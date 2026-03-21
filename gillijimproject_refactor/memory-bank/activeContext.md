@@ -115,6 +115,56 @@ Working branch is now reset in the main tree, not only in side worktrees.
 
 ### PM4 Orientation Follow-Up: World-Space Solver No Longer Forces Mirrored Swap Fits (Mar 21)
 
+### PM4 Link-Decode Follow-Up: Legacy `MSLK` Surface Index Defaults No Longer Leak As Real Data (Mar 21)
+
+### PM4 MPRL Axis Contract Correction (Mar 21)
+
+- Follow-up after comparing the active viewer path against older PM4 R&D exports and `WoWRollback/Pm4Reader` forensic notes.
+- Current correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- the active viewer restores the older fixed `MSVT` viewer/world basis `(Y, X, Z)` for the common `XY+Zup` path instead of trying to recover that basis later with per-object planar heuristics.
+	- viewer-side `MPRL` positions are now converted to world as `(PositionX, PositionZ, PositionY)` so they line up with that restored `MSVT` basis during planar scoring, nearest-anchor comparisons, and PM4 position-ref marker rendering.
+	- the previous viewer assumption that `MPRL` could be treated as ADT-style planar `X/Z`, vertical `Y` or as raw `Z/X/Y` world output is no longer the active contract.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run.
+	- no runtime real-data signoff yet that this closes the reported PM4 placement failure.
+
+### PM4 Render-Derivation Follow-Up: Overlay Objects Now Keep An Explicit Local Frame (Mar 21)
+
+- Follow-up after runtime evidence that PM4 mesh pieces were effectively being treated as if they were already in final placed space, which makes it too easy to conflate object-local shape with world placement.
+- Current correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- `Pm4OverlayObject` now localizes its line/triangle geometry around a preserved pre-split linked-group placement anchor instead of storing only fully placed geometry.
+	- each PM4 overlay object now carries a baked base placement transform that restores that anchored object-local geometry into the solved placed frame.
+	- when one CK24 is split into linked-group / MDOS / connectivity-derived parts, those parts keep the original linked-group placement anchor instead of rebasing to per-fragment centers.
+	- overlay rendering now applies that baked base transform first, then any global PM4 overlay transform and object-local alignment edits on top.
+	- PM4 JSON export now rehydrates placed-space geometry from the baked base transform so the interchange dump still matches what the viewer is rendering.
+- Scope / limit:
+	- this is structural groundwork for the missing “mesh inside stable object frame” layer; it is not a claim that final PM4 natural-rotation decoding is solved.
+	- the CK24 placement solve itself is unchanged in this slice.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
+	- no automated tests were added or run.
+	- no runtime real-data signoff yet that this resolves the remaining PM4 orientation mismatch.
+
+- Runtime investigation on `test_data/development/World/Maps/development/development_00_00.pm4` found a concrete active-path bug during PM4 rotation forensics:
+	- `WoWMapConverter.Core.Formats.PM4.MslkEntry` exposes `MsurIndex`, `MsviFirstIndex`, and `MsviIndexCount`
+	- `WorldScene` consults `MsurIndex` when grouping/linking surfaces and linked `MPRL` refs
+	- but `Pm4File.PopulateLegacyView(...)` was never populating those legacy fields, so `MsurIndex` defaulted to `0`
+- Current correction:
+	- legacy `MSLK` entries created from the canonical decoder now explicitly set sentinel values for the unsupported fields (`MsurIndex = uint.MaxValue`, `MsviFirstIndex = -1`, `MsviIndexCount = 0`) instead of leaking fake `0` values into the viewer
+	- this keeps `WorldScene` on the existing `RefIndex` fallback path unless a real surface index is available in the future
+- PM4 rotation-forensics result from `development_00_00.pm4`:
+	- raw `MPRL.Unk04` values only span about `0.01° .. 22.3°` on this tile
+	- treat that field as a narrow local heading/placement signal on this file, not as proven absolute object yaw for the whole placed building set
+	- `Unk06` is constant `0x8000` on this tile, and `Unk16` still behaves like normal-vs-terminator entry typing
+	- `Unk14` continues to look like floor/level bucketing, not pitch/roll
+- Viewer debugging follow-up:
+	- selected PM4-object debug info now shows linked `MPRL` normal/terminator counts, floor range, and heading min/max/mean so runtime object picks can be compared against raw PM4 placement stats directly
+- Validation status for this follow-up:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026
+	- no automated tests were added or run
+	- no runtime signoff yet that the selected `CK24=0x421809` object now has the final correct orientation; this slice improves link-data integrity and observability first
+
 - Use `documentation/pm4-current-decoding-logic-2026-03-20.md` as the authoritative viewer-side PM4 reconstruction contract for the active branch.
 - That doc was refreshed on Mar 21, 2026 to capture the current CK24 pipeline, the tile-local versus world-space planar candidate split, and the rollback of the linked-`MPRL` center-translation experiment.
 
@@ -126,11 +176,12 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- tile-local PM4 already has a fixed south-west tile basis, so per-tile `swap` solving could rotate whole non-origin tiles even when the underlying tile basis was correct
 - Current correction:
 	- tile-local PM4 now tests only non-swapped mirror candidates inside the established tile basis
+	- tile-local PM4 world assembly now applies the file tile indices in viewer-world order (`tileY -> worldX`, `tileX -> worldY`) instead of the naive unswapped pairing that only looked right on origin tiles
 	- quarter-turn `swap` candidates remain world-space only
 - Validation status for this exact follow-up:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
 	- no automated tests were added or run for this follow-up.
-	- no runtime real-data signoff yet on the non-origin tile rotation case; do not claim PM4 tile orientation closure from build success alone.
+	- no runtime real-data signoff yet on the non-origin tile placement/orientation case; do not claim PM4 tile closure from build success alone.
 
 - Runtime PM4 alignment evidence showed some objects resolving to mirrored planar transforms like `swap=True, invertU=False, invertV=False`, which reverses handedness and makes stairs/ramps wind the wrong way around structures.
 - Root cause in `src/MdxViewer/Terrain/WorldScene.cs`:

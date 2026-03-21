@@ -55,6 +55,7 @@ public readonly struct Pm4ObjectDebugInfo
         int objectPartId,
         uint linkGroupObjectId,
         int linkedPositionRefCount,
+        Pm4LinkedPositionRefSummary linkedPositionRefSummary,
         int tileX,
         int tileY,
         int surfaceCount,
@@ -77,6 +78,7 @@ public readonly struct Pm4ObjectDebugInfo
         ObjectPartId = objectPartId;
         LinkGroupObjectId = linkGroupObjectId;
         LinkedPositionRefCount = linkedPositionRefCount;
+        LinkedPositionRefSummary = linkedPositionRefSummary;
         TileX = tileX;
         TileY = tileY;
         SurfaceCount = surfaceCount;
@@ -100,6 +102,7 @@ public readonly struct Pm4ObjectDebugInfo
     public int ObjectPartId { get; }
     public uint LinkGroupObjectId { get; }
     public int LinkedPositionRefCount { get; }
+    public Pm4LinkedPositionRefSummary LinkedPositionRefSummary { get; }
     public int TileX { get; }
     public int TileY { get; }
     public int SurfaceCount { get; }
@@ -115,6 +118,39 @@ public readonly struct Pm4ObjectDebugInfo
     public bool InvertU { get; }
     public bool InvertV { get; }
     public bool InvertsWinding { get; }
+}
+
+public readonly struct Pm4LinkedPositionRefSummary
+{
+    public Pm4LinkedPositionRefSummary(
+        int totalCount,
+        int normalCount,
+        int terminatorCount,
+        int floorMin,
+        int floorMax,
+        float headingMinDegrees,
+        float headingMaxDegrees,
+        float headingMeanDegrees)
+    {
+        TotalCount = totalCount;
+        NormalCount = normalCount;
+        TerminatorCount = terminatorCount;
+        FloorMin = floorMin;
+        FloorMax = floorMax;
+        HeadingMinDegrees = headingMinDegrees;
+        HeadingMaxDegrees = headingMaxDegrees;
+        HeadingMeanDegrees = headingMeanDegrees;
+    }
+
+    public int TotalCount { get; }
+    public int NormalCount { get; }
+    public int TerminatorCount { get; }
+    public int FloorMin { get; }
+    public int FloorMax { get; }
+    public float HeadingMinDegrees { get; }
+    public float HeadingMaxDegrees { get; }
+    public float HeadingMeanDegrees { get; }
+    public bool HasNormalHeadings => NormalCount > 0 && !float.IsNaN(HeadingMeanDegrees);
 }
 
 /// <summary>
@@ -417,7 +453,21 @@ public class WorldScene : ISceneRenderer
 
     public string BuildPm4OverlayInterchangeJson(bool includeGeometry = true)
     {
-        static float[] ToArray(Vector3 v) => new[] { v.X, v.Y, v.Z };
+        static float[] VectorToArray(Vector3 v) => new[] { v.X, v.Y, v.Z };
+        static float[] LineToArray(Pm4LineSegment line, in Matrix4x4 transform)
+        {
+            Vector3 from = ApplyPm4OverlayTransform(line.From, transform);
+            Vector3 to = ApplyPm4OverlayTransform(line.To, transform);
+            return new[] { from.X, from.Y, from.Z, to.X, to.Y, to.Z };
+        }
+
+        static float[] TriangleToArray(Pm4Triangle tri, in Matrix4x4 transform)
+        {
+            Vector3 a = ApplyPm4OverlayTransform(tri.A, transform);
+            Vector3 b = ApplyPm4OverlayTransform(tri.B, transform);
+            Vector3 c = ApplyPm4OverlayTransform(tri.C, transform);
+            return new[] { a.X, a.Y, a.Z, b.X, b.Y, b.Z, c.X, c.Y, c.Z };
+        }
 
         var tiles = _pm4TileObjects
             .OrderBy(kvp => kvp.Key.tileX)
@@ -439,6 +489,7 @@ public class WorldScene : ISceneRenderer
                             && !IsNearZeroVector(objectRotationDegrees);
                         bool hasObjectScale = _pm4ObjectScales.TryGetValue(objectGroupKey, out Vector3 objectScale)
                             && !IsNearOneVector(objectScale);
+                        Matrix4x4 baseGeometryTransform = obj.BaseTransform;
 
                         return new
                         {
@@ -454,14 +505,25 @@ public class WorldScene : ISceneRenderer
                                 ck24 = objectGroupKey.ck24,
                             },
                             linkedPositionRefCount = obj.LinkedPositionRefCount,
+                            linkedPositionRefSummary = new
+                            {
+                                totalCount = obj.LinkedPositionRefSummary.TotalCount,
+                                normalCount = obj.LinkedPositionRefSummary.NormalCount,
+                                terminatorCount = obj.LinkedPositionRefSummary.TerminatorCount,
+                                floorMin = obj.LinkedPositionRefSummary.FloorMin,
+                                floorMax = obj.LinkedPositionRefSummary.FloorMax,
+                                headingMinDegrees = obj.LinkedPositionRefSummary.HeadingMinDegrees,
+                                headingMaxDegrees = obj.LinkedPositionRefSummary.HeadingMaxDegrees,
+                                headingMeanDegrees = obj.LinkedPositionRefSummary.HeadingMeanDegrees,
+                            },
                             surfaceCount = obj.SurfaceCount,
                             dominantGroupKey = obj.DominantGroupKey,
                             dominantAttributeMask = obj.DominantAttributeMask,
                             dominantMdosIndex = obj.DominantMdosIndex,
                             averageSurfaceHeight = obj.AverageSurfaceHeight,
-                            boundsMin = ToArray(obj.BoundsMin),
-                            boundsMax = ToArray(obj.BoundsMax),
-                            center = ToArray(obj.Center),
+                            boundsMin = VectorToArray(obj.BoundsMin),
+                            boundsMax = VectorToArray(obj.BoundsMax),
+                            center = VectorToArray(obj.Center),
                             planarTransform = new
                             {
                                 swapPlanarAxes = obj.PlanarTransform.SwapPlanarAxes,
@@ -470,28 +532,20 @@ public class WorldScene : ISceneRenderer
                                 invertsWinding = obj.PlanarTransform.InvertsWinding,
                             },
                             hasObjectOffset,
-                            objectOffset = hasObjectOffset ? ToArray(objectOffset) : ToArray(Vector3.Zero),
+                            objectOffset = hasObjectOffset ? VectorToArray(objectOffset) : VectorToArray(Vector3.Zero),
                             hasObjectRotation,
-                            objectRotationDegrees = hasObjectRotation ? ToArray(objectRotationDegrees) : ToArray(Vector3.Zero),
+                            objectRotationDegrees = hasObjectRotation ? VectorToArray(objectRotationDegrees) : VectorToArray(Vector3.Zero),
                             hasObjectScale,
-                            objectScale = hasObjectScale ? ToArray(objectScale) : ToArray(Vector3.One),
+                            objectScale = hasObjectScale ? VectorToArray(objectScale) : VectorToArray(Vector3.One),
                             lineCount = obj.Lines.Count,
                             triangleCount = obj.Triangles.Count,
+                            baseTransformTranslation = VectorToArray(obj.PlacementAnchor),
                             lines = includeGeometry
-                                ? obj.Lines.Select(line => new[]
-                                    {
-                                        line.From.X, line.From.Y, line.From.Z,
-                                        line.To.X, line.To.Y, line.To.Z,
-                                    })
+                                ? obj.Lines.Select(line => LineToArray(line, baseGeometryTransform))
                                     .ToList()
                                 : new List<float[]>(),
                             triangles = includeGeometry
-                                ? obj.Triangles.Select(tri => new[]
-                                    {
-                                        tri.A.X, tri.A.Y, tri.A.Z,
-                                        tri.B.X, tri.B.Y, tri.B.Z,
-                                        tri.C.X, tri.C.Y, tri.C.Z,
-                                    })
+                                ? obj.Triangles.Select(tri => TriangleToArray(tri, baseGeometryTransform))
                                     .ToList()
                                 : new List<float[]>(),
                         };
@@ -507,7 +561,7 @@ public class WorldScene : ISceneRenderer
             {
                 tileX = kvp.Key.tileX,
                 tileY = kvp.Key.tileY,
-                refs = kvp.Value.Select(ToArray).ToList(),
+                refs = kvp.Value.Select(VectorToArray).ToList(),
             })
             .ToList();
 
@@ -528,9 +582,9 @@ public class WorldScene : ISceneRenderer
             },
             overlayAlignment = new
             {
-                translation = ToArray(_pm4OverlayTranslation),
-                rotationDegrees = ToArray(_pm4OverlayRotationDegrees),
-                scale = ToArray(_pm4OverlayScale),
+                translation = VectorToArray(_pm4OverlayTranslation),
+                rotationDegrees = VectorToArray(_pm4OverlayRotationDegrees),
+                scale = VectorToArray(_pm4OverlayScale),
             },
             tiles,
             tilePositionRefs = positionRefs,
@@ -896,6 +950,7 @@ public class WorldScene : ISceneRenderer
                 obj.ObjectPartId + objectPartOffset,
                 obj.LinkGroupObjectId,
                 obj.LinkedPositionRefCount,
+                obj.LinkedPositionRefSummary,
                 obj.Lines,
                 obj.Triangles,
                 obj.SurfaceCount,
@@ -903,6 +958,7 @@ public class WorldScene : ISceneRenderer
                 obj.DominantAttributeMask,
                 obj.DominantMdosIndex,
                 obj.AverageSurfaceHeight,
+                obj.PlacementAnchor,
                 obj.PlanarTransform));
         }
 
@@ -993,6 +1049,17 @@ public class WorldScene : ISceneRenderer
                 uint dominantLinkGroupObjectId = SelectDominantMslkGroupObjectId(pm4, linkedGroup);
                 List<MsurEntry> linkedSurfaces = linkedGroup.Select(static entry => entry.Surface).ToList();
                 List<MprlEntry> linkedPositionRefs = CollectLinkedPositionRefs(pm4, linkedGroup);
+                Pm4LinkedPositionRefSummary linkedPositionRefSummary = SummarizeLinkedPositionRefs(linkedPositionRefs);
+                Vector3 linkedPlacementAnchor = ComputeSurfaceRendererCentroid(
+                    pm4,
+                    linkedSurfaces,
+                    tileX,
+                    tileY,
+                    useTileLocalCoordinates,
+                    ck24AxisConvention,
+                    ck24PlanarTransform,
+                    ck24WorldPivot,
+                    ck24WorldYawCorrection);
                 List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
                     ? SplitSurfaceGroupByMdos(linkedSurfaces)
                     : new List<List<MsurEntry>> { linkedSurfaces };
@@ -1008,8 +1075,9 @@ public class WorldScene : ISceneRenderer
                         if (tileLineBudget <= 0)
                             break;
 
-                        // Keep split components under one linked group on a shared transform basis.
-                        // Per-component transform resolution can explode one real object into offset fragments.
+                        // Keep split components under one shared CK24 transform basis.
+                        // Per-component or per-linked-group transform resolution can explode one real object
+                        // into internally inconsistent mirrored/rotated fragments.
                         List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, ck24WorldPivot, ck24WorldYawCorrection, tileLineBudget, ref rejectedLongEdges);
                         List<Pm4Triangle> triangles = tileTriangleBudget > 0
                             ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, ck24WorldPivot, ck24WorldYawCorrection, tileTriangleBudget)
@@ -1029,6 +1097,7 @@ public class WorldScene : ISceneRenderer
                             objectPartCounter++,
                             dominantLinkGroupObjectId,
                             linkedPositionRefs.Count,
+                            linkedPositionRefSummary,
                             lines,
                             triangles,
                             component.Count,
@@ -1036,6 +1105,7 @@ public class WorldScene : ISceneRenderer
                             dominantAttributeMask,
                             dominantMdosIndex,
                             averageSurfaceHeight,
+                            linkedPlacementAnchor,
                             ck24PlanarTransform));
 
                         tileLineBudget -= lines.Count;
@@ -1378,6 +1448,60 @@ public class WorldScene : ISceneRenderer
         return false;
     }
 
+    private static Pm4LinkedPositionRefSummary SummarizeLinkedPositionRefs(IReadOnlyList<MprlEntry> positionRefs)
+    {
+        if (positionRefs.Count == 0)
+            return new Pm4LinkedPositionRefSummary(0, 0, 0, 0, 0, float.NaN, float.NaN, float.NaN);
+
+        int normalCount = 0;
+        int terminatorCount = 0;
+        int floorMin = int.MaxValue;
+        int floorMax = int.MinValue;
+        float headingMinDegrees = float.PositiveInfinity;
+        float headingMaxDegrees = float.NegativeInfinity;
+        double sumSin = 0d;
+        double sumCos = 0d;
+
+        for (int i = 0; i < positionRefs.Count; i++)
+        {
+            MprlEntry positionRef = positionRefs[i];
+            if (positionRef.Unk16 != 0)
+            {
+                terminatorCount++;
+                continue;
+            }
+
+            normalCount++;
+            floorMin = Math.Min(floorMin, positionRef.Unk14);
+            floorMax = Math.Max(floorMax, positionRef.Unk14);
+
+            float headingDegrees = (positionRef.RotationOrFlags & 0xFFFF) * (360f / 65536f);
+            headingMinDegrees = Math.Min(headingMinDegrees, headingDegrees);
+            headingMaxDegrees = Math.Max(headingMaxDegrees, headingDegrees);
+
+            float headingRadians = headingDegrees * (MathF.PI / 180f);
+            sumSin += Math.Sin(headingRadians);
+            sumCos += Math.Cos(headingRadians);
+        }
+
+        if (normalCount == 0)
+            return new Pm4LinkedPositionRefSummary(positionRefs.Count, 0, terminatorCount, 0, 0, float.NaN, float.NaN, float.NaN);
+
+        float headingMeanDegrees = (float)(Math.Atan2(sumSin, sumCos) * (180d / Math.PI));
+        if (headingMeanDegrees < 0f)
+            headingMeanDegrees += 360f;
+
+        return new Pm4LinkedPositionRefSummary(
+            positionRefs.Count,
+            normalCount,
+            terminatorCount,
+            floorMin,
+            floorMax,
+            headingMinDegrees,
+            headingMaxDegrees,
+            headingMeanDegrees);
+    }
+
     private static bool TryComputeExpectedMprlYawRadians(IReadOnlyList<MprlEntry> positionRefs, out float yawRadians)
     {
         yawRadians = 0f;
@@ -1592,6 +1716,37 @@ public class WorldScene : ISceneRenderer
         return ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
     }
 
+    private static Vector3 ComputeSurfaceRendererCentroid(
+        Pm4File pm4,
+        IReadOnlyList<MsurEntry> surfaces,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
+        Vector3 worldPivot,
+        float worldYawCorrectionRadians)
+    {
+        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaces);
+        if (objectVertices.Count == 0)
+            return Vector3.Zero;
+
+        Vector3 centroid = Vector3.Zero;
+        for (int i = 0; i < objectVertices.Count; i++)
+            centroid += objectVertices[i];
+        centroid /= objectVertices.Count;
+
+        return ConvertPm4VertexToRenderer(
+            centroid,
+            tileX,
+            tileY,
+            useTileLocalCoordinates,
+            axisConvention,
+            planarTransform,
+            worldPivot,
+            worldYawCorrectionRadians);
+    }
+
     private static List<Vector3> SampleObjectVertices(IReadOnlyList<Vector3> objectVertices, int maxSamples)
     {
         var sampled = new List<Vector3>();
@@ -1614,11 +1769,22 @@ public class WorldScene : ISceneRenderer
         var points = new List<Vector2>(positionRefs.Count);
         for (int i = 0; i < positionRefs.Count; i++)
         {
-            Vector3 refPos = positionRefs[i].Position;
-            points.Add(new Vector2(refPos.X, refPos.Z));
+            Vector3 refWorld = ConvertMprlPositionToWorld(positionRefs[i].Position);
+            points.Add(new Vector2(refWorld.X, refWorld.Y));
         }
 
         return points;
+    }
+
+    private static Vector3 ConvertMprlPositionToWorld(Vector3 refPos)
+    {
+        // Older PM4 R&D exported MSVT in a fixed viewer/world basis of (Y, X, Z).
+        // The raw forensic mapping on the development dataset was:
+        //   MPRL X -> raw MSVT Y
+        //   MPRL Z -> raw MSVT X
+        //   MPRL Y -> raw MSVT Z
+        // Folding those together gives viewer/world coordinates of (X, Z, Y).
+        return new Vector3(refPos.X, refPos.Z, refPos.Y);
     }
 
     private static float NearestDistanceSquared(IReadOnlyList<Vector2> points, in Vector2 target)
@@ -1968,9 +2134,7 @@ public class WorldScene : ISceneRenderer
         int count = Math.Min(limit, pm4.PositionRefs.Count);
         for (int i = 0; i < count; i++)
         {
-            Vector3 refPos = pm4.PositionRefs[i].Position;
-            // MPRL uses ADT placement: X/Z planar with Y vertical.
-            Vector3 world = new(refPos.X, refPos.Z, refPos.Y);
+            Vector3 world = ConvertMprlPositionToWorld(pm4.PositionRefs[i].Position);
             markers.Add(new Vector3(
                 WoWConstants.MapOrigin - world.Y,
                 WoWConstants.MapOrigin - world.X,
@@ -2261,9 +2425,7 @@ public class WorldScene : ISceneRenderer
         float best = float.MaxValue;
         for (int i = 0; i < positionRefs.Count; i++)
         {
-            Vector3 refPos = positionRefs[i].Position;
-            // MPRL uses ADT-style placement: X/Z planar with Y vertical.
-            Vector3 refWorld = new(refPos.X, refPos.Z, refPos.Y);
+            Vector3 refWorld = ConvertMprlPositionToWorld(positionRefs[i].Position);
             float dx = refWorld.X - world.X;
             float dy = refWorld.Y - world.Y;
             float distSq = dx * dx + dy * dy;
@@ -2475,8 +2637,12 @@ public class WorldScene : ISceneRenderer
                 break;
             case Pm4AxisConvention.XYPlaneZUp:
             default:
-                localU = pm4Vertex.X;
-                localV = pm4Vertex.Y;
+                // The older PM4 R&D exporter that matched placed WMO/M2 assets used
+                // a fixed MSVT planar order of (Y, X, Z), not raw (X, Y, Z).
+                // Keep Z-up, but preserve that planar basis here so the viewer stops
+                // trying to approximate it with per-object swap/invert heuristics.
+                localU = pm4Vertex.Y;
+                localV = pm4Vertex.X;
                 localUp = pm4Vertex.Z;
                 break;
         }
@@ -2492,8 +2658,12 @@ public class WorldScene : ISceneRenderer
         {
             float mappedU = planarTransform.InvertU ? tileSpan - localU : localU;
             float mappedV = planarTransform.InvertV ? tileSpan - localV : localV;
-            worldX = tileX * tileSpan + mappedU;
-            worldY = tileY * tileSpan + mappedV;
+
+            // Viewer world uses the standard WoW tile convention where file tile X advances along
+            // world Y and file tile Y advances along world X. Keeping these unswapped only happens
+            // to look correct on origin tiles and shifts non-origin tile-local PM4 onto the wrong grid.
+            worldX = tileY * tileSpan + mappedU;
+            worldY = tileX * tileSpan + mappedV;
         }
         else
         {
@@ -2841,12 +3011,9 @@ public class WorldScene : ISceneRenderer
         }
 
         ViewerLog.Important(ViewerLog.Category.Terrain, $"Instances: {_mdxInstances.Count} MDX, {_skyboxInstances.Count} skybox, {_wmoInstances.Count} WMO");
-        ViewerLog.Important(ViewerLog.Category.Terrain, $"Unique models: {UniqueMdxModels} MDX, {UniqueWmoModels} WMO");
-
         // Diagnostic: terrain chunk WorldPosition range
         var camPos = _terrainManager.GetInitialCameraPosition();
         ViewerLog.Info(ViewerLog.Category.Terrain, $"Camera: ({camPos.X:F1}, {camPos.Y:F1}, {camPos.Z:F1})");
-
         // Compute terrain bounding box from chunk WorldPositions
         float tMinX = float.MaxValue, tMinY = float.MaxValue, tMinZ = float.MaxValue;
         float tMaxX = float.MinValue, tMaxY = float.MinValue, tMaxZ = float.MinValue;
@@ -3669,6 +3836,7 @@ public class WorldScene : ISceneRenderer
 
                         var objectKey = (tileKey.tileX, tileKey.tileY, obj.Ck24, obj.ObjectPartId);
                         Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                        Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
 
                         if (!ShouldRenderPm4Object(obj, objectTransform, applyObjectTransform, cameraPos, out Vector3 transformedCenter))
                             continue;
@@ -3684,9 +3852,9 @@ public class WorldScene : ISceneRenderer
                             for (int i = 0; i < obj.Triangles.Count; i++)
                             {
                                 Pm4Triangle tri = obj.Triangles[i];
-                                Vector3 a = applyObjectTransform ? ApplyPm4OverlayTransform(tri.A, objectTransform) : tri.A;
-                                Vector3 b = applyObjectTransform ? ApplyPm4OverlayTransform(tri.B, objectTransform) : tri.B;
-                                Vector3 c = applyObjectTransform ? ApplyPm4OverlayTransform(tri.C, objectTransform) : tri.C;
+                                Vector3 a = ApplyPm4OverlayTransform(tri.A, geometryTransform);
+                                Vector3 b = ApplyPm4OverlayTransform(tri.B, geometryTransform);
+                                Vector3 c = ApplyPm4OverlayTransform(tri.C, geometryTransform);
                                 _bbRenderer.BatchTriangle(a, b, c, pm4Color, 0.20f);
                             }
                             _pm4VisibleTriangleCount += obj.Triangles.Count;
@@ -3695,8 +3863,8 @@ public class WorldScene : ISceneRenderer
                         for (int i = 0; i < obj.Lines.Count; i++)
                         {
                             Pm4LineSegment line = obj.Lines[i];
-                            Vector3 from = applyObjectTransform ? ApplyPm4OverlayTransform(line.From, objectTransform) : line.From;
-                            Vector3 to = applyObjectTransform ? ApplyPm4OverlayTransform(line.To, objectTransform) : line.To;
+                            Vector3 from = ApplyPm4OverlayTransform(line.From, geometryTransform);
+                            Vector3 to = ApplyPm4OverlayTransform(line.To, geometryTransform);
                             _bbRenderer.BatchLine(from, to, pm4Color);
                         }
 
@@ -4196,6 +4364,7 @@ public class WorldScene : ISceneRenderer
             obj.ObjectPartId,
             obj.LinkGroupObjectId,
             obj.LinkedPositionRefCount,
+            obj.LinkedPositionRefSummary,
             objectKey.tileX,
             objectKey.tileY,
             obj.SurfaceCount,
@@ -4496,6 +4665,13 @@ public class WorldScene : ISceneRenderer
         return Vector3.Transform(position, transform);
     }
 
+    private static Matrix4x4 BuildPm4GeometryTransform(Pm4OverlayObject obj, in Matrix4x4 objectTransform, bool applyObjectTransform)
+    {
+        return applyObjectTransform
+            ? obj.BaseTransform * objectTransform
+            : obj.BaseTransform;
+    }
+
     private bool ShouldRenderPm4Object(
         Pm4OverlayObject obj,
         in Matrix4x4 objectTransform,
@@ -4725,6 +4901,7 @@ internal sealed class Pm4OverlayObject
         int objectPartId,
         uint linkGroupObjectId,
         int linkedPositionRefCount,
+        Pm4LinkedPositionRefSummary linkedPositionRefSummary,
         List<Pm4LineSegment> lines,
         List<Pm4Triangle> triangles,
         int surfaceCount,
@@ -4732,6 +4909,7 @@ internal sealed class Pm4OverlayObject
         byte dominantAttributeMask,
         uint dominantMdosIndex,
         float averageSurfaceHeight,
+        Vector3 placementAnchor,
         Pm4PlanarTransform planarTransform)
     {
         Ck24 = ck24;
@@ -4739,6 +4917,7 @@ internal sealed class Pm4OverlayObject
         ObjectPartId = objectPartId;
         LinkGroupObjectId = linkGroupObjectId;
         LinkedPositionRefCount = linkedPositionRefCount;
+        LinkedPositionRefSummary = linkedPositionRefSummary;
         Lines = lines;
         Triangles = triangles;
         SurfaceCount = surfaceCount;
@@ -4749,6 +4928,10 @@ internal sealed class Pm4OverlayObject
         PlanarTransform = planarTransform;
         (BoundsMin, BoundsMax) = ComputeBounds(lines, triangles);
         Center = (BoundsMin + BoundsMax) * 0.5f;
+        PlacementAnchor = IsFiniteVector(placementAnchor) ? placementAnchor : Center;
+        BaseTransform = Matrix4x4.CreateTranslation(PlacementAnchor);
+        Lines = LocalizeLines(lines, PlacementAnchor);
+        Triangles = LocalizeTriangles(triangles, PlacementAnchor);
     }
 
     public uint Ck24 { get; }
@@ -4757,6 +4940,7 @@ internal sealed class Pm4OverlayObject
     public int ObjectPartId { get; }
     public uint LinkGroupObjectId { get; }
     public int LinkedPositionRefCount { get; }
+    public Pm4LinkedPositionRefSummary LinkedPositionRefSummary { get; }
     public List<Pm4LineSegment> Lines { get; }
     public List<Pm4Triangle> Triangles { get; }
     public int SurfaceCount { get; }
@@ -4765,9 +4949,42 @@ internal sealed class Pm4OverlayObject
     public uint DominantMdosIndex { get; }
     public float AverageSurfaceHeight { get; }
     public Pm4PlanarTransform PlanarTransform { get; }
+    public Matrix4x4 BaseTransform { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }
     public Vector3 Center { get; }
+    public Vector3 PlacementAnchor { get; }
+
+    private static List<Pm4LineSegment> LocalizeLines(List<Pm4LineSegment> lines, Vector3 center)
+    {
+        var localized = new List<Pm4LineSegment>(lines.Count);
+        for (int i = 0; i < lines.Count; i++)
+        {
+            Pm4LineSegment line = lines[i];
+            localized.Add(new Pm4LineSegment(line.From - center, line.To - center));
+        }
+
+        return localized;
+    }
+
+    private static List<Pm4Triangle> LocalizeTriangles(List<Pm4Triangle> triangles, Vector3 center)
+    {
+        var localized = new List<Pm4Triangle>(triangles.Count);
+        for (int i = 0; i < triangles.Count; i++)
+        {
+            Pm4Triangle tri = triangles[i];
+            localized.Add(new Pm4Triangle(tri.A - center, tri.B - center, tri.C - center));
+        }
+
+        return localized;
+    }
+
+    private static bool IsFiniteVector(Vector3 value)
+    {
+        return float.IsFinite(value.X)
+            && float.IsFinite(value.Y)
+            && float.IsFinite(value.Z);
+    }
 
     private static (Vector3 min, Vector3 max) ComputeBounds(List<Pm4LineSegment> lines, List<Pm4Triangle> triangles)
     {

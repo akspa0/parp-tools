@@ -342,7 +342,7 @@ public partial class ViewerApp
 
             if (_worldScene != null)
             {
-                ImGui.SetNextItemOpen(false, ImGuiCond.Once);
+                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
                 if (ImGui.CollapsingHeader("World Objects"))
                     DrawWorldObjectsContent();
             }
@@ -630,7 +630,34 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        ImGui.Text("Chunk Clipboard");
+        if (ImGui.Button("Open Chunk Clipboard"))
+            _showChunkClipboardWindow = true;
+        ImGui.SameLine();
+        ImGui.TextDisabled("Chunk copy/paste now lives in its own dockable panel.");
+    }
+
+    private void DrawChunkClipboardWindow()
+    {
+        var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (renderer == null)
+        {
+            _showChunkClipboardWindow = false;
+            return;
+        }
+
+        ImGui.SetNextWindowSize(new Vector2(420f, 0f), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Chunk Clipboard", ref _showChunkClipboardWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        DrawChunkClipboardContent(renderer);
+        ImGui.End();
+    }
+
+    private void DrawChunkClipboardContent(TerrainRenderer renderer)
+    {
         ImGui.Checkbox("Enable Chunk Tool", ref _chunkToolEnabled);
         ImGui.SameLine();
         ImGui.Checkbox("Show Overlay", ref _chunkClipboardShowOverlay);
@@ -669,9 +696,8 @@ public partial class ViewerApp
         var targetChunk = GetChunkClipboardTarget(renderer);
         bool hasChunk = targetChunk.HasValue;
         string targetLabel = _chunkClipboardUseMouse ? "Mouse" : "Camera";
-        if (hasChunk)
+        if (targetChunk is { } c)
         {
-            var c = targetChunk.Value;
             ImGui.TextDisabled($"Copy Target ({targetLabel}): tile({c.TileX},{c.TileY}) chunk({c.ChunkX},{c.ChunkY})");
         }
         else

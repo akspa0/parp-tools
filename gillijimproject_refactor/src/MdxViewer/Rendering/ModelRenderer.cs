@@ -91,7 +91,7 @@ public class MdxRenderer : ISceneRenderer
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
-    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUnshaded, _uPremultiplyAlpha;
+        private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
@@ -603,6 +603,7 @@ public class MdxRenderer : ISceneRenderer
                         _gl.Disable(EnableCap.Blend);
                         _gl.DepthMask(!forceBackdropState);
                         _gl.Uniform1(_uAlphaTest, 1);
+                        _gl.Uniform1(_uUseTextureAlpha, 1);
                         _gl.Uniform1(_uAlphaThreshold, 0.75f);
                         _gl.Uniform1(_uPremultiplyAlpha, 0);
                     }
@@ -618,6 +619,7 @@ public class MdxRenderer : ISceneRenderer
                                 // Premultiplied alpha avoids color-matte fringes on soft transparent edges.
                                 _gl.BlendFunc(BlendingFactor.One, BlendingFactor.OneMinusSrcAlpha);
                                 _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uUseTextureAlpha, 1);
                                 _gl.Uniform1(_uAlphaThreshold, 0.0f);
                                 _gl.Uniform1(_uPremultiplyAlpha, 1);
                                 break;
@@ -625,17 +627,20 @@ public class MdxRenderer : ISceneRenderer
                             case MdlTexOp.AddAlpha:
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
                                 _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uUseTextureAlpha, 1);
                                 _gl.Uniform1(_uAlphaThreshold, 0.0f);
                                 break;
                             case MdlTexOp.Modulate:
                             case MdlTexOp.Modulate2X:
                                 _gl.BlendFunc(BlendingFactor.DstColor, BlendingFactor.Zero);
                                 _gl.Uniform1(_uAlphaTest, 0);
+                                _gl.Uniform1(_uUseTextureAlpha, 0);
                                 _gl.Uniform1(_uAlphaThreshold, 0.0f);
                                 break;
                             default:
                                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                                 _gl.Uniform1(_uAlphaTest, 1);
+                                _gl.Uniform1(_uUseTextureAlpha, 1);
                                 _gl.Uniform1(_uAlphaThreshold, 0.05f);
                                 break;
                         }
@@ -649,6 +654,7 @@ public class MdxRenderer : ISceneRenderer
                             _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                             _gl.DepthMask(!noDepthWrite);
                             _gl.Uniform1(_uAlphaTest, 1);
+                            _gl.Uniform1(_uUseTextureAlpha, 0);
                             _gl.Uniform1(_uAlphaThreshold, 0.05f);
                             _gl.Uniform1(_uPremultiplyAlpha, 0);
                         }
@@ -657,6 +663,7 @@ public class MdxRenderer : ISceneRenderer
                             _gl.Disable(EnableCap.Blend);
                             _gl.DepthMask(!noDepthWrite);
                             _gl.Uniform1(_uAlphaTest, 0);
+                            _gl.Uniform1(_uUseTextureAlpha, 0);
                             _gl.Uniform1(_uPremultiplyAlpha, 0);
                         }
                     }
@@ -877,6 +884,7 @@ in vec3 vViewNormal;
 uniform sampler2D uSampler;
 uniform int uHasTexture;
 uniform int uAlphaTest;
+uniform int uUseTextureAlpha;
 uniform float uAlphaThreshold;
 uniform int uPremultiplyAlpha;
 uniform int uUnshaded;
@@ -948,9 +956,7 @@ void main() {
         finalColor = mix(uFogColor, litColor, fogFactor);
     }
 
-    // For blended/alpha-tested layers (uAlphaTest=1), use texture alpha.
-    // For opaque layers (uAlphaTest=0), force alpha=1.0 to prevent invisible geometry.
-    float outAlpha = (uAlphaTest == 1) ? texColor.a : 1.0;
+    float outAlpha = (uUseTextureAlpha == 1) ? texColor.a : 1.0;
     FragColor = vec4(finalColor, outAlpha) * uColor;
 }
 ";
@@ -979,6 +985,7 @@ void main() {
         _uProj = _gl.GetUniformLocation(_shaderProgram, "uProj");
         _uHasTexture = _gl.GetUniformLocation(_shaderProgram, "uHasTexture");
         _uAlphaTest = _gl.GetUniformLocation(_shaderProgram, "uAlphaTest");
+        _uUseTextureAlpha = _gl.GetUniformLocation(_shaderProgram, "uUseTextureAlpha");
         _uAlphaThreshold = _gl.GetUniformLocation(_shaderProgram, "uAlphaThreshold");
         _uPremultiplyAlpha = _gl.GetUniformLocation(_shaderProgram, "uPremultiplyAlpha");
         _uUnshaded = _gl.GetUniformLocation(_shaderProgram, "uUnshaded");
