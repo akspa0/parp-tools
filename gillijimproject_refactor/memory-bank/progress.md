@@ -10,10 +10,12 @@
 - `src/MdxViewer/Terrain/WorldScene.cs`
 	- viewer-side `MPRL` position handling no longer assumes ADT-style planar `X/Z`, vertical `Y`.
 	- the common `XY+Zup` mesh path now restores the older fixed `MSVT` viewer/world basis `(Y, X, Z)` instead of treating raw `(X, Y, Z)` as already canonical.
+	- PM4 axis convention is now detected once per file and reused across CK24 groups instead of being redetected per CK24.
 	- `BuildMprlPlanarPoints(...)`, `NearestPositionRefDistanceSquared(...)`, and `BuildPm4PositionRefMarkers(...)` now all convert `MPRL.Position` to world as `(PositionX, PositionZ, PositionY)` to match that restored `MSVT` basis.
 - Why this was needed:
 	- older PM4 forensics matched `MPRL` fields against raw `MSVT` axes, but the active viewer also needs to fold in the older successful `MSVT -> (Y, X, Z)` world basis from the R&D exporter.
 	- without that fixed `MSVT` basis, the viewer was trying to approximate the right layout with per-object swap/invert heuristics, which can push PM4 into mirrored or polar-opposite fits against real WMO/M2 placements.
+	- keeping axis convention per CK24 could still let neighboring wall/object fragments choose different mesh bases, which matched the remaining “random offset / mirrored” runtime symptom.
 - Validation limits:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings.
 	- no automated tests added or run.
@@ -212,7 +214,7 @@
 	- this forced some world-space objects into mirrored fits because the rigid `+/-90` degree candidates were never evaluated
 - Current behavior:
 	- world-space PM4 now evaluates the rigid planar transforms first (`identity`, `180`, `+90`, `-90`)
-	- mirrored candidates remain as fallback only and now carry a stronger world-space penalty so they do not win unless they are clearly required by the data
+	- mirrored candidates are now removed from the active PM4 planar solver so winding parity stays rigid-only instead of drifting into reversed/opposite-facing fits
 - Validation limits:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
 	- no automated tests added or run

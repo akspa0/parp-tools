@@ -185,6 +185,7 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 
 - Current viewer behavior in `WorldScene`:
    - the common `XY+Zup` PM4 mesh path now preserves the older fixed `MSVT` viewer/world basis `(Y, X, Z)` that matched placed WMO/M2 assets during earlier R&D.
+   - PM4 axis convention is now detected once per file and reused across CK24 groups so neighboring PM4 wall/object pieces do not choose different mesh bases.
    - PM4 `MPRL.Position` is now converted to world as `(PositionX, PositionZ, PositionY)` for planar scoring, nearest-ref distance checks, and in-scene PM4 ref markers so the ref data follows that same basis.
    - the earlier viewer-side assumption that `MPRL` was ADT-style planar `X/Z`, vertical `Y` was inconsistent with older PM4 forensic notes on the development dataset.
 - Why this matters:
@@ -243,7 +244,7 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - that meant a world-space object that actually needed a rigid `+/-90` degree basis change could only be approximated by the mirrored `swap` candidate, which reverses object handedness and makes stair/ramp winding run the wrong way around the structure
 - Current correction:
    - world-space PM4 now evaluates the full rigid planar set first: identity, 180 degree, +90 degree, and -90 degree basis changes
-   - mirrored candidates still exist as fallback, but they are enumerated after the rigid set and carry a stronger score penalty for world-space PM4 data
+   - mirrored candidates are no longer part of the active PM4 planar solver, so PM4 stays on rigid candidates only and cannot flip winding by choosing a mirror fit
 - Validation status:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this solver fix
    - no automated tests were added or run for this slice

@@ -122,6 +122,7 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - Follow-up after comparing the active viewer path against older PM4 R&D exports and `WoWRollback/Pm4Reader` forensic notes.
 - Current correction in `src/MdxViewer/Terrain/WorldScene.cs`:
 	- the active viewer restores the older fixed `MSVT` viewer/world basis `(Y, X, Z)` for the common `XY+Zup` path instead of trying to recover that basis later with per-object planar heuristics.
+	- axis convention is now held file-level again across CK24 groups instead of being redetected per CK24; this avoids neighboring PM4 pieces drifting into different mesh bases.
 	- viewer-side `MPRL` positions are now converted to world as `(PositionX, PositionZ, PositionY)` so they line up with that restored `MSVT` basis during planar scoring, nearest-anchor comparisons, and PM4 position-ref marker rendering.
 	- the previous viewer assumption that `MPRL` could be treated as ADT-style planar `X/Z`, vertical `Y` or as raw `Z/X/Y` world output is no longer the active contract.
 - Validation status:
@@ -189,7 +190,7 @@ Working branch is now reset in the main tree, not only in side worktrees.
 	- rigid quarter-turn candidates were never considered, so some world-space objects could only be approximated by mirrored solutions
 - Current correction:
 	- world-space PM4 now evaluates the rigid planar set first: identity, 180 degree, +90 degree, and -90 degree basis changes
-	- mirrored candidates remain as fallback only and now carry a stronger score penalty for world-space PM4 data
+	- mirrored candidates are no longer part of the active PM4 planar solver; the viewer now stays on rigid candidates only to avoid reversed winding and opposite-facing fits
 - Validation status for this exact PM4 solver slice:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 21, 2026.
 	- no automated tests were added or run for this slice

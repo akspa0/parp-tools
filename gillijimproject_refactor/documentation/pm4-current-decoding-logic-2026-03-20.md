@@ -54,6 +54,7 @@ For PM4 alignment triage:
 - Strong: duplicate PM4 payloads merge rather than overwrite.
 - Strong: PM4 overlay object identity is keyed by `(tile, ck24, objectPart)`, not only `(tile, ck24)`.
 - Strong: coordinate mode and planar solve are resolved per CK24, not once per file.
+- Strong: axis convention is now held file-level again so neighboring CK24 groups do not drift into different mesh bases.
 - Strong: tile-local PM4 and world-space PM4 no longer share the same unrestricted planar candidate set.
 - Strong: the linked-`MPRL` bounds-center translation experiment is no longer active.
 - Strong negative result: current runtime evidence does not support an `MPRL` bounding-box or `MPRL` container-frame paradigm for viewer reconstruction.
@@ -71,7 +72,8 @@ This is the cleanest mental model for the active codebase.
 
 2. Linked object-assembly view
    - viewer reconstruction groups surfaces into CK24-scoped objects and sub-objects
-   - this is where coordinate mode, axis convention, planar transform, and linked-group splitting are decided
+   - this is where coordinate mode, planar transform, and linked-group splitting are decided
+   - axis convention is detected from PM4 geometry once per file and then reused across CK24 groups
 
 3. Final viewer render derivation
    - object-local PM4 lines/triangles plus a baked base placement transform, renderer-basis conversion, object-local debug transforms, bounds, and pickability
@@ -303,6 +305,8 @@ The important constraint is what does **not** happen anymore:
 
 The score prefers the basis that produces the most horizontal, floor-like triangles or surface normals. If that is inconclusive, it falls back to range-based heuristics.
 
+Current viewer rule: this axis convention is chosen once per PM4 file and then reused across CK24 groups. The earlier per-CK24 basis solve could make neighboring wall/object pieces choose different mesh bases, which showed up as random offsets or mirrored-looking local fits even when the broader tile placement was closer.
+
 ### 6. Coordinate mode is solved per CK24
 
 `ResolveCk24CoordinateMode(...)` compares:
@@ -322,12 +326,11 @@ This is not one file-wide switch. One PM4 file can contain CK24 buckets that pre
 Tile-local PM4 candidates:
 
 - remain inside the established south-west tile basis
-- test only non-swapped mirror combinations
+- test only rigid non-mirrored variants inside that basis (`default`, `180°`)
 
 World-space PM4 candidates:
 
-- test rigid identity and quarter-turn variants first
-- only then fall back to mirrored candidates
+- test only the rigid set: identity, `180°`, `+90°`, `-90°`
 
 This split exists because applying the world-space quarter-turn search to tile-local PM4 produced the coherent `90°` non-origin tile rotation regression.
 
@@ -400,7 +403,7 @@ Implemented in `WorldScene.BuildPm4TileObjects(...)`:
 
 1. Keep only `MSUR` surfaces with `CK24 != 0` for object reconstruction
 2. Group surfaces by CK24
-3. Detect axis convention per CK24 candidate set
+3. Reuse one file-level axis convention detected from PM4 geometry
 4. Resolve coordinate mode per CK24
    - tile-local vs world-space is chosen by `MPRL` fit, not once per file
 5. Resolve one shared planar transform per CK24
@@ -475,13 +478,12 @@ Working interpretation for now:
 
 Tile-local PM4:
 
-- tests only the non-swapped mirror set inside the established south-west tile basis
+- tests only rigid non-mirrored variants inside the established south-west tile basis
 - does not allow the quarter-turn swap set that caused coherent non-origin tile rotations
 
 World-space PM4:
 
-- evaluates the rigid set first: identity, `180°`, `+90°`, `-90°`
-- only falls back to mirrored candidates afterward
+- evaluates only the rigid set: identity, `180°`, `+90°`, `-90°`
 
 This separation matters. Applying the world-space quarter-turn search to tile-local PM4 caused the reported `90°` non-origin tile regression.
 

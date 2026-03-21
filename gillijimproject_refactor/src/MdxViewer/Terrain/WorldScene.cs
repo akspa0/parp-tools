@@ -994,6 +994,7 @@ public class WorldScene : ISceneRenderer
         if (!pm4.Surfaces.Any(surface => surface.Ck24 != 0))
             return objects;
 
+        Pm4AxisConvention fileAxisConvention = DetectPm4AxisConvention(pm4);
         bool fallbackTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
@@ -1010,7 +1011,7 @@ public class WorldScene : ISceneRenderer
             byte ck24Type = (byte)(ck24 >> 16);
             int objectPartCounter = 0;
             List<Pm4IndexedSurface> surfaceGroup = ck24Group.ToList();
-            Pm4AxisConvention ck24AxisConvention = DetectPm4AxisConvention(pm4, surfaceGroup.Select(static entry => entry.Surface));
+            Pm4AxisConvention ck24AxisConvention = fileAxisConvention;
             List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
             List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
             IReadOnlyList<MprlEntry> ck24ScoringRefs = ck24PositionRefs.Count > 0
@@ -2396,28 +2397,22 @@ public class WorldScene : ISceneRenderer
     {
         if (useTileLocalCoordinates)
         {
-            // Tile-local PM4 already has an established south-west tile basis.
-            // Let the solver test only the non-swapped mirror set inside that basis;
-            // quarter-turn swap candidates were meant for world-space PM4 and can turn
-            // a whole tile into a coherent 90-degree rotation once tile indices move
-            // away from the origin.
+            // Tile-local PM4 should stay in one rigid south-west tile basis.
+            // Mirrored candidates flip winding and can make pathing face the opposite
+            // direction inside the right broad frame, which matches the remaining
+            // reported regression more closely than a simple quarter-turn error.
             yield return new Pm4PlanarTransform(false, true, true);
             yield return new Pm4PlanarTransform(false, false, false);
-            yield return new Pm4PlanarTransform(false, true, false);
-            yield return new Pm4PlanarTransform(false, false, true);
             yield break;
         }
 
-        // World-space PM4 can legitimately need a quarter-turn basis change, so keep the
-        // full rigid set first and only fall back to mirrored candidates afterward.
+        // World-space PM4 can legitimately need a quarter-turn basis change, but mirrored
+        // fallback candidates have repeatedly produced reversed winding / opposite-facing
+        // fits. Keep the rigid set only.
         yield return new Pm4PlanarTransform(false, false, false);
         yield return new Pm4PlanarTransform(false, true, true);
         yield return new Pm4PlanarTransform(true, true, false);
         yield return new Pm4PlanarTransform(true, false, true);
-        yield return new Pm4PlanarTransform(true, false, false);
-        yield return new Pm4PlanarTransform(false, true, false);
-        yield return new Pm4PlanarTransform(false, false, true);
-        yield return new Pm4PlanarTransform(true, true, true);
     }
 
     private static float NearestPositionRefDistanceSquared(IReadOnlyList<MprlEntry> positionRefs, Vector3 world)
