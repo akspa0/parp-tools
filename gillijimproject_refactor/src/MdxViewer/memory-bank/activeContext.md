@@ -8,6 +8,14 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Base commit: 343dadf (tag v0.4.0)
 - .github instructions/skills/prompts restored from main and committed (845748b)
 
+### Standalone PM4 Research Library (Mar 21)
+
+- There is now a separate raw-reader path at `src/Pm4Research.Core` for fresh PM4 rediscovery work.
+- Use that project when the question is about chunk structure, offsets, raw typed layouts, or whether the current PM4 decoder is making a bad assumption.
+- Do not start new format-rediscovery work inside `WorldScene` unless the question is specifically about viewer reconstruction behavior.
+- Preferred PM4 reference tile for that research path is `test_data/development/World/Maps/development/development_00_00.pm4`.
+- The repo does not contain the matching `00_00` ADT triplet, so viewer-side signoff on that tile still depends on the user's external trusted ADT copy.
+
 ### Explicit Base-Build Selection Recovery (Mar 21)
 
 ### Archive I/O Performance Slice: Read-Path Probe Reduction + Prefetch Signal (Mar 21)
@@ -257,12 +265,13 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - The earlier viewer-side linked-`MPRL` center translation experiment is no longer active.
 - Runtime user validation reported that PM4 alignment got materially worse after that change.
 - Runtime viewer evidence also does not support the broader `MPRL` bounding-box/container paradigm: reconstructed PM4 geometry is not naturally conforming to that model.
+- User/domain correction: `MPRL` itself should be interpreted as terrain/object collision-footprint intersections, not as object-center noise.
 - Current viewer behavior in `src/MdxViewer/Terrain/WorldScene.cs`:
    - linked CK24 groups are no longer translated into a linked `MPRL` world-bounds center.
    - PM4 object reconstruction is back on the prior geometry-pivot path with the existing coarse yaw-correction logic.
    - the `12°` suppression of small principal-axis yaw deltas still remains active.
 - Working rule:
-   - keep using `MPRL` as anchor/scoring input.
+   - keep using `MPRL` as footprint/collision reference input.
    - do not reintroduce an `MPRL` bounds/container ownership model without fresh evidence.
 - Validation status:
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after reverting the translation path.

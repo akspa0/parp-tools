@@ -162,6 +162,8 @@ public readonly struct Pm4LinkedPositionRefSummary
 /// </summary>
 public class WorldScene : ISceneRenderer
 {
+    private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
+
     private readonly GL _gl;
     private readonly TerrainManager _terrainManager;
     private readonly WorldAssetManager _assets;
@@ -512,15 +514,15 @@ public class WorldScene : ISceneRenderer
                                 terminatorCount = obj.LinkedPositionRefSummary.TerminatorCount,
                                 floorMin = obj.LinkedPositionRefSummary.FloorMin,
                                 floorMax = obj.LinkedPositionRefSummary.FloorMax,
-                                headingMinDegrees = obj.LinkedPositionRefSummary.HeadingMinDegrees,
-                                headingMaxDegrees = obj.LinkedPositionRefSummary.HeadingMaxDegrees,
-                                headingMeanDegrees = obj.LinkedPositionRefSummary.HeadingMeanDegrees,
+                                headingMinDegrees = JsonFiniteOrNull(obj.LinkedPositionRefSummary.HeadingMinDegrees),
+                                headingMaxDegrees = JsonFiniteOrNull(obj.LinkedPositionRefSummary.HeadingMaxDegrees),
+                                headingMeanDegrees = JsonFiniteOrNull(obj.LinkedPositionRefSummary.HeadingMeanDegrees),
                             },
                             surfaceCount = obj.SurfaceCount,
                             dominantGroupKey = obj.DominantGroupKey,
                             dominantAttributeMask = obj.DominantAttributeMask,
                             dominantMdosIndex = obj.DominantMdosIndex,
-                            averageSurfaceHeight = obj.AverageSurfaceHeight,
+                            averageSurfaceHeight = JsonFiniteOrNull(obj.AverageSurfaceHeight),
                             boundsMin = VectorToArray(obj.BoundsMin),
                             boundsMax = VectorToArray(obj.BoundsMax),
                             center = VectorToArray(obj.Center),
@@ -588,6 +590,286 @@ public class WorldScene : ISceneRenderer
             },
             tiles,
             tilePositionRefs = positionRefs,
+        };
+
+        return JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        });
+    }
+
+    internal Pm4WmoCorrelationReport BuildPm4WmoPlacementCorrelationReport(int maxMatchesPerPlacement = 8)
+    {
+        if (!_pm4LoadAttempted)
+            LazyLoadPm4Overlay();
+
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        int resolvedMaxMatches = Math.Max(1, maxMatchesPerPlacement);
+        List<Pm4CorrelationObjectState> pm4Objects = BuildPm4CorrelationObjectStates();
+        Dictionary<int, ModfPlacement> modfByUniqueId = _terrainManager.Adapter.ModfPlacements
+            .GroupBy(static placement => placement.UniqueId)
+            .ToDictionary(static group => group.Key, static group => group.First());
+
+        int placementCount = 0;
+        int meshResolvedCount = 0;
+        int placementsWithCandidates = 0;
+        int placementsWithNearCandidates = 0;
+
+        List<Pm4WmoCorrelationPlacement> placementReports = _tileWmoInstances
+            .OrderBy(static kvp => kvp.Key.Item1)
+            .ThenBy(static kvp => kvp.Key.Item2)
+            .SelectMany(tileEntry => tileEntry.Value
+                .OrderBy(static instance => instance.ModelPath, StringComparer.OrdinalIgnoreCase)
+                .Select(instance =>
+                {
+                    placementCount++;
+
+                    bool hasMeshSummary = _assets.TryGetWmoMeshSummary(instance.ModelKey, out WmoMeshSummary meshSummary);
+                    if (hasMeshSummary)
+                        meshResolvedCount++;
+
+                    Vector3 worldBoundsMin = instance.BoundsMin;
+                    Vector3 worldBoundsMax = instance.BoundsMax;
+                    Vector2[] wmoFootprintHull = Array.Empty<Vector2>();
+                    float wmoFootprintArea = 0f;
+                    if (hasMeshSummary)
+                    {
+                        TransformBounds(meshSummary.BoundsMin, meshSummary.BoundsMax, instance.Transform, out worldBoundsMin, out worldBoundsMax);
+                        wmoFootprintHull = BuildTransformedFootprintHull(meshSummary.FootprintSampleVertices, instance.Transform);
+                        wmoFootprintArea = ComputePolygonArea(wmoFootprintHull);
+                    }
+
+                    bool hasRawPlacement = modfByUniqueId.TryGetValue(instance.UniqueId, out ModfPlacement rawPlacement);
+
+                    var candidateMetrics = pm4Objects
+                        .Where(candidate => Math.Abs(candidate.TileX - tileEntry.Key.Item1) <= 1
+                            && Math.Abs(candidate.TileY - tileEntry.Key.Item2) <= 1)
+                        .Select(candidate =>
+                        {
+                            float planarGap = ComputePlanarAabbGap(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
+                            float verticalGap = ComputeAxisGap(worldBoundsMin.Z, worldBoundsMax.Z, candidate.BoundsMin.Z, candidate.BoundsMax.Z);
+                            float centerDistance = Vector3.Distance(instance.PlacementPosition, candidate.Center);
+                            float planarOverlapRatio = ComputePlanarOverlapRatio(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
+                            float volumeOverlapRatio = ComputeAabbOverlapRatio(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
+                            float footprintOverlapRatio = ComputeConvexFootprintOverlapRatio(wmoFootprintHull, candidate.FootprintHull, wmoFootprintArea, candidate.FootprintArea);
+                            float footprintAreaRatio = ComputeFootprintAreaRatio(wmoFootprintArea, candidate.FootprintArea);
+                            float footprintDistance = ComputeSymmetricFootprintDistance(wmoFootprintHull, candidate.FootprintHull);
+
+                            return new
+                            {
+                                candidate,
+                                planarGap,
+                                verticalGap,
+                                centerDistance,
+                                planarOverlapRatio,
+                                volumeOverlapRatio,
+                                footprintOverlapRatio,
+                                footprintAreaRatio,
+                                footprintDistance,
+                                sameTile = candidate.TileX == tileEntry.Key.Item1 && candidate.TileY == tileEntry.Key.Item2,
+                            };
+                        })
+                        .OrderByDescending(static candidate => candidate.sameTile)
+                        .ThenByDescending(static candidate => candidate.footprintOverlapRatio)
+                        .ThenByDescending(static candidate => candidate.planarOverlapRatio)
+                        .ThenByDescending(static candidate => candidate.footprintAreaRatio)
+                        .ThenByDescending(static candidate => candidate.volumeOverlapRatio)
+                        .ThenBy(static candidate => candidate.footprintDistance)
+                        .ThenBy(static candidate => candidate.planarGap)
+                        .ThenBy(static candidate => candidate.verticalGap)
+                        .ThenBy(static candidate => candidate.centerDistance)
+                        .ToList();
+
+                    if (candidateMetrics.Count > 0)
+                        placementsWithCandidates++;
+
+                    int nearCandidateCount = candidateMetrics.Count(candidate => candidate.planarGap <= 32f && candidate.verticalGap <= 64f);
+                    if (nearCandidateCount > 0)
+                        placementsWithNearCandidates++;
+
+                    Pm4WmoCorrelationAdtPlacementInfo adtPlacementInfo = new(
+                        hasRawPlacement,
+                        hasRawPlacement ? rawPlacement.Flags : (ushort)0,
+                        hasRawPlacement ? rawPlacement.BoundsMin : Vector3.Zero,
+                        hasRawPlacement ? rawPlacement.BoundsMax : Vector3.Zero);
+
+                    Pm4WmoCorrelationMeshInfo wmoMeshInfo = hasMeshSummary
+                        ? new Pm4WmoCorrelationMeshInfo(
+                            true,
+                            meshSummary.Version,
+                            meshSummary.GroupCount,
+                            meshSummary.VertexCount,
+                            meshSummary.IndexCount,
+                            meshSummary.TriangleCount,
+                            meshSummary.BatchCount,
+                            meshSummary.BoundsMin,
+                            meshSummary.BoundsMax,
+                            meshSummary.FootprintSampleCount,
+                            wmoFootprintHull.Length,
+                            wmoFootprintArea)
+                        : new Pm4WmoCorrelationMeshInfo(
+                            false,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0,
+                            Vector3.Zero,
+                            Vector3.Zero,
+                            0,
+                            0,
+                            0f);
+
+                    List<Pm4WmoCorrelationMatch> matches = candidateMetrics
+                        .Take(resolvedMaxMatches)
+                        .Select(candidate => new Pm4WmoCorrelationMatch(
+                            candidate.candidate.TileX,
+                            candidate.candidate.TileY,
+                            candidate.candidate.Object.Ck24,
+                            candidate.candidate.Object.Ck24Type,
+                            candidate.candidate.Object.Ck24ObjectId,
+                            candidate.candidate.Object.ObjectPartId,
+                            candidate.candidate.Object.LinkGroupObjectId,
+                            candidate.candidate.Object.SurfaceCount,
+                            candidate.candidate.Object.LinkedPositionRefCount,
+                            candidate.candidate.Object.DominantGroupKey,
+                            candidate.candidate.Object.DominantAttributeMask,
+                            candidate.candidate.Object.DominantMdosIndex,
+                            candidate.candidate.Object.AverageSurfaceHeight,
+                            candidate.sameTile,
+                            candidate.planarGap,
+                            candidate.verticalGap,
+                            candidate.centerDistance,
+                            candidate.planarOverlapRatio,
+                            candidate.volumeOverlapRatio,
+                            candidate.footprintOverlapRatio,
+                            candidate.footprintAreaRatio,
+                            candidate.footprintDistance,
+                            candidate.candidate.BoundsMin,
+                            candidate.candidate.BoundsMax,
+                            candidate.candidate.Center))
+                        .ToList();
+
+                    return new Pm4WmoCorrelationPlacement(
+                        tileEntry.Key.Item1,
+                        tileEntry.Key.Item2,
+                        instance.UniqueId,
+                        instance.ModelName,
+                        instance.ModelPath,
+                        instance.ModelKey,
+                        instance.PlacementPosition,
+                        instance.PlacementRotation,
+                        instance.PlacementScale,
+                        adtPlacementInfo,
+                        worldBoundsMin,
+                        worldBoundsMax,
+                        wmoMeshInfo,
+                        candidateMetrics.Count,
+                        nearCandidateCount,
+                        matches);
+                }))
+            .ToList();
+
+        return new Pm4WmoCorrelationReport(
+            DateTime.UtcNow,
+            _pm4Status,
+            new Pm4WmoCorrelationSummary(
+                placementCount,
+                meshResolvedCount,
+                pm4Objects.Count,
+                placementsWithCandidates,
+                placementsWithNearCandidates,
+                resolvedMaxMatches),
+            placementReports);
+    }
+
+    public string BuildPm4WmoPlacementCorrelationJson(int maxMatchesPerPlacement = 8)
+    {
+        static float[] VectorToArray(Vector3 value) => new[] { value.X, value.Y, value.Z };
+
+        Pm4WmoCorrelationReport report = BuildPm4WmoPlacementCorrelationReport(maxMatchesPerPlacement);
+        var payload = new
+        {
+            generatedAtUtc = report.GeneratedAtUtc,
+            pm4Status = report.Pm4Status,
+            summary = new
+            {
+                wmoPlacementCount = report.Summary.WmoPlacementCount,
+                wmoMeshResolvedCount = report.Summary.WmoMeshResolvedCount,
+                pm4ObjectCount = report.Summary.Pm4ObjectCount,
+                placementsWithCandidates = report.Summary.PlacementsWithCandidates,
+                placementsWithNearCandidates = report.Summary.PlacementsWithNearCandidates,
+                maxMatchesPerPlacement = report.Summary.MaxMatchesPerPlacement,
+            },
+            placements = report.Placements.Select(placement => new
+            {
+                tileX = placement.TileX,
+                tileY = placement.TileY,
+                uniqueId = placement.UniqueId,
+                modelName = placement.ModelName,
+                modelPath = placement.ModelPath,
+                modelKey = placement.ModelKey,
+                placementPosition = VectorToArray(placement.PlacementPosition),
+                placementRotation = VectorToArray(placement.PlacementRotation),
+                placementScale = JsonFiniteOrNull(placement.PlacementScale),
+                adtPlacement = new
+                {
+                    found = placement.AdtPlacement.Found,
+                    flags = placement.AdtPlacement.Flags,
+                    rawBoundsMin = VectorToArray(placement.AdtPlacement.RawBoundsMin),
+                    rawBoundsMax = VectorToArray(placement.AdtPlacement.RawBoundsMax),
+                },
+                worldBoundsMin = VectorToArray(placement.WorldBoundsMin),
+                worldBoundsMax = VectorToArray(placement.WorldBoundsMax),
+                wmoMesh = new
+                {
+                    available = placement.WmoMesh.Available,
+                    version = placement.WmoMesh.Version,
+                    groupCount = placement.WmoMesh.GroupCount,
+                    vertexCount = placement.WmoMesh.VertexCount,
+                    indexCount = placement.WmoMesh.IndexCount,
+                    triangleCount = placement.WmoMesh.TriangleCount,
+                    batchCount = placement.WmoMesh.BatchCount,
+                    localBoundsMin = VectorToArray(placement.WmoMesh.LocalBoundsMin),
+                    localBoundsMax = VectorToArray(placement.WmoMesh.LocalBoundsMax),
+                    footprintSampleCount = placement.WmoMesh.FootprintSampleCount,
+                    worldFootprintHullPointCount = placement.WmoMesh.WorldFootprintHullPointCount,
+                    worldFootprintArea = JsonFiniteOrNull(placement.WmoMesh.WorldFootprintArea),
+                },
+                pm4CandidateCount = placement.Pm4CandidateCount,
+                pm4NearCandidateCount = placement.Pm4NearCandidateCount,
+                pm4Matches = placement.Pm4Matches.Select(match => new
+                {
+                    tileX = match.TileX,
+                    tileY = match.TileY,
+                    ck24 = match.Ck24,
+                    ck24Type = match.Ck24Type,
+                    ck24ObjectId = match.Ck24ObjectId,
+                    objectPartId = match.ObjectPartId,
+                    linkGroupObjectId = match.LinkGroupObjectId,
+                    surfaceCount = match.SurfaceCount,
+                    linkedPositionRefCount = match.LinkedPositionRefCount,
+                    dominantGroupKey = match.DominantGroupKey,
+                    dominantAttributeMask = match.DominantAttributeMask,
+                    dominantMdosIndex = match.DominantMdosIndex,
+                    averageSurfaceHeight = JsonFiniteOrNull(match.AverageSurfaceHeight),
+                    sameTile = match.SameTile,
+                    planarGap = JsonFiniteOrNull(match.PlanarGap),
+                    verticalGap = JsonFiniteOrNull(match.VerticalGap),
+                    centerDistance = JsonFiniteOrNull(match.CenterDistance),
+                    planarOverlapRatio = JsonFiniteOrNull(match.PlanarOverlapRatio),
+                    volumeOverlapRatio = JsonFiniteOrNull(match.VolumeOverlapRatio),
+                    footprintOverlapRatio = JsonFiniteOrNull(match.FootprintOverlapRatio),
+                    footprintAreaRatio = JsonFiniteOrNull(match.FootprintAreaRatio),
+                    footprintDistance = JsonFiniteOrNull(match.FootprintDistance),
+                    boundsMin = VectorToArray(match.BoundsMin),
+                    boundsMax = VectorToArray(match.BoundsMax),
+                    center = VectorToArray(match.Center),
+                }).ToList(),
+            }).ToList(),
         };
 
         return JsonSerializer.Serialize(payload, new JsonSerializerOptions
@@ -4323,6 +4605,16 @@ public class WorldScene : ISceneRenderer
         _selectedPm4ObjectGroupKey = null;
     }
 
+    public bool SelectPm4Object((int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        if (!_pm4ObjectLookup.ContainsKey(objectKey))
+            return false;
+
+        _selectedPm4ObjectKey = objectKey;
+        _selectedPm4ObjectGroupKey = BuildPm4ObjectGroupKey(objectKey);
+        return true;
+    }
+
     public bool TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo info)
     {
         info = default;
@@ -4665,6 +4957,402 @@ public class WorldScene : ISceneRenderer
         return applyObjectTransform
             ? obj.BaseTransform * objectTransform
             : obj.BaseTransform;
+    }
+
+    private List<Pm4CorrelationObjectState> BuildPm4CorrelationObjectStates()
+    {
+        bool applyPm4Transform = !IsNearZeroVector(_pm4OverlayTranslation)
+            || !IsNearZeroVector(_pm4OverlayRotationDegrees)
+            || !IsNearOneVector(_pm4OverlayScale);
+        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+        var states = new List<Pm4CorrelationObjectState>(_pm4ObjectLookup.Count);
+
+        foreach (var tileEntry in _pm4TileObjects)
+        {
+            foreach (Pm4OverlayObject obj in tileEntry.Value)
+            {
+                var objectKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
+                Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
+                ComputePm4GeometryBounds(obj, geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax, out Vector3 center);
+                ComputePm4Footprint(obj, geometryTransform, out Vector2[] footprintHull, out float footprintArea);
+                states.Add(new Pm4CorrelationObjectState(tileEntry.Key.tileX, tileEntry.Key.tileY, obj, boundsMin, boundsMax, center, footprintHull, footprintArea));
+            }
+        }
+
+        return states;
+    }
+
+    private static void ComputePm4GeometryBounds(Pm4OverlayObject obj, in Matrix4x4 geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax, out Vector3 center)
+    {
+        boundsMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        boundsMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        bool hasBounds = false;
+
+        for (int i = 0; i < obj.Lines.Count; i++)
+        {
+            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Lines[i].From, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
+            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Lines[i].To, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
+        }
+
+        for (int i = 0; i < obj.Triangles.Count; i++)
+        {
+            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].A, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
+            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].B, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
+            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].C, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
+        }
+
+        if (!hasBounds)
+        {
+            center = ApplyPm4OverlayTransform(Vector3.Zero, geometryTransform);
+            boundsMin = center;
+            boundsMax = center;
+            return;
+        }
+
+        center = (boundsMin + boundsMax) * 0.5f;
+    }
+
+    private static void IncludePointInBounds(Vector3 point, ref Vector3 boundsMin, ref Vector3 boundsMax, ref bool hasBounds)
+    {
+        boundsMin = Vector3.Min(boundsMin, point);
+        boundsMax = Vector3.Max(boundsMax, point);
+        hasBounds = true;
+    }
+
+    private static void ComputePm4Footprint(Pm4OverlayObject obj, in Matrix4x4 geometryTransform, out Vector2[] footprintHull, out float footprintArea)
+    {
+        const int maxSamples = 192;
+        Matrix4x4 transform = geometryTransform;
+
+        int totalPointCount = obj.Lines.Count * 2 + obj.Triangles.Count * 3;
+        if (totalPointCount <= 0)
+        {
+            footprintHull = Array.Empty<Vector2>();
+            footprintArea = 0f;
+            return;
+        }
+
+        int stride = Math.Max(1, totalPointCount / maxSamples);
+        var points = new List<Vector2>(Math.Min(totalPointCount, maxSamples));
+        int pointIndex = 0;
+
+        void AddPoint(Vector3 source)
+        {
+            if (points.Count >= maxSamples)
+            {
+                pointIndex++;
+                return;
+            }
+
+            if (pointIndex % stride == 0)
+            {
+                Vector3 transformed = ApplyPm4OverlayTransform(source, transform);
+                points.Add(new Vector2(transformed.X, transformed.Y));
+            }
+
+            pointIndex++;
+        }
+
+        for (int i = 0; i < obj.Lines.Count; i++)
+        {
+            AddPoint(obj.Lines[i].From);
+            AddPoint(obj.Lines[i].To);
+        }
+
+        for (int i = 0; i < obj.Triangles.Count; i++)
+        {
+            AddPoint(obj.Triangles[i].A);
+            AddPoint(obj.Triangles[i].B);
+            AddPoint(obj.Triangles[i].C);
+        }
+
+        footprintHull = BuildConvexHull(points);
+        footprintArea = ComputePolygonArea(footprintHull);
+    }
+
+    private static Vector2[] BuildTransformedFootprintHull(IReadOnlyList<Vector3> sourcePoints, in Matrix4x4 transform)
+    {
+        if (sourcePoints.Count == 0)
+            return Array.Empty<Vector2>();
+
+        var projected = new List<Vector2>(sourcePoints.Count);
+        for (int i = 0; i < sourcePoints.Count; i++)
+        {
+            Vector3 transformed = Vector3.Transform(sourcePoints[i], transform);
+            projected.Add(new Vector2(transformed.X, transformed.Y));
+        }
+
+        return BuildConvexHull(projected);
+    }
+
+    private static Vector2[] BuildConvexHull(IReadOnlyList<Vector2> points)
+    {
+        if (points.Count == 0)
+            return Array.Empty<Vector2>();
+
+        var sorted = points
+            .Where(static point => float.IsFinite(point.X) && float.IsFinite(point.Y))
+            .Distinct()
+            .OrderBy(static point => point.X)
+            .ThenBy(static point => point.Y)
+            .ToList();
+
+        if (sorted.Count <= 2)
+            return sorted.ToArray();
+
+        static float Cross(in Vector2 origin, in Vector2 a, in Vector2 b)
+        {
+            return (a.X - origin.X) * (b.Y - origin.Y) - (a.Y - origin.Y) * (b.X - origin.X);
+        }
+
+        var lower = new List<Vector2>(sorted.Count);
+        for (int i = 0; i < sorted.Count; i++)
+        {
+            Vector2 point = sorted[i];
+            while (lower.Count >= 2 && Cross(lower[lower.Count - 2], lower[lower.Count - 1], point) <= 0f)
+                lower.RemoveAt(lower.Count - 1);
+
+            lower.Add(point);
+        }
+
+        var upper = new List<Vector2>(sorted.Count);
+        for (int i = sorted.Count - 1; i >= 0; i--)
+        {
+            Vector2 point = sorted[i];
+            while (upper.Count >= 2 && Cross(upper[upper.Count - 2], upper[upper.Count - 1], point) <= 0f)
+                upper.RemoveAt(upper.Count - 1);
+
+            upper.Add(point);
+        }
+
+        lower.RemoveAt(lower.Count - 1);
+        upper.RemoveAt(upper.Count - 1);
+        lower.AddRange(upper);
+        return NormalizePolygonWinding(lower).ToArray();
+    }
+
+    private static float ComputePolygonArea(IReadOnlyList<Vector2> polygon)
+    {
+        return MathF.Abs(ComputeSignedPolygonArea(polygon));
+    }
+
+    private static float ComputeSignedPolygonArea(IReadOnlyList<Vector2> polygon)
+    {
+        if (polygon.Count < 3)
+            return 0f;
+
+        float twiceArea = 0f;
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            Vector2 current = polygon[i];
+            Vector2 next = polygon[(i + 1) % polygon.Count];
+            twiceArea += current.X * next.Y - next.X * current.Y;
+        }
+
+        return twiceArea * 0.5f;
+    }
+
+    private static List<Vector2> NormalizePolygonWinding(IReadOnlyList<Vector2> polygon)
+    {
+        var normalized = RemoveDuplicatePolygonPoints(polygon);
+        if (normalized.Count >= 3 && ComputeSignedPolygonArea(normalized) < 0f)
+            normalized.Reverse();
+
+        return normalized;
+    }
+
+    private static List<Vector2> RemoveDuplicatePolygonPoints(IReadOnlyList<Vector2> polygon)
+    {
+        const float epsilon = 0.0001f;
+        var cleaned = new List<Vector2>(polygon.Count);
+
+        for (int i = 0; i < polygon.Count; i++)
+        {
+            Vector2 point = polygon[i];
+            if (cleaned.Count == 0 || Vector2.DistanceSquared(cleaned[cleaned.Count - 1], point) > epsilon * epsilon)
+                cleaned.Add(point);
+        }
+
+        if (cleaned.Count > 1 && Vector2.DistanceSquared(cleaned[0], cleaned[cleaned.Count - 1]) <= epsilon * epsilon)
+            cleaned.RemoveAt(cleaned.Count - 1);
+
+        return cleaned;
+    }
+
+    private static float ComputeFootprintAreaRatio(float areaA, float areaB)
+    {
+        float maxArea = MathF.Max(areaA, areaB);
+        if (maxArea <= 0f)
+            return 0f;
+
+        return MathF.Min(areaA, areaB) / maxArea;
+    }
+
+    private static float ComputeConvexFootprintOverlapRatio(IReadOnlyList<Vector2> hullA, IReadOnlyList<Vector2> hullB, float areaA, float areaB)
+    {
+        if (hullA.Count < 3 || hullB.Count < 3)
+            return 0f;
+
+        float minArea = MathF.Min(areaA, areaB);
+        if (minArea <= 0f)
+            return 0f;
+
+        List<Vector2> normalizedHullA = NormalizePolygonWinding(hullA);
+        List<Vector2> normalizedHullB = NormalizePolygonWinding(hullB);
+        List<Vector2> intersection = ClipConvexPolygon(normalizedHullA, normalizedHullB);
+        if (intersection.Count < 3)
+            return 0f;
+
+        float ratio = ComputePolygonArea(intersection) / minArea;
+        return Math.Clamp(ratio, 0f, 1f);
+    }
+
+    private static List<Vector2> ClipConvexPolygon(IReadOnlyList<Vector2> subjectPolygon, IReadOnlyList<Vector2> clipPolygon)
+    {
+        var output = NormalizePolygonWinding(subjectPolygon);
+        if (output.Count == 0)
+            return output;
+
+        List<Vector2> normalizedClipPolygon = NormalizePolygonWinding(clipPolygon);
+
+        for (int edgeIndex = 0; edgeIndex < normalizedClipPolygon.Count; edgeIndex++)
+        {
+            Vector2 clipStart = normalizedClipPolygon[edgeIndex];
+            Vector2 clipEnd = normalizedClipPolygon[(edgeIndex + 1) % normalizedClipPolygon.Count];
+            var input = output;
+            output = new List<Vector2>();
+            if (input.Count == 0)
+                break;
+
+            Vector2 start = input[input.Count - 1];
+            bool startInside = IsInsideClipEdge(start, clipStart, clipEnd);
+            for (int i = 0; i < input.Count; i++)
+            {
+                Vector2 end = input[i];
+                bool endInside = IsInsideClipEdge(end, clipStart, clipEnd);
+
+                if (endInside)
+                {
+                    if (!startInside)
+                        output.Add(ComputeLineIntersection(start, end, clipStart, clipEnd));
+
+                    output.Add(end);
+                }
+                else if (startInside)
+                {
+                    output.Add(ComputeLineIntersection(start, end, clipStart, clipEnd));
+                }
+
+                start = end;
+                startInside = endInside;
+            }
+
+            output = RemoveDuplicatePolygonPoints(output);
+        }
+
+        return NormalizePolygonWinding(output);
+    }
+
+    private static bool IsInsideClipEdge(Vector2 point, Vector2 edgeStart, Vector2 edgeEnd)
+    {
+        float cross = (edgeEnd.X - edgeStart.X) * (point.Y - edgeStart.Y)
+            - (edgeEnd.Y - edgeStart.Y) * (point.X - edgeStart.X);
+        return cross >= -0.0001f;
+    }
+
+    private static Vector2 ComputeLineIntersection(Vector2 a0, Vector2 a1, Vector2 b0, Vector2 b1)
+    {
+        float ax = a1.X - a0.X;
+        float ay = a1.Y - a0.Y;
+        float bx = b1.X - b0.X;
+        float by = b1.Y - b0.Y;
+        float denominator = ax * by - ay * bx;
+        if (MathF.Abs(denominator) < 0.0001f)
+            return a1;
+
+        float t = ((b0.X - a0.X) * by - (b0.Y - a0.Y) * bx) / denominator;
+        return new Vector2(a0.X + ax * t, a0.Y + ay * t);
+    }
+
+    private static float ComputeSymmetricFootprintDistance(IReadOnlyList<Vector2> hullA, IReadOnlyList<Vector2> hullB)
+    {
+        if (hullA.Count == 0 || hullB.Count == 0)
+            return float.PositiveInfinity;
+
+        return (ComputeMeanNearestFootprintDistance(hullA, hullB) + ComputeMeanNearestFootprintDistance(hullB, hullA)) * 0.5f;
+    }
+
+    private static float ComputeMeanNearestFootprintDistance(IReadOnlyList<Vector2> source, IReadOnlyList<Vector2> target)
+    {
+        if (source.Count == 0 || target.Count == 0)
+            return float.PositiveInfinity;
+
+        float totalDistance = 0f;
+        for (int sourceIndex = 0; sourceIndex < source.Count; sourceIndex++)
+        {
+            float bestDistanceSquared = float.PositiveInfinity;
+            for (int targetIndex = 0; targetIndex < target.Count; targetIndex++)
+            {
+                float distanceSquared = Vector2.DistanceSquared(source[sourceIndex], target[targetIndex]);
+                if (distanceSquared < bestDistanceSquared)
+                    bestDistanceSquared = distanceSquared;
+            }
+
+            totalDistance += MathF.Sqrt(bestDistanceSquared);
+        }
+
+        return totalDistance / source.Count;
+    }
+
+    private static float ComputeAxisGap(float minA, float maxA, float minB, float maxB)
+    {
+        if (maxA < minB)
+            return minB - maxA;
+
+        if (maxB < minA)
+            return minA - maxB;
+
+        return 0f;
+    }
+
+    private static float ComputeOverlapLength(float minA, float maxA, float minB, float maxB)
+    {
+        return MathF.Max(0f, MathF.Min(maxA, maxB) - MathF.Max(minA, minB));
+    }
+
+    private static float ComputePlanarAabbGap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+    {
+        float dx = ComputeAxisGap(minA.X, maxA.X, minB.X, maxB.X);
+        float dy = ComputeAxisGap(minA.Y, maxA.Y, minB.Y, maxB.Y);
+        return MathF.Sqrt(dx * dx + dy * dy);
+    }
+
+    private static float ComputePlanarOverlapRatio(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+    {
+        float overlapX = ComputeOverlapLength(minA.X, maxA.X, minB.X, maxB.X);
+        float overlapY = ComputeOverlapLength(minA.Y, maxA.Y, minB.Y, maxB.Y);
+        float areaA = MathF.Max(0f, maxA.X - minA.X) * MathF.Max(0f, maxA.Y - minA.Y);
+        float areaB = MathF.Max(0f, maxB.X - minB.X) * MathF.Max(0f, maxB.Y - minB.Y);
+        float minArea = MathF.Min(areaA, areaB);
+        if (minArea <= 0f)
+            return 0f;
+
+        return (overlapX * overlapY) / minArea;
+    }
+
+    private static float ComputeAabbOverlapRatio(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
+    {
+        float overlapX = ComputeOverlapLength(minA.X, maxA.X, minB.X, maxB.X);
+        float overlapY = ComputeOverlapLength(minA.Y, maxA.Y, minB.Y, maxB.Y);
+        float overlapZ = ComputeOverlapLength(minA.Z, maxA.Z, minB.Z, maxB.Z);
+        float volumeA = MathF.Max(0f, maxA.X - minA.X) * MathF.Max(0f, maxA.Y - minA.Y) * MathF.Max(0f, maxA.Z - minA.Z);
+        float volumeB = MathF.Max(0f, maxB.X - minB.X) * MathF.Max(0f, maxB.Y - minB.Y) * MathF.Max(0f, maxB.Z - minB.Z);
+        float minVolume = MathF.Min(volumeA, volumeB);
+        if (minVolume <= 0f)
+            return 0f;
+
+        return (overlapX * overlapY * overlapZ) / minVolume;
     }
 
     private bool ShouldRenderPm4Object(
@@ -5013,6 +5701,95 @@ internal sealed class Pm4OverlayObject
         return (min, max);
     }
 }
+
+internal sealed record Pm4CorrelationObjectState(
+    int TileX,
+    int TileY,
+    Pm4OverlayObject Object,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3 Center,
+    Vector2[] FootprintHull,
+    float FootprintArea);
+
+internal sealed record Pm4WmoCorrelationSummary(
+    int WmoPlacementCount,
+    int WmoMeshResolvedCount,
+    int Pm4ObjectCount,
+    int PlacementsWithCandidates,
+    int PlacementsWithNearCandidates,
+    int MaxMatchesPerPlacement);
+
+internal sealed record Pm4WmoCorrelationAdtPlacementInfo(
+    bool Found,
+    ushort Flags,
+    Vector3 RawBoundsMin,
+    Vector3 RawBoundsMax);
+
+internal sealed record Pm4WmoCorrelationMeshInfo(
+    bool Available,
+    int Version,
+    int GroupCount,
+    int VertexCount,
+    int IndexCount,
+    int TriangleCount,
+    int BatchCount,
+    Vector3 LocalBoundsMin,
+    Vector3 LocalBoundsMax,
+    int FootprintSampleCount,
+    int WorldFootprintHullPointCount,
+    float WorldFootprintArea);
+
+internal sealed record Pm4WmoCorrelationMatch(
+    int TileX,
+    int TileY,
+    uint Ck24,
+    byte Ck24Type,
+    ushort Ck24ObjectId,
+    int ObjectPartId,
+    uint LinkGroupObjectId,
+    int SurfaceCount,
+    int LinkedPositionRefCount,
+    byte DominantGroupKey,
+    byte DominantAttributeMask,
+    uint DominantMdosIndex,
+    float AverageSurfaceHeight,
+    bool SameTile,
+    float PlanarGap,
+    float VerticalGap,
+    float CenterDistance,
+    float PlanarOverlapRatio,
+    float VolumeOverlapRatio,
+    float FootprintOverlapRatio,
+    float FootprintAreaRatio,
+    float FootprintDistance,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3 Center);
+
+internal sealed record Pm4WmoCorrelationPlacement(
+    int TileX,
+    int TileY,
+    int UniqueId,
+    string ModelName,
+    string ModelPath,
+    string ModelKey,
+    Vector3 PlacementPosition,
+    Vector3 PlacementRotation,
+    float PlacementScale,
+    Pm4WmoCorrelationAdtPlacementInfo AdtPlacement,
+    Vector3 WorldBoundsMin,
+    Vector3 WorldBoundsMax,
+    Pm4WmoCorrelationMeshInfo WmoMesh,
+    int Pm4CandidateCount,
+    int Pm4NearCandidateCount,
+    IReadOnlyList<Pm4WmoCorrelationMatch> Pm4Matches);
+
+internal sealed record Pm4WmoCorrelationReport(
+    DateTime GeneratedAtUtc,
+    string Pm4Status,
+    Pm4WmoCorrelationSummary Summary,
+    IReadOnlyList<Pm4WmoCorrelationPlacement> Placements);
 
 internal readonly struct Pm4LineSegment
 {

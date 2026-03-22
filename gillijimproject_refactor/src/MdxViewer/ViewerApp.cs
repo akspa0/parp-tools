@@ -278,7 +278,14 @@ public partial class ViewerApp : IDisposable
     private float _pm4RotationStepDegrees = 90f;
     private float _pm4ScaleStepUnits = 0.1f;
     private bool _showPm4AlignmentWindow;
-    private bool _showChunkClipboardWindow = true;
+    private bool _showPm4WmoCorrelationWindow;
+    private Pm4WmoCorrelationReport? _pm4WmoCorrelationReport;
+    private int _pm4WmoCorrelationMaxMatchesPerPlacement = 8;
+    private int _selectedPm4WmoCorrelationPlacementIndex = -1;
+    private int _selectedPm4WmoCorrelationMatchIndex;
+    private bool _pm4WmoCorrelationNearOnly = true;
+    private string _pm4WmoCorrelationModelFilter = string.Empty;
+    private bool _showChunkClipboardWindow = false;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -308,6 +315,9 @@ public partial class ViewerApp : IDisposable
     private string? _pendingKnownGoodClientPath;
     private string? _pendingKnownGoodClientBuildVersion;
     private bool _pendingKnownGoodClientAttachLooseFolder;
+    private bool _openForgetKnownGoodClientConfirm;
+    private string? _pendingForgetKnownGoodClientPath;
+    private string? _pendingForgetKnownGoodClientDisplayName;
 
     // FPS counter
     private int _frameCount;
@@ -999,6 +1009,9 @@ void main() {
             // PM4 alignment (floating window)
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
+
+            if (_showPm4WmoCorrelationWindow)
+                DrawPm4WmoCorrelationWindow();
         }
 
         // Fullscreen minimap overlay (M key toggle)
@@ -1080,10 +1093,10 @@ void main() {
                     foreach (var knownClient in _knownGoodClientPaths)
                     {
                         if (ImGui.MenuItem($"{knownClient.Name}##forget_saved_{knownClient.Path}"))
-                            ForgetKnownGoodClientPath(knownClient.Path);
+                            QueueForgetKnownGoodClientPath(knownClient);
 
                         if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip(knownClient.Path);
+                            ImGui.SetTooltip(BuildKnownGoodClientTooltip(knownClient));
                     }
 
                     ImGui.EndMenu();
@@ -1091,27 +1104,6 @@ void main() {
 
                 if (ImGui.MenuItem("Open VLM Project..."))
                     _wantOpenVlmProject = true;
-
-                ImGui.Separator();
-
-                if (ImGui.MenuItem("Generate VLM Dataset..."))
-                    _showVlmExportDialog = true;
-
-                if (ImGui.MenuItem("Terrain Texture Transfer..."))
-                    _showTerrainTextureTransferDialog = true;
-
-                if (ImGui.MenuItem("Map Converter..."))
-                    _showMapConverterDialog = true;
-
-                if (ImGui.MenuItem("WMO Converter..."))
-                    _showWmoConverterDialog = true;
-
-                ImGui.Separator();
-
-                if (ImGui.MenuItem("Export GLB...", _renderer != null))
-                    _wantExportGlb = true;
-                if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
-                    _wantExportGlbCollision = true;
 
                 ImGui.Separator();
 
@@ -1145,6 +1137,12 @@ void main() {
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
                 ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow);
+                if (ImGui.MenuItem("PM4/WMO Correlation", "", _showPm4WmoCorrelationWindow))
+                {
+                    _showPm4WmoCorrelationWindow = !_showPm4WmoCorrelationWindow;
+                    if (_showPm4WmoCorrelationWindow)
+                        EnsurePm4WmoCorrelationReportLoaded();
+                }
                 ImGui.Separator();
                 if (ImGui.MenuItem("Asset Catalog"))
                 {
@@ -1160,6 +1158,154 @@ void main() {
                 ImGui.EndMenu();
             }
 
+            if (ImGui.BeginMenu("Tools"))
+            {
+                if (ImGui.MenuItem("Generate VLM Dataset..."))
+                    _showVlmExportDialog = true;
+
+                if (ImGui.MenuItem("Terrain Texture Transfer..."))
+                    _showTerrainTextureTransferDialog = true;
+
+                if (ImGui.MenuItem("Map Converter..."))
+                    _showMapConverterDialog = true;
+
+                if (ImGui.MenuItem("WMO Converter..."))
+                    _showWmoConverterDialog = true;
+
+                ImGui.Separator();
+
+                if (ImGui.BeginMenu("Export"))
+                {
+                    if (ImGui.BeginMenu("GLB"))
+                    {
+                        if (ImGui.MenuItem("Export GLB...", _renderer != null))
+                            _wantExportGlb = true;
+                        if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
+                            _wantExportGlbCollision = true;
+
+                        ImGui.Separator();
+
+                        bool canExportMapGlb = _terrainManager != null && _dataSource != null;
+                        if (ImGui.BeginMenu("Map Tiles", canExportMapGlb))
+                        {
+                            if (ImGui.MenuItem("Current Tile (Terrain + Objects)", "", false, canExportMapGlb))
+                            {
+                                _mapGlbScope = TerrainTileScope.CurrentTile;
+                                _wantExportMapGlbTiles = true;
+                            }
+                            if (ImGui.MenuItem("Loaded Tiles Folder", "", false, canExportMapGlb))
+                            {
+                                _mapGlbScope = TerrainTileScope.LoadedTiles;
+                                _wantExportMapGlbTiles = true;
+                            }
+                            if (ImGui.MenuItem("Whole Map Folder", "", false, canExportMapGlb))
+                            {
+                                _mapGlbScope = TerrainTileScope.WholeMap;
+                                _wantExportMapGlbTiles = true;
+                            }
+                            ImGui.EndMenu();
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Terrain"))
+                    {
+                        bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                        if (ImGui.BeginMenu("Alpha Masks"))
+                        {
+                            if (ImGui.MenuItem("Current Tile Atlas (PNG)...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
+                            }
+
+                            if (ImGui.MenuItem("Current Tile Chunks Folder...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.AlphaCurrentTileChunksFolder;
+                            }
+
+                            if (ImGui.MenuItem("Loaded Tiles Folder...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.AlphaLoadedTilesFolder;
+                            }
+
+                            if (ImGui.MenuItem("Whole Map Folder...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.AlphaWholeMapFolder;
+                            }
+
+                            ImGui.EndMenu();
+                        }
+
+                        if (ImGui.BeginMenu("Heightmaps"))
+                        {
+                            if (ImGui.MenuItem("Current Tile (257x257 L16 PNG + JSON)...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
+                            }
+
+                            if (ImGui.MenuItem("Loaded Tiles Folder (per-tile)...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.Heightmap257LoadedTilesFolderPerTile;
+                            }
+
+                            if (ImGui.MenuItem("Whole Map Folder (per-map)...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.Heightmap257WholeMapFolderPerMap;
+                            }
+
+                            ImGui.EndMenu();
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                if (ImGui.BeginMenu("Import"))
+                {
+                    if (ImGui.BeginMenu("Terrain"))
+                    {
+                        bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
+
+                        if (ImGui.BeginMenu("Alpha Masks"))
+                        {
+                            if (ImGui.MenuItem("From Folder of Tile Atlases...", hasTerrain))
+                            {
+                                _wantTerrainImport = true;
+                                _terrainImportKind = TerrainImportKind.AlphaFolder;
+                            }
+                            ImGui.EndMenu();
+                        }
+
+                        if (ImGui.BeginMenu("Heightmaps"))
+                        {
+                            if (ImGui.MenuItem("From Folder of Tile Heightmaps...", hasTerrain))
+                            {
+                                _wantTerrainImport = true;
+                                _terrainImportKind = TerrainImportKind.Heightmap257Folder;
+                            }
+                            ImGui.EndMenu();
+                        }
+
+                        ImGui.EndMenu();
+                    }
+
+                    ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About"))
@@ -1167,137 +1313,48 @@ void main() {
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("Export"))
-            {
-                if (ImGui.BeginMenu("GLB"))
-                {
-                    if (ImGui.MenuItem("Export GLB...", _renderer != null))
-                        _wantExportGlb = true;
-                    if (ImGui.MenuItem("Export GLB (Collision Only)...", _renderer != null))
-                        _wantExportGlbCollision = true;
-
-                    ImGui.Separator();
-
-                    bool canExportMapGlb = _terrainManager != null && _dataSource != null;
-                    if (ImGui.BeginMenu("Map Tiles", canExportMapGlb))
-                    {
-                        if (ImGui.MenuItem("Current Tile (Terrain + Objects)", "", false, canExportMapGlb))
-                        {
-                            _mapGlbScope = TerrainTileScope.CurrentTile;
-                            _wantExportMapGlbTiles = true;
-                        }
-                        if (ImGui.MenuItem("Loaded Tiles Folder", "", false, canExportMapGlb))
-                        {
-                            _mapGlbScope = TerrainTileScope.LoadedTiles;
-                            _wantExportMapGlbTiles = true;
-                        }
-                        if (ImGui.MenuItem("Whole Map Folder", "", false, canExportMapGlb))
-                        {
-                            _mapGlbScope = TerrainTileScope.WholeMap;
-                            _wantExportMapGlbTiles = true;
-                        }
-                        ImGui.EndMenu();
-                    }
-
-                    ImGui.EndMenu();
-                }
-
-                if (ImGui.BeginMenu("Terrain"))
-                {
-                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
-
-                    if (ImGui.BeginMenu("Alpha Masks"))
-                    {
-                        if (ImGui.MenuItem("Current Tile Atlas (PNG)...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileAtlas;
-                        }
-
-                        if (ImGui.MenuItem("Current Tile Chunks Folder...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.AlphaCurrentTileChunksFolder;
-                        }
-
-                        if (ImGui.MenuItem("Loaded Tiles Folder...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.AlphaLoadedTilesFolder;
-                        }
-
-                        if (ImGui.MenuItem("Whole Map Folder...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.AlphaWholeMapFolder;
-                        }
-
-                        ImGui.EndMenu();
-                    }
-
-                    if (ImGui.BeginMenu("Heightmaps"))
-                    {
-                        if (ImGui.MenuItem("Current Tile (257x257 L16 PNG + JSON)...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.Heightmap257CurrentTilePerTile;
-                        }
-
-                        if (ImGui.MenuItem("Loaded Tiles Folder (per-tile)...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.Heightmap257LoadedTilesFolderPerTile;
-                        }
-
-                        if (ImGui.MenuItem("Whole Map Folder (per-map)...", hasTerrain))
-                        {
-                            _wantTerrainExport = true;
-                            _terrainExportKind = TerrainExportKind.Heightmap257WholeMapFolderPerMap;
-                        }
-
-                        ImGui.EndMenu();
-                    }
-
-                    ImGui.EndMenu();
-                }
-
-                ImGui.EndMenu();
-            }
-
-            if (ImGui.BeginMenu("Import"))
-            {
-                if (ImGui.BeginMenu("Terrain"))
-                {
-                    bool hasTerrain = _terrainManager != null || _vlmTerrainManager != null;
-
-                    if (ImGui.BeginMenu("Alpha Masks"))
-                    {
-                        if (ImGui.MenuItem("From Folder of Tile Atlases...", hasTerrain))
-                        {
-                            _wantTerrainImport = true;
-                            _terrainImportKind = TerrainImportKind.AlphaFolder;
-                        }
-                        ImGui.EndMenu();
-                    }
-
-                    if (ImGui.BeginMenu("Heightmaps"))
-                    {
-                        if (ImGui.MenuItem("From Folder of Tile Heightmaps...", hasTerrain))
-                        {
-                            _wantTerrainImport = true;
-                            _terrainImportKind = TerrainImportKind.Heightmap257Folder;
-                        }
-                        ImGui.EndMenu();
-                    }
-
-                    ImGui.EndMenu();
-                }
-
-                ImGui.EndMenu();
-            }
-
             ImGui.EndMainMenuBar();
         }
+
+        if (_openForgetKnownGoodClientConfirm)
+        {
+            _openForgetKnownGoodClientConfirm = false;
+            ImGui.OpenPopup("Confirm Forget Known-Good Base");
+        }
+
+        bool keepForgetKnownGoodPopupOpen = true;
+        if (ImGui.BeginPopupModal("Confirm Forget Known-Good Base", ref keepForgetKnownGoodPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            string displayName = string.IsNullOrWhiteSpace(_pendingForgetKnownGoodClientDisplayName)
+                ? "this saved base"
+                : _pendingForgetKnownGoodClientDisplayName!;
+
+            ImGui.TextWrapped($"Remove saved base '{displayName}'?");
+            if (!string.IsNullOrWhiteSpace(_pendingForgetKnownGoodClientPath))
+                ImGui.TextDisabled(_pendingForgetKnownGoodClientPath);
+
+            ImGui.Spacing();
+            if (ImGui.Button("Remove", new Vector2(120f, 0f)))
+            {
+                if (!string.IsNullOrWhiteSpace(_pendingForgetKnownGoodClientPath))
+                    ForgetKnownGoodClientPath(_pendingForgetKnownGoodClientPath);
+
+                ClearPendingForgetKnownGoodClientPath();
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120f, 0f)))
+            {
+                ClearPendingForgetKnownGoodClientPath();
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        if (!keepForgetKnownGoodPopupOpen)
+            ClearPendingForgetKnownGoodClientPath();
 
         // Handle deferred actions
         if (_wantOpenFile)
@@ -1495,6 +1552,19 @@ void main() {
                 _statusMessage = $"Map GLB export failed: {ex.Message}";
             }
         }
+    }
+
+    private void QueueForgetKnownGoodClientPath(KnownGoodClientPath knownClient)
+    {
+        _pendingForgetKnownGoodClientPath = knownClient.Path;
+        _pendingForgetKnownGoodClientDisplayName = knownClient.Name;
+        _openForgetKnownGoodClientConfirm = true;
+    }
+
+    private void ClearPendingForgetKnownGoodClientPath()
+    {
+        _pendingForgetKnownGoodClientPath = null;
+        _pendingForgetKnownGoodClientDisplayName = null;
     }
 
     private void DrawDockspaceHost()
@@ -4325,6 +4395,12 @@ void main() {
         ImGui.SameLine();
         if (ImGui.SmallButton("PM4 Align"))
             _showPm4AlignmentWindow = true;
+        ImGui.SameLine();
+        if (ImGui.SmallButton("PM4/WMO"))
+        {
+            _showPm4WmoCorrelationWindow = true;
+            EnsurePm4WmoCorrelationReportLoaded();
+        }
         ImGui.SameLine();
         if (ImGui.SmallButton("Save PM4 Align"))
             SaveCurrentPm4Alignment();

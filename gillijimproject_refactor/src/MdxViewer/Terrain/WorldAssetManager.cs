@@ -18,6 +18,20 @@ public readonly record struct WorldAssetReadStats(
     long PathProbeMisses,
     int ResolvedPathCacheCount);
 
+public readonly record struct WmoMeshSummary(
+    int Version,
+    int GroupCount,
+    int VertexCount,
+    int IndexCount,
+    int TriangleCount,
+    int BatchCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
 /// <summary>
 /// Centralized asset manager for world scene rendering.
 /// Ensures each model and texture is loaded exactly once into GPU memory,
@@ -38,6 +52,7 @@ public class WorldAssetManager : IDisposable
     // Model path (normalized) → loaded renderer (null = load attempted but failed)
     private readonly Dictionary<string, MdxRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, WmoMeshSummary> _wmoMeshSummaries = new(StringComparer.OrdinalIgnoreCase);
 
     // LRU tracking — keys ordered by last access time (most recent at end)
     private readonly LinkedList<string> _mdxLru = new();
@@ -276,6 +291,25 @@ public class WorldAssetManager : IDisposable
         }
         boundsMin = boundsMax = Vector3.Zero;
         return false;
+    }
+
+    public bool TryGetWmoMeshSummary(string normalizedKey, out WmoMeshSummary summary)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_wmoMeshSummaries.TryGetValue(normalizedKey, out summary))
+            return true;
+
+        WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
+        if (wmo == null)
+        {
+            summary = default;
+            return false;
+        }
+
+        summary = BuildWmoMeshSummary(wmo);
+        _wmoMeshSummaries[normalizedKey] = summary;
+        return true;
     }
 
     /// <summary>
@@ -965,76 +999,9 @@ public class WorldAssetManager : IDisposable
     {
         try
         {
-            byte[]? data = ReadFileData(normalizedKey);
-            if (data == null || data.Length == 0)
-            {
-                if (_wmoModels.Count < 3)
-                    ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data null for: \"{normalizedKey}\"");
+            WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
+            if (wmo == null)
                 return null;
-            }
-            if (_wmoModels.Count < 3)
-                ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
-
-            // Detect WMO version from bytes
-            int version = DetectWmoVersion(data);
-
-            WmoV14ToV17Converter.WmoV14Data wmo;
-
-            if (version >= 17)
-            {
-                // v17+: parse directly into WmoV14Data — no lossy binary roundtrip
-                var dir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
-                var baseName = Path.GetFileNameWithoutExtension(normalizedKey);
-
-                var groupBytesList = new List<byte[]>();
-                for (int gi = 0; gi < 512; gi++)
-                {
-                    var groupName = $"{baseName}_{gi:D3}.wmo";
-                    var groupPath = string.IsNullOrEmpty(dir) ? groupName : $"{dir}\\{groupName}";
-                    var groupBytes = ReadFileData(groupPath);
-                    if (groupBytes == null || groupBytes.Length == 0) break;
-                    groupBytesList.Add(groupBytes);
-                }
-
-                var v17Parser = new WmoV17ToV14Converter();
-                wmo = v17Parser.ParseV17ToModel(data, groupBytesList);
-                ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
-            }
-            else
-            {
-                // v14/v16: parse with existing pipeline
-                string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
-                try
-                {
-                    File.WriteAllBytes(tmpPath, data);
-                    var converter = new WmoV14ToV17Converter();
-                    wmo = converter.ParseWmoV14(tmpPath);
-
-                    // v14/v16 split format: load group files from data source
-                    if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
-                    {
-                        var wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
-                        var wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
-                        for (int gi = 0; gi < wmo.GroupCount; gi++)
-                        {
-                            var groupName = $"{wmoBase}_{gi:D3}.wmo";
-                            var groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
-                            var groupBytes = ReadFileData(groupPath);
-                            if (groupBytes != null && groupBytes.Length > 0)
-                                converter.ParseGroupFile(groupBytes, wmo, gi);
-                        }
-                        for (int gi = 0; gi < wmo.Groups.Count; gi++)
-                        {
-                            if (wmo.Groups[gi].Name == null)
-                                wmo.Groups[gi].Name = $"group_{gi}";
-                        }
-                    }
-                }
-                finally
-                {
-                    try { File.Delete(tmpPath); } catch { }
-                }
-            }
 
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
             return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion);
@@ -1044,6 +1011,150 @@ public class WorldAssetManager : IDisposable
             ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
         }
+    }
+
+    private WmoV14ToV17Converter.WmoV14Data? LoadWmoDataModel(string normalizedKey)
+    {
+        byte[]? data = ReadFileData(normalizedKey);
+        if (data == null || data.Length == 0)
+        {
+            if (_wmoModels.Count < 3)
+                ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data null for: \"{normalizedKey}\"");
+            return null;
+        }
+
+        if (_wmoModels.Count < 3)
+            ViewerLog.Debug(ViewerLog.Category.Wmo, $"WMO data found for: \"{normalizedKey}\" ({data.Length} bytes)");
+
+        int version = DetectWmoVersion(data);
+        if (version >= 17)
+        {
+            var v17Parser = new WmoV17ToV14Converter();
+            WmoV14ToV17Converter.WmoV14Data wmo = v17Parser.ParseV17ToModel(data, LoadWmoGroupBytes(normalizedKey));
+            ViewerLog.Trace($"[WMO] Parsed v{version} direct: {Path.GetFileName(normalizedKey)} ({wmo.Groups.Count} groups)");
+            return wmo;
+        }
+
+        string tmpPath = Path.Combine(Path.GetTempPath(), $"wmo_{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllBytes(tmpPath, data);
+            var converter = new WmoV14ToV17Converter();
+            WmoV14ToV17Converter.WmoV14Data wmo = converter.ParseWmoV14(tmpPath);
+
+            if (wmo.Groups.Count == 0 && wmo.GroupCount > 0 && _dataSource != null)
+            {
+                string wmoDir = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+                string wmoBase = Path.GetFileNameWithoutExtension(normalizedKey);
+                for (int gi = 0; gi < wmo.GroupCount; gi++)
+                {
+                    string groupName = $"{wmoBase}_{gi:D3}.wmo";
+                    string groupPath = string.IsNullOrEmpty(wmoDir) ? groupName : $"{wmoDir}\\{groupName}";
+                    byte[]? groupBytes = ReadFileData(groupPath);
+                    if (groupBytes != null && groupBytes.Length > 0)
+                        converter.ParseGroupFile(groupBytes, wmo, gi);
+                }
+
+                for (int gi = 0; gi < wmo.Groups.Count; gi++)
+                {
+                    if (wmo.Groups[gi].Name == null)
+                        wmo.Groups[gi].Name = $"group_{gi}";
+                }
+            }
+
+            return wmo;
+        }
+        finally
+        {
+            try { File.Delete(tmpPath); } catch { }
+        }
+    }
+
+    private List<byte[]> LoadWmoGroupBytes(string normalizedKey)
+    {
+        string directory = Path.GetDirectoryName(normalizedKey)?.Replace('/', '\\') ?? "";
+        string baseName = Path.GetFileNameWithoutExtension(normalizedKey);
+        var groupBytesList = new List<byte[]>();
+
+        for (int gi = 0; gi < 512; gi++)
+        {
+            string groupName = $"{baseName}_{gi:D3}.wmo";
+            string groupPath = string.IsNullOrEmpty(directory) ? groupName : $"{directory}\\{groupName}";
+            byte[]? groupBytes = ReadFileData(groupPath);
+            if (groupBytes == null || groupBytes.Length == 0)
+                break;
+
+            groupBytesList.Add(groupBytes);
+        }
+
+        return groupBytesList;
+    }
+
+    private static WmoMeshSummary BuildWmoMeshSummary(WmoV14ToV17Converter.WmoV14Data wmo)
+    {
+        int vertexCount = 0;
+        int indexCount = 0;
+        int batchCount = 0;
+        Vector3[] footprintSampleVertices = BuildWmoFootprintSamples(wmo.Groups);
+
+        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
+        {
+            vertexCount += group.Vertices.Count;
+            indexCount += group.Indices.Count;
+            batchCount += group.Batches.Count;
+        }
+
+        return new WmoMeshSummary(
+            Version: (int)wmo.Version,
+            GroupCount: wmo.Groups.Count,
+            VertexCount: vertexCount,
+            IndexCount: indexCount,
+            TriangleCount: indexCount / 3,
+            BatchCount: batchCount,
+            BoundsMin: wmo.BoundsMin,
+            BoundsMax: wmo.BoundsMax,
+            FootprintSampleVertices: footprintSampleVertices);
+    }
+
+    private static Vector3[] BuildWmoFootprintSamples(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
+    {
+        const int maxSamples = 256;
+
+        int totalVertexCount = 0;
+        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            totalVertexCount += groups[groupIndex].Vertices.Count;
+
+        if (totalVertexCount <= 0)
+            return Array.Empty<Vector3>();
+
+        int stride = Math.Max(1, totalVertexCount / maxSamples);
+        var samples = new List<Vector3>(Math.Min(totalVertexCount, maxSamples));
+        int globalVertexIndex = 0;
+
+        for (int groupIndex = 0; groupIndex < groups.Count && samples.Count < maxSamples; groupIndex++)
+        {
+            List<Vector3> vertices = groups[groupIndex].Vertices;
+            for (int vertexIndex = 0; vertexIndex < vertices.Count && samples.Count < maxSamples; vertexIndex++, globalVertexIndex++)
+            {
+                if (globalVertexIndex % stride == 0)
+                    samples.Add(vertices[vertexIndex]);
+            }
+        }
+
+        if (samples.Count == 0)
+        {
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                List<Vector3> vertices = groups[groupIndex].Vertices;
+                if (vertices.Count > 0)
+                {
+                    samples.Add(vertices[0]);
+                    break;
+                }
+            }
+        }
+
+        return samples.ToArray();
     }
 
     /// <summary>

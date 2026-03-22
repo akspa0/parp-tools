@@ -1,5 +1,230 @@
 # Progress
 
+### Mar 21, 2026 - Standalone PM4 Research Library
+
+- Added `src/Pm4Research.Core` as a fresh-start PM4 reading library independent from the active viewer reconstruction path.
+- Current implementation:
+	- walks PM4 files chunk-by-chunk and preserves raw payloads with offsets/sizes
+	- independently decodes the currently understood chunk layouts: `MVER`, `MSHD`, `MSLK`, `MSPV`, `MSPI`, `MSVT`, `MSVI`, `MSUR`, `MSCN`, `MPRL`, `MPRR`, `MDBH`, `MDBI`, `MDBF`, `MDOS`, `MDSF`
+	- exposes `Pm4ResearchFile` and `Pm4ExplorationSnapshot` so future rediscovery work can compare raw chunk evidence without going through `WorldScene`
+	- exposes decode-audit reports so future rediscovery work can measure chunk-size consistency and cross-chunk reference validity before inferring object semantics
+- Why this was added:
+	- current PM4 viewer work has hit repeated transform-contract ambiguity
+	- the user requested a fresh perspective instead of continuing to layer fixes onto the existing PM4 read/reconstruct path
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Core/Pm4Research.Core.csproj -c Debug` passed.
+	- no automated tests added or run.
+	- no runtime real-data validation yet; this is groundwork for fresh PM4 format exploration.
+
+### Mar 21, 2026 - PM4 Decode-Confidence Audit Pass
+
+- Added raw decode-audit commands to `src/Pm4Research.Cli`:
+	- `inspect-audit`
+	- `scan-audit`
+- The audit path measures:
+	- chunk presence versus populated-data presence
+	- stride/size consistency for the typed chunk layouts
+	- cross-chunk reference validity for `MSVI -> MSVT`, `MSPI -> MSPV`, `MSUR -> MSVI`, `MSLK -> MSUR`, `MSLK -> MSPI`, `MDSF -> MSUR`, `MDSF -> MDOS`, and `MDOS -> MDBH`
+- Real-data findings from the full development corpus (`616` PM4 files):
+	- zero file-walk overrun or trailing-byte diagnostics
+	- zero unknown chunk signatures after adding typed support for the documented destructible-building chunks
+	- recurring decode structure is carried by the `MS*` / `MPR*` families, not by Wintergrasp destructible chunks
+	- `MDBI` and `MDBF` are one-tile only in this corpus, and `MDBH` / `MDOS` / `MDSF` only carry populated destructible-building payload on the trusted `development_00_00.pm4` reference tile; their wider corpus presence is mostly placeholder/empty chunk stubs
+	- meaningful open seam surfaced by the audit: aggregate `MSLK.RefIndex -> MSUR` mismatches still exist in the corpus, so the current standalone `MSLK.RefIndex == MSUR index` assumption is not fully closed
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- inspect-audit --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-audit --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - Targeted `MSLK.RefIndex` Mismatch Audit
+
+- Added dedicated commands to `src/Pm4Research.Cli`:
+	- `inspect-mslk-refindex`
+	- `scan-mslk-refindex`
+- The new audit reports invalid `MSLK.RefIndex >= MSUR.Count` cases by tile and records which other PM4 index domains those values still fit on the same file.
+- Real-data findings from the full development corpus:
+	- `150` files contain `4553` total `MSLK.RefIndex -> MSUR` mismatches
+	- the trusted `development_00_00.pm4` tile has zero such mismatches, so it is not the main linkage-problem reference tile
+	- bad `RefIndex` values almost never fit `MPRL` counts, which weakens the idea that the unresolved `RefIndex` population is simply pointing into `MPRL`
+	- many bad values still fit within `MSLK`, `MSPI`, `MSVI`, and `MSCN` counts on the affected files, making those domains stronger next-step candidates
+	- some mismatch-heavy tiles show repeated `LinkId` clusters, which may help isolate families of alternate `RefIndex` semantics in a follow-up pass
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- inspect-mslk-refindex --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-mslk-refindex --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - Comprehensive PM4 Unknowns Map
+
+- Added `scan-unknowns` to `src/Pm4Research.Cli` and `Pm4ResearchUnknownsAnalyzer` to `src/Pm4Research.Core`.
+- Purpose:
+	- stop spreading PM4 unknowns across isolated ad-hoc commands and stale notes
+	- produce one corpus-scale report that states which raw PM4 relationships are verified, which are partial, and which fields remain open
+- The report now covers:
+	- chunk population vs populated payload counts
+	- verified raw edges such as `MSUR -> MSVI`, `MSVI -> MSVT`, `MSLK -> MSPI`, `MSPI -> MSPV`, and `MDSF -> {MSUR, MDOS}`
+	- partial/open edges such as `MSLK.RefIndex`, `MSLK.GroupObjectId -> MPRL.Unk04`, `MPRR.Value1`, and `MDOS.buildingIndex`
+	- field distributions for `MSHD`, `MSLK`, `MSUR`, `MPRL`, and `MPRR`
+	- `LinkId` pattern summary and `MSLK.MspiIndexCount` ambiguity buckets
+	- a generated unknown list with evidence and next proof tasks
+- Key real-data findings from the current corpus run:
+	- `LinkId` is uniformly `0xFFFFYYXX` in the current dataset
+	- `MPRL.Unk02` is always `-1` and `Unk06` is always `0x8000`
+	- `MPRL.Unk14` ranges `-1..15` and still looks floor-like; `Unk16` collapses to two values (`0x0000`, `0x3FFF`)
+	- `MSLK.MspiIndexCount` has no triangles-only evidence in the current corpus, but still has a large overlap bucket where both interpretations fit
+	- `MPRR` remains a mixed/open field family; current counts do not justify naming it as purely `MPRL` or purely geometry-facing
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-unknowns --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - MSCN Relationship Report
+
+- Added `scan-mscn` to `src/Pm4Research.Cli` and `Pm4ResearchMscnAnalyzer` to `src/Pm4Research.Core`.
+- Purpose:
+	- stop treating MSCN as a vague side channel or re-importing old rollback claims without revalidating them in the standalone raw path
+	- measure MSCN directly against CK24, `MSUR.MdosIndex`, mesh-side geometry, and `MSLK.GroupObjectId`
+- The report now covers:
+	- `MSUR.MdosIndex -> MSCN` validity across the full corpus
+	- CK24-group MSCN coverage and mesh+MSCN coexistence
+	- raw-vs-swapped MSCN bounds overlap against CK24 mesh bounds
+	- low16 / low24 `MSLK.GroupObjectId` fits against CK24 identity layers
+	- MSCN coordinate-space buckets against file tile coordinates
+- Key real-data findings from the current corpus run:
+	- `MSUR.MdosIndex -> MSCN` is strong but not closed (`511891` fits, `6201` misses)
+	- `1886 / 1895` CK24 groups carry valid MSCN-backed node coverage
+	- raw MSCN bounds overlap CK24 mesh bounds far more often than swapped-XY MSCN bounds (`1162` vs `10` fits)
+	- current standalone corpus evidence does not support the older blanket claim that MSCN is simply world-space plus XY swap
+	- `MSLK.GroupObjectId` is not a direct full CK24 key (`0 / 1272796` low24 fits) and only weakly overlaps CK24 low16 object ids (`399 / 1272397`)
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-mscn --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - PM4 Linkage / CK24 ObjectId Report
+
+- Added `scan-linkage` to `src/Pm4Research.Cli` and `Pm4ResearchLinkageAnalyzer` to `src/Pm4Research.Core`.
+- Purpose:
+	- stop treating the UI `Ck24ObjectId` label as if it were a separately proven PM4 identity field
+	- join `MSLK.RefIndex` mismatches, `MSLK.GroupObjectId`, CK24 identity layers, and bad `MSUR.MdosIndex` clusters in one corpus report
+- The report now covers:
+	- low16 and low24 `MSLK.GroupObjectId` fits against CK24 identity layers on mismatch entries
+	- file-local reuse of non-zero `Ck24ObjectId` across multiple full CK24 values and type bytes
+	- top mismatch families grouped by `LinkId + TypeFlags + Subtype`
+	- top bad-`MdosIndex` CK24 clusters
+- Key real-data findings from the current corpus run:
+	- the UI `Ck24ObjectId` is just the low 16 bits of `MSUR.PackedParams -> CK24`
+	- that low16 layer is usually a near one-to-one slice of full CK24 in-file, not a broadly reused hierarchy id (`2` reuse cases out of `1601` analyzed non-zero object-id groups)
+	- both reuse cases occur on tile `36_24`, where one low16 object id survives across two full CK24 values and two type bytes
+	- `MSLK.GroupObjectId` remains weak as the missing identity/hierarchy answer for unresolved `RefIndex` mismatches (`16` low16 matches, `15` low24 matches across `4553` mismatches)
+	- `58` files carry bad `MSUR.MdosIndex` references, including several large non-zero CK24 families, not only `CK24=0` aggregates
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-linkage --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - PM4 Structure-Confidence / Decode-Trust Report
+
+- Added `scan-structure-confidence` to `src/Pm4Research.Cli` and `Pm4ResearchStructureConfidenceAnalyzer` to `src/Pm4Research.Core`.
+- Purpose:
+	- stop collapsing two separate questions into one:
+		- "is this chunk layout byte-level real?"
+		- "are these field names and meanings actually proven?"
+	- give the standalone PM4 path an explicit guardrail against inherited GPT-era structure lore and stale rollback assumptions
+- The report now covers:
+	- chunk-level layout confidence vs semantic confidence vs hallucination risk
+	- field-level classification (`verified-reference`, `derived-bit-slice`, `named-guess`, `conflicted-reference`, `sparse-reference`, etc.)
+	- explicit source-conflict inventory where older notes or field names overstate certainty
+	- one summary that counts how much of the current standalone decoder is truly byte-closed versus only semantically guessed
+- Key real-data findings from the current corpus run:
+	- `13` tracked chunk families currently land in `high` layout confidence on the fixed development corpus
+	- semantic confidence is much weaker:
+		- `1` field `high`
+		- `4` fields `medium`
+		- `10` fields `low`
+		- `4` fields `very-low`
+	- strongest current byte+semantic anchors are `MSPV`, `MSPI`, `MSVT`, `MSVI`, `MSUR -> MSVI`, and `MDSF -> {MSUR, MDOS}`
+	- highest current hallucination-risk zones are `MSLK.RefIndex`, `MSUR` bytes `4..19`, `MPRR.Value1`, `MPRL.Unk04/14/16`, and sparse destructible fields such as `MDOS.buildingIndex`
+	- the new conflict inventory now records concrete overstated legacy claims around `MSLK.LinkId`, `MSLK.RefIndex`, `MSUR.MdosIndex`, `MSUR.Normal + Height`, MSCN coordinate frame, and `MPRR.Value1`
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-structure-confidence --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development --output i:/parp/parp-tools/gillijimproject_refactor/output/pm4_reports/development_structure_confidence_report.json` passed.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - MSUR Geometry Audit + RefIndex Family Classifier + Placement-Truth Refresh
+
+- Added two new standalone PM4 commands in `src/Pm4Research.Cli`:
+	- `scan-msur-geometry`
+	- `scan-mslk-refindex-classifier`
+- Added two new standalone analyzers in `src/Pm4Research.Core`:
+	- `Pm4ResearchMsurGeometryAnalyzer`
+	- `Pm4ResearchMslkRefIndexClassifier`
+- Purpose:
+	- close the specific decoder-trust seam around whether `MSUR` bytes `4..19` are real geometric fields or inherited naming fiction
+	- replace the undifferentiated `4553`-row `MSLK.RefIndex` mismatch blob with likely target-domain family buckets
+	- advance step 3 pragmatically by reusing the existing active `pm4-validate-coords` path for real `_obj0.adt` placement truth instead of pretending standalone PM4 can prove that by itself
+- Key real-data findings from `scan-msur-geometry`:
+	- analyzed surfaces: `518092`
+	- degenerate surfaces: `0`
+	- unit-length stored normals: `518092 / 518092`
+	- strong positive stored-vs-geometry normal alignment: `518092 / 518092`
+	- the trailing float currently named `Height` behaves like the negative plane-distance term along the stored normal, with best candidate `storedPlane.-` mean absolute error `0.00367829`
+	- practical correction: `MSUR` bytes `4..19` are no longer a top decoder hallucination-risk seam, but the final float is semantically better described as a signed plane term than as generic height
+- Key real-data findings from `scan-mslk-refindex-classifier`:
+	- files with mismatches: `150`
+	- total mismatch rows: `4553`
+	- resolved/classified families: `505`
+	- ambiguous families still remaining: `344`
+	- resolved rows covered by classified families: `2651`
+	- the classifier uses lift above corpus baseline so domains like `MPRR` do not win just by size (`98.4%` raw fit baseline)
+	- largest current resolved family population: `probable-MSVT` (`293` families), with smaller but real `MSPI` / `MSPV` / `MSVI` / `MSCN` / `MPRL` slices
+- Key real-data findings from the placement-truth refresh using existing active `pm4-validate-coords`:
+	- tiles scanned: `616`
+	- tiles validated against `_obj0.adt` placements: `206`
+	- `MPRL` refs inside expected tile bounds: `114301 / 114301` (`100.0%`)
+	- `MPRL` refs within `32` units of a nearest placement: `107907 / 114301` (`94.4%`)
+	- average nearest placement distance: `10.98`
+	- this materially strengthens `MPRL.Position` against real object-placement truth; it does **not** close `MPRR`
+- Follow-up correction to decode-trust state:
+	- refreshed `scan-structure-confidence` after these audits
+	- semantic confidence counts moved from `1/4/10/4` (`high/medium/low/very-low`) to `2/4/9/4`
+	- highest current hallucination-risk zones are now `MSLK.RefIndex`, `MPRR.Value1`, `MPRL.Unk04/14/16`, and sparse destructible fields such as `MDOS.buildingIndex`
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-msur-geometry --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development --output i:/parp/parp-tools/gillijimproject_refactor/output/pm4_reports/development_msur_geometry_report.json` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -- scan-mslk-refindex-classifier --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development --output i:/parp/parp-tools/gillijimproject_refactor/output/pm4_reports/development_mslk_refindex_classifier_report.json` passed.
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- pm4-validate-coords --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development --json i:/parp/parp-tools/gillijimproject_refactor/output/pm4_reports/development_pm4_coordinate_validation_report.json` passed, but only after a broader active-tree build that emitted many unrelated existing warnings.
+	- no automated tests were added or run.
+
+### Mar 21, 2026 - PM4 Research Workflow Validation On Trusted Tile `development_00_00.pm4`
+
+- Validated the standalone PM4 research workflow on `test_data/development/World/Maps/development/development_00_00.pm4`, which is now the preferred reference tile for PM4 rediscovery work.
+- Real-data findings from the standalone CLI on that tile:
+	- `54` chunks total
+	- `MSPV=8778`, `MSVT=6318`, `MSCN=9990`, `MPRL=2493`
+	- top CK24 groups include large multi-surface families such as `0x40AA0A`, `0x418D9F`, and `0x421809`
+	- `MPRL.Unk04` still spans only about `0.01°..22.30°` on this tile in the standalone read path, consistent with earlier viewer forensics that it is not a simple absolute building-yaw field here
+- Dataset note:
+	- the matching original `00_00` ADT triplet is not present anywhere in the workspace, so repository-side validation is currently limited to PM4 analysis and not full in-repo PM4-vs-ADT visual signoff
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Core/Pm4Research.Core.csproj -c Debug` passed.
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/Pm4Research.Cli/Pm4Research.Cli.csproj -c Debug` passed.
+	- no automated tests were added or run.
+	- real-data PM4 analysis was performed on the file above, but no in-repo ADT-backed runtime signoff was possible because the companion ADTs are not in the workspace.
+
+### Mar 21, 2026 - MPRL Semantic Correction From User Domain Knowledge
+
+- User clarified the intended semantics of `MPRL` explicitly:
+	- `MPRL` points are literal terrain/object collision-footprint intersections.
+	- they mark the `XYZ` positions where ADT terrain is pierced by the object for collision stitching.
+	- this makes terrain and object part of the same collision mesh at those points.
+- Consequence for active PM4 work:
+	- reject the old whole-object `MPRL` center/bounds translation idea, but do not reduce `MPRL` to vague anchor noise.
+	- treat `MPRL` as collision-footprint reference data when scoring or comparing PM4 object hypotheses.
+- Research-tooling follow-up:
+	- `Pm4Research.Core` object hypotheses now include `MPRL` footprint counts against raw PM4 bounds so corpus analysis can see which candidate objects actually capture linked/tile-level `MPRL` seam points.
+
 ### Mar 21, 2026 - PM4 Link-Decode Sanity Fix + Linked-MPRL Summary Instrumentation
 
 ### Mar 21, 2026 - PM4 Object-Local Base Frame Layer
@@ -74,6 +299,46 @@
 	- no automated tests were added or run.
 
 ### Mar 21, 2026 - Dockspace UI Recovery + PM4 Translation Rollback
+
+### Mar 21, 2026 - Viewer PM4/WMO Correlation Export
+
+- User asked to stop treating PM4, ADT placements, and WMO mesh data as separate lanes and to wire the correlation path into `MdxViewer` itself.
+- `src/MdxViewer/Terrain/WorldAssetManager.cs`
+	- added `WmoMeshSummary` and a new `TryGetWmoMeshSummary(...)` path.
+	- factored WMO parsing so the existing v14/v17 read path can be reused for correlation output without depending on a live `WmoRenderer`.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- added `BuildPm4WmoPlacementCorrelationJson(...)`.
+	- the export walks currently loaded tile WMO placements, derives WMO mesh summaries/local bounds, and ranks nearby PM4 overlay objects by tile-neighborhood plus bounds-gap / overlap heuristics.
+	- output includes ADT placement identity, WMO mesh counts/bounds, and PM4 object metadata such as `CK24`, object part, linked-ref counts, and dominant `MSUR` fields.
+- `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+	- added `Dump PM4/WMO Correlation JSON` to the existing `PM4 Alignment` window.
+	- save flow matches the existing PM4 object JSON export path.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings.
+	- no automated tests were added or run.
+	- no runtime real-data validation was performed for the new export workflow.
+
+### Mar 21, 2026 - Viewer PM4/WMO Correlation Panel + Footprint Scoring Follow-Up
+
+- User chose the next PM4/WMO steps explicitly:
+	- add a live in-viewer correlation panel instead of staying export-only
+	- strengthen ranking with actual transformed geometry / footprint comparison instead of only AABB heuristics
+- `src/MdxViewer/Terrain/WorldAssetManager.cs`
+	- extended `WmoMeshSummary` with sampled WMO geometry points so footprint comparison can reuse cached parse output instead of reopening meshes during report generation.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- added `BuildPm4WmoPlacementCorrelationReport(...)` as a typed viewer-side report model behind the JSON export.
+	- correlation ranking now incorporates footprint overlap, footprint area similarity, and symmetric hull-distance metrics derived from transformed WMO sample geometry and PM4 object footprint hulls.
+	- added `SelectPm4Object(...)` so a reported candidate can be promoted directly into the live PM4 selection state.
+- `src/MdxViewer/ViewerApp.cs`
+	- added persistent window/filter state for a new `PM4/WMO Correlation` tool window.
+	- added a `View` menu toggle and a `PM4/WMO` launch button beside the existing PM4 controls.
+- `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+	- added a real `PM4/WMO Correlation` window with refresh, near-only filtering, model/path filtering, placement browsing, candidate drill-down, PM4 selection, and camera framing actions.
+	- `PM4 Alignment` now links directly into that panel instead of only offering JSON export.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings after the follow-up.
+	- no automated tests were added or run.
+	- no runtime real-data validation has been performed yet for the new panel interactions or the footprint-based ranking quality.
 
 - Latest user report after the ViewerApp partial split and earlier PM4 MPRL-frame experiment:
 	- `World Maps` starting collapsed was wrong.

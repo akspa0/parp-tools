@@ -47,6 +47,8 @@ For PM4 alignment triage:
 - Build success is not PM4 correctness.
 - Runtime real-data signoff is still required before claiming PM4 placement/orientation closure.
 - When this document and runtime behavior disagree, runtime evidence wins and the document should be updated.
+- Preferred PM4 reference tile for raw-format and viewer-forensics work is `test_data/development/World/Maps/development/development_00_00.pm4`.
+- That tile is currently the best trusted PM4 anchor because it is dense, already used in multiple forensics passes, and the user has matching original ADTs outside this repo for object-placement cross-checks.
 
 ## Current Confidence Level
 
@@ -58,7 +60,8 @@ For PM4 alignment triage:
 - Strong: tile-local PM4 and world-space PM4 no longer share the same unrestricted planar candidate set.
 - Strong: the linked-`MPRL` bounds-center translation experiment is no longer active.
 - Strong negative result: current runtime evidence does not support an `MPRL` bounding-box or `MPRL` container-frame paradigm for viewer reconstruction.
-- Open: final PM4 frame ownership is still not fully closed, but `MPRL` should currently be treated as anchor/scoring data rather than a bounding-box ownership model.
+- Strong semantic guidance from user/domain knowledge: `MPRL` points are terrain/object collision-footprint intersections where ADT terrain is pierced by object collision geometry.
+- Open: final PM4 frame ownership is still not fully closed, but `MPRL` should currently be treated as collision-footprint reference data used for scoring and linkage, not as a bounding-box ownership model.
 - Open: `MSCN` is parsed and important to the broader PM4 pipeline, but it is not yet the authoritative source for active viewer object extents/orientation.
 - Open: runtime visual signoff is still pending for remaining alignment and visibility edge cases.
 
@@ -131,7 +134,7 @@ The decoder also records per-chunk byte sizes in `ChunkSizes`, which is useful f
 | `MSVI` | `List<uint>` | `MeshIndices` | per-surface index references | drives loop edges and triangle fans |
 | `MSUR` | `List<MsurChunk>` | `Surfaces` | `Ck24`, `MsviFirstIndex`, `IndexCount`, `MdosIndex`, `GroupKey`, `AttributeMask`, `Height` | defines CK24 grouping and surface membership |
 | `MSLK` | `List<MslkChunk>` | `LinkEntries` | `GroupObjectId`, `MsurIndex`, `RefIndex` | links surfaces to linked groups and position refs |
-| `MPRL` | `List<MprlChunk>` | `PositionRefs` | `Position`, low-16 `RotationOrFlags` | anchor/scoring/yaw reference input |
+| `MPRL` | `List<MprlChunk>` | `PositionRefs` | `Position`, low-16 `RotationOrFlags` | terrain/object collision-footprint refs; current viewer uses them as scoring and yaw-reference input |
 | `MSCN` | `List<Vector3>` | `ExteriorVertices` | parsed only | not authoritative for active viewer reconstruction |
 | `MPRR` | `List<MprrChunk>` | `MprrEntries` | graph edge values | not part of the active viewer orientation path |
 
@@ -438,6 +441,12 @@ For `MPRL` association:
 
 `MPRL` is important, but the current viewer contract is narrower than the earlier failed experiment.
 
+Authoritative semantic update from user/domain knowledge:
+
+- `MPRL` points are literal terrain/object collision-footprint intersections.
+- they mark the `XYZ` positions where ADT terrain is pierced by object collision geometry so terrain and object participate in one stitched collision surface.
+- this means `MPRL` is not an object-center cloud and not an enclosing bounds container.
+
 Negative result from runtime debugging:
 
 - PM4 geometry, PM4 bounds, and visible object extents are not currently conforming to an `MPRL` bounding-box paradigm.
@@ -446,6 +455,7 @@ Negative result from runtime debugging:
 
 What `MPRL` does today:
 
+- semantically, it represents terrain/object collision-footprint reference points
 - helps decide tile-local vs world-space interpretation
 - helps score planar transform candidates
 - provides expected yaw for comparison against geometry-derived principal yaw
@@ -460,8 +470,9 @@ Reason: the linked-center translation experiment regressed runtime placement and
 
 Working interpretation for now:
 
-- `MPRL` still looks useful as a placement/reference signal.
-- `MPRL` does not currently behave like a reliable per-object bounding box, enclosing footprint, or authoritative container for reconstructed PM4 viewer objects.
+- `MPRL` should be treated as collision-footprint reference data.
+- the earlier failure was specifically the viewer's attempt to translate whole CK24 groups into an `MPRL` center/bounds frame.
+- do not collapse that into the wrong conclusion that `MPRL` is generic noise; the better conclusion is that its semantics are footprint/collision seam points, not enclosing containers.
 
 ## Orientation Solver (Current)
 

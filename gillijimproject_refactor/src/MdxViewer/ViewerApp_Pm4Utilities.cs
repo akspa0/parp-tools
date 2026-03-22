@@ -108,6 +108,15 @@ public partial class ViewerApp
             ImGui.SameLine();
             if (ImGui.Button("Dump PM4 Objects JSON"))
                 ExportPm4ObjectsJson();
+            ImGui.SameLine();
+            if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
+                ExportPm4WmoCorrelationJson();
+            ImGui.SameLine();
+            if (ImGui.Button("PM4/WMO Panel"))
+            {
+                _showPm4WmoCorrelationWindow = true;
+                EnsurePm4WmoCorrelationReportLoaded();
+            }
             ImGui.End();
             return;
         }
@@ -325,6 +334,15 @@ public partial class ViewerApp
         if (ImGui.Button("Dump PM4 Objects JSON"))
             ExportPm4ObjectsJson();
         ImGui.SameLine();
+        if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
+            ExportPm4WmoCorrelationJson();
+        ImGui.SameLine();
+        if (ImGui.Button("PM4/WMO Panel"))
+        {
+            _showPm4WmoCorrelationWindow = true;
+            EnsurePm4WmoCorrelationReportLoaded();
+        }
+        ImGui.SameLine();
         if (ImGui.Button("Print Obj Alignment"))
         {
             Vector3 t = _worldScene.SelectedPm4ObjectTranslation;
@@ -337,6 +355,213 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Obj Move: ({_worldScene.SelectedPm4ObjectTranslation.X:F3}, {_worldScene.SelectedPm4ObjectTranslation.Y:F3}, {_worldScene.SelectedPm4ObjectTranslation.Z:F3})");
         ImGui.TextDisabled($"Obj Rot: ({_worldScene.SelectedPm4ObjectRotationDegrees.X:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Y:F3}, {_worldScene.SelectedPm4ObjectRotationDegrees.Z:F3}) deg");
         ImGui.TextDisabled($"Obj Scale: ({_worldScene.SelectedPm4ObjectScale.X:F4}, {_worldScene.SelectedPm4ObjectScale.Y:F4}, {_worldScene.SelectedPm4ObjectScale.Z:F4})");
+
+        ImGui.End();
+    }
+
+    private void DrawPm4WmoCorrelationWindow()
+    {
+        if (_worldScene == null)
+        {
+            _showPm4WmoCorrelationWindow = false;
+            _pm4WmoCorrelationReport = null;
+            return;
+        }
+
+        EnsurePm4WmoCorrelationReportLoaded();
+
+        ImGui.SetNextWindowSize(new Vector2(1120, 720), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("PM4/WMO Correlation", ref _showPm4WmoCorrelationWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        int requestedMatches = _pm4WmoCorrelationMaxMatchesPerPlacement;
+        ImGui.SetNextItemWidth(90f);
+        if (ImGui.InputInt("Max Matches", ref requestedMatches))
+        {
+            _pm4WmoCorrelationMaxMatchesPerPlacement = Math.Clamp(requestedMatches, 1, 32);
+            RefreshPm4WmoCorrelationReport();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Refresh"))
+            RefreshPm4WmoCorrelationReport();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Dump JSON"))
+            ExportPm4WmoCorrelationJson();
+
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Only Near", ref _pm4WmoCorrelationNearOnly))
+        {
+            if (_selectedPm4WmoCorrelationPlacementIndex >= 0)
+                _selectedPm4WmoCorrelationMatchIndex = 0;
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(260f);
+        ImGui.InputTextWithHint("##Pm4WmoCorrelationFilter", "Filter model name or path", ref _pm4WmoCorrelationModelFilter, 256);
+
+        if (_pm4WmoCorrelationReport == null)
+        {
+            ImGui.TextDisabled("No PM4/WMO correlation report is loaded.");
+            ImGui.End();
+            return;
+        }
+
+        Pm4WmoCorrelationReport report = _pm4WmoCorrelationReport;
+        ImGui.TextDisabled(
+            $"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | placements {report.Summary.WmoPlacementCount}, resolved WMO meshes {report.Summary.WmoMeshResolvedCount}, PM4 objects {report.Summary.Pm4ObjectCount}");
+        ImGui.TextDisabled(
+            $"Candidates {report.Summary.PlacementsWithCandidates}/{report.Summary.WmoPlacementCount}, near {report.Summary.PlacementsWithNearCandidates}, PM4 status: {report.Pm4Status}");
+        ImGui.Separator();
+
+        string filter = _pm4WmoCorrelationModelFilter.Trim();
+        var filteredPlacements = report.Placements
+            .Select((placement, index) => new { placement, index })
+            .Where(entry => !_pm4WmoCorrelationNearOnly || entry.placement.Pm4NearCandidateCount > 0)
+            .Where(entry => string.IsNullOrWhiteSpace(filter)
+                || entry.placement.ModelName.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || entry.placement.ModelPath.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || entry.placement.ModelKey.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(entry => entry.placement.Pm4Matches.Count > 0 ? entry.placement.Pm4Matches[0].FootprintOverlapRatio : 0f)
+            .ThenBy(entry => entry.placement.ModelName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (filteredPlacements.Count == 0)
+        {
+            ImGui.TextDisabled("No placements matched the current filter.");
+            ImGui.End();
+            return;
+        }
+
+        if (!filteredPlacements.Any(entry => entry.index == _selectedPm4WmoCorrelationPlacementIndex))
+        {
+            _selectedPm4WmoCorrelationPlacementIndex = filteredPlacements[0].index;
+            _selectedPm4WmoCorrelationMatchIndex = 0;
+        }
+
+        float leftWidth = MathF.Min(430f, ImGui.GetContentRegionAvail().X * 0.42f);
+        if (ImGui.BeginChild("##Pm4WmoPlacementList", new Vector2(leftWidth, 0f), true))
+        {
+            for (int i = 0; i < filteredPlacements.Count; i++)
+            {
+                var entry = filteredPlacements[i];
+                Pm4WmoCorrelationPlacement placement = entry.placement;
+                bool selected = entry.index == _selectedPm4WmoCorrelationPlacementIndex;
+                string label = $"[{placement.TileX},{placement.TileY}] {placement.ModelName}##Pm4WmoPlacement{entry.index}";
+                if (ImGui.Selectable(label, selected))
+                {
+                    _selectedPm4WmoCorrelationPlacementIndex = entry.index;
+                    _selectedPm4WmoCorrelationMatchIndex = 0;
+                }
+
+                ImGui.TextDisabled($"uid={placement.UniqueId} candidates={placement.Pm4CandidateCount} near={placement.Pm4NearCandidateCount}");
+                if (placement.Pm4Matches.Count > 0)
+                {
+                    Pm4WmoCorrelationMatch best = placement.Pm4Matches[0];
+                    ImGui.TextDisabled(
+                        $"best CK24=0x{best.Ck24:X6} part={best.ObjectPartId} footprint={best.FootprintOverlapRatio:F2} area={best.FootprintAreaRatio:F2} dist={best.FootprintDistance:F1}");
+                }
+                else
+                {
+                    ImGui.TextDisabled("No PM4 candidates in the current tile neighborhood.");
+                }
+
+                ImGui.Separator();
+            }
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        if (ImGui.BeginChild("##Pm4WmoPlacementDetails", Vector2.Zero, true))
+        {
+            Pm4WmoCorrelationPlacement placement = report.Placements[_selectedPm4WmoCorrelationPlacementIndex];
+            ImGui.Text($"{placement.ModelName} (tile {placement.TileX},{placement.TileY}, uid {placement.UniqueId})");
+            ImGui.TextDisabled(placement.ModelPath);
+
+            if (ImGui.Button("Frame WMO"))
+                FocusCameraOnBounds(placement.WorldBoundsMin, placement.WorldBoundsMax);
+
+            if (placement.Pm4Matches.Count > 0)
+            {
+                Pm4WmoCorrelationMatch selectedMatch = placement.Pm4Matches[Math.Clamp(_selectedPm4WmoCorrelationMatchIndex, 0, placement.Pm4Matches.Count - 1)];
+
+                ImGui.SameLine();
+                if (ImGui.Button("Select PM4"))
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Frame PM4"))
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: true);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Frame Pair"))
+                {
+                    Vector3 boundsMin = Vector3.Min(placement.WorldBoundsMin, selectedMatch.BoundsMin);
+                    Vector3 boundsMax = Vector3.Max(placement.WorldBoundsMax, selectedMatch.BoundsMax);
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
+                    FocusCameraOnBounds(boundsMin, boundsMax);
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled($"Placement pos: ({placement.PlacementPosition.X:F2}, {placement.PlacementPosition.Y:F2}, {placement.PlacementPosition.Z:F2})");
+            ImGui.TextDisabled($"Placement rot: ({placement.PlacementRotation.X:F2}, {placement.PlacementRotation.Y:F2}, {placement.PlacementRotation.Z:F2}) scale={placement.PlacementScale:F3}");
+            ImGui.TextDisabled($"World bounds min: ({placement.WorldBoundsMin.X:F2}, {placement.WorldBoundsMin.Y:F2}, {placement.WorldBoundsMin.Z:F2})");
+            ImGui.TextDisabled($"World bounds max: ({placement.WorldBoundsMax.X:F2}, {placement.WorldBoundsMax.Y:F2}, {placement.WorldBoundsMax.Z:F2})");
+            if (placement.AdtPlacement.Found)
+                ImGui.TextDisabled($"ADT flags=0x{placement.AdtPlacement.Flags:X4}");
+            else
+                ImGui.TextDisabled("No raw MODF placement metadata was found for this unique id.");
+
+            if (placement.WmoMesh.Available)
+            {
+                ImGui.TextDisabled(
+                    $"WMO v{placement.WmoMesh.Version}: groups={placement.WmoMesh.GroupCount} verts={placement.WmoMesh.VertexCount} tris={placement.WmoMesh.TriangleCount} batches={placement.WmoMesh.BatchCount}");
+                ImGui.TextDisabled(
+                    $"Footprint samples={placement.WmoMesh.FootprintSampleCount} hull={placement.WmoMesh.WorldFootprintHullPointCount} area={placement.WmoMesh.WorldFootprintArea:F1}");
+            }
+            else
+            {
+                ImGui.TextDisabled("WMO mesh summary is unavailable for this placement.");
+            }
+
+            ImGui.Separator();
+            ImGui.Text($"PM4 matches ({placement.Pm4Matches.Count}/{placement.Pm4CandidateCount} shown, near={placement.Pm4NearCandidateCount})");
+
+            if (placement.Pm4Matches.Count == 0)
+            {
+                ImGui.TextDisabled("No PM4 candidate objects are available for this placement.");
+            }
+            else if (ImGui.BeginChild("##Pm4WmoMatchList", Vector2.Zero, false))
+            {
+                for (int matchIndex = 0; matchIndex < placement.Pm4Matches.Count; matchIndex++)
+                {
+                    Pm4WmoCorrelationMatch match = placement.Pm4Matches[matchIndex];
+                    bool selected = matchIndex == _selectedPm4WmoCorrelationMatchIndex;
+                    string label = $"CK24 0x{match.Ck24:X6} part {match.ObjectPartId}##Pm4WmoMatch{matchIndex}";
+                    if (ImGui.Selectable(label, selected))
+                        _selectedPm4WmoCorrelationMatchIndex = matchIndex;
+
+                    ImGui.TextDisabled(
+                        $"tile=({match.TileX},{match.TileY}) type=0x{match.Ck24Type:X2} objId={match.Ck24ObjectId} sameTile={match.SameTile}");
+                    ImGui.TextDisabled(
+                        $"footprint overlap={match.FootprintOverlapRatio:F3} area={match.FootprintAreaRatio:F3} dist={match.FootprintDistance:F2}");
+                    ImGui.TextDisabled(
+                        $"planar gap={match.PlanarGap:F2} vertical gap={match.VerticalGap:F2} center={match.CenterDistance:F2} planar overlap={match.PlanarOverlapRatio:F3}");
+                    ImGui.TextDisabled(
+                        $"surfaces={match.SurfaceCount} linked refs={match.LinkedPositionRefCount} mdos={match.DominantMdosIndex} avgH={match.AverageSurfaceHeight:F2}");
+                    ImGui.Separator();
+                }
+
+                ImGui.EndChild();
+            }
+        }
+        ImGui.EndChild();
 
         ImGui.End();
     }
@@ -380,6 +605,99 @@ public partial class ViewerApp
             _statusMessage = $"PM4 JSON export failed: {ex.Message}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
         }
+    }
+
+    private void ExportPm4WmoCorrelationJson()
+    {
+        if (_worldScene == null)
+            return;
+
+        string defaultName = $"pm4_wmo_correlation_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+        string? picked = ShowSaveFileDialogSTA(
+            "Save PM4/WMO Correlation JSON",
+            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            string json = _worldScene.BuildPm4WmoPlacementCorrelationJson();
+            File.WriteAllText(picked, json, Encoding.UTF8);
+            _statusMessage = $"Exported PM4/WMO correlation JSON: {picked}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4/WMO correlation export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Correlation] JSON export failed: {ex}");
+        }
+    }
+
+    private void EnsurePm4WmoCorrelationReportLoaded()
+    {
+        if (_pm4WmoCorrelationReport == null)
+            RefreshPm4WmoCorrelationReport();
+    }
+
+    private void RefreshPm4WmoCorrelationReport()
+    {
+        if (_worldScene == null)
+            return;
+
+        try
+        {
+            _pm4WmoCorrelationReport = _worldScene.BuildPm4WmoPlacementCorrelationReport(_pm4WmoCorrelationMaxMatchesPerPlacement);
+            if (_pm4WmoCorrelationReport.Placements.Count == 0)
+            {
+                _selectedPm4WmoCorrelationPlacementIndex = -1;
+                _selectedPm4WmoCorrelationMatchIndex = 0;
+            }
+            else if (_selectedPm4WmoCorrelationPlacementIndex < 0 || _selectedPm4WmoCorrelationPlacementIndex >= _pm4WmoCorrelationReport.Placements.Count)
+            {
+                _selectedPm4WmoCorrelationPlacementIndex = 0;
+                _selectedPm4WmoCorrelationMatchIndex = 0;
+            }
+
+            _statusMessage = $"Refreshed PM4/WMO correlation report ({_pm4WmoCorrelationReport.Summary.WmoPlacementCount} placements).";
+        }
+        catch (Exception ex)
+        {
+            _pm4WmoCorrelationReport = null;
+            _statusMessage = $"PM4/WMO correlation refresh failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Correlation] Report refresh failed: {ex}");
+        }
+    }
+
+    private void SelectPm4CorrelationMatch(Pm4WmoCorrelationMatch match, bool frameCamera)
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.SelectPm4Object((match.TileX, match.TileY, match.Ck24, match.ObjectPartId)))
+        {
+            _showPm4AlignmentWindow = true;
+            if (frameCamera)
+                FocusCameraOnBounds(match.BoundsMin, match.BoundsMax);
+
+            _statusMessage = $"Selected PM4 candidate CK24=0x{match.Ck24:X6} part={match.ObjectPartId} from correlation panel.";
+        }
+        else
+        {
+            _statusMessage = $"PM4 candidate CK24=0x{match.Ck24:X6} part={match.ObjectPartId} is no longer available.";
+        }
+    }
+
+    private void FocusCameraOnBounds(Vector3 boundsMin, Vector3 boundsMax)
+    {
+        Vector3 center = (boundsMin + boundsMax) * 0.5f;
+        Vector3 extent = Vector3.Max(boundsMax - boundsMin, new Vector3(1f, 1f, 1f));
+        float distance = MathF.Max(extent.Length() * 1.35f, 80f);
+
+        _camera.Position = center + new Vector3(distance, 0f, MathF.Max(extent.Z * 0.6f, 30f));
+        _camera.Yaw = 180f;
+        _camera.Pitch = -18f;
     }
 
     private void ApplySavedPm4AlignmentToScene()
