@@ -107,6 +107,7 @@ public class MdxFile
     public List<uint> GlobalSequences { get; } = new();
     public List<MdlMaterial> Materials { get; } = new();
     public List<MdlTexture> Textures { get; } = new();
+    public List<MdlTextureAnimation> TextureAnimations { get; } = new();
     public List<MdlGeoset> Geosets { get; } = new();
     public List<MdlBone> Bones { get; } = new();
     public List<C3Vector> PivotPoints { get; } = new();
@@ -115,6 +116,8 @@ public class MdxFile
     public List<MdlGeosetAnimation> GeosetAnimations { get; } = new();
     public List<MdlParticleEmitter2> ParticleEmitters2 { get; } = new();
     public List<MdlRibbonEmitter> RibbonEmitters { get; } = new();
+    public int RawParticleEmitterCount { get; set; }
+    public int RawRibbonEmitterCount { get; set; }
 
     /// <summary>Load MDX binary file</summary>
     public static MdxFile Load(string path)

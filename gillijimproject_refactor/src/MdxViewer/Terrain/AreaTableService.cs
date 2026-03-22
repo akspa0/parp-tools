@@ -18,7 +18,7 @@ public class AreaTableService
 
     public record AreaEntry(int Id, string Name, int ParentAreaId, int MapId, int Flags);
 
-    public int Count => _areas.Count;
+    public int Count => _primaryKeyCount;
     public string? LoadedBuild { get; private set; }
     public string? LoadedLocale { get; private set; }
     public string? NameColumn { get; private set; }
@@ -68,46 +68,47 @@ public class AreaTableService
 
         LoadedLocale = localeUsed.ToString();
 
-        // Detect column names (varies by build)
-        string nameCol = DetectColumn(storage, "AreaName_lang", "AreaName", "Name");
-        string idCol = DetectColumn(storage, "AreaNumber", "ID", "AreaID");
-        string parentCol = DetectColumn(storage, "ParentAreaNum", "ParentAreaID", "ParentAreaNum");
-        string mapCol = DetectColumn(storage, "ContinentID", "MapID", "Continent");
-        string flagsCol = DetectColumn(storage, "Flags", "AreaFlags");
+        var availableColumns = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
+
+        // Detect column names from the active DBD-backed layout rather than probing a row.
+        string? nameCol = DetectColumn(availableColumns, "AreaName_lang", "AreaName", "Name");
+        string? idCol = DetectColumn(availableColumns, "ID", "AreaID", "AreaNumber");
+        string? areaNumberCol = DetectColumn(availableColumns, "AreaNumber");
+        string? parentCol = DetectColumn(availableColumns, "ParentAreaID", "ParentAreaNum");
+        string? mapCol = DetectColumn(availableColumns, "ContinentID", "MapID", "Continent");
+        string? flagsCol = DetectColumn(availableColumns, "Flags", "AreaFlags");
         NameColumn = nameCol;
         IdColumn = idCol;
         ParentColumn = parentCol;
         MapColumn = mapCol;
         FlagsColumn = flagsCol;
 
-        // MCNK AreaId uses the DBC row key (implicit ID), NOT the AreaNumber field.
-        // AreaNumber is a packed value (e.g. 1048576) unrelated to MCNK placement.
-        // Index primarily by row key. Also index by AreaNumber as fallback.
+        // MCNK AreaId should resolve against the canonical AreaTable ID for the active layout.
+        // Older tables also expose AreaNumber-style aliases, so keep those as fallbacks instead
+        // of treating them as the primary key for every build.
         foreach (var key in storage.Keys)
         {
             _rowCount++;
             var row = storage[key];
-            int areaNumber = SafeField<int>(row, idCol, key);
-            string name = Sanitize(SafeField<string>(row, nameCol, "") ?? "");
+            int areaId = SafeField<int>(row, idCol, key);
+            if (areaId == 0 && key != 0)
+                areaId = key;
+
+            string name = Sanitize(SafeField<string>(row, nameCol, string.Empty) ?? string.Empty);
             int parentId = SafeField<int>(row, parentCol, 0);
             int mapId = SafeField<int>(row, mapCol, 0);
             int flags = SafeField<int>(row, flagsCol, 0);
+            int areaNumber = SafeField<int>(row, areaNumberCol, 0);
 
-            var entry = new AreaEntry(key, name, parentId, mapId, flags);
-            _areas[key] = entry;
-            _primaryKeyCount++;
-
-            if (areaNumber != key)
-            {
-                if (_areas.TryAdd(areaNumber, entry))
-                    _fallbackAliasCount++;
-                else
-                    _fallbackAliasCollisions++;
-            }
+            var entry = new AreaEntry(areaId, name, parentId, mapId, flags);
+            RegisterPrimary(areaId, entry);
+            RegisterAlias(key, entry);
+            RegisterAlias(areaNumber, entry);
+            RegisterLegacyPackedAreaNumberAliases(build, areaNumber, entry);
         }
 
         ViewerLog.Important(ViewerLog.Category.General,
-            $"[AreaTable] Loaded build={LoadedBuild} locale={LoadedLocale} rows={_rowCount} indexed={_areas.Count} primaryKeys={_primaryKeyCount} fallbackAliases={_fallbackAliasCount} aliasCollisions={_fallbackAliasCollisions} nameCol='{nameCol}' idCol='{idCol}' parentCol='{parentCol}' mapCol='{mapCol}' flagsCol='{flagsCol}'");
+            $"[AreaTable] Loaded build={LoadedBuild} locale={LoadedLocale} rows={_rowCount} indexed={_areas.Count} primaryKeys={_primaryKeyCount} fallbackAliases={_fallbackAliasCount} aliasCollisions={_fallbackAliasCollisions} nameCol='{FormatColumn(nameCol)}' idCol='{FormatColumn(idCol)}' parentCol='{FormatColumn(parentCol)}' mapCol='{FormatColumn(mapCol)}' flagsCol='{FormatColumn(flagsCol)}'");
     }
 
     /// <summary>
@@ -157,7 +158,7 @@ public class AreaTableService
 
     public string DescribeLoadContext()
     {
-        return $"build={LoadedBuild ?? "unknown"}, locale={LoadedLocale ?? "unknown"}, rows={_rowCount}, indexed={_areas.Count}, idCol={IdColumn ?? "?"}, mapCol={MapColumn ?? "?"}";
+        return $"build={LoadedBuild ?? "unknown"}, locale={LoadedLocale ?? "unknown"}, rows={_rowCount}, indexed={_areas.Count}, primaryKeys={_primaryKeyCount}, idCol={IdColumn ?? "?"}, mapCol={MapColumn ?? "?"}";
     }
 
     public string DescribeLookup(int areaId, int mapId)
@@ -173,22 +174,67 @@ public class AreaTableService
         return $"[AreaTable] Lookup resolved: AreaId={areaId} -> '{entry.Name}' on MapId={mapId} {DescribeLoadContext()}";
     }
 
-    private static string DetectColumn(IDBCDStorage storage, params string[] candidates)
+    private void RegisterPrimary(int areaId, AreaEntry entry)
     {
-        if (storage.Values.Count == 0) return candidates[0];
-        var row = storage.Values.First();
-        foreach (var col in candidates)
+        if (_areas.TryAdd(areaId, entry))
         {
-            try { _ = row[col]; return col; }
-            catch { }
+            _primaryKeyCount++;
+            return;
         }
-        return candidates[0];
+
+        _areas[areaId] = entry;
     }
 
-    private static T SafeField<T>(dynamic row, string col, T fallback)
+    private void RegisterAlias(int aliasId, AreaEntry entry)
     {
+        if (aliasId == 0 || aliasId == entry.Id)
+            return;
+
+        if (_areas.TryGetValue(aliasId, out var existing))
+        {
+            if (existing.Id != entry.Id)
+                _fallbackAliasCollisions++;
+            return;
+        }
+
+        _areas[aliasId] = entry;
+        _fallbackAliasCount++;
+    }
+
+    private void RegisterLegacyPackedAreaNumberAliases(string? build, int areaNumber, AreaEntry entry)
+    {
+        if (areaNumber == 0 || string.IsNullOrWhiteSpace(build) || !build.StartsWith("0.5.", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        int lowWord = areaNumber & 0xFFFF;
+        int highWord = (int)((uint)areaNumber >> 16);
+        RegisterAlias(lowWord, entry);
+        RegisterAlias(highWord, entry);
+    }
+
+    private static string? DetectColumn(ISet<string> availableColumns, params string[] candidates)
+    {
+        foreach (var col in candidates)
+        {
+            if (availableColumns.Contains(col))
+                return col;
+        }
+
+        return null;
+    }
+
+    private static T SafeField<T>(dynamic row, string? col, T fallback)
+    {
+        if (string.IsNullOrWhiteSpace(col))
+            return fallback;
+
         try { return (T)row[col]; }
         catch { return fallback; }
+    }
+
+    private static string FormatColumn(string? col)
+    {
+        return string.IsNullOrWhiteSpace(col) ? "n/a" : col;
     }
 
     private static string Sanitize(string s)

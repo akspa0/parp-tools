@@ -166,7 +166,8 @@ void main()
         Matrix4x4 view, Matrix4x4 proj,
         Vector3 cameraPos,
         Dictionary<int, uint> textureMap,
-        IReadOnlyList<MdlTexture> textureDefs)
+        IReadOnlyList<MdlTexture> textureDefs,
+        Matrix4x4 modelTransform)
     {
         // Count total live particles
         int total = 0;
@@ -240,12 +241,13 @@ void main()
             {
                 var color = emitter.GetParticleColor(p);
                 float size = emitter.GetParticleSize(p);
+                Vector3 particlePos = Vector3.Transform(p.Position, modelTransform);
 
                 // Texture atlas cell based on particle lifetime phase
                 int cellIdx = (int)(p.LifePhase * (totalCells - 1));
                 cellIdx = Math.Clamp(cellIdx, 0, totalCells - 1);
 
-                _gl.Uniform3(_uParticlePos,   p.Position.X, p.Position.Y, p.Position.Z);
+                _gl.Uniform3(_uParticlePos,   particlePos.X, particlePos.Y, particlePos.Z);
                 _gl.Uniform4(_uParticleColor, color.X, color.Y, color.Z, color.W);
                 _gl.Uniform1(_uParticleSize,  size);
                 _gl.Uniform1(_uCellIndex,     cellIdx);

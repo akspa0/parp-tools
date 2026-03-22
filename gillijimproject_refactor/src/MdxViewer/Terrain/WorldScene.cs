@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Population;
 using MdxViewer.Rendering;
+using Pm4Research.Core;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Formats.PM4;
 
@@ -153,6 +155,110 @@ public readonly struct Pm4LinkedPositionRefSummary
     public bool HasNormalHeadings => NormalCount > 0 && !float.IsNaN(HeadingMeanDegrees);
 }
 
+public readonly struct Pm4ResearchHypothesisMatch
+{
+    public Pm4ResearchHypothesisMatch(
+        string family,
+        int familyObjectIndex,
+        int surfaceCount,
+        int totalIndexCount,
+        int mdosCount,
+        int groupKeyCount,
+        int linkedMprlRefCount,
+        int linkedMprlInBoundsCount,
+        float similarityScore)
+    {
+        Family = family;
+        FamilyObjectIndex = familyObjectIndex;
+        SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
+        MdosCount = mdosCount;
+        GroupKeyCount = groupKeyCount;
+        LinkedMprlRefCount = linkedMprlRefCount;
+        LinkedMprlInBoundsCount = linkedMprlInBoundsCount;
+        SimilarityScore = similarityScore;
+    }
+
+    public string Family { get; }
+    public int FamilyObjectIndex { get; }
+    public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
+    public int MdosCount { get; }
+    public int GroupKeyCount { get; }
+    public int LinkedMprlRefCount { get; }
+    public int LinkedMprlInBoundsCount { get; }
+    public float SimilarityScore { get; }
+}
+
+public readonly struct Pm4SelectedObjectResearchInfo
+{
+    public Pm4SelectedObjectResearchInfo(
+        string sourcePath,
+        uint version,
+        int mslkCount,
+        int msurCount,
+        int mscnCount,
+        int mprlCount,
+        int invalidRefIndexCount,
+        int totalHypothesisCount,
+        int matchingCk24HypothesisCount,
+        int diagnosticCount,
+        IReadOnlyList<string> diagnostics,
+        IReadOnlyList<Pm4ResearchHypothesisMatch> topMatches)
+    {
+        SourcePath = sourcePath;
+        Version = version;
+        MslkCount = mslkCount;
+        MsurCount = msurCount;
+        MscnCount = mscnCount;
+        MprlCount = mprlCount;
+        InvalidRefIndexCount = invalidRefIndexCount;
+        TotalHypothesisCount = totalHypothesisCount;
+        MatchingCk24HypothesisCount = matchingCk24HypothesisCount;
+        DiagnosticCount = diagnosticCount;
+        Diagnostics = diagnostics;
+        TopMatches = topMatches;
+    }
+
+    public string SourcePath { get; }
+    public uint Version { get; }
+    public int MslkCount { get; }
+    public int MsurCount { get; }
+    public int MscnCount { get; }
+    public int MprlCount { get; }
+    public int InvalidRefIndexCount { get; }
+    public int TotalHypothesisCount { get; }
+    public int MatchingCk24HypothesisCount { get; }
+    public int DiagnosticCount { get; }
+    public IReadOnlyList<string> Diagnostics { get; }
+    public IReadOnlyList<Pm4ResearchHypothesisMatch> TopMatches { get; }
+}
+
+internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
+
+internal readonly struct Pm4MergeCandidateGroup
+{
+    public Pm4MergeCandidateGroup(
+        (int tileX, int tileY, uint ck24) key,
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        Vector3 center,
+        HashSet<Pm4ConnectorKey> connectorKeys)
+    {
+        Key = key;
+        BoundsMin = boundsMin;
+        BoundsMax = boundsMax;
+        Center = center;
+        ConnectorKeys = connectorKeys;
+    }
+
+    public (int tileX, int tileY, uint ck24) Key { get; }
+    public Vector3 BoundsMin { get; }
+    public Vector3 BoundsMax { get; }
+    public Vector3 Center { get; }
+    public HashSet<Pm4ConnectorKey> ConnectorKeys { get; }
+}
+
 /// <summary>
 /// Combines terrain (WDT/ADT), WMO placements (MODF), and MDX placements (MDDF)
 /// into a single world scene — the same way the game client renders a map.
@@ -167,6 +273,7 @@ public class WorldScene : ISceneRenderer
     private readonly GL _gl;
     private readonly TerrainManager _terrainManager;
     private readonly WorldAssetManager _assets;
+    private readonly Pm4OverlayCacheService? _pm4OverlayCacheService;
 
     // Lightweight instance lists — just a key + transform, no renderer reference
     // These are rebuilt from _tileMdxInstances/_tileWmoInstances when tiles change
@@ -208,13 +315,21 @@ public class WorldScene : ISceneRenderer
     private bool _wireframeRevealEnabled;
 
     // PM4 debug overlay
-    private const int Pm4MaxLinesTotal = 400000;
-    private const int Pm4MaxLinesPerTile = 12000;
-    private const int Pm4MaxTrianglesTotal = 240000;
-    private const int Pm4MaxTrianglesPerTile = 12000;
-    private const int Pm4MaxPositionRefsTotal = 120000;
-    private const int Pm4MaxPositionRefsPerTile = 3000;
+    private const int Pm4MaxLinesTotal = int.MaxValue;
+    private const int Pm4MaxLinesPerTile = int.MaxValue;
+    private const int Pm4MaxTrianglesTotal = int.MaxValue;
+    private const int Pm4MaxTrianglesPerTile = int.MaxValue;
+    private const int Pm4MaxPositionRefsTotal = int.MaxValue;
+    private const int Pm4MaxPositionRefsPerTile = int.MaxValue;
     private const float Pm4MaxEdgeLength = 512f;
+    private const float Pm4ConnectorQuantizationUnits = 2f;
+    private const float Pm4ConnectorMergeBoundsPadding = 32f;
+    private const float Pm4ConnectorMergeMaxCenterDistance = 256f;
+    private const float Pm4ConnectorMergeCloseCenterDistance = 128f;
+    private const int Pm4MinCameraTileRadius = 1;
+    private const int Pm4MaxCameraTileRadius = 2;
+    private const double Pm4ExpandWindowThresholdMs = 120.0;
+    private const double Pm4ShrinkWindowThresholdMs = 300.0;
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4ObjectBounds = true;
@@ -246,10 +361,18 @@ public class WorldScene : ISceneRenderer
     private int _pm4VisiblePositionRefCount;
     private float _pm4MinObjectZ;
     private float _pm4MaxObjectZ;
+    private int _pm4CameraTileRadius = Pm4MinCameraTileRadius;
+    private double _pm4AverageLoadMs = -1.0;
+    private (int minTileX, int minTileY, int maxTileX, int maxTileY)? _pm4LoadedCameraWindow;
+    private Vector3 _lastRenderedCameraPosition;
+    private bool _hasLastRenderedCameraPosition;
     private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
     private readonly Dictionary<(int tileX, int tileY), Pm4OverlayTileStats> _pm4TileStats = new();
     private readonly Dictionary<(int tileX, int tileY), List<Vector3>> _pm4TilePositionRefs = new();
+    private readonly Dictionary<string, Pm4ResearchContext> _pm4ResearchBySourcePath = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _pm4ResearchUnavailablePaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), (int tileX, int tileY, uint ck24)> _pm4MergedObjectGroupKeys = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4ObjectGroupBounds = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectRotationsDegrees = new();
@@ -359,7 +482,7 @@ public class WorldScene : ISceneRenderer
     public bool HasSelectedPm4Object => _selectedPm4ObjectKey.HasValue;
     public (int tileX, int tileY, uint ck24, int objectPart)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
 
-    private static (int tileX, int tileY, uint ck24) BuildPm4ObjectGroupKey(
+    private static (int tileX, int tileY, uint ck24) BuildPm4BaseObjectGroupKey(
         (int tileX, int tileY, uint ck24, int objectPart) objectKey)
     {
         return (objectKey.tileX, objectKey.tileY, objectKey.ck24);
@@ -367,16 +490,17 @@ public class WorldScene : ISceneRenderer
 
     private (int tileX, int tileY, uint ck24) ResolvePm4ObjectGroupKey((int tileX, int tileY, uint ck24, int objectPart) objectKey)
     {
-        return BuildPm4ObjectGroupKey(objectKey);
+        var baseGroupKey = BuildPm4BaseObjectGroupKey(objectKey);
+        return _pm4MergedObjectGroupKeys.TryGetValue(baseGroupKey, out var mergedGroupKey)
+            ? mergedGroupKey
+            : baseGroupKey;
     }
 
-    private static bool IsPm4ObjectInGroup(
+    private bool IsPm4ObjectInGroup(
         (int tileX, int tileY, uint ck24) groupKey,
         (int tileX, int tileY, uint ck24, int objectPart) objectKey)
     {
-        return groupKey.tileX == objectKey.tileX
-            && groupKey.tileY == objectKey.tileY
-            && groupKey.ck24 == objectKey.ck24;
+        return ResolvePm4ObjectGroupKey(objectKey) == groupKey;
     }
 
     public Vector3 SelectedPm4ObjectTranslation
@@ -485,7 +609,7 @@ public class WorldScene : ISceneRenderer
                     .Select(obj =>
                     {
                         var objectKey = (kvp.Key.tileX, kvp.Key.tileY, obj.Ck24, obj.ObjectPartId);
-                        var objectGroupKey = BuildPm4ObjectGroupKey(objectKey);
+                        var objectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
                         bool hasObjectOffset = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectOffset);
                         bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)
                             && !IsNearZeroVector(objectRotationDegrees);
@@ -600,14 +724,14 @@ public class WorldScene : ISceneRenderer
 
     internal Pm4WmoCorrelationReport BuildPm4WmoPlacementCorrelationReport(int maxMatchesPerPlacement = 8)
     {
-        if (!_pm4LoadAttempted)
-            LazyLoadPm4Overlay();
+        EnsurePm4OverlayMatchesCameraWindow(GetPm4LoadAnchorCameraPosition());
 
         if (_instancesDirty)
             RebuildInstanceLists();
 
         int resolvedMaxMatches = Math.Max(1, maxMatchesPerPlacement);
         List<Pm4CorrelationObjectState> pm4Objects = BuildPm4CorrelationObjectStates();
+        int mergedPm4ObjectCount = pm4Objects.Select(static candidate => candidate.GroupKey).Distinct().Count();
         Dictionary<int, ModfPlacement> modfByUniqueId = _terrainManager.Adapter.ModfPlacements
             .GroupBy(static placement => placement.UniqueId)
             .ToDictionary(static group => group.Key, static group => group.First());
@@ -671,6 +795,18 @@ public class WorldScene : ISceneRenderer
                                 sameTile = candidate.TileX == tileEntry.Key.Item1 && candidate.TileY == tileEntry.Key.Item2,
                             };
                         })
+                        .GroupBy(static candidate => candidate.candidate.GroupKey)
+                        .Select(group => group
+                            .OrderByDescending(static candidate => candidate.sameTile)
+                            .ThenByDescending(static candidate => candidate.footprintOverlapRatio)
+                            .ThenByDescending(static candidate => candidate.planarOverlapRatio)
+                            .ThenByDescending(static candidate => candidate.footprintAreaRatio)
+                            .ThenByDescending(static candidate => candidate.volumeOverlapRatio)
+                            .ThenBy(static candidate => candidate.footprintDistance)
+                            .ThenBy(static candidate => candidate.planarGap)
+                            .ThenBy(static candidate => candidate.verticalGap)
+                            .ThenBy(static candidate => candidate.centerDistance)
+                            .First())
                         .OrderByDescending(static candidate => candidate.sameTile)
                         .ThenByDescending(static candidate => candidate.footprintOverlapRatio)
                         .ThenByDescending(static candidate => candidate.planarOverlapRatio)
@@ -779,7 +915,7 @@ public class WorldScene : ISceneRenderer
             new Pm4WmoCorrelationSummary(
                 placementCount,
                 meshResolvedCount,
-                pm4Objects.Count,
+                mergedPm4ObjectCount,
                 placementsWithCandidates,
                 placementsWithNearCandidates,
                 resolvedMaxMatches),
@@ -997,16 +1133,22 @@ public class WorldScene : ISceneRenderer
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
     }
 
-    private void LazyLoadPm4Overlay()
+    private void LazyLoadPm4Overlay(bool ignoreCache = false)
     {
+        var previousSelectedPm4ObjectKey = _selectedPm4ObjectKey;
+        Vector3 cameraPos = GetPm4LoadAnchorCameraPosition();
+        int activeCameraRadius = _pm4CameraTileRadius;
+        var activeCameraWindow = GetPm4CameraWindow(cameraPos, activeCameraRadius);
         _pm4LoadAttempted = true;
+        _pm4LoadedCameraWindow = activeCameraWindow;
         _pm4TileObjects.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
+        _pm4ResearchBySourcePath.Clear();
+        _pm4ResearchUnavailablePaths.Clear();
         _pm4ObjectLookup.Clear();
+        _pm4MergedObjectGroupKeys.Clear();
         _pm4ObjectGroupBounds.Clear();
-        _selectedPm4ObjectKey = null;
-        _selectedPm4ObjectGroupKey = null;
         _pm4TotalFiles = 0;
         _pm4LoadedFiles = 0;
         _pm4ObjectCount = 0;
@@ -1028,31 +1170,25 @@ public class WorldScene : ISceneRenderer
         }
 
         string mapName = _terrainManager.MapName;
-        var pm4Candidates = _dataSource
+        List<string> mapPm4Candidates = _dataSource
             .GetFileList(".pm4")
             .Where(path => IsMapPm4Path(path, mapName))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        _pm4TotalFiles = pm4Candidates.Count;
-        if (_pm4TotalFiles == 0)
+        int mapPm4CandidateCount = mapPm4Candidates.Count;
+        if (mapPm4CandidateCount == 0)
         {
             _pm4Status = $"PM4: no files found for map '{mapName}'.";
             return;
         }
 
-        int remainingLineBudget = Pm4MaxLinesTotal;
-        int remainingTriangleBudget = Pm4MaxTrianglesTotal;
-        int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
         int tileParseRejected = 0;
         int tileRangeRejected = 0;
-        int readFailed = 0;
-        int decodeFailed = 0;
-        int zeroObjectFiles = 0;
-        foreach (string pm4Path in pm4Candidates)
+        bool selectedTilePinned = false;
+        var pm4Candidates = new List<(string path, int tileX, int tileY)>();
+        foreach (string pm4Path in mapPm4Candidates)
         {
-            if (remainingLineBudget <= 0)
-                break;
-
             if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
             {
                 tileParseRejected++;
@@ -1064,6 +1200,71 @@ public class WorldScene : ISceneRenderer
                 tileRangeRejected++;
                 continue;
             }
+
+            bool isSelectedTile = previousSelectedPm4ObjectKey.HasValue
+                && previousSelectedPm4ObjectKey.Value.tileX == effectiveTileX
+                && previousSelectedPm4ObjectKey.Value.tileY == effectiveTileY;
+            if (!IsPm4TileInsideCameraWindow(effectiveTileX, effectiveTileY, activeCameraWindow) && !isSelectedTile)
+                continue;
+
+            if (isSelectedTile && !IsPm4TileInsideCameraWindow(effectiveTileX, effectiveTileY, activeCameraWindow))
+                selectedTilePinned = true;
+
+            pm4Candidates.Add((pm4Path, effectiveTileX, effectiveTileY));
+        }
+
+        _pm4TotalFiles = pm4Candidates.Count;
+        if (_pm4TotalFiles == 0)
+        {
+            _pm4Status = $"PM4: 0/{mapPm4CandidateCount} files intersect the active camera window ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}).";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+            return;
+        }
+
+        if (ignoreCache && _pm4OverlayCacheService != null)
+        {
+            if (!_pm4OverlayCacheService.TryDelete(mapName, out string? cacheDeleteError) && !string.IsNullOrWhiteSpace(cacheDeleteError))
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheDeleteError}");
+        }
+
+        string candidateSignature = Pm4OverlayCacheService.BuildCandidateSignature(
+            _dataSource,
+            pm4Candidates.Select(static candidate => candidate.path).ToList(),
+            _pm4SplitCk24ByMdos,
+            _pm4SplitCk24ByConnectivity);
+        var loadStopwatch = Stopwatch.StartNew();
+        string? cacheLoadError = null;
+        if (!ignoreCache
+            && _pm4OverlayCacheService != null
+            && _pm4OverlayCacheService.TryLoad(mapName, candidateSignature, out Pm4OverlayCacheData? cachedOverlay, out cacheLoadError)
+            && cachedOverlay != null)
+        {
+            RestorePm4OverlayFromCache(cachedOverlay);
+            RestoreSelectedPm4Object(previousSelectedPm4ObjectKey);
+            loadStopwatch.Stop();
+            UpdatePm4AdaptiveWindowRadius(loadStopwatch.Elapsed.TotalMilliseconds);
+            _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} active-window files restored from disk cache for tiles ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius}, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected{(selectedTilePinned ? ", selected tile pinned" : string.Empty)}, {loadStopwatch.ElapsedMilliseconds} ms.";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(cacheLoadError))
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheLoadError}");
+
+        int remainingLineBudget = Pm4MaxLinesTotal;
+        int remainingTriangleBudget = Pm4MaxTrianglesTotal;
+        int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
+        int readFailed = 0;
+        int decodeFailed = 0;
+        int zeroObjectFiles = 0;
+        foreach (var candidate in pm4Candidates)
+        {
+            if (remainingLineBudget <= 0)
+                break;
+
+            string pm4Path = candidate.path;
+            int effectiveTileX = candidate.tileX;
+            int effectiveTileY = candidate.tileY;
 
             byte[]? bytes = _dataSource.ReadFile(pm4Path);
             if (bytes == null || bytes.Length == 0)
@@ -1078,6 +1279,7 @@ public class WorldScene : ISceneRenderer
                 int rejectedLongEdges = 0;
                 List<Pm4OverlayObject> objects = BuildPm4TileObjects(
                     pm4,
+                    pm4Path,
                     effectiveTileX,
                     effectiveTileY,
                     _pm4SplitCk24ByMdos,
@@ -1165,7 +1367,7 @@ public class WorldScene : ISceneRenderer
 
         if (_pm4LoadedFiles == 0)
         {
-            _pm4Status = $"PM4: {_pm4TotalFiles} files found, none decoded into overlay data (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).";
+            _pm4Status = $"PM4: {_pm4TotalFiles}/{mapPm4CandidateCount} active-window files found, none decoded into overlay data for window ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius} (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).";
             ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
             return;
         }
@@ -1176,10 +1378,224 @@ public class WorldScene : ISceneRenderer
             _pm4MaxObjectZ = 1f;
         }
 
+        RebuildPm4MergedObjectGroups();
         RebuildPm4ObjectGroupBounds();
+        RestoreSelectedPm4Object(previousSelectedPm4ObjectKey);
 
-        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected.";
+        loadStopwatch.Stop();
+        if (_pm4OverlayCacheService != null)
+        {
+            var cacheData = BuildPm4OverlayCacheData(mapName, candidateSignature);
+            if (!_pm4OverlayCacheService.TrySave(cacheData, out string? cacheSaveError) && !string.IsNullOrWhiteSpace(cacheSaveError))
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheSaveError}");
+        }
+
+        UpdatePm4AdaptiveWindowRadius(loadStopwatch.Elapsed.TotalMilliseconds);
+        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} active-window files decoded and cached for tiles ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius}, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected{(selectedTilePinned ? ", selected tile pinned" : string.Empty)}, {loadStopwatch.ElapsedMilliseconds} ms.";
         ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+    }
+
+    private void RestoreSelectedPm4Object((int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey)
+    {
+        if (!selectedObjectKey.HasValue)
+        {
+            _selectedPm4ObjectKey = null;
+            _selectedPm4ObjectGroupKey = null;
+            return;
+        }
+
+        if (_pm4ObjectLookup.ContainsKey(selectedObjectKey.Value))
+        {
+            _selectedPm4ObjectKey = selectedObjectKey;
+            _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(selectedObjectKey.Value);
+            return;
+        }
+
+        _selectedPm4ObjectKey = null;
+        _selectedPm4ObjectGroupKey = null;
+    }
+
+    private Vector3 GetPm4LoadAnchorCameraPosition()
+    {
+        if (_hasLastRenderedCameraPosition)
+            return _lastRenderedCameraPosition;
+
+        return _terrainManager.GetInitialCameraPosition();
+    }
+
+    private static (int minTileX, int minTileY, int maxTileX, int maxTileY) GetPm4CameraWindow(Vector3 cameraPos, int tileRadius)
+    {
+        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
+        int centerTileX = Math.Clamp((int)MathF.Floor(camTileX), 0, 63);
+        int centerTileY = Math.Clamp((int)MathF.Floor(camTileY), 0, 63);
+        int minTileX = Math.Max(0, centerTileX - tileRadius);
+        int minTileY = Math.Max(0, centerTileY - tileRadius);
+        int maxTileX = Math.Min(63, centerTileX + tileRadius);
+        int maxTileY = Math.Min(63, centerTileY + tileRadius);
+        return (minTileX, minTileY, maxTileX, maxTileY);
+    }
+
+    private static bool IsPm4TileInsideCameraWindow(
+        int tileX,
+        int tileY,
+        (int minTileX, int minTileY, int maxTileX, int maxTileY) cameraWindow)
+    {
+        return tileX >= cameraWindow.minTileX
+            && tileX <= cameraWindow.maxTileX
+            && tileY >= cameraWindow.minTileY
+            && tileY <= cameraWindow.maxTileY;
+    }
+
+    private void EnsurePm4OverlayMatchesCameraWindow(Vector3 cameraPos)
+    {
+        if (!_showPm4Overlay)
+            return;
+
+        var cameraWindow = GetPm4CameraWindow(cameraPos, _pm4CameraTileRadius);
+        if (!_pm4LoadAttempted || _pm4LoadedCameraWindow != cameraWindow)
+            LazyLoadPm4Overlay();
+    }
+
+    private void UpdatePm4AdaptiveWindowRadius(double loadElapsedMs)
+    {
+        _pm4AverageLoadMs = _pm4AverageLoadMs < 0.0
+            ? loadElapsedMs
+            : _pm4AverageLoadMs * 0.65 + loadElapsedMs * 0.35;
+
+        int previousRadius = _pm4CameraTileRadius;
+        if (_pm4AverageLoadMs >= Pm4ShrinkWindowThresholdMs && _pm4CameraTileRadius > Pm4MinCameraTileRadius)
+            _pm4CameraTileRadius--;
+        else if (_pm4AverageLoadMs <= Pm4ExpandWindowThresholdMs && _pm4CameraTileRadius < Pm4MaxCameraTileRadius)
+            _pm4CameraTileRadius++;
+
+        if (previousRadius != _pm4CameraTileRadius)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Terrain,
+                $"[PM4] Adaptive window radius changed {previousRadius} -> {_pm4CameraTileRadius} (avg {_pm4AverageLoadMs:0} ms).");
+        }
+    }
+
+    private Pm4OverlayCacheData BuildPm4OverlayCacheData(string mapName, string candidateSignature)
+    {
+        var tiles = new List<Pm4OverlayCacheTile>(_pm4TileObjects.Count);
+        foreach (var tileEntry in _pm4TileObjects.OrderBy(static entry => entry.Key.tileX).ThenBy(static entry => entry.Key.tileY))
+        {
+            List<Vector3> positionRefs = _pm4TilePositionRefs.TryGetValue(tileEntry.Key, out List<Vector3>? existingPositionRefs)
+                ? existingPositionRefs
+                : new List<Vector3>();
+            var objects = new List<Pm4OverlayCacheObject>(tileEntry.Value.Count);
+            for (int i = 0; i < tileEntry.Value.Count; i++)
+            {
+                Pm4OverlayObject obj = tileEntry.Value[i];
+                objects.Add(new Pm4OverlayCacheObject(
+                    obj.SourcePath,
+                    obj.Ck24,
+                    obj.Ck24Type,
+                    obj.ObjectPartId,
+                    obj.LinkGroupObjectId,
+                    obj.LinkedPositionRefCount,
+                    obj.LinkedPositionRefSummary,
+                    obj.Lines,
+                    obj.Triangles,
+                    obj.SurfaceCount,
+                    obj.TotalIndexCount,
+                    obj.DominantGroupKey,
+                    obj.DominantAttributeMask,
+                    obj.DominantMdosIndex,
+                    obj.AverageSurfaceHeight,
+                    obj.PlacementAnchor,
+                    obj.PlanarTransform,
+                    obj.BoundsMin,
+                    obj.BoundsMax,
+                    obj.ConnectorKeys.ToList()));
+            }
+
+            tiles.Add(new Pm4OverlayCacheTile(tileEntry.Key.tileX, tileEntry.Key.tileY, objects, positionRefs));
+        }
+
+        return new Pm4OverlayCacheData(
+            mapName,
+            candidateSignature,
+            _pm4TotalFiles,
+            _pm4LoadedFiles,
+            _pm4ObjectCount,
+            _pm4LineCount,
+            _pm4TriangleCount,
+            _pm4PositionRefCount,
+            _pm4RejectedLongEdges,
+            _pm4MinObjectZ,
+            _pm4MaxObjectZ,
+            tiles);
+    }
+
+    private void RestorePm4OverlayFromCache(Pm4OverlayCacheData cacheData)
+    {
+        _pm4TotalFiles = cacheData.TotalFiles;
+        _pm4LoadedFiles = cacheData.LoadedFiles;
+        _pm4ObjectCount = cacheData.ObjectCount;
+        _pm4LineCount = cacheData.LineCount;
+        _pm4TriangleCount = cacheData.TriangleCount;
+        _pm4PositionRefCount = cacheData.PositionRefCount;
+        _pm4RejectedLongEdges = cacheData.RejectedLongEdges;
+        _pm4MinObjectZ = cacheData.MinObjectZ;
+        _pm4MaxObjectZ = cacheData.MaxObjectZ;
+
+        for (int tileIndex = 0; tileIndex < cacheData.Tiles.Count; tileIndex++)
+        {
+            Pm4OverlayCacheTile tile = cacheData.Tiles[tileIndex];
+            var tileKey = (tile.TileX, tile.TileY);
+
+            var objects = new List<Pm4OverlayObject>(tile.Objects.Count);
+            for (int objectIndex = 0; objectIndex < tile.Objects.Count; objectIndex++)
+            {
+                Pm4OverlayCacheObject cachedObject = tile.Objects[objectIndex];
+                Pm4OverlayObject restored = Pm4OverlayObject.FromCachedLocalized(
+                    cachedObject.SourcePath,
+                    cachedObject.Ck24,
+                    cachedObject.Ck24Type,
+                    cachedObject.ObjectPartId,
+                    cachedObject.LinkGroupObjectId,
+                    cachedObject.LinkedPositionRefCount,
+                    cachedObject.LinkedPositionRefSummary,
+                    new List<Pm4LineSegment>(cachedObject.Lines),
+                    new List<Pm4Triangle>(cachedObject.Triangles),
+                    cachedObject.SurfaceCount,
+                    cachedObject.TotalIndexCount,
+                    cachedObject.DominantGroupKey,
+                    cachedObject.DominantAttributeMask,
+                    cachedObject.DominantMdosIndex,
+                    cachedObject.AverageSurfaceHeight,
+                    cachedObject.PlacementAnchor,
+                    cachedObject.PlanarTransform,
+                    cachedObject.BoundsMin,
+                    cachedObject.BoundsMax,
+                    cachedObject.ConnectorKeys.ToList());
+                objects.Add(restored);
+                _pm4ObjectLookup[(tile.TileX, tile.TileY, restored.Ck24, restored.ObjectPartId)] = restored;
+            }
+
+            _pm4TileObjects[tileKey] = objects;
+            _pm4TileStats[tileKey] = new Pm4OverlayTileStats(
+                tile.TileX,
+                tile.TileY,
+                objects.Count,
+                objects.Sum(static obj => obj.Lines.Count),
+                objects.Sum(static obj => obj.Triangles.Count));
+
+            if (tile.PositionRefs.Count > 0)
+                _pm4TilePositionRefs[tileKey] = new List<Vector3>(tile.PositionRefs);
+        }
+
+        if (_pm4MinObjectZ > _pm4MaxObjectZ)
+        {
+            _pm4MinObjectZ = 0f;
+            _pm4MaxObjectZ = 1f;
+        }
+
+        RebuildPm4MergedObjectGroups();
+        RebuildPm4ObjectGroupBounds();
     }
 
     private static bool IsMapPm4Path(string path, string mapName)
@@ -1226,7 +1642,8 @@ public class WorldScene : ISceneRenderer
         for (int i = 0; i < objects.Count; i++)
         {
             Pm4OverlayObject obj = objects[i];
-            rebased.Add(new Pm4OverlayObject(
+            rebased.Add(Pm4OverlayObject.FromCachedLocalized(
+                obj.SourcePath,
                 obj.Ck24,
                 obj.Ck24Type,
                 obj.ObjectPartId + objectPartOffset,
@@ -1236,12 +1653,16 @@ public class WorldScene : ISceneRenderer
                 obj.Lines,
                 obj.Triangles,
                 obj.SurfaceCount,
+                obj.TotalIndexCount,
                 obj.DominantGroupKey,
                 obj.DominantAttributeMask,
                 obj.DominantMdosIndex,
                 obj.AverageSurfaceHeight,
                 obj.PlacementAnchor,
-                obj.PlanarTransform));
+                obj.PlanarTransform,
+                obj.BoundsMin,
+                obj.BoundsMax,
+                obj.ConnectorKeys));
         }
 
         return rebased;
@@ -1261,6 +1682,7 @@ public class WorldScene : ISceneRenderer
 
     private static List<Pm4OverlayObject> BuildPm4TileObjects(
         Pm4File pm4,
+        string sourcePath,
         int tileX,
         int tileY,
         bool splitCk24ByMdos,
@@ -1322,6 +1744,16 @@ public class WorldScene : ISceneRenderer
                 out float resolvedYawCorrection)
                 ? resolvedYawCorrection
                 : 0f;
+            IReadOnlyList<Pm4ConnectorKey> ck24ConnectorKeys = BuildCk24ConnectorKeys(
+                pm4,
+                ck24Surfaces,
+                tileX,
+                tileY,
+                useTileLocalCoordinates,
+                ck24AxisConvention,
+                ck24PlanarTransform,
+                ck24WorldPivot,
+                ck24WorldYawCorrection);
             List<List<Pm4IndexedSurface>> linkedGroups = SplitSurfaceGroupByMslk(pm4, surfaceGroup);
 
             foreach (List<Pm4IndexedSurface> linkedGroup in linkedGroups)
@@ -1373,8 +1805,10 @@ public class WorldScene : ISceneRenderer
                         byte dominantAttributeMask = SelectDominantSurfaceValue(component, static surface => surface.AttributeMask);
                         uint dominantMdosIndex = SelectDominantSurfaceValue(component, static surface => surface.MdosIndex);
                         float averageSurfaceHeight = component.Count > 0 ? component.Average(static surface => surface.Height) : 0f;
+                        int totalIndexCount = component.Sum(static surface => surface.IndexCount);
 
                         objects.Add(new Pm4OverlayObject(
+                            sourcePath,
                             ck24,
                             ck24Type,
                             objectPartCounter++,
@@ -1384,12 +1818,14 @@ public class WorldScene : ISceneRenderer
                             lines,
                             triangles,
                             component.Count,
+                            totalIndexCount,
                             dominantGroupKey,
                             dominantAttributeMask,
                             dominantMdosIndex,
                             averageSurfaceHeight,
                             linkedPlacementAnchor,
-                            ck24PlanarTransform));
+                            ck24PlanarTransform,
+                            ck24ConnectorKeys));
 
                         tileLineBudget -= lines.Count;
                         tileTriangleBudget -= triangles.Count;
@@ -2360,6 +2796,265 @@ public class WorldScene : ISceneRenderer
         return groups.Count > 0 ? groups : new List<List<MsurEntry>> { surfaces.ToList() };
     }
 
+    private static IReadOnlyList<Pm4ConnectorKey> BuildCk24ConnectorKeys(
+        Pm4File pm4,
+        IReadOnlyList<MsurEntry> surfaces,
+        int tileX,
+        int tileY,
+        bool useTileLocalCoordinates,
+        Pm4AxisConvention axisConvention,
+        Pm4PlanarTransform planarTransform,
+        Vector3 worldPivot,
+        float worldYawCorrectionRadians)
+    {
+        if (surfaces.Count == 0 || pm4.ExteriorVertices.Count == 0)
+            return Array.Empty<Pm4ConnectorKey>();
+
+        var distinctMdosIndices = new HashSet<uint>();
+        var connectorKeys = new HashSet<Pm4ConnectorKey>();
+        var ordered = new List<Pm4ConnectorKey>();
+
+        for (int i = 0; i < surfaces.Count; i++)
+        {
+            uint mdosIndex = surfaces[i].MdosIndex;
+            if (!distinctMdosIndices.Add(mdosIndex) || mdosIndex >= pm4.ExteriorVertices.Count)
+                continue;
+
+            Vector3 connectorPoint = ConvertPm4VertexToRenderer(
+                pm4.ExteriorVertices[(int)mdosIndex],
+                tileX,
+                tileY,
+                useTileLocalCoordinates,
+                axisConvention,
+                planarTransform,
+                worldPivot,
+                worldYawCorrectionRadians);
+
+            if (!float.IsFinite(connectorPoint.X) || !float.IsFinite(connectorPoint.Y) || !float.IsFinite(connectorPoint.Z))
+                continue;
+
+            Pm4ConnectorKey connectorKey = QuantizePm4ConnectorKey(connectorPoint);
+            if (connectorKeys.Add(connectorKey))
+                ordered.Add(connectorKey);
+        }
+
+        ordered.Sort(static (a, b) =>
+        {
+            int compareX = a.X.CompareTo(b.X);
+            if (compareX != 0)
+                return compareX;
+
+            int compareY = a.Y.CompareTo(b.Y);
+            if (compareY != 0)
+                return compareY;
+
+            return a.Z.CompareTo(b.Z);
+        });
+
+        return ordered;
+    }
+
+    private static Pm4ConnectorKey QuantizePm4ConnectorKey(Vector3 point)
+    {
+        return new Pm4ConnectorKey(
+            (int)MathF.Round(point.X / Pm4ConnectorQuantizationUnits),
+            (int)MathF.Round(point.Y / Pm4ConnectorQuantizationUnits),
+            (int)MathF.Round(point.Z / Pm4ConnectorQuantizationUnits));
+    }
+
+    private void RebuildPm4MergedObjectGroups()
+    {
+        _pm4MergedObjectGroupKeys.Clear();
+
+        var groups = new List<Pm4MergeCandidateGroup>();
+        var groupsByTile = new Dictionary<(int tileX, int tileY), List<int>>();
+        foreach (var tileEntry in _pm4TileObjects)
+        {
+            foreach (IGrouping<uint, Pm4OverlayObject> ck24Group in tileEntry.Value.GroupBy(static obj => obj.Ck24))
+            {
+                var baseGroupKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, ck24Group.Key);
+                Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
+                Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
+                bool hasBounds = false;
+                var connectorKeys = new HashSet<Pm4ConnectorKey>();
+
+                foreach (Pm4OverlayObject obj in ck24Group)
+                {
+                    IncludePointInBounds(obj.BoundsMin, ref boundsMin, ref boundsMax, ref hasBounds);
+                    IncludePointInBounds(obj.BoundsMax, ref boundsMin, ref boundsMax, ref hasBounds);
+
+                    for (int i = 0; i < obj.ConnectorKeys.Count; i++)
+                        connectorKeys.Add(obj.ConnectorKeys[i]);
+                }
+
+                if (!hasBounds)
+                {
+                    boundsMin = Vector3.Zero;
+                    boundsMax = Vector3.Zero;
+                }
+
+                Vector3 center = (boundsMin + boundsMax) * 0.5f;
+                int groupIndex = groups.Count;
+                groups.Add(new Pm4MergeCandidateGroup(baseGroupKey, boundsMin, boundsMax, center, connectorKeys));
+                _pm4MergedObjectGroupKeys[baseGroupKey] = baseGroupKey;
+
+                if (!groupsByTile.TryGetValue((tileEntry.Key.tileX, tileEntry.Key.tileY), out List<int>? tileGroupIndices))
+                {
+                    tileGroupIndices = new List<int>();
+                    groupsByTile[(tileEntry.Key.tileX, tileEntry.Key.tileY)] = tileGroupIndices;
+                }
+
+                tileGroupIndices.Add(groupIndex);
+            }
+        }
+
+        if (groups.Count <= 1)
+            return;
+
+        int[] parent = new int[groups.Count];
+        for (int i = 0; i < parent.Length; i++)
+            parent[i] = i;
+
+        static int Find(int[] parentArray, int index)
+        {
+            while (parentArray[index] != index)
+            {
+                parentArray[index] = parentArray[parentArray[index]];
+                index = parentArray[index];
+            }
+
+            return index;
+        }
+
+        static void Union(int[] parentArray, int a, int b)
+        {
+            int rootA = Find(parentArray, a);
+            int rootB = Find(parentArray, b);
+            if (rootA != rootB)
+                parentArray[rootB] = rootA;
+        }
+
+        (int deltaX, int deltaY)[] neighborOffsets =
+        {
+            (1, -1),
+            (1, 0),
+            (1, 1),
+            (0, 1),
+        };
+
+        foreach (var tileEntry in groupsByTile)
+        {
+            List<int> currentTileGroupIndices = tileEntry.Value;
+            for (int offsetIndex = 0; offsetIndex < neighborOffsets.Length; offsetIndex++)
+            {
+                var neighborTileKey = (
+                    tileEntry.Key.tileX + neighborOffsets[offsetIndex].deltaX,
+                    tileEntry.Key.tileY + neighborOffsets[offsetIndex].deltaY);
+                if (!groupsByTile.TryGetValue(neighborTileKey, out List<int>? neighborTileGroupIndices))
+                    continue;
+
+                for (int i = 0; i < currentTileGroupIndices.Count; i++)
+                {
+                    int currentGroupIndex = currentTileGroupIndices[i];
+                    for (int j = 0; j < neighborTileGroupIndices.Count; j++)
+                    {
+                        int neighborGroupIndex = neighborTileGroupIndices[j];
+                        if (ShouldMergePm4Groups(groups[currentGroupIndex], groups[neighborGroupIndex]))
+                            Union(parent, currentGroupIndex, neighborGroupIndex);
+                    }
+                }
+            }
+        }
+
+        var components = new Dictionary<int, List<int>>();
+        for (int i = 0; i < groups.Count; i++)
+        {
+            int root = Find(parent, i);
+            if (!components.TryGetValue(root, out List<int>? members))
+            {
+                members = new List<int>();
+                components[root] = members;
+            }
+
+            members.Add(i);
+        }
+
+        foreach (List<int> members in components.Values)
+        {
+            if (members.Count <= 1)
+                continue;
+
+            var canonicalKey = members
+                .Select(index => groups[index].Key)
+                .OrderBy(static key => key.tileX)
+                .ThenBy(static key => key.tileY)
+                .ThenBy(static key => key.ck24)
+                .First();
+
+            for (int i = 0; i < members.Count; i++)
+                _pm4MergedObjectGroupKeys[groups[members[i]].Key] = canonicalKey;
+        }
+    }
+
+    private static bool ShouldMergePm4Groups(Pm4MergeCandidateGroup a, Pm4MergeCandidateGroup b)
+    {
+        if (a.Key.tileX == b.Key.tileX && a.Key.tileY == b.Key.tileY)
+            return false;
+
+        if (Math.Abs(a.Key.tileX - b.Key.tileX) > 1 || Math.Abs(a.Key.tileY - b.Key.tileY) > 1)
+            return false;
+
+        if (a.ConnectorKeys.Count == 0 || b.ConnectorKeys.Count == 0)
+            return false;
+
+        float centerDistanceSquared = Vector3.DistanceSquared(a.Center, b.Center);
+        bool boundsOverlap = BoundsOverlapExpanded(a.BoundsMin, a.BoundsMax, b.BoundsMin, b.BoundsMax, Pm4ConnectorMergeBoundsPadding);
+        if (!boundsOverlap && centerDistanceSquared > Pm4ConnectorMergeMaxCenterDistance * Pm4ConnectorMergeMaxCenterDistance)
+            return false;
+
+        int sharedConnectorCount = CountSharedConnectorKeys(a.ConnectorKeys, b.ConnectorKeys);
+        if (sharedConnectorCount == 0)
+            return false;
+
+        int minConnectorCount = Math.Min(a.ConnectorKeys.Count, b.ConnectorKeys.Count);
+        float sharedRatio = sharedConnectorCount / (float)minConnectorCount;
+
+        if (sharedConnectorCount >= 4)
+            return true;
+
+        if (sharedConnectorCount >= 2 && sharedRatio >= 0.5f)
+            return true;
+
+        return sharedConnectorCount >= 2
+            && sharedRatio >= 0.35f
+            && centerDistanceSquared <= Pm4ConnectorMergeCloseCenterDistance * Pm4ConnectorMergeCloseCenterDistance;
+    }
+
+    private static int CountSharedConnectorKeys(HashSet<Pm4ConnectorKey> a, HashSet<Pm4ConnectorKey> b)
+    {
+        HashSet<Pm4ConnectorKey> smaller = a.Count <= b.Count ? a : b;
+        HashSet<Pm4ConnectorKey> larger = a.Count <= b.Count ? b : a;
+        int shared = 0;
+
+        foreach (Pm4ConnectorKey key in smaller)
+        {
+            if (larger.Contains(key))
+                shared++;
+        }
+
+        return shared;
+    }
+
+    private static bool BoundsOverlapExpanded(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB, float padding)
+    {
+        return maxA.X + padding >= minB.X - padding
+            && minA.X - padding <= maxB.X + padding
+            && maxA.Y + padding >= minB.Y - padding
+            && minA.Y - padding <= maxB.Y + padding
+            && maxA.Z + padding >= minB.Z - padding
+            && minA.Z - padding <= maxB.Z + padding;
+    }
+
     private static byte SelectDominantSurfaceValue(IReadOnlyList<MsurEntry> surfaces, Func<MsurEntry, byte> selector)
     {
         if (surfaces.Count == 0)
@@ -3001,7 +3696,8 @@ public class WorldScene : ISceneRenderer
     public void ReloadPm4Overlay()
     {
         _pm4LoadAttempted = false;
-        LazyLoadPm4Overlay();
+        _pm4LoadedCameraWindow = null;
+        LazyLoadPm4Overlay(ignoreCache: true);
     }
 
     /// <summary>
@@ -3058,6 +3754,7 @@ public class WorldScene : ISceneRenderer
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
@@ -3080,6 +3777,7 @@ public class WorldScene : ISceneRenderer
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
         _skyDome = new SkyDomeRenderer(gl);
@@ -3816,6 +4514,10 @@ public class WorldScene : ISceneRenderer
         // Extract camera position from view matrix (inverse of view translation)
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
+        _lastRenderedCameraPosition = cameraPos;
+        _hasLastRenderedCameraPosition = true;
+
+        EnsurePm4OverlayMatchesCameraWindow(cameraPos);
 
         // Update frustum planes for culling
         var vp = view * proj;
@@ -3927,7 +4629,16 @@ public class WorldScene : ISceneRenderer
                 }
                 var renderer = TryGetQueuedMdx(inst.ModelKey);
                 if (renderer == null) continue;
-                renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
+                if (renderer.RequiresUnbatchedWorldRender)
+                {
+                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                }
+                else
+                {
+                    renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
+                }
                 MdxRenderedCount++;
             }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
@@ -3969,7 +4680,16 @@ public class WorldScene : ISceneRenderer
                     tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
                 var renderer = TryGetQueuedMdx(inst.ModelKey);
                 if (renderer == null) continue;
-                renderer.RenderInstance(inst.Transform, RenderPass.Transparent, tFade);
+                if (renderer.RequiresUnbatchedWorldRender)
+                {
+                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                }
+                else
+                {
+                    renderer.RenderInstance(inst.Transform, RenderPass.Transparent, tFade);
+                }
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
@@ -4582,7 +5302,7 @@ public class WorldScene : ISceneRenderer
                 {
                     bestT = t;
                     bestKey = candidateKey;
-                    bestGroupKey = BuildPm4ObjectGroupKey(candidateKey);
+                    bestGroupKey = ResolvePm4ObjectGroupKey(candidateKey);
                 }
             }
         }
@@ -4611,7 +5331,7 @@ public class WorldScene : ISceneRenderer
             return false;
 
         _selectedPm4ObjectKey = objectKey;
-        _selectedPm4ObjectGroupKey = BuildPm4ObjectGroupKey(objectKey);
+        _selectedPm4ObjectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
         return true;
     }
 
@@ -4669,6 +5389,111 @@ public class WorldScene : ISceneRenderer
             obj.PlanarTransform.InvertsWinding);
 
         return true;
+    }
+
+    public bool TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo info)
+    {
+        info = default;
+        if (!_selectedPm4ObjectKey.HasValue)
+            return false;
+
+        var objectKey = _selectedPm4ObjectKey.Value;
+        if (!_pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? obj))
+            return false;
+
+        if (string.IsNullOrWhiteSpace(obj.SourcePath))
+            return false;
+
+        if (!TryGetPm4ResearchContext(obj.SourcePath, out Pm4ResearchContext? context) || context == null)
+            return false;
+
+        List<Pm4ResearchHypothesisMatch> allMatches = context.HypothesisReport.Objects
+            .Where(hypothesis => hypothesis.Ck24 == obj.Ck24)
+            .Select(hypothesis => new Pm4ResearchHypothesisMatch(
+                hypothesis.Family,
+                hypothesis.FamilyObjectIndex,
+                hypothesis.SurfaceCount,
+                hypothesis.TotalIndexCount,
+                hypothesis.MdosIndices.Count,
+                hypothesis.GroupKeys.Count,
+                hypothesis.MprlFootprint.LinkedRefCount,
+                hypothesis.MprlFootprint.LinkedInBoundsCount,
+                ComputePm4ResearchMatchScore(obj, hypothesis)))
+            .OrderBy(match => match.SimilarityScore)
+            .ThenBy(match => match.Family)
+            .ThenBy(match => match.FamilyObjectIndex)
+            .ToList();
+
+        info = new Pm4SelectedObjectResearchInfo(
+            obj.SourcePath,
+            context.Snapshot.Version,
+            context.Snapshot.MslkCount,
+            context.Snapshot.MsurCount,
+            context.Snapshot.MscnCount,
+            context.Snapshot.MprlCount,
+            context.RefIndexAudit.InvalidRefIndexCount,
+            context.HypothesisReport.TotalHypothesisCount,
+            allMatches.Count,
+            context.Snapshot.Diagnostics.Count,
+            context.Snapshot.Diagnostics.Take(3).ToList(),
+            allMatches.Take(8).ToList());
+
+        return true;
+    }
+
+    private bool TryGetPm4ResearchContext(string sourcePath, out Pm4ResearchContext? context)
+    {
+        if (_pm4ResearchBySourcePath.TryGetValue(sourcePath, out context))
+            return true;
+
+        if (_pm4ResearchUnavailablePaths.Contains(sourcePath) || _dataSource == null)
+        {
+            context = null;
+            return false;
+        }
+
+        byte[]? bytes = _dataSource.ReadFile(sourcePath);
+        if (bytes == null || bytes.Length == 0)
+        {
+            _pm4ResearchUnavailablePaths.Add(sourcePath);
+            context = null;
+            return false;
+        }
+
+        try
+        {
+            Pm4ResearchFile researchFile = Pm4ResearchReader.Read(bytes, sourcePath);
+            context = new Pm4ResearchContext(
+                sourcePath,
+                Pm4ResearchReader.CreateSnapshot(researchFile),
+                Pm4ResearchAuditAnalyzer.AnalyzeMslkRefIndexFile(researchFile),
+                Pm4ResearchObjectHypothesisGenerator.Analyze(researchFile));
+            _pm4ResearchBySourcePath[sourcePath] = context;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _pm4ResearchUnavailablePaths.Add(sourcePath);
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4 Research] Failed to analyze '{sourcePath}': {ex.Message}");
+            context = null;
+            return false;
+        }
+    }
+
+    private static float ComputePm4ResearchMatchScore(Pm4OverlayObject obj, Pm4ObjectHypothesis hypothesis)
+    {
+        float score = 0f;
+        score += Math.Abs(hypothesis.SurfaceCount - obj.SurfaceCount) * 3f;
+        score += Math.Abs(hypothesis.TotalIndexCount - obj.TotalIndexCount) * 0.125f;
+        score += Math.Abs(hypothesis.MprlFootprint.LinkedRefCount - obj.LinkedPositionRefCount) * 4f;
+
+        if (obj.LinkGroupObjectId != 0)
+        {
+            bool hasExactGroupObjectId = hypothesis.MslkGroupObjectIds.Contains(obj.LinkGroupObjectId);
+            score += hasExactGroupObjectId ? -8f : 8f;
+        }
+
+        return Math.Max(0f, score);
     }
 
     private static float NearestPointDistance(Vector3 point, IReadOnlyList<Vector3> candidates, bool applyPm4Transform, in Matrix4x4 pm4Transform)
@@ -4972,11 +5797,12 @@ public class WorldScene : ISceneRenderer
             foreach (Pm4OverlayObject obj in tileEntry.Value)
             {
                 var objectKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
+                var groupKey = ResolvePm4ObjectGroupKey(objectKey);
                 Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
                 Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
                 ComputePm4GeometryBounds(obj, geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax, out Vector3 center);
                 ComputePm4Footprint(obj, geometryTransform, out Vector2[] footprintHull, out float footprintArea);
-                states.Add(new Pm4CorrelationObjectState(tileEntry.Key.tileX, tileEntry.Key.tileY, obj, boundsMin, boundsMax, center, footprintHull, footprintArea));
+                states.Add(new Pm4CorrelationObjectState(tileEntry.Key.tileX, tileEntry.Key.tileY, groupKey, obj, boundsMin, boundsMax, center, footprintHull, footprintArea));
             }
         }
 
@@ -5415,7 +6241,7 @@ public class WorldScene : ISceneRenderer
 
         foreach (var (objectKey, obj) in _pm4ObjectLookup)
         {
-            var groupKey = BuildPm4ObjectGroupKey(objectKey);
+            var groupKey = ResolvePm4ObjectGroupKey(objectKey);
             if (_pm4ObjectGroupBounds.TryGetValue(groupKey, out var existingBounds))
             {
                 _pm4ObjectGroupBounds[groupKey] = (
@@ -5568,7 +6394,10 @@ public class WorldScene : ISceneRenderer
         _pm4TileObjects.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
+        _pm4ResearchBySourcePath.Clear();
+        _pm4ResearchUnavailablePaths.Clear();
         _pm4ObjectLookup.Clear();
+        _pm4MergedObjectGroupKeys.Clear();
         _pm4ObjectGroupBounds.Clear();
         _pm4ObjectTranslations.Clear();
         _pm4ObjectRotationsDegrees.Clear();
@@ -5578,7 +6407,54 @@ public class WorldScene : ISceneRenderer
 
 internal sealed class Pm4OverlayObject
 {
+    public static Pm4OverlayObject FromCachedLocalized(
+        string sourcePath,
+        uint ck24,
+        byte ck24Type,
+        int objectPartId,
+        uint linkGroupObjectId,
+        int linkedPositionRefCount,
+        Pm4LinkedPositionRefSummary linkedPositionRefSummary,
+        List<Pm4LineSegment> localizedLines,
+        List<Pm4Triangle> localizedTriangles,
+        int surfaceCount,
+        int totalIndexCount,
+        byte dominantGroupKey,
+        byte dominantAttributeMask,
+        uint dominantMdosIndex,
+        float averageSurfaceHeight,
+        Vector3 placementAnchor,
+        Pm4PlanarTransform planarTransform,
+        Vector3 boundsMin,
+        Vector3 boundsMax,
+        IReadOnlyList<Pm4ConnectorKey> connectorKeys)
+    {
+        return new Pm4OverlayObject(
+            sourcePath,
+            ck24,
+            ck24Type,
+            objectPartId,
+            linkGroupObjectId,
+            linkedPositionRefCount,
+            linkedPositionRefSummary,
+            localizedLines,
+            localizedTriangles,
+            surfaceCount,
+            totalIndexCount,
+            dominantGroupKey,
+            dominantAttributeMask,
+            dominantMdosIndex,
+            averageSurfaceHeight,
+            placementAnchor,
+            planarTransform,
+            connectorKeys,
+            boundsMin,
+            boundsMax,
+            geometryIsLocalized: true);
+    }
+
     public Pm4OverlayObject(
+        string sourcePath,
         uint ck24,
         byte ck24Type,
         int objectPartId,
@@ -5588,13 +6464,63 @@ internal sealed class Pm4OverlayObject
         List<Pm4LineSegment> lines,
         List<Pm4Triangle> triangles,
         int surfaceCount,
+        int totalIndexCount,
         byte dominantGroupKey,
         byte dominantAttributeMask,
         uint dominantMdosIndex,
         float averageSurfaceHeight,
         Vector3 placementAnchor,
-        Pm4PlanarTransform planarTransform)
+        Pm4PlanarTransform planarTransform,
+        IReadOnlyList<Pm4ConnectorKey> connectorKeys)
+        : this(
+            sourcePath,
+            ck24,
+            ck24Type,
+            objectPartId,
+            linkGroupObjectId,
+            linkedPositionRefCount,
+            linkedPositionRefSummary,
+            lines,
+            triangles,
+            surfaceCount,
+            totalIndexCount,
+            dominantGroupKey,
+            dominantAttributeMask,
+            dominantMdosIndex,
+            averageSurfaceHeight,
+            placementAnchor,
+            planarTransform,
+            connectorKeys,
+            default,
+            default,
+            geometryIsLocalized: false)
     {
+    }
+
+    private Pm4OverlayObject(
+        string sourcePath,
+        uint ck24,
+        byte ck24Type,
+        int objectPartId,
+        uint linkGroupObjectId,
+        int linkedPositionRefCount,
+        Pm4LinkedPositionRefSummary linkedPositionRefSummary,
+        List<Pm4LineSegment> lines,
+        List<Pm4Triangle> triangles,
+        int surfaceCount,
+        int totalIndexCount,
+        byte dominantGroupKey,
+        byte dominantAttributeMask,
+        uint dominantMdosIndex,
+        float averageSurfaceHeight,
+        Vector3 placementAnchor,
+        Pm4PlanarTransform planarTransform,
+        IReadOnlyList<Pm4ConnectorKey> connectorKeys,
+        Vector3 cachedBoundsMin,
+        Vector3 cachedBoundsMax,
+        bool geometryIsLocalized)
+    {
+        SourcePath = sourcePath;
         Ck24 = ck24;
         Ck24Type = ck24Type;
         ObjectPartId = objectPartId;
@@ -5604,19 +6530,39 @@ internal sealed class Pm4OverlayObject
         Lines = lines;
         Triangles = triangles;
         SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
         DominantGroupKey = dominantGroupKey;
         DominantAttributeMask = dominantAttributeMask;
         DominantMdosIndex = dominantMdosIndex;
         AverageSurfaceHeight = averageSurfaceHeight;
         PlanarTransform = planarTransform;
-        (BoundsMin, BoundsMax) = ComputeBounds(lines, triangles);
+        ConnectorKeys = connectorKeys;
+        if (geometryIsLocalized)
+        {
+            BoundsMin = cachedBoundsMin;
+            BoundsMax = cachedBoundsMax;
+        }
+        else
+        {
+            (BoundsMin, BoundsMax) = ComputeBounds(lines, triangles);
+        }
+
         Center = (BoundsMin + BoundsMax) * 0.5f;
         PlacementAnchor = IsFiniteVector(placementAnchor) ? placementAnchor : Center;
         BaseTransform = Matrix4x4.CreateTranslation(PlacementAnchor);
-        Lines = LocalizeLines(lines, PlacementAnchor);
-        Triangles = LocalizeTriangles(triangles, PlacementAnchor);
+        if (geometryIsLocalized)
+        {
+            Lines = lines;
+            Triangles = triangles;
+        }
+        else
+        {
+            Lines = LocalizeLines(lines, PlacementAnchor);
+            Triangles = LocalizeTriangles(triangles, PlacementAnchor);
+        }
     }
 
+    public string SourcePath { get; }
     public uint Ck24 { get; }
     public byte Ck24Type { get; }
     public ushort Ck24ObjectId => (ushort)(Ck24 & 0xFFFF);
@@ -5627,11 +6573,13 @@ internal sealed class Pm4OverlayObject
     public List<Pm4LineSegment> Lines { get; }
     public List<Pm4Triangle> Triangles { get; }
     public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
     public byte DominantGroupKey { get; }
     public byte DominantAttributeMask { get; }
     public uint DominantMdosIndex { get; }
     public float AverageSurfaceHeight { get; }
     public Pm4PlanarTransform PlanarTransform { get; }
+    public IReadOnlyList<Pm4ConnectorKey> ConnectorKeys { get; }
     public Matrix4x4 BaseTransform { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }
@@ -5702,9 +6650,30 @@ internal sealed class Pm4OverlayObject
     }
 }
 
+internal sealed class Pm4ResearchContext
+{
+    public Pm4ResearchContext(
+        string sourcePath,
+        Pm4ExplorationSnapshot snapshot,
+        Pm4MslkRefIndexFileAudit refIndexAudit,
+        Pm4TileObjectHypothesisReport hypothesisReport)
+    {
+        SourcePath = sourcePath;
+        Snapshot = snapshot;
+        RefIndexAudit = refIndexAudit;
+        HypothesisReport = hypothesisReport;
+    }
+
+    public string SourcePath { get; }
+    public Pm4ExplorationSnapshot Snapshot { get; }
+    public Pm4MslkRefIndexFileAudit RefIndexAudit { get; }
+    public Pm4TileObjectHypothesisReport HypothesisReport { get; }
+}
+
 internal sealed record Pm4CorrelationObjectState(
     int TileX,
     int TileY,
+    (int tileX, int tileY, uint ck24) GroupKey,
     Pm4OverlayObject Object,
     Vector3 BoundsMin,
     Vector3 BoundsMax,

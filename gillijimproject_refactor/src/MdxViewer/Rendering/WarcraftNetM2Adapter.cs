@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.Logging;
 using MdxViewer.Terrain;
@@ -171,11 +172,28 @@ internal static class WarcraftNetM2Adapter
             {
                 Name = string.IsNullOrWhiteSpace(model.Name) ? Path.GetFileNameWithoutExtension(modelPath) : model.Name,
                 Bounds = ToMdlBounds(model.BoundingBox, model.BoundingBoxRadius),
-            }
+            },
+            RawParticleEmitterCount = model.RawParticleEmitterCount,
+            RawRibbonEmitterCount = model.RawRibbonEmitterCount,
         };
+
+        foreach (var sequence in model.Sequences)
+        {
+            mdx.Sequences.Add(new MdlSequence
+            {
+                Name = sequence.Name,
+                Time = new CiRange { Start = sequence.StartFrame, End = sequence.EndFrame },
+            });
+        }
+
+        foreach (uint globalSequence in model.GlobalSequences)
+            mdx.GlobalSequences.Add(globalSequence);
 
         foreach (var texture in model.Textures)
             mdx.Textures.Add(ToMdlTexture(texture));
+
+        foreach (var textureAnimation in model.TextureAnimations)
+            mdx.TextureAnimations.Add(textureAnimation);
 
         if (mdx.Textures.Count == 0)
             mdx.Textures.Add(new MdlTexture { Path = string.Empty, ReplaceableId = 0, Flags = 0 });
@@ -284,7 +302,9 @@ internal static class WarcraftNetM2Adapter
         {
             try
             {
-                ParsedModelData data = ParsedModelData.FromWarcraftNet(new MD21(m2Bytes));
+                var md21 = new MD21(m2Bytes);
+                ParsedModelData data = ParsedModelData.FromWarcraftNet(md21);
+                TrySupplementAnimationMetadataFromWarcraftNet(md21, m2Bytes, fileName, data);
                 TrySupplementRawModelMetadata(m2Bytes, fileName, data);
                 return data;
             }
@@ -294,6 +314,7 @@ internal static class WarcraftNetM2Adapter
                 if (wrapped.ModelInformation != null)
                 {
                     ParsedModelData data = ParsedModelData.FromWarcraftNet(wrapped.ModelInformation);
+                    TrySupplementAnimationMetadataFromWarcraftNet(wrapped.ModelInformation, m2Bytes, fileName, data);
                     TrySupplementRawModelMetadata(m2Bytes, fileName, data);
                     return data;
                 }
@@ -308,11 +329,28 @@ internal static class WarcraftNetM2Adapter
             if (IsMd21(m2Bytes))
                 ViewerLog.Trace($"[M2] Parsed MD21 container via Warcraft.NET Model wrapper: {fileName}");
             ParsedModelData data = ParsedModelData.FromWarcraftNet(m2Model.ModelInformation);
+            TrySupplementAnimationMetadataFromWarcraftNet(m2Model.ModelInformation, m2Bytes, fileName, data);
             TrySupplementRawModelMetadata(m2Bytes, fileName, data);
             return data;
         }
 
         throw new InvalidDataException("M2 is missing MD21 model information.");
+    }
+
+    private static void TrySupplementAnimationMetadataFromWarcraftNet(MD21 md21, byte[] modelBytes, string fileName, ParsedModelData data)
+    {
+        try
+        {
+            PopulateSequenceMetadata(md21, data);
+            PopulateTransparencyMetadata(md21, modelBytes, data);
+            PopulateColorMetadata(md21, modelBytes, data);
+            PopulateUvAnimationMetadata(md21, modelBytes, data);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[M2] Warcraft.NET animation metadata supplement skipped for {fileName}: {ex.Message}");
+        }
     }
 
     private static CMdlBounds ToMdlBounds(WnBoundingBox box, float radius)
@@ -406,8 +444,12 @@ internal static class WarcraftNetM2Adapter
                 CoordId = coordId,
                 TransformId = -1,
                 StaticAlpha = 1.0f,
+                StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
+                StaticColorAlpha = 1.0f,
                 Flags = MapLayerFlags(renderFlagBits, textureFlags, coordId),
             });
+
+            ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
         }
 
         return sectionMaterialIds;
@@ -435,6 +477,51 @@ internal static class WarcraftNetM2Adapter
         return 0;
     }
 
+    private static void ApplyLayerAnimationMetadata(MdlTexLayer layer, MdxFile mdx, ParsedModelData model, SkinTextureUnitData batch)
+    {
+        if (batch.ColorIndex >= 0 && batch.ColorIndex < model.Colors.Count)
+        {
+            ParsedColorData color = model.Colors[batch.ColorIndex];
+            layer.StaticColor = color.StaticColor;
+            layer.StaticColorAlpha = color.StaticAlpha;
+            layer.ColorInterpolation = color.ColorInterpolation;
+            layer.ColorGlobalSeqId = color.ColorGlobalSeqId;
+            layer.ColorAlphaInterpolation = color.AlphaInterpolation;
+            layer.ColorAlphaGlobalSeqId = color.AlphaGlobalSeqId;
+            layer.ColorKeys.AddRange(color.ColorKeys);
+            layer.ColorAlphaKeys.AddRange(color.AlphaKeys);
+        }
+
+        int transparencyId = ResolveTransparencyId(model, batch.TransparencyComboIndex);
+        if (transparencyId >= 0 && transparencyId < model.Transparency.Count)
+        {
+            ParsedTransparencyData transparency = model.Transparency[transparencyId];
+            layer.AlphaInterpolation = transparency.Interpolation;
+            layer.AlphaGlobalSeqId = transparency.GlobalSeqId;
+            layer.AlphaKeys.AddRange(transparency.Keys);
+        }
+
+        int textureAnimationId = ResolveTextureAnimationId(model, batch.TextureAnimationLookupIndex);
+        if (textureAnimationId >= 0 && textureAnimationId < mdx.TextureAnimations.Count)
+            layer.TransformId = textureAnimationId;
+    }
+
+    private static int ResolveTransparencyId(ParsedModelData model, int lookupIndex)
+    {
+        if (lookupIndex >= 0 && lookupIndex < model.TransparencyLookup.Count)
+            return model.TransparencyLookup[lookupIndex].TransparencyId;
+
+        return -1;
+    }
+
+    private static int ResolveTextureAnimationId(ParsedModelData model, int lookupIndex)
+    {
+        if (lookupIndex >= 0 && lookupIndex < model.UvAnimationLookup.Count)
+            return model.UvAnimationLookup[lookupIndex].TextureAnimationId;
+
+        return -1;
+    }
+
     private static MdlMaterial CreateFallbackMaterial()
     {
         var material = new MdlMaterial { PriorityPlane = 0 };
@@ -445,6 +532,8 @@ internal static class WarcraftNetM2Adapter
             CoordId = 0,
             TransformId = -1,
             StaticAlpha = 1.0f,
+            StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
+            StaticColorAlpha = 1.0f,
             Flags = MdlGeoFlags.None,
         });
         return material;
@@ -536,9 +625,11 @@ internal static class WarcraftNetM2Adapter
 
     private static void AddVertexToGeoset(MdlGeoset geoset, ParsedVertexData vertex)
     {
+        int vertexIndex = geoset.Vertices.Count;
         geoset.Vertices.Add(new C3Vector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
         geoset.Normals.Add(new C3Vector(vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z));
-        geoset.TexCoords.Add(new C2Vector(vertex.TextureCoord0X, vertex.TextureCoord0Y));
+        // ModelRenderer expects UV sets packed as [all uv0][all uv1], not per-vertex interleaving.
+        geoset.TexCoords.Insert(vertexIndex, new C2Vector(vertex.TextureCoord0X, vertex.TextureCoord0Y));
         geoset.TexCoords.Add(new C2Vector(vertex.TextureCoord1X, vertex.TextureCoord1Y));
         geoset.VertexGroups.Add(0);
     }
@@ -600,7 +691,12 @@ internal static class WarcraftNetM2Adapter
 
             int mergeCount = Math.Min(parsedSkin.TextureUnits.Count, supplement.TextureUnits.Count);
             for (int i = 0; i < mergeCount; i++)
+            {
+                parsedSkin.TextureUnits[i].ColorIndex = supplement.TextureUnits[i].ColorIndex;
                 parsedSkin.TextureUnits[i].TextureCoordComboIndex = supplement.TextureUnits[i].TextureCoordComboIndex;
+                parsedSkin.TextureUnits[i].TransparencyComboIndex = supplement.TextureUnits[i].TransparencyComboIndex;
+                parsedSkin.TextureUnits[i].TextureAnimationLookupIndex = supplement.TextureUnits[i].TextureAnimationLookupIndex;
+            }
 
             if (parsedSkin.TextureUnits.Count != supplement.TextureUnits.Count)
             {
@@ -1252,8 +1348,12 @@ internal static class WarcraftNetM2Adapter
             for (uint i = 0; i < selected.Value.BatchCount; i++)
             {
                 int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
+                short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x06);
                 ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x08);
                 ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
+                ushort textureCoordComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x10);
+                ushort transparencyComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x12);
+                ushort textureAnimationLookupIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x14);
                 int submeshIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x04);
                 if (submeshIndex < skin.Submeshes.Count)
                 {
@@ -1261,8 +1361,12 @@ internal static class WarcraftNetM2Adapter
                     {
                         PriorityPlane = modelBytes[batchOffset + 0x01],
                         SkinSectionIndex = submeshIndex,
+                        ColorIndex = colorIndex,
                         MaterialIndex = materialIndex,
                         TextureComboIndex = textureComboIndex,
+                        TextureCoordComboIndex = textureCoordComboIndex,
+                        TransparencyComboIndex = transparencyComboIndex,
+                        TextureAnimationLookupIndex = textureAnimationLookupIndex,
                     });
                 }
             }
@@ -1472,12 +1576,18 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 ushort submeshIndex = br.ReadUInt16();
                 _ = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = profile.SkinLikeBStride >= 20 && entryPos + 20 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
+                ushort transparencyComboIndex = profile.SkinLikeBStride >= 22 && entryPos + 22 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
+                ushort textureAnimationLookupIndex = profile.SkinLikeBStride >= 24 && entryPos + 24 <= skinBytes.Length
                     ? br.ReadUInt16()
                     : (ushort)0;
 
@@ -1487,9 +1597,12 @@ internal static class WarcraftNetM2Adapter
                 {
                     PriorityPlane = priority,
                     SkinSectionIndex = submeshIndex,
+                    ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
                     TextureComboIndex = textureComboIndex,
                     TextureCoordComboIndex = textureCoordComboIndex,
+                    TransparencyComboIndex = transparencyComboIndex,
+                    TextureAnimationLookupIndex = textureAnimationLookupIndex,
                 });
             }
         }
@@ -1599,12 +1712,18 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 ushort submeshIndex = br.ReadUInt16();
                 _ = br.ReadUInt16();
-                _ = br.ReadInt16();
+                short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = textureUnitStride >= 20 && entryPos + 20 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
+                ushort transparencyComboIndex = textureUnitStride >= 22 && entryPos + 22 <= skinBytes.Length
+                    ? br.ReadUInt16()
+                    : (ushort)0;
+                ushort textureAnimationLookupIndex = textureUnitStride >= 24 && entryPos + 24 <= skinBytes.Length
                     ? br.ReadUInt16()
                     : (ushort)0;
 
@@ -1614,9 +1733,12 @@ internal static class WarcraftNetM2Adapter
                 {
                     PriorityPlane = priority,
                     SkinSectionIndex = submeshIndex,
+                    ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
                     TextureComboIndex = textureComboIndex,
                     TextureCoordComboIndex = textureCoordComboIndex,
+                    TransparencyComboIndex = transparencyComboIndex,
+                    TextureAnimationLookupIndex = textureAnimationLookupIndex,
                 });
             }
         }
@@ -1706,6 +1828,10 @@ internal static class WarcraftNetM2Adapter
                     SkinSectionIndex = tu.SkinSectionIndex,
                     MaterialIndex = tu.MaterialIndex,
                     TextureComboIndex = tu.TextureComboIndex,
+                    ColorIndex = -1,
+                    TextureCoordComboIndex = 0,
+                    TransparencyComboIndex = -1,
+                    TextureAnimationLookupIndex = -1,
                 });
             }
 
@@ -1725,9 +1851,12 @@ internal static class WarcraftNetM2Adapter
 
     private sealed class SkinTextureUnitData
     {
+        public int ColorIndex { get; set; } = -1;
         public int MaterialIndex { get; set; }
         public int TextureComboIndex { get; set; }
         public int TextureCoordComboIndex { get; set; }
+        public int TransparencyComboIndex { get; set; } = -1;
+        public int TextureAnimationLookupIndex { get; set; } = -1;
         public int SkinSectionIndex { get; set; }
         public ushort PriorityPlane { get; set; }
     }
@@ -1743,6 +1872,15 @@ internal static class WarcraftNetM2Adapter
         public List<ParsedRenderFlagData> RenderFlags { get; } = new();
         public List<ParsedTextureLookupData> TextureLookup { get; } = new();
         public List<ParsedTextureCoordLookupData> TextureCoordLookup { get; } = new();
+        public List<ParsedSequenceData> Sequences { get; } = new();
+        public List<uint> GlobalSequences { get; } = new();
+        public List<ParsedTransparencyData> Transparency { get; } = new();
+        public List<ParsedTransparencyLookupData> TransparencyLookup { get; } = new();
+        public List<ParsedColorData> Colors { get; } = new();
+        public List<MdlTextureAnimation> TextureAnimations { get; } = new();
+        public List<ParsedUvAnimationLookupData> UvAnimationLookup { get; } = new();
+        public int RawParticleEmitterCount { get; init; }
+        public int RawRibbonEmitterCount { get; init; }
 
         public static ParsedModelData FromWarcraftNet(MD21 md21)
         {
@@ -1751,6 +1889,8 @@ internal static class WarcraftNetM2Adapter
                 Name = md21.Name ?? string.Empty,
                 BoundingBox = md21.BoundingBox,
                 BoundingBoxRadius = md21.BoundingBoxRadius,
+                RawParticleEmitterCount = md21.ParticleEmitters?.Count ?? 0,
+                RawRibbonEmitterCount = md21.RibbonEmitters?.Count ?? 0,
             };
 
             foreach (var vertex in md21.Vertices)
@@ -1795,6 +1935,401 @@ internal static class WarcraftNetM2Adapter
         }
     }
 
+    private readonly record struct RawTrackKeyFrame(int Time, object Value, object InTangent, object OutTangent);
+
+    private static void PopulateSequenceMetadata(MD21 md21, ParsedModelData data)
+    {
+        data.Sequences.Clear();
+        data.GlobalSequences.Clear();
+
+        int sequenceStart = 0;
+        int animationIndex = 0;
+        foreach (object animation in EnumerateMember(md21, "Animations"))
+        {
+            int animationId = ReadIntMember(animation, "AnimationID");
+            int subAnimationId = ReadIntMember(animation, "SubAnimationID");
+            int length = Math.Max(0, ReadIntMember(animation, "Length"));
+            int sequenceEnd = sequenceStart + length;
+
+            data.Sequences.Add(new ParsedSequenceData
+            {
+                Name = $"Anim_{animationIndex}_{animationId}_{subAnimationId}",
+                StartFrame = sequenceStart,
+                EndFrame = sequenceEnd,
+            });
+
+            sequenceStart = sequenceEnd + 1;
+            animationIndex++;
+        }
+
+        foreach (object sequence in EnumerateMember(md21, "Sequences"))
+        {
+            int timestamp = Math.Max(0, ReadIntMember(sequence, "Timestamp"));
+            data.GlobalSequences.Add((uint)timestamp);
+        }
+    }
+
+    private static void PopulateTransparencyMetadata(MD21 md21, byte[] rawBytes, ParsedModelData data)
+    {
+        data.Transparency.Clear();
+        data.TransparencyLookup.Clear();
+
+        foreach (object transparency in EnumerateMember(md21, "Transparency"))
+        {
+            object block = GetRequiredMemberValue(transparency, "Alpha");
+            var parsed = new ParsedTransparencyData
+            {
+                Interpolation = ReadAnimationInterpolation(block),
+                GlobalSeqId = ReadGlobalSequenceId(block),
+            };
+            parsed.Keys.AddRange(ReadFloatKeys(block, rawBytes, data.Sequences, ConvertAlpha));
+            data.Transparency.Add(parsed);
+        }
+
+        foreach (object lookup in EnumerateMember(md21, "TransparencyLookup"))
+        {
+            data.TransparencyLookup.Add(new ParsedTransparencyLookupData
+            {
+                TransparencyId = NormalizeLookupIndex(ReadIntMember(lookup, "TransparencyID")),
+            });
+        }
+    }
+
+    private static void PopulateColorMetadata(MD21 md21, byte[] rawBytes, ParsedModelData data)
+    {
+        data.Colors.Clear();
+
+        foreach (object color in EnumerateMember(md21, "Colors"))
+        {
+            object colorBlock = GetRequiredMemberValue(color, "Color");
+            object alphaBlock = GetRequiredMemberValue(color, "Alpha");
+
+            var parsed = new ParsedColorData
+            {
+                ColorInterpolation = ReadAnimationInterpolation(colorBlock),
+                ColorGlobalSeqId = ReadGlobalSequenceId(colorBlock),
+                AlphaInterpolation = ReadAnimationInterpolation(alphaBlock),
+                AlphaGlobalSeqId = ReadGlobalSequenceId(alphaBlock),
+            };
+
+            parsed.ColorKeys.AddRange(ReadColorKeys(colorBlock, rawBytes, data.Sequences));
+            parsed.AlphaKeys.AddRange(ReadFloatKeys(alphaBlock, rawBytes, data.Sequences, ConvertAlpha));
+            data.Colors.Add(parsed);
+        }
+    }
+
+    private static void PopulateUvAnimationMetadata(MD21 md21, byte[] rawBytes, ParsedModelData data)
+    {
+        data.TextureAnimations.Clear();
+        data.UvAnimationLookup.Clear();
+
+        foreach (object uvAnimation in EnumerateMember(md21, "UVAnimations"))
+        {
+            var parsed = new MdlTextureAnimation
+            {
+                TranslationTrack = ReadVectorTrack(GetRequiredMemberValue(uvAnimation, "Translation"), rawBytes, data.Sequences),
+                RotationTrack = ReadQuaternionTrack(GetRequiredMemberValue(uvAnimation, "Rotation"), rawBytes, data.Sequences),
+                ScalingTrack = ReadVectorTrack(GetRequiredMemberValue(uvAnimation, "Scaling"), rawBytes, data.Sequences),
+            };
+
+            data.TextureAnimations.Add(parsed);
+        }
+
+        foreach (object lookup in EnumerateMember(md21, "UVAnimLookup"))
+        {
+            data.UvAnimationLookup.Add(new ParsedUvAnimationLookupData
+            {
+                TextureAnimationId = NormalizeLookupIndex(ReadIntMember(lookup, "AnimatedTextureID")),
+            });
+        }
+    }
+
+    private static IEnumerable<object> EnumerateMember(object instance, string memberName)
+    {
+        if (!TryGetMemberValue(instance, memberName, out object? value) || value is not System.Collections.IEnumerable enumerable)
+            yield break;
+
+        foreach (object? item in enumerable)
+        {
+            if (item != null)
+                yield return item;
+        }
+    }
+
+    private static List<MdlAnimKey<float>> ReadFloatKeys(object block, byte[] rawBytes, IReadOnlyList<ParsedSequenceData> sequences, Func<object, float> convert)
+    {
+        var keys = new List<MdlAnimKey<float>>();
+        foreach (var keyFrame in ReadTrackKeyFrames(block, rawBytes, sequences))
+        {
+            keys.Add(new MdlAnimKey<float>
+            {
+                Time = keyFrame.Time,
+                Value = convert(keyFrame.Value),
+                TangentIn = convert(keyFrame.InTangent),
+                TangentOut = convert(keyFrame.OutTangent),
+            });
+        }
+
+        return keys;
+    }
+
+    private static List<MdlAnimKey<C3Color>> ReadColorKeys(object block, byte[] rawBytes, IReadOnlyList<ParsedSequenceData> sequences)
+    {
+        var keys = new List<MdlAnimKey<C3Color>>();
+        foreach (var keyFrame in ReadTrackKeyFrames(block, rawBytes, sequences))
+        {
+            keys.Add(new MdlAnimKey<C3Color>
+            {
+                Time = keyFrame.Time,
+                Value = ConvertColor(keyFrame.Value),
+                ColorTangentIn = ConvertColor(keyFrame.InTangent),
+                ColorTangentOut = ConvertColor(keyFrame.OutTangent),
+            });
+        }
+
+        return keys;
+    }
+
+    private static MdlAnimTrack<C3Vector>? ReadVectorTrack(object block, byte[] rawBytes, IReadOnlyList<ParsedSequenceData> sequences)
+    {
+        var track = new MdlAnimTrack<C3Vector>
+        {
+            InterpolationType = ReadTrackInterpolation(block),
+            GlobalSeqId = ReadGlobalSequenceId(block),
+        };
+
+        foreach (var keyFrame in ReadTrackKeyFrames(block, rawBytes, sequences))
+        {
+            track.Keys.Add(new MdlTrackKey<C3Vector>
+            {
+                Frame = keyFrame.Time,
+                Value = ConvertVector(keyFrame.Value),
+                InTan = ConvertVector(keyFrame.InTangent),
+                OutTan = ConvertVector(keyFrame.OutTangent),
+            });
+        }
+
+        return track.Keys.Count > 0 ? track : null;
+    }
+
+    private static MdlAnimTrack<C4Quaternion>? ReadQuaternionTrack(object block, byte[] rawBytes, IReadOnlyList<ParsedSequenceData> sequences)
+    {
+        var track = new MdlAnimTrack<C4Quaternion>
+        {
+            InterpolationType = ReadTrackInterpolation(block),
+            GlobalSeqId = ReadGlobalSequenceId(block),
+        };
+
+        foreach (var keyFrame in ReadTrackKeyFrames(block, rawBytes, sequences))
+        {
+            track.Keys.Add(new MdlTrackKey<C4Quaternion>
+            {
+                Frame = keyFrame.Time,
+                Value = ConvertQuaternion(keyFrame.Value),
+                InTan = ConvertQuaternion(keyFrame.InTangent),
+                OutTan = ConvertQuaternion(keyFrame.OutTangent),
+            });
+        }
+
+        return track.Keys.Count > 0 ? track : null;
+    }
+
+    private static List<RawTrackKeyFrame> ReadTrackKeyFrames(object block, byte[] rawBytes, IReadOnlyList<ParsedSequenceData> sequences)
+    {
+        var keys = new List<RawTrackKeyFrame>();
+        using var ms = new MemoryStream(rawBytes, writable: false);
+        using var br = new BinaryReader(ms);
+
+        Array timestampTracks = GetArrayReferenceElements(GetRequiredMemberValue(block, "Timestamps"), br);
+        Array valueTracks = GetArrayReferenceElements(GetRequiredMemberValue(block, "Values"), br);
+        int trackCount = Math.Min(timestampTracks.Length, valueTracks.Length);
+        bool isGlobalSequence = ReadGlobalSequenceId(block) >= 0;
+
+        for (int trackIndex = 0; trackIndex < trackCount; trackIndex++)
+        {
+            Array timestamps = GetArrayReferenceElements(timestampTracks.GetValue(trackIndex), br);
+            Array values = GetArrayReferenceElements(valueTracks.GetValue(trackIndex), br);
+            int keyCount = Math.Min(timestamps.Length, values.Length);
+            int timeOffset = !isGlobalSequence && trackIndex < sequences.Count ? sequences[trackIndex].StartFrame : 0;
+
+            for (int keyIndex = 0; keyIndex < keyCount; keyIndex++)
+            {
+                object rawValue = values.GetValue(keyIndex) ?? throw new InvalidDataException("Track key value was null.");
+                object value = TryGetTrackSubValue(rawValue, "Value") ?? rawValue;
+                object inTangent = TryGetTrackSubValue(rawValue, "InTangent") ?? TryGetTrackSubValue(rawValue, "InTan") ?? value;
+                object outTangent = TryGetTrackSubValue(rawValue, "OutTangent") ?? TryGetTrackSubValue(rawValue, "OutTan") ?? value;
+
+                keys.Add(new RawTrackKeyFrame(
+                    Time: Convert.ToInt32(timestamps.GetValue(keyIndex) ?? 0) + timeOffset,
+                    Value: value,
+                    InTangent: inTangent,
+                    OutTangent: outTangent));
+            }
+        }
+
+        keys.Sort(static (left, right) => left.Time.CompareTo(right.Time));
+        return keys;
+    }
+
+    private static Array GetArrayReferenceElements(object? arrayReference, BinaryReader br)
+    {
+        if (arrayReference == null)
+            return Array.Empty<object>();
+
+        if (arrayReference is Array array)
+            return array;
+
+        MethodInfo? getElements = arrayReference.GetType().GetMethod("GetElements", BindingFlags.Instance | BindingFlags.Public);
+        if (getElements == null)
+            throw new InvalidDataException($"Array reference type '{arrayReference.GetType().FullName}' did not expose GetElements(BinaryReader).");
+
+        object? elements = getElements.Invoke(arrayReference, new object[] { br });
+        return elements as Array ?? Array.Empty<object>();
+    }
+
+    private static object? TryGetTrackSubValue(object instance, string memberName)
+    {
+        return TryGetMemberValue(instance, memberName, out object? value) ? value : null;
+    }
+
+    private static bool TryGetMemberValue(object instance, string memberName, out object? value)
+    {
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.IgnoreCase;
+
+        PropertyInfo? property = instance.GetType().GetProperty(memberName, Flags);
+        if (property != null)
+        {
+            value = property.GetValue(instance);
+            return true;
+        }
+
+        FieldInfo? field = instance.GetType().GetField(memberName, Flags);
+        if (field != null)
+        {
+            value = field.GetValue(instance);
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    private static object GetRequiredMemberValue(object instance, string memberName)
+    {
+        if (!TryGetMemberValue(instance, memberName, out object? value) || value == null)
+            throw new InvalidDataException($"Required member '{memberName}' was missing on '{instance.GetType().FullName}'.");
+
+        return value;
+    }
+
+    private static int ReadIntMember(object instance, string memberName)
+    {
+        object value = GetRequiredMemberValue(instance, memberName);
+        int converted = Convert.ToInt32(value);
+        return converted == ushort.MaxValue ? -1 : converted;
+    }
+
+    private static int NormalizeLookupIndex(int value)
+    {
+        return value == ushort.MaxValue ? -1 : value;
+    }
+
+    private static int ReadGlobalSequenceId(object block)
+    {
+        return NormalizeLookupIndex(ReadIntMember(block, "GlobalSequence"));
+    }
+
+    private static MdlAnimInterpolation ReadAnimationInterpolation(object block)
+    {
+        int interpolation = ReadIntMember(block, "InterpolationType");
+        return interpolation switch
+        {
+            0 => MdlAnimInterpolation.None,
+            1 => MdlAnimInterpolation.Linear,
+            2 => MdlAnimInterpolation.Hermite,
+            3 => MdlAnimInterpolation.Bezier,
+            _ => MdlAnimInterpolation.Linear,
+        };
+    }
+
+    private static MdlTrackType ReadTrackInterpolation(object block)
+    {
+        int interpolation = ReadIntMember(block, "InterpolationType");
+        return interpolation switch
+        {
+            0 => MdlTrackType.NoInterp,
+            1 => MdlTrackType.Linear,
+            2 => MdlTrackType.Hermite,
+            3 => MdlTrackType.Bezier,
+            _ => MdlTrackType.Linear,
+        };
+    }
+
+    private static float ConvertAlpha(object value)
+    {
+        return value switch
+        {
+            short alphaShort => Math.Clamp(alphaShort / 32767.0f, 0.0f, 1.0f),
+            ushort alphaUShort => Math.Clamp(alphaUShort / 65535.0f, 0.0f, 1.0f),
+            float alphaFloat => Math.Clamp(alphaFloat, 0.0f, 1.0f),
+            _ => Math.Clamp(Convert.ToSingle(value), 0.0f, 1.0f),
+        };
+    }
+
+    private static C3Color ConvertColor(object value)
+    {
+        if (value is C3Color color)
+            return color;
+
+        if (value is Vector3 vector)
+            return new C3Color(vector.X, vector.Y, vector.Z);
+
+        return new C3Color(
+            ReadSingleComponent(value, "R", "X"),
+            ReadSingleComponent(value, "G", "Y"),
+            ReadSingleComponent(value, "B", "Z"));
+    }
+
+    private static C3Vector ConvertVector(object value)
+    {
+        if (value is C3Vector vector)
+            return vector;
+
+        if (value is Vector3 numerics)
+            return new C3Vector(numerics.X, numerics.Y, numerics.Z);
+
+        return new C3Vector(
+            ReadSingleComponent(value, "X"),
+            ReadSingleComponent(value, "Y"),
+            ReadSingleComponent(value, "Z"));
+    }
+
+    private static C4Quaternion ConvertQuaternion(object value)
+    {
+        if (value is C4Quaternion quaternion)
+            return quaternion;
+
+        if (value is Quaternion numerics)
+            return new C4Quaternion(numerics.X, numerics.Y, numerics.Z, numerics.W);
+
+        return new C4Quaternion(
+            ReadSingleComponent(value, "X"),
+            ReadSingleComponent(value, "Y"),
+            ReadSingleComponent(value, "Z"),
+            ReadSingleComponent(value, "W"));
+    }
+
+    private static float ReadSingleComponent(object instance, string primary, string? fallback = null)
+    {
+        if (TryGetMemberValue(instance, primary, out object? primaryValue) && primaryValue != null)
+            return Convert.ToSingle(primaryValue);
+
+        if (fallback != null && TryGetMemberValue(instance, fallback, out object? fallbackValue) && fallbackValue != null)
+            return Convert.ToSingle(fallbackValue);
+
+        throw new InvalidDataException($"Could not read '{primary}' from '{instance.GetType().FullName}'.");
+    }
+
     private struct ParsedVertexData
     {
         public Vector3 Position;
@@ -1826,6 +2361,42 @@ internal static class WarcraftNetM2Adapter
     private struct ParsedTextureCoordLookupData
     {
         public int CoordId;
+    }
+
+    private sealed class ParsedSequenceData
+    {
+        public string Name { get; init; } = string.Empty;
+        public int StartFrame { get; init; }
+        public int EndFrame { get; init; }
+    }
+
+    private sealed class ParsedTransparencyData
+    {
+        public MdlAnimInterpolation Interpolation { get; init; }
+        public int GlobalSeqId { get; init; } = -1;
+        public List<MdlAnimKey<float>> Keys { get; } = new();
+    }
+
+    private struct ParsedTransparencyLookupData
+    {
+        public int TransparencyId;
+    }
+
+    private sealed class ParsedColorData
+    {
+        public C3Color StaticColor { get; init; } = new C3Color(1.0f, 1.0f, 1.0f);
+        public float StaticAlpha { get; init; } = 1.0f;
+        public MdlAnimInterpolation ColorInterpolation { get; init; }
+        public int ColorGlobalSeqId { get; init; } = -1;
+        public List<MdlAnimKey<C3Color>> ColorKeys { get; } = new();
+        public MdlAnimInterpolation AlphaInterpolation { get; init; }
+        public int AlphaGlobalSeqId { get; init; } = -1;
+        public List<MdlAnimKey<float>> AlphaKeys { get; } = new();
+    }
+
+    private struct ParsedUvAnimationLookupData
+    {
+        public int TextureAnimationId;
     }
 
     private struct EmbeddedProfileHeader

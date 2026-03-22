@@ -59,6 +59,98 @@ public class MdxAnimator
     /// <summary>Whether animation is currently playing</summary>
     public bool IsPlaying { get; set; } = true;
 
+    public static bool HasAnimationData(MdxFile mdx)
+    {
+        if (mdx.Bones.Any(b =>
+                b.TranslationTrack?.Keys.Count > 0 ||
+                b.RotationTrack?.Keys.Count > 0 ||
+                b.ScalingTrack?.Keys.Count > 0))
+            return true;
+
+        if (mdx.GeosetAnimations.Any(ga => ga.AlphaKeys.Count > 0 || ga.ColorKeys.Count > 0))
+            return true;
+
+        if (mdx.TextureAnimations.Any(anim =>
+                anim.TranslationTrack?.Keys.Count > 0 ||
+                anim.RotationTrack?.Keys.Count > 0 ||
+                anim.ScalingTrack?.Keys.Count > 0))
+            return true;
+
+        return mdx.Materials.Any(material => material.Layers.Any(layer =>
+            layer.AlphaKeys.Count > 0 ||
+            layer.ColorKeys.Count > 0 ||
+            layer.ColorAlphaKeys.Count > 0));
+    }
+
+    public float EvaluateFloatTrack(IReadOnlyList<MdlAnimKey<float>> keys, MdlAnimInterpolation interpolation, int globalSeqId, float defaultValue)
+    {
+        if (keys.Count == 0)
+            return defaultValue;
+
+        GetFrameRange(globalSeqId, out float frame, out int from, out int to);
+        var (left, right) = FindAnimKeys(keys, frame, from, to);
+        if (left == null)
+            return defaultValue;
+
+        if (right == null || left.Time == right.Time)
+            return left.Value;
+
+        float t = (frame - left.Time) / (right.Time - left.Time);
+        t = Math.Clamp(t, 0f, 1f);
+
+        return interpolation switch
+        {
+            MdlAnimInterpolation.None => left.Value,
+            MdlAnimInterpolation.Hermite => Hermite(left.Value, left.TangentOut, right.TangentIn, right.Value, t),
+            MdlAnimInterpolation.Bezier or MdlAnimInterpolation.Bezier2 => Bezier(left.Value, left.TangentOut, right.TangentIn, right.Value, t),
+            _ => left.Value + ((right.Value - left.Value) * t),
+        };
+    }
+
+    public C3Color EvaluateColorTrack(IReadOnlyList<MdlAnimKey<C3Color>> keys, MdlAnimInterpolation interpolation, int globalSeqId, C3Color defaultValue)
+    {
+        if (keys.Count == 0)
+            return defaultValue;
+
+        GetFrameRange(globalSeqId, out float frame, out int from, out int to);
+        var (left, right) = FindAnimKeys(keys, frame, from, to);
+        if (left == null)
+            return defaultValue;
+
+        if (right == null || left.Time == right.Time)
+            return left.Value;
+
+        float t = (frame - left.Time) / (right.Time - left.Time);
+        t = Math.Clamp(t, 0f, 1f);
+
+        return interpolation switch
+        {
+            MdlAnimInterpolation.None => left.Value,
+            MdlAnimInterpolation.Hermite => new C3Color(
+                Hermite(left.Value.R, left.ColorTangentOut.R, right.ColorTangentIn.R, right.Value.R, t),
+                Hermite(left.Value.G, left.ColorTangentOut.G, right.ColorTangentIn.G, right.Value.G, t),
+                Hermite(left.Value.B, left.ColorTangentOut.B, right.ColorTangentIn.B, right.Value.B, t)),
+            MdlAnimInterpolation.Bezier or MdlAnimInterpolation.Bezier2 => new C3Color(
+                Bezier(left.Value.R, left.ColorTangentOut.R, right.ColorTangentIn.R, right.Value.R, t),
+                Bezier(left.Value.G, left.ColorTangentOut.G, right.ColorTangentIn.G, right.Value.G, t),
+                Bezier(left.Value.B, left.ColorTangentOut.B, right.ColorTangentIn.B, right.Value.B, t)),
+            _ => new C3Color(
+                left.Value.R + ((right.Value.R - left.Value.R) * t),
+                left.Value.G + ((right.Value.G - left.Value.G) * t),
+                left.Value.B + ((right.Value.B - left.Value.B) * t)),
+        };
+    }
+
+    public Vector3 EvaluateVectorTrack(MdlAnimTrack<C3Vector>? track, Vector3 defaultValue)
+    {
+        return EvalVec3Track(track) ?? defaultValue;
+    }
+
+    public Quaternion EvaluateQuaternionTrack(MdlAnimTrack<C4Quaternion>? track, Quaternion defaultValue)
+    {
+        return EvalQuatTrack(track) ?? defaultValue;
+    }
+
     public AnimTrackDebugStats GetTrackDebugStatsForCurrentSequence()
     {
         if (_mdx.Sequences.Count == 0)
@@ -199,10 +291,7 @@ public class MdxAnimator
         _globalSeqFrames = new float[mdx.GlobalSequences.Count];
 
         // Check if any bones have animation tracks
-        HasAnimation = mdx.Bones.Any(b =>
-            b.TranslationTrack?.Keys.Count > 0 ||
-            b.RotationTrack?.Keys.Count > 0 ||
-            b.ScalingTrack?.Keys.Count > 0);
+        HasAnimation = HasAnimationData(mdx);
 
         // Initialize to identity
         for (int i = 0; i < _boneMatrices.Length; i++)
@@ -262,7 +351,7 @@ public class MdxAnimator
     /// <summary>Advance animation by deltaMs milliseconds and recompute bone matrices</summary>
     public void Update(float deltaMs)
     {
-        if (!HasAnimation || _mdx.Sequences.Count == 0) return;
+        if (!HasAnimation) return;
         
         // If paused, just recalculate bones at current frame without advancing time
         if (!IsPlaying)
@@ -272,17 +361,20 @@ public class MdxAnimator
             return;
         }
 
-        var seq = _mdx.Sequences[_sequenceIndex];
-        _currentFrame += deltaMs;
-
-        // Loop animation
-        if (_currentFrame > seq.Time.End)
+        if (_mdx.Sequences.Count > 0)
         {
-            float duration = seq.Time.End - seq.Time.Start;
-            if (duration > 0)
-                _currentFrame = seq.Time.Start + ((_currentFrame - seq.Time.Start) % duration);
-            else
-                _currentFrame = seq.Time.Start;
+            var seq = _mdx.Sequences[_sequenceIndex];
+            _currentFrame += deltaMs;
+
+            // Loop animation
+            if (_currentFrame > seq.Time.End)
+            {
+                float duration = seq.Time.End - seq.Time.Start;
+                if (duration > 0)
+                    _currentFrame = seq.Time.Start + ((_currentFrame - seq.Time.Start) % duration);
+                else
+                    _currentFrame = seq.Time.Start;
+            }
         }
 
         // Update global sequences
@@ -439,6 +531,12 @@ public class MdxAnimator
             from = 0;
             to = (int)_mdx.GlobalSequences[globalSeqId];
         }
+        else if (_mdx.Sequences.Count == 0)
+        {
+            frame = _currentFrame;
+            from = 0;
+            to = int.MaxValue;
+        }
         else
         {
             frame = _currentFrame;
@@ -446,6 +544,46 @@ public class MdxAnimator
             from = seq.Time.Start;
             to = seq.Time.End;
         }
+    }
+
+    private static (MdlAnimKey<T>? left, MdlAnimKey<T>? right) FindAnimKeys<T>(
+        IReadOnlyList<MdlAnimKey<T>> keys, float frame, int from, int to)
+    {
+        if (keys.Count == 0) return (null, null);
+        if (keys[0].Time > to) return (null, null);
+        if (keys[^1].Time < from) return (null, null);
+
+        int first = 0;
+        int count = keys.Count;
+        while (count > 0)
+        {
+            int step = count >> 1;
+            if (keys[first + step].Time <= frame)
+            {
+                first = first + step + 1;
+                count -= step + 1;
+            }
+            else
+            {
+                count = step;
+            }
+        }
+
+        if (first == keys.Count || keys[first].Time > to)
+        {
+            if (first > 0 && keys[first - 1].Time >= from)
+                return (keys[first - 1], keys[first - 1]);
+            return (null, null);
+        }
+
+        if (first == 0 || keys[first - 1].Time < from)
+        {
+            if (keys[first].Time <= to)
+                return (keys[first], keys[first]);
+            return (null, null);
+        }
+
+        return (keys[first - 1], keys[first]);
     }
 
     private static (MdlTrackKey<T>? left, MdlTrackKey<T>? right) FindKeyframes<T>(

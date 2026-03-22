@@ -460,6 +460,13 @@ public class TerrainManager : ISceneRenderer
             return;
         }
 
+        if (MapName.Equals("development", StringComparison.OrdinalIgnoreCase) && _adapter.TileExists(0, 0))
+        {
+            float tileCenter = WoWConstants.MapOrigin - (WoWConstants.ChunkSize * 0.5f);
+            cameraPos = new Vector3(tileCenter, tileCenter, 200f);
+            return;
+        }
+
         float sumX = 0, sumY = 0;
         foreach (int idx in _adapter.ExistingTiles)
         {

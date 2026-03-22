@@ -45,6 +45,17 @@ public class MdlTexLayer
     public int TransformId { get; set; } = -1;
     public int CoordId { get; set; } = -1;
     public float StaticAlpha { get; set; } = 1.0f;
+    public C3Color StaticColor { get; set; } = new C3Color(1.0f, 1.0f, 1.0f);
+    public float StaticColorAlpha { get; set; } = 1.0f;
+    public List<MdlAnimKey<float>> AlphaKeys { get; } = new();
+    public MdlAnimInterpolation AlphaInterpolation { get; set; }
+    public int AlphaGlobalSeqId { get; set; } = -1;
+    public List<MdlAnimKey<C3Color>> ColorKeys { get; } = new();
+    public MdlAnimInterpolation ColorInterpolation { get; set; }
+    public int ColorGlobalSeqId { get; set; } = -1;
+    public List<MdlAnimKey<float>> ColorAlphaKeys { get; } = new();
+    public MdlAnimInterpolation ColorAlphaInterpolation { get; set; }
+    public int ColorAlphaGlobalSeqId { get; set; } = -1;
 }
 
 /// <summary>Material (MTLS entry)</summary>
@@ -79,6 +90,17 @@ public class MdlAnimTrack<T>
     public MdlTrackType InterpolationType { get; set; } = MdlTrackType.Linear;
     public int GlobalSeqId { get; set; } = -1;
     public List<MdlTrackKey<T>> Keys { get; } = new();
+}
+
+/// <summary>Texture animation transform data used by M2-adapted materials.</summary>
+public class MdlTextureAnimation
+{
+    public C3Vector StaticTranslation { get; set; } = new C3Vector(0.0f, 0.0f, 0.0f);
+    public C4Quaternion StaticRotation { get; set; } = new C4Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+    public C3Vector StaticScaling { get; set; } = new C3Vector(1.0f, 1.0f, 1.0f);
+    public MdlAnimTrack<C3Vector>? TranslationTrack { get; set; }
+    public MdlAnimTrack<C4Quaternion>? RotationTrack { get; set; }
+    public MdlAnimTrack<C3Vector>? ScalingTrack { get; set; }
 }
 
 /// <summary>Single keyframe in an animation track</summary>

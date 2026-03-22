@@ -91,14 +91,16 @@ public class MdxRenderer : ISceneRenderer
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
-        private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha;
+    private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha;
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
     private static int _uUvSet;
+    private static int _uUseUvTransform, _uUvTranslation, _uUvScale, _uUvRotationRow0, _uUvRotationRow1;
     private static int _uBones; // Bone matrix array uniform location
     private static int _uHasBones; // Enable skinning flag
     private static bool _shaderInitialized;
+    private static uint _whiteFallbackTexture;
 
     private readonly List<GeosetBuffers> _geosets = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
@@ -141,6 +143,7 @@ public class MdxRenderer : ISceneRenderer
     /// <summary>Model-space bounding box max corner.</summary>
     public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
     public bool IsM2AdapterModel => _isM2AdapterModel;
+    public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public MdxAnimator? Animator => _animator;
@@ -175,7 +178,7 @@ public class MdxRenderer : ISceneRenderer
         LoadTextures();
 
         // Initialize animation system
-        if (mdx.Bones.Count > 0)
+        if (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx))
         {
             _animator = new MdxAnimator(mdx);
             if (_animator.HasAnimation)
@@ -197,6 +200,13 @@ public class MdxRenderer : ISceneRenderer
                 _particleEmitters.Add(emitter);
             }
             ViewerLog.Info(ViewerLog.Category.Mdx, $"Particles: {_particleEmitters.Count} emitters");
+        }
+
+        if (_isM2AdapterModel && (_mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0))
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] Unresolved effect systems for {_modelVirtualPath ?? modelDir}: rawParticles={_mdx.RawParticleEmitterCount}, rawRibbons={_mdx.RawRibbonEmitterCount}");
         }
 
         // Log material→texture mapping for debugging
@@ -281,7 +291,7 @@ public class MdxRenderer : ISceneRenderer
         float dt = Math.Clamp(deltaMs, 0f, 100f);
 
         // Skeletal animation
-        if (_animator != null && _animator.HasAnimation)
+        if (_animator != null)
             _animator.Update(dt);
 
         // Particle simulation
@@ -461,7 +471,7 @@ public class MdxRenderer : ISceneRenderer
         if (pass == RenderPass.Transparent && _particleEmitters.Count > 0 && _particleRenderer != null)
         {
             var cp2 = cameraPos ?? Vector3.Zero;
-            _particleRenderer.Render(_particleEmitters, view, proj, cp2, _textures, _mdx.Textures);
+            _particleRenderer.Render(_particleEmitters, view, proj, cp2, _textures, _mdx.Textures, modelMatrix);
             _gl.UseProgram(_shaderProgram);
         }
 
@@ -549,7 +559,7 @@ public class MdxRenderer : ISceneRenderer
                     // Determine if this layer needs blending
                     // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
                     // Render in opaque pass with high alpha threshold, not as blended
-                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, effectiveBlendMode);
+                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, layer.BlendMode, effectiveBlendMode);
                     bool needsBlend = !isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load);
 
                     // Filter by render pass — alpha cutout renders in opaque pass
@@ -674,6 +684,12 @@ public class MdxRenderer : ISceneRenderer
                         _gl.BindTexture(TextureTarget.Texture2D, glTex);
                         _gl.Uniform1(_uHasTexture, 1);
                     }
+                    else if (ShouldUseNeutralMissingTextureFallback(l, layer, effectiveBlendMode))
+                    {
+                        _gl.ActiveTexture(TextureUnit.Texture0);
+                        _gl.BindTexture(TextureTarget.Texture2D, EnsureWhiteFallbackTexture());
+                        _gl.Uniform1(_uHasTexture, 1);
+                    }
                     else
                     {
                         if (_usesPreRelease301M2Profile)
@@ -686,11 +702,14 @@ public class MdxRenderer : ISceneRenderer
                         if (l > 0) continue;
                     }
 
-                    float alpha = layer.StaticAlpha * fadeAlpha;
+                    ApplyLayerUvTransform(layer);
+
+                    float alpha = EvaluateLayerAlpha(layer) * fadeAlpha;
                     // Apply geoset animation alpha override if present
                     if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float geoAlpha))
                         alpha *= geoAlpha;
-                    _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, alpha);
+                    C3Color layerColor = EvaluateLayerColor(layer);
+                    _gl.Uniform4(_uColor, layerColor.R, layerColor.G, layerColor.B, alpha);
 
                     _gl.BindVertexArray(gb.Vao);
                     _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -717,6 +736,7 @@ public class MdxRenderer : ISceneRenderer
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
+                ResetLayerUvTransform();
                 _gl.Uniform4(_uColor, 1.0f, 1.0f, 1.0f, 1.0f);
                 _gl.BindVertexArray(gb.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -750,14 +770,79 @@ public class MdxRenderer : ISceneRenderer
             float alpha = ga.DefaultAlpha;
 
             // Evaluate alpha keyframe track if present
-            if (ga.AlphaKeys.Count > 0)
+            if (_animator != null && ga.AlphaKeys.Count > 0)
             {
-                alpha = EvaluateFloatTrack(ga.AlphaKeys, ga.AlphaInterpolation,
-                    ga.AlphaGlobalSeqId, frame, seqStart, seqEnd);
+                alpha = _animator.EvaluateFloatTrack(ga.AlphaKeys, ga.AlphaInterpolation, ga.AlphaGlobalSeqId, ga.DefaultAlpha);
             }
 
             _geosetAlphaOverrides[(int)ga.GeosetId] = Math.Clamp(alpha, 0f, 1f);
         }
+    }
+
+    private float EvaluateLayerAlpha(MdlTexLayer layer)
+    {
+        float alpha = layer.StaticAlpha;
+
+        if (_animator != null)
+        {
+            alpha *= _animator.EvaluateFloatTrack(layer.AlphaKeys, layer.AlphaInterpolation, layer.AlphaGlobalSeqId, 1.0f);
+            alpha *= _animator.EvaluateFloatTrack(layer.ColorAlphaKeys, layer.ColorAlphaInterpolation, layer.ColorAlphaGlobalSeqId, layer.StaticColorAlpha);
+        }
+        else
+        {
+            alpha *= layer.StaticColorAlpha;
+        }
+
+        return Math.Clamp(alpha, 0.0f, 1.0f);
+    }
+
+    private C3Color EvaluateLayerColor(MdlTexLayer layer)
+    {
+        if (_animator == null)
+            return layer.StaticColor;
+
+        C3Color color = _animator.EvaluateColorTrack(layer.ColorKeys, layer.ColorInterpolation, layer.ColorGlobalSeqId, layer.StaticColor);
+        return new C3Color(
+            Math.Clamp(color.R, 0.0f, 1.0f),
+            Math.Clamp(color.G, 0.0f, 1.0f),
+            Math.Clamp(color.B, 0.0f, 1.0f));
+    }
+
+    private unsafe void ApplyLayerUvTransform(MdlTexLayer layer)
+    {
+        if (layer.TransformId < 0 || layer.TransformId >= _mdx.TextureAnimations.Count)
+        {
+            ResetLayerUvTransform();
+            return;
+        }
+
+        var animation = _mdx.TextureAnimations[layer.TransformId];
+        Vector3 translation = _animator?.EvaluateVectorTrack(animation.TranslationTrack,
+                new Vector3(animation.StaticTranslation.X, animation.StaticTranslation.Y, animation.StaticTranslation.Z))
+            ?? new Vector3(animation.StaticTranslation.X, animation.StaticTranslation.Y, animation.StaticTranslation.Z);
+        Vector3 scale = _animator?.EvaluateVectorTrack(animation.ScalingTrack,
+                new Vector3(animation.StaticScaling.X, animation.StaticScaling.Y, animation.StaticScaling.Z))
+            ?? new Vector3(animation.StaticScaling.X, animation.StaticScaling.Y, animation.StaticScaling.Z);
+        Quaternion rotation = _animator?.EvaluateQuaternionTrack(animation.RotationTrack,
+                new Quaternion(animation.StaticRotation.X, animation.StaticRotation.Y, animation.StaticRotation.Z, animation.StaticRotation.W))
+            ?? new Quaternion(animation.StaticRotation.X, animation.StaticRotation.Y, animation.StaticRotation.Z, animation.StaticRotation.W);
+
+        Matrix4x4 rotationMatrix = Matrix4x4.CreateFromQuaternion(rotation);
+
+        _gl.Uniform1(_uUseUvTransform, 1);
+        _gl.Uniform2(_uUvTranslation, translation.X, translation.Y);
+        _gl.Uniform2(_uUvScale, scale.X, scale.Y);
+        _gl.Uniform2(_uUvRotationRow0, rotationMatrix.M11, rotationMatrix.M12);
+        _gl.Uniform2(_uUvRotationRow1, rotationMatrix.M21, rotationMatrix.M22);
+    }
+
+    private void ResetLayerUvTransform()
+    {
+        _gl.Uniform1(_uUseUvTransform, 0);
+        _gl.Uniform2(_uUvTranslation, 0.0f, 0.0f);
+        _gl.Uniform2(_uUvScale, 1.0f, 1.0f);
+        _gl.Uniform2(_uUvRotationRow0, 1.0f, 0.0f);
+        _gl.Uniform2(_uUvRotationRow1, 0.0f, 1.0f);
     }
 
     /// <summary>Evaluate a float animation track (used for geoset animation alpha).</summary>
@@ -890,6 +975,11 @@ uniform int uPremultiplyAlpha;
 uniform int uUnshaded;
 uniform int uSphereEnvMap;
 uniform int uUvSet;
+uniform int uUseUvTransform;
+uniform vec2 uUvTranslation;
+uniform vec2 uUvScale;
+uniform vec2 uUvRotationRow0;
+uniform vec2 uUvRotationRow1;
 uniform vec4 uColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
@@ -913,6 +1003,11 @@ void main() {
     vec2 texCoord = (uUvSet == 1) ? vTexCoord1 : vTexCoord0;
     if (uSphereEnvMap == 1) {
         texCoord = viewNorm.xy * 0.5 + 0.5;
+    } else if (uUseUvTransform == 1) {
+        vec2 centered = (texCoord - vec2(0.5, 0.5)) * uUvScale;
+        texCoord = vec2(
+            dot(centered, uUvRotationRow0),
+            dot(centered, uUvRotationRow1)) + vec2(0.5, 0.5) + uUvTranslation;
     }
 
     vec4 texColor;
@@ -999,11 +1094,17 @@ void main() {
         _uAmbientColor = _gl.GetUniformLocation(_shaderProgram, "uAmbientColor");
         _uSphereEnvMap = _gl.GetUniformLocation(_shaderProgram, "uSphereEnvMap");
         _uUvSet = _gl.GetUniformLocation(_shaderProgram, "uUvSet");
+        _uUseUvTransform = _gl.GetUniformLocation(_shaderProgram, "uUseUvTransform");
+        _uUvTranslation = _gl.GetUniformLocation(_shaderProgram, "uUvTranslation");
+        _uUvScale = _gl.GetUniformLocation(_shaderProgram, "uUvScale");
+        _uUvRotationRow0 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow0");
+        _uUvRotationRow1 = _gl.GetUniformLocation(_shaderProgram, "uUvRotationRow1");
         _uBones = _gl.GetUniformLocation(_shaderProgram, "uBones[0]");
         _uHasBones = _gl.GetUniformLocation(_shaderProgram, "uHasBones");
 
         int samplerLoc = _gl.GetUniformLocation(_shaderProgram, "uSampler");
         _gl.Uniform1(samplerLoc, 0);
+        ResetLayerUvTransform();
         _shaderInitialized = true;
     }
 
@@ -1618,15 +1719,77 @@ void main() {
         }
     }
 
-    private bool ShouldUseAlphaCutout(int layerIndex, int textureId, MdlTexOp blendMode)
+    private bool ShouldUseNeutralMissingTextureFallback(int layerIndex, MdlTexLayer layer, MdlTexOp effectiveBlendMode)
     {
-        if (layerIndex != 0 || blendMode != MdlTexOp.Transparent)
+        if (!_isM2AdapterModel)
+            return false;
+
+        if (_mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0)
+            return true;
+
+        if (layerIndex != 0)
+            return false;
+
+        if (effectiveBlendMode == MdlTexOp.Load)
+            return false;
+
+        return effectiveBlendMode is MdlTexOp.Add
+            or MdlTexOp.AddAlpha
+            or MdlTexOp.Blend
+            or MdlTexOp.Transparent
+            or MdlTexOp.Modulate
+            or MdlTexOp.Modulate2X
+            || layer.TransformId >= 0
+            || layer.AlphaKeys.Count > 0
+            || layer.ColorKeys.Count > 0
+            || layer.ColorAlphaKeys.Count > 0;
+    }
+
+    private unsafe uint EnsureWhiteFallbackTexture()
+    {
+        if (_whiteFallbackTexture != 0)
+            return _whiteFallbackTexture;
+
+        byte[] pixel = { 255, 255, 255, 255 };
+        _whiteFallbackTexture = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, _whiteFallbackTexture);
+        fixed (byte* ptr = pixel)
+        {
+            _gl.TexImage2D(
+                TextureTarget.Texture2D,
+                0,
+                InternalFormat.Rgba,
+                1,
+                1,
+                0,
+                PixelFormat.Rgba,
+                PixelType.UnsignedByte,
+                ptr);
+        }
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return _whiteFallbackTexture;
+    }
+
+    private bool ShouldUseAlphaCutout(int layerIndex, int textureId, MdlTexOp declaredBlendMode, MdlTexOp effectiveBlendMode)
+    {
+        if (effectiveBlendMode != MdlTexOp.Transparent)
             return false;
 
         if (!_isM2AdapterModel)
+            return layerIndex == 0;
+
+        // Explicit M2 AlphaKey layers are cutouts regardless of which material layer they use.
+        // Heuristic Transparent promotion from Load should stay conservative and only apply when
+        // the decoded texture alpha looks binary rather than truly translucent.
+        if (declaredBlendMode == MdlTexOp.Transparent)
             return true;
 
-        return GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
+        return layerIndex == 0 && GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
     }
 
     private MdlTexOp GetEffectiveBlendMode(int layerIndex, int textureId, MdlTexOp declaredBlendMode)
@@ -1909,13 +2072,16 @@ void main() {
     private static TextureAlphaKind ClassifyTextureAlpha(byte[] pixels)
     {
         bool hasBinaryTransparency = false;
+        const byte binaryLowThreshold = 16;
+        const byte binaryHighThreshold = 239;
+
         for (int i = 3; i < pixels.Length; i += 4)
         {
             byte alpha = pixels[i];
-            if (alpha == 255)
+            if (alpha >= binaryHighThreshold)
                 continue;
 
-            if (alpha != 0)
+            if (alpha > binaryLowThreshold)
                 return TextureAlphaKind.Translucent;
 
             hasBinaryTransparency = true;

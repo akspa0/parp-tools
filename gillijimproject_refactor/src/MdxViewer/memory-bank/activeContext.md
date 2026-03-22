@@ -8,6 +8,26 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Base commit: 343dadf (tag v0.4.0)
 - .github instructions/skills/prompts restored from main and committed (845748b)
 
+### PM4 Overlay Load Contract Change: Adaptive Camera Window + Sticky Selection (Mar 22)
+
+- PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` no longer decodes the entire map on first toggle.
+- Current behavior:
+   - the loader computes a centered camera window with adaptive tile radius instead of a fixed full-map or fixed 2x2 decode
+   - radius currently expands when recent PM4 loads stay cheap and shrinks when recent PM4 loads get expensive
+   - only PM4 files whose effective tile lands inside that adaptive window are decoded/read
+   - the PM4 overlay reloads when the camera crosses into a different active window
+   - if a PM4 object is selected, its source tile is pinned into the load set so selection does not drop just because the camera drifts away
+   - PM4 status text now reports the active window tile range, the radius used for the current load, the moving-average load time, and whether a selected tile was pinned
+- Important boundary:
+   - this reduces startup MPQ read pressure, but PM4 correlation/report utilities still operate on the currently loaded PM4 subset, not an implicit full-map PM4 set
+   - PM4 cache entries are still keyed by the active candidate subset/signature, not a persistent full-map aggregate
+   - clearing selection does not currently force an immediate PM4 reload just to evict a previously pinned tile; the extra selected tile naturally falls out on the next PM4 reload/window change
+- Validation status:
+   - file diagnostics on `src/MdxViewer/Terrain/WorldScene.cs` were clean after the adaptive-window and sticky-selection follow-up
+   - a follow-up full `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` was started but cancelled before completion
+   - no automated tests were added or run
+   - no runtime real-data validation has been done yet on adaptive PM4 reload smoothness, selection persistence while moving, or whether the MPQ I/O burst is reduced enough in the user's dataset
+
 ### Standalone PM4 Research Library (Mar 21)
 
 - There is now a separate raw-reader path at `src/Pm4Research.Core` for fresh PM4 rediscovery work.
@@ -185,6 +205,66 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - no automated tests were added or run for this slice
    - no runtime signoff yet; selection behavior still needs an in-view click check on real PM4 overlay data
 
+### PM4 Cross-Tile Merge Follow-Up: MSCN Connector Groups (Mar 22)
+
+- Border-spanning PM4 objects are no longer treated as independent runtime groups solely because they were loaded from different ADT tiles.
+- Current viewer behavior in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - each CK24 family now captures a quantized MSCN connector signature from valid `MSUR.MdosIndex -> MSCN` nodes during PM4 overlay build
+   - after all PM4 tiles load, the viewer builds a post-load merge map across neighboring `(tile, ck24)` groups when their MSCN connector sets overlap strongly enough
+   - PM4 object selection, object-local transforms, group highlighting, and PM4/WMO correlation candidate dedupe now resolve through that merged runtime-group key instead of raw `(tile, ck24)` only
+- Important boundary:
+   - this is a post-load runtime merge layer, not a new CK24 reconstruction solver and not proof that MSCN is the sole authoritative object-ownership model
+   - PM4 geometry generation still happens per tile/per CK24 first; the merge only unifies groups afterward
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no automated tests were added or run
+   - no runtime real-data signoff yet that the new merge thresholds correctly collapse Dark Portal-style multi-ADT duplicates without false merges
+
+### Viewer Regression Follow-Up: AreaTable + Development Spawn + M2 UV Contract (Mar 22)
+
+- Current viewer behavior:
+   - `AreaTableService` now resolves columns from `IDBCDStorage.AvailableColumns` instead of probing a sample row and incorrectly preferring `AreaNumber` / `ParentAreaNum` on all builds.
+   - canonical area lookup now indexes by the resolved `ID`/row id first, while still keeping `AreaNumber` aliases and legacy `0.5.x` packed-word aliases as fallbacks for older tables.
+   - `TerrainManager` now forces the default initial camera for map `development` to tile `0_0` when that tile exists, instead of averaging all populated tiles.
+   - `WarcraftNetM2Adapter` now packs geoset UVs in the renderer's expected layout `[all uv0][all uv1]` instead of per-vertex interleaving, which was causing UV1/env-map layers to read the wrong coordinates.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after these changes on top of the current dirty viewer tree
+   - no automated tests were added or run for this slice
+   - no runtime real-data signoff yet for `3.3.5` / `0.5.x` / `4.x` AreaTable resolution, development-map spawn behavior, or remaining M2 material-state symptoms beyond the UV layout fix
+
+### Viewer Regression Follow-Up: M2 Foliage AlphaKey Classification (Mar 22)
+
+- Current viewer behavior:
+   - `ModelRenderer` no longer restricts M2 alpha-cutout handling to layer 0 only.
+   - explicit M2 `AlphaKey` / `Transparent` layers now render as cutouts on any material layer instead of falling into the blended path just because they were not layer 0.
+   - texture alpha classification is now tolerant of near-0 / near-255 compressed alpha samples, so binary foliage textures with compression fringes are less likely to be misclassified as truly translucent.
+- Why this matters:
+   - when binary leaf-card textures fall into the blended pass, the viewer cannot sort per-triangle/per-fragment foliage correctly, so trees/plants look angle-dependent or only "right" part of the time.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change on top of the current dirty viewer tree
+   - no automated tests were added or run for this slice
+   - no runtime real-data signoff yet that this resolves the remaining M2 foliage transparency failures across representative tree/plant models
+
+### Viewer Regression Follow-Up: PM4 Forced Rebuild Reload + M2 Effect Missing-Texture Fallback (Mar 22)
+
+- Latest user-reported symptoms after the persistent PM4 cache landed were:
+   - `Reload PM4` could appear to do nothing because it flowed back through the persisted PM4 overlay cache and restored the same incomplete result.
+   - some PM4-heavy tiles could still silently lose known objects because `WorldScene` still kept per-tile PM4 line / triangle / position-ref caps even after the earlier full-map cache change.
+   - M2 glow / light-ray / effect-like layers with unresolved textures still fell into the renderer's magenta missing-texture path and showed up as solid pink geometry.
+- Current viewer behavior:
+   - `ReloadPm4Overlay()` now bypasses disk-cache restore and deletes the current PM4 cache file before rebuilding from source.
+   - PM4 overlay cache version is now `2`, so older persisted overlays from the earlier cache behavior are invalidated.
+   - remaining per-tile PM4 overlay caps in `WorldScene` are now `int.MaxValue`, matching the earlier removal of the total-map caps.
+   - `ModelRenderer` now binds a neutral white 1x1 fallback texture for M2-adapted non-opaque / effect-like base layers when the texture is unresolved, instead of always rendering those layers as magenta missing-texture errors.
+- Why this matters:
+   - the user expectation for `Reload PM4` is a real rebuild, not a fast restore of the same cached overlay.
+   - the earlier persistent cache solved repeat startup cost, but it also made stale or truncated PM4 overlays sticky until the cache was explicitly bypassed.
+   - effect-style M2 layers are often visually acceptable with a neutral additive-style fallback, while magenta is only useful for plainly broken ordinary textured geometry.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change; build succeeded with existing workspace warnings only.
+   - no automated tests were added or run for this slice.
+   - no runtime real-data signoff yet that forced PM4 rebuild now restores the missing objects or that all reported pink M2 effect objects now render acceptably on representative assets.
+
 ### PM4 Orientation Follow-Up: World-Space Solver No Longer Forces Mirrored Swap-Only Fits (Mar 21)
 
 ### PM4 Render-Derivation Follow-Up: Object-Local Geometry + Baked Base Placement (Mar 21)
@@ -245,6 +325,29 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
    - no automated tests were added or run
 	- no runtime real-data signoff yet on the reported non-origin tile placement/orientation case
+
+### PM4 Overlay Follow-Up: Full-Map Cache Instead Of AOI Reloading (Mar 22)
+
+- Fresh runtime evidence from the PM4/WMO correlation dump exposed a missing-tile failure mode that was separate from the coordinate-basis regressions:
+   - PM4 status showed `100/3290 files` with exactly `400000 lines`, which matched the old hard global overlay line budget in `WorldScene`
+   - the old PM4 overlay loader walked the full map file list once and stopped when that shared budget was exhausted
+   - this left large portions of the map uncached even before any coordinate-placement logic had a chance to matter
+- Short-lived AOI-scoped reload logic was tried, but that made PM4 follow terrain streaming and caused viewer hitching/freezes while camera movement forced PM4 reloads.
+- Current viewer behavior in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - PM4 overlay now returns to one-time full-map caching instead of AOI-triggered reloading
+   - total PM4 line / triangle / position-ref caps are no longer the limiting factor for the one-time cache build
+   - per-tile PM4 caps remain in place so single pathological files still cannot explode one tile's overlay geometry indefinitely
+   - PM4 file enumeration is sorted deterministically before caching so map-wide cache contents are reproducible across runs
+   - PM4 overlay build results are now persisted under `output/cache/pm4-overlay/<data-source-hash>/...` as a gzip-compressed binary cache keyed by ordered PM4 paths plus the active CK24 split flags
+   - cache restore rebuilds `Pm4OverlayObject` directly from already-localized geometry, so later viewer runs can skip the expensive PM4 decode/rebuild path instead of only keeping the overlay resident in one process
+- Why this matters:
+   - the user requirement is to pay the PM4 load cost once and keep the resulting cache stable, rather than reloading PM4 as the camera moves
+   - the first cold load still pays the full PM4 decode/build cost, but later runs against the same PM4 corpus and split mode should restore from disk cache instead
+   - render-time PM4 visibility still uses existing tile/AOI gating, but the PM4 data itself is now intended to stay resident once built
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no automated tests were added or run
+   - no runtime real-data signoff yet that full-map PM4 cache build time, cache hit speed, and steady-state interaction are acceptable on representative datasets
 
 - Latest runtime evidence from the PM4 alignment window showed mirrored solutions like `swap=True, invertU=False, invertV=False, windingFlip=True` on objects whose real mismatch was a rigid quarter-turn, not a true reflection.
 - Root cause in `WorldScene.ResolvePlanarTransform(...)`:

@@ -154,6 +154,34 @@ public partial class ViewerApp
             ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
         }
 
+        if (_worldScene.TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo researchInfo)
+            && ImGui.CollapsingHeader("PM4 Research", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextDisabled($"Source: {Path.GetFileName(researchInfo.SourcePath)}");
+            ImGui.TextDisabled($"v{researchInfo.Version} MSLK={researchInfo.MslkCount} MSUR={researchInfo.MsurCount} MSCN={researchInfo.MscnCount} MPRL={researchInfo.MprlCount}");
+            ImGui.TextDisabled($"RefIndex mismatches={researchInfo.InvalidRefIndexCount} diagnostics={researchInfo.DiagnosticCount} hypotheses={researchInfo.MatchingCk24HypothesisCount}/{researchInfo.TotalHypothesisCount}");
+
+            if (researchInfo.Diagnostics.Count > 0)
+            {
+                for (int i = 0; i < researchInfo.Diagnostics.Count; i++)
+                    ImGui.TextDisabled($"diag: {researchInfo.Diagnostics[i]}");
+            }
+
+            if (researchInfo.TopMatches.Count == 0)
+            {
+                ImGui.TextDisabled("No raw PM4 hypotheses matched the selected CK24.");
+            }
+            else
+            {
+                ImGui.Text("Top raw hypotheses:");
+                for (int i = 0; i < researchInfo.TopMatches.Count; i++)
+                {
+                    Pm4ResearchHypothesisMatch match = researchInfo.TopMatches[i];
+                    ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mdos={match.MdosCount} groups={match.GroupKeyCount} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
+                }
+            }
+        }
+
         ImGui.Separator();
         ImGui.Text("Object Translation:");
 
@@ -506,6 +534,14 @@ public partial class ViewerApp
                     SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
                     FocusCameraOnBounds(boundsMin, boundsMax);
                 }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Snap PM4 XY"))
+                    AlignPm4CorrelationMatchToPlacement(placement, selectedMatch, includeZ: false);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Snap PM4 XYZ"))
+                    AlignPm4CorrelationMatchToPlacement(placement, selectedMatch, includeZ: true);
             }
 
             ImGui.Separator();
@@ -687,6 +723,36 @@ public partial class ViewerApp
         {
             _statusMessage = $"PM4 candidate CK24=0x{match.Ck24:X6} part={match.ObjectPartId} is no longer available.";
         }
+    }
+
+    private void AlignPm4CorrelationMatchToPlacement(Pm4WmoCorrelationPlacement placement, Pm4WmoCorrelationMatch match, bool includeZ)
+    {
+        if (_worldScene == null)
+            return;
+
+        if (!_worldScene.SelectPm4Object((match.TileX, match.TileY, match.Ck24, match.ObjectPartId)))
+        {
+            _statusMessage = $"PM4 candidate CK24=0x{match.Ck24:X6} part={match.ObjectPartId} is no longer available.";
+            return;
+        }
+
+        if (!_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
+        {
+            _statusMessage = "PM4 snap failed: selected object debug info is unavailable.";
+            return;
+        }
+
+        Vector3 placementCenter = (placement.WorldBoundsMin + placement.WorldBoundsMax) * 0.5f;
+        Vector3 delta = placementCenter - debugInfo.Center;
+        if (!includeZ)
+            delta.Z = 0f;
+
+        _worldScene.SelectedPm4ObjectTranslation += delta;
+        _showPm4AlignmentWindow = true;
+
+        string axes = includeZ ? "XYZ" : "XY";
+        _statusMessage =
+            $"Snapped PM4 CK24=0x{match.Ck24:X6} part={match.ObjectPartId} to WMO center ({axes}) by ({delta.X:F2}, {delta.Y:F2}, {delta.Z:F2}).";
     }
 
     private void FocusCameraOnBounds(Vector3 boundsMin, Vector3 boundsMax)

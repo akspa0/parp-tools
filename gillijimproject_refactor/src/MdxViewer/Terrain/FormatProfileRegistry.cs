@@ -396,6 +396,22 @@ public static class FormatProfileRegistry
         EffectLikeBStride = 0x7C
     };
 
+    public static readonly M2Profile M2Profile40xUnknown = new()
+    {
+        ProfileId = "M2Profile_40x_Unknown",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = true,
+        MinSupportedVersion = 0x108,
+        MaxSupportedVersion = 0x108,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
     public static readonly AdtProfile AdtProfile090xUnknown = new()
     {
         ProfileId = "AdtProfile_090x_Unknown",
@@ -643,6 +659,9 @@ public static class FormatProfileRegistry
         {
             if (major == 3 && minor == 0)
                 return M2Profile30xUnknown;
+
+            if (major == 4 && minor == 0)
+                return M2Profile40xUnknown;
         }
 
         return null;
