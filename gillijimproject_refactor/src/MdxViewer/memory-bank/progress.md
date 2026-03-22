@@ -5,6 +5,26 @@
 **Supported client versions: 0.5.3 through 0.12** — fully usable
 **3.3.5 WotLK: IN PROGRESS** — scaffolding exists but MH2O liquid and terrain texturing are broken
 
+## 2026-03-22 — Viewer Debug Workflow Follow-Up: PM4 OBJ Export + Minimap Guardrails + Terrain Hole Override
+
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- added offline PM4 OBJ export that scans PM4 files directly from the active data source and writes per-tile OBJ, per-object OBJ, and `pm4_obj_manifest.json`
+- `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+	- added `Export PM4 OBJ Set` to the PM4 utilities UI so PM4 object comparison can happen outside the live overlay path
+- `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`, `src/MdxViewer/Rendering/MinimapRenderer.cs`
+	- minimap teleport now requires triple-clicking the same tile instead of a single short click
+	- minimap zoom, pan, and window state now persist in viewer settings
+	- decoded minimap tiles now cache on disk across runs
+- `src/MdxViewer/Terrain/TerrainMeshBuilder.cs`, `src/MdxViewer/Terrain/TerrainManager.cs`, `src/MdxViewer/Terrain/VlmTerrainManager.cs`, `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- added viewer-side terrain hole override controls
+	- loaded tiles can rebuild with `HoleMask` ignored globally or on the current camera tile
+	- the override is inspection-only and does not mutate source ADT files
+- Validation status:
+	- file diagnostics were clean on the edited files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on PM4 OBJ parity, minimap UX/cache benefit, or terrain-hole rebuild behavior
+
 ## 2026-03-20 — PM4 Render Hot-Path Reduction (Preprocess + Culling)
 
 - PM4 global `Flip All Obj Y` is now baked at PM4 object build/load time instead of being applied as a per-frame transform on every PM4 vertex.
@@ -101,10 +121,11 @@
 | DBC integration | ✅ DBCD, CreatureModelData, CreatureDisplayInfo, TaxiPath, AreaPOI, AreaTable |
 | Camera | ✅ Free-fly WASD + mouse look |
 | ImGui UI | ✅ File browser, model info, visibility toggles |
-| Live minimap + click-to-teleport | ✅ WDT + VLM |
+| Live minimap + guarded teleport/cache | ✅ WDT + VLM (triple-click teleport, persisted state, disk tile cache) |
+| Terrain hole debug override | ✅ Viewer-side mesh rebuild override (all tiles or current tile) |
 | AreaPOI system | ✅ DBC loading, 3D markers, minimap markers, UI list |
 | Object picking/selection | ✅ |
-| PM4 debug overlay | 🔧 In progress — viewer-side PM4 surfaces + color modes + MPRL/centroid markers + CK24 split controls + parity-aware winding correction; runtime visual signoff still pending |
+| PM4 debug overlay + offline OBJ export | 🔧 In progress — viewer-side PM4 surfaces + color modes + MPRL/centroid markers + CK24 split controls + offline per-tile/per-object OBJ export; runtime visual signoff still pending |
 | GLB export | ✅ MDX + WMO, Z-up → Y-up conversion |
 | Thread safety | ✅ ConcurrentDictionary for TileTextures, locks for placement dedup |
 | **Asset Catalog** | ✅ SQL dump parser (no MySQL), browse/search/filter, JSON+GLB+screenshot export |
@@ -216,9 +237,9 @@
 
 ## 2026-03-20 — PM4 MPRL Yaw Decode Basis Correction
 
-- Follow-up after runtime report that PM4 objects were still 90 degrees clockwise:
-	- `TryComputeExpectedMprlYawRadians(...)` now decodes packed MPRL low-16 rotation as clockwise and rebases it by +90 degrees before circular averaging
-	- this directly targets the observed consistent global yaw-basis mismatch while keeping CK24 grouping/tile mapping logic unchanged
+- Follow-up after later PM4 rotation triage showed the `+90°` rebase was an unproven viewer-side semantic assumption, not a raw PM4 decode fact:
+	- `TryComputeExpectedMprlYawRadians(...)` now circular-averages the raw packed MPRL low-16 angle directly
+	- sign and quarter-turn ambiguity are still handled by the existing yaw-basis fallback path, but the viewer no longer hardcodes a clockwise `+90°` world-yaw reinterpretation into `MPRL`
 - Validation status:
 	- no automated tests were added or run
 	- runtime signoff still pending

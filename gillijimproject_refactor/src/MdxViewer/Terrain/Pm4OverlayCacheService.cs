@@ -9,7 +9,7 @@ namespace MdxViewer.Terrain;
 internal sealed class Pm4OverlayCacheService
 {
     private const string CacheMagic = "PM4C";
-    private const int CacheVersion = 2;
+    private const int CacheVersion = 3;
     private readonly string _cacheRoot;
 
     public Pm4OverlayCacheService(string cacheRoot)
@@ -291,6 +291,7 @@ internal sealed class Pm4OverlayCacheService
                 uint dominantMdosIndex = reader.ReadUInt32();
                 float averageSurfaceHeight = reader.ReadSingle();
                 Vector3 placementAnchor = ReadVector3(reader);
+                float baseRotationRadians = reader.ReadSingle();
                 var planarTransform = new Pm4PlanarTransform(reader.ReadBoolean(), reader.ReadBoolean(), reader.ReadBoolean());
                 Vector3 boundsMin = ReadVector3(reader);
                 Vector3 boundsMax = ReadVector3(reader);
@@ -337,6 +338,7 @@ internal sealed class Pm4OverlayCacheService
                     dominantMdosIndex,
                     averageSurfaceHeight,
                     placementAnchor,
+                    baseRotationRadians,
                     planarTransform,
                     boundsMin,
                     boundsMax,
@@ -411,6 +413,7 @@ internal sealed class Pm4OverlayCacheService
                 writer.Write(obj.DominantMdosIndex);
                 writer.Write(obj.AverageSurfaceHeight);
                 WriteVector3(writer, obj.PlacementAnchor);
+                writer.Write(obj.BaseRotationRadians);
                 writer.Write(obj.PlanarTransform.SwapPlanarAxes);
                 writer.Write(obj.PlanarTransform.InvertU);
                 writer.Write(obj.PlanarTransform.InvertV);
@@ -533,6 +536,7 @@ internal sealed class Pm4OverlayCacheObject
         uint dominantMdosIndex,
         float averageSurfaceHeight,
         Vector3 placementAnchor,
+        float baseRotationRadians,
         Pm4PlanarTransform planarTransform,
         Vector3 boundsMin,
         Vector3 boundsMax,
@@ -554,6 +558,7 @@ internal sealed class Pm4OverlayCacheObject
         DominantMdosIndex = dominantMdosIndex;
         AverageSurfaceHeight = averageSurfaceHeight;
         PlacementAnchor = placementAnchor;
+        BaseRotationRadians = baseRotationRadians;
         PlanarTransform = planarTransform;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
@@ -576,6 +581,7 @@ internal sealed class Pm4OverlayCacheObject
     public uint DominantMdosIndex { get; }
     public float AverageSurfaceHeight { get; }
     public Vector3 PlacementAnchor { get; }
+    public float BaseRotationRadians { get; }
     public Pm4PlanarTransform PlanarTransform { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }

@@ -23,7 +23,7 @@ public class TerrainMeshBuilder
     /// Build a GPU mesh for a single terrain chunk.
     /// Returns null if the chunk has no valid height data.
     /// </summary>
-    public TerrainChunkMesh? BuildChunkMesh(TerrainChunkData chunk)
+    public TerrainChunkMesh? BuildChunkMesh(TerrainChunkData chunk, bool ignoreHoles = false)
     {
         if (chunk.Heights.Length < 145) return null;
 
@@ -110,7 +110,7 @@ public class TerrainMeshBuilder
         }
 
         // Build index buffer: 8×8 cells, each split into 4 triangles via center vertex = 256 triangles
-        var indices = BuildIndices(chunk.HoleMask);
+        var indices = BuildIndices(ignoreHoles ? 0 : chunk.HoleMask);
 
         if (indices.Length == 0) return null;
 

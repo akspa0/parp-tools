@@ -8,25 +8,91 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Base commit: 343dadf (tag v0.4.0)
 - .github instructions/skills/prompts restored from main and committed (845748b)
 
-### PM4 Overlay Load Contract Change: Adaptive Camera Window + Sticky Selection (Mar 22)
+### PM4 Overlay Load Contract Change: Full-Map Overlay Restore (Mar 22)
 
-- PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` no longer decodes the entire map on first toggle.
+- PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
 - Current behavior:
-   - the loader computes a centered camera window with adaptive tile radius instead of a fixed full-map or fixed 2x2 decode
-   - radius currently expands when recent PM4 loads stay cheap and shrinks when recent PM4 loads get expensive
-   - only PM4 files whose effective tile lands inside that adaptive window are decoded/read
-   - the PM4 overlay reloads when the camera crosses into a different active window
-   - if a PM4 object is selected, its source tile is pinned into the load set so selection does not drop just because the camera drifts away
-   - PM4 status text now reports the active window tile range, the radius used for the current load, the moving-average load time, and whether a selected tile was pinned
+   - the loader still computes PM4 camera-window/radius metrics for diagnostics, but candidate selection is no longer restricted by camera position
+   - all valid map PM4 files are decoded/read into the overlay candidate set
+   - PM4 decode/cache load now runs on a background task instead of blocking the render thread when the PM4 layer is enabled or reloaded
+   - completed PM4 overlay snapshots are applied back on the render thread on the next frame, so the live dictionaries are not mutated from the background worker
+   - the loaded PM4 window is pinned to the full tile range `(0..63, 0..63)` so moving the camera no longer forces PM4 reload churn
+   - PM4 cache entries are now effectively keyed by the full map-wide PM4 candidate set for the active map instead of a camera-window subset
+   - PM4 status text now reports `map-wide` load/cache results instead of `active-window`
 - Important boundary:
-   - this reduces startup MPQ read pressure, but PM4 correlation/report utilities still operate on the currently loaded PM4 subset, not an implicit full-map PM4 set
-   - PM4 cache entries are still keyed by the active candidate subset/signature, not a persistent full-map aggregate
-   - clearing selection does not currently force an immediate PM4 reload just to evict a previously pinned tile; the extra selected tile naturally falls out on the next PM4 reload/window change
+   - this restores visibility for PM4 outside the upper-left camera window, but it also restores the heavier map-wide load behavior
+   - backgrounding should remove the hard UI freeze on PM4 enable, but no runtime real-data signoff yet exists on final load time, responsiveness during load, or memory pressure on the user's dataset
 - Validation status:
-   - file diagnostics on `src/MdxViewer/Terrain/WorldScene.cs` were clean after the adaptive-window and sticky-selection follow-up
-   - a follow-up full `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` was started but cancelled before completion
+   - file diagnostics on `src/MdxViewer/Terrain/WorldScene.cs` were clean after the background-load refactor
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 22, 2026 after the background-load refactor
    - no automated tests were added or run
-   - no runtime real-data validation has been done yet on adaptive PM4 reload smoothness, selection persistence while moving, or whether the MPQ I/O burst is reduced enough in the user's dataset
+   - no runtime real-data signoff yet; do not over-claim from build success alone
+
+### PM4 Offline OBJ Export Utility (Mar 22)
+
+- `src/MdxViewer/Terrain/WorldScene.cs` now exposes an offline PM4 OBJ export path that scans PM4 files directly from the active data source instead of depending on the live overlay's currently loaded subset.
+- `ViewerApp_Pm4Utilities` now exposes `Export PM4 OBJ Set`, which writes:
+   - per-tile OBJ
+   - per-object OBJ
+   - `pm4_obj_manifest.json`
+- Intended use:
+   - produce stable comparison artifacts for PM4/WMO/debug analysis without adding more runtime PM4 streaming complexity
+- Validation status:
+   - edited files were diagnostics-clean
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 22, 2026 after this export path was in the active tree
+   - no runtime signoff yet on exported geometry correctness
+
+### Minimap Interaction + Cache Follow-Up (Mar 22)
+
+- Floating and fullscreen minimap views no longer teleport on any short click release.
+- Current behavior:
+   - teleport now requires triple-clicking the same tile within the confirmation window
+   - drag-vs-click discrimination uses full drag-origin distance instead of only the last drag delta
+   - minimap window visibility, zoom, and pan offset now persist in viewer settings
+   - decoded minimap tiles are cached on disk under `output/cache/minimap/<cache-segment>` so they survive across runs
+- Validation status:
+   - edited files were diagnostics-clean
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 22, 2026 after this minimap follow-up was in the active tree
+   - no runtime real-data signoff yet on teleport feel or cache effectiveness
+
+### Terrain Hole Debug Toggle (Mar 22)
+
+- Terrain hole masking is still preserved in source chunk data; the viewer now has a mesh rebuild override for inspection only.
+- Current behavior:
+   - `TerrainMeshBuilder.BuildChunkMesh(...)` can ignore `HoleMask` at mesh-build time without mutating the underlying `TerrainChunkData`
+   - both `TerrainManager` and `VlmTerrainManager` now support a global `IgnoreTerrainHolesGlobally` override during mesh rebuilds
+   - the active UI is a single layers-bar `Holes` toggle, not the earlier sidebar/per-tile controls
+- Important boundary:
+   - this is a viewer-side debug/inspection feature only; it does not edit ADT hole flags or terrain data on disk
+- Validation status:
+   - edited files were diagnostics-clean
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after this change
+   - no runtime real-data signoff yet on the rebuild behavior while streaming
+
+### PM4 Yaw Decode Guardrail (Mar 22)
+
+- Latest PM4 object-rotation triage showed the active `+90°` / clockwise reinterpretation of `MPRL` low-16 rotation in `WorldScene.TryComputeExpectedMprlYawRadians(...)` was a viewer-side heuristic, not an established PM4 decode fact.
+- Current behavior:
+   - `MPRL` low-16 rotation is decoded as a raw packed angle only
+   - circular averaging still produces the expected-yaw scoring signal
+   - sign and quarter-turn ambiguity remain in the downstream yaw-basis fallback path instead of being baked into raw decode
+- Important boundary:
+   - this removes one hardcoded semantic assumption, but it does not prove that `MPRL.Unk04` is a closed absolute world-yaw field
+   - runtime real-data validation is still required before claiming PM4 rotation closure
+
+- PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
+- Current behavior:
+   - the loader still computes PM4 camera-window/radius metrics for diagnostics, but candidate selection is no longer restricted by camera position
+   - all valid map PM4 files are decoded/read into the overlay candidate set
+   - the loaded PM4 window is pinned to the full tile range `(0..63, 0..63)` so moving the camera no longer forces PM4 reload churn
+   - PM4 cache entries are now effectively keyed by the full map-wide PM4 candidate set for the active map instead of a camera-window subset
+   - PM4 status text now reports `map-wide` load/cache results instead of `active-window`
+- Important boundary:
+   - this restores visibility for PM4 outside the upper-left camera window, but it also restores the heavier map-wide load behavior
+   - no runtime real-data signoff yet on the resulting load time or memory pressure on the user's dataset
+- Validation status:
+   - file diagnostics on `src/MdxViewer/Terrain/WorldScene.cs` should be kept clean after the full-map restore
+   - build/runtime validation should be reported separately; do not over-claim from code inspection alone
 
 ### Standalone PM4 Research Library (Mar 21)
 

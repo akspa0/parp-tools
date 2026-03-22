@@ -481,7 +481,8 @@ Working interpretation for now:
 1. centroid-to-nearest-`MPRL` distance
 2. footprint score between sampled object points and `MPRL` planar points when enough linked refs exist
 3. yaw tie-break between candidate principal axis and averaged `MPRL` yaw
-   - `MPRL` packed low-16 rotation is decoded as clockwise and rebased by `+90°` for world yaw comparison
+   - `MPRL` packed low-16 rotation is currently decoded as a raw packed angle only
+   - sign and quarter-turn ambiguity are left to the existing basis-fallback comparison path instead of hardcoding a world-yaw rebase
    - basis fallback evaluates direct, sign-flipped, and quarter-turn variants
 4. an explicit penalty for mirrored or winding-inverting candidates
 
@@ -570,7 +571,7 @@ Line numbers below are anchor points for this branch state. If they drift, the f
 | coordinate-mode scoring helper | `src/MdxViewer/Terrain/WorldScene.cs`, `EvaluateCoordinateModeScore(...)` just below line 1055 | footprint + centroid score blend |
 | planar transform solve | `src/MdxViewer/Terrain/WorldScene.cs`, `ResolvePlanarTransform(...)` line 2119 | shared CK24 transform selection |
 | planar candidate enumeration | `src/MdxViewer/Terrain/WorldScene.cs`, `EnumeratePlanarTransforms(...)` in the `ResolvePlanarTransform` block around line 2231 | different candidate sets for tile-local vs world-space |
-| expected `MPRL` yaw | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeExpectedMprlYawRadians(...)` line 1381 | decodes current low-16 yaw signal |
+| expected `MPRL` yaw | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeExpectedMprlYawRadians(...)` line 1381 | circular-average of the raw packed low-16 angle signal |
 | principal yaw from reconstructed geometry | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputePlanarPrincipalYaw(...)` immediately below the `TryComputeExpectedMprlYawRadians(...)` block | geometry-driven comparison yaw |
 | coarse yaw delta gate | `src/MdxViewer/Terrain/WorldScene.cs`, `TryComputeWorldYawCorrectionRadians(...)` line 1536 | rejects residual deltas under `12°` |
 | CK24 world pivot | `src/MdxViewer/Terrain/WorldScene.cs`, `ComputeSurfaceWorldCentroid(...)` just below the yaw-correction helper | shared rotation pivot for the CK24 |

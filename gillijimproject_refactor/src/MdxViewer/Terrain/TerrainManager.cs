@@ -35,6 +35,7 @@ public class TerrainManager : ISceneRenderer
     private readonly ConcurrentDictionary<(int, int), byte> _loadingTiles = new();
     private readonly List<(int tileX, int tileY)> _unloadScratch = new();
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
+    private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
     // AOI: how many tiles around the camera to keep loaded
     private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
@@ -73,9 +74,23 @@ public class TerrainManager : ISceneRenderer
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName { get; }
+    public bool IgnoreTerrainHolesGlobally
+    {
+        get => _ignoreTerrainHolesGlobally;
+        set
+        {
+            if (_ignoreTerrainHolesGlobally == value)
+                return;
+
+            _ignoreTerrainHolesGlobally = value;
+            RebuildLoadedTilesForHoleVisibility();
+        }
+    }
 
     /// <summary>Exposes the terrain adapter for WorldScene to access placement data.</summary>
     public ITerrainAdapter Adapter => _adapter;
+
+    private bool _ignoreTerrainHolesGlobally;
 
     /// <summary>
     /// Replace a tile's parsed chunk data and rebuild its loaded GPU meshes.
@@ -83,6 +98,8 @@ public class TerrainManager : ISceneRenderer
     /// </summary>
     public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
     {
+            var replacementChunks = newChunks.ToList();
+
         if (!_tileCache.TryGetValue((tileX, tileY), out var cached))
         {
             cached = _adapter.LoadTileWithPlacements(tileX, tileY);
@@ -90,7 +107,18 @@ public class TerrainManager : ISceneRenderer
         }
 
         cached.Chunks.Clear();
-        cached.Chunks.AddRange(newChunks);
+            cached.Chunks.AddRange(replacementChunks);
+
+            var meshes = new List<TerrainChunkMesh>(cached.Chunks.Count);
+            foreach (var chunkData in cached.Chunks)
+            {
+                var mesh = BuildChunkMesh(chunkData);
+                if (mesh != null)
+                    meshes.Add(mesh);
+            }
+
+            if (cached.Chunks.Count == 0)
+                return;
 
         var key = (tileX, tileY);
         if (_loadedTiles.TryGetValue(key, out var oldMeshes))
@@ -102,20 +130,47 @@ public class TerrainManager : ISceneRenderer
             _loadedTiles.Remove(key);
         }
 
-        var meshes = new List<TerrainChunkMesh>(cached.Chunks.Count);
-        foreach (var chunkData in cached.Chunks)
-        {
-            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
-            if (mesh != null)
-                meshes.Add(mesh);
-        }
-
-        if (meshes.Count == 0)
-            return;
-
         _loadedTiles[key] = meshes;
         _terrainRenderer.AddChunks(meshes, _adapter.TileTextures);
         _liquidRenderer.AddChunks(cached.Chunks);
+    }
+
+    public bool IsIgnoringTerrainHolesForTile(int tileX, int tileY)
+        => _ignoreTerrainHolesGlobally || _ignoreTerrainHolesTiles.Contains((tileX, tileY));
+
+    public bool SetIgnoreTerrainHolesForTile(int tileX, int tileY, bool enabled)
+    {
+        bool changed = enabled
+            ? _ignoreTerrainHolesTiles.Add((tileX, tileY))
+            : _ignoreTerrainHolesTiles.Remove((tileX, tileY));
+
+        if (changed && !_ignoreTerrainHolesGlobally)
+            RebuildLoadedTileForHoleVisibility(tileX, tileY);
+
+        return changed;
+    }
+
+    private TerrainChunkMesh? BuildChunkMesh(TerrainChunkData chunkData)
+        => _meshBuilder.BuildChunkMesh(chunkData, IsIgnoringTerrainHolesForTile(chunkData.TileX, chunkData.TileY));
+
+    private void RebuildLoadedTilesForHoleVisibility()
+    {
+        foreach (var (tileX, tileY) in _loadedTiles.Keys.ToList())
+            RebuildLoadedTileForHoleVisibility(tileX, tileY);
+    }
+
+    private void RebuildLoadedTileForHoleVisibility(int tileX, int tileY)
+    {
+        if (!_loadedTiles.ContainsKey((tileX, tileY)))
+            return;
+
+        if (!_tileCache.TryGetValue((tileX, tileY), out var result))
+        {
+            result = _adapter.LoadTileWithPlacements(tileX, tileY);
+            _tileCache[(tileX, tileY)] = result;
+        }
+
+        ReplaceTileChunksAndRebuild(tileX, tileY, result.Chunks);
     }
 
     /// <summary>
@@ -389,7 +444,7 @@ public class TerrainManager : ISceneRenderer
             var meshes = new List<TerrainChunkMesh>();
             foreach (var chunkData in result.Chunks)
             {
-                var mesh = _meshBuilder.BuildChunkMesh(chunkData);
+                var mesh = BuildChunkMesh(chunkData);
                 if (mesh != null)
                     meshes.Add(mesh);
             }
@@ -437,7 +492,7 @@ public class TerrainManager : ISceneRenderer
 
         foreach (var chunkData in result.Chunks)
         {
-            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
+            var mesh = BuildChunkMesh(chunkData);
             if (mesh != null)
                 meshes.Add(mesh);
         }

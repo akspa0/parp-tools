@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
+using System.Text;
 using System.Text.Json;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
@@ -270,6 +272,16 @@ public class WorldScene : ISceneRenderer
 {
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
 
+    private static float DecodeRawMprlPackedAngleRadians(MprlEntry positionRef)
+    {
+        return (positionRef.RotationOrFlags & 0xFFFF) * (2f * MathF.PI / 65536f);
+    }
+
+    private static float DecodeRawMprlPackedAngleDegrees(MprlEntry positionRef)
+    {
+        return DecodeRawMprlPackedAngleRadians(positionRef) * (180f / MathF.PI);
+    }
+
     private readonly GL _gl;
     private readonly TerrainManager _terrainManager;
     private readonly WorldAssetManager _assets;
@@ -364,6 +376,9 @@ public class WorldScene : ISceneRenderer
     private int _pm4CameraTileRadius = Pm4MinCameraTileRadius;
     private double _pm4AverageLoadMs = -1.0;
     private (int minTileX, int minTileY, int maxTileX, int maxTileY)? _pm4LoadedCameraWindow;
+    private Task<Pm4OverlayAsyncLoadResult>? _pm4LoadTask;
+    private CancellationTokenSource? _pm4LoadCancellation;
+    private int _pm4LoadRequestId;
     private Vector3 _lastRenderedCameraPosition;
     private bool _hasLastRenderedCameraPosition;
     private readonly Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> _pm4TileObjects = new();
@@ -434,10 +449,11 @@ public class WorldScene : ISceneRenderer
             _showPm4Overlay = value;
             // Allow reattempt when previously loaded with no data, e.g. after attaching a new loose overlay.
             if (value && (!_pm4LoadAttempted || _pm4TileObjects.Count == 0))
-                LazyLoadPm4Overlay();
+                BeginPm4OverlayLoad();
         }
     }
     public bool Pm4LoadAttempted => _pm4LoadAttempted;
+    public bool IsPm4Loading => _pm4LoadTask != null && !_pm4LoadTask.IsCompleted;
     public string Pm4Status => _pm4Status;
     public int Pm4TotalFiles => _pm4TotalFiles;
     public int Pm4LoadedFiles => _pm4LoadedFiles;
@@ -663,6 +679,7 @@ public class WorldScene : ISceneRenderer
                             objectRotationDegrees = hasObjectRotation ? VectorToArray(objectRotationDegrees) : VectorToArray(Vector3.Zero),
                             hasObjectScale,
                             objectScale = hasObjectScale ? VectorToArray(objectScale) : VectorToArray(Vector3.One),
+                            baseTransformRotationDegreesZ = obj.BaseRotationRadians * (180f / MathF.PI),
                             lineCount = obj.Lines.Count,
                             triangleCount = obj.Triangles.Count,
                             baseTransformTranslation = VectorToArray(obj.PlacementAnchor),
@@ -720,6 +737,236 @@ public class WorldScene : ISceneRenderer
         {
             WriteIndented = true,
         });
+    }
+
+    public Pm4OfflineObjExportSummary ExportPm4ObjectsAsObjDirectory(string outputDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(outputDirectory))
+            throw new ArgumentException("Output directory is required.", nameof(outputDirectory));
+
+        if (_dataSource == null)
+            throw new InvalidOperationException("PM4 export is unavailable: no data source.");
+
+        string mapName = _terrainManager.MapName;
+        List<string> mapPm4Candidates = _dataSource
+            .GetFileList(".pm4")
+            .Where(path => IsMapPm4Path(path, mapName))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (mapPm4Candidates.Count == 0)
+            throw new InvalidOperationException($"PM4 export found no files for map '{mapName}'.");
+
+        string exportRoot = Path.Combine(outputDirectory, SanitizePm4ExportPathSegment(mapName));
+        Directory.CreateDirectory(exportRoot);
+
+        var exportedTiles = new Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>>();
+        var fileSummaries = new List<object>(mapPm4Candidates.Count);
+        int exportedObjectCount = 0;
+        int exportedTileCount = 0;
+        int tileParseRejected = 0;
+        int tileRangeRejected = 0;
+        int readFailed = 0;
+        int decodeFailed = 0;
+        int zeroObjectFiles = 0;
+
+        foreach (string pm4Path in mapPm4Candidates)
+        {
+            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
+            {
+                tileParseRejected++;
+                fileSummaries.Add(new
+                {
+                    sourcePath = pm4Path,
+                    tileParsed = false,
+                    exported = false,
+                    reason = "tile-parse-failed"
+                });
+                continue;
+            }
+
+            if (!TryMapPm4FileTileToTerrainTile(fileTileX, fileTileY, out int effectiveTileX, out int effectiveTileY))
+            {
+                tileRangeRejected++;
+                fileSummaries.Add(new
+                {
+                    sourcePath = pm4Path,
+                    tileParsed = true,
+                    fileTileX,
+                    fileTileY,
+                    effectiveTileX = (int?)null,
+                    effectiveTileY = (int?)null,
+                    exported = false,
+                    reason = "tile-out-of-range"
+                });
+                continue;
+            }
+
+            byte[]? bytes = _dataSource.ReadFile(pm4Path);
+            if (bytes == null || bytes.Length == 0)
+            {
+                readFailed++;
+                fileSummaries.Add(new
+                {
+                    sourcePath = pm4Path,
+                    tileParsed = true,
+                    fileTileX,
+                    fileTileY,
+                    effectiveTileX,
+                    effectiveTileY,
+                    exported = false,
+                    reason = "read-failed"
+                });
+                continue;
+            }
+
+            try
+            {
+                var pm4 = new Pm4File(bytes);
+                int remainingLineBudget = int.MaxValue;
+                int remainingTriangleBudget = int.MaxValue;
+                int rejectedLongEdges = 0;
+                List<Pm4OverlayObject> objects = BuildPm4TileObjects(
+                    pm4,
+                    pm4Path,
+                    effectiveTileX,
+                    effectiveTileY,
+                    _pm4SplitCk24ByMdos,
+                    _pm4SplitCk24ByConnectivity,
+                    ref remainingLineBudget,
+                    ref remainingTriangleBudget,
+                    ref rejectedLongEdges);
+
+                if (objects.Count == 0)
+                    zeroObjectFiles++;
+
+                if (exportedTiles.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
+                {
+                    int objectPartOffset = existingObjects.Count;
+                    objects = RebasePm4ObjectParts(objects, objectPartOffset);
+                    existingObjects.AddRange(objects);
+                }
+                else
+                {
+                    exportedTiles[(effectiveTileX, effectiveTileY)] = objects;
+                }
+
+                exportedObjectCount += objects.Count;
+                fileSummaries.Add(new
+                {
+                    sourcePath = pm4Path,
+                    tileParsed = true,
+                    fileTileX,
+                    fileTileY,
+                    effectiveTileX,
+                    effectiveTileY,
+                    exported = true,
+                    version = pm4.Version,
+                    meshVertexCount = pm4.MeshVertices.Count,
+                    meshIndexCount = pm4.MeshIndices.Count,
+                    surfaceCount = pm4.Surfaces.Count,
+                    ck24SurfaceCount = pm4.Surfaces.Count(surface => surface.Ck24 != 0),
+                    linkCount = pm4.LinkEntries.Count,
+                    positionRefCount = pm4.PositionRefs.Count,
+                    exportedObjectCount = objects.Count,
+                    exportedLineCount = objects.Sum(static obj => obj.Lines.Count),
+                    exportedTriangleCount = objects.Sum(static obj => obj.Triangles.Count),
+                    rejectedLongEdges,
+                    zeroObjects = objects.Count == 0
+                });
+            }
+            catch (Exception ex)
+            {
+                decodeFailed++;
+                fileSummaries.Add(new
+                {
+                    sourcePath = pm4Path,
+                    tileParsed = true,
+                    fileTileX,
+                    fileTileY,
+                    effectiveTileX,
+                    effectiveTileY,
+                    exported = false,
+                    reason = "decode-failed",
+                    error = ex.Message
+                });
+            }
+        }
+
+        var tileSummaries = new List<object>(exportedTiles.Count);
+        foreach (var tileEntry in exportedTiles
+            .OrderBy(static entry => entry.Key.tileX)
+            .ThenBy(static entry => entry.Key.tileY))
+        {
+            exportedTileCount++;
+            int tileX = tileEntry.Key.tileX;
+            int tileY = tileEntry.Key.tileY;
+            List<Pm4OverlayObject> objects = tileEntry.Value
+                .OrderBy(static obj => obj.Ck24)
+                .ThenBy(static obj => obj.ObjectPartId)
+                .ToList();
+            string tileDirectory = Path.Combine(exportRoot, $"tile_{tileX:D2}_{tileY:D2}");
+            Directory.CreateDirectory(tileDirectory);
+
+            string tileObjPath = Path.Combine(tileDirectory, $"tile_{tileX:D2}_{tileY:D2}.obj");
+            File.WriteAllText(tileObjPath, BuildPm4ObjText(objects, tileX, tileY), Encoding.UTF8);
+
+            foreach (Pm4OverlayObject obj in objects)
+            {
+                string fileName = $"ck24_{obj.Ck24:X6}_part_{obj.ObjectPartId:D4}_type_{obj.Ck24Type:X2}_obj_{obj.Ck24ObjectId:D5}.obj";
+                string objectPath = Path.Combine(tileDirectory, fileName);
+                File.WriteAllText(objectPath, BuildPm4ObjText(new[] { obj }, tileX, tileY), Encoding.UTF8);
+            }
+
+            tileSummaries.Add(new
+            {
+                tileX,
+                tileY,
+                tileObjPath,
+                objectCount = objects.Count,
+                lineCount = objects.Sum(static obj => obj.Lines.Count),
+                triangleCount = objects.Sum(static obj => obj.Triangles.Count),
+                ck24Count = objects.Select(static obj => obj.Ck24).Distinct().Count(),
+                sourceFiles = objects.Select(static obj => obj.SourcePath).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(static path => path, StringComparer.OrdinalIgnoreCase).ToList()
+            });
+        }
+
+        string manifestPath = Path.Combine(exportRoot, "pm4_obj_manifest.json");
+        var manifest = new
+        {
+            generatedAtUtc = DateTime.UtcNow,
+            mapName,
+            exportRoot,
+            splitCk24ByMdos = _pm4SplitCk24ByMdos,
+            splitCk24ByConnectivity = _pm4SplitCk24ByConnectivity,
+            summary = new
+            {
+                sourceFileCount = mapPm4Candidates.Count,
+                exportedTileCount,
+                exportedObjectCount,
+                tileParseRejected,
+                tileRangeRejected,
+                readFailed,
+                decodeFailed,
+                zeroObjectFiles
+            },
+            tiles = tileSummaries,
+            files = fileSummaries
+        };
+        File.WriteAllText(
+            manifestPath,
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }),
+            Encoding.UTF8);
+
+        return new Pm4OfflineObjExportSummary(
+            exportRoot,
+            manifestPath,
+            mapPm4Candidates.Count,
+            exportedTileCount,
+            exportedObjectCount,
+            zeroObjectFiles,
+            decodeFailed,
+            readFailed);
     }
 
     internal Pm4WmoCorrelationReport BuildPm4WmoPlacementCorrelationReport(int maxMatchesPerPlacement = 8)
@@ -1133,14 +1380,320 @@ public class WorldScene : ISceneRenderer
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
     }
 
-    private void LazyLoadPm4Overlay(bool ignoreCache = false)
+    private void BeginPm4OverlayLoad(bool ignoreCache = false)
     {
-        var previousSelectedPm4ObjectKey = _selectedPm4ObjectKey;
-        Vector3 cameraPos = GetPm4LoadAnchorCameraPosition();
-        int activeCameraRadius = _pm4CameraTileRadius;
-        var activeCameraWindow = GetPm4CameraWindow(cameraPos, activeCameraRadius);
+        if (_dataSource == null)
+        {
+            _pm4LoadAttempted = true;
+            _pm4Status = "PM4 unavailable: no data source.";
+            return;
+        }
+
+        if (!ignoreCache && _pm4LoadTask != null && !_pm4LoadTask.IsCompleted)
+            return;
+
+        _pm4LoadCancellation?.Cancel();
+        _pm4LoadCancellation?.Dispose();
+
         _pm4LoadAttempted = true;
-        _pm4LoadedCameraWindow = activeCameraWindow;
+        _pm4LoadedCameraWindow = null;
+        int requestId = ++_pm4LoadRequestId;
+        var selectedObjectKey = _selectedPm4ObjectKey;
+        var cancellation = new CancellationTokenSource();
+        _pm4LoadCancellation = cancellation;
+        _pm4Status = ignoreCache
+            ? "PM4 reload queued: decoding map-wide overlay in background..."
+            : "PM4 loading: decoding map-wide overlay in background...";
+        _pm4LoadTask = Task.Run(() => LoadPm4OverlayAsync(requestId, ignoreCache, selectedObjectKey, cancellation.Token), cancellation.Token);
+    }
+
+    private void TryFinalizePm4OverlayLoad()
+    {
+        Task<Pm4OverlayAsyncLoadResult>? loadTask = _pm4LoadTask;
+        if (loadTask == null || !loadTask.IsCompleted)
+            return;
+
+        _pm4LoadTask = null;
+
+        Pm4OverlayAsyncLoadResult result;
+        try
+        {
+            result = loadTask.GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _pm4Status = $"PM4 load failed: {ex.Message}";
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+            return;
+        }
+
+        if (result.RequestId != _pm4LoadRequestId || result.Cancelled)
+            return;
+
+        if (result.CacheData != null)
+        {
+            ClearPm4OverlayRuntimeState();
+            _pm4LoadedCameraWindow = (0, 0, 63, 63);
+            RestorePm4OverlayFromCache(result.CacheData);
+            RestoreSelectedPm4Object(result.SelectedObjectKey);
+            UpdatePm4AdaptiveWindowRadius(result.LoadElapsedMs);
+        }
+
+        _pm4Status = result.StatusMessage;
+        ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+    }
+
+    private Pm4OverlayAsyncLoadResult LoadPm4OverlayAsync(
+        int requestId,
+        bool ignoreCache,
+        (int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (_dataSource == null)
+                return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, "PM4 unavailable: no data source.", cancelled: false);
+
+            string mapName = _terrainManager.MapName;
+            List<string> mapPm4Candidates = _dataSource
+                .GetFileList(".pm4")
+                .Where(path => IsMapPm4Path(path, mapName))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            int mapPm4CandidateCount = mapPm4Candidates.Count;
+            if (mapPm4CandidateCount == 0)
+                return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, $"PM4: no files found for map '{mapName}'.", cancelled: false);
+
+            int tileParseRejected = 0;
+            int tileRangeRejected = 0;
+            var pm4Candidates = new List<(string path, int tileX, int tileY)>();
+            foreach (string pm4Path in mapPm4Candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
+                {
+                    tileParseRejected++;
+                    continue;
+                }
+
+                if (!TryMapPm4FileTileToTerrainTile(fileTileX, fileTileY, out int effectiveTileX, out int effectiveTileY))
+                {
+                    tileRangeRejected++;
+                    continue;
+                }
+
+                pm4Candidates.Add((pm4Path, effectiveTileX, effectiveTileY));
+            }
+
+            int totalFiles = pm4Candidates.Count;
+            if (totalFiles == 0)
+            {
+                return new Pm4OverlayAsyncLoadResult(
+                    requestId,
+                    null,
+                    selectedObjectKey,
+                    0.0,
+                    $"PM4: 0/{mapPm4CandidateCount} valid map files after tile mapping (tileParse={tileParseRejected}, tileRange={tileRangeRejected}).",
+                    cancelled: false);
+            }
+
+            if (ignoreCache && _pm4OverlayCacheService != null)
+            {
+                if (!_pm4OverlayCacheService.TryDelete(mapName, out string? cacheDeleteError) && !string.IsNullOrWhiteSpace(cacheDeleteError))
+                    ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheDeleteError}");
+            }
+
+            string candidateSignature = Pm4OverlayCacheService.BuildCandidateSignature(
+                _dataSource,
+                pm4Candidates.Select(static candidate => candidate.path).ToList(),
+                _pm4SplitCk24ByMdos,
+                _pm4SplitCk24ByConnectivity);
+            var loadStopwatch = Stopwatch.StartNew();
+            string? cacheLoadError = null;
+            if (!ignoreCache
+                && _pm4OverlayCacheService != null
+                && _pm4OverlayCacheService.TryLoad(mapName, candidateSignature, out Pm4OverlayCacheData? cachedOverlay, out cacheLoadError)
+                && cachedOverlay != null)
+            {
+                loadStopwatch.Stop();
+                return new Pm4OverlayAsyncLoadResult(
+                    requestId,
+                    cachedOverlay,
+                    selectedObjectKey,
+                    loadStopwatch.Elapsed.TotalMilliseconds,
+                    $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} map-wide files restored from disk cache, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} CK24 objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                    cancelled: false);
+            }
+
+            if (!string.IsNullOrWhiteSpace(cacheLoadError))
+                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheLoadError}");
+
+            int remainingLineBudget = Pm4MaxLinesTotal;
+            int remainingTriangleBudget = Pm4MaxTrianglesTotal;
+            int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
+            int loadedFiles = 0;
+            int objectCount = 0;
+            int lineCount = 0;
+            int triangleCount = 0;
+            int positionRefCount = 0;
+            int rejectedLongEdgesTotal = 0;
+            int readFailed = 0;
+            int decodeFailed = 0;
+            int zeroObjectFiles = 0;
+            float minObjectZ = float.MaxValue;
+            float maxObjectZ = float.MinValue;
+            var tileObjects = new Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>>();
+            var tilePositionRefs = new Dictionary<(int tileX, int tileY), List<Vector3>>();
+
+            foreach (var candidate in pm4Candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (remainingLineBudget <= 0)
+                    break;
+
+                string pm4Path = candidate.path;
+                int effectiveTileX = candidate.tileX;
+                int effectiveTileY = candidate.tileY;
+
+                byte[]? bytes = _dataSource.ReadFile(pm4Path);
+                if (bytes == null || bytes.Length == 0)
+                {
+                    readFailed++;
+                    continue;
+                }
+
+                try
+                {
+                    var pm4 = new Pm4File(bytes);
+                    int rejectedLongEdges = 0;
+                    List<Pm4OverlayObject> objects = BuildPm4TileObjects(
+                        pm4,
+                        pm4Path,
+                        effectiveTileX,
+                        effectiveTileY,
+                        _pm4SplitCk24ByMdos,
+                        _pm4SplitCk24ByConnectivity,
+                        ref remainingLineBudget,
+                        ref remainingTriangleBudget,
+                        ref rejectedLongEdges);
+                    if (objects.Count == 0)
+                    {
+                        zeroObjectFiles++;
+                        ViewerLog.Debug(ViewerLog.Category.Terrain,
+                            $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.Surfaces.Count}, meshVerts={pm4.MeshVertices.Count}, meshIndices={pm4.MeshIndices.Count}, links={pm4.LinkEntries.Count}, refs={pm4.PositionRefs.Count}) but produced 0 overlay objects.");
+                        continue;
+                    }
+
+                    if (tileObjects.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
+                    {
+                        ViewerLog.Debug(
+                            ViewerLog.Category.Terrain,
+                            $"[PM4] Multiple files mapped to tile ({effectiveTileX},{effectiveTileY}); merging '{Path.GetFileName(pm4Path)}' into existing overlay tile.");
+
+                        int objectPartOffset = existingObjects.Count;
+                        objects = RebasePm4ObjectParts(objects, objectPartOffset);
+                        existingObjects.AddRange(objects);
+                    }
+                    else
+                    {
+                        tileObjects[(effectiveTileX, effectiveTileY)] = objects;
+                    }
+
+                    foreach (Pm4OverlayObject obj in objects)
+                    {
+                        minObjectZ = MathF.Min(minObjectZ, obj.Center.Z);
+                        maxObjectZ = MathF.Max(maxObjectZ, obj.Center.Z);
+                    }
+
+                    if (remainingPositionRefBudget > 0)
+                    {
+                        List<Vector3> positionRefs = BuildPm4PositionRefMarkers(pm4, Math.Min(Pm4MaxPositionRefsPerTile, remainingPositionRefBudget));
+                        if (positionRefs.Count > 0)
+                        {
+                            if (tilePositionRefs.TryGetValue((effectiveTileX, effectiveTileY), out List<Vector3>? existingPositionRefs))
+                                existingPositionRefs.AddRange(positionRefs);
+                            else
+                                tilePositionRefs[(effectiveTileX, effectiveTileY)] = positionRefs;
+
+                            positionRefCount += positionRefs.Count;
+                            remainingPositionRefBudget -= positionRefs.Count;
+                        }
+                    }
+
+                    loadedFiles++;
+                    objectCount += objects.Count;
+                    lineCount += objects.Sum(obj => obj.Lines.Count);
+                    triangleCount += objects.Sum(obj => obj.Triangles.Count);
+                    rejectedLongEdgesTotal += rejectedLongEdges;
+                }
+                catch (Exception ex)
+                {
+                    decodeFailed++;
+                    ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] Failed to decode '{pm4Path}': {ex.Message}");
+                }
+            }
+
+            if (loadedFiles == 0)
+            {
+                return new Pm4OverlayAsyncLoadResult(
+                    requestId,
+                    null,
+                    selectedObjectKey,
+                    loadStopwatch.Elapsed.TotalMilliseconds,
+                    $"PM4: {totalFiles}/{mapPm4CandidateCount} map-wide files found, none decoded into overlay data (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
+                    cancelled: false);
+            }
+
+            if (minObjectZ > maxObjectZ)
+            {
+                minObjectZ = 0f;
+                maxObjectZ = 1f;
+            }
+
+            loadStopwatch.Stop();
+            Pm4OverlayCacheData cacheData = BuildPm4OverlayCacheData(
+                mapName,
+                candidateSignature,
+                totalFiles,
+                loadedFiles,
+                objectCount,
+                lineCount,
+                triangleCount,
+                positionRefCount,
+                rejectedLongEdgesTotal,
+                minObjectZ,
+                maxObjectZ,
+                tileObjects,
+                tilePositionRefs);
+            if (_pm4OverlayCacheService != null)
+            {
+                if (!_pm4OverlayCacheService.TrySave(cacheData, out string? cacheSaveError) && !string.IsNullOrWhiteSpace(cacheSaveError))
+                    ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheSaveError}");
+            }
+
+            return new Pm4OverlayAsyncLoadResult(
+                requestId,
+                cacheData,
+                selectedObjectKey,
+                loadStopwatch.Elapsed.TotalMilliseconds,
+                $"PM4 ready: {loadedFiles}/{totalFiles} map-wide files decoded and cached, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} CK24 objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                cancelled: false);
+        }
+        catch (OperationCanceledException)
+        {
+            return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, "PM4 load cancelled.", cancelled: true);
+        }
+        catch (Exception ex)
+        {
+            return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, $"PM4 load failed: {ex.Message}", cancelled: false);
+        }
+    }
+
+    private void ClearPm4OverlayRuntimeState()
+    {
+        _pm4LoadedCameraWindow = null;
         _pm4TileObjects.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
@@ -1162,237 +1715,73 @@ public class WorldScene : ISceneRenderer
         _pm4VisiblePositionRefCount = 0;
         _pm4MinObjectZ = float.MaxValue;
         _pm4MaxObjectZ = float.MinValue;
+    }
 
-        if (_dataSource == null)
+    private static Pm4OverlayCacheData BuildPm4OverlayCacheData(
+        string mapName,
+        string candidateSignature,
+        int totalFiles,
+        int loadedFiles,
+        int objectCount,
+        int lineCount,
+        int triangleCount,
+        int positionRefCount,
+        int rejectedLongEdges,
+        float minObjectZ,
+        float maxObjectZ,
+        Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>> tileObjects,
+        Dictionary<(int tileX, int tileY), List<Vector3>> tilePositionRefs)
+    {
+        var tiles = new List<Pm4OverlayCacheTile>(tileObjects.Count);
+        foreach (var tileEntry in tileObjects.OrderBy(static entry => entry.Key.tileX).ThenBy(static entry => entry.Key.tileY))
         {
-            _pm4Status = "PM4 unavailable: no data source.";
-            return;
-        }
-
-        string mapName = _terrainManager.MapName;
-        List<string> mapPm4Candidates = _dataSource
-            .GetFileList(".pm4")
-            .Where(path => IsMapPm4Path(path, mapName))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        int mapPm4CandidateCount = mapPm4Candidates.Count;
-        if (mapPm4CandidateCount == 0)
-        {
-            _pm4Status = $"PM4: no files found for map '{mapName}'.";
-            return;
-        }
-
-        int tileParseRejected = 0;
-        int tileRangeRejected = 0;
-        bool selectedTilePinned = false;
-        var pm4Candidates = new List<(string path, int tileX, int tileY)>();
-        foreach (string pm4Path in mapPm4Candidates)
-        {
-            if (!Pm4CoordinateService.TryParseTileCoordinates(pm4Path, out int fileTileX, out int fileTileY))
+            List<Vector3> positionRefs = tilePositionRefs.TryGetValue(tileEntry.Key, out List<Vector3>? existingPositionRefs)
+                ? existingPositionRefs
+                : new List<Vector3>();
+            var objects = new List<Pm4OverlayCacheObject>(tileEntry.Value.Count);
+            for (int i = 0; i < tileEntry.Value.Count; i++)
             {
-                tileParseRejected++;
-                continue;
+                Pm4OverlayObject obj = tileEntry.Value[i];
+                objects.Add(new Pm4OverlayCacheObject(
+                    obj.SourcePath,
+                    obj.Ck24,
+                    obj.Ck24Type,
+                    obj.ObjectPartId,
+                    obj.LinkGroupObjectId,
+                    obj.LinkedPositionRefCount,
+                    obj.LinkedPositionRefSummary,
+                    obj.Lines,
+                    obj.Triangles,
+                    obj.SurfaceCount,
+                    obj.TotalIndexCount,
+                    obj.DominantGroupKey,
+                    obj.DominantAttributeMask,
+                    obj.DominantMdosIndex,
+                    obj.AverageSurfaceHeight,
+                    obj.PlacementAnchor,
+                    obj.BaseRotationRadians,
+                    obj.PlanarTransform,
+                    obj.BoundsMin,
+                    obj.BoundsMax,
+                    obj.ConnectorKeys.ToList()));
             }
 
-            if (!TryMapPm4FileTileToTerrainTile(fileTileX, fileTileY, out int effectiveTileX, out int effectiveTileY))
-            {
-                tileRangeRejected++;
-                continue;
-            }
-
-            bool isSelectedTile = previousSelectedPm4ObjectKey.HasValue
-                && previousSelectedPm4ObjectKey.Value.tileX == effectiveTileX
-                && previousSelectedPm4ObjectKey.Value.tileY == effectiveTileY;
-            if (!IsPm4TileInsideCameraWindow(effectiveTileX, effectiveTileY, activeCameraWindow) && !isSelectedTile)
-                continue;
-
-            if (isSelectedTile && !IsPm4TileInsideCameraWindow(effectiveTileX, effectiveTileY, activeCameraWindow))
-                selectedTilePinned = true;
-
-            pm4Candidates.Add((pm4Path, effectiveTileX, effectiveTileY));
+            tiles.Add(new Pm4OverlayCacheTile(tileEntry.Key.tileX, tileEntry.Key.tileY, objects, positionRefs));
         }
 
-        _pm4TotalFiles = pm4Candidates.Count;
-        if (_pm4TotalFiles == 0)
-        {
-            _pm4Status = $"PM4: 0/{mapPm4CandidateCount} files intersect the active camera window ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}).";
-            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
-            return;
-        }
-
-        if (ignoreCache && _pm4OverlayCacheService != null)
-        {
-            if (!_pm4OverlayCacheService.TryDelete(mapName, out string? cacheDeleteError) && !string.IsNullOrWhiteSpace(cacheDeleteError))
-                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheDeleteError}");
-        }
-
-        string candidateSignature = Pm4OverlayCacheService.BuildCandidateSignature(
-            _dataSource,
-            pm4Candidates.Select(static candidate => candidate.path).ToList(),
-            _pm4SplitCk24ByMdos,
-            _pm4SplitCk24ByConnectivity);
-        var loadStopwatch = Stopwatch.StartNew();
-        string? cacheLoadError = null;
-        if (!ignoreCache
-            && _pm4OverlayCacheService != null
-            && _pm4OverlayCacheService.TryLoad(mapName, candidateSignature, out Pm4OverlayCacheData? cachedOverlay, out cacheLoadError)
-            && cachedOverlay != null)
-        {
-            RestorePm4OverlayFromCache(cachedOverlay);
-            RestoreSelectedPm4Object(previousSelectedPm4ObjectKey);
-            loadStopwatch.Stop();
-            UpdatePm4AdaptiveWindowRadius(loadStopwatch.Elapsed.TotalMilliseconds);
-            _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} active-window files restored from disk cache for tiles ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius}, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected{(selectedTilePinned ? ", selected tile pinned" : string.Empty)}, {loadStopwatch.ElapsedMilliseconds} ms.";
-            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(cacheLoadError))
-            ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheLoadError}");
-
-        int remainingLineBudget = Pm4MaxLinesTotal;
-        int remainingTriangleBudget = Pm4MaxTrianglesTotal;
-        int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
-        int readFailed = 0;
-        int decodeFailed = 0;
-        int zeroObjectFiles = 0;
-        foreach (var candidate in pm4Candidates)
-        {
-            if (remainingLineBudget <= 0)
-                break;
-
-            string pm4Path = candidate.path;
-            int effectiveTileX = candidate.tileX;
-            int effectiveTileY = candidate.tileY;
-
-            byte[]? bytes = _dataSource.ReadFile(pm4Path);
-            if (bytes == null || bytes.Length == 0)
-            {
-                readFailed++;
-                continue;
-            }
-
-            try
-            {
-                var pm4 = new Pm4File(bytes);
-                int rejectedLongEdges = 0;
-                List<Pm4OverlayObject> objects = BuildPm4TileObjects(
-                    pm4,
-                    pm4Path,
-                    effectiveTileX,
-                    effectiveTileY,
-                    _pm4SplitCk24ByMdos,
-                    _pm4SplitCk24ByConnectivity,
-                    ref remainingLineBudget,
-                    ref remainingTriangleBudget,
-                    ref rejectedLongEdges);
-                if (objects.Count == 0)
-                {
-                    zeroObjectFiles++;
-                    ViewerLog.Debug(ViewerLog.Category.Terrain,
-                        $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.Surfaces.Count}, meshVerts={pm4.MeshVertices.Count}, meshIndices={pm4.MeshIndices.Count}, links={pm4.LinkEntries.Count}, refs={pm4.PositionRefs.Count}) but produced 0 overlay objects.");
-                    continue;
-                }
-
-                if (_pm4TileObjects.TryGetValue((effectiveTileX, effectiveTileY), out List<Pm4OverlayObject>? existingObjects))
-                {
-                    ViewerLog.Debug(
-                        ViewerLog.Category.Terrain,
-                        $"[PM4] Multiple files mapped to tile ({effectiveTileX},{effectiveTileY}); merging '{Path.GetFileName(pm4Path)}' into existing overlay tile.");
-
-                    int objectPartOffset = existingObjects.Count;
-                    objects = RebasePm4ObjectParts(objects, objectPartOffset);
-                    existingObjects.AddRange(objects);
-                }
-                else
-                {
-                    _pm4TileObjects[(effectiveTileX, effectiveTileY)] = objects;
-                }
-
-                foreach (Pm4OverlayObject obj in objects)
-                {
-                    _pm4ObjectLookup[(effectiveTileX, effectiveTileY, obj.Ck24, obj.ObjectPartId)] = obj;
-                    _pm4MinObjectZ = MathF.Min(_pm4MinObjectZ, obj.Center.Z);
-                    _pm4MaxObjectZ = MathF.Max(_pm4MaxObjectZ, obj.Center.Z);
-                }
-
-                if (remainingPositionRefBudget > 0)
-                {
-                    List<Vector3> positionRefs = BuildPm4PositionRefMarkers(pm4, Math.Min(Pm4MaxPositionRefsPerTile, remainingPositionRefBudget));
-                    if (positionRefs.Count > 0)
-                    {
-                        if (_pm4TilePositionRefs.TryGetValue((effectiveTileX, effectiveTileY), out List<Vector3>? existingPositionRefs))
-                            existingPositionRefs.AddRange(positionRefs);
-                        else
-                            _pm4TilePositionRefs[(effectiveTileX, effectiveTileY)] = positionRefs;
-
-                        _pm4PositionRefCount += positionRefs.Count;
-                        remainingPositionRefBudget -= positionRefs.Count;
-                    }
-                }
-
-                _pm4LoadedFiles++;
-                _pm4ObjectCount += objects.Count;
-                int tileLineCount = objects.Sum(obj => obj.Lines.Count);
-                int tileTriangleCount = objects.Sum(obj => obj.Triangles.Count);
-                _pm4LineCount += tileLineCount;
-                _pm4TriangleCount += tileTriangleCount;
-                _pm4RejectedLongEdges += rejectedLongEdges;
-                if (_pm4TileStats.TryGetValue((effectiveTileX, effectiveTileY), out Pm4OverlayTileStats existingStats))
-                {
-                    _pm4TileStats[(effectiveTileX, effectiveTileY)] = new Pm4OverlayTileStats(
-                        effectiveTileX,
-                        effectiveTileY,
-                        existingStats.ObjectCount + objects.Count,
-                        existingStats.LineCount + tileLineCount,
-                        existingStats.TriangleCount + tileTriangleCount);
-                }
-                else
-                {
-                    _pm4TileStats[(effectiveTileX, effectiveTileY)] = new Pm4OverlayTileStats(
-                        effectiveTileX,
-                        effectiveTileY,
-                        objects.Count,
-                        tileLineCount,
-                        tileTriangleCount);
-                }
-            }
-            catch (Exception ex)
-            {
-                decodeFailed++;
-                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] Failed to decode '{pm4Path}': {ex.Message}");
-            }
-        }
-
-        if (_pm4LoadedFiles == 0)
-        {
-            _pm4Status = $"PM4: {_pm4TotalFiles}/{mapPm4CandidateCount} active-window files found, none decoded into overlay data for window ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius} (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).";
-            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
-            return;
-        }
-
-        if (_pm4MinObjectZ > _pm4MaxObjectZ)
-        {
-            _pm4MinObjectZ = 0f;
-            _pm4MaxObjectZ = 1f;
-        }
-
-        RebuildPm4MergedObjectGroups();
-        RebuildPm4ObjectGroupBounds();
-        RestoreSelectedPm4Object(previousSelectedPm4ObjectKey);
-
-        loadStopwatch.Stop();
-        if (_pm4OverlayCacheService != null)
-        {
-            var cacheData = BuildPm4OverlayCacheData(mapName, candidateSignature);
-            if (!_pm4OverlayCacheService.TrySave(cacheData, out string? cacheSaveError) && !string.IsNullOrWhiteSpace(cacheSaveError))
-                ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheSaveError}");
-        }
-
-        UpdatePm4AdaptiveWindowRadius(loadStopwatch.Elapsed.TotalMilliseconds);
-        _pm4Status = $"PM4 ready: {_pm4LoadedFiles}/{_pm4TotalFiles} active-window files decoded and cached for tiles ({activeCameraWindow.minTileX},{activeCameraWindow.minTileY})-({activeCameraWindow.maxTileX},{activeCameraWindow.maxTileY}) radius {activeCameraRadius}, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {_pm4ObjectCount} CK24 objects, {_pm4LineCount} lines, {_pm4TriangleCount} triangles, {_pm4PositionRefCount} refs, {_pm4RejectedLongEdges} long edges rejected{(selectedTilePinned ? ", selected tile pinned" : string.Empty)}, {loadStopwatch.ElapsedMilliseconds} ms.";
-        ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+        return new Pm4OverlayCacheData(
+            mapName,
+            candidateSignature,
+            totalFiles,
+            loadedFiles,
+            objectCount,
+            lineCount,
+            triangleCount,
+            positionRefCount,
+            rejectedLongEdges,
+            minObjectZ,
+            maxObjectZ,
+            tiles);
     }
 
     private void RestoreSelectedPm4Object((int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey)
@@ -1425,15 +1814,20 @@ public class WorldScene : ISceneRenderer
 
     private static (int minTileX, int minTileY, int maxTileX, int maxTileY) GetPm4CameraWindow(Vector3 cameraPos, int tileRadius)
     {
-        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
-        int centerTileX = Math.Clamp((int)MathF.Floor(camTileX), 0, 63);
-        int centerTileY = Math.Clamp((int)MathF.Floor(camTileY), 0, 63);
+        GetPm4CameraTile(cameraPos, out int centerTileX, out int centerTileY);
         int minTileX = Math.Max(0, centerTileX - tileRadius);
         int minTileY = Math.Max(0, centerTileY - tileRadius);
         int maxTileX = Math.Min(63, centerTileX + tileRadius);
         int maxTileY = Math.Min(63, centerTileY + tileRadius);
         return (minTileX, minTileY, maxTileX, maxTileY);
+    }
+
+    private static void GetPm4CameraTile(Vector3 cameraPos, out int tileX, out int tileY)
+    {
+        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
+        tileX = Math.Clamp((int)MathF.Floor(camTileX), 0, 63);
+        tileY = Math.Clamp((int)MathF.Floor(camTileY), 0, 63);
     }
 
     private static bool IsPm4TileInsideCameraWindow(
@@ -1452,9 +1846,18 @@ public class WorldScene : ISceneRenderer
         if (!_showPm4Overlay)
             return;
 
-        var cameraWindow = GetPm4CameraWindow(cameraPos, _pm4CameraTileRadius);
-        if (!_pm4LoadAttempted || _pm4LoadedCameraWindow != cameraWindow)
-            LazyLoadPm4Overlay();
+        if (_pm4LoadTask != null && !_pm4LoadTask.IsCompleted)
+            return;
+
+        if (!_pm4LoadAttempted || !_pm4LoadedCameraWindow.HasValue)
+        {
+            BeginPm4OverlayLoad();
+            return;
+        }
+
+        GetPm4CameraTile(cameraPos, out int cameraTileX, out int cameraTileY);
+        if (!IsPm4TileInsideCameraWindow(cameraTileX, cameraTileY, _pm4LoadedCameraWindow.Value))
+            BeginPm4OverlayLoad();
     }
 
     private void UpdatePm4AdaptiveWindowRadius(double loadElapsedMs)
@@ -1506,6 +1909,7 @@ public class WorldScene : ISceneRenderer
                     obj.DominantMdosIndex,
                     obj.AverageSurfaceHeight,
                     obj.PlacementAnchor,
+                    obj.BaseRotationRadians,
                     obj.PlanarTransform,
                     obj.BoundsMin,
                     obj.BoundsMax,
@@ -1568,6 +1972,7 @@ public class WorldScene : ISceneRenderer
                     cachedObject.DominantMdosIndex,
                     cachedObject.AverageSurfaceHeight,
                     cachedObject.PlacementAnchor,
+                    cachedObject.BaseRotationRadians,
                     cachedObject.PlanarTransform,
                     cachedObject.BoundsMin,
                     cachedObject.BoundsMax,
@@ -1607,6 +2012,84 @@ public class WorldScene : ISceneRenderer
 
         string mapSegment = "/" + mapName + "/";
         return normalized.Contains(mapSegment, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildPm4ObjText(IReadOnlyList<Pm4OverlayObject> objects, int tileX, int tileY)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"# PM4 tile {tileX:D2}_{tileY:D2}");
+        builder.AppendLine($"# object_count {objects.Count}");
+
+        int vertexIndex = 1;
+        foreach (Pm4OverlayObject obj in objects)
+        {
+            string objectName = $"tile_{tileX:D2}_{tileY:D2}_ck24_{obj.Ck24:X6}_part_{obj.ObjectPartId:D4}";
+            builder.AppendLine();
+            builder.AppendLine($"o {objectName}");
+            builder.AppendLine($"# source {obj.SourcePath}");
+            builder.AppendLine($"# lines {obj.Lines.Count} triangles {obj.Triangles.Count} surfaces {obj.SurfaceCount} total_indices {obj.TotalIndexCount}");
+
+            Matrix4x4 transform = obj.BaseTransform;
+            for (int i = 0; i < obj.Triangles.Count; i++)
+            {
+                Pm4Triangle tri = obj.Triangles[i];
+                Vector3 a = ApplyPm4OverlayTransform(tri.A, transform);
+                Vector3 b = ApplyPm4OverlayTransform(tri.B, transform);
+                Vector3 c = ApplyPm4OverlayTransform(tri.C, transform);
+                AppendObjVertex(builder, a);
+                AppendObjVertex(builder, b);
+                AppendObjVertex(builder, c);
+                builder.Append("f ")
+                    .Append(vertexIndex)
+                    .Append(' ')
+                    .Append(vertexIndex + 1)
+                    .Append(' ')
+                    .Append(vertexIndex + 2)
+                    .AppendLine();
+                vertexIndex += 3;
+            }
+
+            for (int i = 0; i < obj.Lines.Count; i++)
+            {
+                Pm4LineSegment line = obj.Lines[i];
+                Vector3 from = ApplyPm4OverlayTransform(line.From, transform);
+                Vector3 to = ApplyPm4OverlayTransform(line.To, transform);
+                AppendObjVertex(builder, from);
+                AppendObjVertex(builder, to);
+                builder.Append("l ")
+                    .Append(vertexIndex)
+                    .Append(' ')
+                    .Append(vertexIndex + 1)
+                    .AppendLine();
+                vertexIndex += 2;
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private static void AppendObjVertex(StringBuilder builder, Vector3 vertex)
+    {
+        builder.Append("v ")
+            .Append(vertex.X.ToString("G9", CultureInfo.InvariantCulture))
+            .Append(' ')
+            .Append(vertex.Y.ToString("G9", CultureInfo.InvariantCulture))
+            .Append(' ')
+            .Append(vertex.Z.ToString("G9", CultureInfo.InvariantCulture))
+            .AppendLine();
+    }
+
+    private static string SanitizePm4ExportPathSegment(string value)
+    {
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(value.Length);
+        for (int i = 0; i < value.Length; i++)
+        {
+            char current = value[i];
+            builder.Append(invalidChars.Contains(current) ? '_' : current);
+        }
+
+        return builder.Length == 0 ? "pm4" : builder.ToString();
     }
 
     private static bool TryMapPm4FileTileToTerrainTile(int fileTileX, int fileTileY, out int terrainTileX, out int terrainTileY)
@@ -1659,6 +2142,7 @@ public class WorldScene : ISceneRenderer
                 obj.DominantMdosIndex,
                 obj.AverageSurfaceHeight,
                 obj.PlacementAnchor,
+                obj.BaseRotationRadians,
                 obj.PlanarTransform,
                 obj.BoundsMin,
                 obj.BoundsMax,
@@ -1744,6 +2228,7 @@ public class WorldScene : ISceneRenderer
                 out float resolvedYawCorrection)
                 ? resolvedYawCorrection
                 : 0f;
+            float ck24RendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(ck24WorldYawCorrection);
             IReadOnlyList<Pm4ConnectorKey> ck24ConnectorKeys = BuildCk24ConnectorKeys(
                 pm4,
                 ck24Surfaces,
@@ -1824,6 +2309,7 @@ public class WorldScene : ISceneRenderer
                             dominantMdosIndex,
                             averageSurfaceHeight,
                             linkedPlacementAnchor,
+                            ck24RendererFrameRotationRadians,
                             ck24PlanarTransform,
                             ck24ConnectorKeys));
 
@@ -2194,7 +2680,7 @@ public class WorldScene : ISceneRenderer
             floorMin = Math.Min(floorMin, positionRef.Unk14);
             floorMax = Math.Max(floorMax, positionRef.Unk14);
 
-            float headingDegrees = (positionRef.RotationOrFlags & 0xFFFF) * (360f / 65536f);
+            float headingDegrees = DecodeRawMprlPackedAngleDegrees(positionRef);
             headingMinDegrees = Math.Min(headingMinDegrees, headingDegrees);
             headingMaxDegrees = Math.Max(headingMaxDegrees, headingDegrees);
 
@@ -2232,11 +2718,9 @@ public class WorldScene : ISceneRenderer
         int count = 0;
         for (int i = 0; i < positionRefs.Count; i++)
         {
-            // Runtime evidence shows PM4 objects are consistently rotated 90 degrees clockwise
-            // when using the raw packed MPRL low-16 angle directly. Treat the packed value as
-            // clockwise and rebase by +90 degrees to align with world yaw comparison.
-            float rawAngle = (positionRefs[i].RotationOrFlags & 0xFFFF) * (2f * MathF.PI / 65536f);
-            float angleRadians = (MathF.PI * 0.5f) - rawAngle;
+            // Keep MPRL low-16 orientation as a raw packed angle until its world-yaw semantics
+            // are proven. Basis/sign ambiguity is handled later by the comparison fallback path.
+            float angleRadians = DecodeRawMprlPackedAngleRadians(positionRefs[i]);
             sumSin += Math.Sin(angleRadians);
             sumCos += Math.Cos(angleRadians);
             count++;
@@ -3674,6 +4158,11 @@ public class WorldScene : ISceneRenderer
             world.Z + 0.5f);
     }
 
+    private static float ConvertWorldYawCorrectionToRendererRotationRadians(float worldYawCorrectionRadians)
+    {
+        return -worldYawCorrectionRadians;
+    }
+
     private static Vector3 ConvertPm4VertexToRenderer(
         Vector3 pm4Vertex,
         int tileX,
@@ -3697,7 +4186,7 @@ public class WorldScene : ISceneRenderer
     {
         _pm4LoadAttempted = false;
         _pm4LoadedCameraWindow = null;
-        LazyLoadPm4Overlay(ignoreCache: true);
+        BeginPm4OverlayLoad(ignoreCache: true);
     }
 
     /// <summary>
@@ -4436,6 +4925,8 @@ public class WorldScene : ISceneRenderer
     private bool _renderDiagPrinted = false;
     public void Render(Matrix4x4 view, Matrix4x4 proj)
     {
+        TryFinalizePm4OverlayLoad();
+
         // Rebuild flat instance lists if tiles changed
         if (_instancesDirty)
             RebuildInstanceLists();
@@ -5784,6 +6275,16 @@ public class WorldScene : ISceneRenderer
             : obj.BaseTransform;
     }
 
+    internal static Matrix4x4 BuildPm4BaseTransform(Vector3 placementAnchor, float baseRotationRadians)
+    {
+        Matrix4x4 transform = Matrix4x4.Identity;
+        if (MathF.Abs(baseRotationRadians) > 1e-6f)
+            transform *= Matrix4x4.CreateRotationZ(baseRotationRadians);
+
+        transform *= Matrix4x4.CreateTranslation(placementAnchor);
+        return transform;
+    }
+
     private List<Pm4CorrelationObjectState> BuildPm4CorrelationObjectStates()
     {
         bool applyPm4Transform = !IsNearZeroVector(_pm4OverlayTranslation)
@@ -6375,6 +6876,8 @@ public class WorldScene : ISceneRenderer
 
     public void Dispose()
     {
+        _pm4LoadCancellation?.Cancel();
+        _pm4LoadCancellation?.Dispose();
         _terrainManager.OnTileLoaded -= OnTileLoaded;
         _terrainManager.OnTileUnloaded -= OnTileUnloaded;
         _terrainManager.Dispose();
@@ -6403,6 +6906,32 @@ public class WorldScene : ISceneRenderer
         _pm4ObjectRotationsDegrees.Clear();
         _pm4ObjectScales.Clear();
     }
+
+    private sealed class Pm4OverlayAsyncLoadResult
+    {
+        public Pm4OverlayAsyncLoadResult(
+            int requestId,
+            Pm4OverlayCacheData? cacheData,
+            (int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey,
+            double loadElapsedMs,
+            string statusMessage,
+            bool cancelled)
+        {
+            RequestId = requestId;
+            CacheData = cacheData;
+            SelectedObjectKey = selectedObjectKey;
+            LoadElapsedMs = loadElapsedMs;
+            StatusMessage = statusMessage;
+            Cancelled = cancelled;
+        }
+
+        public int RequestId { get; }
+        public Pm4OverlayCacheData? CacheData { get; }
+        public (int tileX, int tileY, uint ck24, int objectPart)? SelectedObjectKey { get; }
+        public double LoadElapsedMs { get; }
+        public string StatusMessage { get; }
+        public bool Cancelled { get; }
+    }
 }
 
 internal sealed class Pm4OverlayObject
@@ -6424,6 +6953,7 @@ internal sealed class Pm4OverlayObject
         uint dominantMdosIndex,
         float averageSurfaceHeight,
         Vector3 placementAnchor,
+        float baseRotationRadians,
         Pm4PlanarTransform planarTransform,
         Vector3 boundsMin,
         Vector3 boundsMax,
@@ -6446,6 +6976,7 @@ internal sealed class Pm4OverlayObject
             dominantMdosIndex,
             averageSurfaceHeight,
             placementAnchor,
+            baseRotationRadians,
             planarTransform,
             connectorKeys,
             boundsMin,
@@ -6470,6 +7001,7 @@ internal sealed class Pm4OverlayObject
         uint dominantMdosIndex,
         float averageSurfaceHeight,
         Vector3 placementAnchor,
+        float baseRotationRadians,
         Pm4PlanarTransform planarTransform,
         IReadOnlyList<Pm4ConnectorKey> connectorKeys)
         : this(
@@ -6489,6 +7021,7 @@ internal sealed class Pm4OverlayObject
             dominantMdosIndex,
             averageSurfaceHeight,
             placementAnchor,
+            baseRotationRadians,
             planarTransform,
             connectorKeys,
             default,
@@ -6514,6 +7047,7 @@ internal sealed class Pm4OverlayObject
         uint dominantMdosIndex,
         float averageSurfaceHeight,
         Vector3 placementAnchor,
+        float baseRotationRadians,
         Pm4PlanarTransform planarTransform,
         IReadOnlyList<Pm4ConnectorKey> connectorKeys,
         Vector3 cachedBoundsMin,
@@ -6549,7 +7083,8 @@ internal sealed class Pm4OverlayObject
 
         Center = (BoundsMin + BoundsMax) * 0.5f;
         PlacementAnchor = IsFiniteVector(placementAnchor) ? placementAnchor : Center;
-        BaseTransform = Matrix4x4.CreateTranslation(PlacementAnchor);
+        BaseRotationRadians = float.IsFinite(baseRotationRadians) ? baseRotationRadians : 0f;
+        BaseTransform = WorldScene.BuildPm4BaseTransform(PlacementAnchor, BaseRotationRadians);
         if (geometryIsLocalized)
         {
             Lines = lines;
@@ -6557,8 +7092,11 @@ internal sealed class Pm4OverlayObject
         }
         else
         {
-            Lines = LocalizeLines(lines, PlacementAnchor);
-            Triangles = LocalizeTriangles(triangles, PlacementAnchor);
+            if (!Matrix4x4.Invert(BaseTransform, out Matrix4x4 inverseBaseTransform))
+                inverseBaseTransform = Matrix4x4.CreateTranslation(-PlacementAnchor);
+
+            Lines = LocalizeLines(lines, inverseBaseTransform);
+            Triangles = LocalizeTriangles(triangles, inverseBaseTransform);
         }
     }
 
@@ -6585,26 +7123,32 @@ internal sealed class Pm4OverlayObject
     public Vector3 BoundsMax { get; }
     public Vector3 Center { get; }
     public Vector3 PlacementAnchor { get; }
+    public float BaseRotationRadians { get; }
 
-    private static List<Pm4LineSegment> LocalizeLines(List<Pm4LineSegment> lines, Vector3 center)
+    private static List<Pm4LineSegment> LocalizeLines(List<Pm4LineSegment> lines, in Matrix4x4 inverseBaseTransform)
     {
         var localized = new List<Pm4LineSegment>(lines.Count);
         for (int i = 0; i < lines.Count; i++)
         {
             Pm4LineSegment line = lines[i];
-            localized.Add(new Pm4LineSegment(line.From - center, line.To - center));
+            localized.Add(new Pm4LineSegment(
+                Vector3.Transform(line.From, inverseBaseTransform),
+                Vector3.Transform(line.To, inverseBaseTransform)));
         }
 
         return localized;
     }
 
-    private static List<Pm4Triangle> LocalizeTriangles(List<Pm4Triangle> triangles, Vector3 center)
+    private static List<Pm4Triangle> LocalizeTriangles(List<Pm4Triangle> triangles, in Matrix4x4 inverseBaseTransform)
     {
         var localized = new List<Pm4Triangle>(triangles.Count);
         for (int i = 0; i < triangles.Count; i++)
         {
             Pm4Triangle tri = triangles[i];
-            localized.Add(new Pm4Triangle(tri.A - center, tri.B - center, tri.C - center));
+            localized.Add(new Pm4Triangle(
+                Vector3.Transform(tri.A, inverseBaseTransform),
+                Vector3.Transform(tri.B, inverseBaseTransform),
+                Vector3.Transform(tri.C, inverseBaseTransform)));
         }
 
         return localized;
@@ -6759,6 +7303,16 @@ internal sealed record Pm4WmoCorrelationReport(
     string Pm4Status,
     Pm4WmoCorrelationSummary Summary,
     IReadOnlyList<Pm4WmoCorrelationPlacement> Placements);
+
+public readonly record struct Pm4OfflineObjExportSummary(
+    string OutputDirectory,
+    string ManifestPath,
+    int SourceFileCount,
+    int ExportedTileCount,
+    int ExportedObjectCount,
+    int ZeroObjectFileCount,
+    int DecodeFailedCount,
+    int ReadFailedCount);
 
 internal readonly struct Pm4LineSegment
 {

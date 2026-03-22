@@ -18,6 +18,7 @@ public class VlmTerrainManager : ISceneRenderer
     private readonly TerrainMeshBuilder _meshBuilder;
     private readonly TerrainRenderer _terrainRenderer;
     private readonly LiquidRenderer _liquidRenderer;
+    private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
     // Loaded tiles: (tileX, tileY) → list of chunk meshes
     private readonly Dictionary<(int, int), List<TerrainChunkMesh>> _loadedTiles = new();
@@ -49,6 +50,20 @@ public class VlmTerrainManager : ISceneRenderer
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName => _loader.MapName;
     public VlmProjectLoader Loader => _loader;
+    public bool IgnoreTerrainHolesGlobally
+    {
+        get => _ignoreTerrainHolesGlobally;
+        set
+        {
+            if (_ignoreTerrainHolesGlobally == value)
+                return;
+
+            _ignoreTerrainHolesGlobally = value;
+            RebuildLoadedTilesForHoleVisibility();
+        }
+    }
+
+    private bool _ignoreTerrainHolesGlobally;
 
     /// <summary>
     /// Try to get parsed tile data for a tile, loading from project data if needed.
@@ -77,6 +92,18 @@ public class VlmTerrainManager : ISceneRenderer
     /// </summary>
     public void ReplaceTileChunksAndRebuild(int tileX, int tileY, IReadOnlyList<TerrainChunkData> newChunks)
     {
+            var replacementChunks = newChunks.ToList();
+            if (replacementChunks.Count == 0)
+                return;
+
+            var meshes = new List<TerrainChunkMesh>(replacementChunks.Count);
+            foreach (var chunkData in replacementChunks)
+            {
+                var mesh = BuildChunkMesh(chunkData);
+                if (mesh != null)
+                    meshes.Add(mesh);
+            }
+
         var key = (tileX, tileY);
         if (_loadedTiles.TryGetValue(key, out var oldMeshes))
         {
@@ -87,20 +114,44 @@ public class VlmTerrainManager : ISceneRenderer
             _loadedTiles.Remove(key);
         }
 
-        var meshes = new List<TerrainChunkMesh>(newChunks.Count);
-        foreach (var chunkData in newChunks)
-        {
-            var mesh = _meshBuilder.BuildChunkMesh(chunkData);
-            if (mesh != null)
-                meshes.Add(mesh);
-        }
-
-        if (meshes.Count == 0)
-            return;
-
         _loadedTiles[key] = meshes;
         _terrainRenderer.AddChunks(meshes, _loader.TileTextures);
-        _liquidRenderer.AddChunks(newChunks);
+        _liquidRenderer.AddChunks(replacementChunks);
+    }
+
+    public bool IsIgnoringTerrainHolesForTile(int tileX, int tileY)
+        => _ignoreTerrainHolesGlobally || _ignoreTerrainHolesTiles.Contains((tileX, tileY));
+
+    public bool SetIgnoreTerrainHolesForTile(int tileX, int tileY, bool enabled)
+    {
+        bool changed = enabled
+            ? _ignoreTerrainHolesTiles.Add((tileX, tileY))
+            : _ignoreTerrainHolesTiles.Remove((tileX, tileY));
+
+        if (changed && !_ignoreTerrainHolesGlobally)
+            RebuildLoadedTileForHoleVisibility(tileX, tileY);
+
+        return changed;
+    }
+
+    private TerrainChunkMesh? BuildChunkMesh(TerrainChunkData chunkData)
+        => _meshBuilder.BuildChunkMesh(chunkData, IsIgnoringTerrainHolesForTile(chunkData.TileX, chunkData.TileY));
+
+    private void RebuildLoadedTilesForHoleVisibility()
+    {
+        foreach (var (tileX, tileY) in _loadedTiles.Keys.ToList())
+            RebuildLoadedTileForHoleVisibility(tileX, tileY);
+    }
+
+    private void RebuildLoadedTileForHoleVisibility(int tileX, int tileY)
+    {
+        if (!_loadedTiles.ContainsKey((tileX, tileY)))
+            return;
+
+        if (!TryGetTileLoadResult(tileX, tileY, out var result))
+            return;
+
+        ReplaceTileChunksAndRebuild(tileX, tileY, result.Chunks);
     }
 
     public VlmTerrainManager(GL gl, string projectRoot)
@@ -208,7 +259,7 @@ public class VlmTerrainManager : ISceneRenderer
             var meshes = new List<TerrainChunkMesh>();
             foreach (var chunkData in result.Chunks)
             {
-                var mesh = _meshBuilder.BuildChunkMesh(chunkData);
+                var mesh = BuildChunkMesh(chunkData);
                 if (mesh != null)
                     meshes.Add(mesh);
             }

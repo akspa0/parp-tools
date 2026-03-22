@@ -1,5 +1,27 @@
 # Progress
 
+### Mar 22, 2026 - Viewer Debug Workflow Follow-Up: PM4 OBJ Export + Minimap Guardrails + Terrain Hole Override
+
+- Added a viewer-side offline PM4 OBJ export path so PM4 inspection no longer depends only on the live overlay's currently loaded subset.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- now exports per-tile OBJ, per-object OBJ, and `pm4_obj_manifest.json` from direct PM4 file scans against the active data source
+- `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+	- now exposes `Export PM4 OBJ Set` in the PM4 utilities UI
+- `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`, `src/MdxViewer/Rendering/MinimapRenderer.cs`
+	- minimap teleport now requires triple-clicking the same tile within the confirmation window
+	- minimap drag-vs-click discrimination now uses full drag-origin distance
+	- minimap zoom/pan/window visibility now persist in viewer settings
+	- decoded minimap tiles now cache on disk under `output/cache/minimap/<cache-segment>`
+- `src/MdxViewer/Terrain/TerrainMeshBuilder.cs`, `src/MdxViewer/Terrain/TerrainManager.cs`, `src/MdxViewer/Terrain/VlmTerrainManager.cs`, `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- added viewer-side terrain hole override controls
+	- loaded terrain tiles can now be rebuilt with `HoleMask` ignored either globally or for the current camera tile
+	- this does not edit ADT data on disk; it is a mesh rebuild / debug visibility feature only
+- Validation limits:
+	- file diagnostics were clean on the edited viewer files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on PM4 OBJ parity, minimap UX/cache behavior, or terrain-hole rebuild behavior
+
 ### Mar 21, 2026 - Standalone PM4 Research Library
 
 - Added `src/Pm4Research.Core` as a fresh-start PM4 reading library independent from the active viewer reconstruction path.

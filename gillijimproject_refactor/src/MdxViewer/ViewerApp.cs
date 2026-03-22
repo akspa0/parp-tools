@@ -85,6 +85,10 @@ public partial class ViewerApp : IDisposable
     private Vector2 _minimapPanOffset = Vector2.Zero; // Pan offset for click-and-drag
     private bool _minimapDragging = false;
     private Vector2 _minimapDragStart = Vector2.Zero;
+    private Vector2 _minimapDragOrigin = Vector2.Zero;
+    private (int tileX, int tileY)? _pendingMinimapTeleportTile;
+    private int _pendingMinimapTeleportClickCount;
+    private DateTime _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
     private Rendering.LoadingScreen? _loadingScreen;
 
     // Output directories (next to the executable)
@@ -95,6 +99,9 @@ public partial class ViewerApp : IDisposable
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
     private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
+    private const int MinimapTeleportConfirmClicks = 3;
+    private const float MinimapClickMovementThresholdPixels = 3f;
+    private static readonly TimeSpan MinimapTeleportConfirmWindow = TimeSpan.FromSeconds(3);
 
     // File browser state
     private List<string> _filteredFiles = new();
@@ -4469,12 +4476,14 @@ void main() {
         if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
             _worldScene.ShowPm4ObjectCentroids = showPm4Centroids;
 
-        if (_worldScene.Pm4LoadAttempted)
+        if (_worldScene.IsPm4Loading)
+            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Status}");
+        else if (_worldScene.Pm4LoadAttempted)
             ImGui.TextDisabled($"PM4: {_worldScene.Pm4LoadedFiles}/{_worldScene.Pm4TotalFiles} files, {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} objects, {_worldScene.Pm4VisibleLineCount}/{_worldScene.Pm4LineCount} lines, {_worldScene.Pm4VisibleTriangleCount}/{_worldScene.Pm4TriangleCount} tris, {_worldScene.Pm4VisiblePositionRefCount}/{_worldScene.Pm4PositionRefCount} refs");
         else
             ImGui.TextDisabled("PM4: toggle overlay to lazy-load navmesh debug lines");
-        if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
-            ImGui.SetTooltip(_worldScene.Pm4Status);
+        if (_worldScene.Pm4LoadAttempted)
+            ImGui.TextDisabled($"PM4 status: {_worldScene.Pm4Status}");
         ImGui.TextDisabled($"PM4 Align: T=({_worldScene.Pm4OverlayTranslation.X:F2}, {_worldScene.Pm4OverlayTranslation.Y:F2}, {_worldScene.Pm4OverlayTranslation.Z:F2}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F2}, {_worldScene.Pm4OverlayRotationDegrees.Y:F2}, {_worldScene.Pm4OverlayRotationDegrees.Z:F2})° S=({_worldScene.Pm4OverlayScale.X:F3}, {_worldScene.Pm4OverlayScale.Y:F3}, {_worldScene.Pm4OverlayScale.Z:F3})");
 
         ImGui.Separator();
@@ -5295,7 +5304,8 @@ void main() {
                 }
 
                 _minimapRenderer?.Dispose();
-                _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index);
+                string minimapCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
+                _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index, Path.Combine(CacheDir, "minimap", minimapCacheSegment));
 
                 string? dbdDir = ResolveDbdDefinitionsDir();
 
@@ -5509,15 +5519,19 @@ void main() {
             return;
 
         string cacheIdentity = BuildWdlPreviewCacheIdentity();
-        string cacheSegment = string.IsNullOrWhiteSpace(cacheIdentity)
-            ? "default"
-            : Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(cacheIdentity))).ToLowerInvariant();
-        if (string.IsNullOrWhiteSpace(cacheSegment))
-            cacheSegment = "default";
+        string cacheSegment = BuildCacheSegment(cacheIdentity);
 
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewCacheService = new WdlPreviewCacheService(_dataSource, Path.Combine(CacheDir, "wdl-preview", cacheSegment));
         _wdlPreviewWarmupStatus = string.Empty;
+    }
+
+    private static string BuildCacheSegment(string cacheIdentity)
+    {
+        string cacheSegment = string.IsNullOrWhiteSpace(cacheIdentity)
+            ? "default"
+            : Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(cacheIdentity))).ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(cacheSegment) ? "default" : cacheSegment;
     }
 
     private string BuildWdlPreviewCacheIdentity()
@@ -7424,6 +7438,13 @@ void main() {
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
             _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
+            _showMinimapWindow = settings.ShowMinimapWindow;
+            _minimapZoom = float.IsFinite(settings.MinimapZoom)
+                ? Math.Clamp(settings.MinimapZoom, 1f, 32f)
+                : 4f;
+            _minimapPanOffset = new Vector2(
+                float.IsFinite(settings.MinimapPanOffsetX) ? settings.MinimapPanOffsetX : 0f,
+                float.IsFinite(settings.MinimapPanOffsetY) ? settings.MinimapPanOffsetY : 0f);
             _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
             _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
             _pm4SavedOverlayScale = new Vector3(settings.Pm4ScaleX, settings.Pm4ScaleY, settings.Pm4ScaleZ);
@@ -7471,6 +7492,10 @@ void main() {
                     ? _clientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1)].BuildVersion
                     : null,
                 KnownGoodClientPaths = _knownGoodClientPaths,
+                ShowMinimapWindow = _showMinimapWindow,
+                MinimapZoom = _minimapZoom,
+                MinimapPanOffsetX = _minimapPanOffset.X,
+                MinimapPanOffsetY = _minimapPanOffset.Y,
                 Pm4TranslationX = _pm4SavedOverlayTranslation.X,
                 Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
                 Pm4TranslationZ = _pm4SavedOverlayTranslation.Z,
@@ -7582,6 +7607,10 @@ void main() {
         public string? LastLooseOverlayPath { get; set; }
         public string? LastSelectedBuildVersion { get; set; }
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
+        public bool ShowMinimapWindow { get; set; }
+        public float MinimapZoom { get; set; } = 4f;
+        public float MinimapPanOffsetX { get; set; }
+        public float MinimapPanOffsetY { get; set; }
         public float Pm4TranslationX { get; set; }
         public float Pm4TranslationY { get; set; }
         public float Pm4TranslationZ { get; set; }

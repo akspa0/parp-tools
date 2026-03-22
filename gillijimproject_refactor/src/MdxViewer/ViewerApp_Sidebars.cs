@@ -41,6 +41,22 @@ public partial class ViewerApp
                 if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
 
                 ImGui.SameLine();
+                bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+                    ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+                    ?? false);
+                if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
+                {
+                    if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+                    {
+                        _statusMessage = terrainHolesEnabled
+                            ? "Terrain hole masking enabled."
+                            : "Terrain hole masking disabled.";
+                    }
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle terrain hole masking on or off.");
+
+                ImGui.SameLine();
                 ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
                 ImGui.SameLine();
 
@@ -101,6 +117,11 @@ public partial class ViewerApp
                     bool showPm4 = _worldScene.ShowPm4Overlay;
                     if (ImGui.Checkbox("PM4", ref showPm4))
                         _worldScene.ShowPm4Overlay = showPm4;
+                    if (_worldScene.IsPm4Loading)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
+                    }
                     if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
                         ImGui.SetTooltip(_worldScene.Pm4Status);
                 }
@@ -634,6 +655,25 @@ public partial class ViewerApp
             _showChunkClipboardWindow = true;
         ImGui.SameLine();
         ImGui.TextDisabled("Chunk copy/paste now lives in its own dockable panel.");
+    }
+
+    private bool SetIgnoreTerrainHolesGlobally(bool enabled)
+    {
+        bool changed = false;
+
+        if (_terrainManager != null && _terrainManager.IgnoreTerrainHolesGlobally != enabled)
+        {
+            _terrainManager.IgnoreTerrainHolesGlobally = enabled;
+            changed = true;
+        }
+
+        if (_vlmTerrainManager != null && _vlmTerrainManager.IgnoreTerrainHolesGlobally != enabled)
+        {
+            _vlmTerrainManager.IgnoreTerrainHolesGlobally = enabled;
+            changed = true;
+        }
+
+        return changed;
     }
 
     private void DrawChunkClipboardWindow()

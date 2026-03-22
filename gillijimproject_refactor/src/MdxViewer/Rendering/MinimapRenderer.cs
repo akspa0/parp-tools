@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Security.Cryptography;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using SereniaBLPLib;
@@ -16,13 +17,16 @@ public class MinimapRenderer : IDisposable
     private readonly GL _gl;
     private readonly IDataSource _dataSource;
     private readonly Md5TranslateIndex? _md5Index;
+    private readonly string _cacheRoot;
     private readonly Dictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
 
-    public MinimapRenderer(GL gl, IDataSource dataSource, Md5TranslateIndex? md5Index)
+    public MinimapRenderer(GL gl, IDataSource dataSource, Md5TranslateIndex? md5Index, string cacheRoot)
     {
         _gl = gl;
         _dataSource = dataSource;
         _md5Index = md5Index;
+        _cacheRoot = cacheRoot;
+        Directory.CreateDirectory(_cacheRoot);
     }
 
     /// <summary>
@@ -43,6 +47,9 @@ public class MinimapRenderer : IDisposable
 
     private unsafe uint LoadTile(string plainPath)
     {
+        if (TryLoadCachedBitmap(plainPath, out DecodedMinimapTile? cachedTile) && cachedTile != null)
+            return UploadTexture(cachedTile);
+
         byte[]? data = null;
 
         // 1. Try MD5 translation if available
@@ -76,57 +83,117 @@ public class MinimapRenderer : IDisposable
             using var ms = new MemoryStream(data);
             using var blp = new BlpFile(ms);
             var bmp = blp.GetBitmap(0);
-
-            int w = bmp.Width, h = bmp.Height;
-            var pixels = new byte[w * h * 4];
-            var rect = new System.Drawing.Rectangle(0, 0, w, h);
-            var bmpData = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            
-            try
-            {
-                var srcBytes = new byte[bmpData.Stride * h];
-                System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, srcBytes, 0, srcBytes.Length);
-
-                // BGRA → RGBA (no vertical flip — ImGui uses top-left origin matching bitmap)
-                for (int y = 0; y < h; y++)
-                {
-                    for (int x = 0; x < w; x++)
-                    {
-                        int srcIdx = y * bmpData.Stride + x * 4;
-                        int dstIdx = (y * w + x) * 4;
-                        pixels[dstIdx + 0] = srcBytes[srcIdx + 2]; // R
-                        pixels[dstIdx + 1] = srcBytes[srcIdx + 1]; // G
-                        pixels[dstIdx + 2] = srcBytes[srcIdx + 0]; // B
-                        pixels[dstIdx + 3] = srcBytes[srcIdx + 3]; // A
-                    }
-                }
-            }
-            finally
-            {
-                bmp.UnlockBits(bmpData);
-            }
+            DecodedMinimapTile decoded = ConvertBitmap(bmp);
+            TrySaveCachedBitmap(plainPath, bmp);
             bmp.Dispose();
-
-            uint tex = _gl.GenTexture();
-            _gl.BindTexture(TextureTarget.Texture2D, tex);
-            fixed (byte* ptr = pixels)
-                _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
-                    (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
-            _gl.BindTexture(TextureTarget.Texture2D, 0);
-
-            return tex;
+            return UploadTexture(decoded);
         }
         catch (Exception ex)
         {
             ViewerLog.Trace($"[MinimapRenderer] Failed to load tile {plainPath}: {ex.Message}");
             return 0;
         }
+    }
+
+    private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels);
+
+    private static DecodedMinimapTile ConvertBitmap(System.Drawing.Bitmap bmp)
+    {
+        int width = bmp.Width;
+        int height = bmp.Height;
+        var pixels = new byte[width * height * 4];
+        var rect = new System.Drawing.Rectangle(0, 0, width, height);
+        var bmpData = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+        try
+        {
+            var srcBytes = new byte[bmpData.Stride * height];
+            System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, srcBytes, 0, srcBytes.Length);
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int srcIdx = y * bmpData.Stride + x * 4;
+                    int dstIdx = (y * width + x) * 4;
+                    pixels[dstIdx + 0] = srcBytes[srcIdx + 2];
+                    pixels[dstIdx + 1] = srcBytes[srcIdx + 1];
+                    pixels[dstIdx + 2] = srcBytes[srcIdx + 0];
+                    pixels[dstIdx + 3] = srcBytes[srcIdx + 3];
+                }
+            }
+        }
+        finally
+        {
+            bmp.UnlockBits(bmpData);
+        }
+
+        return new DecodedMinimapTile(width, height, pixels);
+    }
+
+    private unsafe uint UploadTexture(DecodedMinimapTile tile)
+    {
+        uint tex = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, tex);
+        fixed (byte* ptr = tile.Pixels)
+            _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+                (uint)tile.Width, (uint)tile.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        return tex;
+    }
+
+    private bool TryLoadCachedBitmap(string plainPath, out DecodedMinimapTile? tile)
+    {
+        tile = null;
+        string cachePath = GetCachePath(plainPath);
+        if (!File.Exists(cachePath))
+            return false;
+
+        try
+        {
+            using var bmp = new System.Drawing.Bitmap(cachePath);
+            tile = ConvertBitmap(bmp);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[MinimapRenderer] Failed to load cached tile {cachePath}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void TrySaveCachedBitmap(string plainPath, System.Drawing.Bitmap bmp)
+    {
+        string cachePath = GetCachePath(plainPath);
+        string? cacheDirectory = Path.GetDirectoryName(cachePath);
+        if (!string.IsNullOrEmpty(cacheDirectory))
+            Directory.CreateDirectory(cacheDirectory);
+
+        string tempPath = cachePath + ".tmp";
+        try
+        {
+            bmp.Save(tempPath, System.Drawing.Imaging.ImageFormat.Png);
+            File.Move(tempPath, cachePath, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[MinimapRenderer] Failed to save cached tile {cachePath}: {ex.Message}");
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
+    }
+
+    private string GetCachePath(string plainPath)
+    {
+        string normalized = plainPath.Replace('\\', '/').ToLowerInvariant();
+        string hash = Convert.ToHexString(SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
+        return Path.Combine(_cacheRoot, hash + ".png");
     }
 
     public void Dispose()

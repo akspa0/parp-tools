@@ -109,6 +109,9 @@ public partial class ViewerApp
             if (ImGui.Button("Dump PM4 Objects JSON"))
                 ExportPm4ObjectsJson();
             ImGui.SameLine();
+            if (ImGui.Button("Export PM4 OBJ Set"))
+                ExportPm4ObjectsObjSet();
+            ImGui.SameLine();
             if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
                 ExportPm4WmoCorrelationJson();
             ImGui.SameLine();
@@ -361,6 +364,9 @@ public partial class ViewerApp
 
         if (ImGui.Button("Dump PM4 Objects JSON"))
             ExportPm4ObjectsJson();
+        ImGui.SameLine();
+        if (ImGui.Button("Export PM4 OBJ Set"))
+            ExportPm4ObjectsObjSet();
         ImGui.SameLine();
         if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
             ExportPm4WmoCorrelationJson();
@@ -640,6 +646,33 @@ public partial class ViewerApp
         {
             _statusMessage = $"PM4 JSON export failed: {ex.Message}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] JSON export failed: {ex}");
+        }
+    }
+
+    private void ExportPm4ObjectsObjSet()
+    {
+        if (_worldScene == null)
+            return;
+
+        Directory.CreateDirectory(ExportDir);
+        string? picked = ShowFolderDialogSTA(
+            "Choose a folder for PM4 OBJ export",
+            ExportDir,
+            showNewFolderButton: true);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            Pm4OfflineObjExportSummary summary = _worldScene.ExportPm4ObjectsAsObjDirectory(picked);
+            _statusMessage =
+                $"Exported PM4 OBJ set: {summary.ExportedObjectCount} objects across {summary.ExportedTileCount} tiles to {summary.OutputDirectory} (manifest: {summary.ManifestPath}).";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4 OBJ export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Export] OBJ export failed: {ex}");
         }
     }
 

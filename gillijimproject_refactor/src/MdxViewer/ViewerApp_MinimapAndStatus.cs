@@ -10,6 +10,98 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
+    {
+        ImGui.SetCursorScreenPos(cursorPos);
+        ImGui.InvisibleButton(interactionId, new Vector2(mapSize, mapSize));
+        bool isHovered = ImGui.IsItemHovered();
+        bool isActive = ImGui.IsItemActive();
+        Vector2 mousePos = ImGui.GetMousePos();
+
+        if (isHovered || isActive)
+        {
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _minimapDragging = true;
+                _minimapDragStart = mousePos;
+                _minimapDragOrigin = mousePos;
+            }
+            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 delta = mousePos - _minimapDragStart;
+                if (delta.LengthSquared() > 0.01f)
+                {
+                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
+                    _minimapDragStart = mousePos;
+                }
+            }
+            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
+            {
+                Vector2 totalDelta = mousePos - _minimapDragOrigin;
+                if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
+                    && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTileX, out float clickTileY))
+                {
+                    RegisterMinimapTeleportClick(clickTileX, clickTileY);
+                }
+
+                _minimapDragging = false;
+            }
+        }
+        else if (_minimapDragging)
+        {
+            _minimapDragging = false;
+        }
+    }
+
+    private static bool TryGetMinimapClickTarget(Vector2 mousePos, Vector2 cursorPos, float cellSize, float viewMinTx, float viewMinTy, out float clickTileX, out float clickTileY)
+    {
+        clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
+        clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
+        return clickTileX >= 0f && clickTileX < 64f && clickTileY >= 0f && clickTileY < 64f;
+    }
+
+    private void RegisterMinimapTeleportClick(float clickTileX, float clickTileY)
+    {
+        int tileX = (int)MathF.Floor(clickTileX);
+        int tileY = (int)MathF.Floor(clickTileY);
+        DateTime now = DateTime.UtcNow;
+
+        if (!_pendingMinimapTeleportTile.HasValue
+            || _pendingMinimapTeleportTile.Value.tileX != tileX
+            || _pendingMinimapTeleportTile.Value.tileY != tileY
+            || now - _pendingMinimapTeleportLastClickUtc > MinimapTeleportConfirmWindow)
+        {
+            _pendingMinimapTeleportTile = (tileX, tileY);
+            _pendingMinimapTeleportClickCount = 1;
+            _pendingMinimapTeleportLastClickUtc = now;
+            _statusMessage = $"Minimap teleport armed for tile ({tileX},{tileY}) 1/{MinimapTeleportConfirmClicks}. Click the same tile {MinimapTeleportConfirmClicks - 1} more times to teleport.";
+            return;
+        }
+
+        _pendingMinimapTeleportClickCount++;
+        _pendingMinimapTeleportLastClickUtc = now;
+
+        if (_pendingMinimapTeleportClickCount < MinimapTeleportConfirmClicks)
+        {
+            int remainingClicks = MinimapTeleportConfirmClicks - _pendingMinimapTeleportClickCount;
+            _statusMessage = $"Minimap teleport still armed for tile ({tileX},{tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}. Click {remainingClicks} more time{(remainingClicks == 1 ? string.Empty : "s")} to teleport.";
+            return;
+        }
+
+        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
+        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+        _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
+        _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
+        ClearPendingMinimapTeleport();
+    }
+
+    private void ClearPendingMinimapTeleport()
+    {
+        _pendingMinimapTeleportTile = null;
+        _pendingMinimapTeleportClickCount = 0;
+        _pendingMinimapTeleportLastClickUtc = DateTime.MinValue;
+    }
+
     private void DrawStatusBar()
     {
         var io = ImGui.GetIO();
@@ -121,50 +213,7 @@ public partial class ViewerApp
             camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
             out float viewMinTx, out float viewMinTy, out float cellSize);
 
-        ImGui.SetCursorScreenPos(cursorPos);
-        ImGui.InvisibleButton("##minimapInteraction", new Vector2(mapSize, mapSize));
-        bool isHovered = ImGui.IsItemHovered();
-        bool isActive = ImGui.IsItemActive();
-
-        var mousePos = ImGui.GetMousePos();
-
-        if (isHovered || isActive)
-        {
-            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-            {
-                _minimapDragging = true;
-                _minimapDragStart = mousePos;
-            }
-            else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 delta = mousePos - _minimapDragStart;
-                if (delta.LengthSquared() > 0.01f)
-                {
-                    _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
-                    _minimapDragStart = mousePos;
-                }
-            }
-            else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
-            {
-                Vector2 delta = mousePos - _minimapDragStart;
-                if (delta.Length() <= 3f)
-                {
-                    float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
-                    float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
-                    if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
-                    {
-                        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
-                        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
-                        _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
-                    }
-                }
-                _minimapDragging = false;
-            }
-        }
-        else if (_minimapDragging)
-        {
-            _minimapDragging = false;
-        }
+        HandleMinimapInteraction("##minimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
 
         ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
 
@@ -227,57 +276,14 @@ public partial class ViewerApp
                 camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
                 out float viewMinTx, out float viewMinTy, out float cellSize);
 
-            ImGui.SetCursorPos(new Vector2(padding, topPadding));
-            ImGui.InvisibleButton("##fullscreenMinimapInteraction", new Vector2(mapSize, mapSize));
-            bool isHovered = ImGui.IsItemHovered();
-            bool isActive = ImGui.IsItemActive();
-
-            var mousePos = ImGui.GetMousePos();
-
-            if (isHovered || isActive)
-            {
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                {
-                    _minimapDragging = true;
-                    _minimapDragStart = mousePos;
-                }
-                else if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && _minimapDragging)
-                {
-                    Vector2 delta = mousePos - _minimapDragStart;
-                    if (delta.LengthSquared() > 0.01f)
-                    {
-                        _minimapPanOffset -= new Vector2(delta.Y / cellSize, delta.X / cellSize);
-                        _minimapDragStart = mousePos;
-                    }
-                }
-                else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left) && _minimapDragging)
-                {
-                    Vector2 delta = mousePos - _minimapDragStart;
-                    if (delta.Length() <= 3f)
-                    {
-                        float clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
-                        float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
-                        if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
-                        {
-                            float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
-                            float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
-                            _camera.Position = new System.Numerics.Vector3(worldX, worldY, _camera.Position.Z);
-                        }
-                    }
-                    _minimapDragging = false;
-                }
-            }
-            else if (_minimapDragging)
-            {
-                _minimapDragging = false;
-            }
+            HandleMinimapInteraction("##fullscreenMinimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
 
             ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
             int ctX = (int)MathF.Floor(camTileX);
             int ctY = (int)MathF.Floor(camTileY);
             ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), $"  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click same tile to teleport");
 
             if (_minimapPanOffset != Vector2.Zero)
             {

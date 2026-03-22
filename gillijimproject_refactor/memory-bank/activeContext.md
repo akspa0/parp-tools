@@ -9,6 +9,24 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - .github metadata restored from main and committed: 845748b
 - .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
 
+### Viewer Debug/Workflow Follow-Up (Mar 22)
+
+- Latest viewer-side work moved away from treating PM4 runtime streaming as the only inspection path.
+- Current additions in the active tree:
+	- PM4 offline OBJ export from `src/MdxViewer/Terrain/WorldScene.cs`, surfaced through `ViewerApp_Pm4Utilities.cs`, so per-tile/per-object PM4 geometry can be compared outside the live overlay window.
+	- minimap interaction/caching follow-up in `ViewerApp_MinimapAndStatus.cs`, `ViewerApp.cs`, and `Rendering/MinimapRenderer.cs`:
+		- teleport now requires triple-clicking the same tile instead of a single short click
+		- minimap zoom/pan/window state now persist in viewer settings
+		- decoded minimap tiles now cache on disk under `output/cache/minimap/<cache-segment>`
+	- terrain-hole debug override in `TerrainMeshBuilder`, `TerrainManager`, `VlmTerrainManager`, and `ViewerApp_Sidebars.cs`:
+		- viewer can ignore terrain hole masks globally or on the current camera tile by rebuilding loaded chunk meshes only
+		- source ADT hole flags are unchanged; this is viewer-side inspection only
+- Validation status:
+	- file diagnostics were clean on the edited viewer files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` PASSED on Mar 22, 2026 after these viewer-side follow-ups were in the active tree
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on PM4 OBJ correctness, minimap feel/cache benefit, or terrain-hole rebuild behavior while streaming
+
 ### Standalone PM4 Research Library (Mar 21)
 
 - Added a new isolated project at `src/Pm4Research.Core` for fresh PM4 format work outside the current viewer/converter reconstruction path.
