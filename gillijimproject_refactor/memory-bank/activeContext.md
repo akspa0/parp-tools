@@ -11,16 +11,21 @@ Working branch is now reset in the main tree, not only in side worktrees.
 
 ### Documentation Refresh + Render Quality Follow-Up (Mar 23)
 
-- Repo-level docs were stale relative to the current recovery branch and have now been refreshed.
-- `README.md` and `src/MdxViewer/README.md` now describe the current viewer workflow instead of the older simplified startup story.
-- Important doc corrections now recorded explicitly:
-	- MPQ/client loading is an explicit build-selection workflow, not a vague path auto-detect story
-	- the viewer is now documented as a combined world viewer, PM4 inspection surface, terrain debugger, and export front end
-	- dock panels, minimap guardrails, PM4 correlation/export tools, terrain-hole debug controls, and render-quality filtering are now called out in repo docs
-	- current accepted render-quality direction on this branch is texture filtering first; lack of MSAA in some GL contexts is acceptable and does not block the feature slice
+- Repo-level docs were refreshed, but the first pass still contained bad assumptions.
+- The user then rewrote `src/MdxViewer/README.md` to be more grounded and truthful.
+- Current documentation/handoff rule:
+	- treat the user-corrected viewer README as the authoritative public summary for support and usage claims
+	- do not reintroduce speculative platform restrictions or inflated support statements without direct evidence
+	- do not write branch-local language into README text intended for eventual `main`
+- Important current README claims to preserve in future sessions:
+	- support headline: `0.5.3` through `4.0.0.11927`
+	- later `4.0.x` ADT support exists
+	- later split-ADT support through `4.3.4` exists but remains explicitly untested
+	- Alpha-Core SQL world NPC/gameobject support is relevant to the README and should not be dropped casually
+	- asset-catalog screenshot automation exists already; broader UI/menu showcase capture is still future work
 - Validation status:
-	- docs were refreshed after the Mar 23 viewer build had already passed
-	- this documentation update itself adds no runtime validation and should not be read as new visual signoff
+	- docs were updated after the Mar 23 viewer build had already passed
+	- the documentation update itself adds no runtime validation and should not be read as new visual signoff
 
 ### Viewer Debug/Workflow Follow-Up (Mar 22)
 

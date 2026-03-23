@@ -47,10 +47,15 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - GIF/WebM capture, `.LIT` decode work, and guaranteed object AA via an explicitly multisampled swapchain are still separate follow-up seams
    - the current branch direction does not require explicit MSAA follow-up right now; filtering is already considered the worthwhile practical improvement when the GL context lacks sample buffers
 - Documentation follow-up on the same date:
-   - repo docs and viewer docs were refreshed so they describe the actual current workflow instead of the older simplified launch/feature story
-   - branch-specific wording was reduced so the docs read correctly when merged to main
-   - support language now calls out the documented range `0.5.3` through `4.0.0.11927`, with later `4.0.x` and untested paths through `4.3.4` described as broader but less validated support
-   - docs now mention that asset-catalog export already has automated multi-angle screenshot capture, while broader UI/menu showcase capture remains a follow-up idea
+   - the user rewrote `src/MdxViewer/README.md` to be more grounded/truthful after the initial doc pass overstated or guessed at some support/platform details
+   - treat the current viewer README as the authoritative published summary for support claims unless newer runtime evidence contradicts it
+   - important current README framing to preserve in future edits:
+      - support headline: `0.5.3` through `4.0.0.11927`
+      - later `4.0.x` ADT support exists
+      - later split-ADT support through `4.3.4` exists but remains explicitly untested
+      - do not reintroduce Windows-x64-only wording for repo/build claims
+      - do not add branch-specific language to published README text
+      - asset-catalog screenshot automation exists already, but UI/menu showcase capture is still only a follow-up idea
 
 - PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
 - Current behavior:

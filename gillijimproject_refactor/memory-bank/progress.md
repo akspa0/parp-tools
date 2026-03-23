@@ -2,12 +2,12 @@
 
 ### Mar 23, 2026 - Viewer Docs Refresh + Render Quality Follow-Up
 
-- Refreshed stale repo docs in `README.md` and `src/MdxViewer/README.md` so they match the current recovery-branch viewer instead of the older standalone-viewer-centric workflow.
-- Documented the current explicit base-client/build-selection flow, saved known-good base workflow, loose-overlay attach path, dockable UI, PM4 utilities, minimap guardrails, terrain-hole debug controls, and render-quality filtering.
-- Recorded the current practical render-quality boundary clearly:
-	- texture filtering is landed and useful
-	- object MSAA depends on the active GL context exposing sample buffers
-	- lack of MSAA in the current tested context is acceptable and does not block this slice
+- Initial doc refresh was followed by a user rewrite of `src/MdxViewer/README.md` to remove bad assumptions and make the support/workflow description more grounded.
+- Preserve that correction for future handoff:
+	- do not overstate platform restrictions
+	- do not overstate supported versions beyond the user-corrected README
+	- do not write branch-local language into docs intended for eventual `main`
+	- keep the render-quality statement narrow: texture filtering is the landed win; MSAA availability is context-dependent and not required for this slice
 - Validation limits:
 	- the active viewer solution had already built successfully on Mar 23 before the doc refresh
 	- no automated tests were added or run for the documentation update
