@@ -11,7 +11,7 @@ MdxViewer is the active viewer/debugging application in this repo. It is no long
 ## Supported Data Files
 
 - WMOv14/v16/v17 Reading and conversion support (0.5.3-4.0.0.11927)
-- MDX/M2 reading and conversion support
+- MDX/M2 reading (Partial conversion support)
 - Alpha WDT terrain (0.5.3-0.5.5)
 - Retail ADT terrain (ADTv18)
   - Support for MCLQ and MH2O chunk types
@@ -74,14 +74,11 @@ Use `File > Open File...` or pass a file path on launch.
 ### World and terrain viewing
 
 - Alpha monolithic WDT terrain
-- 0.5.3 through 4.0.0.11927 era world map support with MPQ data sources or lo
-- Cataclysm `4.0.0.11927` era terrain support
-- later `4.0.x` ADT handling in the active terrain path
-- untested later-era split-ADT support paths up through `4.3.4`
+- 0.5.3 through 4.0.0.11927 era world map support with MPQ data sources or loose map folders
 - WMO-only world maps
 - AOI terrain streaming
 - minimap tile rendering and cache reuse
-- area names, POIs, taxi overlays, and zone lighting from DBC data
+- area names, POIs, taxi overlays (nodes and routes!), AlphaWDT <-> 3.3.5 ADT converter and lots more
 
 ### PM4 inspection and development-map workflows
 
