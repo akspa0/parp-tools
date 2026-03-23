@@ -30,6 +30,25 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the Mar 23 render-order + transparent-only fallback follow-up
    - no automated tests were added or run
 
+### Render Quality Controls Slice (Mar 23)
+
+- `ViewerApp` now exposes a persistent `Render Quality` window from the `View` menu.
+- Current landed scope:
+   - persistent texture filtering mode (`Nearest`, `Bilinear`, `Trilinear`)
+   - runtime multisample toggle only when the current GL window actually provides multisample buffers
+   - live sampler-state refresh for already loaded standalone/world renderers instead of applying only to future asset loads
+- Active renderer coverage for the live sampler refresh:
+   - `ModelRenderer`
+   - `WmoRenderer` including cached doodad renderers
+   - `TerrainRenderer`
+   - world-scene asset caches through `WorldAssetManager`
+- Important boundary:
+   - this is sampler-quality control, not a full post-processing stack
+   - GIF/WebM capture, `.LIT` decode work, and guaranteed object AA via an explicitly multisampled swapchain are still separate follow-up seams
+   - the current branch direction does not require explicit MSAA follow-up right now; filtering is already considered the worthwhile practical improvement when the GL context lacks sample buffers
+- Documentation follow-up on the same date:
+   - repo docs and viewer docs were refreshed so they describe the actual current workflow instead of the older simplified launch/feature story
+
 - PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
 - Current behavior:
    - the loader still computes PM4 camera-window/radius metrics for diagnostics, but candidate selection is no longer restricted by camera position

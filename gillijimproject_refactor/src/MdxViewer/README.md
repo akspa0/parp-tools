@@ -1,152 +1,198 @@
 # MdxViewer — WoW World Viewer
 
-A high-performance .NET 9 / OpenGL 3.3 world viewer for **World of Warcraft Alpha 0.5.3**, **0.6.0**, and **Lich King 3.3.5** game data. Renders terrain, WMO world objects, MDX/M2 models, liquids, and DBC-driven overlays with high fidelity.
+MdxViewer is the active viewer/debugging application in this repo. It is no longer just a standalone MDX/WMO viewer. On the current recovery branch it acts as a combined world viewer, PM4 inspection surface, terrain debugger, asset browser, and export front end.
 
-## Key Features
+## Runtime and build requirements
 
-### Terrain & World
-- **Alpha 0.5.3 WDT** — Monolithic WDT with 256 MCNK chunks per tile.
-- **0.6.0 Split ADTs** — Per-tile ADT files with reversed FourCC, MCNK header offsets, packed MCLQ instances.
-- **0.6.0 WMO-Only Maps** — Instance dungeons/battlegrounds via WDT-level MWMO+MODF.
-- **3.3.5 Split ADTs** — Standard root/obj/tex ADT files from MPQ (partial — loading freeze under investigation).
-- **AOI Streaming** — 9×9 tile area-of-interest with directional lookahead, persistent tile cache, and throttled MPQ reads.
-- **MCSH Shadows** — 64×64 shadow bitmasks applied across all terrain layers.
+- .NET 10 SDK
+- Windows x64
+- OpenGL 3.3 capable GPU/driver
 
-### Liquids
-- **MCLQ** (0.5.3/0.6.0) — Per-vertex sloped heights for waterfalls, absolute world Z, packed multi-instance format.
-- **MH2O** (3.3.5) — Per-tile liquid with sub-rect heightmaps and visibility masks.
-- **MLIQ** (WMO) — WMO group liquids with `matId`-based type detection (Water, Ocean, Magma, Slime).
+## Build and run
 
-### WMO Rendering (v14, v16 & v17)
-- **4-Pass Transparency** — Opaque → Doodads → Liquids → Transparent.
-- **100% Doodad Load Rate** — Case-insensitive MPQ search with `.mdx`/`.mdl` extension swapping.
-- **Doodad Culling** — Distance (500u) + cap (64) + nearest-first sort for performance.
-- **Doodad Sets** — Full support for switching between internal WMO doodad configurations.
+From the repository root:
 
-### MDX/M2 Models
-- **Two-Pass Rendering** — Opaque pass followed by depth-sorted transparent pass.
-- **Blend Modes 0-6** — All 7 standard WoW blend modes (Opaque, AlphaKey, Alpha, Additive, etc.).
-- **Alpha Cutout** — Hard discard for tree canopies in opaque pass.
-- **DBCD Texture Resolution** — Resolves textures using CreatureModelData, CreatureDisplayInfo, CreatureDisplayInfoExtra, and ItemDisplayInfo DBC tables.
+```powershell
+dotnet build .\src\MdxViewer\MdxViewer.sln -c Debug
+dotnet run --project .\src\MdxViewer\MdxViewer.csproj
+```
 
-### Minimap & Overlays
-- **Minimap** — Camera-centered with BLP tile textures, scroll-wheel zoom, and double-click teleport.
-- **Area POIs** — DBC-driven point-of-interest markers as 3D pins and minimap dots.
-- **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data.
-- **Area Names** — Live area name display from AreaTable.dbc with MapID validation.
-- **Zone Lighting** — DBC-driven ambient/fog/sky colors from Light.dbc + LightData.dbc.
-- **SQL World Population** — Optional NPC/GameObject placement injection from alpha-core SQL dumps.
+Optional launch flags:
 
-## Controls
+```text
+--verbose
+--full-load
+--partial-load
+```
+
+- `--verbose` keeps console logging enabled.
+- `--full-load` forces all tiles to load at startup.
+- `--partial-load` is accepted for backward compatibility, but AOI streaming is already the default.
+
+You can also pass a loose file path after the flags.
+
+## Current startup workflow
+
+The old workflow description that said the viewer auto-detects everything from a path is out of date. The current usage path is explicit and UI-driven.
+
+### Base client workflow
+
+Use `File > Open Game Folder (MPQ)...`.
+
+- The viewer asks for an explicit build selection before loading MPQs.
+- Known-good base clients can be saved and reused.
+- `Load Loose Map Folder Against Saved Base` is the intended path for overlay debugging and mixed-source development-map work.
+
+### Loose asset workflow
+
+Use `File > Open File...` or pass a file path on launch.
+
+- standalone MDX/M2 models can be inspected directly
+- standalone WMOs can be inspected directly
+- world files can be opened after the relevant data source/base client is configured
+
+## What the viewer currently supports
+
+### World and terrain viewing
+
+- Alpha monolithic WDT terrain
+- 0.6.0 split ADT terrain
+- 3.3.5 split ADT terrain
+- WMO-only world maps
+- AOI terrain streaming
+- minimap tile rendering and cache reuse
+- area names, POIs, taxi overlays, and zone lighting from DBC data
+
+### PM4 inspection and development-map workflows
+
+- map-wide PM4 overlay loading
+- background PM4 decode/apply path
+- zero-CK24 family recovery for PM4 overlays
+- PM4 alignment utilities
+- PM4/WMO correlation report window
+- PM4/WMO correlation JSON export
+- PM4 OBJ set export from the viewer
+
+### Rendering and material handling
+
+- standalone MDX rendering with animation support
+- standalone WMO rendering with doodads and liquids
+- world-scene MDX and WMO placement rendering
+- liquid ordering follow-ups so terrain liquids no longer always overdraw transparent model layers
+- transparent geoset priority-plane ordering in MDX models
+- M2-family UV/env-map and wrap/blend follow-ups on the active branch
+
+### UI and inspection workflows
+
+- dockable navigator and inspector panels
+- `Tab` hide-chrome mode
+- floating log viewer
+- floating perf window
+- minimap window plus fullscreen minimap with `M`
+- render-quality window
+- PM4/WMO correlation window
+- asset catalog window
+
+### Export and utilities
+
+- GLB export for standalone assets
+- GLB map-tile export
+- map converter UI
+- WMO converter UI
+- VLM export UI
+- terrain texture transfer UI
+
+## Current controls
 
 | Input | Action |
-|-------|--------|
-| **WASD** | Move camera (North/South/East/West) |
-| **Q / E** | Move camera Vertical (Down / Up) |
-| **Right Drag** | Look around (Yaw / Pitch) |
-| **Scroll Wheel** | Adjust camera speed (viewport) / Minimap zoom (minimap) |
-| **Double-Click Minimap** | Teleport camera to clicked location |
-| **Day/Night Slider** | Adjust world lighting (Terrain/WMO) |
+|------|--------|
+| `W A S D` | Free-fly camera movement |
+| `Q / E` | Vertical movement |
+| Right mouse drag | Look around |
+| Mouse wheel | Forward/back camera motion in the scene; zoom in minimap windows |
+| `Tab` | Hide or restore UI chrome |
+| `M` | Toggle fullscreen minimap |
+| Triple-click same minimap tile | Teleport camera |
+| Drag on minimap | Pan the minimap |
 
-## Requirements
+## Important current UI surfaces
 
-- **Runtime**: .NET 10.0 SDK
-- **GPU**: OpenGL 3.3+ capable hardware
-- **OS**: Windows x64 (other platforms untested)
+### View menu
 
-## Building from Source
+The `View` menu is now part of normal use, not an afterthought. It exposes:
 
-### 1. Clone the repo
-```bash
-git clone https://github.com/akspa0/parp-tools.git
-cd parp-tools/gillijimproject_refactor
-git submodule update --init --recursive
-```
+- dock panels
+- file browser
+- model info
+- terrain controls
+- minimap
+- log viewer
+- perf
+- render quality
+- PM4/WMO correlation
 
-This initializes the alpha-core dependency at `external/alpha-core` used by SQL spawn injection.
+### Render Quality
 
-### 2. Bootstrap library dependencies
-External libraries (SereniaBLPLib, DBCD, WoWDBDefs) are not git submodules — they are cloned on demand by the bootstrap script.
+The active render-quality work is intentionally narrow and real.
 
-**PowerShell (Windows):**
-```powershell
-./setup-libs.ps1
-```
+- texture filtering modes: `Nearest`, `Bilinear`, `Trilinear`
+- changes apply live to already loaded standalone models, WMOs, terrain textures, and world cached renderers
+- object MSAA is only toggleable when the active OpenGL context actually provides sample buffers
 
-**Bash (Linux/macOS):**
-```bash
-chmod +x setup-libs.sh
-./setup-libs.sh
-```
+Current accepted branch direction:
 
-Re-run with `-Force` (PowerShell) or `--force` (bash) to re-clone all libraries.
+- filtering is the meaningful visual upgrade already landed
+- explicit multisampled context work is not required right now
 
-### 3. Build & Run
-```bash
-cd src/MdxViewer
-dotnet build
-dotnet run -- path/to/game/directory
-```
+### Minimap
 
-The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain adapter.
+Current minimap behavior differs from older docs.
 
-## SQL World Population (alpha-core)
+- teleport is guarded by triple-clicking the same tile
+- drag-vs-click handling is stricter to avoid accidental teleports
+- zoom, pan, and minimap window visibility persist in viewer settings
+- decoded minimap tiles cache to disk under `output/cache/minimap`
 
-MdxViewer can inject NPC and GameObject spawns from alpha-core SQL files.
+### Terrain debugging
 
-- Expected root: `external/alpha-core`
-- Required files:
-  - `etc/databases/world/world.sql`
-  - `etc/databases/dbc/dbc.sql`
+The viewer now supports terrain-hole inspection without mutating source data.
+
+- terrain holes can be ignored during mesh rebuild for debugging
+- this is viewer-side only
+- ADT hole flags on disk are not edited by this feature
+
+## SQL world population
+
+The viewer can inject optional SQL-driven world spawns from an alpha-core checkout.
+
+Expected root:
+
+- `external/alpha-core`
+
+Required SQL files:
+
+- `etc/databases/world/world.sql`
+- `etc/databases/dbc/dbc.sql`
 
 In the viewer:
 
-1. Open **World Objects → SQL World Population**.
-2. Set SQL root (or click **Use Submodule Path**).
-3. Click **Load SQL Spawns (Current Map)**.
-4. Click a SQL GameObject in the scene to get **SQL GameObject Animation** controls in the right sidebar (play/pause, sequence, keyframe stepping, frame scrub).
+1. open the world-objects SQL population section
+2. set the SQL root or use the detected submodule path
+3. load spawns for the current map
+4. select a SQL gameobject instance to inspect animation controls when available
 
-### Pre-built Releases
-Download self-contained binaries from [Releases](../../releases) — no .NET SDK or library setup required.
+## Current limits and boundaries
 
-## Architecture
+- the render-quality slice is sampler-quality control, not a general post-processing framework
+- GIF/WebM capture is not landed
+- standalone skybox and atmospheric-light parity with world rendering is still follow-up work
+- `.LIT` decoding is still open work
+- the active viewer has very limited automated regression coverage, so build success is not full runtime signoff
 
-The viewer is built on a modular adapter pattern:
+## Validation note
 
-### Core Abstractions
-- **IDataSource** — MPQ archives (`MpqDataSource`) or loose files.
-- **ITerrainAdapter** — Unified interface for terrain loading:
-  - `AlphaTerrainAdapter` — Alpha 0.5.3 monolithic WDT
-  - `StandardTerrainAdapter` — 0.6.0 / 3.3.5 split ADTs + WMO-only maps
+Latest build check on the current branch:
 
-### Rendering Pipeline
-- **TerrainManager** — AOI streaming with persistent cache, MPQ throttling (`SemaphoreSlim(4)`), directional priority loading.
-- **WorldScene** — Placement transforms, instance management, frustum culling.
-- **WmoRenderer** — WMO GPU rendering (4-pass, doodad culling, MLIQ liquid).
-- **ModelRenderer** — MDX GPU rendering (two-pass, blend modes, alpha cutout).
-- **LiquidRenderer** — MCLQ/MLIQ/MH2O liquid mesh rendering.
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 23, 2026
 
-### Services
-- **WorldAssetManager** — Centralized caching for WMO and MDX/M2 geometry.
-- **ReplaceableTextureResolver** — DBCD-backed dynamic texture ID → BLP path resolution.
-- **LightService** — Zone-based lighting from Light.dbc + LightData.dbc.
-- **AreaTableService** — MapID-aware area name lookups.
-
-## Supported Formats
-
-| Format | Version | Status |
-|--------|---------|--------|
-| **WDT** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ Fully supported |
-| **ADT** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ (3.3.5 has loading freeze) |
-| **WMO** | v14, v16, v17 | ✅ Fully supported |
-| **MDX** | v1300+ | ✅ Supported (animation WIP) |
-| **M2** | v264+ | 🔧 Partial support |
-| **DBC** | 0.5.3 / 0.6.0 / 3.3.5 | ✅ AreaTable, AreaPOI, TaxiPath, Light, Map |
-| **GLB** | Export | ✅ MDX/WMO export |
-
-## Coordinate System (Ghidra Verified)
-
-- **WoW Coords**: X=North, Y=West, Z=Up (Right-handed, Direct3D CW winding).
-- **Renderer Coords**: `rendererX = MapOrigin - wowY`, `rendererY = MapOrigin - wowX`, `rendererZ = wowZ`.
-- **WMO-Only Maps**: Raw WoW world coords (no MapOrigin conversion).
-- **GPU Fix**: Reverse triangle winding at upload (CW→CCW) + 180° Z rotation in placement transforms.
+That build result validates integration and compilation only. Real-data runtime validation is still required for terrain, PM4, material-order, and lighting-sensitive changes.

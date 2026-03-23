@@ -130,6 +130,8 @@ public class MdxRenderer : ISceneRenderer
         public uint TextureId;
         public int RefCount;
         public TextureAlphaKind AlphaKind;
+        public TextureWrapMode WrapS;
+        public TextureWrapMode WrapT;
     }
 
     // ── Geoset animation alpha cache (evaluated per-frame) ──
@@ -1812,12 +1814,47 @@ void main() {
                 ptr);
         }
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
         return _whiteFallbackTexture;
+    }
+
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var kvp in _textures)
+        {
+            uint textureId = kvp.Value;
+            if (textureId == 0)
+                continue;
+
+            TextureWrapMode wrapS = TextureWrapMode.Repeat;
+            TextureWrapMode wrapT = TextureWrapMode.Repeat;
+
+            if (_textureCacheKeys.TryGetValue(kvp.Key, out var cacheKey))
+            {
+                lock (SharedTextureCacheLock)
+                {
+                    if (SharedTextureCache.TryGetValue(cacheKey, out var entry))
+                    {
+                        wrapS = entry.WrapS;
+                        wrapT = entry.WrapT;
+                    }
+                }
+            }
+
+            _gl.BindTexture(TextureTarget.Texture2D, textureId);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true, wrapS, wrapT);
+        }
+
+        if (_whiteFallbackTexture != 0)
+        {
+            _gl.BindTexture(TextureTarget.Texture2D, _whiteFallbackTexture);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+                TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
+        }
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     private bool ShouldUseAlphaCutout(int layerIndex, int textureId, MdlTexOp declaredBlendMode, MdlTexOp effectiveBlendMode)
@@ -2081,6 +2118,8 @@ void main() {
             {
                 TextureId = textureId,
                 AlphaKind = ClassifyTextureAlpha(pixels),
+                WrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat,
+                WrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat,
             };
         }
         catch (Exception ex)
@@ -2105,6 +2144,8 @@ void main() {
             {
                 TextureId = textureId,
                 AlphaKind = ClassifyTextureAlpha(pixels),
+                WrapS = TextureWrapMode.Repeat,
+                WrapT = TextureWrapMode.Repeat,
             };
         }
         catch (Exception ex)
@@ -2145,13 +2186,9 @@ void main() {
                 width, height, 0,
                 PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-
         var wrapS = clampS ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
         var wrapT = clampT ? TextureWrapMode.ClampToEdge : TextureWrapMode.Repeat;
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)wrapS);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)wrapT);
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true, wrapS, wrapT);
         _gl.GenerateMipmap(TextureTarget.Texture2D);
 
         _gl.BindTexture(TextureTarget.Texture2D, 0);

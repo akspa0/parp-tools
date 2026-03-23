@@ -171,6 +171,24 @@ public class WmoRenderer : ISceneRenderer
         _wireframe = !_wireframe;
     }
 
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var textureId in _materialTextures.Values)
+        {
+            if (textureId == 0)
+                continue;
+
+            _gl.BindTexture(TextureTarget.Texture2D, textureId);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
+        }
+
+        foreach (var renderer in _doodadModelCache.Values)
+            renderer?.ApplyTextureSamplingSettings();
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
     public unsafe void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
@@ -854,10 +872,8 @@ void main() {
             fixed (byte* ptr = pixels)
                 _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
                     (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
             _gl.GenerateMipmap(TextureTarget.Texture2D);
             return tex;
         }

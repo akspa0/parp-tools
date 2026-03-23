@@ -1,215 +1,155 @@
 # Parp Tools — Gillijim Project (C# refactor)
 
-WoW format preservation, analysis, and visualization tooling. The **primary project** is [MdxViewer](src/MdxViewer/) — a high-performance .NET 9 / OpenGL 3.3 world viewer supporting **Alpha 0.5.3**, **0.6.0**, and **LK 3.3.5** game data.
+WoW preservation, analysis, and visualization tooling. The primary active application in this tree is [MdxViewer](src/MdxViewer/), a .NET 10 / OpenGL 3.3 viewer for world data, models, WMOs, minimaps, PM4 overlay research, and format-conversion workflows.
 
-## Quick Start — MdxViewer
+This README is intentionally high level. The detailed viewer workflow lives in [src/MdxViewer/README.md](src/MdxViewer/README.md).
 
-```bash
-cd src/MdxViewer
-dotnet build
-dotnet run -- path/to/game/directory
+## Current state
+
+- Active branch/workflow target: v0.4.0 recovery on the main tree.
+- Primary viewer path: [src/MdxViewer](src/MdxViewer).
+- Current viewer focus is not just standalone model viewing anymore. The app now acts as:
+  - a world viewer for Alpha, Wrath, and selected Cataclysm-beta era client data
+  - a PM4 inspection surface for the development-map workflow
+  - a terrain and liquid debugging tool
+  - a WMO and MDX/M2 inspection/export tool
+  - a front end for several converter and validation utilities already in this repo
+
+## Quick start
+
+### 1. Bootstrap vendored library dependencies
+
+PowerShell:
+
+```powershell
+./setup-libs.ps1
 ```
 
-The viewer auto-detects the WoW build version from the game path and loads terrain, WMOs, MDX models, liquids, and DBC overlays.
+### 2. Build the active viewer solution
 
-See [`src/MdxViewer/README.md`](src/MdxViewer/README.md) for full documentation.
-
----
-
-## Repository Structure
-
-### Primary Project
-
-- **`src/MdxViewer/`** — 3D world viewer (active development)
-  - Multi-version terrain: Alpha monolithic WDT, 0.6.0 split ADTs, 3.3.5 split ADTs
-  - WMO v14/v16/v17 rendering with 4-pass transparency, doodads, liquids
-  - MDX/M2 model rendering with blend modes, alpha cutout, DBC texture resolution
-  - AOI streaming with persistent cache, directional lookahead, MPQ throttling
-  - DBC overlays: AreaPOI, TaxiPaths, area names, zone-based lighting
-  - ImGui UI with minimap, file browser, object list, terrain controls
-
-### Supporting Projects
-
-- `src/MDX-L_Tool/` — MDX file format parser for Alpha 0.5.3 model archaeology
-- `src/WoWMapConverter/` — Map conversion tools, VLM, ADT format library
-
-### Data & Conversion Tools
-
-- `AlphaWDTAnalysisTool/` — CLI to remap LK ADTs using numeric crosswalks
-- `DBCTool.V2/` — DBC crosswalk generation, dumps, and audits
-- `WoWRollback/` — ADT merger, PM4 tools, MCCV painting, asset gating
-- `BlpResizer/` — BLP texture conversion
-
-### Libraries & References
-
-- `lib/` — Vendored libraries: `wow.tools.local` (DBCD), `Warcraft.NET`, `WoWDBDefs`, `MapUpconverter`
-- `reference_data/` — Local WoWDev wiki copies (reference only)
-- `test_data/` — Input data tree (`test_data/<version>/tree/...`)
-- `memory-bank/` — Working context notes
-
----
-
-## Quick workflows (high level)
-
-1) Generate crosswalks and audits (DBCTool.V2)
-
-```bash
-dotnet run --project DBCTool.V2/DBCTool.V2.csproj -- --s53
+```powershell
+dotnet build .\src\MdxViewer\MdxViewer.sln -c Debug
 ```
 
-- Inputs come from `test_data/<version>/tree` (see docs). Outputs land under `DBCTool.V2/dbctool_outputs/session_*/compare/v2/`.
+### 3. Run the viewer
 
-2) Remap ADTs and verify (AlphaWDTAnalysisTool)
-
-- Use a patch directory that contains the via060 per-map crosswalks (and optional overrides), and provide the LK 3.3.5 DBC directory for names in verify.
-- After export, run `tools/agg-area-verify.ps1` on the export root to see which `alpha_raw` values were present and whether they mapped.
-
----
-
-## Alpha / Legacy asset gating (prevent old client crashes)
-
-Older clients (e.g., 0.5.3) crash if MDNM/MONM reference assets that don’t exist in that build. Use the workflow below to build a version-accurate listfile and strictly gate assets when packing.
-
-### 1) Build a version listfile (scan MPQs + loose files)
-
-```bash
-dotnet run --project WoWRollback.Cli/WoWRollback.Cli.csproj snapshot-listfile \
-  --client-path "C:/Path/To/ClientRoot" \
-  --alias "alpha-0.5.3" \
-  --community-listfile "../test_data/community-listfile-withcapitals.csv" \
-  --out ./alpha_053.json \
-  --csv-out ./alpha_053.csv \
-  --csv-missing-fdid 0
+```powershell
+dotnet run --project .\src\MdxViewer\MdxViewer.csproj
 ```
 
-What it does:
+Optional flags:
 
-- Scans all MPQs (including locale subfolders) and loose files under the client.
-- Reads embedded `(listfile)` when present and derives asset names from wrappers (e.g., `Azeroth.wdt.MPQ` → `Azeroth.wdt`, `*.m2.MPQ` → `*.m2` and `.mdx`).
-- Optionally enriches with a community listfile to set FDIDs (exact path, `.m2`↔`.mdx` alias, and filename-only heuristic when unique).
-- Writes:
-  - `alpha_053.json` (snapshot with optional `fdid` fields)
-  - `alpha_053.csv` (community-style CSV; unknown FDIDs use the provided token, default `0`)
-  - `snapshot_missing_fdid.csv` and `snapshot_ambiguous_fdid.csv` for diagnostics
-
-Useful flags:
-
-- `--community-listfile <file>`: CSV/JSON/plain community listfile for FDID enrichment
-- `--csv-out <file>`: emit a community-style CSV (preferred for downstream gating)
-- `--csv-missing-fdid <token>`: placeholder for unknown FDIDs (e.g., `0`, `XXXXXXXX`, or `none` for path-only)
-
-### 2) Pack with strict asset gating
-
-```bash
-dotnet run --project WoWRollback.Cli/WoWRollback.Cli.csproj pack-monolithic-alpha-wdt \
-  --client-path "C:/Path/To/ClientRoot" \
-  --map "expansion01" \
-  --out ./build/expansion01.wdt \
-  --target-listfile ./alpha_053.csv \
-  --strict-target-assets true \
-  --verbose
+```text
+--verbose
+--full-load
 ```
 
-Notes:
+- `--verbose` enables console logging instead of suppressing noisy library output.
+- `--full-load` loads all terrain tiles at startup instead of using the default AOI streaming path.
 
-- Gating is applied for both M2 (MDNM) and WMO (MONM) names; unknowns are dropped.
-- Placements referencing dropped names are skipped (no invalid MCRF refs).
-- A `dropped_assets.csv` report is written next to the output WDT.
+You can also pass a direct file path after the flags to open a loose asset immediately.
 
----
+## How the current viewer is used
 
-## Development Map PM4 Pipeline (C# refactor)
+The old README flow that implied automatic build inference from a game path is stale. The current workflow is explicit.
 
-End-to-end pipeline to reconstruct the "development" map using PM4 pathfinding output and WMO collision geometry, then inject the resulting WMO placements into clean 3.3.5 ADTs.
+### Open a base client
 
-### Canonical data locations
+Use `File > Open Game Folder (MPQ)...`.
 
-These paths are fixed in this repo (see `.windsurf/rules/data-paths.md`):
+- The viewer opens a build-selection dialog before MPQ load.
+- Saved base-client entries preserve both path and build identity.
+- `Load Loose Map Folder Against Saved Base` is the intended workflow for patched overlays or mixed-source map debugging.
 
-| Data | Path | Notes |
-|------|------|-------|
-| Split Cata ADTs + PM4 | `test_data/development/World/Maps/development` | 466 root ADTs, 616 PM4 files + PM4Faces output |
-| Minimap PNGs | `test_data/minimaps/development` | For MCCV painting |
-| WoWMuseum LK ADTs | `test_data/WoWMuseum/335-dev/World/Maps/development` | Clean 3.3.5 baseline |
-| WMO collision (per-group/flag) | `pm4-adt-test13/wmo_flags/` | One folder per WMO, one OBJ per group/flag |
-| MODF reconstruction (current) | `pm4-adt-test13/modf_reconstruction/` | `modf_entries.csv`, `mwmo_names.csv`, `placement_verification.json` |
+### Open worlds or loose assets
 
-### Step 1 — Build base LK ADTs (terrain/textures/MCCV)
+After a base client is open, you can:
 
-Use the existing ADT tooling to produce a "clean" LK ADT set that has terrain, textures, and MCCV applied where needed:
+- load WDT or ADT data through the in-app world/file browser
+- open standalone WMO and MDX/M2 assets
+- attach loose map folders on top of a saved MPQ base
+- use the development-map PM4 tooling from the viewer UI
 
-- `merge-split` — merge split LK ADTs (root + `_obj0` + `_tex0`) into monolithic form.
-- `merge-minimap` — MCCV-paint tiles that have no textures at all using minimap PNGs.
-- `merge-textures` — pull texture chunks from older monolithic ADTs when `_tex0` is missing.
+### Use the viewer as a debugging surface
 
-The result is a directory such as:
+The active viewer now includes UI and workflows for:
 
-- `PM4ADTs/clean_v3/` or `test_output/merged_minimap/`
+- dockable navigator/inspector panels
+- hideable chrome with `Tab`
+- minimap zoom, pan, cached tiles, and guarded teleport
+- PM4 overlay inspection and PM4/WMO correlation browsing
+- PM4 OBJ export
+- terrain-hole rebuild override for inspection
+- render-quality filtering controls for already loaded textures
+- log viewer and perf windows
 
-This directory is the **`--in`** argument for the MODF injector.
+## Current MdxViewer capabilities
 
-### Step 2 — Reconstruct MODF from PM4 + WMO collision library
+### World and terrain
 
-Run the PM4 reconstruction CLI from the repo root:
+- Alpha monolithic WDT terrain
+- 0.6.0 split ADT terrain
+- 3.3.5 split ADT terrain
+- WMO-only map support
+- AOI streaming with persistent caching
+- minimap rendering with disk cache
+- terrain alpha/shadow visualization and terrain-hole inspection toggles
 
-```bash
-dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- pm4-reconstruct-modf \
-  --pm4 "test_data/development/World/Maps/development" \
-  --wmo "pm4-adt-test13/wmo_flags" \
-  --out "pm4-adt-test13/modf_reconstruction" \
-  --min-confidence 0.7
-```
+### PM4 and development-map workflow
 
-This will:
+- map-wide PM4 overlay loading in the active world scene
+- background PM4 decode/apply path instead of blocking UI load
+- recovery for zero-CK24 PM4 object families
+- offline PM4 OBJ export from the viewer
+- PM4/WMO correlation report browsing and JSON export
 
-- Load PM4 objects from all `ck_instances.csv` files under `--pm4`.
-- Load WMO collision geometry from the per-group/per-flag OBJ files under `--wmo`.
-- Match PM4 objects to WMOs, compute placement transforms, and apply the PM4→ADT world coordinate transform.
-- Write:
-  - `modf_entries.csv` — world-space MODF placements (post-transform).
-  - `mwmo_names.csv` — MWMO string table.
-  - `placement_verification.json` — per-tile/per-WMO summary for audits.
+### Object rendering
 
-### Step 3 — Inject MODF into base LK ADTs
+- standalone MDX and WMO viewing
+- world-scene MDX/WMO placement rendering
+- WMO doodads, liquids, and transparent material ordering fixes
+- M2-family material follow-ups for UV/env-map and wrap/blend recovery
 
-With the reconstruction CSVs in place, inject MODF into your base ADT set:
+### Render quality
 
-```bash
-dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- inject-modf \
-  --modf "pm4-adt-test13/modf_reconstruction/modf_entries.csv" \
-  --mwmo "pm4-adt-test13/modf_reconstruction/mwmo_names.csv" \
-  --in  "PM4ADTs/clean_v3" \
-  --out "PM4ADTs/museum_patched_test13" \
-  --map development
-```
+- a `Render Quality` window now exposes live texture filtering changes for already loaded assets
+- current practical modes are `Nearest`, `Bilinear`, and `Trilinear`
+- multisample object antialiasing is only available if the active GL context already exposes sample buffers
+- current accepted direction on this branch: filtering matters, explicit MSAA work is not required right now
 
-Notes:
+### Export and tooling
 
-- `inject-modf` uses `MuseumAdtPatcher` / `AdtPatcher` to preserve all existing chunks and only modify `MWMO`, `MWID`, and `MODF`.
-- If a tile has no reconstructed placements in `modf_entries.csv`, its ADT is copied unchanged.
-- You can inspect on-disk MODF via:
+- GLB export for standalone assets and map tiles
+- map converter UI
+- WMO converter UI
+- VLM export UI
+- terrain texture transfer UI
 
-  ```bash
-  dotnet run --project WoWRollback/WoWRollback.PM4Module/WoWRollback.PM4Module.csproj -- dump-modf \
-    --in PM4ADTs/museum_patched_test13 --map development --tile 22_18
-  ```
+## Repository structure
 
-  and compare against `dump-modf-csv` for the same tile.
+### Primary active projects
 
-The `PM4ADTs/museum_patched_test13/` directory is suitable for Noggit / 3.3.5 client testing once paired with an appropriate WDT.
+- [src/MdxViewer](src/MdxViewer) — active viewer, renderer, PM4 inspection, export UI
+- [src/WoWMapConverter](src/WoWMapConverter) — format and conversion library used by several tools
+- [src/MDX-L_Tool](src/MDX-L_Tool) — MDX archaeology / parser utility
+- [src/Pm4Research.Core](src/Pm4Research.Core) — standalone PM4 rediscovery and audit path
 
----
+### Supporting areas
 
-## Policies
+- `AlphaWDTAnalysisTool/`
+- `DBCTool.V2/`
+- `WoWRollback/`
+- `reference_data/`
+- `test_data/`
+- `memory-bank/`
 
-- Strict numeric mapping only; map-locked; no heuristics.
-- Overrides contain exact numeric rows and never override explicit crosswalk mappings.
-- We do not edit DBCs in this preservation track.
+## Validation note
 
----
+The active viewer tree has little first-party regression coverage. Build success matters, but it is not runtime signoff.
 
-## Housekeeping
+As of Mar 23, 2026:
 
-- Legacy: `DBCTool/` is unmaintained and kept for historical reference. Please use `DBCTool.V2` for all current workflows.
-- License: undecided — pending review of third-party library licenses in `lib/`.
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on the current branch
+- no automated tests were added for the latest render-quality/documentation slice
+- terrain, PM4, liquid, and material-order changes still require real-data runtime validation before being described as fully verified
 

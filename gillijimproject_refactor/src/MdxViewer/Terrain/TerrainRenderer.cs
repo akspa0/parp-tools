@@ -200,6 +200,41 @@ public class TerrainRenderer : IDisposable
             _chunks.Remove(chunk);
     }
 
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var textureId in _textureCache.Values)
+        {
+            if (textureId == 0)
+                continue;
+
+            _gl.BindTexture(TextureTarget.Texture2D, textureId);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
+        }
+
+        foreach (var chunk in _chunks)
+        {
+            foreach (var textureId in chunk.AlphaTextures.Values)
+            {
+                if (textureId == 0)
+                    continue;
+
+                _gl.BindTexture(TextureTarget.Texture2D, textureId);
+                RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+                    TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
+            }
+
+            if (chunk.ShadowTexture != 0)
+            {
+                _gl.BindTexture(TextureTarget.Texture2D, chunk.ShadowTexture);
+                RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+                    TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
+            }
+        }
+
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
     public void ReplaceTileAlphaShadowArray(int tileX, int tileY, byte[] alphaShadowRgba)
     {
         const int chunkSize = 64 * 64;
@@ -504,10 +539,8 @@ public class TerrainRenderer : IDisposable
                 _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
                     (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
             _gl.GenerateMipmap(TextureTarget.Texture2D);
             _gl.BindTexture(TextureTarget.Texture2D, 0);
 
@@ -564,10 +597,8 @@ public class TerrainRenderer : IDisposable
                 _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
                     (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+                TextureWrapMode.Repeat, TextureWrapMode.Repeat);
             _gl.GenerateMipmap(TextureTarget.Texture2D);
             _gl.BindTexture(TextureTarget.Texture2D, 0);
 
@@ -602,10 +633,8 @@ public class TerrainRenderer : IDisposable
                 _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
                     (uint)size, (uint)size, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
 
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+                TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
             _gl.BindTexture(TextureTarget.Texture2D, 0);
 
             chunk.AlphaTextures[layer] = tex;
@@ -627,10 +656,8 @@ public class TerrainRenderer : IDisposable
             _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
                 64, 64, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         chunk.ShadowTexture = tex;
@@ -645,10 +672,8 @@ public class TerrainRenderer : IDisposable
             _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
                 64, 64, 0, PixelFormat.Red, PixelType.UnsignedByte, ptr);
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: false,
+            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         return tex;

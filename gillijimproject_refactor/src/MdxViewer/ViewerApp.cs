@@ -134,6 +134,7 @@ public partial class ViewerApp : IDisposable
     private bool _showLogViewer = false;
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
+    private bool _showRenderQualityWindow = false;
     private bool _useDockspaceUi = true;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
@@ -438,6 +439,8 @@ public partial class ViewerApp : IDisposable
 
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
+        DetectRenderQualityCapabilities();
+        ApplyRenderQualitySettings(refreshTextures: false);
 
         // Mouse input for viewport (not consumed by ImGui)
         foreach (var mouse in _input.Mice)
@@ -1009,6 +1012,10 @@ void main() {
             if (_showPerfWindow)
                 DrawPerfWindow();
 
+            // Render quality (floating window)
+            if (_showRenderQualityWindow)
+                DrawRenderQualityWindow();
+
             // Chunk Clipboard (floating window)
             if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
                 DrawChunkClipboardWindow();
@@ -1143,6 +1150,7 @@ void main() {
                 ImGui.MenuItem("Minimap", "", ref _showMinimapWindow);
                 ImGui.MenuItem("Log Viewer", "", ref _showLogViewer);
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
+                ImGui.MenuItem("Render Quality", "", ref _showRenderQualityWindow);
                 ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow);
                 if (ImGui.MenuItem("PM4/WMO Correlation", "", _showPm4WmoCorrelationWindow))
                 {
@@ -7438,6 +7446,10 @@ void main() {
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
             _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
+            _textureFilteringMode = Enum.IsDefined(typeof(TextureFilteringMode), settings.TextureFilteringMode)
+                ? (TextureFilteringMode)settings.TextureFilteringMode
+                : TextureFilteringMode.Trilinear;
+            _enableMultisample = settings.EnableMultisample;
             _showMinimapWindow = settings.ShowMinimapWindow;
             _minimapZoom = float.IsFinite(settings.MinimapZoom)
                 ? Math.Clamp(settings.MinimapZoom, 1f, 32f)
@@ -7491,6 +7503,8 @@ void main() {
                 LastSelectedBuildVersion = _clientBuildOptions.Count > 0
                     ? _clientBuildOptions[Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1)].BuildVersion
                     : null,
+                TextureFilteringMode = (int)_textureFilteringMode,
+                EnableMultisample = _enableMultisample,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
                 MinimapZoom = _minimapZoom,
@@ -7606,6 +7620,8 @@ void main() {
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
         public string? LastSelectedBuildVersion { get; set; }
+        public int TextureFilteringMode { get; set; } = (int)Rendering.TextureFilteringMode.Trilinear;
+        public bool EnableMultisample { get; set; } = true;
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; }
         public float MinimapZoom { get; set; } = 4f;

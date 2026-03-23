@@ -9,6 +9,19 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - .github metadata restored from main and committed: 845748b
 - .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
 
+### Documentation Refresh + Render Quality Follow-Up (Mar 23)
+
+- Repo-level docs were stale relative to the current recovery branch and have now been refreshed.
+- `README.md` and `src/MdxViewer/README.md` now describe the current viewer workflow instead of the older simplified startup story.
+- Important doc corrections now recorded explicitly:
+	- MPQ/client loading is an explicit build-selection workflow, not a vague path auto-detect story
+	- the viewer is now documented as a combined world viewer, PM4 inspection surface, terrain debugger, and export front end
+	- dock panels, minimap guardrails, PM4 correlation/export tools, terrain-hole debug controls, and render-quality filtering are now called out in repo docs
+	- current accepted render-quality direction on this branch is texture filtering first; lack of MSAA in some GL contexts is acceptable and does not block the feature slice
+- Validation status:
+	- docs were refreshed after the Mar 23 viewer build had already passed
+	- this documentation update itself adds no runtime validation and should not be read as new visual signoff
+
 ### Viewer Debug/Workflow Follow-Up (Mar 22)
 
 - Latest viewer-side work moved away from treating PM4 runtime streaming as the only inspection path.

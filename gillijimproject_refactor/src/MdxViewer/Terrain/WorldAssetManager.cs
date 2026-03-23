@@ -112,6 +112,15 @@ public class WorldAssetManager : IDisposable
         _buildVersion = buildVersion;
     }
 
+    public void ApplyTextureSamplingSettings()
+    {
+        foreach (var renderer in _mdxModels.Values)
+            renderer?.ApplyTextureSamplingSettings();
+
+        foreach (var renderer in _wmoModels.Values)
+            renderer?.ApplyTextureSamplingSettings();
+    }
+
     public WorldAssetReadStats GetReadStats()
         => new(
             _fileReadRequests,

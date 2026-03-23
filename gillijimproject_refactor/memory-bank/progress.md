@@ -1,5 +1,17 @@
 # Progress
 
+### Mar 23, 2026 - Viewer Docs Refresh + Render Quality Follow-Up
+
+- Refreshed stale repo docs in `README.md` and `src/MdxViewer/README.md` so they match the current recovery-branch viewer instead of the older standalone-viewer-centric workflow.
+- Documented the current explicit base-client/build-selection flow, saved known-good base workflow, loose-overlay attach path, dockable UI, PM4 utilities, minimap guardrails, terrain-hole debug controls, and render-quality filtering.
+- Recorded the current practical render-quality boundary clearly:
+	- texture filtering is landed and useful
+	- object MSAA depends on the active GL context exposing sample buffers
+	- lack of MSAA in the current tested context is acceptable and does not block this slice
+- Validation limits:
+	- the active viewer solution had already built successfully on Mar 23 before the doc refresh
+	- no automated tests were added or run for the documentation update
+
 ### Mar 22, 2026 - Viewer Debug Workflow Follow-Up: PM4 OBJ Export + Minimap Guardrails + Terrain Hole Override
 
 - Added a viewer-side offline PM4 OBJ export path so PM4 inspection no longer depends only on the live overlay's currently loaded subset.

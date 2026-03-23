@@ -458,6 +458,12 @@ public class WorldScene : ISceneRenderer
     public int Pm4TotalFiles => _pm4TotalFiles;
     public int Pm4LoadedFiles => _pm4LoadedFiles;
     public int Pm4ObjectCount => _pm4ObjectCount;
+
+    public void ApplyTextureSamplingSettings()
+    {
+        _terrainManager.Renderer.ApplyTextureSamplingSettings();
+        _assets.ApplyTextureSamplingSettings();
+    }
     public int Pm4LineCount => _pm4LineCount;
     public int Pm4TriangleCount => _pm4TriangleCount;
     public int Pm4RejectedLongEdges => _pm4RejectedLongEdges;
