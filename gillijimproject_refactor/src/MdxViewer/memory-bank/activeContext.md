@@ -48,6 +48,9 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
    - the current branch direction does not require explicit MSAA follow-up right now; filtering is already considered the worthwhile practical improvement when the GL context lacks sample buffers
 - Documentation follow-up on the same date:
    - repo docs and viewer docs were refreshed so they describe the actual current workflow instead of the older simplified launch/feature story
+   - branch-specific wording was reduced so the docs read correctly when merged to main
+   - support language now calls out the documented range `0.5.3` through `4.0.0.11927`, with later `4.0.x` and untested paths through `4.3.4` described as broader but less validated support
+   - docs now mention that asset-catalog export already has automated multi-angle screenshot capture, while broader UI/menu showcase capture remains a follow-up idea
 
 - PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
 - Current behavior:

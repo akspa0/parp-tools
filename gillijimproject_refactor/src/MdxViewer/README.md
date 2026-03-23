@@ -1,12 +1,30 @@
 # MdxViewer — WoW World Viewer
 
-MdxViewer is the active viewer/debugging application in this repo. It is no longer just a standalone MDX/WMO viewer. On the current recovery branch it acts as a combined world viewer, PM4 inspection surface, terrain debugger, asset browser, and export front end.
+MdxViewer is the active viewer/debugging application in this repo. It is no longer just a standalone MDX/WMO viewer. It acts as a combined world viewer, PM4 inspection surface, terrain debugger, asset browser, and export front end.
 
 ## Runtime and build requirements
 
 - .NET 10 SDK
-- Windows x64
 - OpenGL 3.3 capable GPU/driver
+- Alpha-Core SQL data for world npc and gameobject data (0.5.3-0.5.5, works on all versions of game data)
+
+## Supported Data Files
+
+- WMOv14/v16/v17 Reading and conversion support (0.5.3-4.0.0.11927)
+- MDX/M2 reading and conversion support
+- Alpha WDT terrain (0.5.3-0.5.5)
+- Retail ADT terrain (ADTv18)
+  - Support for MCLQ and MH2O chunk types
+  - Support for later `4.0.x` ADT variants in the active terrain path
+  - Untested support paths for later-era split-ADT variants up through `4.3.4`
+- Minimap tile rendering and caching  
+
+
+## Supported data range
+
+- Documented support range: `0.5.3` through `4.0.0.11927`
+- Additional support exists for later `4.0.x` ADTs
+- The terrain pipeline also contains untested later-era support paths through `4.3.4`
 
 ## Build and run
 
@@ -33,7 +51,7 @@ You can also pass a loose file path after the flags.
 
 ## Current startup workflow
 
-The old workflow description that said the viewer auto-detects everything from a path is out of date. The current usage path is explicit and UI-driven.
+The current usage path is explicit and UI-driven.
 
 ### Base client workflow
 
@@ -56,8 +74,10 @@ Use `File > Open File...` or pass a file path on launch.
 ### World and terrain viewing
 
 - Alpha monolithic WDT terrain
-- 0.6.0 split ADT terrain
-- 3.3.5 split ADT terrain
+- 0.5.3 through 4.0.0.11927 era world map support with MPQ data sources or lo
+- Cataclysm `4.0.0.11927` era terrain support
+- later `4.0.x` ADT handling in the active terrain path
+- untested later-era split-ADT support paths up through `4.3.4`
 - WMO-only world maps
 - AOI terrain streaming
 - minimap tile rendering and cache reuse
@@ -80,7 +100,7 @@ Use `File > Open File...` or pass a file path on launch.
 - world-scene MDX and WMO placement rendering
 - liquid ordering follow-ups so terrain liquids no longer always overdraw transparent model layers
 - transparent geoset priority-plane ordering in MDX models
-- M2-family UV/env-map and wrap/blend follow-ups on the active branch
+- M2-family UV/env-map and wrap/blend follow-ups
 
 ### UI and inspection workflows
 
@@ -139,7 +159,7 @@ The active render-quality work is intentionally narrow and real.
 - changes apply live to already loaded standalone models, WMOs, terrain textures, and world cached renderers
 - object MSAA is only toggleable when the active OpenGL context actually provides sample buffers
 
-Current accepted branch direction:
+Current accepted direction:
 
 - filtering is the meaningful visual upgrade already landed
 - explicit multisampled context work is not required right now
@@ -152,6 +172,10 @@ Current minimap behavior differs from older docs.
 - drag-vs-click handling is stricter to avoid accidental teleports
 - zoom, pan, and minimap window visibility persist in viewer settings
 - decoded minimap tiles cache to disk under `output/cache/minimap`
+
+### Screenshot/export automation
+
+- asset-catalog export already supports automated multi-angle model screenshots
 
 ### Terrain debugging
 
@@ -184,15 +208,3 @@ In the viewer:
 ## Current limits and boundaries
 
 - the render-quality slice is sampler-quality control, not a general post-processing framework
-- GIF/WebM capture is not landed
-- standalone skybox and atmospheric-light parity with world rendering is still follow-up work
-- `.LIT` decoding is still open work
-- the active viewer has very limited automated regression coverage, so build success is not full runtime signoff
-
-## Validation note
-
-Latest build check on the current branch:
-
-- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 23, 2026
-
-That build result validates integration and compilation only. Real-data runtime validation is still required for terrain, PM4, material-order, and lighting-sensitive changes.

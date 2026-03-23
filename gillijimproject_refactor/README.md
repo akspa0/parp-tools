@@ -6,7 +6,6 @@ This README is intentionally high level. The detailed viewer workflow lives in [
 
 ## Current state
 
-- Active branch/workflow target: v0.4.0 recovery on the main tree.
 - Primary viewer path: [src/MdxViewer](src/MdxViewer).
 - Current viewer focus is not just standalone model viewing anymore. The app now acts as:
   - a world viewer for Alpha, Wrath, and selected Cataclysm-beta era client data
@@ -14,6 +13,13 @@ This README is intentionally high level. The detailed viewer workflow lives in [
   - a terrain and liquid debugging tool
   - a WMO and MDX/M2 inspection/export tool
   - a front end for several converter and validation utilities already in this repo
+
+## Version support
+
+- Actively supported viewer range: `0.5.3` through `4.0.0.11927`.
+- Additional terrain support exists for later `4.0.x` ADTs.
+- The current codebase also includes untested support paths for later game data through `4.3.4`, especially in the split-ADT terrain pipeline.
+- Practical rule: `0.5.3` through `4.0.0.11927` is the documented support range; later `4.0.x` and `4.3.4` era data should be treated as promising but not yet broadly signed off.
 
 ## Quick start
 
@@ -30,6 +36,8 @@ PowerShell:
 ```powershell
 dotnet build .\src\MdxViewer\MdxViewer.sln -c Debug
 ```
+
+The repository builds successfully in GitHub Actions across multiple platforms. The active viewer itself is developed around a .NET 10 and OpenGL 3.3 workflow and should not be described as Windows x64-only from a repository-build perspective.
 
 ### 3. Run the viewer
 
@@ -115,7 +123,7 @@ The active viewer now includes UI and workflows for:
 - a `Render Quality` window now exposes live texture filtering changes for already loaded assets
 - current practical modes are `Nearest`, `Bilinear`, and `Trilinear`
 - multisample object antialiasing is only available if the active GL context already exposes sample buffers
-- current accepted direction on this branch: filtering matters, explicit MSAA work is not required right now
+- current accepted direction: filtering matters, explicit MSAA work is not required right now
 
 ### Export and tooling
 
@@ -124,6 +132,12 @@ The active viewer now includes UI and workflows for:
 - WMO converter UI
 - VLM export UI
 - terrain texture transfer UI
+- asset-catalog export already includes automated multi-angle model screenshots
+
+## Documentation gaps still worth closing
+
+- the READMEs now reflect the current viewer more accurately, but they still need a stronger visual walkthrough
+- there is already automated screenshot capture infrastructure for asset-catalog exports; a separate automated pass for UI/menu showcase screenshots would be a reasonable follow-up if we want marketing-quality documentation assets
 
 ## Repository structure
 
@@ -149,7 +163,7 @@ The active viewer tree has little first-party regression coverage. Build success
 
 As of Mar 23, 2026:
 
-- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on the current branch
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
 - no automated tests were added for the latest render-quality/documentation slice
 - terrain, PM4, liquid, and material-order changes still require real-data runtime validation before being described as fully verified
 
