@@ -10,10 +10,31 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 
 ### PM4 Overlay Load Contract Change: Full-Map Overlay Restore (Mar 22)
 
+### MCLQ / MDX Transparency Ordering Follow-Up (Mar 23)
+
+- World-scene render ordering now treats terrain liquid as an in-between pass instead of the final pass:
+   - opaque terrain / WMO / MDX still establish the depth buffer first
+   - terrain liquid now renders before transparent MDX layers
+   - batched MDX transparent draws explicitly re-run `BeginBatch(...)` after the liquid pass because liquid rendering changes the active GL program/state
+- `ModelRenderer` now honors material `PriorityPlane` for transparent geoset ordering within a model, using the documented lowest-to-highest order instead of raw geoset insertion order.
+- `WmoRenderer` no longer renders doodad MDX in a single `RenderPass.Both` block before liquids:
+   - doodad opaque layers render before WMO liquids
+   - doodad transparent layers render after WMO liquids
+- Follow-up regression fix on the same slice:
+   - splitting doodad/model rendering into opaque + transparent passes exposed an old `ModelRenderer` fallback seam where transparent-only geosets would draw magenta fallback geometry during the opaque pass.
+   - `ModelRenderer.RenderGeosets(...)` now suppresses that fallback only when the current pass skipped every layer because of pass filtering, while still keeping fallback behavior for real in-pass material failures.
+- Important boundary:
+   - this is a render-order/material-order correction only; it is not a full global transparent-surface sort across terrain liquids, WMO transparent batches, and all doodad layers.
+   - runtime real-data validation is still required on reflective / translucent models before claiming full material parity.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the Mar 23 render-order + transparent-only fallback follow-up
+   - no automated tests were added or run
+
 - PM4 overlay loading in `src/MdxViewer/Terrain/WorldScene.cs` now restores the map-wide PM4 candidate set instead of filtering to the active camera window.
 - Current behavior:
    - the loader still computes PM4 camera-window/radius metrics for diagnostics, but candidate selection is no longer restricted by camera position
    - all valid map PM4 files are decoded/read into the overlay candidate set
+   - zero-CK24 PM4 surface families are no longer dropped outright; the viewer now seeds separate overlay objects for those type/attr buckets instead of only reconstructing non-zero CK24 groups
    - PM4 decode/cache load now runs on a background task instead of blocking the render thread when the PM4 layer is enabled or reloaded
    - completed PM4 overlay snapshots are applied back on the render thread on the next frame, so the live dictionaries are not mutated from the background worker
    - the loaded PM4 window is pinned to the full tile range `(0..63, 0..63)` so moving the camera no longer forces PM4 reload churn

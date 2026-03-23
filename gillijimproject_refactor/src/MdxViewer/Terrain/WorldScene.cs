@@ -498,10 +498,15 @@ public class WorldScene : ISceneRenderer
     public bool HasSelectedPm4Object => _selectedPm4ObjectKey.HasValue;
     public (int tileX, int tileY, uint ck24, int objectPart)? SelectedPm4ObjectKey => _selectedPm4ObjectKey;
 
+    private const uint Pm4SyntheticZeroCk24GroupMask = 0x80000000u;
+
     private static (int tileX, int tileY, uint ck24) BuildPm4BaseObjectGroupKey(
         (int tileX, int tileY, uint ck24, int objectPart) objectKey)
     {
-        return (objectKey.tileX, objectKey.tileY, objectKey.ck24);
+        uint groupKey = objectKey.ck24 != 0
+            ? objectKey.ck24
+            : Pm4SyntheticZeroCk24GroupMask | (uint)objectKey.objectPart;
+        return (objectKey.tileX, objectKey.tileY, groupKey);
     }
 
     private (int tileX, int tileY, uint ck24) ResolvePm4ObjectGroupKey((int tileX, int tileY, uint ck24, int objectPart) objectKey)
@@ -1523,7 +1528,7 @@ public class WorldScene : ISceneRenderer
                     cachedOverlay,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
-                    $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} map-wide files restored from disk cache, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} CK24 objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                    $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} map-wide files restored from disk cache, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
                     cancelled: false);
             }
 
@@ -1678,7 +1683,7 @@ public class WorldScene : ISceneRenderer
                 cacheData,
                 selectedObjectKey,
                 loadStopwatch.Elapsed.TotalMilliseconds,
-                $"PM4 ready: {loadedFiles}/{totalFiles} map-wide files decoded and cached, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} CK24 objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                $"PM4 ready: {loadedFiles}/{totalFiles} map-wide files decoded and cached, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
                 cancelled: false);
         }
         catch (OperationCanceledException)
@@ -2164,6 +2169,58 @@ public class WorldScene : ISceneRenderer
         public MsurEntry Surface { get; }
     }
 
+    private readonly struct Pm4OverlaySeedGroup
+    {
+        public Pm4OverlaySeedGroup(uint displayCk24, byte displayCk24Type, bool requiresConnectivitySeedSplit, List<Pm4IndexedSurface> surfaces)
+        {
+            DisplayCk24 = displayCk24;
+            DisplayCk24Type = displayCk24Type;
+            RequiresConnectivitySeedSplit = requiresConnectivitySeedSplit;
+            Surfaces = surfaces;
+        }
+
+        public uint DisplayCk24 { get; }
+        public byte DisplayCk24Type { get; }
+        public bool RequiresConnectivitySeedSplit { get; }
+        public List<Pm4IndexedSurface> Surfaces { get; }
+    }
+
+    private static List<Pm4OverlaySeedGroup> BuildPm4OverlaySeedGroups(Pm4File pm4)
+    {
+        List<Pm4IndexedSurface> indexedSurfaces = pm4.Surfaces
+            .Select((surface, surfaceIndex) => new Pm4IndexedSurface(surfaceIndex, surface))
+            .Where(static indexedSurface => indexedSurface.Surface.IndexCount >= 3)
+            .ToList();
+
+        var groups = new List<Pm4OverlaySeedGroup>();
+        foreach (IGrouping<uint, Pm4IndexedSurface> ck24Group in indexedSurfaces
+            .Where(static indexedSurface => indexedSurface.Surface.Ck24 != 0)
+            .GroupBy(static indexedSurface => indexedSurface.Surface.Ck24)
+            .OrderBy(static group => group.Key))
+        {
+            groups.Add(new Pm4OverlaySeedGroup(
+                ck24Group.Key,
+                (byte)(ck24Group.Key >> 16),
+                requiresConnectivitySeedSplit: false,
+                ck24Group.ToList()));
+        }
+
+        foreach (IGrouping<(byte groupKey, byte attributeMask), Pm4IndexedSurface> zeroGroup in indexedSurfaces
+            .Where(static indexedSurface => indexedSurface.Surface.Ck24 == 0)
+            .GroupBy(static indexedSurface => (indexedSurface.Surface.GroupKey, indexedSurface.Surface.AttributeMask))
+            .OrderBy(static group => group.Key.GroupKey)
+            .ThenBy(static group => group.Key.AttributeMask))
+        {
+            groups.Add(new Pm4OverlaySeedGroup(
+                0u,
+                0,
+                requiresConnectivitySeedSplit: true,
+                zeroGroup.ToList()));
+        }
+
+        return groups;
+    }
+
     private static List<Pm4OverlayObject> BuildPm4TileObjects(
         Pm4File pm4,
         string sourcePath,
@@ -2179,7 +2236,8 @@ public class WorldScene : ISceneRenderer
         if (remainingLineBudget <= 0 || pm4.MeshVertices.Count == 0)
             return objects;
 
-        if (!pm4.Surfaces.Any(surface => surface.Ck24 != 0))
+        List<Pm4OverlaySeedGroup> seedGroups = BuildPm4OverlaySeedGroups(pm4);
+        if (seedGroups.Count == 0)
             return objects;
 
         Pm4AxisConvention fileAxisConvention = DetectPm4AxisConvention(pm4);
@@ -2187,18 +2245,15 @@ public class WorldScene : ISceneRenderer
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
-        foreach (var ck24Group in pm4.Surfaces
-            .Select((surface, surfaceIndex) => new Pm4IndexedSurface(surfaceIndex, surface))
-            .Where(indexedSurface => indexedSurface.Surface.Ck24 != 0)
-            .GroupBy(indexedSurface => indexedSurface.Surface.Ck24))
+        foreach (Pm4OverlaySeedGroup seedGroup in seedGroups)
         {
             if (tileLineBudget <= 0)
                 break;
 
-            uint ck24 = ck24Group.Key;
-            byte ck24Type = (byte)(ck24 >> 16);
+            uint ck24 = seedGroup.DisplayCk24;
+            byte ck24Type = seedGroup.DisplayCk24Type;
             int objectPartCounter = 0;
-            List<Pm4IndexedSurface> surfaceGroup = ck24Group.ToList();
+            List<Pm4IndexedSurface> surfaceGroup = seedGroup.Surfaces;
             Pm4AxisConvention ck24AxisConvention = fileAxisConvention;
             List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
             List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
@@ -2239,7 +2294,9 @@ public class WorldScene : ISceneRenderer
                 ck24PlanarTransform,
                 ck24WorldPivot,
                 ck24WorldYawCorrection);
-            List<List<Pm4IndexedSurface>> linkedGroups = SplitSurfaceGroupByMslk(pm4, surfaceGroup);
+            List<List<Pm4IndexedSurface>> linkedGroups = seedGroup.RequiresConnectivitySeedSplit
+                ? SplitIndexedSurfaceGroupByConnectivity(pm4, surfaceGroup)
+                : SplitSurfaceGroupByMslk(pm4, surfaceGroup);
 
             foreach (List<Pm4IndexedSurface> linkedGroup in linkedGroups)
             {
@@ -2576,6 +2633,93 @@ public class WorldScene : ISceneRenderer
             groups.Add(unlinked);
 
         return groups;
+    }
+
+    private static List<List<Pm4IndexedSurface>> SplitIndexedSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        var components = new List<List<Pm4IndexedSurface>>();
+        if (surfaces.Count == 0)
+            return components;
+        if (surfaces.Count == 1)
+        {
+            components.Add(new List<Pm4IndexedSurface> { surfaces[0] });
+            return components;
+        }
+
+        var surfaceVertices = new List<List<int>>(surfaces.Count);
+        var vertexToSurfaceIndices = new Dictionary<int, List<int>>();
+
+        for (int s = 0; s < surfaces.Count; s++)
+        {
+            MsurEntry surface = surfaces[s].Surface;
+            int firstIndex = (int)surface.MsviFirstIndex;
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            var vertices = new List<int>();
+            var unique = new HashSet<int>();
+
+            if (surface.IndexCount > 0 && firstIndex >= 0 && endExclusive > firstIndex)
+            {
+                for (int idx = firstIndex; idx < endExclusive; idx++)
+                {
+                    int vertexIndex = (int)pm4.MeshIndices[idx];
+                    if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                        continue;
+                    if (!unique.Add(vertexIndex))
+                        continue;
+
+                    vertices.Add(vertexIndex);
+                    if (!vertexToSurfaceIndices.TryGetValue(vertexIndex, out List<int>? owners))
+                    {
+                        owners = new List<int>();
+                        vertexToSurfaceIndices[vertexIndex] = owners;
+                    }
+
+                    owners.Add(s);
+                }
+            }
+
+            surfaceVertices.Add(vertices);
+        }
+
+        var visited = new bool[surfaces.Count];
+        var queue = new Queue<int>();
+        for (int start = 0; start < surfaces.Count; start++)
+        {
+            if (visited[start])
+                continue;
+
+            visited[start] = true;
+            queue.Enqueue(start);
+            var component = new List<Pm4IndexedSurface>();
+
+            while (queue.Count > 0)
+            {
+                int current = queue.Dequeue();
+                component.Add(surfaces[current]);
+
+                List<int> vertices = surfaceVertices[current];
+                for (int v = 0; v < vertices.Count; v++)
+                {
+                    int vertexIndex = vertices[v];
+                    if (!vertexToSurfaceIndices.TryGetValue(vertexIndex, out List<int>? neighbors))
+                        continue;
+
+                    for (int n = 0; n < neighbors.Count; n++)
+                    {
+                        int neighborSurface = neighbors[n];
+                        if (visited[neighborSurface])
+                            continue;
+
+                        visited[neighborSurface] = true;
+                        queue.Enqueue(neighborSurface);
+                    }
+                }
+            }
+
+            components.Add(component);
+        }
+
+        return components;
     }
 
     private static uint SelectDominantMslkGroupObjectId(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
@@ -3354,15 +3498,15 @@ public class WorldScene : ISceneRenderer
         var groupsByTile = new Dictionary<(int tileX, int tileY), List<int>>();
         foreach (var tileEntry in _pm4TileObjects)
         {
-            foreach (IGrouping<uint, Pm4OverlayObject> ck24Group in tileEntry.Value.GroupBy(static obj => obj.Ck24))
+            foreach (IGrouping<(int tileX, int tileY, uint ck24), Pm4OverlayObject> objectGroup in tileEntry.Value.GroupBy(obj => BuildPm4BaseObjectGroupKey((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId))))
             {
-                var baseGroupKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, ck24Group.Key);
+                var baseGroupKey = objectGroup.Key;
                 Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
                 Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
                 bool hasBounds = false;
                 var connectorKeys = new HashSet<Pm4ConnectorKey>();
 
-                foreach (Pm4OverlayObject obj in ck24Group)
+                foreach (Pm4OverlayObject obj in objectGroup)
                 {
                     IncludePointInBounds(obj.BoundsMin, ref boundsMin, ref boundsMax, ref hasBounds);
                     IncludePointInBounds(obj.BoundsMax, ref boundsMin, ref boundsMax, ref hasBounds);
@@ -5085,11 +5229,11 @@ public class WorldScene : ISceneRenderer
             }
         }
 
+        MdxRenderer? batchRenderer = null;
         if (_doodadsVisible)
         {
             // Set up shared per-frame state once (shader, view/proj, fog, lighting).
             // Safe because all MdxRenderers share a single static shader program.
-            MdxRenderer? batchRenderer = null;
             foreach (var inst in _mdxInstances)
             {
                 if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
@@ -5135,12 +5279,25 @@ public class WorldScene : ISceneRenderer
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
         }
 
-        // ── PASS 2: TRANSPARENT (back-to-front, frustum-culled) ─────────
+        // ── PASS 2: LIQUID ──────────────────────────────────────────────
+        // Render liquid after opaque geometry has established the depth buffer,
+        // but before transparent MDX layers so reflective/translucent model
+        // surfaces are composited on top instead of being overpainted by water.
+        _gl.Disable(EnableCap.Blend);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Lequal);
+        _terrainManager.RenderLiquid(view, proj, cameraPos);
+
+        // ── PASS 3: TRANSPARENT (back-to-front, frustum-culled) ─────────
         // Render transparent/blended layers sorted by distance to camera.
         // Depth test ON but depth write OFF so transparent objects don't
         // occlude each other incorrectly.
         if (_doodadsVisible)
         {
+            batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthFunc(DepthFunction.Lequal);
 
@@ -5188,16 +5345,6 @@ public class WorldScene : ISceneRenderer
         {
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
         }
-
-        // ── PASS 3: LIQUID ──────────────────────────────────────────────
-        // Render liquid surfaces LAST so all opaque geometry (terrain, WMOs, MDX)
-        // is already in the framebuffer. Liquid uses alpha blending + depth mask off,
-        // so objects below the water surface are visible through the transparent water.
-        _gl.Disable(EnableCap.Blend);
-        _gl.DepthMask(true);
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        _terrainManager.RenderLiquid(view, proj, cameraPos);
 
         if (_wireframeRevealEnabled)
             RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);

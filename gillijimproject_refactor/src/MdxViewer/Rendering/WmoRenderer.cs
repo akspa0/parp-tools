@@ -236,7 +236,7 @@ public class WmoRenderer : ISceneRenderer
     {
         EnsureLiquidMeshesUpToDate();
 
-        // Two-pass WMO rendering: Opaque → Doodads → Liquids → Transparent
+        // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
         _gl.UseProgram(_shaderProgram);
         _gl.Disable(EnableCap.CullFace);
 
@@ -311,8 +311,10 @@ public class WmoRenderer : ISceneRenderer
             _gl.BindVertexArray(0);
         }
 
-        // Pass 2: Doodads (rendered between opaque and transparent WMO geometry)
-        // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount
+        // Pass 2: Doodad opaque layers.
+        // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount.
+        List<(int idx, float distSq)>? visibleDoodads = null;
+        int visibleDoodadRenderCount = 0;
         if (_doodadsVisible && _doodadInstances.Count > 0)
         {
             // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
@@ -320,7 +322,7 @@ public class WmoRenderer : ISceneRenderer
             var updatedDoodadModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             // Build list of visible doodads with world-space distance to camera
-            var visibleDoodads = new List<(int idx, float distSq)>();
+            visibleDoodads = new List<(int idx, float distSq)>();
             float cullDistSq = DoodadCullDistance * DoodadCullDistance;
             for (int di = 0; di < _doodadInstances.Count; di++)
             {
@@ -339,13 +341,13 @@ public class WmoRenderer : ISceneRenderer
 
             // Sort nearest-first and cap at max render count
             visibleDoodads.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-            int renderCount = Math.Min(visibleDoodads.Count, (int)DoodadMaxRenderCount);
+            visibleDoodadRenderCount = Math.Min(visibleDoodads.Count, (int)DoodadMaxRenderCount);
 
-            for (int vi = 0; vi < renderCount; vi++)
+            for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
             {
                 var inst = _doodadInstances[visibleDoodads[vi].idx];
                 var doodadWorld = inst.Transform * modelMatrix;
-                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Both, 1.0f,
+                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,
                     lightDir, lightColor, ambientColor);
             }
@@ -375,7 +377,20 @@ public class WmoRenderer : ISceneRenderer
             _gl.Disable(EnableCap.Blend);
         }
 
-        // Pass 4: Transparent geometry (BlendMode 1+ = alpha key/blend)
+        // Pass 4: Doodad transparent layers back-to-front so model glass/reflection stays above liquids.
+        if (visibleDoodads != null && visibleDoodadRenderCount > 0)
+        {
+            for (int vi = visibleDoodadRenderCount - 1; vi >= 0; vi--)
+            {
+                var inst = _doodadInstances[visibleDoodads[vi].idx];
+                var doodadWorld = inst.Transform * modelMatrix;
+                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
+                    fogColor, fogStart, fogEnd, cameraPos,
+                    lightDir, lightColor, ambientColor);
+            }
+        }
+
+        // Pass 5: Transparent geometry (BlendMode 1+ = alpha key/blend)
         // Alpha key (BlendMode 1): hard cutout at alpha < 0.5
         // Alpha blend (BlendMode 2+): smooth blending with depth writes off
         _gl.UseProgram(_shaderProgram);

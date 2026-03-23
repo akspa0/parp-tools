@@ -103,6 +103,7 @@ public class MdxRenderer : ISceneRenderer
     private static uint _whiteFallbackTexture;
 
     private readonly List<GeosetBuffers> _geosets = new();
+    private readonly List<int> _transparentGeosetOrder = new();
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
     private readonly Dictionary<int, string> _textureCacheKeys = new();
     private readonly Dictionary<int, TextureAlphaKind> _textureAlphaKinds = new();
@@ -534,9 +535,32 @@ public class MdxRenderer : ISceneRenderer
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
     private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha, bool forceBackdropState = false)
     {
-        for (int i = 0; i < _geosets.Count; i++)
+        List<int>? geosetOrder = null;
+        if (pass == RenderPass.Transparent && _geosets.Count > 1)
         {
-            var gb = _geosets[i];
+            _transparentGeosetOrder.Clear();
+            for (int i = 0; i < _geosets.Count; i++)
+                _transparentGeosetOrder.Add(i);
+
+            _transparentGeosetOrder.Sort((leftIndex, rightIndex) =>
+            {
+                int leftPriority = GetGeosetPriorityPlane(_geosets[leftIndex].GeosetIndex);
+                int rightPriority = GetGeosetPriorityPlane(_geosets[rightIndex].GeosetIndex);
+                int priorityCompare = leftPriority.CompareTo(rightPriority);
+                if (priorityCompare != 0)
+                    return priorityCompare;
+
+                return _geosets[leftIndex].GeosetIndex.CompareTo(_geosets[rightIndex].GeosetIndex);
+            });
+
+            geosetOrder = _transparentGeosetOrder;
+        }
+
+        int geosetCount = geosetOrder?.Count ?? _geosets.Count;
+        for (int orderIndex = 0; orderIndex < geosetCount; orderIndex++)
+        {
+            int geosetBufferIndex = geosetOrder?[orderIndex] ?? orderIndex;
+            var gb = _geosets[geosetBufferIndex];
             if (!gb.Visible) continue;
 
             // Skip geosets hidden by geoset animation (alpha ≈ 0)
@@ -545,11 +569,14 @@ public class MdxRenderer : ISceneRenderer
 
             // Render each material layer for this geoset
             bool anyLayerRendered = false;
+            bool hasMaterialLayers = false;
+            bool hasLayerCandidateForPass = false;
             bool suppressedMissingTextureFallback = false;
             var geoset = _mdx.Geosets[gb.GeosetIndex];
             if (geoset.MaterialId >= 0 && geoset.MaterialId < _mdx.Materials.Count)
             {
                 var material = _mdx.Materials[geoset.MaterialId];
+                hasMaterialLayers = material.Layers.Count > 0;
                 for (int l = 0; l < material.Layers.Count; l++)
                 {
                     var layer = material.Layers[l];
@@ -565,6 +592,7 @@ public class MdxRenderer : ISceneRenderer
                     // Filter by render pass — alpha cutout renders in opaque pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
                     if (pass == RenderPass.Transparent && !needsBlend) continue;
+                    hasLayerCandidateForPass = true;
 
                     // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
                     var geoFlags = layer.Flags;
@@ -732,7 +760,12 @@ public class MdxRenderer : ISceneRenderer
             }
 
             // Fallback: no material or no layers rendered — treat as opaque
-            if (!anyLayerRendered && pass != RenderPass.Transparent && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
+            // Important: when a model only has transparent layers, the opaque pass must not
+            // draw magenta fallback geometry just because pass filtering skipped every layer.
+            if (!anyLayerRendered
+                && (!hasMaterialLayers || hasLayerCandidateForPass)
+                && pass != RenderPass.Transparent
+                && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
@@ -745,6 +778,18 @@ public class MdxRenderer : ISceneRenderer
         }
 
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+    }
+
+    private int GetGeosetPriorityPlane(int geosetIndex)
+    {
+        if ((uint)geosetIndex >= (uint)_mdx.Geosets.Count)
+            return 0;
+
+        int materialId = _mdx.Geosets[geosetIndex].MaterialId;
+        if ((uint)materialId >= (uint)_mdx.Materials.Count)
+            return 0;
+
+        return _mdx.Materials[materialId].PriorityPlane;
     }
 
     /// <summary>
