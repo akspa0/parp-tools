@@ -226,6 +226,11 @@ public static class LiquidConverter
         4 => MclqLiquidType.Slime,   // Slime
         5 => MclqLiquidType.Magma,   // Magma
         6 => MclqLiquidType.Magma,   // Lava (alternate)
+        13 => MclqLiquidType.River,  // River (3.3.5/4.0 family)
+        14 => MclqLiquidType.River,  // Still water
+        17 => MclqLiquidType.Ocean,  // Ocean
+        19 => MclqLiquidType.Magma,  // Magma/Lava
+        20 => MclqLiquidType.Slime,  // Slime
         _ => MclqLiquidType.River    // Default to river/water
     };
 

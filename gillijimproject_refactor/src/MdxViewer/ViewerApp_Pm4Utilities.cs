@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
 using ImGuiNET;
 using MdxViewer.Logging;
 using MdxViewer.Terrain;
@@ -840,5 +841,171 @@ public partial class ViewerApp
             Pm4OverlayColorMode.Height => "Height Gradient",
             _ => mode.ToString()
         };
+    }
+
+    private void DrawPm4ColorLegend(string idSuffix = "")
+    {
+        if (_worldScene == null || !_worldScene.ShowPm4Overlay)
+            return;
+
+        Pm4ColorLegendInfo legend = _worldScene.GetPm4ColorLegend();
+        if (!ImGui.CollapsingHeader($"PM4 Color Legend##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        if (!string.IsNullOrWhiteSpace(legend.Description))
+            ImGui.TextDisabled(legend.Description);
+
+        if (legend.Entries.Count == 0)
+        {
+            ImGui.TextDisabled("No loaded PM4 objects for the current legend mode.");
+            return;
+        }
+
+        for (int i = 0; i < legend.Entries.Count; i++)
+        {
+            Pm4ColorLegendEntry entry = legend.Entries[i];
+            ImGui.ColorButton(
+                $"##Pm4LegendColor{idSuffix}_{i}",
+                new Vector4(entry.Color, 1f),
+                ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoDragDrop,
+                new Vector2(14f, 14f));
+            ImGui.SameLine();
+            if (entry.IsSelected)
+                ImGui.TextColored(new Vector4(1f, 1f, 0.35f, 1f), $"{entry.Label}  [{entry.ObjectCount}]  selected");
+            else if (legend.IsContinuous)
+                ImGui.TextUnformatted(entry.Label);
+            else
+                ImGui.TextUnformatted($"{entry.Label}  [{entry.ObjectCount}]");
+        }
+
+        if (legend.IsTruncated)
+            ImGui.TextDisabled($"Showing {legend.Entries.Count} of {legend.TotalEntryCount} legend entries.");
+    }
+
+    private void DrawSelectedPm4ObjectGraph(string idSuffix = "")
+    {
+        if (_worldScene == null || !_worldScene.TryGetSelectedPm4ObjectGraphInfo(out Pm4SelectedObjectGraphInfo graph))
+            return;
+
+        if (!ImGui.CollapsingHeader($"PM4 Graph##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        ImGui.TextDisabled("Derived from the current overlay build: CK24 root, MSLK-linked groups, optional MDOS split, then connectivity parts.");
+        ImGui.TextDisabled("Treat this as viewer structure, not a claim that PM4 stores matching raw graph nodes.");
+        ImGui.TextDisabled($"Split flags: MDOS={graph.SplitByMdos} Connectivity={graph.SplitByConnectivity}");
+        ImGui.TextDisabled($"Tiles={graph.TileCount} LinkGroups={graph.LinkGroupCount} MdosGroups={graph.MdosGroupCount} Parts={graph.PartCount}");
+        ImGui.TextDisabled($"Surfaces={graph.SurfaceCount} Indices={graph.TotalIndexCount} AttrMasks={graph.AttributeMaskCount} GroupKeys={graph.GroupKeyCount}");
+        ImGui.TextDisabled("Click a part row to reselect it. Use Frame to move the camera to that exact part.");
+
+        if (ImGui.Button($"Export Graph JSON##{idSuffix}"))
+            ExportSelectedPm4GraphJson(graph);
+
+        ImGuiTreeNodeFlags rootFlags = ImGuiTreeNodeFlags.DefaultOpen;
+        if (ImGui.TreeNodeEx($"CK24 0x{graph.Ck24:X6} type=0x{graph.Ck24Type:X2} obj={graph.Ck24ObjectId}##Pm4GraphRoot{idSuffix}", rootFlags))
+        {
+            for (int linkIndex = 0; linkIndex < graph.LinkGroups.Count; linkIndex++)
+            {
+                Pm4SelectedObjectGraphLinkNode linkGroup = graph.LinkGroups[linkIndex];
+                string linkSummary = $"MSLK 0x{linkGroup.LinkGroupObjectId:X8} parts={linkGroup.PartCount} surfaces={linkGroup.SurfaceCount} indices={linkGroup.TotalIndexCount} linkedMPRL={linkGroup.LinkedPositionRefCount}";
+                if (ImGui.TreeNodeEx($"{linkSummary}##Pm4GraphLink{idSuffix}_{linkIndex}", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    if (linkGroup.LinkedPositionRefSummary.TotalCount > 0)
+                    {
+                        ImGui.TextDisabled(
+                            $"MPRL normal={linkGroup.LinkedPositionRefSummary.NormalCount} term={linkGroup.LinkedPositionRefSummary.TerminatorCount} floors={linkGroup.LinkedPositionRefSummary.FloorMin}..{linkGroup.LinkedPositionRefSummary.FloorMax}");
+                    }
+
+                    for (int mdosIndex = 0; mdosIndex < linkGroup.MdosGroups.Count; mdosIndex++)
+                    {
+                        Pm4SelectedObjectGraphMdosNode mdosGroup = linkGroup.MdosGroups[mdosIndex];
+                        string mdosSummary = $"MDOS {mdosGroup.MdosIndex} parts={mdosGroup.PartCount} surfaces={mdosGroup.SurfaceCount} indices={mdosGroup.TotalIndexCount} attrs={FormatPm4ByteList(mdosGroup.AttributeMasks)} groups={FormatPm4ByteList(mdosGroup.GroupKeys)}";
+                        if (ImGui.TreeNodeEx($"{mdosSummary}##Pm4GraphMdos{idSuffix}_{linkIndex}_{mdosIndex}", ImGuiTreeNodeFlags.DefaultOpen))
+                        {
+                            for (int partIndex = 0; partIndex < mdosGroup.Parts.Count; partIndex++)
+                            {
+                                Pm4SelectedObjectGraphPartNode part = mdosGroup.Parts[partIndex];
+                                ImGuiTreeNodeFlags partFlags = ImGuiTreeNodeFlags.Leaf | ImGuiTreeNodeFlags.NoTreePushOnOpen;
+                                if (part.IsSelected)
+                                    partFlags |= ImGuiTreeNodeFlags.Selected;
+
+                                string partSummary = $"part={part.ObjectPartId} tile=({part.TileX},{part.TileY}) surfaces={part.SurfaceCount} indices={part.TotalIndexCount} lines={part.LineCount} tris={part.TriangleCount} group=0x{part.DominantGroupKey:X2} attr=0x{part.DominantAttributeMask:X2}";
+                                ImGui.TreeNodeEx($"{partSummary}##Pm4GraphPart{idSuffix}_{linkIndex}_{mdosIndex}_{partIndex}", partFlags);
+                                if (ImGui.IsItemClicked())
+                                    SelectPm4GraphPart((part.TileX, part.TileY, graph.Ck24, part.ObjectPartId), frameCamera: false);
+                                ImGui.SameLine();
+                                if (ImGui.SmallButton($"Frame##Pm4GraphPartFrame{idSuffix}_{linkIndex}_{mdosIndex}_{partIndex}"))
+                                    SelectPm4GraphPart((part.TileX, part.TileY, graph.Ck24, part.ObjectPartId), frameCamera: true);
+                            }
+
+                            ImGui.TreePop();
+                        }
+                    }
+
+                    ImGui.TreePop();
+                }
+            }
+
+            ImGui.TreePop();
+        }
+    }
+
+    private static string FormatPm4ByteList(IReadOnlyList<byte> values)
+    {
+        if (values.Count == 0)
+            return "-";
+
+        return string.Join(", ", values.Select(static value => $"0x{value:X2}"));
+    }
+
+    private void SelectPm4GraphPart((int tileX, int tileY, uint ck24, int objectPart) objectKey, bool frameCamera)
+    {
+        if (_worldScene == null)
+            return;
+
+        if (!_worldScene.SelectPm4Object(objectKey))
+        {
+            _statusMessage = $"PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart} is no longer available.";
+            return;
+        }
+
+        _showPm4AlignmentWindow = true;
+
+        if (frameCamera)
+        {
+            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
+                FocusCameraOnBounds(debugInfo.BoundsMin, debugInfo.BoundsMax);
+        }
+
+        _statusMessage = frameCamera
+            ? $"Selected and framed PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart}."
+            : $"Selected PM4 graph part CK24=0x{objectKey.ck24:X6} part={objectKey.objectPart}.";
+    }
+
+    private void ExportSelectedPm4GraphJson(Pm4SelectedObjectGraphInfo graph)
+    {
+        string defaultName = $"pm4_graph_ck24_{graph.Ck24:X6}_part_{graph.SelectedObjectPartId:D4}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+        string? picked = ShowSaveFileDialogSTA(
+            "Save Selected PM4 Graph JSON",
+            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            string json = JsonSerializer.Serialize(graph, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+            File.WriteAllText(picked, json, Encoding.UTF8);
+            _statusMessage = $"Exported selected PM4 graph JSON: {picked}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4 graph export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Graph] JSON export failed: {ex}");
+        }
     }
 }

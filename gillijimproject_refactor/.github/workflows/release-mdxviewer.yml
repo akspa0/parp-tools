@@ -1,4 +1,4 @@
-name: Release MdxViewer
+name: Release parp-tools WoW Viewer
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.1.0)'
+        description: 'Version tag (e.g. v0.4.5)'
         required: true
 
 permissions:
@@ -33,7 +33,7 @@ jobs:
           Remove-Item -Recurse -Force gillijimproject_refactor/lib/wow.tools.local/DBCD -ErrorAction SilentlyContinue
           git clone --depth 1 https://github.com/wowdev/DBCD gillijimproject_refactor/lib/wow.tools.local/DBCD
 
-      - name: Patch DBCD target frameworks (upstream may have net10.0 which requires .NET 10 SDK)
+      - name: Patch DBCD target frameworks for CI compatibility
         run: |
           $dbcdProjects = @(
             "gillijimproject_refactor/lib/wow.tools.local/DBCD/DBCD/DBCD.csproj",
@@ -42,7 +42,7 @@ jobs:
           foreach ($proj in $dbcdProjects) {
             if (Test-Path $proj) {
               $content = Get-Content $proj -Raw
-              $patched = $content -replace '<TargetFrameworks>[^<]+</TargetFrameworks>', '<TargetFrameworks>netstandard2.1;net8.0;net9.0</TargetFrameworks>'
+              $patched = $content -replace '<TargetFrameworks>[^<]+</TargetFrameworks>', '<TargetFrameworks>netstandard2.1;net8.0;net9.0;net10.0</TargetFrameworks>'
               Set-Content $proj $patched
               Write-Host "Patched $proj"
             }
@@ -54,10 +54,10 @@ jobs:
           Remove-Item -Recurse -Force gillijimproject_refactor/lib/WoWTools.Minimaps/SereniaBLPLib -ErrorAction SilentlyContinue
           git clone --depth 1 https://github.com/WoW-Tools/SereniaBLPLib.git gillijimproject_refactor/lib/WoWTools.Minimaps/SereniaBLPLib
 
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj
@@ -70,36 +70,42 @@ jobs:
             --self-contained true `
             -p:PublishSingleFile=false `
             -p:IncludeNativeLibrariesForSelfExtract=true `
-            -o gillijimproject_refactor/publish/MdxViewer
+            -o gillijimproject_refactor/publish/ParpToolsWoWViewer
 
       - name: Verify definitions bundled
         run: |
-          if (!(Test-Path "gillijimproject_refactor/publish/MdxViewer/definitions/AreaTable.dbd")) {
+          if (!(Test-Path "gillijimproject_refactor/publish/ParpToolsWoWViewer/definitions/AreaTable.dbd")) {
             Write-Error "WoWDBDefs definitions not found in publish output!"
             exit 1
           }
-          $count = (Get-ChildItem "gillijimproject_refactor/publish/MdxViewer/definitions/*.dbd").Count
+          $count = (Get-ChildItem "gillijimproject_refactor/publish/ParpToolsWoWViewer/definitions/*.dbd").Count
           Write-Host "Bundled $count .dbd definition files"
 
       - name: Create ZIP archive
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
-          Compress-Archive -Path "gillijimproject_refactor/publish/MdxViewer/*" -DestinationPath "MdxViewer-${version}-win-x64.zip"
-          Write-Host "Created MdxViewer-${version}-win-x64.zip"
+          Compress-Archive -Path "gillijimproject_refactor/publish/ParpToolsWoWViewer/*" -DestinationPath "parp-tools-wow-viewer-${version}-win-x64.zip"
+          Write-Host "Created parp-tools-wow-viewer-${version}-win-x64.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: MdxViewer ${{ github.event.inputs.version || github.ref_name }}
+          name: parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## MdxViewer — WoW World Viewer
+            ## parp-tools WoW Viewer
 
-            High-performance .NET 9 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
+            Build `0.4.5` of the active WoW world/model viewer and debugging surface in this repo.
+
+            Author: `github.com/akspa0/parp-tools`
+
+            Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!
+
+            Current support target: WoW Alpha `0.5.3` through Cataclysm `4.0.0.11927`.
 
             ### Quick Start
             1. Extract the ZIP
-            2. Run `MdxViewer.exe path\to\game\directory`
+            2. Run `ParpToolsWoWViewer.exe path\to\game\directory`
 
             ### Requirements
             - Windows x64
@@ -107,9 +113,9 @@ jobs:
             - WoW game data (MPQ archives)
 
             ### What's Included
-            - Self-contained .NET 9 runtime (no install needed)
+            - Self-contained .NET 10 runtime (no install needed)
             - WoWDBDefs definitions for DBC parsing
             - Pure C# MPQ reader (no StormLib dependency)
-          files: MdxViewer-*-win-x64.zip
+          files: parp-tools-wow-viewer-*-win-x64.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Text;
+using DBCD;
+using DBCD.Providers;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
@@ -28,6 +30,8 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly bool _useBigAlpha;
     private readonly string? _buildVersion;
     private readonly AdtProfile _adtProfile;
+    private readonly Dictionary<ushort, LiquidType> _mh2oLiquidTypesById = new();
+    private readonly HashSet<ushort> _reportedUnknownMh2oLiquidTypeIds = new();
 
     public ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; } = new();
     public IReadOnlyList<string> MdxModelNames => _mdxNames;
@@ -44,7 +48,13 @@ public class StandardTerrainAdapter : ITerrainAdapter
     private readonly Dictionary<string, int> _mdxNameIndex = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, int> _wmoNameIndex = new(StringComparer.OrdinalIgnoreCase);
 
-    public StandardTerrainAdapter(byte[] wdtBytes, string mapName, IDataSource dataSource, string? buildVersion = null)
+    public StandardTerrainAdapter(
+        byte[] wdtBytes,
+        string mapName,
+        IDataSource dataSource,
+        string? buildVersion = null,
+        IDBCProvider? dbcProvider = null,
+        string? dbdDir = null)
     {
         _dataSource = dataSource;
         _mapName = mapName;
@@ -74,6 +84,9 @@ public class StandardTerrainAdapter : ITerrainAdapter
             $"Standard WDT: {_existingTiles.Count} tiles, MPHD=0x{_mphdFlags:X}, bigAlpha={_useBigAlpha}");
         ViewerLog.Important(ViewerLog.Category.Terrain,
             $"Standard ADT profile: {_adtProfile.ProfileId} (build={_buildVersion ?? "unknown"})");
+
+        if (dbcProvider != null && !string.IsNullOrWhiteSpace(dbdDir) && !string.IsNullOrWhiteSpace(buildVersion))
+            LoadMh2oLiquidTypeLookup(dbcProvider, dbdDir, buildVersion);
 
         // For WMO-only maps, parse MWMO + MODF from the WDT itself (same as Alpha WDT)
         if (IsWmoBased)
@@ -1452,7 +1465,7 @@ public class StandardTerrainAdapter : ITerrainAdapter
                 $"  Tile({tileX},{tileY}) MH2O: {liquidCount} liquid chunks");
     }
 
-    private static LiquidChunkData? BuildMh2oLiquid(
+    private LiquidChunkData? BuildMh2oLiquid(
         IEnumerable<Mh2oInstance> instances,
         int tileX,
         int tileY,
@@ -1590,7 +1603,85 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return 0f;
     }
 
-    private static LiquidType MapMh2oLiquidType(ushort liquidTypeId)
+    private LiquidType MapMh2oLiquidType(ushort liquidTypeId)
+    {
+        if (_mh2oLiquidTypesById.TryGetValue(liquidTypeId, out var liquidType))
+            return liquidType;
+
+        liquidType = MapMh2oLiquidTypeFallback(liquidTypeId);
+        if (_mh2oLiquidTypesById.Count > 0 && _reportedUnknownMh2oLiquidTypeIds.Add(liquidTypeId))
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[MH2O] LiquidType.dbc ID {liquidTypeId} was not present in the loaded LiquidType table for build {_buildVersion ?? "unknown"}; falling back to static family mapping as {liquidType}.");
+        }
+
+        return liquidType;
+    }
+
+    private void LoadMh2oLiquidTypeLookup(IDBCProvider dbcProvider, string dbdDir, string build)
+    {
+        try
+        {
+            var dbdProvider = new FilesystemDBDProvider(dbdDir);
+            var dbcd = new DBCD.DBCD(dbcProvider, dbdProvider);
+
+            IDBCDStorage storage;
+            try
+            {
+                storage = dbcd.Load("LiquidType", build, Locale.EnUS);
+            }
+            catch
+            {
+                storage = dbcd.Load("LiquidType", build, Locale.None);
+            }
+
+            var availableColumns = new HashSet<string>(storage.AvailableColumns, StringComparer.OrdinalIgnoreCase);
+            string? typeColumn = DetectColumn(availableColumns, "Type", "LiquidType", "TypeID");
+            if (string.IsNullOrWhiteSpace(typeColumn))
+            {
+                ViewerLog.Important(ViewerLog.Category.Dbc,
+                    $"[MH2O] LiquidType.dbc loaded for build {build}, but no recognizable family column was found.");
+                return;
+            }
+
+            foreach (var key in storage.Keys)
+            {
+                if ((uint)key > ushort.MaxValue)
+                    continue;
+
+                var row = storage[key];
+                int liquidClass = SafeField<int>(row, typeColumn, -1);
+                if (!TryMapLiquidTypeClass(liquidClass, out var mappedLiquidType))
+                    continue;
+
+                _mh2oLiquidTypesById[(ushort)key] = mappedLiquidType;
+            }
+
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"[MH2O] Loaded {_mh2oLiquidTypesById.Count} LiquidType.dbc family mappings for build {build} via column '{typeColumn}'.");
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Important(ViewerLog.Category.Dbc,
+                $"[MH2O] Failed to load LiquidType.dbc for build {build}: {ex.Message}");
+        }
+    }
+
+    private static bool TryMapLiquidTypeClass(int liquidClass, out LiquidType liquidType)
+    {
+        liquidType = liquidClass switch
+        {
+            0 => LiquidType.Water,
+            1 => LiquidType.Ocean,
+            2 => LiquidType.Magma,
+            3 => LiquidType.Slime,
+            _ => LiquidType.Water,
+        };
+
+        return liquidClass is >= 0 and <= 3;
+    }
+
+    private static LiquidType MapMh2oLiquidTypeFallback(ushort liquidTypeId)
     {
         var mclqType = LiquidConverter.MapLiquidTypeIdToMclqType(liquidTypeId);
         return mclqType switch
@@ -1612,6 +1703,26 @@ public class StandardTerrainAdapter : ITerrainAdapter
             LiquidType.Ocean => 3,
             _ => int.MaxValue,
         };
+    }
+
+    private static string? DetectColumn(ISet<string> availableColumns, params string[] candidates)
+    {
+        foreach (var col in candidates)
+        {
+            if (availableColumns.Contains(col))
+                return col;
+        }
+
+        return null;
+    }
+
+    private static T SafeField<T>(dynamic row, string? col, T fallback)
+    {
+        if (string.IsNullOrWhiteSpace(col))
+            return fallback;
+
+        try { return (T)row[col]; }
+        catch { return fallback; }
     }
 
     /// <summary>

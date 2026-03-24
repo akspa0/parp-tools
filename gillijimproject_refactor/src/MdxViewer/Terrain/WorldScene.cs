@@ -236,6 +236,214 @@ public readonly struct Pm4SelectedObjectResearchInfo
     public IReadOnlyList<Pm4ResearchHypothesisMatch> TopMatches { get; }
 }
 
+public readonly struct Pm4ColorLegendEntry
+{
+    public Pm4ColorLegendEntry(string label, Vector3 color, int objectCount, bool isSelected)
+    {
+        Label = label;
+        Color = color;
+        ObjectCount = objectCount;
+        IsSelected = isSelected;
+    }
+
+    public string Label { get; }
+    public Vector3 Color { get; }
+    public int ObjectCount { get; }
+    public bool IsSelected { get; }
+}
+
+public readonly struct Pm4ColorLegendInfo
+{
+    public Pm4ColorLegendInfo(
+        Pm4OverlayColorMode mode,
+        bool isContinuous,
+        string description,
+        int totalEntryCount,
+        IReadOnlyList<Pm4ColorLegendEntry> entries)
+    {
+        Mode = mode;
+        IsContinuous = isContinuous;
+        Description = description;
+        TotalEntryCount = totalEntryCount;
+        Entries = entries;
+    }
+
+    public Pm4OverlayColorMode Mode { get; }
+    public bool IsContinuous { get; }
+    public string Description { get; }
+    public int TotalEntryCount { get; }
+    public IReadOnlyList<Pm4ColorLegendEntry> Entries { get; }
+    public bool IsTruncated => Entries.Count < TotalEntryCount;
+    public int HiddenEntryCount => Math.Max(0, TotalEntryCount - Entries.Count);
+}
+
+public readonly struct Pm4SelectedObjectGraphPartNode
+{
+    public Pm4SelectedObjectGraphPartNode(
+        int tileX,
+        int tileY,
+        int objectPartId,
+        int surfaceCount,
+        int totalIndexCount,
+        int lineCount,
+        int triangleCount,
+        byte dominantGroupKey,
+        byte dominantAttributeMask,
+        uint dominantMdosIndex,
+        bool isSelected)
+    {
+        TileX = tileX;
+        TileY = tileY;
+        ObjectPartId = objectPartId;
+        SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
+        LineCount = lineCount;
+        TriangleCount = triangleCount;
+        DominantGroupKey = dominantGroupKey;
+        DominantAttributeMask = dominantAttributeMask;
+        DominantMdosIndex = dominantMdosIndex;
+        IsSelected = isSelected;
+    }
+
+    public int TileX { get; }
+    public int TileY { get; }
+    public int ObjectPartId { get; }
+    public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
+    public int LineCount { get; }
+    public int TriangleCount { get; }
+    public byte DominantGroupKey { get; }
+    public byte DominantAttributeMask { get; }
+    public uint DominantMdosIndex { get; }
+    public bool IsSelected { get; }
+}
+
+public readonly struct Pm4SelectedObjectGraphMdosNode
+{
+    public Pm4SelectedObjectGraphMdosNode(
+        uint mdosIndex,
+        int partCount,
+        int surfaceCount,
+        int totalIndexCount,
+        IReadOnlyList<byte> attributeMasks,
+        IReadOnlyList<byte> groupKeys,
+        IReadOnlyList<Pm4SelectedObjectGraphPartNode> parts)
+    {
+        MdosIndex = mdosIndex;
+        PartCount = partCount;
+        SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
+        AttributeMasks = attributeMasks;
+        GroupKeys = groupKeys;
+        Parts = parts;
+    }
+
+    public uint MdosIndex { get; }
+    public int PartCount { get; }
+    public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
+    public IReadOnlyList<byte> AttributeMasks { get; }
+    public IReadOnlyList<byte> GroupKeys { get; }
+    public IReadOnlyList<Pm4SelectedObjectGraphPartNode> Parts { get; }
+}
+
+public readonly struct Pm4SelectedObjectGraphLinkNode
+{
+    public Pm4SelectedObjectGraphLinkNode(
+        uint linkGroupObjectId,
+        int partCount,
+        int surfaceCount,
+        int totalIndexCount,
+        int linkedPositionRefCount,
+        Pm4LinkedPositionRefSummary linkedPositionRefSummary,
+        IReadOnlyList<uint> mdosIndices,
+        IReadOnlyList<byte> attributeMasks,
+        IReadOnlyList<byte> groupKeys,
+        IReadOnlyList<Pm4SelectedObjectGraphMdosNode> mdosGroups)
+    {
+        LinkGroupObjectId = linkGroupObjectId;
+        PartCount = partCount;
+        SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
+        LinkedPositionRefCount = linkedPositionRefCount;
+        LinkedPositionRefSummary = linkedPositionRefSummary;
+        MdosIndices = mdosIndices;
+        AttributeMasks = attributeMasks;
+        GroupKeys = groupKeys;
+        MdosGroups = mdosGroups;
+    }
+
+    public uint LinkGroupObjectId { get; }
+    public int PartCount { get; }
+    public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
+    public int LinkedPositionRefCount { get; }
+    public Pm4LinkedPositionRefSummary LinkedPositionRefSummary { get; }
+    public IReadOnlyList<uint> MdosIndices { get; }
+    public IReadOnlyList<byte> AttributeMasks { get; }
+    public IReadOnlyList<byte> GroupKeys { get; }
+    public IReadOnlyList<Pm4SelectedObjectGraphMdosNode> MdosGroups { get; }
+}
+
+public readonly struct Pm4SelectedObjectGraphInfo
+{
+    public Pm4SelectedObjectGraphInfo(
+        int selectedTileX,
+        int selectedTileY,
+        uint ck24,
+        byte ck24Type,
+        ushort ck24ObjectId,
+        int selectedObjectPartId,
+        bool splitByMdos,
+        bool splitByConnectivity,
+        int tileCount,
+        int linkGroupCount,
+        int mdosGroupCount,
+        int partCount,
+        int surfaceCount,
+        int totalIndexCount,
+        int attributeMaskCount,
+        int groupKeyCount,
+        IReadOnlyList<Pm4SelectedObjectGraphLinkNode> linkGroups)
+    {
+        SelectedTileX = selectedTileX;
+        SelectedTileY = selectedTileY;
+        Ck24 = ck24;
+        Ck24Type = ck24Type;
+        Ck24ObjectId = ck24ObjectId;
+        SelectedObjectPartId = selectedObjectPartId;
+        SplitByMdos = splitByMdos;
+        SplitByConnectivity = splitByConnectivity;
+        TileCount = tileCount;
+        LinkGroupCount = linkGroupCount;
+        MdosGroupCount = mdosGroupCount;
+        PartCount = partCount;
+        SurfaceCount = surfaceCount;
+        TotalIndexCount = totalIndexCount;
+        AttributeMaskCount = attributeMaskCount;
+        GroupKeyCount = groupKeyCount;
+        LinkGroups = linkGroups;
+    }
+
+    public int SelectedTileX { get; }
+    public int SelectedTileY { get; }
+    public uint Ck24 { get; }
+    public byte Ck24Type { get; }
+    public ushort Ck24ObjectId { get; }
+    public int SelectedObjectPartId { get; }
+    public bool SplitByMdos { get; }
+    public bool SplitByConnectivity { get; }
+    public int TileCount { get; }
+    public int LinkGroupCount { get; }
+    public int MdosGroupCount { get; }
+    public int PartCount { get; }
+    public int SurfaceCount { get; }
+    public int TotalIndexCount { get; }
+    public int AttributeMaskCount { get; }
+    public int GroupKeyCount { get; }
+    public IReadOnlyList<Pm4SelectedObjectGraphLinkNode> LinkGroups { get; }
+}
+
 internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
 
 internal readonly struct Pm4MergeCandidateGroup
@@ -6334,6 +6542,266 @@ public class WorldScene : ISceneRenderer
         };
     }
 
+
+            public bool TryGetSelectedPm4ObjectGraphInfo(out Pm4SelectedObjectGraphInfo info)
+            {
+                info = default;
+                if (!_selectedPm4ObjectKey.HasValue || !_selectedPm4ObjectGroupKey.HasValue)
+                    return false;
+
+                var selectedObjectKey = _selectedPm4ObjectKey.Value;
+                var selectedGroupKey = _selectedPm4ObjectGroupKey.Value;
+                if (!_pm4ObjectLookup.TryGetValue(selectedObjectKey, out Pm4OverlayObject? selectedObject))
+                    return false;
+
+                var groupObjects = new List<((int tileX, int tileY, uint ck24, int objectPart) key, Pm4OverlayObject obj)>();
+                foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
+                {
+                    List<Pm4OverlayObject> objects = tileEntry.Value;
+                    for (int i = 0; i < objects.Count; i++)
+                    {
+                        Pm4OverlayObject candidate = objects[i];
+                        var candidateKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, candidate.Ck24, candidate.ObjectPartId);
+                        if (ResolvePm4ObjectGroupKey(candidateKey) == selectedGroupKey)
+                            groupObjects.Add((candidateKey, candidate));
+                    }
+                }
+
+                if (groupObjects.Count == 0)
+                    return false;
+
+                List<Pm4SelectedObjectGraphLinkNode> linkGroups = groupObjects
+                    .GroupBy(static entry => entry.obj.LinkGroupObjectId)
+                    .OrderBy(static group => group.Key)
+                    .Select(linkGroup =>
+                    {
+                        var linkEntries = linkGroup
+                            .OrderBy(static entry => entry.obj.DominantMdosIndex)
+                            .ThenBy(static entry => entry.key.objectPart)
+                            .ThenBy(static entry => entry.key.tileX)
+                            .ThenBy(static entry => entry.key.tileY)
+                            .ToList();
+
+                        List<Pm4SelectedObjectGraphMdosNode> mdosGroups = linkEntries
+                            .GroupBy(static entry => entry.obj.DominantMdosIndex)
+                            .OrderBy(static group => group.Key)
+                            .Select(mdosGroup =>
+                            {
+                                var mdosEntries = mdosGroup
+                                    .OrderBy(static entry => entry.key.objectPart)
+                                    .ThenBy(static entry => entry.key.tileX)
+                                    .ThenBy(static entry => entry.key.tileY)
+                                    .ToList();
+
+                                List<Pm4SelectedObjectGraphPartNode> parts = mdosEntries
+                                    .Select(entry => new Pm4SelectedObjectGraphPartNode(
+                                        entry.key.tileX,
+                                        entry.key.tileY,
+                                        entry.obj.ObjectPartId,
+                                        entry.obj.SurfaceCount,
+                                        entry.obj.TotalIndexCount,
+                                        entry.obj.Lines.Count,
+                                        entry.obj.Triangles.Count,
+                                        entry.obj.DominantGroupKey,
+                                        entry.obj.DominantAttributeMask,
+                                        entry.obj.DominantMdosIndex,
+                                        entry.key == selectedObjectKey))
+                                    .ToList();
+
+                                return new Pm4SelectedObjectGraphMdosNode(
+                                    mdosGroup.Key,
+                                    parts.Count,
+                                    mdosEntries.Sum(static entry => entry.obj.SurfaceCount),
+                                    mdosEntries.Sum(static entry => entry.obj.TotalIndexCount),
+                                    mdosEntries.Select(static entry => entry.obj.DominantAttributeMask).Distinct().OrderBy(static value => value).ToList(),
+                                    mdosEntries.Select(static entry => entry.obj.DominantGroupKey).Distinct().OrderBy(static value => value).ToList(),
+                                    parts);
+                            })
+                            .ToList();
+
+                        Pm4OverlayObject linkSeed = linkEntries[0].obj;
+                        return new Pm4SelectedObjectGraphLinkNode(
+                            linkGroup.Key,
+                            linkEntries.Count,
+                            linkEntries.Sum(static entry => entry.obj.SurfaceCount),
+                            linkEntries.Sum(static entry => entry.obj.TotalIndexCount),
+                            linkSeed.LinkedPositionRefCount,
+                            linkSeed.LinkedPositionRefSummary,
+                            mdosGroups.Select(static group => group.MdosIndex).ToList(),
+                            linkEntries.Select(static entry => entry.obj.DominantAttributeMask).Distinct().OrderBy(static value => value).ToList(),
+                            linkEntries.Select(static entry => entry.obj.DominantGroupKey).Distinct().OrderBy(static value => value).ToList(),
+                            mdosGroups);
+                    })
+                    .ToList();
+
+                info = new Pm4SelectedObjectGraphInfo(
+                    selectedObjectKey.tileX,
+                    selectedObjectKey.tileY,
+                    selectedObject.Ck24,
+                    selectedObject.Ck24Type,
+                    selectedObject.Ck24ObjectId,
+                    selectedObject.ObjectPartId,
+                    _pm4SplitCk24ByMdos,
+                    _pm4SplitCk24ByConnectivity,
+                    groupObjects.Select(static entry => (entry.key.tileX, entry.key.tileY)).Distinct().Count(),
+                    linkGroups.Count,
+                    linkGroups.Sum(static group => group.MdosGroups.Count),
+                    groupObjects.Count,
+                    groupObjects.Sum(static entry => entry.obj.SurfaceCount),
+                    groupObjects.Sum(static entry => entry.obj.TotalIndexCount),
+                    groupObjects.Select(static entry => entry.obj.DominantAttributeMask).Distinct().Count(),
+                    groupObjects.Select(static entry => entry.obj.DominantGroupKey).Distinct().Count(),
+                    linkGroups);
+
+                return true;
+            }
+
+            public Pm4ColorLegendInfo GetPm4ColorLegend(int maxEntries = 32)
+            {
+                maxEntries = Math.Max(1, maxEntries);
+
+                if (_pm4ColorMode == Pm4OverlayColorMode.Height)
+                {
+                    float minZ = float.IsFinite(_pm4MinObjectZ) ? _pm4MinObjectZ : 0f;
+                    float maxZ = float.IsFinite(_pm4MaxObjectZ) ? _pm4MaxObjectZ : minZ;
+                    float midZ = minZ + ((maxZ - minZ) * 0.5f);
+                    var entries = new List<Pm4ColorLegendEntry>
+                    {
+                        new($"low ({minZ:F1})", ColorFromHeight(minZ), 0, false),
+                        new($"mid ({midZ:F1})", ColorFromHeight(midZ), 0, false),
+                        new($"high ({maxZ:F1})", ColorFromHeight(maxZ), 0, false)
+                    };
+
+                    return new Pm4ColorLegendInfo(
+                        _pm4ColorMode,
+                        isContinuous: true,
+                        "Continuous gradient by PM4 object center height.",
+                        entries.Count,
+                        entries);
+                }
+
+                if (_pm4ColorMode == Pm4OverlayColorMode.Tile)
+                {
+                    var counts = new Dictionary<(int tileX, int tileY), int>();
+                    foreach (((int tileX, int tileY) tileKey, _) in EnumerateVisiblePm4OverlayObjects())
+                    {
+                        counts.TryGetValue(tileKey, out int existing);
+                        counts[tileKey] = existing + 1;
+                    }
+
+                    bool hasSelection = _selectedPm4ObjectKey.HasValue;
+                    (int tileX, int tileY) selectedTile = hasSelection
+                        ? (_selectedPm4ObjectKey!.Value.tileX, _selectedPm4ObjectKey.Value.tileY)
+                        : default;
+                    List<Pm4ColorLegendEntry> entries = counts
+                        .OrderBy(static entry => entry.Key.tileX)
+                        .ThenBy(static entry => entry.Key.tileY)
+                        .Take(maxEntries)
+                        .Select(entry => new Pm4ColorLegendEntry(
+                            $"tile ({entry.Key.tileX}, {entry.Key.tileY})",
+                            ColorFromSeed((uint)HashCode.Combine(entry.Key.tileX, entry.Key.tileY)),
+                            entry.Value,
+                            hasSelection && entry.Key == selectedTile))
+                        .ToList();
+
+                    return new Pm4ColorLegendInfo(
+                        _pm4ColorMode,
+                        isContinuous: false,
+                        "Each swatch identifies one loaded PM4 tile bucket.",
+                        counts.Count,
+                        entries);
+                }
+
+                var categoricalCounts = new Dictionary<uint, int>();
+                foreach (((int tileX, int tileY) _, Pm4OverlayObject obj) in EnumerateVisiblePm4OverlayObjects())
+                {
+                    uint key = GetPm4LegendValue(_pm4ColorMode, obj);
+                    categoricalCounts.TryGetValue(key, out int existing);
+                    categoricalCounts[key] = existing + 1;
+                }
+
+                uint? selectedValue = TryGetSelectedPm4LegendValue();
+                List<Pm4ColorLegendEntry> categoricalEntries = categoricalCounts
+                    .OrderBy(static entry => entry.Key)
+                    .Take(maxEntries)
+                    .Select(entry => new Pm4ColorLegendEntry(
+                        FormatPm4LegendLabel(_pm4ColorMode, entry.Key),
+                        GetPm4LegendColor(_pm4ColorMode, entry.Key),
+                        entry.Value,
+                        selectedValue.HasValue && selectedValue.Value == entry.Key))
+                    .ToList();
+
+                return new Pm4ColorLegendInfo(
+                    _pm4ColorMode,
+                    isContinuous: false,
+                    "Categorical colors are viewer-identification buckets, not closed PM4 semantics.",
+                    categoricalCounts.Count,
+                    categoricalEntries);
+            }
+
+            private IEnumerable<((int tileX, int tileY) tileKey, Pm4OverlayObject obj)> EnumerateVisiblePm4OverlayObjects()
+            {
+                foreach (KeyValuePair<(int tileX, int tileY), List<Pm4OverlayObject>> tileEntry in _pm4TileObjects)
+                {
+                    List<Pm4OverlayObject> objects = tileEntry.Value;
+                    for (int i = 0; i < objects.Count; i++)
+                    {
+                        Pm4OverlayObject obj = objects[i];
+                        if (ShouldRenderPm4ObjectType(obj.Ck24Type))
+                            yield return (tileEntry.Key, obj);
+                    }
+                }
+            }
+
+            private static uint GetPm4LegendValue(Pm4OverlayColorMode mode, Pm4OverlayObject obj)
+            {
+                return mode switch
+                {
+                    Pm4OverlayColorMode.Ck24ObjectId => obj.Ck24ObjectId,
+                    Pm4OverlayColorMode.Ck24Key => obj.Ck24,
+                    Pm4OverlayColorMode.GroupKey => obj.DominantGroupKey,
+                    Pm4OverlayColorMode.AttributeMask => obj.DominantAttributeMask,
+                    _ => obj.Ck24Type
+                };
+            }
+
+            private uint? TryGetSelectedPm4LegendValue()
+            {
+                if (!_selectedPm4ObjectKey.HasValue || !_pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedObject))
+                    return null;
+
+                return _pm4ColorMode switch
+                {
+                    Pm4OverlayColorMode.Tile => null,
+                    Pm4OverlayColorMode.Height => null,
+                    _ => GetPm4LegendValue(_pm4ColorMode, selectedObject)
+                };
+            }
+
+            private string FormatPm4LegendLabel(Pm4OverlayColorMode mode, uint value)
+            {
+                return mode switch
+                {
+                    Pm4OverlayColorMode.Ck24Type => $"CK24 type 0x{value:X2}",
+                    Pm4OverlayColorMode.Ck24ObjectId => $"CK24 obj {value} (0x{value:X4})",
+                    Pm4OverlayColorMode.Ck24Key => $"CK24 0x{value:X6}",
+                    Pm4OverlayColorMode.GroupKey => $"GroupKey 0x{value:X2}",
+                    Pm4OverlayColorMode.AttributeMask => $"AttrMask 0x{value:X2}",
+                    _ => value.ToString(CultureInfo.InvariantCulture)
+                };
+            }
+
+            private Vector3 GetPm4LegendColor(Pm4OverlayColorMode mode, uint value)
+            {
+                return mode switch
+                {
+                    Pm4OverlayColorMode.Ck24ObjectId => ColorFromSeed(value),
+                    Pm4OverlayColorMode.Ck24Key => ColorFromSeed(value),
+                    Pm4OverlayColorMode.GroupKey => ColorFromSeed(value),
+                    Pm4OverlayColorMode.AttributeMask => ColorFromSeed(value),
+                    _ => GetPm4TypeColor((byte)value)
+                };
+            }
     private Vector3 ColorFromHeight(float z)
     {
         float denom = _pm4MaxObjectZ - _pm4MinObjectZ;

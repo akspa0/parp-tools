@@ -3,11 +3,11 @@ using MdxViewer.Logging;
 using MdxLTool.Formats.Mdx;
 
 /// <summary>
-/// WoW Model Viewer entry point.
+/// parp-tools WoW Viewer entry point.
 /// Launches with ImGui UI, menu bar, file browser, and 3D viewport.
 /// Supports: MDX (Alpha 0.5.3), WMO (v14/v17), GLB export.
 /// Data sources: loose files, MPQ archives.
-/// Usage: MdxViewer [--verbose] [--full-load|--partial-load] [file ...]
+/// Usage: ParpToolsWoWViewer [--verbose] [--full-load|--partial-load] [file ...]
 /// </summary>
 class Program
 {

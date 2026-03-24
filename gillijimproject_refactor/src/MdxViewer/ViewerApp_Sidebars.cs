@@ -76,6 +76,11 @@ public partial class ViewerApp
                 bool shadowMap = renderer.ShowShadowMap;
                 if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
                 ImGui.SameLine();
+                bool useMccv = renderer.UseMccv;
+                if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle MCCV terrain vertex-color tinting.");
+                ImGui.SameLine();
                 bool contours = renderer.ShowContours;
                 if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
 
@@ -338,6 +343,8 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
                 ImGui.Separator();
                 ImGui.TextWrapped(_selectedObjectInfo);
+                DrawSelectedPm4ObjectGraph("SidebarSelectedObject");
+                DrawSelectedWmoControls();
                 DrawSelectedSqlGameObjectAnimationControls();
                 ImGui.Spacing();
             }
@@ -513,37 +520,89 @@ public partial class ViewerApp
             ImGui.Separator();
             ImGui.Text("Visibility:");
 
-            if (ImGui.SmallButton("All On"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, true);
-            ImGui.SameLine();
-            if (ImGui.SmallButton("All Off"))
-                for (int i = 0; i < _renderer.SubObjectCount; i++)
-                    _renderer.SetSubObjectVisible(i, false);
+            DrawRendererVisibilityControls(_renderer, "standalone");
+        }
+    }
 
-            ImGui.TextDisabled($"Groups: {_renderer.SubObjectCount}");
-            float listHeight = MathF.Min(220f, MathF.Max(110f, GetUniformListRowHeight() * Math.Min(_renderer.SubObjectCount, 8)));
-            if (ImGui.BeginChild("##SubObjectVisibility", new Vector2(0, listHeight), true))
+    private void DrawSelectedWmoControls()
+    {
+        if (_worldScene == null || _worldScene.SelectedObjectType != Terrain.ObjectType.Wmo || !_worldScene.SelectedInstance.HasValue)
+            return;
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        string normalizedKey = WorldAssetManager.NormalizeKey(selected.ModelPath);
+        WmoRenderer? wmoRenderer = _worldScene.Assets.GetWmo(normalizedKey);
+        if (wmoRenderer == null)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled("Selected WMO controls unavailable: renderer not loaded.");
+            return;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Selected WMO Controls");
+        ImGui.TextDisabled("Changes apply to all loaded instances of this WMO model.");
+
+        if (wmoRenderer.DoodadSetCount > 0)
+        {
+            ImGui.Text("Doodad Set:");
+            int activeSet = wmoRenderer.ActiveDoodadSet;
+            string currentSetName = wmoRenderer.GetDoodadSetName(activeSet);
+            if (ImGui.BeginCombo("##SelectedWmoDoodadSet", currentSetName))
             {
-                float rowHeight = GetUniformListRowHeight();
-                GetVisibleListRange(_renderer.SubObjectCount, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
+                for (int setIndex = 0; setIndex < wmoRenderer.DoodadSetCount; setIndex++)
                 {
-                    bool vis = _renderer.GetSubObjectVisible(i);
-                    string label = $"{_renderer.GetSubObjectName(i)}##subobj_{i}";
-                    if (ImGui.Checkbox(label, ref vis))
-                        _renderer.SetSubObjectVisible(i, vis);
+                    bool selectedSet = setIndex == activeSet;
+                    if (ImGui.Selectable(wmoRenderer.GetDoodadSetName(setIndex), selectedSet))
+                        wmoRenderer.SetActiveDoodadSet(setIndex);
+                    if (selectedSet)
+                        ImGui.SetItemDefaultFocus();
                 }
-
-                if (endIndex < _renderer.SubObjectCount)
-                    ImGui.Dummy(new Vector2(0, (_renderer.SubObjectCount - endIndex) * rowHeight));
-
-                ImGui.EndChild();
+                ImGui.EndCombo();
             }
         }
+
+        ImGui.Text("Groups / Doodads:");
+        DrawRendererVisibilityControls(wmoRenderer, "selected_wmo");
+    }
+
+    private void DrawRendererVisibilityControls(ISceneRenderer renderer, string idSuffix)
+    {
+        if (ImGui.SmallButton($"All On##{idSuffix}"))
+        {
+            for (int i = 0; i < renderer.SubObjectCount; i++)
+                renderer.SetSubObjectVisible(i, true);
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton($"All Off##{idSuffix}"))
+        {
+            for (int i = 0; i < renderer.SubObjectCount; i++)
+                renderer.SetSubObjectVisible(i, false);
+        }
+
+        ImGui.TextDisabled($"Entries: {renderer.SubObjectCount}");
+        float listHeight = MathF.Min(220f, MathF.Max(110f, GetUniformListRowHeight() * Math.Min(renderer.SubObjectCount, 8)));
+        if (!ImGui.BeginChild($"##SubObjectVisibility_{idSuffix}", new Vector2(0, listHeight), true))
+            return;
+
+        float rowHeight = GetUniformListRowHeight();
+        GetVisibleListRange(renderer.SubObjectCount, rowHeight, out int startIndex, out int endIndex);
+        if (startIndex > 0)
+            ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+        for (int i = startIndex; i < endIndex; i++)
+        {
+            bool visible = renderer.GetSubObjectVisible(i);
+            string label = $"{renderer.GetSubObjectName(i)}##subobj_{idSuffix}_{i}";
+            if (ImGui.Checkbox(label, ref visible))
+                renderer.SetSubObjectVisible(i, visible);
+        }
+
+        if (endIndex < renderer.SubObjectCount)
+            ImGui.Dummy(new Vector2(0, (renderer.SubObjectCount - endIndex) * rowHeight));
+
+        ImGui.EndChild();
     }
 
     private void FrameCurrentModel()

@@ -1,5 +1,22 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## v0.4.5 Branding + MH2O LiquidType Fix (Mar 24)
+
+- Viewer branding now points at `parp-tools WoW Viewer` in the active runtime shell:
+   - window title uses the new product name
+   - Help -> About is now a real modal with version, author, and credits
+   - executable/assembly metadata now emits `ParpToolsWoWViewer`
+- Release prep follow-up in the active tree:
+   - `src/MdxViewer/MdxViewer.csproj` and `src/MdxViewer/MdxViewer.CrossPlatform.csproj` now carry version `0.4.5`
+   - `.github/workflows/release-mdxviewer.yml` now uses the .NET 10 SDK, the new product naming, and the `parp-tools-wow-viewer-<version>-win-x64.zip` artifact name
+- Terrain/liquid correction in the active tree:
+   - `StandardTerrainAdapter` now resolves `MH2O` liquid family from `LiquidType.dbc.Type` when the active client build has DBC metadata loaded
+   - fallback behavior still exists for cases where DBC lookup is unavailable, but it now recognizes the later 3.3.5 / 4.0 IDs used elsewhere in the repo (`13`, `14`, `17`, `19`, `20`)
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed after this slice
+   - no automated tests were added or run
+   - no runtime real-data signoff yet on the actual corrected liquid visuals for 3.3.5 / 4.0 maps
+
 ## Current Focus: Recovery On v0.4.0 Baseline (Mar 17, 2026)
 
 MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tree.
@@ -7,6 +24,46 @@ MdxViewer work has been reset to a v0.4.0-based branch in the main workspace tre
 - Branch: recovery/v0.4.0-surgical-main-tree
 - Base commit: 343dadf (tag v0.4.0)
 - .github instructions/skills/prompts restored from main and committed (845748b)
+
+### Tool Dialog Path Seeding Follow-Up (Mar 23)
+
+- Viewer tools should reuse the already loaded session roots instead of forcing users to browse back to them repeatedly.
+- Current viewer-side behavior:
+   - `Generate VLM Dataset` seeds from the active `MpqDataSource.GamePath` plus the current loaded map name.
+   - `Terrain Texture Transfer` seeds source/target map directories from the attached loose overlay root and active base client root when those directories exist for the current map.
+   - `Map Converter` seeds current-map WDT/map-directory inputs from the loaded session roots when an on-disk path is available.
+   - `WMO Converter` continues to seed from the currently loaded standalone WMO file.
+- Scope limit:
+   - this change reduces UI friction only; it does not prove the downstream converters are correct.
+   - after this follow-up, file diagnostics were clean on `src/MdxViewer/ViewerApp.cs`, but no new full build/runtime signoff was recorded yet for the exact slice.
+
+### Unified Terrain/Model/WMO I/O Overhaul Proposal (Mar 23)
+
+- User direction is to stop splitting read/write knowledge across viewer/runtime code and `WoWMapConverter.Core`.
+- Desired long-term state:
+   - one shared library for Alpha/LK/4.x terrain, WDT/ADT, M2/MDX, and WMO read/write/conversion contracts
+   - viewer, converter, dataset exporters, and future tools all call that same contract instead of carrying divergent logic
+   - Alpha placement downconversion remains explicitly open until MODF/MDDF writer support is ported and validated
+- Planning prompt for the larger effort lives at `plans/unified_format_io_overhaul_prompt_2026-03-23.md`.
+- New PM4-specific planning guardrail after the Mar 24 viewer follow-up:
+   - the current useful selected-object hierarchy in the viewer is `CK24 -> MSLK-linked subgroup -> optional MDOS subgroup -> connectivity part`
+   - `MSUR.AttributeMask` and `GroupKey` should remain exposed as inspectable subgroup labels even while their semantics stay open
+   - PM4 centroids are still derived anchors for display/debugging, not proven raw PM4 hierarchy nodes
+
+### PM4 Legend + Selected-Object Graph Follow-Up (Mar 24)
+
+- `WorldScene` now exposes two viewer-side PM4 inspection helpers built from the current overlay state:
+   - a categorical color legend for the active PM4 color mode so `MSUR Attr Mask` colors can be identified by explicit values/counts
+   - a selected-object graph summary that reflects the current overlay assembly chain: `CK24 -> MSLK-linked group -> MDOS bucket -> part`
+- `ViewerApp` / `ViewerApp_Sidebars` now surface those helpers directly in the UI:
+   - `World Objects` shows `PM4 Color Legend`
+   - selected PM4 objects in the inspector show `PM4 Graph`
+- Mar 24 interaction follow-up on the same UI:
+   - PM4 graph leaf rows now reselect the exact PM4 part they describe instead of being read-only text
+   - the graph panel also supports JSON export of the selected PM4 structural view for later research/planning capture
+- Important boundary:
+   - the graph is a viewer-derived structural explanation of the current overlay assembly, not proof that PM4 stores matching explicit graph nodes
+   - the legend identifies value buckets only; it does not close the semantics of `AttributeMask` or `GroupKey`
 
 ### PM4 Overlay Load Contract Change: Full-Map Overlay Restore (Mar 22)
 

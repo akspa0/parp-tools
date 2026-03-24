@@ -1,5 +1,22 @@
 # Active Context
 
+## Mar 24, 2026 - v0.4.5 Branding + MH2O LiquidType Classification Fix
+
+- Active viewer branding/release metadata is now aligned toward `parp-tools WoW Viewer` version `0.4.5` without renaming the `MdxViewer` root namespace.
+- Current user-facing changes in the active tree:
+	- viewer window title now uses `parp-tools WoW Viewer`
+	- Help -> About now opens a modal with author + credits instead of only writing a transient status line
+	- project metadata now emits `ParpToolsWoWViewer` as the executable/assembly name
+	- `.github/workflows/release-mdxviewer.yml` now packages/releases `parp-tools-wow-viewer-<version>-win-x64.zip` and uses the .NET 10 SDK required by the active project target
+- MH2O follow-up on the same slice:
+	- `src/MdxViewer/Terrain/StandardTerrainAdapter.cs` now classifies `MH2O` liquids from `LiquidType.dbc -> Type` when DBC metadata is available for the active client build
+	- when DBC loading is unavailable or an ID is missing from the loaded table, the viewer now falls back to an expanded static family map that includes the real 3.3.5 / 4.0 IDs already used elsewhere in the repo (`13`, `14`, `17`, `19`, `20`)
+	- `src/WoWMapConverter/WoWMapConverter.Core/Formats/Liquids/LiquidConverter.cs` now recognizes those late-style IDs in the shared `LiquidTypeId -> MCLQ family` fallback path as well
+- Validation status:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed on Mar 24, 2026
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on 3.3.5 / 4.0 liquid visual parity; the build only proves the implementation compiles
+
 ## Current Focus: v0.4.0 Recovery Branch (Mar 17, 2026)
 
 Working branch is now reset in the main tree, not only in side worktrees.
@@ -8,6 +25,26 @@ Working branch is now reset in the main tree, not only in side worktrees.
 - Baseline tag/commit: v0.4.0 / 343dadf
 - .github metadata restored from main and committed: 845748b
 - .github restore was pushed to origin/recovery/v0.4.0-surgical-main-tree
+
+### Tooling Path Reuse + Unified Format I/O Proposal (Mar 23)
+
+- Viewer tool dialogs should stop forcing repeated folder browsing when the session already knows the active base client and loose overlay roots.
+- Current viewer-side behavior now seeds tool inputs from the active session where practical:
+	- `Generate VLM Dataset` pulls the active MPQ base client path and current map name.
+	- `Terrain Texture Transfer` prefers the attached loose-overlay map directory as source and the base-client map directory as target when those roots exist.
+	- `Map Converter` now seeds WDT/map-directory inputs from the currently loaded local WDT when available, otherwise from the current map under the active loose/base roots.
+	- `WMO Converter` still seeds from the currently loaded standalone WMO when applicable.
+- Important scope limit:
+	- this is UI/tool input seeding only, not proof that all downstream conversion paths are correct for Alpha, LK 3.3.5, or 4.x data.
+	- after the Mar 23 seeding follow-up, edited-file diagnostics were clean on `src/MdxViewer/ViewerApp.cs`, but no new full viewer build or runtime signoff was recorded yet for this slice.
+- Larger project direction requested by the user:
+	- consolidate terrain, ADT/WDT, M2/MDX, and WMO read/write knowledge into one shared library used by viewer, converter, and tooling instead of continuing to split capabilities across `MdxViewer` and `WoWMapConverter.Core`.
+	- do not assume the existing map converter is already closed for Alpha placement writing: MODF/MDDF downconversion for Alpha WDT remains an explicit open seam until reimplemented and validated.
+	- planning prompt captured in `plans/unified_format_io_overhaul_prompt_2026-03-23.md`.
+	- new PM4 planning guardrail from Mar 24 viewer forensics/UI work:
+		- the practical viewer hierarchy is `CK24 -> MSLK-linked subgroup -> optional MDOS subgroup -> connectivity part`
+		- PM4 centroids are useful derived display anchors for those nodes, not proven raw PM4 node records
+		- `MSUR.AttributeMask` colors should be surfaced as explicit value legends, but their semantics remain open and must not be hardcoded into format contracts prematurely
 
 ### Documentation Refresh + Render Quality Follow-Up (Mar 23)
 

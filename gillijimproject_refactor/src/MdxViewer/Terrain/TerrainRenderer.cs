@@ -49,6 +49,9 @@ public class TerrainRenderer : IDisposable
     // MCSH shadow map overlay
     public bool ShowShadowMap { get; set; } = false;
 
+    // MCCV vertex-color tint
+    public bool UseMccv { get; set; } = true;
+
     // Topographical contour lines
     public bool ShowContours { get; set; } = false;
     public float ContourInterval { get; set; } = 2.0f;
@@ -329,6 +332,7 @@ public class TerrainRenderer : IDisposable
         _shader.SetInt("uShowTileGrid", ShowTileGrid ? 1 : 0);
         _shader.SetInt("uShowAlphaMask", ShowAlphaMask ? 1 : 0);
         _shader.SetInt("uShowShadowMap", ShowShadowMap ? 1 : 0);
+        _shader.SetInt("uUseMccv", UseMccv ? 1 : 0);
         _shader.SetInt("uShowContours", ShowContours ? 1 : 0);
         _shader.SetFloat("uContourInterval", ContourInterval);
 
@@ -726,6 +730,7 @@ uniform int uShowChunkGrid;
 uniform int uShowTileGrid;
 uniform int uShowAlphaMask;
 uniform int uShowShadowMap;
+uniform int uUseMccv;
 uniform int uShowContours;
 uniform float uContourInterval;
 
@@ -781,7 +786,7 @@ void main() {
 
     // MCCV uses mid-gray as the neutral/no-tint value. Map 0.5 -> 1.0 so default MCCV leaves terrain unchanged.
     // Alpha is preserved for debugging/export parity but is not used for terrain tinting here.
-    vec3 vertexTint = clamp(vVertexColor.rgb * 2.0, 0.0, 2.0);
+    vec3 vertexTint = (uUseMccv == 1) ? clamp(vVertexColor.rgb * 2.0, 0.0, 2.0) : vec3(1.0);
     litColor *= vertexTint;
 
     // Fog

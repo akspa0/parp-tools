@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -29,6 +30,9 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp : IDisposable
 {
+    private const string ViewerProductName = "parp-tools WoW Viewer";
+    private const string ViewerAboutPopupTitle = "About parp-tools WoW Viewer";
+
     private enum ModelContainerKind
     {
         Unknown,
@@ -66,6 +70,7 @@ public partial class ViewerApp : IDisposable
     private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
+    private bool _openAboutPopup;
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
     private int _currentMapId = -1; // MapID of the currently loaded world
@@ -118,6 +123,15 @@ public partial class ViewerApp : IDisposable
     
     // Stored loaded model data for export (avoids re-parsing from disk)
     private WmoV14ToV17Converter.WmoV14Data? _loadedWmo;
+
+    private static string GetViewerDisplayVersion()
+    {
+        return typeof(ViewerApp).Assembly
+                   .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                   ?.InformationalVersion
+               ?? typeof(ViewerApp).Assembly.GetName().Version?.ToString(3)
+               ?? "unknown";
+    }
     private MdxFile? _loadedMdx;
 
     // Mouse state
@@ -161,6 +175,9 @@ public partial class ViewerApp : IDisposable
         Heightmap257CurrentTilePerTile = 10,
         Heightmap257LoadedTilesFolderPerTile = 11,
         Heightmap257WholeMapFolderPerMap = 12,
+        MccvCurrentTilePng = 20,
+        MccvLoadedTilesFolder = 21,
+        MccvWholeMapFolder = 22,
     }
 
     private enum TerrainImportKind
@@ -168,6 +185,7 @@ public partial class ViewerApp : IDisposable
         None = 0,
         AlphaFolder = 1,
         Heightmap257Folder = 10,
+        MccvFolder = 20,
     }
 
     private bool _wantTerrainExport;
@@ -176,6 +194,7 @@ public partial class ViewerApp : IDisposable
     private TerrainImportKind _terrainImportKind = TerrainImportKind.None;
     private bool _showAlphaFolderImportScope;
     private bool _showHeightmapFolderImportScope;
+    private bool _showMccvFolderImportScope;
     private TerrainTileScope _terrainTileScope = TerrainTileScope.LoadedTiles;
     private TerrainTileScope _mapGlbScope = TerrainTileScope.CurrentTile;
     private string _terrainImportFolder = "";
@@ -402,7 +421,7 @@ public partial class ViewerApp : IDisposable
     {
         var opts = WindowOptions.Default;
         opts.Size = new Vector2D<int>(1600, 900);
-        opts.Title = "WoW Model Viewer";
+        opts.Title = ViewerProductName;
         opts.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
         opts.VSync = false; // Disable VSync — let the GPU run uncapped for profiling
 
@@ -1047,6 +1066,8 @@ void main() {
             DrawAlphaFolderImportScopeDialog();
         if (_showHeightmapFolderImportScope)
             DrawHeightmapFolderImportScopeDialog();
+        if (_showMccvFolderImportScope)
+            DrawMccvFolderImportScopeDialog();
         if (_showMapConverterDialog)
             DrawMapConverterDialog();
         if (_showWmoConverterDialog)
@@ -1176,16 +1197,28 @@ void main() {
             if (ImGui.BeginMenu("Tools"))
             {
                 if (ImGui.MenuItem("Generate VLM Dataset..."))
+                {
+                    PrepareVlmExportDialogInputs();
                     _showVlmExportDialog = true;
+                }
 
                 if (ImGui.MenuItem("Terrain Texture Transfer..."))
+                {
+                    PrepareTerrainTextureTransferDialogInputs();
                     _showTerrainTextureTransferDialog = true;
+                }
 
                 if (ImGui.MenuItem("Map Converter..."))
+                {
+                    PrepareMapConverterDialogInputs();
                     _showMapConverterDialog = true;
+                }
 
                 if (ImGui.MenuItem("WMO Converter..."))
+                {
+                    PrepareWmoConverterDialogInputs();
                     _showWmoConverterDialog = true;
+                }
 
                 ImGui.Separator();
 
@@ -1280,6 +1313,29 @@ void main() {
                             ImGui.EndMenu();
                         }
 
+                        if (ImGui.BeginMenu("MCCV"))
+                        {
+                            if (ImGui.MenuItem("Current Tile PNG...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.MccvCurrentTilePng;
+                            }
+
+                            if (ImGui.MenuItem("Loaded Tiles Folder...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.MccvLoadedTilesFolder;
+                            }
+
+                            if (ImGui.MenuItem("Whole Map Folder...", hasTerrain))
+                            {
+                                _wantTerrainExport = true;
+                                _terrainExportKind = TerrainExportKind.MccvWholeMapFolder;
+                            }
+
+                            ImGui.EndMenu();
+                        }
+
                         ImGui.EndMenu();
                     }
 
@@ -1312,6 +1368,16 @@ void main() {
                             ImGui.EndMenu();
                         }
 
+                        if (ImGui.BeginMenu("MCCV"))
+                        {
+                            if (ImGui.MenuItem("From Folder of Tile MCCV PNGs...", hasTerrain))
+                            {
+                                _wantTerrainImport = true;
+                                _terrainImportKind = TerrainImportKind.MccvFolder;
+                            }
+                            ImGui.EndMenu();
+                        }
+
                         ImGui.EndMenu();
                     }
 
@@ -1324,7 +1390,10 @@ void main() {
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About"))
-                    _statusMessage = "WoW Model Viewer — MDX/WMO viewer with GLB export. Built with Silk.NET + ImGui.";
+                {
+                    _openAboutPopup = true;
+                    _statusMessage = $"{ViewerProductName} {GetViewerDisplayVersion()}";
+                }
                 ImGui.EndMenu();
             }
 
@@ -1335,6 +1404,30 @@ void main() {
         {
             _openForgetKnownGoodClientConfirm = false;
             ImGui.OpenPopup("Confirm Forget Known-Good Base");
+        }
+
+        if (_openAboutPopup)
+        {
+            _openAboutPopup = false;
+            ImGui.OpenPopup(ViewerAboutPopupTitle);
+        }
+
+        bool keepAboutPopupOpen = true;
+        if (ImGui.BeginPopupModal(ViewerAboutPopupTitle, ref keepAboutPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.TextUnformatted(ViewerProductName);
+            ImGui.TextDisabled($"Version {GetViewerDisplayVersion()}");
+            ImGui.Spacing();
+            ImGui.TextWrapped("World/model viewer and debugging surface for WoW Alpha, Wrath, and early Cataclysm data.");
+            ImGui.Spacing();
+            ImGui.TextWrapped("Author: github.com/akspa0/parp-tools");
+            ImGui.Spacing();
+            ImGui.TextWrapped("Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!");
+            ImGui.Spacing();
+            if (ImGui.Button("Close", new Vector2(120f, 0f)))
+                ImGui.CloseCurrentPopup();
+
+            ImGui.EndPopup();
         }
 
         bool keepForgetKnownGoodPopupOpen = true;
@@ -1370,6 +1463,9 @@ void main() {
 
         if (!keepForgetKnownGoodPopupOpen)
             ClearPendingForgetKnownGoodClientPath();
+
+        if (!keepAboutPopupOpen)
+            _openAboutPopup = false;
 
         // Handle deferred actions
         if (_wantOpenFile)
@@ -1676,6 +1772,15 @@ void main() {
                 case TerrainExportKind.Heightmap257WholeMapFolderPerMap:
                     ExportHeightmap257TilesFolderPerMap();
                     break;
+                case TerrainExportKind.MccvCurrentTilePng:
+                    ExportMccvCurrentTilePng();
+                    break;
+                case TerrainExportKind.MccvLoadedTilesFolder:
+                    ExportMccvTilesFolder(wholeMap: false);
+                    break;
+                case TerrainExportKind.MccvWholeMapFolder:
+                    ExportMccvTilesFolder(wholeMap: true);
+                    break;
             }
         }
         catch (Exception ex)
@@ -1699,6 +1804,9 @@ void main() {
                     break;
                 case TerrainImportKind.Heightmap257Folder:
                     BeginHeightmapFolderImport();
+                    break;
+                case TerrainImportKind.MccvFolder:
+                    BeginMccvFolderImport();
                     break;
             }
         }
@@ -1991,6 +2099,159 @@ void main() {
         }
 
         _statusMessage = $"Imported alpha masks for {applied} tiles.";
+    }
+
+    private void ExportMccvCurrentTilePng()
+    {
+        var (tx, ty) = GetCameraTile();
+        var chunks = LoadTileChunksForExport(tx, ty);
+        if (chunks == null)
+        {
+            _statusMessage = $"No tile data available for ({tx},{ty}).";
+            return;
+        }
+
+        Directory.CreateDirectory(ExportDir);
+        string defaultName = $"tile_{tx}_{ty}_mccv.png";
+        var picked = ShowSaveFileDialogSTA(
+            "Save MCCV Tile PNG",
+            "PNG Files (*.png)|*.png|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+        if (string.IsNullOrEmpty(picked))
+            return;
+
+        using var image = TerrainMccvIo.BuildTileImage(chunks);
+        using (var fs = File.Create(picked))
+            image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+        _statusMessage = $"Exported: {picked}";
+    }
+
+    private void ExportMccvTilesFolder(bool wholeMap)
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select output folder for tile MCCV PNGs",
+            ExportDir,
+            showNewFolderButton: true);
+        if (string.IsNullOrEmpty(folder))
+            return;
+
+        var tiles = wholeMap
+            ? GetTileScopeList(TerrainTileScope.WholeMap)
+            : GetTileScopeList(TerrainTileScope.LoadedTiles);
+
+        int written = 0;
+        foreach (var (tx, ty) in tiles)
+        {
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null)
+                continue;
+
+            using var image = TerrainMccvIo.BuildTileImage(chunks);
+            string path = Path.Combine(folder, $"tile_{tx}_{ty}_mccv.png");
+            using (var fs = File.Create(path))
+                image.Save(fs, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            written++;
+        }
+
+        _statusMessage = $"Exported {written} MCCV tiles: {folder}";
+    }
+
+    private void BeginMccvFolderImport()
+    {
+        string? folder = ShowFolderDialogSTA(
+            "Select folder containing tile MCCV PNGs",
+            initialDir: null,
+            showNewFolderButton: false);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        _terrainImportFolder = folder;
+        _showMccvFolderImportScope = true;
+    }
+
+    private void DrawMccvFolderImportScopeDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("Import MCCV", ref _showMccvFolderImportScope, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.Text("Apply imported MCCV to:");
+        ImGui.Separator();
+
+        int scope = (int)_terrainTileScope;
+        ImGui.RadioButton("Current tile", ref scope, (int)TerrainTileScope.CurrentTile);
+        ImGui.RadioButton("Loaded tiles", ref scope, (int)TerrainTileScope.LoadedTiles);
+        ImGui.RadioButton("Whole map", ref scope, (int)TerrainTileScope.WholeMap);
+        ImGui.RadioButton("Custom list", ref scope, (int)TerrainTileScope.CustomList);
+        _terrainTileScope = (TerrainTileScope)scope;
+
+        if (_terrainTileScope == TerrainTileScope.CustomList)
+        {
+            ImGui.TextDisabled("One tile per line: x y (or x,y)");
+            ImGui.InputTextMultiline("##customTiles", ref _terrainCustomTilesText, 8192, new Vector2(480, 160));
+        }
+
+        ImGui.Separator();
+        ImGui.TextDisabled("PNG channels preserve raw MCCV bytes in file order for VLM/tooling compatibility.");
+        if (ImGui.Button("Import"))
+        {
+            ApplyMccvFolderImport(_terrainImportFolder, _terrainTileScope);
+            _terrainImportFolder = "";
+            _showMccvFolderImportScope = false;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Cancel"))
+        {
+            _terrainImportFolder = "";
+            _showMccvFolderImportScope = false;
+        }
+
+        ImGui.End();
+    }
+
+    private void ApplyMccvFolderImport(string folder, TerrainTileScope scope)
+    {
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return;
+
+        var targets = new HashSet<(int tileX, int tileY)>(GetTileScopeList(scope));
+        if (targets.Count == 0)
+        {
+            _statusMessage = "No target tiles selected.";
+            return;
+        }
+
+        if (scope == TerrainTileScope.WholeMap && _terrainManager != null)
+            _terrainManager.LoadAllTiles();
+
+        int applied = 0;
+        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
+        {
+            if (!TryParseTileCoordsFromFileName(file, out int tx, out int ty))
+                continue;
+            if (!targets.Contains((tx, ty)))
+                continue;
+
+            var chunks = LoadTileChunksForExport(tx, ty);
+            if (chunks == null)
+                continue;
+
+            using var image = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(file);
+            var newChunks = TerrainMccvIo.ApplyTileImageToChunks(chunks, image);
+            if (_terrainManager != null)
+                _terrainManager.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+            else
+                _vlmTerrainManager?.ReplaceTileChunksAndRebuild(tx, ty, newChunks);
+
+            applied++;
+        }
+
+        _statusMessage = $"Imported MCCV for {applied} tiles.";
     }
 
     private void ExportHeightmap257CurrentTilePerTile()
@@ -4458,6 +4719,8 @@ void main() {
             ImGui.EndCombo();
         }
 
+        DrawPm4ColorLegend("WorldObjects");
+
         bool splitCk24Connectivity = _worldScene.Pm4SplitCk24ByConnectivity;
         if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Connectivity))
         {
@@ -5359,6 +5622,199 @@ void main() {
         }
     }
 
+    private void PrepareVlmExportDialogInputs()
+    {
+        string? activeGamePath = GetActiveGamePath();
+        if (!string.IsNullOrWhiteSpace(activeGamePath))
+            _vlmClientPath = activeGamePath;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (!string.IsNullOrWhiteSpace(currentMapName))
+            _vlmMapName = currentMapName;
+
+        if (!string.IsNullOrWhiteSpace(_vlmClientPath) && !string.IsNullOrWhiteSpace(_vlmMapName) && string.IsNullOrWhiteSpace(_vlmOutputDir))
+            _vlmOutputDir = GenerateVlmOutputPath(_vlmClientPath, _vlmMapName);
+    }
+
+    private void PrepareTerrainTextureTransferDialogInputs()
+    {
+        string? overlayMapDir = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        string? baseMapDir = TryResolveCurrentMapDirectory(preferLooseOverlay: false);
+
+        if (!string.IsNullOrWhiteSpace(overlayMapDir))
+            _terrainTransferSourceDir = overlayMapDir;
+
+        if (!string.IsNullOrWhiteSpace(baseMapDir))
+            _terrainTransferTargetDir = baseMapDir;
+        else if (!string.IsNullOrWhiteSpace(overlayMapDir))
+            _terrainTransferTargetDir = overlayMapDir;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        bool usingDefaultOutput = string.IsNullOrWhiteSpace(_terrainTransferOutputDir)
+            || string.Equals(_terrainTransferOutputDir, Path.Combine("output", "terrain-texture-transfer-ui"), StringComparison.OrdinalIgnoreCase);
+        if (usingDefaultOutput && !string.IsNullOrWhiteSpace(currentMapName))
+            _terrainTransferOutputDir = Path.Combine("output", "terrain-texture-transfer-ui", currentMapName);
+    }
+
+    private void PrepareMapConverterDialogInputs()
+    {
+        string? preferredWdt = TryGetLoadedLocalWdtPath();
+        preferredWdt ??= TryResolveCurrentMapWdtPath(preferLooseOverlay: true);
+        preferredWdt ??= TryResolveCurrentMapWdtPath(preferLooseOverlay: false);
+
+        if (!string.IsNullOrWhiteSpace(preferredWdt))
+            _mapConvertSourcePath = preferredWdt;
+
+        string? preferredMapDir = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
+        preferredMapDir ??= TryResolveCurrentMapDirectory(preferLooseOverlay: false);
+        if (!string.IsNullOrWhiteSpace(preferredMapDir))
+            _mapConvertLkMapDir = preferredMapDir;
+    }
+
+    private void PrepareWmoConverterDialogInputs()
+    {
+        if (!string.IsNullOrEmpty(_loadedFilePath)
+            && string.Equals(Path.GetExtension(_loadedFilePath), ".wmo", StringComparison.OrdinalIgnoreCase))
+        {
+            _wmoConvertSourcePath = _loadedFilePath;
+        }
+    }
+
+    private string? GetActiveGamePath()
+    {
+        if (_dataSource is MpqDataSource mpqDataSource && !string.IsNullOrWhiteSpace(mpqDataSource.GamePath))
+            return Path.GetFullPath(mpqDataSource.GamePath);
+
+        if (!string.IsNullOrWhiteSpace(_lastGameFolderPath))
+            return Path.GetFullPath(_lastGameFolderPath);
+
+        return null;
+    }
+
+    private string? GetCurrentSessionMapName()
+    {
+        if (_terrainManager != null && !string.IsNullOrWhiteSpace(_terrainManager.MapName))
+            return _terrainManager.MapName;
+
+        if (_vlmTerrainManager != null && !string.IsNullOrWhiteSpace(_vlmTerrainManager.MapName))
+            return _vlmTerrainManager.MapName;
+
+        return null;
+    }
+
+    private string? TryResolveCurrentMapDirectory(bool preferLooseOverlay)
+    {
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return null;
+
+        foreach (string root in EnumerateCurrentSessionRoots(preferLooseOverlay))
+        {
+            string? mapDirectory = TryResolveMapDirectoryUnderRoot(root, currentMapName);
+            if (!string.IsNullOrWhiteSpace(mapDirectory))
+                return mapDirectory;
+        }
+
+        return null;
+    }
+
+    private string? TryResolveCurrentMapWdtPath(bool preferLooseOverlay)
+    {
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return null;
+
+        foreach (string root in EnumerateCurrentSessionRoots(preferLooseOverlay))
+        {
+            string? wdtPath = TryResolveMapWdtUnderRoot(root, currentMapName);
+            if (!string.IsNullOrWhiteSpace(wdtPath))
+                return wdtPath;
+        }
+
+        return null;
+    }
+
+    private IEnumerable<string> EnumerateCurrentSessionRoots(bool preferLooseOverlay)
+    {
+        var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            IEnumerable<string> overlayRoots = preferLooseOverlay
+                ? mpqDataSource.OverlayRoots.Reverse()
+                : mpqDataSource.OverlayRoots;
+
+            foreach (string overlayRoot in overlayRoots)
+            {
+                string normalizedRoot = Path.GetFullPath(overlayRoot);
+                if (yielded.Add(normalizedRoot))
+                    yield return normalizedRoot;
+            }
+
+            string gamePath = Path.GetFullPath(mpqDataSource.GamePath);
+            if (yielded.Add(gamePath))
+                yield return gamePath;
+
+            yield break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_lastLooseOverlayPath))
+        {
+            string looseRoot = Path.GetFullPath(_lastLooseOverlayPath);
+            if (yielded.Add(looseRoot))
+                yield return looseRoot;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_lastGameFolderPath))
+        {
+            string gameRoot = Path.GetFullPath(_lastGameFolderPath);
+            if (yielded.Add(gameRoot))
+                yield return gameRoot;
+        }
+    }
+
+    private static string? TryResolveMapDirectoryUnderRoot(string rootPath, string mapName)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) || string.IsNullOrWhiteSpace(mapName))
+            return null;
+
+        string[] candidates =
+        {
+            Path.Combine(rootPath, "World", "Maps", mapName),
+            Path.Combine(rootPath, "Data", "World", "Maps", mapName),
+            Path.Combine(rootPath, mapName),
+        };
+
+        foreach (string candidate in candidates)
+        {
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveMapWdtUnderRoot(string rootPath, string mapName)
+    {
+        string? mapDirectory = TryResolveMapDirectoryUnderRoot(rootPath, mapName);
+        if (string.IsNullOrWhiteSpace(mapDirectory))
+            return null;
+
+        string wdtPath = Path.Combine(mapDirectory, mapName + ".wdt");
+        return File.Exists(wdtPath) ? wdtPath : null;
+    }
+
+    private string? TryGetLoadedLocalWdtPath()
+    {
+        if (string.IsNullOrWhiteSpace(_loadedFilePath))
+            return null;
+
+        if (!string.Equals(Path.GetExtension(_loadedFilePath), ".wdt", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return File.Exists(_loadedFilePath) ? _loadedFilePath : null;
+    }
+
     private void AttachLooseMapOverlay(string selectedPath)
     {
         if (_dataSource is not MpqDataSource mpqDataSource)
@@ -5991,7 +6447,7 @@ void main() {
     {
         _loadedFilePath = filePath;
         _loadedFileName = Path.GetFileName(filePath);
-        _window.Title = $"WoW Viewer - {_loadedFileName}";
+        _window.Title = $"{ViewerProductName} - {_loadedFileName}";
 
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
         string dir = Path.GetDirectoryName(filePath) ?? ".";
@@ -6853,7 +7309,7 @@ void main() {
                 LoadModelFromBytesWithContainerProbe(data, resolvedPath, dir, "Catalog");
             }
 
-            _window.Title = $"WoW Viewer - {entry.Name} ({_loadedFileName})";
+            _window.Title = $"{ViewerProductName} - {entry.Name} ({_loadedFileName})";
             _statusMessage = $"Loaded from catalog: {entry.Name} [{entry.EntryId}]";
         }
         catch (Exception ex)
@@ -6932,7 +7388,7 @@ void main() {
                     break;
             }
 
-            _window.Title = $"WoW Viewer - {_loadedFileName}";
+            _window.Title = $"{ViewerProductName} - {_loadedFileName}";
         }
         catch (Exception ex)
         {
@@ -7107,7 +7563,7 @@ void main() {
                 }
 
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
-                var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild);
+                var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild, _dbcProvider, _dbdDir);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
                 _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild,
                     onStatus: OnLoadStatus);

@@ -1,5 +1,83 @@
 # Progress
 
+### Mar 24, 2026 - v0.4.5 Branding + MH2O LiquidType Classification Fix
+
+- `src/MdxViewer/ViewerApp.cs`
+	- viewer window titles now use `parp-tools WoW Viewer`
+	- Help -> About now opens a modal with version, author, and credits instead of only setting a status line
+	- standard terrain world loads now pass the active DBC provider/build metadata into `StandardTerrainAdapter`
+- `src/MdxViewer/MdxViewer.csproj` and `src/MdxViewer/MdxViewer.CrossPlatform.csproj`
+	- version metadata now targets `0.4.5`
+	- the emitted assembly/executable name is now `ParpToolsWoWViewer`
+- `.github/workflows/release-mdxviewer.yml`
+	- release workflow is now branded for `parp-tools WoW Viewer`
+	- workflow dispatch example now points at `v0.4.5`
+	- build environment now uses .NET 10 and publishes `parp-tools-wow-viewer-<version>-win-x64.zip`
+- `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`
+	- `MH2O` liquid family selection now prefers `LiquidType.dbc.Type` through DBCD instead of treating `LiquidTypeId` as a direct render class
+	- fallback behavior now still handles later 3.3.5 / 4.0 liquid IDs when DBC metadata is unavailable
+- `src/WoWMapConverter/WoWMapConverter.Core/Formats/Liquids/LiquidConverter.cs`
+	- shared fallback `LiquidTypeId -> MCLQ family` mapping now recognizes `13`, `14`, `17`, `19`, and `20`
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on the corrected 3.3.5 / 4.0 liquid-family rendering
+
+### Mar 24, 2026 - PM4 Color Legend + Selected-Object Graph UI
+
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- now exposes viewer-derived PM4 legend data for the active color mode instead of forcing users to reverse-map swatches by eye
+	- now exposes a selected-object PM4 hierarchy summary built from the current overlay assembly using:
+		- CK24 root group
+		- MSLK-linked subgroup
+		- optional MDOS subgroup
+		- connectivity/object-part leaf nodes
+- `src/MdxViewer/ViewerApp.cs`
+	- world-objects PM4 controls now show a `PM4 Color Legend` block under the color-mode selector so `MSUR Attr Mask` and other categorical modes are directly identifiable by value/count
+- `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- selected PM4 objects now show a `PM4 Graph` tree in the inspector so users can inspect link-group / MDOS / part structure for the clicked object
+- Mar 24 follow-up on the same PM4 UI slice:
+	- PM4 graph leaf rows are now actionable: clicking a part reselects that exact PM4 part and `Frame` moves the camera to it
+	- the selected PM4 graph can now be exported as JSON for later PM4 research/planning work
+- Planning follow-up:
+	- `plans/unified_format_io_overhaul_prompt_2026-03-23.md` now records the current pragmatic PM4 hierarchy contract and the rule that centroids are derived anchors, not raw PM4 graph nodes
+- Validation limits:
+	- no automated tests were added or run
+	- runtime real-data signoff is still required before claiming the new graph view fully matches raw PM4 ownership semantics
+
+### Mar 23, 2026 - Viewer Tool Dialogs Now Reuse Active Client / Loose Overlay Paths
+
+- The viewer already retained enough session state to stop forcing repeated path browsing across several tools:
+	- active MPQ base client path via `MpqDataSource.GamePath`
+	- attached loose overlay roots via `MpqDataSource.OverlayRoots`
+	- current loaded map name via `TerrainManager.MapName` / `VlmTerrainManager.MapName`
+- `src/MdxViewer/ViewerApp.cs`
+	- tool menu actions now prepare dialog inputs before opening:
+		- `Generate VLM Dataset`
+		- `Terrain Texture Transfer`
+		- `Map Converter`
+		- `WMO Converter`
+	- added helper methods that resolve the current session’s base client, loose overlay, map directory, and WDT path from the already loaded viewer state instead of making the user browse for them again.
+- Important current behavior:
+	- VLM export prefers the active MPQ base path and current map name.
+	- terrain transfer prefers loose overlay map dir as source and base-client map dir as target when both exist.
+	- map converter seeds from the current map WDT/map dir when a usable on-disk path exists.
+	- standalone WMO conversion still auto-seeds from the currently loaded WMO file.
+- Validation limits:
+	- file diagnostics on `src/MdxViewer/ViewerApp.cs` were clean after the change.
+	- no automated tests were added or run.
+	- no new full viewer build or runtime real-data signoff was recorded for this exact slice.
+
+### Mar 23, 2026 - Unified Format I/O Overhaul Proposal Captured
+
+- The user wants the current scattered terrain/model/WMO knowledge moved into one shared read/write library used by all tooling.
+- Explicit proposal direction now captured for follow-up planning:
+	- one shared format I/O library for Alpha, LK 3.3.5, and relevant 4.x read/write paths
+	- terrain + placement + model + WMO conversion under one orchestration surface
+	- retire the split where `MdxViewer` has newer runtime-read knowledge while `WoWMapConverter.Core` still carries older write/conversion assumptions
+	- do not over-claim Alpha placement downconversion until MODF/MDDF write support is actually implemented and validated
+- Planning prompt added at `plans/unified_format_io_overhaul_prompt_2026-03-23.md`.
+
 ### Mar 23, 2026 - Viewer Docs Refresh + Render Quality Follow-Up
 
 - Initial doc refresh was followed by a user rewrite of `src/MdxViewer/README.md` to remove bad assumptions and make the support/workflow description more grounded.
