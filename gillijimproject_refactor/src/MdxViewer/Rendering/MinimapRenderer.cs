@@ -40,39 +40,22 @@ public class MinimapRenderer : IDisposable
         if (_textureCache.TryGetValue(plainPath, out uint cached))
             return cached;
 
-        uint tex = LoadTile(plainPath);
+        uint tex = LoadTile(mapName, tx, ty, plainPath);
         _textureCache[plainPath] = tex;
         return tex;
     }
 
-    private unsafe uint LoadTile(string plainPath)
+    private unsafe uint LoadTile(string mapName, int tx, int ty, string cacheKey)
     {
-        if (TryLoadCachedBitmap(plainPath, out DecodedMinimapTile? cachedTile) && cachedTile != null)
+        if (TryLoadCachedBitmap(cacheKey, out DecodedMinimapTile? cachedTile) && cachedTile != null)
             return UploadTexture(cachedTile);
 
         byte[]? data = null;
-
-        // 1. Try MD5 translation if available
-        if (_md5Index != null)
+        foreach (string candidatePath in EnumerateTileCandidates(mapName, tx, ty))
         {
-            var normalized = _md5Index.Normalize(plainPath);
-            if (_md5Index.PlainToHash.TryGetValue(normalized, out string? hashedPath))
-            {
-                data = _dataSource.ReadFile(hashedPath);
-                if (data == null)
-                {
-                    // Try variants (textures/minimap/ vs textures/minimaps/ etc)
-                    data = _dataSource.ReadFile(hashedPath.Replace('/', '\\'));
-                }
-            }
-        }
-
-        // 2. Fallback to direct path
-        if (data == null)
-        {
-            data = _dataSource.ReadFile(plainPath);
-            if (data == null)
-                data = _dataSource.ReadFile(plainPath.Replace('/', '\\'));
+            data = TryReadTileData(candidatePath);
+            if (data != null && data.Length > 0)
+                break;
         }
 
         if (data == null || data.Length == 0)
@@ -84,15 +67,100 @@ public class MinimapRenderer : IDisposable
             using var blp = new BlpFile(ms);
             var bmp = blp.GetBitmap(0);
             DecodedMinimapTile decoded = ConvertBitmap(bmp);
-            TrySaveCachedBitmap(plainPath, bmp);
+            TrySaveCachedBitmap(cacheKey, bmp);
             bmp.Dispose();
             return UploadTexture(decoded);
         }
         catch (Exception ex)
         {
-            ViewerLog.Trace($"[MinimapRenderer] Failed to load tile {plainPath}: {ex.Message}");
+            ViewerLog.Trace($"[MinimapRenderer] Failed to load tile {cacheKey}: {ex.Message}");
             return 0;
         }
+    }
+
+    private byte[]? TryReadTileData(string plainPath)
+    {
+        byte[]? data = null;
+
+        if (_md5Index != null)
+        {
+            var normalized = _md5Index.Normalize(plainPath);
+            if (_md5Index.PlainToHash.TryGetValue(normalized, out string? hashedPath))
+            {
+                data = _dataSource.ReadFile(hashedPath);
+                if (data == null)
+                    data = _dataSource.ReadFile(hashedPath.Replace('/', '\\'));
+            }
+        }
+
+        if (data == null)
+        {
+            data = _dataSource.ReadFile(plainPath);
+            if (data == null)
+                data = _dataSource.ReadFile(plainPath.Replace('/', '\\'));
+        }
+
+        return data;
+    }
+
+    private static IEnumerable<string> EnumerateTileCandidates(string mapName, int x, int y)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var yieldReturnList = new List<string>();
+
+        void AddCandidate(string candidate)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate) && seen.Add(candidate))
+                yieldReturnList.Add(candidate);
+        }
+
+        string normalizedMapName = mapName.ToLowerInvariant();
+        string x2 = x.ToString("D2");
+        string y2 = y.ToString("D2");
+        string trsFormat = $"map{x}_{y2}.blp";
+
+        AddCandidate($"{normalizedMapName}\\{trsFormat}");
+        AddCandidate($"{normalizedMapName}/{trsFormat}");
+        AddCandidate($"textures/minimap/{normalizedMapName}/{trsFormat}");
+
+        AddCandidate($"textures/minimap/{normalizedMapName}/{normalizedMapName}_{x2}_{y2}.blp");
+        AddCandidate($"textures/minimap/{normalizedMapName}/map{x2}_{y2}.blp");
+        AddCandidate($"{normalizedMapName}/map{x2}_{y2}.blp");
+
+        string mapNameSpace = InsertSpaceBeforeCapitals(mapName).ToLowerInvariant();
+        if (!string.Equals(mapNameSpace, normalizedMapName, StringComparison.OrdinalIgnoreCase))
+        {
+            AddCandidate($"{mapNameSpace}\\{trsFormat}");
+            AddCandidate($"textures/minimap/{mapNameSpace}/{trsFormat}");
+            AddCandidate($"textures/minimap/{mapNameSpace}/{mapNameSpace}_{x2}_{y2}.blp");
+            AddCandidate($"textures/minimap/{mapNameSpace}/map{x2}_{y2}.blp");
+            AddCandidate($"{mapNameSpace}/map{x2}_{y2}.blp");
+        }
+
+        AddCandidate($"world/minimaps/{normalizedMapName}/map{x2}_{y2}.blp");
+        AddCandidate($"world/minimaps/{normalizedMapName}/map{x}_{y}.blp");
+        AddCandidate($"textures/minimap/{normalizedMapName}_{x2}_{y2}.blp");
+        AddCandidate($"textures/minimap/{normalizedMapName}_{x}_{y}.blp");
+
+        return yieldReturnList;
+    }
+
+    private static string InsertSpaceBeforeCapitals(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        var builder = new System.Text.StringBuilder(value.Length + 8);
+        for (int index = 0; index < value.Length; index++)
+        {
+            char ch = value[index];
+            if (index > 0 && char.IsUpper(ch) && !char.IsWhiteSpace(value[index - 1]))
+                builder.Append(' ');
+
+            builder.Append(ch);
+        }
+
+        return builder.ToString();
     }
 
     private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels);

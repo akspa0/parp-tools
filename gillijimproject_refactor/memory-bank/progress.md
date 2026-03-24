@@ -1,5 +1,35 @@
 # Progress
 
+### Mar 24, 2026 - 0.12 Standalone Model Browser Recovery
+
+- `src/MdxViewer/DataSources/MpqDataSource.cs`
+	- loose-file indexing now includes `.mdl`
+	- Alpha nested wrapper scan now includes `.mdx.MPQ`, `.mdl.MPQ`, and `.m2.MPQ`
+	- nested model wrappers now register alternate model-extension aliases into the file set / Alpha wrapper cache so the same wrapped asset can resolve through `.mdx`, `.mdl`, or `.m2`
+- `src/MdxViewer/ViewerApp.cs`
+	- the browser-side `.mdx` file bucket now includes early `.mdl` assets as part of the same standalone model family
+	- standalone disk loads now accept `.mdl`
+	- unsupported standalone M2-family loads now fail early with a clear error when the active build has no resolved `M2Profile`
+- `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- the file-browser type selector now labels the early-model bucket as `.mdx/.mdl`
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed with existing warnings
+	- no automated tests were added or run
+	- no runtime real-data signoff yet on a real `0.12` client dataset
+
+### Mar 24, 2026 - 0.6.0 Through 2.x Terrain Alpha Grid Regression Fix
+
+- `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`
+	- legacy standard-ADT terrain alpha decode no longer uses the naive sequential nibble expansion for the entire `0.6.0` through `2.x` band.
+	- `TerrainAlphaDecodeMode.LegacySequential` now prefers relaxed MCAL per-layer decode with inferred layer spans and preserved `DoNotFixAlphaMap` handling.
+	- fallback legacy 4-bit decode now goes through the existing row-aware unpack + legacy edge-fix helpers, which is the actual seam tied to the chunk-grid artifact.
+- Build follow-up required by the same slice:
+	- the earlier in-progress minimap candidate-path patch still had compile errors in `src/MdxViewer/Rendering/MinimapRenderer.cs`; those were corrected so the terrain change could be validated with a real solution build.
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed.
+	- no automated tests were added or run.
+	- no runtime real-data validation yet on the affected legacy terrain clients.
+
 ### Mar 24, 2026 - v0.4.5 Branding + MH2O LiquidType Classification Fix
 
 - `src/MdxViewer/ViewerApp.cs`

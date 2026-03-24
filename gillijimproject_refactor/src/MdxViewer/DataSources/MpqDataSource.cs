@@ -56,6 +56,7 @@ public class MpqDataSource : IDataSource
 {
     private static readonly HashSet<string> IndexedLooseExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
+        ".mdl",
         ".mdx",
         ".wmo",
         ".m2",
@@ -89,7 +90,7 @@ public class MpqDataSource : IDataSource
     // Loose file roots to check (game folder structure)
     private readonly List<string> _looseRoots = new();
 
-    // Alpha 0.5.3: virtual path → disk path for listfile-less .ext.MPQ files (WMO, WDT, WDL)
+    // Alpha-era nested wrappers: virtual path or model alias → disk path for listfile-less .ext.MPQ files.
     private readonly Dictionary<string, string> _alphaMpqCache = new(StringComparer.OrdinalIgnoreCase);
 
     // Global raw-byte cache for repeated model/texture reads.
@@ -265,9 +266,9 @@ public class MpqDataSource : IDataSource
     }
 
     /// <summary>
-    /// Scans for Alpha 0.5.3 listfile-less .ext.MPQ archives (WMO, WDT, WDL).
+    /// Scans for Alpha-era listfile-less .ext.MPQ archives (terrain/WMO wrappers and per-model wrappers).
     /// These files wrap a single data file as file ID 1 inside an individual MPQ archive.
-    /// Builds a virtual path → disk path cache for fast reads.
+    /// Builds a virtual path/alias → disk path cache for fast reads.
     /// </summary>
     private void ScanAlphaNestedMpqArchives(string gamePath)
     {
@@ -283,8 +284,16 @@ public class MpqDataSource : IDataSource
             "wmos", "addons", "interface", "backup", "cache", "logs"
         };
 
-        // Extensions that use listfile-less individual .ext.MPQ wrapping in Alpha 0.5.3
-        string[] nestedExts = { ".wmo.MPQ", ".wmo.mpq", ".wdt.MPQ", ".wdt.mpq", ".wdl.MPQ", ".wdl.mpq" };
+        // Extensions that use listfile-less individual .ext.MPQ wrapping in Alpha-era clients.
+        string[] nestedExts =
+        {
+            ".wmo.MPQ", ".wmo.mpq",
+            ".wdt.MPQ", ".wdt.mpq",
+            ".wdl.MPQ", ".wdl.mpq",
+            ".mdx.MPQ", ".mdx.mpq",
+            ".mdl.MPQ", ".mdl.mpq",
+            ".m2.MPQ", ".m2.mpq"
+        };
 
         var countByExt = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -340,18 +349,64 @@ public class MpqDataSource : IDataSource
                     virtualPath = virtualPath[..^4];
                 virtualPath = virtualPath.Replace('/', '\\');
 
-                _fileSet.Add(virtualPath);
-                _alphaMpqCache[virtualPath] = mpqFile;
+                foreach (string registeredPath in EnumerateAlphaWrapperVirtualPaths(virtualPath))
+                {
+                    _fileSet.Add(registeredPath);
+                    _alphaMpqCache[registeredPath] = mpqFile;
 
-                var ext = Path.GetExtension(virtualPath).ToLowerInvariant();
-                if (!countByExt.ContainsKey(ext)) countByExt[ext] = 0;
-                countByExt[ext]++;
+                    var ext = Path.GetExtension(registeredPath).ToLowerInvariant();
+                    if (!countByExt.ContainsKey(ext)) countByExt[ext] = 0;
+                    countByExt[ext]++;
+                }
             }
         }
 
         ViewerLog.Info(ViewerLog.Category.MpqData, $"Alpha nested MPQ scan: {_alphaMpqCache.Count} files found");
         foreach (var kvp in countByExt.OrderByDescending(x => x.Value))
             ViewerLog.Info(ViewerLog.Category.MpqData, $"  {kvp.Key}: {kvp.Value} files");
+    }
+
+    private static IEnumerable<string> EnumerateAlphaWrapperVirtualPaths(string virtualPath)
+    {
+        yield return virtualPath;
+
+        string extension = Path.GetExtension(virtualPath);
+        if (!IsModelExtension(extension))
+            yield break;
+
+        string basePath = virtualPath[..^extension.Length];
+        foreach (string aliasExtension in GetModelAliasExtensions(extension))
+            yield return basePath + aliasExtension;
+    }
+
+    private static IEnumerable<string> GetModelAliasExtensions(string extension)
+    {
+        if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdl";
+            yield return ".m2";
+            yield break;
+        }
+
+        if (extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdx";
+            yield return ".m2";
+            yield break;
+        }
+
+        if (extension.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return ".mdx";
+            yield return ".mdl";
+        }
+    }
+
+    private static bool IsModelExtension(string extension)
+    {
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
     }
 
     private void AddExternalListfileEntries(string listfilePath)

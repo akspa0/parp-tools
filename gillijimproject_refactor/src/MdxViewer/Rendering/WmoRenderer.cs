@@ -32,6 +32,7 @@ public class WmoRenderer : ISceneRenderer
     private static int _shaderRefCount;
 
     private readonly List<GroupBuffers> _groups = new();
+    private readonly List<(int groupBufferIndex, float distSq)> _transparentGroupSortScratch = new();
     private bool _wireframe;
 
     // Material textures: materialIndex → GL texture handle
@@ -424,8 +425,23 @@ public class WmoRenderer : ISceneRenderer
         _gl.Enable(EnableCap.Blend);
         _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
-        foreach (var gb in _groups)
+        _transparentGroupSortScratch.Clear();
+        for (int groupBufferIndex = 0; groupBufferIndex < _groups.Count; groupBufferIndex++)
         {
+            var groupBuffer = _groups[groupBufferIndex];
+            if (!groupBuffer.Visible)
+                continue;
+
+            Vector3 worldCenter = Vector3.Transform(groupBuffer.GroupCenter, modelMatrix);
+            float distSq = Vector3.DistanceSquared(cp, worldCenter);
+            _transparentGroupSortScratch.Add((groupBufferIndex, distSq));
+        }
+
+        _transparentGroupSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
+
+        foreach (var (groupBufferIndex, _) in _transparentGroupSortScratch)
+        {
+            var gb = _groups[groupBufferIndex];
             if (!gb.Visible) continue;
             var group = _wmo.Groups[gb.GroupIndex];
             _gl.BindVertexArray(gb.Vao);
@@ -642,7 +658,11 @@ void main() {
             if (group.Vertices.Count == 0 || group.Indices.Count == 0)
                 continue;
 
-            var gb = new GroupBuffers { GroupIndex = gi };
+            var gb = new GroupBuffers
+            {
+                GroupIndex = gi,
+                GroupCenter = (group.BoundsMin + group.BoundsMax) * 0.5f
+            };
 
             // Generate normals from geometry
             var normals = GenerateNormals(group);
@@ -1692,6 +1712,7 @@ void main() {
     private class GroupBuffers
     {
         public int GroupIndex;
+        public Vector3 GroupCenter;
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
         public bool Visible = true;

@@ -260,14 +260,21 @@ public partial class ViewerApp
         ImGui.Text($"Source: {_dataSource.Name}");
         ImGui.Separator();
 
-        if (ImGui.BeginCombo("Type", _extensionFilter))
+        if (ImGui.BeginCombo("Type", GetExtensionFilterLabel(_extensionFilter)))
         {
-            string[] filters = { ".mdx", ".wmo", ".m2", ".blp", ".wdt" };
-            foreach (var f in filters)
+            (string value, string label)[] filters =
             {
-                if (ImGui.Selectable(f, _extensionFilter == f))
+                (".mdx", ".mdx/.mdl"),
+                (".wmo", ".wmo"),
+                (".m2", ".m2"),
+                (".blp", ".blp"),
+                (".wdt", ".wdt")
+            };
+            foreach (var filter in filters)
+            {
+                if (ImGui.Selectable(filter.label, _extensionFilter == filter.value))
                 {
-                    _extensionFilter = f;
+                    _extensionFilter = filter.value;
                     RefreshFileList();
                 }
             }
@@ -315,6 +322,13 @@ public partial class ViewerApp
                 ImGui.Dummy(new Vector2(0, (_filteredFiles.Count - endIndex) * rowHeight));
             ImGui.EndChild();
         }
+    }
+
+    private static string GetExtensionFilterLabel(string extensionFilter)
+    {
+        return extensionFilter.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            ? ".mdx/.mdl"
+            : extensionFilter;
     }
 
     private void DrawRightSidebar()

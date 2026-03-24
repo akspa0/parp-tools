@@ -1,5 +1,41 @@
 # Active Context
 
+## Mar 24, 2026 - 0.12 Standalone Model Browser Recovery
+
+- The latest standalone-model regression for the `0.12` client split into two separate seams in the active viewer:
+	- `MpqDataSource` was no longer indexing Alpha-style nested model wrappers at all (`.mdx.MPQ`, `.mdl.MPQ`, `.m2.MPQ`), and it also skipped loose `.mdl` files entirely.
+	- standalone `MD20` / `MD21` routing in `ViewerApp.LoadM2FromBytes(...)` still allowed an unsupported build with no resolved `M2Profile` to continue into the M2-family adapter path instead of failing cleanly.
+- Root cause now fixed in the active tree:
+	- `src/MdxViewer/DataSources/MpqDataSource.cs`
+		- loose-file indexing now includes `.mdl`
+		- Alpha nested wrapper scan now includes model wrappers (`.mdx.MPQ`, `.mdl.MPQ`, `.m2.MPQ`)
+		- model wrappers now register extension aliases into the file set / Alpha wrapper cache so the browser and path resolver can find the same wrapped asset through `.mdx`, `.mdl`, or `.m2`
+	- `src/MdxViewer/ViewerApp.cs`
+		- the standalone browser's `.mdx` filter now aggregates early model files from both `.mdx` and `.mdl`
+		- disk loads now accept `.mdl` through the same container-probe path already used by the data-source loader
+		- `LoadM2FromBytes(...)` now hard-fails with a clear unsupported-build error when no `M2Profile` resolves for the active client build instead of continuing into an unsafe best-effort adapter path
+	- `src/MdxViewer/ViewerApp_Sidebars.cs`
+		- the file-browser type label now reflects that the early-model bucket is `.mdx/.mdl`
+- Scope boundary:
+	- this fix restores file discovery/indexing and turns the unsupported `.m2` route into a safe load failure for pre-M2 builds; it is not proof that standalone `0.12` runtime model rendering is fully signed off across a real client dataset.
+- Validation status:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed on Mar 24, 2026 after this fix.
+	- no automated tests were added or run.
+	- no runtime real-data signoff yet on actual `0.12` client browsing/loading because no fixed `0.12` data path is currently recorded in `memory-bank/data-paths.md`.
+
+## Mar 24, 2026 - 0.6.0 Through 2.x Terrain Alpha Grid Regression Fix
+
+- The terrain grid-pattern regression affecting standard ADT clients from `0.6.0` through the `2.x` era was not a newly proven shader/blend-style difference. The active viewer was still decoding that whole legacy band through a naive sequential 4-bit MCAL unpack path in `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`.
+- Root cause now fixed in the active tree:
+	- `StandardTerrainAdapter.ExtractAlphaMaps(...)` for `TerrainAlphaDecodeMode.LegacySequential` now prefers the relaxed MCAL path (`Mcal.GetAlphaMapForLayerRelaxed(...)`) and preserves `DoNotFixAlphaMap` behavior.
+	- the old naive legacy fallback now routes through the existing row-aware 4-bit decode + legacy edge-fix helpers instead of writing raw nibble pairs straight into the `64x64` output.
+- Scope boundary:
+	- this change is limited to the standard-terrain legacy band (`0.6.0` through `2.x`) and does not change the separate `AlphaTerrainAdapter` path for `0.5.x` or the strict `3.x` / Cataclysm `4.0.0` decode branches.
+- Validation status:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed on Mar 24, 2026 after this fix and after correcting unrelated compile breaks in the in-progress minimap candidate-path patch.
+	- no automated tests were added or run.
+	- no runtime real-data signoff yet on affected `0.6.0` / `0.7.0` / `0.8.0` / `0.9.0` / `1.x` / `2.x` terrain tiles.
+
 ## Mar 24, 2026 - v0.4.5 Branding + MH2O LiquidType Classification Fix
 
 - Active viewer branding/release metadata is now aligned toward `parp-tools WoW Viewer` version `0.4.5` without renaming the `MdxViewer` root namespace.

@@ -871,27 +871,65 @@ public class StandardTerrainAdapter : ITerrainAdapter
             return maps;
         }
 
-        if (mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
+        bool chunkBigAlphaLegacy = InferBigAlphaForChunk(mcnk, useBigAlpha);
+        if (mcnk.AlphaMaps != null && mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
         {
-            // Alpha-style (0.5.3/0.6.0): sequential 4-bit nibbles, 2048 bytes per layer
+            int mcalLength = mcnk.McalRawData.Length;
+            int layerCount = mcnk.TextureLayers.Count;
+            for (int i = 1; i < layerCount && i < 4; i++)
+            {
+                int offset = unchecked((int)mcnk.TextureLayers[i].AlphaMapOffset);
+                if (offset < 0 || offset >= mcalLength)
+                    continue;
+
+                int? nextOffset = GetNextLayerAlphaOffset(mcnk.TextureLayers, i, mcalLength);
+                if (!nextOffset.HasValue)
+                {
+                    int expectedSpan = chunkBigAlphaLegacy ? 4096 : 2048;
+                    int expectedNext = offset + expectedSpan;
+                    if (expectedNext > offset && expectedNext <= mcalLength)
+                        nextOffset = expectedNext;
+                }
+
+                byte[]? alpha = null;
+                try
+                {
+                    alpha = mcnk.AlphaMaps.GetAlphaMapForLayerRelaxed(
+                        mcnk.TextureLayers[i],
+                        nextOffset,
+                        chunkBigAlphaLegacy,
+                        doNotFixAlphaMap);
+                }
+                catch
+                {
+                    alpha = DecodeLayerBySpan(mcnk.McalRawData, offset, nextOffset, chunkBigAlphaLegacy, doNotFixAlphaMap);
+                }
+
+                if (alpha != null && alpha.Length > 0)
+                    maps[i] = alpha;
+            }
+        }
+
+        if (maps.Count == 0 && mcnk.McalRawData != null && mcnk.McalRawData.Length > 0)
+        {
             int offset = 0;
             int nLayers = mcnk.TextureLayers.Count;
             for (int layer = 1; layer < nLayers && layer < 4; layer++)
             {
-                int alphaSize = 2048; // 4-bit: 64×64 / 2
+                int alphaSize = chunkBigAlphaLegacy ? 4096 : 2048;
                 if (offset + alphaSize > mcnk.McalRawData.Length)
                 {
                     alphaSize = mcnk.McalRawData.Length - offset;
-                    if (alphaSize <= 0) break;
+                    if (alphaSize <= 0)
+                        break;
                 }
 
-                var alpha = new byte[4096]; // 64×64 output
-                for (int j = 0; j < Math.Min(2048, alphaSize); j++)
-                {
-                    byte packed = mcnk.McalRawData[offset + j];
-                    alpha[j * 2] = (byte)((packed & 0x0F) * 17);
-                    alpha[j * 2 + 1] = (byte)((packed >> 4) * 17);
-                }
+                byte[]? alpha = chunkBigAlphaLegacy
+                    ? DecodeLayerBySpan(mcnk.McalRawData, offset, offset + alphaSize, true, doNotFixAlphaMap)
+                    : DecodeLayerBySpan(mcnk.McalRawData, offset, offset + alphaSize, false, doNotFixAlphaMap);
+
+                if (alpha == null || alpha.Length == 0)
+                    break;
 
                 maps[layer] = alpha;
                 offset += alphaSize;

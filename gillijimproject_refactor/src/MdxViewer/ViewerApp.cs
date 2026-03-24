@@ -112,6 +112,7 @@ public partial class ViewerApp : IDisposable
     private List<string> _filteredFiles = new();
     private string _searchFilter = "";
     private string _extensionFilter = ".mdx";
+    private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl" };
     private int _selectedFileIndex = -1;
     private string? _loadedFilePath;
     private string? _loadedFileName;
@@ -5495,7 +5496,7 @@ void main() {
     {
         if (_dataSource == null) return;
 
-        var allFiles = _dataSource.GetFileList(_extensionFilter);
+        var allFiles = GetFilesForBrowserFilter();
         IEnumerable<string> candidates = allFiles;
         if (!string.IsNullOrEmpty(_searchFilter))
             candidates = candidates.Where(f => f.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase));
@@ -5514,6 +5515,28 @@ void main() {
         _filteredFiles = filtered;
 
         _selectedFileIndex = -1;
+    }
+
+    private IReadOnlyList<string> GetFilesForBrowserFilter()
+    {
+        if (_dataSource == null)
+            return Array.Empty<string>();
+
+        if (!_extensionFilter.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
+            return _dataSource.GetFileList(_extensionFilter);
+
+        var combined = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string extension in EarlyModelBrowserExtensions)
+        {
+            foreach (string file in _dataSource.GetFileList(extension))
+            {
+                if (seen.Add(file))
+                    combined.Add(file);
+            }
+        }
+
+        return combined;
     }
 
     private void RefreshDiscoveredMaps()
@@ -5568,10 +5591,15 @@ void main() {
                 var dbcProvider = _dbcProvider;
 
                 // Load MD5 translate index for minimaps
+                _md5Index = null;
                 if (WoWMapConverter.Core.Services.Md5TranslateResolver.TryLoad(new[] { gamePath }, mpqDs.MpqService, out var md5Idx))
                 {
                     _md5Index = md5Idx;
                     ViewerLog.Important(ViewerLog.Category.Dbc, $"Loaded MD5 Translate Index: {md5Idx?.HashToPlain.Count} entries");
+                }
+                else
+                {
+                    ViewerLog.Trace($"[MdxViewer] No MD5 translate index found for minimaps under '{gamePath}'. Minimap loading will fall back to direct tile path variants.");
                 }
 
                 _minimapRenderer?.Dispose();
@@ -6460,6 +6488,7 @@ void main() {
             switch (ext)
             {
                 case ".mdx":
+                case ".mdl":
                 case ".m2":
                     var modelBytes = File.ReadAllBytes(filePath);
                     LoadModelFromBytesWithContainerProbe(modelBytes, filePath, dir, "Disk");
@@ -6501,7 +6530,15 @@ void main() {
     private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
     {
         string resolvedModelPath = ResolveStandaloneCanonicalModelPath(originalPath);
-        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, _dbcBuild);
+        var profile = FormatProfileRegistry.ResolveModelProfile(_dbcBuild);
+        if (profile == null)
+        {
+            string buildLabel = string.IsNullOrWhiteSpace(_dbcBuild) ? "unknown" : _dbcBuild;
+            throw new InvalidDataException(
+                $"Standalone M2-family loading is not supported for build {buildLabel}. Early clients should be browsed through .mdx/.mdl assets instead.");
+        }
+
+        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, _dbcBuild);
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
 
         Exception? lastError = null;
