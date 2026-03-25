@@ -538,6 +538,7 @@ public class WmoRenderer : ISceneRenderer
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aTexCoord;
+layout(location = 3) in vec4 aVertexLight;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -546,12 +547,14 @@ uniform mat4 uProj;
 out vec3 vNormal;
 out vec2 vTexCoord;
 out vec3 vFragPos;
+out vec4 vVertexLight;
 
 void main() {
     vec4 worldPos = uModel * vec4(aPos, 1.0);
     vFragPos = worldPos.xyz;
     vNormal = mat3(transpose(inverse(uModel))) * aNormal;
     vTexCoord = aTexCoord;
+    vVertexLight = aVertexLight;
     gl_Position = uProj * uView * worldPos;
 }
 ";
@@ -561,6 +564,7 @@ void main() {
 in vec3 vNormal;
 in vec2 vTexCoord;
 in vec3 vFragPos;
+in vec4 vVertexLight;
 
 uniform sampler2D uSampler;
 uniform int uHasTexture;
@@ -584,6 +588,7 @@ void main() {
     float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
     diff = diff * diff; // square for slightly sharper falloff
     vec3 lighting = uAmbientColor + uLightColor * diff;
+    vec3 bakedLighting = clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0));
 
     vec4 texColor;
     if (uHasTexture == 1) {
@@ -597,7 +602,7 @@ void main() {
         discard;
 
     // Fog: blend to fog color based on distance from camera
-    vec3 litColor = texColor.rgb * lighting;
+    vec3 litColor = texColor.rgb * lighting * bakedLighting;
     float dist = length(vFragPos - uCameraPos);
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 foggedColor = mix(uFogColor, litColor, fogFactor);
@@ -672,28 +677,37 @@ void main() {
             if (!hasUVs)
                 ViewerLog.Trace($"[WmoRenderer] Group {gi} '{group.Name}': UV count mismatch! Verts={vertCount}, UVs={group.UVs.Count}");
 
-            // Interleave: pos(3) + normal(3) + uv(2) = 8 floats
-            float[] vertexData = new float[vertCount * 8];
+            Vector4[] vertexLightColors = BuildVertexLightColors(group);
+
+            // Interleave: pos(3) + normal(3) + uv(2) + vertexLight(4) = 12 floats
+            float[] vertexData = new float[vertCount * 12];
             for (int v = 0; v < vertCount; v++)
             {
                 // Pass through raw WoW model-local coords.
                 // Coordinate conversion is handled by the placement transform.
                 var pos = group.Vertices[v];
-                vertexData[v * 8 + 0] = pos.X;
-                vertexData[v * 8 + 1] = pos.Y;
-                vertexData[v * 8 + 2] = pos.Z;
+                int baseOffset = v * 12;
+                vertexData[baseOffset + 0] = pos.X;
+                vertexData[baseOffset + 1] = pos.Y;
+                vertexData[baseOffset + 2] = pos.Z;
 
                 var n = v < normals.Count ? normals[v] : Vector3.UnitY;
-                vertexData[v * 8 + 3] = n.X;
-                vertexData[v * 8 + 4] = n.Y;
-                vertexData[v * 8 + 5] = n.Z;
+                vertexData[baseOffset + 3] = n.X;
+                vertexData[baseOffset + 4] = n.Y;
+                vertexData[baseOffset + 5] = n.Z;
 
                 if (hasUVs)
                 {
                     var uv = group.UVs[v];
-                    vertexData[v * 8 + 6] = uv.X;
-                    vertexData[v * 8 + 7] = uv.Y;
+                    vertexData[baseOffset + 6] = uv.X;
+                    vertexData[baseOffset + 7] = uv.Y;
                 }
+
+                Vector4 vertexLight = vertexLightColors[v];
+                vertexData[baseOffset + 8] = vertexLight.X;
+                vertexData[baseOffset + 9] = vertexLight.Y;
+                vertexData[baseOffset + 10] = vertexLight.Z;
+                vertexData[baseOffset + 11] = vertexLight.W;
             }
 
             gb.Vao = _gl.GenVertexArray();
@@ -714,19 +728,144 @@ void main() {
             fixed (ushort* ptr = indices)
                 _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(indices.Length * sizeof(ushort)), ptr, BufferUsageARB.StaticDraw);
 
-            uint stride = 8 * sizeof(float);
+            uint stride = 12 * sizeof(float);
             _gl.EnableVertexAttribArray(0);
             _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
             _gl.EnableVertexAttribArray(1);
             _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
             _gl.EnableVertexAttribArray(2);
             _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
+            _gl.EnableVertexAttribArray(3);
+            _gl.VertexAttribPointer(3, 4, VertexAttribPointerType.Float, false, stride, (void*)(8 * sizeof(float)));
 
             _gl.BindVertexArray(0);
 
             gb.IndexCount = (uint)indices.Length;
             _groups.Add(gb);
         }
+    }
+
+    private static Vector4[] BuildVertexLightColors(WmoV14ToV17Converter.WmoGroupData group)
+    {
+        int vertexCount = group.Vertices.Count;
+        var vertexLightColors = new Vector4[vertexCount];
+        if (vertexCount == 0)
+            return vertexLightColors;
+
+        if (TryCopyParsedVertexColors(group, vertexLightColors))
+            return vertexLightColors;
+
+        if (TrySampleVertexColorsFromLightmaps(group, vertexLightColors))
+            return vertexLightColors;
+
+        for (int i = 0; i < vertexCount; i++)
+            vertexLightColors[i] = Vector4.One;
+
+        return vertexLightColors;
+    }
+
+    private static bool TryCopyParsedVertexColors(WmoV14ToV17Converter.WmoGroupData group, Vector4[] vertexLightColors)
+    {
+        if (group.VertexColors.Count != vertexLightColors.Length || group.VertexColors.Count == 0)
+            return false;
+
+        double averageLuminosity = 0.0;
+        foreach (uint packedColor in group.VertexColors)
+        {
+            byte blue = (byte)(packedColor & 0xFF);
+            byte green = (byte)((packedColor >> 8) & 0xFF);
+            byte red = (byte)((packedColor >> 16) & 0xFF);
+            averageLuminosity += (red + green + blue) / 3.0;
+        }
+
+        averageLuminosity /= group.VertexColors.Count;
+        bool hasRawLightmapData = group.LightmapData.Length > 0 && group.LightmapUVs.Count > 0 && group.LightmapInfos.Count > 0;
+        if (averageLuminosity < 10.0 && hasRawLightmapData)
+            return false;
+
+        for (int i = 0; i < vertexLightColors.Length; i++)
+            vertexLightColors[i] = DecodePackedBgra(group.VertexColors[i]);
+
+        return true;
+    }
+
+    private static bool TrySampleVertexColorsFromLightmaps(WmoV14ToV17Converter.WmoGroupData group, Vector4[] vertexLightColors)
+    {
+        if (group.LightmapData.Length == 0 || group.LightmapUVs.Count == 0 || group.LightmapInfos.Count == 0)
+            return false;
+
+        int vertexCount = vertexLightColors.Length;
+        var redSums = new float[vertexCount];
+        var greenSums = new float[vertexCount];
+        var blueSums = new float[vertexCount];
+        var sampleCounts = new int[vertexCount];
+        int faceCount = group.Indices.Count / 3;
+        bool hasSamples = false;
+
+        for (int faceIndex = 0; faceIndex < faceCount; faceIndex++)
+        {
+            var lightmapInfo = group.LightmapInfos[Math.Min(faceIndex, group.LightmapInfos.Count - 1)];
+            if (lightmapInfo.Width == 0 || lightmapInfo.Height == 0)
+                continue;
+
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int uvIndex = faceIndex * 3 + corner;
+                int indexOffset = faceIndex * 3 + corner;
+                if (uvIndex >= group.LightmapUVs.Count || indexOffset >= group.Indices.Count)
+                    continue;
+
+                int vertexIndex = group.Indices[indexOffset];
+                if ((uint)vertexIndex >= (uint)vertexCount)
+                    continue;
+
+                Vector2 uv = group.LightmapUVs[uvIndex];
+                float u = Math.Clamp(uv.X, 0f, 1f);
+                float v = Math.Clamp(uv.Y, 0f, 1f);
+                int pixelX = (int)(u * (lightmapInfo.Width - 1));
+                int pixelY = (int)(v * (lightmapInfo.Height - 1));
+                int pixelOffset = (int)(lightmapInfo.DataOffset + (pixelY * lightmapInfo.Width + pixelX) * 4);
+                if (pixelOffset + 4 > group.LightmapData.Length)
+                    continue;
+
+                blueSums[vertexIndex] += group.LightmapData[pixelOffset + 0] / 255f;
+                greenSums[vertexIndex] += group.LightmapData[pixelOffset + 1] / 255f;
+                redSums[vertexIndex] += group.LightmapData[pixelOffset + 2] / 255f;
+                sampleCounts[vertexIndex]++;
+                hasSamples = true;
+            }
+        }
+
+        if (!hasSamples)
+            return false;
+
+        for (int i = 0; i < vertexCount; i++)
+        {
+            if (sampleCounts[i] > 0)
+            {
+                float invCount = 1f / sampleCounts[i];
+                vertexLightColors[i] = new Vector4(
+                    redSums[i] * invCount,
+                    greenSums[i] * invCount,
+                    blueSums[i] * invCount,
+                    1f);
+            }
+            else
+            {
+                vertexLightColors[i] = Vector4.One;
+            }
+        }
+
+        return true;
+    }
+
+    private static Vector4 DecodePackedBgra(uint packedColor)
+    {
+        float blue = (packedColor & 0xFF) / 255f;
+        float green = ((packedColor >> 8) & 0xFF) / 255f;
+        float red = ((packedColor >> 16) & 0xFF) / 255f;
+        float alpha = ((packedColor >> 24) & 0xFF) / 255f;
+        return new Vector4(red, green, blue, alpha > 0f ? alpha : 1f);
     }
 
     private void LoadMaterialTextures()

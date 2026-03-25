@@ -1,5 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## WMO Vertex-Light Prototype (Mar 24)
+
+- The active viewer now has a first renderer-side object-lighting prototype in `Rendering/WmoRenderer.cs`:
+   - WMO group vertex buffers now carry baked vertex-light colors.
+   - parsed `MOCV` is used when available and usable.
+   - if parsed `MOCV` is absent but preserved v14 lightmap payloads exist, the renderer samples `MOLV` / `MOLD` / `MOLM` into per-vertex baked-light colors during buffer build.
+   - the fragment shader now modulates textured WMO lighting by that baked-light color instead of relying only on the generic ambient+directional path.
+- Important boundary:
+   - this is not a full analogue of the client's `RenderGroupLightmap` / `RenderGroupLightmapTex` path.
+   - there is still no recovered batch-local lightmap texture binding path or true object-lightmap render split in the active viewer.
+   - treat this as a first prototype that uses already-preserved object light data, not as completed lightmap parity.
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed after this change.
+   - no automated tests were added or run.
+   - no runtime real-data signoff yet.
+
 ## WoW 0.5.3 Render Fast-Path And Viewer Perf Gap (Mar 24)
 
 - Current viewer/performance work should treat the following as engine-backed guardrails from the symbolized `0.5.3` client:

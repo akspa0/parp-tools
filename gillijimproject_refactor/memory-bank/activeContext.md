@@ -1,5 +1,22 @@
 # Active Context
 
+## Mar 24, 2026 - WMO Vertex-Light Prototype In Active Viewer
+
+- First renderer-side object-lighting prototype is now in the active tree at `src/MdxViewer/Rendering/WmoRenderer.cs`.
+- Scope of the implementation:
+	- WMO group vertex buffers now carry a fourth attribute for baked vertex-light color.
+	- `WmoRenderer` now prefers parsed `MOCV` vertex colors when they look usable.
+	- if usable `MOCV` is missing but preserved v14 lightmap payloads exist (`MOLV` / `MOLD` / `MOLM`), the renderer now samples those on load into per-vertex baked-light modulation colors.
+	- the fragment shader now modulates the existing diffuse/fog path by that baked-light color, so WMOs can show preserved object-light contribution instead of relying only on the generic ambient+directional path.
+- Important limit:
+	- this is not full `0.5.3` / early-client object-lightmap parity.
+	- there is still no client-faithful group/batch lightmap texture pipeline, no recovered batch-to-lightmap index path, and no dedicated `RenderGroupLightmap` / `RenderGroupLightmapTex` analogue in the active renderer.
+	- this is a first prototype using the data the active model already preserves.
+- Validation status:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug` passed on Mar 24, 2026 after the change.
+	- no automated tests were added or run.
+	- no real-data runtime signoff yet on affected WMOs.
+
 ## Mar 24, 2026 - 0.5.3 Terrain/Object Render Fast-Path And Viewer Perf Gap
 
 - Reverse-engineering follow-up against the symbolized `0.5.3` client materially tightened the current performance/parity story; no viewer code changed in this slice.
