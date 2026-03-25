@@ -1,5 +1,75 @@
 # Progress
 
+### Mar 24, 2026 - 0.5.3 Terrain/Object Render Fast-Path And Viewer Perf Gap
+
+- Reverse-engineering only against the symbolized `0.5.3` client plus viewer code audit; no repo code changes landed in this slice.
+- durable report extended at `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+- confirmed `0.5.3` terrain-side render behavior relevant to performance/parity:
+	- `CreateRenderLists` (`0x00698230`) is a real precompute/batch-build step for terrain texcoords/render lists
+	- `RenderLayers` (`0x006a5d00`) and `RenderLayersDyn` (`0x006a64b0`) use locked GX buffers plus prepared chunk batches instead of a generic frame-time rebuild path
+	- `0.5.3` terrain already has shader-assisted paths via `CMap::psTerrain` / `CMap::psSpecTerrain` plus `shaderGxTexture`
+	- terrain draw cost is reduced by distance through runtime layer-count collapse (`textureLodDist`)
+	- moving terrain layer behavior is now directly supported in the terrain path: runtime layer flag `0x40` triggers an extra texture transform indexed into the time-varying world transform tables
+	- terrain shadows are drawn as a separate modulation pass
+- confirmed `0.5.3` object/light behavior relevant to parity:
+	- `RenderMapObjDefGroups` (`0x0066e030`) walks visible `CMapObjDefGroup` lists and dispatches group renders rather than using one generic world-object loop
+	- `CreateLightmaps` (`0x006adba0`) allocates per-group lightmap textures and registers update callbacks
+	- `RenderGroupLightmap(...)` and `RenderGroupLightmapTex(...)` tighten the lightmap conclusion further: the client has a dedicated group-lightmap render path with its own vertex stream and combine pass structure
+	- `UpdateLightmapTex(...)` exposes CPU lightmap memory plus stride on `GxTex_Latch`, which supports a longer-lived lightmap texture path rather than ad hoc per-draw shading
+	- `CalcLightColors` (`0x006c4da0`) computes substantially richer lighting state than the active viewer currently models (direct, ambient, multiple sky/cloud/water channels, fog, storm blending)
+- viewer-side gap captured from the same slice:
+	- `StandardTerrainAdapter` still actively uses `MPHD` only for big-alpha/profile handling and still flattens `MAIN` entries to tile presence
+	- `TerrainRenderer` is still a generic base+overlay loop with only `MCLY 0x100` interpretation
+	- `LightService` remains a simplified DBC interpolator
+	- `WmoRenderer` / `MdxRenderer` still flatten renderer specialization heavily
+	- `WorldScene` hot-path render work plus uncapped PM4 forensic budgets remain a practical perf risk when enabled, and the existing `RenderQueue` abstraction is not yet the active submission path for world rendering
+- validation limits:
+	- no automated tests were added or run
+	- no viewer build or runtime real-data signoff was performed in this RE-only slice
+
+### Mar 24, 2026 - WoW 2.0.0 Beta Ghidra Recon For M2 / Light / Particle Risk
+
+- Reverse-engineering only against a loaded beta `2.0.0` client binary in Ghidra; no repo code changes landed in this slice.
+- durable report added at `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+- Confirmed engine-side anchors relevant to safe `2.x` support planning:
+	- `FUN_00717b00` loads `shaders\vertex\Model2.bls` and `shaders\pixel\Model2.bls` for `Model2`.
+	- `FUN_006b3b20` preloads map-object pixel BLS variants including translucent diffuse/specular programs.
+	- terrain follow-up clarified:
+		- the terrain shader split is now tighter than earlier notes:
+			- `FUN_006a2360` loads `terrain1..4` into `DAT_00caf304..310` and `terrain1_s..4_s` into `DAT_00caf548..554`
+			- `FUN_006cee30` uses those two contiguous tables as one-pass cached programs indexed by chunk layer count
+			- `terrainp` / `terrainp_s` are the slower manual terrain fallback path inside `FUN_006cee30`
+			- `terrainp_u` / `terrainp_us` are currently only confirmed in startup/shutdown, not yet in an active draw path
+		- `XTextures\slime\slime.%d.blp` now traces into an animated `WCHUNKLIQUID` texture-family path through `FUN_0069b310` and its caller cluster
+		- `WCHUNKLIQUID` rendering is not one single effect path: `FUN_006c65b0` dispatches modes `0/4/8` to animated texture-family renderers and modes `2/3/6/7` to a direct-coordinate path; `FUN_0069e200` builds cell strips for mode values `1/4/6`
+		- `FUN_006c65b0` passes the raw mode nibble into `FUN_0069b310`, so liquid mode doubles as animated family index
+		- currently recovered family table entries are `0=lake_a`, `1=ocean_h`, `2=lava`, `3=slime`, `4=lake_a` again; higher traced slots remain unresolved in this pass
+		- novelty/dead-code candidates now include unresolved family slot `6`, unused `XTextures\river\fast_a.%d.blp`, and terrain-side `terrainp_u` / `terrainp_us` that still only show up in startup/shutdown
+	- `FUN_0072d1a0` plus `FUN_0072cc60` / `FUN_0072cc90` / `FUN_0072cdc0` show `M2Light` objects being spatially bucketed / relinked at runtime instead of handled as a static flat light list.
+	- `FUN_007c26c0`, `FUN_007ca9d0`, `FUN_007c3180`, and `FUN_007c79d0` show `ParticleSystem2` bootstrapping and runtime `CParticle2` / `CParticle2_Model` object storage, which keeps the smoke issue open on the renderer/runtime side.
+	- `LightFloatBand.dbc`, `LightIntBand.dbc`, `LightParams.dbc`, `Light.dbc`, and `LightSkybox.dbc` all use strict `WDBC` loaders with schema checks and ID->row pointer tables.
+- Current conclusion:
+	- later `2.x` profile routing is a reasonable structural start, but real parity risk sits in shader/material selection and light/particle runtime interpretation, not in raw table loading.
+- Validation limits:
+	- no automated tests were added or run.
+	- no viewer build or runtime signoff was performed as part of this RE-only slice.
+
+### Mar 24, 2026 - Later 2.x M2-Family Profile Routing Enablement
+
+- `src/MdxViewer/Terrain/FormatProfileRegistry.cs`
+	- added `M2Profile_20x_Unknown` for later `2.x` / TBC-era model routing.
+	- active `2.x` window is now `MD20` with versions `0x104..0x107` and the existing parser split threshold remains `0x108`.
+- `src/MdxViewer/ViewerApp.cs`
+	- fallback build options now include `2.4.3.8606`, so the viewer can select a later `2.x` model profile even without `Map.dbd` build metadata.
+- `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs`
+	- added short-build alias support for `2.4.3 -> 2.4.3.8606`.
+- `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`
+	- neutralized the profiled legacy `MD20` trace wording so TBC routing no longer logs as if it were only the pre-release `3.0.1` path.
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed.
+	- no automated tests were added or run.
+	- no runtime real-data signoff yet on an actual later `2.x` client dataset.
+
 ### Mar 24, 2026 - 0.12 Standalone Model Browser Recovery
 
 - `src/MdxViewer/DataSources/MpqDataSource.cs`

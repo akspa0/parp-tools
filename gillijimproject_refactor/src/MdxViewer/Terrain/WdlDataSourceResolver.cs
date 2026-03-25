@@ -4,6 +4,23 @@ namespace MdxViewer.Terrain;
 
 internal static class WdlDataSourceResolver
 {
+    public static bool HasWdl(IDataSource dataSource, string mapDirectory)
+    {
+        foreach (string candidate in EnumerateCandidates(mapDirectory))
+        {
+            if (dataSource.FileExists(candidate))
+                return true;
+
+            if (dataSource is not MpqDataSource mpqDataSource)
+                continue;
+
+            if (!string.IsNullOrWhiteSpace(mpqDataSource.FindInFileSet(candidate)))
+                return true;
+        }
+
+        return false;
+    }
+
     public static bool TryReadWdlBytes(IDataSource dataSource, string mapDirectory, out byte[]? wdlBytes, out string? resolvedPath)
     {
         wdlBytes = null;

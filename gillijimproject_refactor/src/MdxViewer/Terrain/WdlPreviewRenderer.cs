@@ -152,8 +152,8 @@ public class WdlPreviewRenderer : IDisposable
 
     internal static Vector3 GetTileSpawnPosition(int tileX, int tileY, float height)
     {
-        float rendererX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.ChunkSize);
-        float rendererY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.ChunkSize);
+        float rendererX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.TileSize);
+        float rendererY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.TileSize);
         return new Vector3(rendererX, rendererY, height + 100f);
     }
 

@@ -62,6 +62,7 @@ public partial class ViewerApp : IDisposable
         new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
         new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
         new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
+        new("Burning Crusade (2.x) - 2.4.3.8606", "2.4.3.8606"),
         new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
         new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340"),
         new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
@@ -147,16 +148,30 @@ public partial class ViewerApp : IDisposable
     private bool _hideUiChrome;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
-    private bool _showMinimapWindow = false;
+    private bool _showMinimapWindow = true;
     private bool _showPerfWindow = false;
     private bool _showRenderQualityWindow = false;
     private bool _useDockspaceUi = true;
+    private Vector2 _dockspaceHostPosition;
+    private Vector2 _dockspaceHostSize;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
+
+    private struct DockPanelState
+    {
+        public bool Visible;
+        public bool IsDocked;
+        public Vector2 Position;
+        public Vector2 Size;
+    }
+
+    private DockPanelState _navigatorDockState;
+    private DockPanelState _inspectorDockState;
+    private DockPanelState _minimapDockState;
 
     private enum TerrainTileScope
     {
@@ -467,7 +482,8 @@ public partial class ViewerApp : IDisposable
         {
             mouse.MouseDown += (_, btn) =>
             {
-                if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse)
+                if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse
+                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
                     _mouseDown = true;
                 if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse
                     && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
@@ -514,7 +530,8 @@ public partial class ViewerApp : IDisposable
             };
             mouse.Scroll += (_, scroll) =>
             {
-                if (!ImGui.GetIO().WantCaptureMouse)
+                if (!ImGui.GetIO().WantCaptureMouse
+                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
                 {
                     // Free-fly: scroll moves camera forward/back
                     float speed = 5f * scroll.Y;
@@ -995,13 +1012,20 @@ void main() {
 
     private void DrawUI()
     {
+        _navigatorDockState = default;
+        _inspectorDockState = default;
+        _minimapDockState = default;
+        if (_hideUiChrome || !_useDockspaceUi)
+        {
+            _dockspaceHostPosition = Vector2.Zero;
+            _dockspaceHostSize = Vector2.Zero;
+        }
+
         if (!_hideUiChrome)
         {
             DrawMenuBar();
 
-            // Top toolbar with visibility checkboxes (only when terrain is loaded)
-            if (_terrainManager != null || _vlmTerrainManager != null)
-                DrawToolbar();
+            DrawToolbar();
 
             if (_useDockspaceUi)
                 DrawDockspaceHost();
@@ -1024,8 +1048,8 @@ void main() {
             if (_showWdlPreview)
                 DrawWdlPreviewDialog();
 
-            // Minimap (floating window)
-            if (_showMinimapWindow && (_terrainManager != null || _vlmTerrainManager != null))
+            // Minimap panel
+            if (_showMinimapWindow)
                 DrawMinimapWindow();
 
             // Perf (floating window)
@@ -1682,13 +1706,16 @@ void main() {
     private void DrawDockspaceHost()
     {
         var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float topOffset = MenuBarHeight + ToolbarHeight;
         float dockHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (dockHeight <= 10f)
             return;
 
-        ImGui.SetNextWindowPos(new Vector2(0f, topOffset), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(io.DisplaySize.X, dockHeight), ImGuiCond.Always);
+        _dockspaceHostPosition = new Vector2(0f, topOffset);
+        _dockspaceHostSize = new Vector2(io.DisplaySize.X, dockHeight);
+
+        ImGui.SetNextWindowPos(_dockspaceHostPosition, ImGuiCond.Always);
+        ImGui.SetNextWindowSize(_dockspaceHostSize, ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0f);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0f);
@@ -5590,21 +5617,7 @@ void main() {
                 _dbcProvider = new MpqDBCProvider(mpqDs.MpqService);
                 var dbcProvider = _dbcProvider;
 
-                // Load MD5 translate index for minimaps
-                _md5Index = null;
-                if (WoWMapConverter.Core.Services.Md5TranslateResolver.TryLoad(new[] { gamePath }, mpqDs.MpqService, out var md5Idx))
-                {
-                    _md5Index = md5Idx;
-                    ViewerLog.Important(ViewerLog.Category.Dbc, $"Loaded MD5 Translate Index: {md5Idx?.HashToPlain.Count} entries");
-                }
-                else
-                {
-                    ViewerLog.Trace($"[MdxViewer] No MD5 translate index found for minimaps under '{gamePath}'. Minimap loading will fall back to direct tile path variants.");
-                }
-
-                _minimapRenderer?.Dispose();
-                string minimapCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
-                _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index, Path.Combine(CacheDir, "minimap", minimapCacheSegment));
+                InitializeMinimapSupport();
 
                 string? dbdDir = ResolveDbdDefinitionsDir();
 
@@ -6016,6 +6029,38 @@ void main() {
         _wdlPreviewCacheService?.Dispose();
         _wdlPreviewCacheService = new WdlPreviewCacheService(_dataSource, Path.Combine(CacheDir, "wdl-preview", cacheSegment));
         _wdlPreviewWarmupStatus = string.Empty;
+    }
+
+    private void InitializeMinimapSupport()
+    {
+        _md5Index = null;
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            if (WoWMapConverter.Core.Services.Md5TranslateResolver.TryLoad(
+                new[] { mpqDataSource.GamePath },
+                mpqDataSource.MpqService,
+                out var md5Idx))
+            {
+                _md5Index = md5Idx;
+                ViewerLog.Important(
+                    ViewerLog.Category.Dbc,
+                    $"Loaded MD5 Translate Index: {md5Idx?.HashToPlain.Count} entries");
+            }
+            else
+            {
+                ViewerLog.Trace(
+                    $"[MdxViewer] No MD5 translate index found for minimaps under '{mpqDataSource.GamePath}'. Minimap loading will fall back to direct tile path variants.");
+            }
+        }
+
+        _minimapRenderer?.Dispose();
+        _minimapRenderer = null;
+        if (_dataSource != null)
+        {
+            string minimapCacheSegment = BuildCacheSegment(BuildWdlPreviewCacheIdentity());
+            _minimapRenderer = new MinimapRenderer(_gl, _dataSource, _md5Index, Path.Combine(CacheDir, "minimap", minimapCacheSegment));
+        }
     }
 
     private static string BuildCacheSegment(string cacheIdentity)
@@ -7610,7 +7655,6 @@ void main() {
             _terrainManager = _worldScene.Terrain;
             _renderer = _worldScene;
             ApplySavedPm4AlignmentToScene();
-
             // Full-load mode: load all tiles synchronously during loading screen
             if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
             {
@@ -7737,7 +7781,6 @@ void main() {
             var vlmMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, loader.MapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = vlmMapDef?.Id ?? -1;
-
             _statusMessage = $"Loaded VLM project: {loader.MapName} ({loader.TileCoords.Count} tiles)";
         }
         catch (Exception ex)
@@ -7876,19 +7919,109 @@ void main() {
 
     private bool IsPointInSceneViewport(float x, float y)
     {
+        if (IsPointInDockedWindow(_navigatorDockState, x, y)
+            || IsPointInDockedWindow(_inspectorDockState, x, y)
+            || IsPointInDockedWindow(_minimapDockState, x, y))
+        {
+            return false;
+        }
+
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
             return false;
         return x >= vpX && x <= vpX + vpW && y >= vpY && y <= vpY + vpH;
     }
 
+    private static bool IsPointInDockedWindow(in DockPanelState state, float x, float y)
+    {
+        if (!state.Visible || !state.IsDocked || state.Size.X <= 1f || state.Size.Y <= 1f)
+            return false;
+
+        return x >= state.Position.X
+            && x <= state.Position.X + state.Size.X
+            && y >= state.Position.Y
+            && y <= state.Position.Y + state.Size.Y;
+    }
+
+    private void CaptureDockPanelState(ref DockPanelState state)
+    {
+        state.Visible = true;
+        state.IsDocked = ImGui.IsWindowDocked();
+        state.Position = ImGui.GetWindowPos();
+        state.Size = ImGui.GetWindowSize();
+    }
+
+    private static void ApplyDockedSidePanelInset(in DockPanelState state, bool isLeftPanel, float viewportY, float viewportHeight, ref float x, ref float width)
+    {
+        if (!state.Visible || !state.IsDocked || state.Size.X <= 1f || state.Size.Y <= 1f)
+            return;
+
+        float panelTop = state.Position.Y;
+        float panelBottom = state.Position.Y + state.Size.Y;
+        float viewportBottom = viewportY + viewportHeight;
+        if (panelBottom <= viewportY || panelTop >= viewportBottom)
+            return;
+
+        const float edgeTolerance = 4f;
+        if (isLeftPanel)
+        {
+            if (state.Position.X > x + edgeTolerance)
+                return;
+
+            x += state.Size.X;
+            width -= state.Size.X;
+            return;
+        }
+
+        float viewportRight = x + width;
+        if (state.Position.X + state.Size.X < viewportRight - edgeTolerance)
+            return;
+
+        width -= state.Size.X;
+    }
+
     private bool TryGetSceneViewportRect(out float x, out float y, out float width, out float height)
     {
         var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+
+        if (_hideUiChrome)
+        {
+            x = 0f;
+            y = 0f;
+            width = io.DisplaySize.X;
+            height = io.DisplaySize.Y;
+            return width > 10f && height > 10f;
+        }
+
+        float topOffset = MenuBarHeight + ToolbarHeight;
         x = 0f;
         y = topOffset;
         width = io.DisplaySize.X;
         height = io.DisplaySize.Y - topOffset - StatusBarHeight;
+
+        if (_useDockspaceUi && _dockspaceHostSize.X > 10f && _dockspaceHostSize.Y > 10f)
+        {
+            x = _dockspaceHostPosition.X;
+            y = _dockspaceHostPosition.Y;
+            width = _dockspaceHostSize.X;
+            height = _dockspaceHostSize.Y;
+
+            ApplyDockedSidePanelInset(_navigatorDockState, isLeftPanel: true, y, height, ref x, ref width);
+            ApplyDockedSidePanelInset(_inspectorDockState, isLeftPanel: false, y, height, ref x, ref width);
+        }
+        else
+        {
+            if (_showLeftSidebar)
+            {
+                x += SidebarWidth;
+                width -= SidebarWidth;
+            }
+
+            if (_showRightSidebar)
+                width -= SidebarWidth;
+        }
+
+        width = MathF.Max(width, 0f);
+        height = MathF.Max(height, 0f);
         return width > 10f && height > 10f;
     }
 
@@ -8083,6 +8216,11 @@ void main() {
         if (_disposed) return;
         _disposed = true;
 
+        ISceneRenderer? renderer = _renderer;
+        WorldScene? worldScene = _worldScene;
+        TerrainManager? terrainManager = _terrainManager;
+        VlmTerrainManager? vlmTerrainManager = _vlmTerrainManager;
+
         SaveViewerSettings();
 
         _loadingScreen?.Dispose();
@@ -8090,10 +8228,22 @@ void main() {
         _wdlPreviewRenderer?.Dispose();
         _editorOverlayBb?.Dispose();
         _sqlPopulationService?.Dispose();
-        _renderer?.Dispose();
-        _worldScene?.Dispose();
-        _terrainManager?.Dispose();
-        _vlmTerrainManager?.Dispose();
+        if (!ReferenceEquals(renderer, worldScene)
+            && !ReferenceEquals(renderer, terrainManager)
+            && !ReferenceEquals(renderer, vlmTerrainManager))
+        {
+            renderer?.Dispose();
+        }
+
+        worldScene?.Dispose();
+        if (worldScene == null)
+            terrainManager?.Dispose();
+
+        if (!ReferenceEquals(vlmTerrainManager, renderer))
+            vlmTerrainManager?.Dispose();
+        else if (worldScene == null)
+            vlmTerrainManager?.Dispose();
+
         _minimapRenderer?.Dispose();
         _dataSource?.Dispose();
         if (_skyReady)
@@ -8116,7 +8266,7 @@ void main() {
         public int TextureFilteringMode { get; set; } = (int)Rendering.TextureFilteringMode.Trilinear;
         public bool EnableMultisample { get; set; } = true;
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
-        public bool ShowMinimapWindow { get; set; }
+        public bool ShowMinimapWindow { get; set; } = true;
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }

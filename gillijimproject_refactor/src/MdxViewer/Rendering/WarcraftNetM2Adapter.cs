@@ -242,7 +242,7 @@ internal static class WarcraftNetM2Adapter
         {
             try
             {
-                ViewerLog.Trace($"[M2] Parsing profiled pre-release MD20: {fileName} ({profile.ProfileId})");
+                ViewerLog.Trace($"[M2] Parsing profiled legacy MD20: {fileName} ({profile.ProfileId})");
                 return ParseProfiledMd20Model(m2Bytes, fileName, profile, buildVersion);
             }
             catch (Exception profiledEx)

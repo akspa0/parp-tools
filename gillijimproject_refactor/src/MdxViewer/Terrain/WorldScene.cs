@@ -1611,8 +1611,7 @@ public class WorldScene : ISceneRenderer
         if (!ignoreCache && _pm4LoadTask != null && !_pm4LoadTask.IsCompleted)
             return;
 
-        _pm4LoadCancellation?.Cancel();
-        _pm4LoadCancellation?.Dispose();
+        ReleasePm4LoadCancellation(cancelPendingLoad: true);
 
         _pm4LoadAttempted = true;
         _pm4LoadedCameraWindow = null;
@@ -1652,7 +1651,7 @@ public class WorldScene : ISceneRenderer
         if (result.CacheData != null)
         {
             ClearPm4OverlayRuntimeState();
-            _pm4LoadedCameraWindow = (0, 0, 63, 63);
+            _pm4LoadedCameraWindow = result.LoadedCameraWindow;
             RestorePm4OverlayFromCache(result.CacheData);
             RestoreSelectedPm4Object(result.SelectedObjectKey);
             UpdatePm4AdaptiveWindowRadius(result.LoadElapsedMs);
@@ -1660,6 +1659,19 @@ public class WorldScene : ISceneRenderer
 
         _pm4Status = result.StatusMessage;
         ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+    }
+
+    private void ReleasePm4LoadCancellation(bool cancelPendingLoad)
+    {
+        CancellationTokenSource? cancellation = _pm4LoadCancellation;
+        _pm4LoadCancellation = null;
+        if (cancellation == null)
+            return;
+
+        if (cancelPendingLoad)
+            cancellation.Cancel();
+
+        cancellation.Dispose();
     }
 
     private Pm4OverlayAsyncLoadResult LoadPm4OverlayAsync(
@@ -1671,7 +1683,7 @@ public class WorldScene : ISceneRenderer
         try
         {
             if (_dataSource == null)
-                return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, "PM4 unavailable: no data source.", cancelled: false);
+                return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, "PM4 unavailable: no data source.", cancelled: false);
 
             string mapName = _terrainManager.MapName;
             List<string> mapPm4Candidates = _dataSource
@@ -1682,7 +1694,7 @@ public class WorldScene : ISceneRenderer
 
             int mapPm4CandidateCount = mapPm4Candidates.Count;
             if (mapPm4CandidateCount == 0)
-                return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, $"PM4: no files found for map '{mapName}'.", cancelled: false);
+                return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, $"PM4: no files found for map '{mapName}'.", cancelled: false);
 
             int tileParseRejected = 0;
             int tileRangeRejected = 0;
@@ -1712,9 +1724,28 @@ public class WorldScene : ISceneRenderer
                 return new Pm4OverlayAsyncLoadResult(
                     requestId,
                     null,
+                    null,
                     selectedObjectKey,
                     0.0,
                     $"PM4: 0/{mapPm4CandidateCount} valid map files after tile mapping (tileParse={tileParseRejected}, tileRange={tileRangeRejected}).",
+                    cancelled: false);
+            }
+
+            Vector3 loadAnchorCameraPosition = GetPm4LoadAnchorCameraPosition();
+            var cameraWindow = GetPm4CameraWindow(loadAnchorCameraPosition, _pm4CameraTileRadius);
+            List<(string path, int tileX, int tileY)> windowCandidates = pm4Candidates
+                .Where(candidate => IsPm4TileInsideCameraWindow(candidate.tileX, candidate.tileY, cameraWindow))
+                .ToList();
+
+            if (windowCandidates.Count == 0)
+            {
+                return new Pm4OverlayAsyncLoadResult(
+                    requestId,
+                    null,
+                    cameraWindow,
+                    selectedObjectKey,
+                    0.0,
+                    $"PM4: no files intersect camera window ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) out of {totalFiles} valid map files.",
                     cancelled: false);
             }
 
@@ -1726,7 +1757,7 @@ public class WorldScene : ISceneRenderer
 
             string candidateSignature = Pm4OverlayCacheService.BuildCandidateSignature(
                 _dataSource,
-                pm4Candidates.Select(static candidate => candidate.path).ToList(),
+                windowCandidates.Select(static candidate => candidate.path).ToList(),
                 _pm4SplitCk24ByMdos,
                 _pm4SplitCk24ByConnectivity);
             var loadStopwatch = Stopwatch.StartNew();
@@ -1740,9 +1771,10 @@ public class WorldScene : ISceneRenderer
                 return new Pm4OverlayAsyncLoadResult(
                     requestId,
                     cachedOverlay,
+                    cameraWindow,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
-                    $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} map-wide files restored from disk cache, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                    $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} camera-window files restored from disk cache for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
                     cancelled: false);
             }
 
@@ -1766,7 +1798,7 @@ public class WorldScene : ISceneRenderer
             var tileObjects = new Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>>();
             var tilePositionRefs = new Dictionary<(int tileX, int tileY), List<Vector3>>();
 
-            foreach (var candidate in pm4Candidates)
+            foreach (var candidate in windowCandidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (remainingLineBudget <= 0)
@@ -1859,9 +1891,10 @@ public class WorldScene : ISceneRenderer
                 return new Pm4OverlayAsyncLoadResult(
                     requestId,
                     null,
+                    cameraWindow,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
-                    $"PM4: {totalFiles}/{mapPm4CandidateCount} map-wide files found, none decoded into overlay data (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
+                    $"PM4: {windowCandidates.Count}/{totalFiles} camera-window files found, none decoded into overlay data for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
                     cancelled: false);
             }
 
@@ -1895,18 +1928,19 @@ public class WorldScene : ISceneRenderer
             return new Pm4OverlayAsyncLoadResult(
                 requestId,
                 cacheData,
+                cameraWindow,
                 selectedObjectKey,
                 loadStopwatch.Elapsed.TotalMilliseconds,
-                $"PM4 ready: {loadedFiles}/{totalFiles} map-wide files decoded and cached, avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                $"PM4 ready: {loadedFiles}/{windowCandidates.Count} camera-window files decoded and cached for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
                 cancelled: false);
         }
         catch (OperationCanceledException)
         {
-            return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, "PM4 load cancelled.", cancelled: true);
+            return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, "PM4 load cancelled.", cancelled: true);
         }
         catch (Exception ex)
         {
-            return new Pm4OverlayAsyncLoadResult(requestId, null, selectedObjectKey, 0.0, $"PM4 load failed: {ex.Message}", cancelled: false);
+            return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, $"PM4 load failed: {ex.Message}", cancelled: false);
         }
     }
 
@@ -2043,8 +2077,8 @@ public class WorldScene : ISceneRenderer
 
     private static void GetPm4CameraTile(Vector3 cameraPos, out int tileX, out int tileY)
     {
-        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
+        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.TileSize;
+        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.TileSize;
         tileX = Math.Clamp((int)MathF.Floor(camTileX), 0, 63);
         tileY = Math.Clamp((int)MathF.Floor(camTileY), 0, 63);
     }
@@ -7497,8 +7531,7 @@ public class WorldScene : ISceneRenderer
 
     public void Dispose()
     {
-        _pm4LoadCancellation?.Cancel();
-        _pm4LoadCancellation?.Dispose();
+        ReleasePm4LoadCancellation(cancelPendingLoad: true);
         _terrainManager.OnTileLoaded -= OnTileLoaded;
         _terrainManager.OnTileUnloaded -= OnTileUnloaded;
         _terrainManager.Dispose();
@@ -7533,6 +7566,7 @@ public class WorldScene : ISceneRenderer
         public Pm4OverlayAsyncLoadResult(
             int requestId,
             Pm4OverlayCacheData? cacheData,
+            (int minTileX, int minTileY, int maxTileX, int maxTileY)? loadedCameraWindow,
             (int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey,
             double loadElapsedMs,
             string statusMessage,
@@ -7540,6 +7574,7 @@ public class WorldScene : ISceneRenderer
         {
             RequestId = requestId;
             CacheData = cacheData;
+            LoadedCameraWindow = loadedCameraWindow;
             SelectedObjectKey = selectedObjectKey;
             LoadElapsedMs = loadElapsedMs;
             StatusMessage = statusMessage;
@@ -7548,6 +7583,7 @@ public class WorldScene : ISceneRenderer
 
         public int RequestId { get; }
         public Pm4OverlayCacheData? CacheData { get; }
+        public (int minTileX, int minTileY, int maxTileX, int maxTileY)? LoadedCameraWindow { get; }
         public (int tileX, int tileY, uint ck24, int objectPart)? SelectedObjectKey { get; }
         public double LoadElapsedMs { get; }
         public string StatusMessage { get; }

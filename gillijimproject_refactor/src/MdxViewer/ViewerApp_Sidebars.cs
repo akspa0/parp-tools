@@ -131,6 +131,34 @@ public partial class ViewerApp
                         ImGui.SetTooltip(_worldScene.Pm4Status);
                 }
             }
+            else
+            {
+                ImGui.TextDisabled("Welcome");
+                ImGui.SameLine();
+                ImGui.Text("Open a game folder or standalone file to start exploring maps, models, and WMOs.");
+                ImGui.SameLine();
+                if (ImGui.Button("Open Game Folder..."))
+                {
+                    _showFolderInput = true;
+                    _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Open File..."))
+                    _wantOpenFile = true;
+
+                if (_dataSource != null)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.7f, 0.78f, 0.88f, 1f), $"Source ready: {_dataSource.Name}");
+
+                    if (_discoveredMaps.Count > 0)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(0.65f, 0.82f, 0.68f, 1f), $"Maps: {_discoveredMaps.Count}");
+                    }
+                }
+            }
         }
         ImGui.End();
         ImGui.PopStyleVar(2);
@@ -139,11 +167,10 @@ public partial class ViewerApp
     private void DrawLeftSidebar()
     {
         var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float topOffset = MenuBarHeight + ToolbarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowPos(new Vector2(0f, topOffset), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         }
         else
@@ -157,6 +184,9 @@ public partial class ViewerApp
             : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
         if (ImGui.Begin(_useDockspaceUi ? "Navigator" : "##LeftSidebar", flags))
         {
+            if (_useDockspaceUi)
+                CaptureDockPanelState(ref _navigatorDockState);
+
             ImGui.SetNextItemOpen(true, ImGuiCond.Once);
             if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
                 DrawFileBrowserContent();
@@ -216,7 +246,7 @@ public partial class ViewerApp
                 WdlPreviewWarmState previewState = canPreview && _wdlPreviewCacheService != null
                     ? _wdlPreviewCacheService.GetState(map.Directory)
                     : (canPreview ? WdlPreviewWarmState.Ready : WdlPreviewWarmState.NotQueued);
-                bool canSelectSpawn = hasWdt && canPreview && previewState == WdlPreviewWarmState.Ready;
+                bool canSelectSpawn = hasWdt && canPreview && previewState != WdlPreviewWarmState.Failed;
 
                 ImGui.SameLine();
                 if (!canSelectSpawn) ImGui.BeginDisabled();
@@ -231,12 +261,12 @@ public partial class ViewerApp
                     ImGui.Text($"Source: {(map.HasDbcEntry ? "Map.dbc + data source" : "Loose data source only")}");
                     ImGui.Text($"WDT: {(hasWdt ? "Found" : "Missing")}");
                     ImGui.Text($"WDL: {(hasWdl ? "Found" : "Missing")}");
-                    if (canSelectSpawn)
+                    if (previewState == WdlPreviewWarmState.Ready)
                         ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f), "WDL preview ready. Click 'Spawn' to choose a start tile.");
                     else if (!hasWdl)
                         ImGui.TextDisabled("No WDL preview is available. 'Load' will use the default map spawn.");
                     else if (previewState is WdlPreviewWarmState.Loading or WdlPreviewWarmState.NotQueued)
-                        ImGui.TextDisabled("WDL preview is preparing in the background.");
+                        ImGui.TextDisabled("WDL preview will continue preparing when you open the spawn chooser.");
                     else if (previewState == WdlPreviewWarmState.Failed)
                         ImGui.TextDisabled("WDL preview failed. 'Load' will fall back to the default map spawn.");
                     ImGui.EndTooltip();
@@ -334,11 +364,10 @@ public partial class ViewerApp
     private void DrawRightSidebar()
     {
         var io = ImGui.GetIO();
-        float topOffset = (_terrainManager != null || _vlmTerrainManager != null) ? MenuBarHeight + ToolbarHeight : MenuBarHeight;
+        float topOffset = MenuBarHeight + ToolbarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         }
         else
@@ -352,6 +381,9 @@ public partial class ViewerApp
             : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
         if (ImGui.Begin(_useDockspaceUi ? "Inspector" : "##RightSidebar", flags))
         {
+            if (_useDockspaceUi)
+                CaptureDockPanelState(ref _inspectorDockState);
+
             if (!string.IsNullOrEmpty(_selectedObjectInfo))
             {
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
@@ -598,7 +630,10 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Entries: {renderer.SubObjectCount}");
         float listHeight = MathF.Min(220f, MathF.Max(110f, GetUniformListRowHeight() * Math.Min(renderer.SubObjectCount, 8)));
         if (!ImGui.BeginChild($"##SubObjectVisibility_{idSuffix}", new Vector2(0, listHeight), true))
+        {
+            ImGui.EndChild();
             return;
+        }
 
         float rowHeight = GetUniformListRowHeight();
         GetVisibleListRange(renderer.SubObjectCount, rowHeight, out int startIndex, out int endIndex);

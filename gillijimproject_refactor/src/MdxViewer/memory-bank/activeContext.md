@@ -1,5 +1,81 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## WoW 0.5.3 Render Fast-Path And Viewer Perf Gap (Mar 24)
+
+- Current viewer/performance work should treat the following as engine-backed guardrails from the symbolized `0.5.3` client:
+- durable write-up: `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+   - `CreateRenderLists` (`0x00698230`) is a real terrain precompute step that builds texcoord and batch/render-list tables up front instead of leaving chunk draw setup entirely to the frame loop
+   - `RenderLayers` (`0x006a5d00`) and `RenderLayersDyn` (`0x006a64b0`) use locked GX buffers plus prepared chunk batches, and they reduce terrain layer count by distance rather than always drawing the full local layer stack
+   - terrain in `0.5.3` already has shader-assisted specialization: the draw path binds `CMap::psTerrain` / `CMap::psSpecTerrain` plus `shaderGxTexture` when terrain/specular shader support is available
+   - moving terrain-layer behavior is now directly supported in the terrain draw path itself: runtime layer flag `0x40` triggers an extra texture transform indexed into time-varying world transform tables, so the terrain motion seam is not just `WCHUNKLIQUID`
+   - terrain shadows are drawn as a separate modulation pass instead of being flattened into one generic terrain blend loop
+   - object lighting/rendering is also more specialized than the active viewer:
+      - `RenderMapObjDefGroups` (`0x0066e030`) walks visible `CMapObjDefGroup` lists and dispatches `CMapObj::RenderGroup(...)` at group scope
+      - `CreateLightmaps` (`0x006adba0`) allocates per-group lightmap textures and registers `UpdateLightmapTex`
+      - `RenderGroupLightmap(...)` and `RenderGroupLightmapTex(...)` show a dedicated group-lightmap render/combine path, not just one generic WMO material path with extra texture sampling
+      - `UpdateLightmapTex(...)` exposes CPU lightmap memory and stride on `GxTex_Latch`, which supports a persistent object-lightmap texture workflow
+      - `CalcLightColors` (`0x006c4da0`) computes much richer world-light state than the active viewer currently models (direct, ambient, multiple sky/cloud/water channels, fog, storm blending)
+- Practical implication for viewer fixes:
+   - the active viewer is still structurally flatter than the client in the exact places that matter for both speed and fidelity:
+      - `StandardTerrainAdapter` still actively uses `MPHD` only for big-alpha/profile handling and still flattens `MAIN` entries to boolean tile existence
+      - `TerrainRenderer` is still a generic base+overlay pass loop that only interprets `MCLY 0x100`; it has no terrain shader-family split, no per-layer motion support, no layer-count LOD collapse, and no specular terrain path
+      - `LightService` remains a simplified nearest-zone DBC interpolator instead of a full terrain/object/sky/runtime-light system
+      - `WmoRenderer` / `MdxRenderer` still rely on shared generic shader families instead of the client's stronger specialization
+      - `WorldScene` hot paths remain heavy, and PM4 forensic budgets are still effectively uncapped when that overlay is enabled
+      - `RenderQueue.cs` exists, but it is not yet the active world-scene submission path, so current batching/sorting/state reuse is still mostly renderer-local
+- Priority order now supported by evidence:
+   1. preserve `MAIN` / `MPHD` / `MCLY` semantics as first-class runtime metadata
+   2. split terrain renderer responsibilities into fallback vs client-faithful material/shader path
+   3. treat object/lightmap parity as a separate seam from terrain lighting
+   4. reduce generic hot-path state churn before layering on more fidelity features
+   5. use `WorldAssetManager`'s existing read/path-probe counters to drive an explicit scene residency/prefetch policy
+- Validation status:
+   - reverse engineering plus code audit only; no viewer code changed and no runtime signoff was produced by this slice
+
+## WoW 2.0.0 Beta Ghidra Recon: 2.x Runtime Risk Map (Mar 24)
+
+- Current `2.x` viewer work should treat the following as engine-backed guardrails from a static Ghidra pass against a beta `2.0.0` client:
+- durable write-up: `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+   - `Model2` is not using a generic shared early-model shader path in the client; `FUN_00717b00` explicitly loads `shaders\vertex\Model2.bls` and `shaders\pixel\Model2.bls`.
+   - map-object rendering in `FUN_006b3b20` preloads multiple material-specific pixel BLS programs, including `MapObjTransDiffuse.bls` and `MapObjTransSpecular.bls`.
+   - `M2Light` handling is spatial/runtime-managed: `FUN_0072d1a0` inserts lights into bucketed structures or general linked lists, and related mutators relink on state/position changes.
+   - `ParticleSystem2` is a real engine runtime with pool/bootstrap logic (`FUN_007c26c0`) and runtime `CParticle2` / `CParticle2_Model` object storage/copy paths (`FUN_007ca9d0`, `FUN_007c3180`, `FUN_007c79d0`).
+   - the `Light*.dbc` family is loaded through strict schema-checked `WDBC` loaders, so raw light-table ingestion is probably not the risky seam for viewer parity.
+   - terrain follow-up is now more precise than the earlier `terrainp* == fast path` shorthand:
+      - `terrain1..4` and `terrain1_s..4_s` are the cached one-pass terrain programs chosen by `FUN_006cee30` by chunk layer count
+      - `terrainp` / `terrainp_s` belong to the slower manual terrain fallback path
+      - `terrainp_u` / `terrainp_us` are loaded in `FUN_006a2360` but still not tied to an active draw branch in this beta pass
+      - both terrain draw branches also contain a separate time-varying layer-transform seam: `FUN_006c00f0` copies a source layer flag field into each runtime layer object, `FUN_006cee30` / `FUN_006cf590` apply an extra transform when bit `0x40` is present, and `FUN_006804b0` updates the transform tables every world tick
+      - animated `WCHUNKLIQUID` remains a separate engine track from the terrain shader selector
+      - `WCHUNKLIQUID` mode is now tied directly to animated family index in `FUN_0069b310`; recovered family entries are `lake_a`, `ocean_h`, `lava`, `slime`, and a duplicate `lake_a`, with higher slots still unresolved
+      - interesting likely-dead or unfinished content remains in view: unresolved family slot `6`, unused `XTextures\river\fast_a.%d.blp`, and the terrain-side `_u/_us` shader variants
+      - viewer-side terrain flag handling is still much thinner than the known format surface:
+         - `StandardTerrainAdapter` only actively uses `MPHD` for big-alpha selection
+         - `ReadMainChunk(...)` collapses every non-zero `MAIN` entry into generic tile existence and does not keep per-entry semantics like `has ADT` vs `all water`
+         - `TerrainRenderer` only interprets `MCLY 0x100` (`use_alpha_map`) and ignores the rest of the preserved layer flag bits
+- Practical implication for future viewer fixes:
+   - preserve the current profile-routing split, but do not assume smoke/light parity will come from parser-only changes.
+      - if later `2.x` visuals are wrong, inspect material/BLS selection and runtime light/particle interpretation before widening format-profile heuristics further.
+      - for moving/sliding terrain visuals specifically, treat `WDT` global flags, terrain-layer runtime flags, and `WCHUNKLIQUID` mode dispatch as separate investigative seams until the file-to-runtime mapping is proven.
+- Validation status:
+   - reverse engineering only; no viewer code changed and no runtime signoff was produced by this slice.
+
+## Later 2.x M2-Family Routing Follow-Up (Mar 24)
+
+- The active viewer no longer hard-rejects later `2.x` / TBC-era `MD20` models solely because there was no resolved model profile for that build family.
+- Current active-tree changes:
+   - `Terrain/FormatProfileRegistry.cs` now exposes `M2Profile_20x_Unknown` for `2.x` builds.
+   - the routed version window is `0x104..0x107`, which matches later TBC-era `MD20` versions and keeps the structural split threshold at `0x108`.
+   - `ViewerApp.cs` fallback build options now include `2.4.3.8606` so the profile can be selected even when `Map.dbd` build metadata is unavailable.
+   - `Rendering/ReplaceableTextureResolver.cs` now recognizes the short alias `2.4.3 -> 2.4.3.8606`.
+- Important limit:
+   - this is profile-routing enablement, not full runtime signoff for all `2.x` assets.
+   - no fixed TBC real-data validation path exists in the current workspace notes, so the slice is build-validated only.
+- Validation status:
+   - file diagnostics were clean on the edited viewer files.
+   - `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer/"` passed after this change.
+   - no automated tests were added or run.
+
 ## v0.4.5 Branding + MH2O LiquidType Fix (Mar 24)
 
 - Viewer branding now points at `parp-tools WoW Viewer` in the active runtime shell:

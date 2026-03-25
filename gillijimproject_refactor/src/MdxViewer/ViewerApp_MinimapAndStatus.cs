@@ -148,33 +148,73 @@ public partial class ViewerApp
     {
         List<(int tx, int ty)>? existingTiles = null;
         Func<int, int, bool>? isTileLoaded = null;
+        int loadedTileCount = 0;
         string? mapName = null;
+        bool hasWorldLoaded = false;
 
         if (_terrainManager != null)
         {
             var adapter = _terrainManager.Adapter;
             existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
             isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
             mapName = _terrainManager.MapName;
+            hasWorldLoaded = true;
         }
         else if (_vlmTerrainManager != null)
         {
             existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
             isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
             mapName = _vlmTerrainManager.MapName;
+            hasWorldLoaded = true;
         }
-        else return;
 
         var io = ImGui.GetIO();
 
-        float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
-        ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
-        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+        if (!_useDockspaceUi)
+        {
+            float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
+            ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+        }
 
         if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
             ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
         {
+            ImGui.End();
+            return;
+        }
+
+        if (_useDockspaceUi)
+            CaptureDockPanelState(ref _minimapDockState);
+
+        if (!hasWorldLoaded)
+        {
+            ImGui.TextWrapped("Load a world map or VLM project to activate the minimap.");
+            ImGui.Spacing();
+            ImGui.TextDisabled("Once a world is loaded, the minimap will show loaded tiles, support zoom and pan, and allow triple-click teleport.");
+            ImGui.Spacing();
+
+            if (ImGui.Button("Open Game Folder..."))
+            {
+                _showFolderInput = true;
+                _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Open File..."))
+                _wantOpenFile = true;
+
+            if (_dataSource != null)
+            {
+                ImGui.Separator();
+                ImGui.Text($"Source: {_dataSource.Name}");
+                if (_discoveredMaps.Count > 0)
+                    ImGui.TextDisabled($"Discovered maps: {_discoveredMaps.Count}");
+            }
+
             ImGui.End();
             return;
         }
@@ -193,6 +233,8 @@ public partial class ViewerApp
             _minimapZoom = Math.Clamp(_minimapZoom - 0.5f, 1f, 32f);
         ImGui.SameLine();
         ImGui.TextDisabled($"Zoom {_minimapZoom:F1}x");
+        ImGui.SameLine();
+        ImGui.TextDisabled($"Loaded {loadedTileCount}");
 
         float controlsHeight = ImGui.GetCursorPosY() + 8f;
         float mapAvailableWidth = ImGui.GetContentRegionAvail().X;

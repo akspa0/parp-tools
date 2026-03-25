@@ -85,8 +85,7 @@ public class MapDiscoveryService
             bool hasWdt = _dataSource.FileExists(wdtPath);
 
             // Check if WDL exists (Alpha 0.5.3 stores as .wdl.mpq)
-            string wdlPath = $"World\\Maps\\{dir}\\{dir}.wdl";
-            bool hasWdl = _dataSource.FileExists(wdlPath);
+            bool hasWdl = WdlDataSourceResolver.HasWdl(_dataSource, dir);
 
             // Do not surface map candidates that are not actually loadable from current data.
             if (!hasWdt)
@@ -156,7 +155,7 @@ public class MapDiscoveryService
             if (!hasWdt)
                 continue;
 
-            bool hasWdl = dataSource.FileExists($"World\\Maps\\{discoveredDirectory}\\{discoveredDirectory}.wdl");
+            bool hasWdl = WdlDataSourceResolver.HasWdl(dataSource, discoveredDirectory);
             yield return new MapDefinition(nextSyntheticId--, discoveredDirectory, discoveredDirectory, hasWdt, hasWdl, HasDbcEntry: false);
         }
     }

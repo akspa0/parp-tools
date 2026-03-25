@@ -1,5 +1,82 @@
 # Active Context
 
+## Mar 24, 2026 - 0.5.3 Terrain/Object Render Fast-Path And Viewer Perf Gap
+
+- Reverse-engineering follow-up against the symbolized `0.5.3` client materially tightened the current performance/parity story; no viewer code changed in this slice.
+- durable write-up extended in `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+- high-confidence `0.5.3` terrain findings from decompilation:
+	- `CreateRenderLists` (`0x00698230`) is a real precompute step that builds terrain texcoord tables and batch/render-list data instead of leaving chunk draw setup entirely to the frame loop
+	- `RenderLayers` (`0x006a5d00`) and `RenderLayersDyn` (`0x006a64b0`) use locked GX buffers plus prebuilt chunk batches, not a fully generic per-layer rebuild path
+	- terrain already has shader-assisted paths in `0.5.3`: the chunk draw path binds `CMap::psTerrain` / `CMap::psSpecTerrain` plus `shaderGxTexture` when terrain/specular shader support is enabled
+	- terrain layer count is reduced by distance (`textureLodDist` can clamp the runtime draw to one layer), and the dynamic path also fades diffuse alpha before collapse
+	- per-layer moving-texture behavior is confirmed in the terrain path itself: when runtime layer flag `0x40` is set, `RenderLayers` / `RenderLayersDyn` apply an extra texture transform indexed by low flag bits into the time-varying world transform tables updated by `FUN_006804b0`
+	- terrain shadows are drawn as a separate modulation pass rather than being flattened into one generic terrain blend loop
+- high-confidence `0.5.3` object/light findings from decompilation:
+	- `RenderMapObjDefGroups` (`0x0066e030`) walks visible `CMapObjDefGroup` lists, sets transforms once per group, and dispatches `CMapObj::RenderGroup(...)`; this is more structured than the active viewer's generic instance loops
+	- `CreateLightmaps` (`0x006adba0`) allocates per-group lightmap textures (`256x256`) and registers `UpdateLightmapTex`, which strongly supports a dedicated object-lightmap path in the client
+	- `RenderGroupLightmap(...)` uses dedicated group lightmap vertex streams and batch-local lightmap texture binding rather than one generic object UV/material path
+	- `RenderGroupLightmapTex(...)` splits the lightmap composition work into dedicated subpasses with lighting forced off, and `UpdateLightmapTex(...)` exposes row-stride plus CPU memory on `GxTex_Latch`; taken together, the object lightmap path is a real rendering subsystem, not just a texture on the generic WMO path
+	- `CalcLightColors` (`0x006c4da0`) computes a much richer lighting state than the active viewer currently models: direct, ambient, six sky channels, five cloud channels, four water channels, fog end, fog-start scalar, and storm blending
+- viewer-side implication from the same slice:
+	- the active viewer remains structurally flatter than the client in the exact places that matter for both performance and fidelity:
+		- `StandardTerrainAdapter` still actively uses `MPHD` only for big-alpha/profile selection and still flattens `MAIN` entries to boolean tile existence
+		- `TerrainRenderer` is still a generic base+overlay pass loop that only interprets `MCLY 0x100`; it has no terrain shader-family split, no per-layer motion support, no layer-count LOD collapse, and no specular terrain path
+		- `LightService` remains a simplified nearest-zone DBC interpolator rather than a full terrain/object/sky/runtime-light system
+		- `WmoRenderer` / `MdxRenderer` still rely on shared generic shader families instead of the client's stronger specialization
+		- `WorldScene` hot paths remain heavy: MDX transparent items are re-collected/sorted every frame, optional PM4 forensic budgets are still `int.MaxValue`, and the current render-queue abstraction is not yet the active world submission path
+- practical priority order now supported by evidence:
+	1. preserve `MAIN` / `MPHD` / `MCLY` semantics as first-class runtime metadata
+	2. split terrain renderer responsibilities into fallback vs client-faithful material/shader path
+	3. treat object/lightmap parity as a separate seam from terrain lighting
+	4. reduce generic hot-path state churn before layering on more fidelity features
+	5. use the existing `WorldAssetManager` read/path-probe counters as the basis for an explicit scene residency/prefetch policy
+- validation status:
+	- reverse engineering plus code audit only; no viewer build or runtime signoff was produced by this slice
+
+## Mar 24, 2026 - WoW 2.0.0 Beta Ghidra Recon For M2 / Light / Particle Risk
+
+- Static reverse-engineering pass only against a loaded beta `2.0.0` `WoW.exe` in Ghidra. No viewer/converter code changed in this slice.
+- durable write-up: `documentation/wow-200-beta-m2-light-particle-terrain-guide.md`
+- High-confidence findings from decompilation:
+	- `Model2` has an explicit BLS shader bootstrap in `FUN_00717b00` (`M2Cache.cpp` path string present) and loads both `shaders\vertex\Model2.bls` and `shaders\pixel\Model2.bls`.
+	- map objects preload a dedicated bank of pixel BLS programs in `FUN_006b3b20`, including `MapObjOverbright`, `MapObjSpecular`, `MapObjMetal`, `MapObjEnv`, `MapObjEnvMetal`, `MapObjExtWater0`, `MapObjTransDiffuse`, and `MapObjTransSpecular`.
+	- `M2Light.cpp`-anchored logic in `FUN_0072d1a0` does not treat model lights as a flat passive list: lights are inserted either into a spatial bucket structure or a general linked list depending on runtime mode/type, and companion mutators (`FUN_0072cc60`, `FUN_0072cc90`, `FUN_0072cdc0`) relink them when state/position changes.
+	- particle runtime is a real engine-side system, not just file payload playback: `FUN_007c26c0` bootstraps `CParticleEmitter2_idx` and global pools, while `FUN_007ca9d0` / related constructors copy emitter payload regions into runtime `CParticle2` / `CParticle2_Model` objects.
+	- the `Light*.dbc` family is loaded through strict `WDBC` schema-checked table loaders with ID-index maps, not ad-hoc parsing. Confirmed table shapes:
+		- `LightFloatBand.dbc` and `LightIntBand.dbc`: `0x22` columns, `0x88` row size, two `0x40`-byte band payloads plus two leading scalars.
+		- `LightParams.dbc`: `9` columns, `0x24` row size.
+		- `Light.dbc`: `0xc` columns, `0x30` row size with a trailing `0x14`-byte block.
+		- `LightSkybox.dbc`: `2` columns, `8` byte rows with string-table resolution.
+- Practical viewer risk guidance from this RE pass:
+	- do not collapse early/later `2.x` materials into one generic shader path if the goal is parity; the client uses distinct BLS programs for `Model2` and multiple map-object material families.
+	- do not expect smoke / particle projection issues to close from parser tweaks alone; the particle and light systems are runtime-managed and likely need render-path/state investigation in addition to format parsing.
+	- terrain follow-up is now split into two separate engine tracks:
+		- cached per-layer terrain programs are now pinned down more precisely:
+			- `terrain1..4` at `DAT_00caf304..310` are the one-pass layer-count table used when `DAT_00cb3594 == 0` and `DAT_00ca31b8 != 0`
+			- `terrain1_s..4_s` at `DAT_00caf548..554` are the alternate one-pass layer-count table used when `DAT_00cb3594 != 0`
+			- `terrainp` / `terrainp_s` belong to the slower manual terrain fallback path in `FUN_006cee30`, not the cached layer-count table
+			- `terrainp_u` / `terrainp_us` are loaded at startup but are still untraced in an active draw branch
+			- terrain also has a separate time-varying layer-transform path: `FUN_006c00f0` copies a source layer flag field into each runtime layer object, `FUN_006cee30` / `FUN_006cf590` apply an extra transform when bit `0x40` is present, and `FUN_006804b0` updates the transform tables every world tick
+		- `XTextures\slime\slime.%d.blp` resolves into an animated `WCHUNKLIQUID` surface path, not yet proven to be a terrain diffuse-layer effect
+		- latest `WCHUNKLIQUID` pass shows a real mode dispatcher: `FUN_006c65b0` splits modes `0/4/8` into animated texture-family rendering and modes `2/3/6/7` into a direct-coordinate/UV-style path
+		- `FUN_006c65b0` passes the raw mode nibble into `FUN_0069b310`, so the liquid mode is also the animated family index
+		- currently recovered family table entries:
+			- `0 -> lake_a`
+			- `1 -> ocean_h`
+			- `2 -> lava`
+			- `3 -> slime`
+			- `4 -> lake_a` again
+		- novelty/dead-content candidates:
+			- `FUN_0069e690(2)` currently reaches `FUN_0069b310(6)`, but the family slot is still unresolved via data xrefs
+			- `XTextures\river\fast_a.%d.blp` exists in strings but is not in the traced active family table
+	- viewer-side audit against the active tree shows terrain flag under-parsing is real:
+		- `StandardTerrainAdapter` currently uses `MPHD` only for big-alpha selection
+		- `ReadMainChunk(...)` treats any non-zero `MAIN` entry as generic tile presence instead of keeping entry semantics like `has ADT` vs `all water`
+		- raw `MCLY` flags are preserved into `TerrainLayer.Flags`, but `TerrainRenderer` only interprets `0x100` as the implicit-alpha hint
+	- the dangerous seam for `2.x` support is downstream interpretation of light/material/particle IDs and runtime state, not raw DBC ingestion.
+- Validation status:
+	- reverse engineering only; no automated tests, no solution build, and no runtime real-data signoff were performed in this slice.
+
 ## Mar 24, 2026 - 0.12 Standalone Model Browser Recovery
 
 - The latest standalone-model regression for the `0.12` client split into two separate seams in the active viewer:

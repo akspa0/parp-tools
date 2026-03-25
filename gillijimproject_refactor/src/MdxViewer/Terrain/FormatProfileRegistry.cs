@@ -364,6 +364,22 @@ public static class FormatProfileRegistry
         EffectLikeBStride = 0x7C
     };
 
+    public static readonly M2Profile M2Profile20xUnknown = new()
+    {
+        ProfileId = "M2Profile_20x_Unknown",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = false,
+        MinSupportedVersion = 0x104,
+        MaxSupportedVersion = 0x107,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
     public static readonly M2Profile M2Profile33512340 = new()
     {
         ProfileId = "M2Profile_335_12340",
@@ -657,6 +673,9 @@ public static class FormatProfileRegistry
 
         if (TryParseBuild(buildVersion, out int major, out int minor, out _, out _))
         {
+            if (major == 2)
+                return M2Profile20xUnknown;
+
             if (major == 3 && minor == 0)
                 return M2Profile30xUnknown;
 
