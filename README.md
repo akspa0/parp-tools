@@ -1,95 +1,150 @@
 # parp-tools
-Tools for analyzing World of Warcraft files
 
-## MdxViewer - WoW World Viewer
+Tooling for preservation, inspection, conversion, and visualization of World of Warcraft data.
 
-A high-performance 3D world viewer supporting WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5 game data with ADT/WDT/WMO/MDX/M2 rendering, format conversion, and asset export.
+This repository contains several generations of work. The primary active path today is the C# refactor under `gillijimproject_refactor`, with `parp-tools WoW Viewer` as the main user-facing application.
 
-### Quick Start
+## Primary Active Project
 
-1. **Open Game Folder**: `File > Open Game Folder` - Select your WoW client directory
-2. **Load a Map**: Double-click a map from the "World Maps" list in the left sidebar
-3. **Navigate**: Use WASD to fly, mouse to look around, scroll wheel to zoom minimap
+### parp-tools WoW Viewer
 
-### Controls
+`parp-tools WoW Viewer` is the active world viewer in this repository.
 
-#### Camera Navigation
-- **W/A/S/D** - Move forward/left/back/right
-- **Q/E** - Move up/down
-- **Shift** - 5x speed boost
-- **Mouse Drag** - Look around (right-click and drag)
+- Product name: `parp-tools WoW Viewer`
+- Source path: `gillijimproject_refactor/src/MdxViewer`
+- Current release line: `v0.4.5`
+- Detailed project overview: `gillijimproject_refactor/README.md`
+- Detailed viewer guide: `gillijimproject_refactor/src/MdxViewer/README.md`
 
-#### Minimap
-- **Location**: Top of right sidebar
-- **M Key** - Toggle fullscreen minimap overlay
-- **Scroll Wheel** - Zoom in/out (1x to 32x)
-- **Click & Drag** - Pan the minimap view
-- **Double-Click** - Teleport to clicked location
-- **Reset Pan Button** - Return to camera-centered view
+The viewer is no longer just a standalone model viewer. It is currently used as a combined world viewer, terrain debugger, PM4 inspection surface, asset browser, export front end, and general-purpose research tool for multiple WoW client eras.
 
-#### UI Panels
-- **Left Sidebar**: File browser, World Maps list
-- **Right Sidebar**: Minimap, Model Info, Terrain Controls, World Objects
-- **Toolbar**: Visibility toggles (Terrain, Doodads, WMOs, Liquids, etc.)
+### Current Viewer Scope
 
-### Features
+- World viewing for Alpha, Wrath-era, and selected Cataclysm-beta data paths
+- Terrain and liquid inspection
+- WMO and MDX/M2 viewing
+- Minimap rendering, cache reuse, and guarded teleport workflow
+- PM4 overlay inspection and export workflows
+- Asset browsing and GLB export utilities
+- Converter and validation tool front end
 
-- **Multi-Version Support**: Alpha 0.5.3, 0.6.0, LK 3.3.5
-- **Terrain Rendering**: Full ADT/WDT support with liquids (MCLQ/MLIQ)
-- **WMO Rendering**: v14/v16/v17 with doodads, liquids, transparency
-- **MDX/M2 Rendering**: Animated models with textures, specular, environment maps
-- **Format Conversion**: WMO v14↔v17, MDX↔M2 bidirectional conversion
-- **GLB Export**: Visual and collision mesh export with materials
-- **Asset Catalog**: Browse/export creatures and gameobjects with screenshots
-- **Alpha-Core Integration**: NPC/GameObject spawn visualization from SQL dumps
+### Supported Range
 
-### Export Options
+- Documented support range: `0.5.3` through `4.0.0.11927`
+- Additional support exists for later `4.0.x` terrain variants
+- Untested support paths also exist through parts of `4.3.4`
 
-- **File > Export GLB (Visual)** - Export WMO with textures (excludes collision)
-- **File > Export GLB (Collision Only)** - Export collision/portal meshes only
-- **Tools > WMO Converter** - Convert between v14 and v17 formats
-- **View > Asset Catalog** - Batch export creatures/gameobjects with screenshots
+That does not mean every subsystem is equally validated across every supported build. The active repo documentation distinguishes between build validation and real-data runtime validation, and that distinction matters here.
 
-### Supported File Formats
+## Quick Start
 
-- **Terrain**: WDT, ADT (Alpha 0.5.3 monolithic, 0.6.0+ split)
-- **Models**: WMO (v14/v16/v17), MDX (v1300), M2 (v264+)
-- **Textures**: BLP (v0/v1), with DBC replaceable texture resolution
-- **Data**: DBC files, Alpha-Core SQL dumps, minimap tiles, Installed game clients (0.5.3-0.8.0)
+From the repository root:
 
----
+### 1. Bootstrap vendored dependencies
 
-## WoWRollback
+PowerShell:
 
-Sink objects below the ground that match specific ranges of layers of uniqueID values.
+```powershell
+.\gillijimproject_refactor\setup-libs.ps1
+```
 
-## Libraries
-- gillijimproject_refactor/src/gillijimproject-csharp - A C# port of mjollna/gillijimproject with many enhancements (AreaTable remapping for 3.3.5 without modding DBCs)
+### 2. Build the active viewer
 
-----
+```powershell
+dotnet build .\gillijimproject_refactor\src\MdxViewer\MdxViewer.sln -c Debug
+```
 
-# Archived projects
+### 3. Run the active viewer
 
-AlphaWDTAnalysisTool - The proof of concept patch tool for AreaID patching. Rolled in to WoWRollback as a library.
+```powershell
+dotnet run --project .\gillijimproject_refactor\src\MdxViewer\MdxViewer.csproj
+```
 
-PM4Tool - PM4 parsing tools
+Inside the viewer, the intended workflow is:
 
-parpToolbox - Additional PM4 parsing tools
+1. Open a base client through `File > Open Game Folder (MPQ)...`
+2. Choose the correct client build when prompted
+3. Open a world, loose map folder, or standalone asset from the UI
 
-PM4FacesTool - current experimental toolkit for parsing PM4 files. Will be rolled into WoWRollback.
+## Repository Layout
 
-parpToolbox/src/PM4Rebuilder - A complete tool for parsing PM4 files into exportable objects. Includes lots of analysis tooling too.
+### Active work
 
-parpToolbox - Base library for PM4/PD4/WMO reading, with tons of tests and analysis tooling for understanding the PM4 file format.
+- `gillijimproject_refactor/`
+	- Primary active development tree
+	- Contains `parp-tools WoW Viewer`, `WoWMapConverter`, `Pm4Research.Core`, and the current documentation / memory-bank state
 
-PM4Tool/WoWToolbox - a PM4/PD4 file decoder with support for reading from ADT and WMO assets for identifying data in the PM4 or PD4 file formats. Currently a working proof of concept. Supports leaked development pm4 files and the cataclysm-era split ADT files for analysis. We use WotLK 3.3.5 assets (wmo/m2) for mesh comparison.
+### Important active subprojects inside the refactor tree
 
-ProjectArcane - Extemely work-in-progress re-write, based on the wowdev wiki documentation
+- `gillijimproject_refactor/src/MdxViewer/`
+	- Active viewer application
+- `gillijimproject_refactor/src/WoWMapConverter/`
+	- Format and conversion library used by the viewer and related tools
+- `gillijimproject_refactor/src/Pm4Research.Core/`
+	- Standalone PM4 decode and audit foundation
+- `gillijimproject_refactor/src/MDX-L_Tool/`
+	- MDX archaeology and parser utility
+- `gillijimproject_refactor/WoWRollback/`
+	- Supporting tooling and modules used by some of the conversion and repair workflows
 
-WCA\WCAnalyzer - A multi-tool built off ModernWoWTools/Warcraft.NET for parsing ADT files from version 0.6 through 11.x and dumping useful data from them, as well as parsing PM4 and PD4 files for useful data.
+### Other top-level folders
 
+- `parpToolbox/`
+	- Older but still useful PM4 and related format research/tooling
+- `PM4Tool/`
+	- PM4-focused experiments and utilities
+- `ADTPrefabTool/`
+	- Separate tooling path, not the primary active viewer/converter path
+- `archived_projects/`
+	- Historical projects preserved for reference, not primary active work
 
-----
-This project is not an official Blizzard Entertainment product and is not affiliated with or endorsed by World of Warcraft or Blizzard Entertainment.
+## Current State Of The Repo
+
+This is a research-heavy codebase with an active modernized path and a large amount of historical material.
+
+The practical rules are:
+
+- treat `gillijimproject_refactor` as the primary active tree
+- treat `parp-tools WoW Viewer` as the main application in current use
+- treat many older folders as reference material, experiments, or legacy tooling unless the task explicitly targets them
+
+## Validation Reality
+
+This repository does not currently have broad first-party automated regression coverage for the active viewer path.
+
+What that means in practice:
+
+- successful builds matter, but build success is not the same as runtime signoff
+- some recent fixes, such as the `v0.4.5` minimap repair, have targeted real-data runtime confirmation
+- many other areas are still build-validated only and should be described that way
+
+If you need exact validation status for a recent viewer or terrain change, check the memory-bank files under `gillijimproject_refactor/memory-bank/` and `gillijimproject_refactor/src/MdxViewer/memory-bank/`.
+
+## Documentation
+
+Start with these files:
+
+- `gillijimproject_refactor/README.md`
+- `gillijimproject_refactor/src/MdxViewer/README.md`
+- `gillijimproject_refactor/memory-bank/activeContext.md`
+- `gillijimproject_refactor/memory-bank/progress.md`
+- `gillijimproject_refactor/memory-bank/data-paths.md`
+
+Those files are more current and more precise than older scattered notes elsewhere in the repository.
+
+## Archived And Experimental Work
+
+This repository also preserves older and experimental work, including:
+
+- Alpha WDT analysis tooling
+- PM4 decoding and reconstruction experiments
+- older toolbox and exporter efforts
+- work-in-progress rewrites and proof-of-concept tools
+
+Those paths remain useful for archaeology and reference, but they should not be treated as the primary maintained surface unless a task explicitly targets them.
+
+## Disclaimer
+
+This project is not an official Blizzard Entertainment product and is not affiliated with or endorsed by Blizzard Entertainment or World of Warcraft.
 
 
