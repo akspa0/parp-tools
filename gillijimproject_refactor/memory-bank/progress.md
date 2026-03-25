@@ -1,5 +1,27 @@
 # Progress
 
+### Mar 25, 2026 - Post-v0.4.5 Roadmap Prompt Bundle + Isolated Branch
+
+- Created a dedicated follow-on branch for next-version work:
+	- `feature/v0.4.6-v0.5.0-roadmap`
+- Added new planning prompt files under `plans/`:
+	- `post_v0_4_5_plan_set_2026-03-25.md`
+	- `v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
+	- `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
+	- `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
+	- `viewer_performance_recovery_prompt_2026-03-25.md`
+- Updated existing planning files:
+	- `v0_5_0_goal_stack_prompt_2026-03-25.md`
+	- `enhanced_terrain_shader_lighting_prompt_2026-03-25.md`
+- Planning direction captured:
+	- `v0.4.6` is now framed as the first WoWRollback / `UniqueID` timeline integration slice inside the active viewer, plus Alpha-Core SQL caching/fidelity work and a first performance recovery pass.
+	- `v0.5.0` remains the larger renderer/performance/fidelity milestone instead of absorbing every immediate post-release request.
+- Documentation follow-up:
+	- root `README.md` now states the documented support range more plainly (`0.5.3` through `4.0.0.11927`) and does a better job surfacing the built-in converters, WMO `v14/v16/v17` support, SQL-driven spawns, PM4 tooling, and screenshot automation reality.
+- Validation limits:
+	- planning/docs only
+	- no automated tests or builds were run for this slice because no code changed
+
 ### Mar 25, 2026 - Fullscreen Minimap Transpose Repair + Runtime User Signoff
 
 - `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`

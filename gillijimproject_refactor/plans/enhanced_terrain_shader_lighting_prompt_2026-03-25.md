@@ -6,6 +6,9 @@ Use this prompt in a fresh planning chat when working on the enhanced-quality te
 
 Use these companion prompt files when the work should be narrower than the full umbrella brief:
 
+- `plans/post_v0_4_5_plan_set_2026-03-25.md`
+- `plans/v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
+- `plans/viewer_performance_recovery_prompt_2026-03-25.md`
 - `plans/enhanced_renderer_plan_set_2026-03-25.md`
 - `plans/enhanced_renderer_architecture_prompt_2026-03-25.md`
 - `plans/enhanced_terrain_first_slice_prompt_2026-03-25.md`
@@ -36,12 +39,13 @@ The plan must treat shader translation as reconstruction of shader families and 
 3. A render-quality UI/settings expansion plan.
 4. A terrain-lighting expansion plan for `LightService` and scene plumbing.
 5. A shader-family translation strategy for later terrain, WMO/map-object, and Model2 work.
-6. A risk register that explicitly separates:
+6. A performance guardrail plan that explains how the enhanced path can land without making the current sluggish-world problem worse.
+7. A risk register that explicitly separates:
 	- terrain decode risk
 	- terrain shading risk
 	- lighting-model risk
 	- later shader-family parity risk
-7. A real-data validation strategy that does not over-claim.
+8. A real-data validation strategy that does not over-claim.
 
 ## Required Constraints
 
@@ -53,6 +57,7 @@ The plan must treat shader translation as reconstruction of shader families and 
 - Do not claim that shader-family reconstruction alone will make lighting “correct” without corresponding runtime light-state work.
 - Do not treat archived code, library tests, or synthetic fixtures as proof for the active viewer.
 - Favor a vertical slice that can actually land without destabilizing the active viewer.
+- Do not ignore frame-time cost; any enhanced terrain slice must define its intended budget, instrumentation, or rollback path if it regresses world-scene performance.
 
 ## Terrain Guardrails
 
@@ -106,6 +111,7 @@ but does **not** yet have a robust material/shader-family translation layer.
 	- liquid
 	- particles
 6. What parts of client shader/material behavior are blocked on more reverse engineering instead of immediate implementation?
+7. How does the enhanced path coexist with the current urgent performance-recovery work instead of competing with it blindly?
 
 ## Suggested Deliverable Structure
 
@@ -113,10 +119,11 @@ but does **not** yet have a robust material/shader-family translation layer.
 2. Historical vs Enhanced target architecture
 3. First implementation slice
 4. Terrain lighting expansion plan
-5. Shader-family translation strategy
-6. Risk register
-7. Real-data validation plan
-8. Later milestones and blocked seams
+5. Performance guardrails
+6. Shader-family translation strategy
+7. Risk register
+8. Real-data validation plan
+9. Later milestones and blocked seams
 
 ## Validation Rules
 

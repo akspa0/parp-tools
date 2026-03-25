@@ -1,14 +1,14 @@
 # parp-tools
 
-Tooling for preservation, inspection, conversion, and visualization of World of Warcraft data.
+Preservation, conversion, archaeology, and visualization tooling for World of Warcraft data.
 
-This repository contains several generations of work. The primary active path today is the C# refactor under `gillijimproject_refactor`, with `parp-tools WoW Viewer` as the main user-facing application.
+The primary active path in this repository is `gillijimproject_refactor`, with `parp-tools WoW Viewer` as the flagship application and `WoWMapConverter` / `Pm4Research.Core` as the core supporting libraries behind much of the current format and reconstruction work.
 
 ## Primary Active Project
 
 ### parp-tools WoW Viewer
 
-`parp-tools WoW Viewer` is the active world viewer in this repository.
+`parp-tools WoW Viewer` is the active world viewer and research surface in this repository.
 
 - Product name: `parp-tools WoW Viewer`
 - Source path: `gillijimproject_refactor/src/MdxViewer`
@@ -16,25 +16,34 @@ This repository contains several generations of work. The primary active path to
 - Detailed project overview: `gillijimproject_refactor/README.md`
 - Detailed viewer guide: `gillijimproject_refactor/src/MdxViewer/README.md`
 
-The viewer is no longer just a standalone model viewer. It is currently used as a combined world viewer, terrain debugger, PM4 inspection surface, asset browser, export front end, and general-purpose research tool for multiple WoW client eras.
+This is no longer just a model viewer. The active app is already being used as a multi-era world viewer, terrain debugger, PM4 inspection surface, asset browser, export front end, SQL-driven spawn viewer, and conversion utility shell.
 
-### Current Viewer Scope
+### What The Active Stack Already Does
 
-- World viewing for Alpha, Wrath-era, and selected Cataclysm-beta data paths
-- Terrain and liquid inspection
-- WMO and MDX/M2 viewing
-- Minimap rendering, cache reuse, and guarded teleport workflow
-- PM4 overlay inspection and export workflows
-- Asset browsing and GLB export utilities
-- Converter and validation tool front end
+- views world data from `0.5.3` through `4.0.0.11927`
+- carries additional later-era terrain support paths into parts of `4.3.4`, though that band remains explicitly untested
+- reads and converts WMO `v14`, `v16`, and `v17`
+- supports MDX / M2 inspection and export workflows
+- includes built-in map, terrain, WMO, VLM, and texture-transfer tooling in the active UI
+- supports Alpha-Core SQL-driven NPC and gameobject population injection in the viewer
+- provides PM4 overlay analysis, PM4/WMO correlation, and PM4 export tooling
 
-### Supported Range
+### Conversion Coverage Worth Calling Out
+
+The repo is stronger on conversion than the current top-level README used to suggest.
+
+- `WoWMapConverter` is an active format and conversion library, not a side experiment
+- the viewer ships built-in UI entry points for map conversion, WMO conversion, VLM export, and terrain texture transfer
+- Alpha-era, Wrath-era, and `4.0.0.11927` era terrain workflows all exist in the active tree
+- the repo contains real cross-era reconstruction work rather than only one-direction viewers or one-off exporters
+
+## Supported Range
 
 - Documented support range: `0.5.3` through `4.0.0.11927`
 - Additional support exists for later `4.0.x` terrain variants
 - Untested support paths also exist through parts of `4.3.4`
 
-That does not mean every subsystem is equally validated across every supported build. The active repo documentation distinguishes between build validation and real-data runtime validation, and that distinction matters here.
+That range is the documented target, not a blanket claim that every subsystem has equal runtime signoff on every build. The active documentation distinguishes between build validation and real-data runtime validation, and that distinction matters here.
 
 ## Quick Start
 
@@ -66,6 +75,31 @@ Inside the viewer, the intended workflow is:
 2. Choose the correct client build when prompted
 3. Open a world, loose map folder, or standalone asset from the UI
 
+## Active Highlights
+
+### Viewer and research workflow
+
+- world viewing for Alpha, Wrath-era, and selected Cataclysm-era data paths
+- terrain, liquid, minimap, taxi, and PM4 inspection workflows
+- standalone WMO and MDX/M2 viewing plus GLB export
+- SQL-driven world spawn loading from Alpha-Core
+- render-quality controls, object inspection, and debugging utilities aimed at real dataset archaeology rather than pure presentation
+
+### PM4 and reconstruction workflow
+
+- standalone PM4 research library under `gillijimproject_refactor/src/Pm4Research.Core`
+- active PM4 overlay loading inside the viewer
+- PM4/WMO correlation reports and export
+- PM4 OBJ export from the live viewer
+
+### Built-in tooling
+
+- map converter UI
+- WMO converter UI
+- VLM export UI
+- terrain texture transfer UI
+- asset-catalog export with automated multi-angle screenshot capture
+
 ## Repository Layout
 
 ### Active work
@@ -85,7 +119,7 @@ Inside the viewer, the intended workflow is:
 - `gillijimproject_refactor/src/MDX-L_Tool/`
 	- MDX archaeology and parser utility
 - `gillijimproject_refactor/WoWRollback/`
-	- Supporting tooling and modules used by some of the conversion and repair workflows
+	- Supporting rollback, reconstruction, and UniqueID-oriented tooling that now feeds post-`v0.4.5` viewer planning directly
 
 ### Other top-level folders
 
@@ -98,15 +132,12 @@ Inside the viewer, the intended workflow is:
 - `archived_projects/`
 	- Historical projects preserved for reference, not primary active work
 
-## Current State Of The Repo
+## Screenshots And Capture
 
-This is a research-heavy codebase with an active modernized path and a large amount of historical material.
+The repo still needs a stronger curated screenshot gallery.
 
-The practical rules are:
-
-- treat `gillijimproject_refactor` as the primary active tree
-- treat `parp-tools WoW Viewer` as the main application in current use
-- treat many older folders as reference material, experiments, or legacy tooling unless the task explicitly targets them
+- automated asset-catalog screenshot capture already exists in the active viewer pipeline
+- broader UI, world-scene, and feature-showcase screenshot automation is still a follow-up task rather than a completed repo artifact
 
 ## Validation Reality
 

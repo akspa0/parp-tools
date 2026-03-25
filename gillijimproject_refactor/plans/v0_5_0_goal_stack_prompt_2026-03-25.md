@@ -1,12 +1,12 @@
 # v0.5.0 Goal Stack Prompt
 
-Use this prompt in a fresh planning chat when the goal is to define the next milestone after `v0.4.5`.
+Use this prompt in a fresh planning chat when the goal is to define the `v0.5.0` goal stack specifically, after the near-term `v0.4.6` branch plan has already been separated.
 
 ## Prompt
 
 Design a concrete `v0.5.0` goal stack for `gillijimproject_refactor/src/MdxViewer`.
 
-This plan must assume that `v0.4.5` is a stabilization-and-release milestone, while `v0.5.0` is the next milestone for meaningful capability growth once the most visible release blockers are under control.
+This plan must assume that `v0.4.5` is the stabilization-and-release milestone, `v0.4.6` is the first post-release feature slice, and `v0.5.0` is the broader milestone for meaningful capability growth once the most visible post-release foundation work is underway.
 
 ## The Goal Stack Must Produce
 
@@ -23,8 +23,17 @@ The plan should treat the following as strong `v0.5.0` candidates:
 - enhanced renderer architecture and mode split
 - enhanced terrain first slice
 - shader-family and lighting roadmap execution
+- deeper viewer performance recovery beyond any `v0.4.6` emergency slice
+- SQL actor fidelity / liveness follow-up only if the first correctness work and performance budgets are already in place
 - minimap hardening beyond the immediate release blocker fix
 - selected-object / world-inspection quality-of-life follow-up where it materially improves debugging and iteration
+
+The plan should explicitly treat these as likely `v0.4.6` work instead of `v0.5.0` work unless scope grows unexpectedly:
+
+- WoWRollback `UniqueID` range filtering inside the active viewer
+- Alpha-Core SQL import caching / SQLite indexing
+- first-pass SQL actor fidelity corrections
+- first performance triage slice aimed at the current obvious frame-time problem
 
 The plan should also explicitly state what should stay out of `v0.5.0` unless stronger evidence appears.
 
@@ -32,6 +41,8 @@ The plan should also explicitly state what should stay out of `v0.5.0` unless st
 
 Reuse the current enhanced-renderer planning bundle where relevant:
 
+- `plans/post_v0_4_5_plan_set_2026-03-25.md`
+- `plans/v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
 - `plans/enhanced_renderer_plan_set_2026-03-25.md`
 - `plans/enhanced_renderer_architecture_prompt_2026-03-25.md`
 - `plans/enhanced_terrain_first_slice_prompt_2026-03-25.md`
@@ -40,9 +51,10 @@ Reuse the current enhanced-renderer planning bundle where relevant:
 ## Required Constraints
 
 - Do not let `v0.5.0` become an unbounded wishlist.
-- Keep release stabilization work separate from post-release fidelity growth.
+- Keep release stabilization work and `v0.4.6` foundation work separate from post-release fidelity growth.
 - Prefer goals with a visible vertical slice and a credible validation path.
 - Be explicit when a goal is still blocked on more reverse engineering.
+- Do not let speculative server-like NPC pathing dominate the milestone unless the prerequisite data and performance work are already solved.
 
 ## Suggested Deliverable Structure
 

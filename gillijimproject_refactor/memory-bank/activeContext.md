@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 25, 2026 - Post-v0.4.5 Branch And Roadmap Prompt Bundle
+
+- Post-release planning is now intentionally split onto branch `feature/v0.4.6-v0.5.0-roadmap` so the next milestone work can stay isolated from `main` until the first real slices are ready.
+- New prompt bundle captured under `plans/` for the next branch of work:
+	- `post_v0_4_5_plan_set_2026-03-25.md`
+	- `v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
+	- `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
+	- `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
+	- `viewer_performance_recovery_prompt_2026-03-25.md`
+- Current intended milestone split:
+	- `v0.4.6` should carry the first visible WoWRollback / `UniqueID` timeline filter slice inside the active viewer, plus Alpha-Core SQL caching/fidelity follow-up and an initial performance recovery pass.
+	- `v0.5.0` should carry the broader renderer/performance/fidelity expansion, including the enhanced terrain shader/lighting path and any deeper scene-liveness follow-up that survives data/profiling scrutiny.
+- Important boundaries for future sessions:
+	- keep WoWRollback integration on the active viewer UI/data-loading path; do not drift back to the older separate web-viewer plan as the primary delivery target.
+	- treat Alpha-Core SQL equipment correctness, animation-state handling, and pathing as separate seams.
+	- do not assume SQL or PM4 already prove server-like NPC pathing; that remains a later research seam, not an implicit short-term deliverable.
+	- performance recovery is now a first-class dependency because richer SQL actors and enhanced shaders will otherwise make the current sluggish-world problem worse.
+- Documentation follow-up on the same slice:
+	- root `README.md` was refreshed again to make the active support headline, conversion coverage, WMO `v14/v16/v17` handling, and built-in tooling more explicit.
+	- screenshot reality remains unchanged: asset-catalog screenshot automation exists already, but a curated world/UI gallery is still future work.
+- Validation status:
+	- planning/documentation only
+	- no viewer, converter, or renderer code changed in this slice
+
 ## Mar 24, 2026 - WMO Vertex-Light Prototype In Active Viewer
 
 - First renderer-side object-lighting prototype is now in the active tree at `src/MdxViewer/Rendering/WmoRenderer.cs`.

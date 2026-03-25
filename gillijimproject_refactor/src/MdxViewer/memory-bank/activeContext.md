@@ -1,5 +1,25 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Post-v0.4.5 Viewer Roadmap Split (Mar 25)
+
+- Viewer follow-up planning is now intentionally isolated on branch `feature/v0.4.6-v0.5.0-roadmap` instead of piling the next milestone discussion directly onto `main`.
+- New viewer-relevant planning prompts now exist under `gillijimproject_refactor/plans/`:
+   - `v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
+   - `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
+   - `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
+   - `viewer_performance_recovery_prompt_2026-03-25.md`
+   - updated `enhanced_terrain_shader_lighting_prompt_2026-03-25.md`
+- Current intended viewer milestone split:
+   - `v0.4.6` should focus on first real WoWRollback / `UniqueID` timeline filtering inside the current viewer, Alpha-Core SQL caching/fidelity follow-up, and an initial performance recovery slice.
+   - `v0.5.0` should focus on the larger renderer/performance/fidelity push, including enhanced terrain shading/lighting and any deeper scene-liveness work that survives data and profiling review.
+- Important boundaries:
+   - use the current viewer UI and world-loading methodology; do not treat the older WoWRollback viewer concepts as the primary product target.
+   - SQL actor equipment correctness, animation-state handling, and pathing are separate seams.
+   - pathing/server-like NPC motion is still speculative until real data sources are verified and the current frame-time problem is improved.
+- Validation status:
+   - planning/documentation only
+   - no active viewer code changed in this slice
+
 ## Object Culling + Far-Fog Follow-Up (Mar 25)
 
 - The active viewer object-visibility path was adjusted to reduce aggressive pop-in/pop-out for world MDX/M2/WMO placements:
