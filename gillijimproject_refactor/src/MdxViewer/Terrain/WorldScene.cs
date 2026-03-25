@@ -521,9 +521,9 @@ public class WorldScene : ISceneRenderer
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
-    private const float WmoCullDistance = 2000f;     // Max distance for WMO instances (slightly past fog)
+    private const float WmoCullDistance = 4000f;     // Minimum WMO instance cull distance; actual range expands with fog distance
     private const float WmoFadeStartFraction = 0.85f;
-    private const float NoCullRadius = 256f;         // Objects within this radius are never frustum-culled
+    private const float NoCullRadius = 512f;         // Objects within this radius are never frustum-culled
     private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
@@ -1556,6 +1556,7 @@ public class WorldScene : ISceneRenderer
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
     private int _selectedTaxiRouteId = -1;
+    private readonly Dictionary<int, string> _taxiActorModelOverrideByPath = new();
     private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
@@ -1596,6 +1597,55 @@ public class WorldScene : ISceneRenderer
 
     public TaxiPathLoader.TaxiRoute? GetTaxiRoute(int pathId)
         => _taxiLoader?.Routes.FirstOrDefault(route => route.PathId == pathId);
+
+    public string? GetTaxiActorModelOverride(int pathId)
+        => _taxiActorModelOverrideByPath.TryGetValue(pathId, out string? modelPath) ? modelPath : null;
+
+    public void SetTaxiActorModelOverride(int pathId, string? modelPath)
+    {
+        string normalizedPath = string.IsNullOrWhiteSpace(modelPath)
+            ? string.Empty
+            : modelPath.Trim().Replace('/', '\\');
+
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            _taxiActorModelOverrideByPath.Remove(pathId);
+            return;
+        }
+
+        _taxiActorModelOverrideByPath[pathId] = normalizedPath;
+        _assets.QueueMdxLoad(WorldAssetManager.NormalizeKey(normalizedPath));
+    }
+
+    public string? GetResolvedTaxiActorModelPath(int pathId)
+    {
+        if (_taxiActorModelOverrideByPath.TryGetValue(pathId, out string? overrideModelPath)
+            && !string.IsNullOrWhiteSpace(overrideModelPath))
+        {
+            return overrideModelPath;
+        }
+
+        TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
+        if (route == null)
+            return null;
+
+        TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
+        return string.IsNullOrWhiteSpace(mountNode?.MountModelPath)
+            ? null
+            : mountNode.MountModelPath.Replace('/', '\\');
+    }
+
+    public bool TryGetTaxiRouteSelectionPoint(int pathId, out Vector3 point)
+    {
+        TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
+        if (route == null)
+        {
+            point = Vector3.Zero;
+            return false;
+        }
+
+        return TryGetTaxiRouteSelectionPoint(route, out point);
+    }
 
     /// <summary>
     /// Store DBC credentials for lazy loading of POI, Taxi, and Lighting.
@@ -4658,9 +4708,18 @@ public class WorldScene : ISceneRenderer
             if (!IsTaxiRouteVisible(route) || route.Waypoints.Count < 2)
                 continue;
 
-            var mountNode = ResolveTaxiActorNode(route);
-            if (mountNode == null || string.IsNullOrWhiteSpace(mountNode.MountModelPath))
-                continue;
+            string? actorModelPath = GetTaxiActorModelOverride(route.PathId);
+            float scale = 1.0f;
+
+            if (string.IsNullOrWhiteSpace(actorModelPath))
+            {
+                TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
+                if (mountNode == null || string.IsNullOrWhiteSpace(mountNode.MountModelPath))
+                    continue;
+
+                actorModelPath = mountNode.MountModelPath;
+                scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
+            }
 
             float routeLength = GetRouteLength(route.Waypoints);
             if (routeLength <= 1f)
@@ -4681,8 +4740,7 @@ public class WorldScene : ISceneRenderer
             float yawRadians = actorDirection.LengthSquared() > 0.0001f
                 ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
                 : 0f;
-            float scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
-            string modelPath = mountNode.MountModelPath.Replace('/', '\\');
+            string modelPath = actorModelPath.Replace('/', '\\');
             string key = WorldAssetManager.NormalizeKey(modelPath);
             _assets.QueueMdxLoad(key);
 
@@ -4751,6 +4809,25 @@ public class WorldScene : ISceneRenderer
             return toNode;
 
         return fromNode ?? toNode;
+    }
+
+    private static bool TryGetTaxiRouteSelectionPoint(TaxiPathLoader.TaxiRoute route, out Vector3 point)
+    {
+        if (route.Waypoints.Count == 0)
+        {
+            point = Vector3.Zero;
+            return false;
+        }
+
+        float routeLength = GetRouteLength(route.Waypoints);
+        if (routeLength <= 1f)
+        {
+            point = route.Waypoints[route.Waypoints.Count / 2];
+            return true;
+        }
+
+        SampleRoute(route.Waypoints, routeLength * 0.5f, out point, out _);
+        return true;
     }
 
     private static float GetRouteLength(List<Vector3> waypoints)
@@ -5492,6 +5569,35 @@ public class WorldScene : ISceneRenderer
         }
     }
 
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static float ComputeNoCullDistanceSq(Vector3 min, Vector3 max)
+    {
+        float halfDiagonal = (max - min).Length() * 0.5f;
+        float graceRadius = MathF.Max(NoCullRadius, MathF.Min(halfDiagonal + 96f, 1024f));
+        return graceRadius * graceRadius;
+    }
+
+    private static float ComputeObjectFogStart(float fogStart, float fogEnd)
+    {
+        if (fogEnd <= 0f)
+            return fogStart;
+
+        float delayedStart = fogEnd * 0.6f;
+        return MathF.Min(fogEnd - 64f, MathF.Max(fogStart, delayedStart));
+    }
+
+    private static float ComputeWmoCullDistance(float fogEnd)
+    {
+        return MathF.Max(WmoCullDistance, fogEnd + 1200f);
+    }
+
     // ── ISceneRenderer ──────────────────────────────────────────────────
 
     private bool _renderDiagPrinted = false;
@@ -5535,6 +5641,9 @@ public class WorldScene : ISceneRenderer
             fogEnd = lighting.FogEnd;
         }
         _skyDome.Render(view, proj, camPos);
+
+        float objectFogStart = ComputeObjectFogStart(fogStart, fogEnd);
+        float objectFogEnd = fogEnd;
 
         // Also set clear color to horizon color so any gaps match the sky
         _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
@@ -5600,10 +5709,11 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         if (_wmosVisible)
         {
-            float wmoCullDistanceSq = WmoCullDistance * WmoCullDistance;
-            float wmoFadeStart = WmoCullDistance * WmoFadeStartFraction;
+            float wmoCullDistance = ComputeWmoCullDistance(objectFogEnd);
+            float wmoCullDistanceSq = wmoCullDistance * wmoCullDistance;
+            float wmoFadeStart = wmoCullDistance * WmoFadeStartFraction;
             float wmoFadeStartSq = wmoFadeStart * wmoFadeStart;
-            float wmoFadeRange = WmoCullDistance - wmoFadeStart;
+            float wmoFadeRange = wmoCullDistance - wmoFadeStart;
 
             // State is constant for this pass; set once to avoid per-instance churn.
             _gl.Disable(EnableCap.Blend);
@@ -5611,10 +5721,10 @@ public class WorldScene : ISceneRenderer
 
             foreach (var inst in _wmoInstances)
             {
-                var wmoCenter = (inst.BoundsMin + inst.BoundsMax) * 0.5f;
-                float wmoDistSq = Vector3.DistanceSquared(cameraPos, wmoCenter);
+                float wmoDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+                float wmoNoCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
                 // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (wmoDistSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                if (wmoDistSq > wmoNoCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { WmoCulledCount++; continue; }
                 // Distance cull + fade for WMOs
                 if (wmoDistSq > wmoCullDistanceSq)
@@ -5630,7 +5740,7 @@ public class WorldScene : ISceneRenderer
                 var renderer = TryGetQueuedWmo(inst.ModelKey);
                 if (renderer == null) continue;
                 renderer.RenderWithTransform(inst.Transform, view, proj,
-                    fogColor, fogStart, fogEnd, cameraPos,
+                    fogColor, objectFogStart, objectFogEnd, cameraPos,
                     lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 WmoRenderedCount++;
             }
@@ -5690,12 +5800,10 @@ public class WorldScene : ISceneRenderer
 
             foreach (var inst in _mdxInstances)
             {
-                // Use placement position (transform translation) for distance — more reliable
-                // than AABB center when rotation transforms are imprecise
-                var placementPos = inst.Transform.Translation;
-                float distSq = Vector3.DistanceSquared(cameraPos, placementPos);
+                float distSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
                 // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                if (distSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { MdxCulledCount++; continue; }
                 // Distance cull small doodads (with fade)
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
@@ -5713,7 +5821,7 @@ public class WorldScene : ISceneRenderer
                 if (renderer.RequiresUnbatchedWorldRender)
                 {
                     renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
-                        fogColor, fogStart, fogEnd, cameraPos,
+                        fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
                 else
@@ -5725,9 +5833,9 @@ public class WorldScene : ISceneRenderer
 
             foreach (var inst in _taxiActorInstances)
             {
-                var placementPos = inst.Transform.Translation;
-                float distSq = Vector3.DistanceSquared(cameraPos, placementPos);
-                if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                float distSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
+                if (distSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
                 { MdxCulledCount++; continue; }
 
                 float fade = 1.0f;
@@ -5742,7 +5850,7 @@ public class WorldScene : ISceneRenderer
                 if (renderer.RequiresUnbatchedWorldRender)
                 {
                     renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
-                        fogColor, fogStart, fogEnd, cameraPos,
+                        fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
                 else
@@ -5770,7 +5878,7 @@ public class WorldScene : ISceneRenderer
         // occlude each other incorrectly.
         if (_doodadsVisible)
         {
-            batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+            batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
 
             _gl.Enable(EnableCap.DepthTest);
@@ -5782,20 +5890,22 @@ public class WorldScene : ISceneRenderer
             {
                 var inst = _mdxInstances[i];
                 // Same frustum + distance cull as opaque pass (with NoCullRadius)
-                var placementPos = inst.Transform.Translation;
-                float dist = Vector3.DistanceSquared(cameraPos, placementPos);
-                if (dist > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                float distSqToBounds = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
+                if (distSqToBounds > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
-                if (diag < DoodadSmallThreshold && dist > DoodadCullDistanceSq) continue;
+                if (diag < DoodadSmallThreshold && distSqToBounds > DoodadCullDistanceSq) continue;
+                float dist = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
                 if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
                 _transparentSortScratch.Add((false, i, dist));
             }
             for (int i = 0; i < _taxiActorInstances.Count; i++)
             {
                 var inst = _taxiActorInstances[i];
-                var placementPos = inst.Transform.Translation;
-                float dist = Vector3.DistanceSquared(cameraPos, placementPos);
-                if (dist > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                float distSqToBounds = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
+                if (distSqToBounds > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                float dist = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
                 if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
                 _transparentSortScratch.Add((true, i, dist));
             }
@@ -5815,7 +5925,7 @@ public class WorldScene : ISceneRenderer
                 if (renderer.RequiresUnbatchedWorldRender)
                 {
                     renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
-                        fogColor, fogStart, fogEnd, cameraPos,
+                        fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
                 else
@@ -6064,6 +6174,10 @@ public class WorldScene : ISceneRenderer
             {
                 var nodeColor = new Vector3(1f, 1f, 0f);
                 var lineColor = new Vector3(0f, 1f, 1f);
+                var routeHandleColor = new Vector3(1f, 0.65f, 0f);
+                var selectedRouteColor = new Vector3(1f, 1f, 1f);
+                int visibleRouteCount = _taxiLoader.Routes.Count(IsTaxiRouteVisible);
+                bool showRouteHandles = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0 || visibleRouteCount <= 32;
 
                 foreach (var node in _taxiLoader.Nodes)
                 {
@@ -6074,8 +6188,17 @@ public class WorldScene : ISceneRenderer
                 foreach (var route in _taxiLoader.Routes)
                 {
                     if (!IsTaxiRouteVisible(route)) continue;
+                    Vector3 routeColor = route.PathId == _selectedTaxiRouteId ? selectedRouteColor : lineColor;
                     for (int i = 0; i < route.Waypoints.Count - 1; i++)
-                        _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], lineColor);
+                        _bbRenderer.BatchLine(route.Waypoints[i], route.Waypoints[i + 1], routeColor);
+
+                    if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
+                    {
+                        float pinHeight = route.PathId == _selectedTaxiRouteId ? 42f : 30f;
+                        float headSize = route.PathId == _selectedTaxiRouteId ? 6f : 4f;
+                        _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
+                            route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
+                    }
                 }
             }
 

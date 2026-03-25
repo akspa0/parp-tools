@@ -1,30 +1,68 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
-## Fullscreen Minimap Tile-Scale Regression Fix (Mar 24)
+## Object Culling + Far-Fog Follow-Up (Mar 25)
 
-- The active viewer minimap paths now consistently treat the fullscreen/floating minimap as a `64x64` tile grid instead of mixing chunk-scale projection into the camera and overlay math.
-   - `ViewerApp_MinimapAndStatus` now computes minimap camera position and minimap teleport targets with `WoWConstants.TileSize`.
-   - `MinimapHelpers` now projects POIs and taxi overlays with `TileSize` as well, so markers share the same coordinate system as the base minimap tiles.
-   - the legacy `DrawMinimap_OLD()` path in `ViewerApp.cs` was updated to the same tile-scale math to avoid fallback reintroduction.
-- Root cause:
-   - minimap rendering is tile-based, but the camera/overlay code had drifted to `ChunkSize`, which inflated positions by `16x` and could place the fullscreen minimap camera marker outside the valid 64x64 map space.
+- The active viewer object-visibility path was adjusted to reduce aggressive pop-in/pop-out for world MDX/M2/WMO placements:
+   - `WorldScene` no longer decides near-camera frustum grace and WMO distance visibility from object-center distance alone; it now uses point-to-AABB distance, which keeps large objects visible when the camera is close to their volume but not their center.
+   - the near-camera frustum-cull exemption radius was increased and is now scaled by object bounds, which reduces turn-in-place pop-in for nearby WMOs and doodads.
+   - world WMO cull distance is no longer a fixed short range; it now expands relative to fog end so objects do not disappear well before the visible world horizon.
+   - object renderers now receive a later fog-start distance than terrain so distant objects are not washed into fog color too early while still remaining rendered.
+   - `Rendering/WmoRenderer`'s separate internal doodad cull for WMO-contained doodads was loosened as well, including a higher render cap, so interior/attached doodads do not disappear far earlier than the parent WMO.
+- Important boundary:
+   - this is a viewer-side visibility tuning pass, not proof that the active culling/fog behavior now matches any historical client.
+   - terrain fog and object fog are now intentionally less tightly matched than before in order to reduce the object-specific washout the user reported.
 - Validation status:
-   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-fix/"` passed after this slice.
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-object-culling-fog/"` passed after this slice.
    - no automated tests were added or run.
-   - no real-data runtime signoff yet on fullscreen minimap placement or minimap teleport behavior.
+   - no real-data runtime signoff yet on close-range object stability, long-range WMO retention, or fog feel on the fixed development dataset.
+
+## Taxi Override Workflow + Persistence Follow-Up (Mar 25)
+
+- The active viewer taxi prototype now has a usable asset-selection workflow on top of the earlier route-picking work:
+   - `ViewerApp_Sidebars` file browser actions now expose `Open Selected`, `Copy Path`, `Use For Taxi Override`, and `Return To Last World` so a browser-selected standalone model can drive taxi actor overrides without forcing manual path retyping.
+   - taxi inspector controls now expose `Use Selected Browser Asset`, `Copy Override Path`, `Open Override Asset`, and `Return To Last World` alongside the existing override input.
+   - `ViewerApp` now captures the currently loaded world path/camera before opening standalone models and can restore that world session through `ReturnToLastWorldScene()`.
+   - taxi actor overrides are now persisted in viewer settings by map name plus route ID and reapplied on world load for the current map.
+- Important boundary:
+   - this is a workflow/persistence improvement on top of the existing taxi-route actor prototype, not proof that override persistence or world-return behavior is runtime-correct on real data.
+   - editor diagnostics were not reliable during this slice; solution build output caught the actual syntax break, and only the final solution build should be treated as validation.
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-taxi-workflow/"` passed after the follow-up fix.
+   - no automated tests were added or run.
+   - no runtime real-data signoff yet on the new file-browser-to-override flow, return-to-world restoration, or persisted override replay.
+
+## Fullscreen Minimap Tile-Scale Assumption Reverted (Mar 25)
+
+- The Mar 24 `TileSize` minimap hypothesis was wrong for the active viewer's current world-tile conventions and made the minimap behavior worse instead of better.
+   - `ViewerApp_MinimapAndStatus` now maps camera position, pan clamping, and minimap teleport targets back onto `WoWConstants.ChunkSize`, which is the world-tile spacing the active viewer currently uses for the `64x64` minimap grid.
+   - `MinimapHelpers` now projects POIs and taxi overlays with that same spacing again so overlay markers share the same coordinate system as the base minimap tiles.
+   - the legacy `DrawMinimap_OLD()` path in `ViewerApp.cs` was restored to the same scale so fallback code does not preserve the bad `TileSize` assumption.
+- Root cause:
+   - the active viewer's naming is misleading here: `WoWConstants.TileSize` is not the minimap's live `64x64` world-tile spacing, so swapping the minimap math from `ChunkSize` to `TileSize` desynchronized camera marker placement, pan bounds, overlay projection, and click-to-teleport.
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-regression-repair/"` passed after this slice.
+   - no automated tests were added or run.
+   - no real-data runtime signoff yet on docked/fullscreen minimap placement, panning feel, or teleport correctness.
 
 ## Fullscreen Minimap Remains Open For v0.4.5 (Mar 25)
 
 - Runtime user feedback after the Mar 24 tile-scale patch says the fullscreen minimap is still broken.
-- Treat the prior tile-scale change as narrowed investigation progress, not as a confirmed fix.
+- The bad `TileSize` swap has now been reverted, but the minimap should still be treated as open until runtime validation proves the docked and fullscreen paths are trustworthy again.
+- Screenshot-guided follow-up on Mar 25 isolated a second concrete seam beyond raw scale:
+   - clicking the top-right Designer Island teleported the camera marker to the lower-left because minimap click-to-world mapping was writing row/column into the wrong renderer axes, and the camera marker path was not using the same row/column orientation as the drawn tile grid.
+   - `ViewerApp_MinimapAndStatus`, `MinimapHelpers`, and the legacy `DrawMinimap_OLD()` path in `ViewerApp.cs` now use the same row/column-to-renderer-axis mapping for camera tile readout, marker placement, POI/taxi overlays, and teleport.
 - Current follow-up framing:
    - this is an active `v0.4.5` release blocker
-   - likely remaining seams are axis mapping, row/column ordering, fullscreen interaction drift, or click/teleport transposition rather than raw `ChunkSize` versus `TileSize` alone
+   - likely remaining seams are fullscreen interaction drift or any leftover tile lookup/display ordering mismatch, not the previously broken click/teleport axis mapping itself
    - the minimap should not be described as fixed until runtime validation confirms marker placement, tile imagery alignment, and click/teleport correctness on the real dataset
 - Planning prompts captured for the next sessions:
    - `plans/v0_4_5_release_stabilization_prompt_2026-03-25.md`
    - `plans/fullscreen_minimap_repair_prompt_2026-03-25.md`
    - `plans/v0_5_0_goal_stack_prompt_2026-03-25.md`
+- Validation status for the axis follow-up:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-axis-repair/"` passed after this slice.
+   - no automated tests were added or run.
+   - no real-data runtime signoff yet on Designer Island/top-right teleport correctness or fullscreen marker alignment.
 
 ## Taxi Route Actor Prototype + Node Inspector Controls (Mar 25)
 

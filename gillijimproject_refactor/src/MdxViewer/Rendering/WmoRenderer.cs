@@ -51,8 +51,8 @@ public class WmoRenderer : ISceneRenderer
     private bool _doodadsVisible = true;
 
     // Doodad culling constants
-    private const float DoodadCullDistance = 1200f;  // Max distance from camera to render WMO doodads
-    private const float DoodadMaxRenderCount = 256;  // Max doodads rendered per WMO per frame
+    private const float DoodadCullDistance = 4000f;  // Minimum distance from camera to render WMO doodads; expanded further by fog range at runtime
+    private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
 
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
@@ -342,7 +342,8 @@ public class WmoRenderer : ISceneRenderer
 
             // Build list of visible doodads with world-space distance to camera
             visibleDoodads = new List<(int idx, float distSq)>();
-            float cullDistSq = DoodadCullDistance * DoodadCullDistance;
+            float doodadCullDistance = MathF.Max(DoodadCullDistance, MathF.Min(fogEnd + 800f, 6000f));
+            float cullDistSq = doodadCullDistance * doodadCullDistance;
             for (int di = 0; di < _doodadInstances.Count; di++)
             {
                 var inst = _doodadInstances[di];

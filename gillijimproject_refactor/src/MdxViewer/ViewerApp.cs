@@ -75,6 +75,11 @@ public partial class ViewerApp : IDisposable
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
     private int _currentMapId = -1; // MapID of the currently loaded world
+    private string? _lastWorldSceneWdtPath;
+    private Vector3 _lastWorldSceneCameraPosition;
+    private float _lastWorldSceneCameraYaw = 180f;
+    private float _lastWorldSceneCameraPitch = -20f;
+    private readonly Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap = new(StringComparer.OrdinalIgnoreCase);
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
@@ -299,6 +304,9 @@ public partial class ViewerApp : IDisposable
     private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
     private string _selectedObjectType = "";
     private string _selectedObjectInfo = "";
+    private string _taxiActorModelOverrideInput = "";
+    private int _taxiActorModelOverrideInputRouteId = -1;
+    private int _taxiActorModelOverrideTargetRouteId = -1;
     private string _sqlAlphaCoreRoot = "";
     private SqlWorldPopulationService? _sqlPopulationService;
     private bool _sqlIncludeCreatures = true;
@@ -5107,7 +5115,7 @@ void main() {
             ImGui.TreePop();
         }
 
-        // Taxi Nodes list — single-click to select/filter, double-click to teleport
+        // Taxi Nodes list — click to select/filter
         if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Nodes.Count > 0 &&
             ImGui.TreeNode($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})"))
         {
@@ -5124,17 +5132,9 @@ void main() {
                     var node = _worldScene.TaxiLoader.Nodes[i];
                     bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
                     string label = $"[{node.Id}] {node.Name}";
-                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    if (ImGui.Selectable(label, isSelected))
                     {
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        {
-                            _camera.Position = node.Position + new System.Numerics.Vector3(0, 0, 50);
-                            _camera.Pitch = -30f;
-                        }
-                        else
-                        {
-                            SelectTaxiNode(node.Id, toggle: true);
-                        }
+                        SelectTaxiNode(node.Id, toggle: true);
                     }
                     if (ImGui.IsItemHovered())
                     {
@@ -5142,7 +5142,7 @@ void main() {
                         ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
                         int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
                         ImGui.Text($"Routes: {routeCount}");
-                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.Text("Click to filter routes. Use the taxi controls to focus the camera.");
                         ImGui.EndTooltip();
                     }
                 }
@@ -5155,7 +5155,7 @@ void main() {
             ImGui.TreePop();
         }
 
-        // Taxi Routes list — single-click to select/filter, double-click to teleport
+        // Taxi Routes list — click to select/filter
         if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0 &&
             ImGui.TreeNode($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})"))
         {
@@ -5174,18 +5174,9 @@ void main() {
                     string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
                     string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
                     string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
-                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    if (ImGui.Selectable(label, isSelected))
                     {
-                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left) && route.Waypoints.Count > 0)
-                        {
-                            var mid = route.Waypoints[route.Waypoints.Count / 2];
-                            _camera.Position = mid + new System.Numerics.Vector3(0, 0, 100);
-                            _camera.Pitch = -30f;
-                        }
-                        else
-                        {
-                            SelectTaxiRoute(route.PathId, toggle: true);
-                        }
+                        SelectTaxiRoute(route.PathId, toggle: true);
                     }
                     if (ImGui.IsItemHovered())
                     {
@@ -5199,7 +5190,7 @@ void main() {
                             ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
                             ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
                         }
-                        ImGui.Text("Click to filter, double-click to teleport");
+                        ImGui.Text("Click to select this route. Use the viewport route handle or taxi controls to focus it.");
                         ImGui.EndTooltip();
                     }
                 }
@@ -5378,8 +5369,8 @@ void main() {
             }
 
             // Camera tile position (center of view)
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
 
             // View window: _minimapZoom tiles in each direction from camera
             float viewRadius = _minimapZoom;
@@ -5857,6 +5848,136 @@ void main() {
             return null;
 
         return File.Exists(_loadedFilePath) ? _loadedFilePath : null;
+    }
+
+    private bool HasWorldReturnTarget()
+        => !string.IsNullOrWhiteSpace(_lastWorldSceneWdtPath) && File.Exists(_lastWorldSceneWdtPath);
+
+    private void CaptureWorldReturnState()
+    {
+        if (_worldScene == null || _terrainManager == null)
+            return;
+
+        string? wdtPath = TryGetLoadedLocalWdtPath();
+        if (string.IsNullOrWhiteSpace(wdtPath))
+            return;
+
+        _lastWorldSceneWdtPath = wdtPath;
+        _lastWorldSceneCameraPosition = _camera.Position;
+        _lastWorldSceneCameraYaw = _camera.Yaw;
+        _lastWorldSceneCameraPitch = _camera.Pitch;
+    }
+
+    private void ReturnToLastWorldScene()
+    {
+        if (!HasWorldReturnTarget())
+        {
+            _statusMessage = "No saved world scene is available to restore.";
+            return;
+        }
+
+        _pendingWorldSpawnOverride = _lastWorldSceneCameraPosition;
+        LoadWdtTerrain(_lastWorldSceneWdtPath!);
+        _camera.Yaw = _lastWorldSceneCameraYaw;
+        _camera.Pitch = _lastWorldSceneCameraPitch;
+        _statusMessage = $"Returned to world: {_terrainManager?.MapName ?? Path.GetFileNameWithoutExtension(_lastWorldSceneWdtPath!)}";
+    }
+
+    private bool TryGetSelectedBrowserAssetPath(out string assetPath)
+    {
+        assetPath = string.Empty;
+        if (_selectedFileIndex < 0 || _selectedFileIndex >= _filteredFiles.Count)
+            return false;
+
+        assetPath = _filteredFiles[_selectedFileIndex];
+        return !string.IsNullOrWhiteSpace(assetPath);
+    }
+
+    private bool TryGetSelectedBrowserModelPath(out string assetPath)
+    {
+        if (TryGetSelectedBrowserAssetPath(out assetPath) && IsTaxiActorModelPath(assetPath))
+            return true;
+
+        assetPath = string.Empty;
+        return false;
+    }
+
+    private void CopyTextToClipboard(string text, string description)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        ImGui.SetClipboardText(text);
+        _statusMessage = $"Copied {description} to clipboard.";
+    }
+
+    private void ApplyTaxiActorModelOverride(int routeId, string? modelPath)
+    {
+        if (_worldScene == null || routeId < 0)
+            return;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (!string.IsNullOrWhiteSpace(currentMapName))
+        {
+            if (!_savedTaxiActorModelOverridesByMap.TryGetValue(currentMapName, out Dictionary<int, string>? overridesByRoute))
+            {
+                overridesByRoute = new Dictionary<int, string>();
+                _savedTaxiActorModelOverridesByMap[currentMapName] = overridesByRoute;
+            }
+
+            if (string.IsNullOrWhiteSpace(modelPath))
+            {
+                overridesByRoute.Remove(routeId);
+                if (overridesByRoute.Count == 0)
+                    _savedTaxiActorModelOverridesByMap.Remove(currentMapName);
+            }
+            else
+            {
+                overridesByRoute[routeId] = modelPath.Trim().Replace('/', '\\');
+            }
+        }
+
+        _worldScene.SetTaxiActorModelOverride(routeId, modelPath);
+        SaveViewerSettings();
+    }
+
+    private void ApplySavedTaxiActorModelOverridesForCurrentMap()
+    {
+        if (_worldScene == null)
+            return;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return;
+
+        if (!_savedTaxiActorModelOverridesByMap.TryGetValue(currentMapName, out Dictionary<int, string>? overridesByRoute))
+            return;
+
+        foreach ((int routeId, string modelPath) in overridesByRoute)
+            _worldScene.SetTaxiActorModelOverride(routeId, modelPath);
+    }
+
+    private bool TryApplySelectedBrowserAssetToTaxiOverride()
+    {
+        if (!TryGetTaxiActorOverrideRouteId(out int routeId))
+        {
+            _statusMessage = "Select a taxi node or route first.";
+            return false;
+        }
+
+        if (!TryGetSelectedBrowserModelPath(out string assetPath))
+        {
+            _statusMessage = "Select an .mdx, .mdl, or .m2 asset in the file browser first.";
+            return false;
+        }
+
+        _taxiActorModelOverrideTargetRouteId = routeId;
+        _taxiActorModelOverrideInput = assetPath.Replace('/', '\\');
+        _taxiActorModelOverrideInputRouteId = routeId;
+        ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+        RefreshSelectedTaxiInfo();
+        _statusMessage = $"Applied taxi actor override from browser asset to route {routeId}.";
+        return true;
     }
 
     private void AttachLooseMapOverlay(string selectedPath)
@@ -6538,6 +6659,9 @@ void main() {
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
         string dir = Path.GetDirectoryName(filePath) ?? ".";
 
+        if (ext != ".wdt")
+            CaptureWorldReturnState();
+
         try
         {
             _renderer?.Dispose();
@@ -6618,6 +6742,7 @@ void main() {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
                     var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
                     LoadMdxModel(mdx, dir, resolvedModelPath, isM2AdapterModel: true);
+                    CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
                     _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -7427,12 +7552,17 @@ void main() {
         string ext = Path.GetExtension(virtualPath).ToLowerInvariant();
         byte[]? data = null;
 
+        if (ext != ".wdt")
+            CaptureWorldReturnState();
+
         try
         {
             if (ext is ".mdx" or ".mdl" or ".m2")
             {
                 resolvedVirtualPath = ResolveStandaloneCanonicalModelPath(virtualPath);
                 data = ReadStandaloneFileData(resolvedVirtualPath);
+                    _lastWorldSceneWdtPath = TryGetLoadedLocalWdtPath();
+                    ApplySavedTaxiActorModelOverridesForCurrentMap();
                 if ((data == null || data.Length == 0) && !resolvedVirtualPath.Equals(virtualPath, StringComparison.OrdinalIgnoreCase))
                     data = ReadStandaloneFileData(virtualPath);
             }
@@ -7897,6 +8027,8 @@ void main() {
 
             string fromName = fromNode?.Name ?? $"#{route.FromNodeId}";
             string toName = toNode?.Name ?? $"#{route.ToNodeId}";
+            string? actorOverridePath = _worldScene.GetTaxiActorModelOverride(route.PathId);
+            string resolvedActorModelPath = _worldScene.GetResolvedTaxiActorModelPath(route.PathId) ?? "not found";
 
             _selectedObjectType = "Taxi Route";
             _selectedObjectInfo =
@@ -7905,7 +8037,8 @@ void main() {
                 $"To: {toName}\n" +
                 $"Cost: {route.Cost}\n" +
                 $"Waypoints: {route.Waypoints.Count}\n" +
-                $"Actor Mount: {mountNode?.MountModelPath ?? "not found"}";
+                $"Actor Override: {actorOverridePath ?? "auto"}\n" +
+                $"Resolved Actor Model: {resolvedActorModelPath}";
             return;
         }
 
@@ -7920,6 +8053,9 @@ void main() {
         _selectedObjectIndex = -1;
         _selectedObjectType = "";
         _selectedObjectInfo = "";
+        _taxiActorModelOverrideInput = "";
+        _taxiActorModelOverrideInputRouteId = -1;
+        _taxiActorModelOverrideTargetRouteId = -1;
     }
 
     private bool TryPickTaxiNodeAtMouse(float localX, float localY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj, out int nodeId)
@@ -7950,6 +8086,206 @@ void main() {
         }
 
         return nodeId >= 0;
+    }
+
+    private bool TryPickTaxiRouteAtMouse(float localX, float localY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj, out int pathId)
+    {
+        pathId = -1;
+        if (_worldScene?.TaxiLoader == null || !_worldScene.ShowTaxi)
+            return false;
+
+        Vector2 pointer = new(localX, localY);
+
+        const float handlePickRadiusPixels = 22f;
+        float bestHandleDistSq = handlePickRadiusPixels * handlePickRadiusPixels;
+
+        foreach (var route in _worldScene.TaxiLoader.Routes)
+        {
+            if (!_worldScene.IsTaxiRouteVisible(route))
+                continue;
+
+            if (!_worldScene.TryGetTaxiRouteSelectionPoint(route.PathId, out Vector3 selectionPoint))
+                continue;
+
+            if (!TryProjectWorldToViewport(selectionPoint + new Vector3(0f, 0f, 30f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+                continue;
+
+            float distSq = Vector2.DistanceSquared(projected, pointer);
+            if (distSq > bestHandleDistSq)
+                continue;
+
+            bestHandleDistSq = distSq;
+            pathId = route.PathId;
+        }
+
+        if (pathId >= 0)
+            return true;
+
+        const float linePickRadiusPixels = 12f;
+        float bestLineDistSq = linePickRadiusPixels * linePickRadiusPixels;
+
+        foreach (var route in _worldScene.TaxiLoader.Routes)
+        {
+            if (!_worldScene.IsTaxiRouteVisible(route) || route.Waypoints.Count < 2)
+                continue;
+
+            for (int i = 0; i < route.Waypoints.Count - 1; i++)
+            {
+                if (!TryProjectWorldToViewport(route.Waypoints[i], view, proj, viewportWidth, viewportHeight, out Vector2 a)
+                    || !TryProjectWorldToViewport(route.Waypoints[i + 1], view, proj, viewportWidth, viewportHeight, out Vector2 b))
+                {
+                    continue;
+                }
+
+                float distSq = DistanceSquaredPointToSegment(pointer, a, b);
+                if (distSq > bestLineDistSq)
+                    continue;
+
+                bestLineDistSq = distSq;
+                pathId = route.PathId;
+            }
+        }
+
+        return pathId >= 0;
+    }
+
+    private static float DistanceSquaredPointToSegment(Vector2 point, Vector2 start, Vector2 end)
+    {
+        Vector2 segment = end - start;
+        float segmentLengthSq = segment.LengthSquared();
+        if (segmentLengthSq <= 0.0001f)
+            return Vector2.DistanceSquared(point, start);
+
+        float t = Vector2.Dot(point - start, segment) / segmentLengthSq;
+        t = Math.Clamp(t, 0f, 1f);
+        Vector2 closest = start + segment * t;
+        return Vector2.DistanceSquared(point, closest);
+    }
+
+    private void FocusSelectedTaxi()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.SelectedTaxiRouteId >= 0)
+        {
+            int routeId = _worldScene.SelectedTaxiRouteId;
+            if (_worldScene.TryGetTaxiRouteSelectionPoint(routeId, out Vector3 routePoint))
+            {
+                _camera.Position = routePoint + new Vector3(0f, 0f, 100f);
+                _camera.Pitch = -30f;
+                _statusMessage = $"Focused taxi route {routeId}.";
+            }
+            return;
+        }
+
+        if (_worldScene.SelectedTaxiNodeId >= 0)
+        {
+            TaxiPathLoader.TaxiNode? node = _worldScene.GetTaxiNode(_worldScene.SelectedTaxiNodeId);
+            if (node != null)
+            {
+                _camera.Position = node.Position + new Vector3(0f, 0f, 50f);
+                _camera.Pitch = -30f;
+                _statusMessage = $"Focused taxi node {node.Id}.";
+            }
+        }
+    }
+
+    private IReadOnlyList<TaxiPathLoader.TaxiRoute> GetTaxiActorOverrideCandidateRoutes()
+    {
+        if (_worldScene?.TaxiLoader == null)
+            return Array.Empty<TaxiPathLoader.TaxiRoute>();
+
+        if (_worldScene.SelectedTaxiRouteId >= 0)
+        {
+            TaxiPathLoader.TaxiRoute? selectedRoute = _worldScene.GetTaxiRoute(_worldScene.SelectedTaxiRouteId);
+            return selectedRoute != null
+                ? new[] { selectedRoute }
+                : Array.Empty<TaxiPathLoader.TaxiRoute>();
+        }
+
+        if (_worldScene.SelectedTaxiNodeId >= 0)
+        {
+            int nodeId = _worldScene.SelectedTaxiNodeId;
+            return _worldScene.TaxiLoader.Routes
+                .Where(route => route.FromNodeId == nodeId || route.ToNodeId == nodeId)
+                .OrderBy(route => route.PathId)
+                .ToList();
+        }
+
+        return Array.Empty<TaxiPathLoader.TaxiRoute>();
+    }
+
+    private bool TryGetTaxiActorOverrideRouteId(out int routeId)
+    {
+        routeId = -1;
+        IReadOnlyList<TaxiPathLoader.TaxiRoute> candidateRoutes = GetTaxiActorOverrideCandidateRoutes();
+        if (candidateRoutes.Count == 0)
+        {
+            _taxiActorModelOverrideTargetRouteId = -1;
+            return false;
+        }
+
+        int preferredRouteId = _worldScene?.SelectedTaxiRouteId >= 0
+            ? _worldScene.SelectedTaxiRouteId
+            : _taxiActorModelOverrideTargetRouteId;
+
+        TaxiPathLoader.TaxiRoute? activeRoute = candidateRoutes.FirstOrDefault(route => route.PathId == preferredRouteId)
+            ?? candidateRoutes[0];
+
+        _taxiActorModelOverrideTargetRouteId = activeRoute.PathId;
+        routeId = activeRoute.PathId;
+        return true;
+    }
+
+    private string GetTaxiRouteDisplayLabel(int pathId)
+    {
+        if (_worldScene == null)
+            return $"Route #{pathId}";
+
+        TaxiPathLoader.TaxiRoute? route = _worldScene.GetTaxiRoute(pathId);
+        if (route == null)
+            return $"Route #{pathId}";
+
+        string fromName = _worldScene.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+        string toName = _worldScene.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+        return $"[{route.PathId}] {fromName} -> {toName}";
+    }
+
+    private void SyncTaxiActorModelOverrideInput(int routeId)
+    {
+        if (_worldScene == null || routeId < 0)
+        {
+            _taxiActorModelOverrideInputRouteId = -1;
+            _taxiActorModelOverrideInput = "";
+            return;
+        }
+
+        if (_taxiActorModelOverrideInputRouteId == routeId)
+            return;
+
+        _taxiActorModelOverrideInputRouteId = routeId;
+        _taxiActorModelOverrideInput = _worldScene.GetTaxiActorModelOverride(routeId) ?? "";
+    }
+
+    private bool TryGetLoadedTaxiActorModelPath(out string modelPath)
+    {
+        modelPath = string.Empty;
+
+        string? candidatePath = _lastVirtualPath;
+        if (string.IsNullOrWhiteSpace(candidatePath) || !IsTaxiActorModelPath(candidatePath))
+            return false;
+
+        modelPath = candidatePath.Replace('/', '\\');
+        return true;
+    }
+
+    private static bool IsTaxiActorModelPath(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".mdl", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryProjectWorldToViewport(Vector3 worldPosition, Matrix4x4 view, Matrix4x4 proj, float viewportWidth, float viewportHeight, out Vector2 projected)
@@ -8042,6 +8378,12 @@ void main() {
         if (TryPickTaxiNodeAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiNodeId))
         {
             SelectTaxiNode(taxiNodeId, toggle: true);
+            return;
+        }
+
+        if (TryPickTaxiRouteAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiRouteId))
+        {
+            SelectTaxiRoute(taxiRouteId, toggle: false);
             return;
         }
 
@@ -8301,6 +8643,29 @@ void main() {
             if (_pm4SavedOverlayRotationDegrees == Vector3.Zero && MathF.Abs(settings.Pm4YawDegrees) > 0.001f)
                 _pm4SavedOverlayRotationDegrees = new Vector3(0f, 0f, settings.Pm4YawDegrees);
 
+                        _savedTaxiActorModelOverridesByMap.Clear();
+                        if (settings.TaxiActorModelOverrides != null)
+                        {
+                            foreach (SavedTaxiActorOverride savedOverride in settings.TaxiActorModelOverrides)
+                            {
+                                if (savedOverride == null
+                                    || string.IsNullOrWhiteSpace(savedOverride.MapName)
+                                    || savedOverride.RouteId < 0
+                                    || string.IsNullOrWhiteSpace(savedOverride.ModelPath))
+                                {
+                                    continue;
+                                }
+
+                                if (!_savedTaxiActorModelOverridesByMap.TryGetValue(savedOverride.MapName, out Dictionary<int, string>? overridesByRoute))
+                                {
+                                    overridesByRoute = new Dictionary<int, string>();
+                                    _savedTaxiActorModelOverridesByMap[savedOverride.MapName] = overridesByRoute;
+                                }
+
+                                overridesByRoute[savedOverride.RouteId] = savedOverride.ModelPath.Trim().Replace('/', '\\');
+                            }
+                        }
+
             ApplySavedPm4AlignmentToScene();
         }
         catch (Exception ex)
@@ -8339,7 +8704,18 @@ void main() {
                 Pm4ScaleX = _pm4SavedOverlayScale.X,
                 Pm4ScaleY = _pm4SavedOverlayScale.Y,
                 Pm4ScaleZ = _pm4SavedOverlayScale.Z,
-                Pm4YawDegrees = _pm4SavedOverlayRotationDegrees.Z
+                Pm4YawDegrees = _pm4SavedOverlayRotationDegrees.Z,
+                TaxiActorModelOverrides = _savedTaxiActorModelOverridesByMap
+                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                    .SelectMany(entry => entry.Value
+                        .OrderBy(routeEntry => routeEntry.Key)
+                        .Select(routeEntry => new SavedTaxiActorOverride
+                        {
+                            MapName = entry.Key,
+                            RouteId = routeEntry.Key,
+                            ModelPath = routeEntry.Value
+                        }))
+                    .ToList()
             };
 
             string json = JsonSerializer.Serialize(settings, new JsonSerializerOptions
@@ -8474,6 +8850,14 @@ void main() {
         public float Pm4ScaleY { get; set; } = 1f;
         public float Pm4ScaleZ { get; set; } = 1f;
         public float Pm4YawDegrees { get; set; }
+        public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
+    }
+
+    private sealed class SavedTaxiActorOverride
+    {
+        public string MapName { get; set; } = "";
+        public int RouteId { get; set; }
+        public string ModelPath { get; set; } = "";
     }
 
     private sealed class KnownGoodClientPath

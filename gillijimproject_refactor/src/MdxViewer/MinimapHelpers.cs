@@ -11,6 +11,7 @@ namespace MdxViewer;
 internal static class MinimapHelpers
 {
     private const float MapTileCount = 64f;
+    private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
 
     public static void RenderMinimapContent(
         Vector2 cursorPos,
@@ -86,8 +87,8 @@ internal static class MinimapHelpers
         // Camera position (centered, adjusted for pan)
         float clampedCamTileX = Math.Clamp(camTileX, 0f, MapTileCount);
         float clampedCamTileY = Math.Clamp(camTileY, 0f, MapTileCount);
-        float camOffsetX = (clampedCamTileX - viewMinTx) * cellSize;
-        float camOffsetY = (clampedCamTileY - viewMinTy) * cellSize;
+        float camOffsetX = (clampedCamTileY - viewMinTy) * cellSize;
+        float camOffsetY = (clampedCamTileX - viewMinTx) * cellSize;
         float camScreenX = cursorPos.X + camOffsetX;
         float camScreenY = cursorPos.Y + camOffsetY;
 
@@ -105,8 +106,8 @@ internal static class MinimapHelpers
         {
             foreach (var poi in worldScene.PoiLoader.Entries)
             {
-                float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / WoWConstants.TileSize;
-                float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / WoWConstants.TileSize;
+                float poiTileX = (WoWConstants.MapOrigin - poi.Position.X) / MinimapWorldTileSize;
+                float poiTileY = (WoWConstants.MapOrigin - poi.Position.Y) / MinimapWorldTileSize;
                 float px = cursorPos.X + (poiTileY - viewMinTy) * cellSize;
                 float py = cursorPos.Y + (poiTileX - viewMinTx) * cellSize;
                 if (px >= cursorPos.X && px <= cursorPos.X + mapSize && py >= cursorPos.Y && py <= cursorPos.Y + mapSize)
@@ -124,18 +125,18 @@ internal static class MinimapHelpers
                 {
                     var a = route.Waypoints[i];
                     var b = route.Waypoints[i + 1];
-                    float ax = cursorPos.X + ((WoWConstants.MapOrigin - a.Y) / WoWConstants.TileSize - viewMinTy) * cellSize;
-                    float ay = cursorPos.Y + ((WoWConstants.MapOrigin - a.X) / WoWConstants.TileSize - viewMinTx) * cellSize;
-                    float bx = cursorPos.X + ((WoWConstants.MapOrigin - b.Y) / WoWConstants.TileSize - viewMinTy) * cellSize;
-                    float by = cursorPos.Y + ((WoWConstants.MapOrigin - b.X) / WoWConstants.TileSize - viewMinTx) * cellSize;
+                    float ax = cursorPos.X + ((WoWConstants.MapOrigin - a.Y) / MinimapWorldTileSize - viewMinTy) * cellSize;
+                    float ay = cursorPos.Y + ((WoWConstants.MapOrigin - a.X) / MinimapWorldTileSize - viewMinTx) * cellSize;
+                    float bx = cursorPos.X + ((WoWConstants.MapOrigin - b.Y) / MinimapWorldTileSize - viewMinTy) * cellSize;
+                    float by = cursorPos.Y + ((WoWConstants.MapOrigin - b.X) / MinimapWorldTileSize - viewMinTx) * cellSize;
                     drawList.AddLine(new Vector2(ax, ay), new Vector2(bx, by), 0xFFFFFF00, 1.5f);
                 }
             }
             foreach (var node in worldScene.TaxiLoader.Nodes)
             {
                 if (!worldScene.IsTaxiNodeVisible(node)) continue;
-                float nx = cursorPos.X + ((WoWConstants.MapOrigin - node.Position.Y) / WoWConstants.TileSize - viewMinTy) * cellSize;
-                float ny = cursorPos.Y + ((WoWConstants.MapOrigin - node.Position.X) / WoWConstants.TileSize - viewMinTx) * cellSize;
+                float nx = cursorPos.X + ((WoWConstants.MapOrigin - node.Position.Y) / MinimapWorldTileSize - viewMinTy) * cellSize;
+                float ny = cursorPos.Y + ((WoWConstants.MapOrigin - node.Position.X) / MinimapWorldTileSize - viewMinTx) * cellSize;
                 if (nx >= cursorPos.X && nx <= cursorPos.X + mapSize && ny >= cursorPos.Y && ny <= cursorPos.Y + mapSize)
                     drawList.AddCircleFilled(new Vector2(nx, ny), MathF.Max(3f, cellSize * 0.2f), 0xFF00FFFF);
             }
@@ -181,8 +182,8 @@ internal static class MinimapHelpers
             float clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
             if (clickTileX >= 0 && clickTileX < 64 && clickTileY >= 0 && clickTileY < 64)
             {
-                float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.TileSize;
-                float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.TileSize;
+                float worldX = WoWConstants.MapOrigin - clickTileX * MinimapWorldTileSize;
+                float worldY = WoWConstants.MapOrigin - clickTileY * MinimapWorldTileSize;
                 camera.Position = new Vector3(worldX, worldY, camera.Position.Z);
             }
         }

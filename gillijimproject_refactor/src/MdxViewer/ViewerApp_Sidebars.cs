@@ -358,6 +358,32 @@ public partial class ViewerApp
             RefreshFileList();
         }
 
+        if (TryGetSelectedBrowserAssetPath(out string selectedAssetPath))
+        {
+            if (ImGui.Button("Open Selected"))
+                LoadFileFromDataSource(selectedAssetPath);
+
+            ImGui.SameLine();
+            if (ImGui.Button("Copy Path"))
+                CopyTextToClipboard(selectedAssetPath, "asset path");
+
+            if (TryGetTaxiActorOverrideRouteId(out _)
+                && IsTaxiActorModelPath(selectedAssetPath))
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Use For Taxi Override"))
+                    TryApplySelectedBrowserAssetToTaxiOverride();
+            }
+
+            ImGui.TextDisabled(selectedAssetPath);
+        }
+
+        if (HasWorldReturnTarget() && _worldScene == null)
+        {
+            if (ImGui.Button("Return To Last World"))
+                ReturnToLastWorldScene();
+        }
+
         ImGui.Text($"{_filteredFiles.Count} files");
         ImGui.Separator();
 
@@ -623,6 +649,9 @@ public partial class ViewerApp
         ImGui.Separator();
         ImGui.Text("Taxi Route Controls");
 
+        if (ImGui.Button("Focus Selected Taxi"))
+            FocusSelectedTaxi();
+
         bool showTaxiActors = _worldScene.ShowTaxiActors;
         if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
             _worldScene.ShowTaxiActors = showTaxiActors;
@@ -631,10 +660,120 @@ public partial class ViewerApp
         if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, 0.1f, 8f, "%.2fx"))
             _worldScene.TaxiActorSpeedMultiplier = speedMultiplier;
 
-        if (_worldScene.SelectedTaxiNodeId >= 0)
+        if (TryGetTaxiActorOverrideRouteId(out int routeId))
+        {
+            IReadOnlyList<TaxiPathLoader.TaxiRoute> candidateRoutes = GetTaxiActorOverrideCandidateRoutes();
+
+            if (_worldScene.SelectedTaxiNodeId >= 0)
+            {
+                ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
+
+                string previewLabel = GetTaxiRouteDisplayLabel(routeId);
+                if (ImGui.BeginCombo("Override Target Route", previewLabel))
+                {
+                    foreach (TaxiPathLoader.TaxiRoute candidateRoute in candidateRoutes)
+                    {
+                        bool isSelected = candidateRoute.PathId == routeId;
+                        if (ImGui.Selectable(GetTaxiRouteDisplayLabel(candidateRoute.PathId), isSelected))
+                        {
+                            _taxiActorModelOverrideTargetRouteId = candidateRoute.PathId;
+                            SyncTaxiActorModelOverrideInput(candidateRoute.PathId);
+                        }
+
+                        if (isSelected)
+                            ImGui.SetItemDefaultFocus();
+                    }
+
+                    ImGui.EndCombo();
+                }
+            }
+            else if (_worldScene.SelectedTaxiRouteId >= 0)
+            {
+                ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
+            }
+
+            SyncTaxiActorModelOverrideInput(routeId);
+
+            string resolvedActorModelPath = _worldScene.GetResolvedTaxiActorModelPath(routeId) ?? "not found";
+            string? actorOverridePath = _worldScene.GetTaxiActorModelOverride(routeId);
+            ImGui.TextWrapped($"Override Route: {GetTaxiRouteDisplayLabel(routeId)}");
+            ImGui.TextWrapped($"Resolved Actor Model: {resolvedActorModelPath}");
+            ImGui.TextDisabled($"Override: {actorOverridePath ?? "auto"}");
+
+            string actorModelPath = _taxiActorModelOverrideInput;
+            if (ImGui.InputText("Actor Model Path", ref actorModelPath, 512))
+                _taxiActorModelOverrideInput = actorModelPath;
+
+            if (ImGui.Button("Apply Model Override"))
+            {
+                ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                SyncTaxiActorModelOverrideInput(routeId);
+                RefreshSelectedTaxiInfo();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Clear Override"))
+            {
+                ApplyTaxiActorModelOverride(routeId, null);
+                _taxiActorModelOverrideInput = string.Empty;
+                _taxiActorModelOverrideInputRouteId = routeId;
+                RefreshSelectedTaxiInfo();
+            }
+
+            if (TryGetSelectedBrowserModelPath(out string selectedBrowserModelPath))
+            {
+                if (ImGui.Button("Use Selected Browser Asset"))
+                {
+                    _taxiActorModelOverrideInput = selectedBrowserModelPath.Replace('/', '\\');
+                    _taxiActorModelOverrideInputRouteId = routeId;
+                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    RefreshSelectedTaxiInfo();
+                }
+
+                ImGui.SameLine();
+                ImGui.TextDisabled(Path.GetFileName(selectedBrowserModelPath));
+            }
+
+            if (TryGetLoadedTaxiActorModelPath(out string loadedModelPath))
+            {
+                if (ImGui.Button("Use Loaded Model"))
+                {
+                    _taxiActorModelOverrideInput = loadedModelPath;
+                    _taxiActorModelOverrideInputRouteId = routeId;
+                    ApplyTaxiActorModelOverride(routeId, loadedModelPath);
+                    RefreshSelectedTaxiInfo();
+                }
+
+                ImGui.SameLine();
+                ImGui.TextDisabled(Path.GetFileName(loadedModelPath));
+            }
+
+            if (!string.IsNullOrWhiteSpace(actorOverridePath))
+            {
+                if (ImGui.Button("Copy Override Path"))
+                    CopyTextToClipboard(actorOverridePath, "override path");
+
+                ImGui.SameLine();
+                if (ImGui.Button("Open Override Asset"))
+                    LoadFileFromDataSource(actorOverridePath);
+
+                if (HasWorldReturnTarget() && _worldScene == null)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.Button("Return To Last World"))
+                        ReturnToLastWorldScene();
+                }
+            }
+        }
+        else if (_worldScene.SelectedTaxiNodeId >= 0)
+        {
             ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
+            ImGui.TextDisabled("No connected routes were found for this taxi node.");
+        }
         else if (_worldScene.SelectedTaxiRouteId >= 0)
+        {
             ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
+        }
     }
 
     private void DrawSelectedWmoControls()
