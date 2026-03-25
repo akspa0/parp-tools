@@ -429,6 +429,7 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
                 ImGui.Separator();
                 ImGui.TextWrapped(_selectedObjectInfo);
+                DrawSelectedTaxiControls();
                 DrawSelectedPm4ObjectGraph("SidebarSelectedObject");
                 DrawSelectedWmoControls();
                 DrawSelectedSqlGameObjectAnimationControls();
@@ -608,6 +609,32 @@ public partial class ViewerApp
 
             DrawRendererVisibilityControls(_renderer, "standalone");
         }
+    }
+
+    private void DrawSelectedTaxiControls()
+    {
+        if (_worldScene == null)
+            return;
+
+        bool hasTaxiSelection = _worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0;
+        if (!hasTaxiSelection)
+            return;
+
+        ImGui.Separator();
+        ImGui.Text("Taxi Route Controls");
+
+        bool showTaxiActors = _worldScene.ShowTaxiActors;
+        if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
+            _worldScene.ShowTaxiActors = showTaxiActors;
+
+        float speedMultiplier = _worldScene.TaxiActorSpeedMultiplier;
+        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, 0.1f, 8f, "%.2fx"))
+            _worldScene.TaxiActorSpeedMultiplier = speedMultiplier;
+
+        if (_worldScene.SelectedTaxiNodeId >= 0)
+            ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
+        else if (_worldScene.SelectedTaxiRouteId >= 0)
+            ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
     }
 
     private void DrawSelectedWmoControls()

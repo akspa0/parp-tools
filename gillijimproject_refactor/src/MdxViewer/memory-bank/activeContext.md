@@ -1,5 +1,48 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Fullscreen Minimap Tile-Scale Regression Fix (Mar 24)
+
+- The active viewer minimap paths now consistently treat the fullscreen/floating minimap as a `64x64` tile grid instead of mixing chunk-scale projection into the camera and overlay math.
+   - `ViewerApp_MinimapAndStatus` now computes minimap camera position and minimap teleport targets with `WoWConstants.TileSize`.
+   - `MinimapHelpers` now projects POIs and taxi overlays with `TileSize` as well, so markers share the same coordinate system as the base minimap tiles.
+   - the legacy `DrawMinimap_OLD()` path in `ViewerApp.cs` was updated to the same tile-scale math to avoid fallback reintroduction.
+- Root cause:
+   - minimap rendering is tile-based, but the camera/overlay code had drifted to `ChunkSize`, which inflated positions by `16x` and could place the fullscreen minimap camera marker outside the valid 64x64 map space.
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-fix/"` passed after this slice.
+   - no automated tests were added or run.
+   - no real-data runtime signoff yet on fullscreen minimap placement or minimap teleport behavior.
+
+## Fullscreen Minimap Remains Open For v0.4.5 (Mar 25)
+
+- Runtime user feedback after the Mar 24 tile-scale patch says the fullscreen minimap is still broken.
+- Treat the prior tile-scale change as narrowed investigation progress, not as a confirmed fix.
+- Current follow-up framing:
+   - this is an active `v0.4.5` release blocker
+   - likely remaining seams are axis mapping, row/column ordering, fullscreen interaction drift, or click/teleport transposition rather than raw `ChunkSize` versus `TileSize` alone
+   - the minimap should not be described as fixed until runtime validation confirms marker placement, tile imagery alignment, and click/teleport correctness on the real dataset
+- Planning prompts captured for the next sessions:
+   - `plans/v0_4_5_release_stabilization_prompt_2026-03-25.md`
+   - `plans/fullscreen_minimap_repair_prompt_2026-03-25.md`
+   - `plans/v0_5_0_goal_stack_prompt_2026-03-25.md`
+
+## Taxi Route Actor Prototype + Node Inspector Controls (Mar 25)
+
+- The active viewer now has a first taxi-route actor prototype wired into the live scene:
+   - `TaxiPathLoader` resolves taxi mount metadata from the historical node-driven DBC chain instead of hardcoding route birds.
+   - `WorldScene` can animate a taxi actor along selected taxi routes using the resolved mount model when a usable node mount path exists.
+   - `ViewerApp` now supports viewport taxi-node picking, and taxi selection feeds the same selected-object inspector flow used by other scene objects.
+   - `ViewerApp_Sidebars` exposes taxi controls in the inspector, including the requested taxi speed slider and a show/hide toggle for the animated taxi actor.
+- Important boundary:
+   - this is a viewer-side prototype for inspection and iteration, not proof of client-faithful taxi runtime behavior.
+   - current mount selection still resolves from node metadata and endpoint fallback, so any route-specific client nuances beyond that remain open until proven with live data.
+   - viewport taxi selection currently uses screen-space node-indicator picking, not scene-depth-tested geometry picking.
+- Validation status:
+   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-taxi/"` passed after this slice.
+   - a normal build to the default output path was blocked by the running `ParpToolsWoWViewer` process locking output DLLs.
+   - no automated tests were added or run.
+   - no real-data runtime signoff yet on taxi actor motion, model correctness, or click-selection ergonomics.
+
 ## WMO Vertex-Light Prototype (Mar 24)
 
 - The active viewer now has a first renderer-side object-lighting prototype in `Rendering/WmoRenderer.cs`:

@@ -88,8 +88,8 @@ public partial class ViewerApp
             return;
         }
 
-        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.ChunkSize;
-        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.ChunkSize;
+        float worldX = WoWConstants.MapOrigin - clickTileX * WoWConstants.TileSize;
+        float worldY = WoWConstants.MapOrigin - clickTileY * WoWConstants.TileSize;
         _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
         _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
         ClearPendingMinimapTeleport();
@@ -219,8 +219,8 @@ public partial class ViewerApp
             return;
         }
 
-        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
         int ctX = (int)MathF.Floor(camTileX);
         int ctY = (int)MathF.Floor(camTileY);
 
@@ -310,8 +310,8 @@ public partial class ViewerApp
                     _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
             }
 
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
 
             MinimapHelpers.RenderMinimapContent(
                 cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,

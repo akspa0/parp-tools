@@ -1,5 +1,104 @@
 # Progress
 
+### Mar 25, 2026 - Enhanced Terrain Shader / Lighting Planning Prompt Captured
+
+- Added planning prompt file:
+	- `plans/enhanced_terrain_shader_lighting_prompt_2026-03-25.md`
+- Purpose:
+	- capture the current direction for an enhanced-quality terrain renderer path, shader-family reconstruction strategy, and lighting-model expansion without collapsing the active historical renderer into a speculative rewrite.
+- Prompt requirements captured:
+	- explicit `Historical` vs `Enhanced` render-mode architecture
+	- terrain-only first vertical slice
+	- render-quality UI/settings expansion
+	- `LightService` expansion as a separate required seam from shader work
+	- shader-family translation strategy for terrain, WMO/map-object, Model2, liquid, and particles
+	- terrain decode/shading guardrails and real-data validation requirements
+- Validation limits:
+	- documentation/planning only
+	- no code changes to the active renderer from this prompt file itself
+	- no automated tests or builds were run for this planning-only slice
+
+### Mar 25, 2026 - Enhanced Renderer Prompt Set Added
+
+- Added focused companion planning prompts:
+	- `plans/enhanced_renderer_plan_set_2026-03-25.md`
+	- `plans/enhanced_renderer_architecture_prompt_2026-03-25.md`
+	- `plans/enhanced_terrain_first_slice_prompt_2026-03-25.md`
+	- `plans/shader_family_and_lighting_roadmap_prompt_2026-03-25.md`
+- Purpose:
+	- give Copilot narrower planning entry points instead of forcing every session through one umbrella renderer prompt.
+- Split of responsibilities:
+	- plan-set index selects the right prompt
+	- architecture prompt covers runtime boundaries and mode ownership
+	- first-slice prompt covers the first landable enhanced terrain implementation slice
+	- roadmap prompt covers post-slice lighting and shader-family rollout
+- Validation limits:
+	- planning/documentation only
+	- no renderer behavior changed by this prompt set
+
+### Mar 24, 2026 - Fullscreen Minimap Tile-Scale Regression Fix
+
+- `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`
+	- floating and fullscreen minimap camera center math now uses `WoWConstants.TileSize` instead of `ChunkSize`.
+	- minimap teleport now converts clicked tile coordinates back to world space with `TileSize`, so the camera lands inside the intended 64x64 map tile grid.
+- `src/MdxViewer/MinimapHelpers.cs`
+	- POI markers, taxi route polylines, and taxi node markers now project world positions onto the minimap in tile space instead of chunk space.
+	- shared minimap click-to-world conversion now also uses `TileSize`.
+- `src/MdxViewer/ViewerApp.cs`
+	- the legacy `DrawMinimap_OLD()` path was updated to the same tile-scale camera math so the regression does not survive in fallback code.
+- Root cause:
+	- the minimap renders a `64x64` tile grid, but the camera/overlay math had drifted onto `ChunkSize`, inflating positions by `16x` and pushing the fullscreen camera marker outside the valid map area.
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-fix/"` passed on Mar 24, 2026.
+	- no automated tests were added or run.
+	- no real-data runtime signoff yet on fullscreen minimap behavior, marker placement, or minimap teleport feel.
+
+### Mar 25, 2026 - Fullscreen Minimap Still Treated As Open Release Blocker
+
+- Runtime user feedback after the earlier tile-scale patch says the fullscreen minimap is still broken.
+- Current interpretation:
+	- the Mar 24 tile-scale correction should now be treated as a partial fix attempt or narrowed hypothesis, not as a closed bug.
+	- the fullscreen minimap remains an open `v0.4.5` release blocker until runtime validation proves otherwise.
+- Current likely investigation seams for the follow-up:
+	- camera world-to-tile axis mapping
+	- tile row/column ordering across `ViewerApp_MinimapAndStatus`, `MinimapHelpers`, and `MinimapRenderer`
+	- fullscreen interaction parity with the docked minimap path
+	- click/teleport mapping versus displayed tile imagery
+- Planning follow-up captured in:
+	- `plans/mdxviewer_release_plan_set_v0_4_5_v0_5_0_2026-03-25.md`
+	- `plans/v0_4_5_release_stabilization_prompt_2026-03-25.md`
+	- `plans/fullscreen_minimap_repair_prompt_2026-03-25.md`
+	- `plans/v0_5_0_goal_stack_prompt_2026-03-25.md`
+- Validation limits:
+	- runtime report only for the minimap still-broken state
+	- no new code changes, tests, or builds were performed in this planning slice
+
+### Mar 25, 2026 - Taxi Route Actor Prototype + Node Inspector Controls
+
+- `src/MdxViewer/Terrain/TaxiPathLoader.cs`
+	- taxi node loading now resolves mount metadata through the historical DBC chain:
+		- `TaxiNodes.MountCreatureID[2]`
+		- `Creature.DisplayID[4]`
+		- `CreatureDisplayInfo.ModelID` + `CreatureModelScale`
+		- `CreatureModelData.ModelName`
+	- `TaxiNode` now exposes resolved mount creature IDs, display ID, scale, and model path for viewer-side taxi actor rendering.
+- `src/MdxViewer/Terrain/WorldScene.cs`
+	- added animated taxi actor runtime support for selected taxi nodes/routes.
+	- taxi actors now sample route waypoints, advance over time, and render through the existing MDX world-render path.
+	- added viewer controls/state for `ShowTaxiActors` and `TaxiActorSpeedMultiplier`.
+- `src/MdxViewer/ViewerApp.cs`
+	- taxi list selection now routes through shared selection helpers instead of setting raw IDs directly.
+	- viewport clicking can now pick visible taxi node indicators and sync them into the selected-object inspector state.
+	- taxi selection now clears conflicting world/PM4 selections and populates selected-object info for node/route inspection.
+- `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- the inspector now shows taxi-route controls when a taxi node or route is selected.
+	- added the requested `Taxi Speed` slider plus a `Show Animated Taxi Actor` toggle.
+- Validation limits:
+	- build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-taxi/"` passed on Mar 25, 2026.
+	- a normal build to the default output path was blocked by the running `ParpToolsWoWViewer` process holding file locks.
+	- no automated tests were added or run.
+	- no real-data runtime signoff yet on taxi mount resolution, taxi node viewport picking, or in-scene route animation.
+
 ### Mar 24, 2026 - WMO Vertex-Light Prototype
 
 - `src/MdxViewer/Rendering/WmoRenderer.cs`

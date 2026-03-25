@@ -508,6 +508,7 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _externalMdxInstances = new();
     private readonly List<ObjectInstance> _externalSkyboxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
+    private readonly List<ObjectInstance> _taxiActorInstances = new();
     private bool _instancesDirty = false;
 
     private bool _objectsVisible = true;
@@ -529,7 +530,7 @@ public class WorldScene : ISceneRenderer
 
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly HashSet<string> _updatedMdxRenderers = new();
-    private readonly List<(int idx, float distSq)> _transparentSortScratch = new();
+    private readonly List<(bool isTaxiActor, int idx, float distSq)> _transparentSortScratch = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private bool _wireframeRevealEnabled;
@@ -1555,9 +1556,22 @@ public class WorldScene : ISceneRenderer
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
     private int _selectedTaxiRouteId = -1;
+    private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
+    private long _lastTaxiActorTick;
+    private bool _taxiActorClockInitialized;
+    private bool _showTaxiActors = true;
+    private float _taxiActorSpeedMultiplier = 1.0f;
+    private const float TaxiActorBaseUnitsPerSecond = 650f;
+    private const float TaxiActorHoverOffset = 12f;
     public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
     public int SelectedTaxiRouteId { get => _selectedTaxiRouteId; set { _selectedTaxiRouteId = value; _selectedTaxiNodeId = -1; } }
     public void ClearTaxiSelection() { _selectedTaxiNodeId = -1; _selectedTaxiRouteId = -1; }
+    public bool ShowTaxiActors { get => _showTaxiActors; set => _showTaxiActors = value; }
+    public float TaxiActorSpeedMultiplier
+    {
+        get => _taxiActorSpeedMultiplier;
+        set => _taxiActorSpeedMultiplier = Math.Max(0f, value);
+    }
 
     public bool IsTaxiRouteVisible(TaxiPathLoader.TaxiRoute route)
     {
@@ -1576,6 +1590,12 @@ public class WorldScene : ISceneRenderer
         }
         return true; // no selection = show all
     }
+
+    public TaxiPathLoader.TaxiNode? GetTaxiNode(int nodeId)
+        => _taxiLoader?.Nodes.FirstOrDefault(node => node.Id == nodeId);
+
+    public TaxiPathLoader.TaxiRoute? GetTaxiRoute(int pathId)
+        => _taxiLoader?.Routes.FirstOrDefault(route => route.PathId == pathId);
 
     /// <summary>
     /// Store DBC credentials for lazy loading of POI, Taxi, and Lighting.
@@ -4608,6 +4628,166 @@ public class WorldScene : ISceneRenderer
         _taxiLoader = new TaxiPathLoader();
         var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
         _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
+        _taxiActorTravelByPath.Clear();
+        _taxiActorClockInitialized = false;
+    }
+
+    private void UpdateTaxiActorInstances()
+    {
+        _taxiActorInstances.Clear();
+
+        bool hasTaxiSelection = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0;
+        if (!_showTaxi || !_showTaxiActors || _taxiLoader == null || !hasTaxiSelection)
+        {
+            _taxiActorClockInitialized = false;
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        float deltaSeconds = 0f;
+        if (_taxiActorClockInitialized)
+            deltaSeconds = (float)((now - _lastTaxiActorTick) / (double)Stopwatch.Frequency);
+        _lastTaxiActorTick = now;
+        _taxiActorClockInitialized = true;
+
+        float distanceStep = TaxiActorBaseUnitsPerSecond * _taxiActorSpeedMultiplier * Math.Max(0f, deltaSeconds);
+        var activePathIds = new HashSet<int>();
+
+        foreach (var route in _taxiLoader.Routes)
+        {
+            if (!IsTaxiRouteVisible(route) || route.Waypoints.Count < 2)
+                continue;
+
+            var mountNode = ResolveTaxiActorNode(route);
+            if (mountNode == null || string.IsNullOrWhiteSpace(mountNode.MountModelPath))
+                continue;
+
+            float routeLength = GetRouteLength(route.Waypoints);
+            if (routeLength <= 1f)
+                continue;
+
+            activePathIds.Add(route.PathId);
+
+            float travel = _taxiActorTravelByPath.TryGetValue(route.PathId, out float existingTravel)
+                ? existingTravel
+                : 0f;
+            if (distanceStep > 0f)
+                travel = (travel + distanceStep) % routeLength;
+            _taxiActorTravelByPath[route.PathId] = travel;
+
+            SampleRoute(route.Waypoints, travel, out Vector3 actorPosition, out Vector3 actorDirection);
+            actorPosition.Z += TaxiActorHoverOffset;
+
+            float yawRadians = actorDirection.LengthSquared() > 0.0001f
+                ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
+                : 0f;
+            float scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
+            string modelPath = mountNode.MountModelPath.Replace('/', '\\');
+            string key = WorldAssetManager.NormalizeKey(modelPath);
+            _assets.QueueMdxLoad(key);
+
+            var transform = Matrix4x4.CreateScale(scale)
+                * Matrix4x4.CreateRotationZ(yawRadians)
+                * Matrix4x4.CreateTranslation(actorPosition);
+
+            Vector3 boundsMin;
+            Vector3 boundsMax;
+            Vector3 localMin = Vector3.Zero;
+            Vector3 localMax = Vector3.Zero;
+            bool boundsResolved = false;
+            if (_assets.TryGetMdxBounds(key, out Vector3 modelMin, out Vector3 modelMax))
+            {
+                localMin = modelMin;
+                localMax = modelMax;
+                boundsResolved = true;
+                TransformBounds(modelMin, modelMax, transform, out boundsMin, out boundsMax);
+            }
+            else
+            {
+                boundsMin = actorPosition - new Vector3(2f);
+                boundsMax = actorPosition + new Vector3(2f);
+            }
+
+            _taxiActorInstances.Add(new ObjectInstance
+            {
+                ModelKey = key,
+                Transform = transform,
+                BoundsMin = boundsMin,
+                BoundsMax = boundsMax,
+                LocalBoundsMin = localMin,
+                LocalBoundsMax = localMax,
+                BoundsResolved = boundsResolved,
+                ModelName = Path.GetFileName(modelPath),
+                ModelPath = modelPath,
+                PlacementPosition = actorPosition,
+                PlacementRotation = new Vector3(0f, 0f, yawRadians * (180f / MathF.PI)),
+                PlacementScale = scale,
+                UniqueId = -route.PathId
+            });
+        }
+
+        foreach (int stalePathId in _taxiActorTravelByPath.Keys.Except(activePathIds).ToList())
+            _taxiActorTravelByPath.Remove(stalePathId);
+    }
+
+    private TaxiPathLoader.TaxiNode? ResolveTaxiActorNode(TaxiPathLoader.TaxiRoute route)
+    {
+        if (_taxiLoader == null)
+            return null;
+
+        if (_selectedTaxiNodeId >= 0)
+        {
+            var selectedNode = GetTaxiNode(_selectedTaxiNodeId);
+            if (selectedNode != null && (route.FromNodeId == selectedNode.Id || route.ToNodeId == selectedNode.Id))
+                return selectedNode;
+        }
+
+        var fromNode = GetTaxiNode(route.FromNodeId);
+        if (fromNode != null && !string.IsNullOrWhiteSpace(fromNode.MountModelPath))
+            return fromNode;
+
+        var toNode = GetTaxiNode(route.ToNodeId);
+        if (toNode != null && !string.IsNullOrWhiteSpace(toNode.MountModelPath))
+            return toNode;
+
+        return fromNode ?? toNode;
+    }
+
+    private static float GetRouteLength(List<Vector3> waypoints)
+    {
+        float total = 0f;
+        for (int i = 0; i < waypoints.Count - 1; i++)
+            total += Vector3.Distance(waypoints[i], waypoints[i + 1]);
+        return total;
+    }
+
+    private static void SampleRoute(List<Vector3> waypoints, float distance, out Vector3 position, out Vector3 direction)
+    {
+        float remaining = distance;
+        for (int i = 0; i < waypoints.Count - 1; i++)
+        {
+            Vector3 start = waypoints[i];
+            Vector3 end = waypoints[i + 1];
+            Vector3 segment = end - start;
+            float segmentLength = segment.Length();
+            if (segmentLength <= 0.001f)
+                continue;
+
+            if (remaining <= segmentLength)
+            {
+                float t = remaining / segmentLength;
+                position = Vector3.Lerp(start, end, t);
+                direction = Vector3.Normalize(segment);
+                return;
+            }
+
+            remaining -= segmentLength;
+        }
+
+        position = waypoints[^1];
+        direction = waypoints[^1] - waypoints[^2];
+        if (direction.LengthSquared() > 0.0001f)
+            direction = Vector3.Normalize(direction);
     }
 
     private void LazyLoadAreaTriggers()
@@ -5324,6 +5504,7 @@ public class WorldScene : ISceneRenderer
             RebuildInstanceLists();
 
         ProcessDeferredAssetLoads();
+    UpdateTaxiActorInstances();
 
         // Extract camera position for sky dome
         Matrix4x4.Invert(view, out var viewInvSky);
@@ -5475,6 +5656,15 @@ public class WorldScene : ISceneRenderer
                     r?.UpdateAnimation();
                 }
             }
+
+            foreach (var inst in _taxiActorInstances)
+            {
+                if (_updatedMdxRenderers.Add(inst.ModelKey))
+                {
+                    _assets.TryGetLoadedMdx(inst.ModelKey, out var r);
+                    r?.UpdateAnimation();
+                }
+            }
         }
 
         MdxRenderer? batchRenderer = null;
@@ -5486,6 +5676,14 @@ public class WorldScene : ISceneRenderer
             {
                 if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
                     break;
+            }
+            if (batchRenderer == null)
+            {
+                foreach (var inst in _taxiActorInstances)
+                {
+                    if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
+                        break;
+                }
             }
             batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
                 lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
@@ -5510,6 +5708,35 @@ public class WorldScene : ISceneRenderer
                     float dist = MathF.Sqrt(distSq);
                     fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
                 }
+                var renderer = TryGetQueuedMdx(inst.ModelKey);
+                if (renderer == null) continue;
+                if (renderer.RequiresUnbatchedWorldRender)
+                {
+                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
+                        fogColor, fogStart, fogEnd, cameraPos,
+                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                }
+                else
+                {
+                    renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
+                }
+                MdxRenderedCount++;
+            }
+
+            foreach (var inst in _taxiActorInstances)
+            {
+                var placementPos = inst.Transform.Translation;
+                float distSq = Vector3.DistanceSquared(cameraPos, placementPos);
+                if (distSq > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+                { MdxCulledCount++; continue; }
+
+                float fade = 1.0f;
+                if (distSq > mdxFadeStartSq)
+                {
+                    float dist = MathF.Sqrt(distSq);
+                    fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
+                }
+
                 var renderer = TryGetQueuedMdx(inst.ModelKey);
                 if (renderer == null) continue;
                 if (renderer.RequiresUnbatchedWorldRender)
@@ -5561,13 +5788,22 @@ public class WorldScene : ISceneRenderer
                 var diag = (inst.BoundsMax - inst.BoundsMin).Length();
                 if (diag < DoodadSmallThreshold && dist > DoodadCullDistanceSq) continue;
                 if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
-                _transparentSortScratch.Add((i, dist));
+                _transparentSortScratch.Add((false, i, dist));
+            }
+            for (int i = 0; i < _taxiActorInstances.Count; i++)
+            {
+                var inst = _taxiActorInstances[i];
+                var placementPos = inst.Transform.Translation;
+                float dist = Vector3.DistanceSquared(cameraPos, placementPos);
+                if (dist > NoCullRadiusSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
+                if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
+                _transparentSortScratch.Add((true, i, dist));
             }
             _transparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq)); // back-to-front
 
-            foreach (var (idx, distSq) in _transparentSortScratch)
+            foreach (var (isTaxiActor, idx, distSq) in _transparentSortScratch)
             {
-                var inst = _mdxInstances[idx];
+                var inst = isTaxiActor ? _taxiActorInstances[idx] : _mdxInstances[idx];
                 // Compute fade for transparent pass (same as opaque)
                 float tDist = MathF.Sqrt(distSq);
                 var tDiag = (inst.BoundsMax - inst.BoundsMin).Length();

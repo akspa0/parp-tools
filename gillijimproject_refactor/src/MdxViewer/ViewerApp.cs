@@ -5129,8 +5129,7 @@ void main() {
                         }
                         else
                         {
-                            // Toggle selection: click again to deselect
-                            _worldScene.SelectedTaxiNodeId = isSelected ? -1 : node.Id;
+                            SelectTaxiNode(node.Id, toggle: true);
                         }
                     }
                     if (ImGui.IsItemHovered())
@@ -5181,8 +5180,7 @@ void main() {
                         }
                         else
                         {
-                            // Toggle selection: click again to deselect
-                            _worldScene.SelectedTaxiRouteId = isSelected ? -1 : route.PathId;
+                            SelectTaxiRoute(route.PathId, toggle: true);
                         }
                     }
                     if (ImGui.IsItemHovered())
@@ -5376,8 +5374,8 @@ void main() {
             }
 
             // Camera tile position (center of view)
-            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize;
-            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize;
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
 
             // View window: _minimapZoom tiles in each direction from camera
             float viewRadius = _minimapZoom;
@@ -7807,6 +7805,171 @@ void main() {
         }
     }
 
+    private void SelectTaxiNode(int nodeId, bool toggle)
+    {
+        if (_worldScene?.TaxiLoader == null)
+            return;
+
+        int nextNodeId = toggle && _worldScene.SelectedTaxiNodeId == nodeId ? -1 : nodeId;
+        _worldScene.SelectedTaxiNodeId = nextNodeId;
+        _worldScene.ClearSelection();
+        _worldScene.ClearPm4ObjectSelection();
+
+        if (nextNodeId < 0)
+        {
+            ClearSelectedTaxiInfo();
+            return;
+        }
+
+        RefreshSelectedTaxiInfo();
+    }
+
+    private void SelectTaxiRoute(int pathId, bool toggle)
+    {
+        if (_worldScene?.TaxiLoader == null)
+            return;
+
+        int nextRouteId = toggle && _worldScene.SelectedTaxiRouteId == pathId ? -1 : pathId;
+        _worldScene.SelectedTaxiRouteId = nextRouteId;
+        _worldScene.ClearSelection();
+        _worldScene.ClearPm4ObjectSelection();
+
+        if (nextRouteId < 0)
+        {
+            ClearSelectedTaxiInfo();
+            return;
+        }
+
+        RefreshSelectedTaxiInfo();
+    }
+
+    private void RefreshSelectedTaxiInfo()
+    {
+        if (_worldScene?.TaxiLoader == null)
+            return;
+
+        _selectedObjectIndex = -1;
+
+        if (_worldScene.SelectedTaxiNodeId >= 0)
+        {
+            var node = _worldScene.GetTaxiNode(_worldScene.SelectedTaxiNodeId);
+            if (node == null)
+            {
+                ClearSelectedTaxiInfo();
+                return;
+            }
+
+            int routeCount = _worldScene.TaxiLoader.Routes.Count(route => route.FromNodeId == node.Id || route.ToNodeId == node.Id);
+            string mountCreatureIds = node.MountCreatureIds.Length > 0
+                ? string.Join(", ", node.MountCreatureIds.Where(id => id > 0))
+                : "none";
+
+            _selectedObjectType = "Taxi Node";
+            _selectedObjectInfo =
+                $"Taxi Node [{node.Id}] {node.Name}\n" +
+                $"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})\n" +
+                $"Routes: {routeCount}\n" +
+                $"Mount Creature IDs: {mountCreatureIds}\n" +
+                $"Resolved Mount Creature: {node.MountCreatureId}\n" +
+                $"Resolved Display ID: {node.MountDisplayId}\n" +
+                $"Resolved Model: {node.MountModelPath ?? "not found"}";
+            return;
+        }
+
+        if (_worldScene.SelectedTaxiRouteId >= 0)
+        {
+            var route = _worldScene.GetTaxiRoute(_worldScene.SelectedTaxiRouteId);
+            if (route == null)
+            {
+                ClearSelectedTaxiInfo();
+                return;
+            }
+
+            var fromNode = _worldScene.GetTaxiNode(route.FromNodeId);
+            var toNode = _worldScene.GetTaxiNode(route.ToNodeId);
+            TaxiPathLoader.TaxiNode? mountNode = fromNode;
+            if (mountNode == null || string.IsNullOrWhiteSpace(mountNode.MountModelPath))
+                mountNode = toNode;
+
+            string fromName = fromNode?.Name ?? $"#{route.FromNodeId}";
+            string toName = toNode?.Name ?? $"#{route.ToNodeId}";
+
+            _selectedObjectType = "Taxi Route";
+            _selectedObjectInfo =
+                $"Taxi Route [{route.PathId}]\n" +
+                $"From: {fromName}\n" +
+                $"To: {toName}\n" +
+                $"Cost: {route.Cost}\n" +
+                $"Waypoints: {route.Waypoints.Count}\n" +
+                $"Actor Mount: {mountNode?.MountModelPath ?? "not found"}";
+            return;
+        }
+
+        ClearSelectedTaxiInfo();
+    }
+
+    private void ClearSelectedTaxiInfo()
+    {
+        if (!_selectedObjectType.StartsWith("Taxi", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _selectedObjectIndex = -1;
+        _selectedObjectType = "";
+        _selectedObjectInfo = "";
+    }
+
+    private bool TryPickTaxiNodeAtMouse(float localX, float localY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj, out int nodeId)
+    {
+        nodeId = -1;
+        if (_worldScene?.TaxiLoader == null || !_worldScene.ShowTaxi)
+            return false;
+
+        const float pickRadiusPixels = 18f;
+        float bestDistanceSq = pickRadiusPixels * pickRadiusPixels;
+
+        foreach (var node in _worldScene.TaxiLoader.Nodes)
+        {
+            if (!_worldScene.IsTaxiNodeVisible(node))
+                continue;
+
+            if (!TryProjectWorldToViewport(node.Position + new Vector3(0f, 0f, 50f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+                continue;
+
+            float dx = projected.X - localX;
+            float dy = projected.Y - localY;
+            float distSq = dx * dx + dy * dy;
+            if (distSq > bestDistanceSq)
+                continue;
+
+            bestDistanceSq = distSq;
+            nodeId = node.Id;
+        }
+
+        return nodeId >= 0;
+    }
+
+    private static bool TryProjectWorldToViewport(Vector3 worldPosition, Matrix4x4 view, Matrix4x4 proj, float viewportWidth, float viewportHeight, out Vector2 projected)
+    {
+        Vector4 clip = Vector4.Transform(Vector4.Transform(new Vector4(worldPosition, 1f), view), proj);
+        if (clip.W <= 0.0001f)
+        {
+            projected = Vector2.Zero;
+            return false;
+        }
+
+        Vector3 ndc = new Vector3(clip.X, clip.Y, clip.Z) / clip.W;
+        if (ndc.Z < -1f || ndc.Z > 1f)
+        {
+            projected = Vector2.Zero;
+            return false;
+        }
+
+        projected = new Vector2(
+            (ndc.X * 0.5f + 0.5f) * viewportWidth,
+            (1f - (ndc.Y * 0.5f + 0.5f)) * viewportHeight);
+        return true;
+    }
+
     private void PickObjectAtMouse(float mouseX, float mouseY)
     {
         if (_worldScene == null) return;
@@ -7835,6 +7998,7 @@ void main() {
 
         if (hasPm4Hit && (!hasSceneHit || pm4HitDistance <= sceneHitDistance))
         {
+            _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
             _worldScene.SelectPm4ObjectByRay(rayOrigin, rayDir);
 
@@ -7871,10 +8035,21 @@ void main() {
             return;
         }
 
+        if (TryPickTaxiNodeAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiNodeId))
+        {
+            SelectTaxiNode(taxiNodeId, toggle: true);
+            return;
+        }
+
         if (hasSceneHit)
+        {
+            _worldScene.ClearTaxiSelection();
             _worldScene.SelectObjectByRay(rayOrigin, rayDir);
+        }
         else
+        {
             _worldScene.ClearSelection();
+        }
 
         // Build info string from the selected instance's embedded metadata
         var sel = _worldScene.SelectedInstance;
@@ -7903,6 +8078,7 @@ void main() {
         }
 
         _worldScene.ClearSelection();
+        _worldScene.ClearTaxiSelection();
         _worldScene.ClearPm4ObjectSelection();
         _selectedObjectIndex = -1;
         _selectedObjectType = "";

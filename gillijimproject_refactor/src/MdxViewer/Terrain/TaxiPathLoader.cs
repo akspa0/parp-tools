@@ -12,7 +12,16 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class TaxiPathLoader
 {
-    public record TaxiNode(int Id, string Name, Vector3 Position, int ContinentId);
+    public record TaxiNode(
+        int Id,
+        string Name,
+        Vector3 Position,
+        int ContinentId,
+        int[] MountCreatureIds,
+        int MountCreatureId,
+        int MountDisplayId,
+        float MountScale,
+        string? MountModelPath);
     public record TaxiRoute(int PathId, int FromNodeId, int ToNodeId, int Cost, List<Vector3> Waypoints);
 
     public List<TaxiNode> Nodes { get; } = new();
@@ -40,6 +49,9 @@ public class TaxiPathLoader
         }
 
         var nodePositions = new Dictionary<int, Vector3>();
+        var creatureDisplayIds = LoadCreatureDisplayIds(dbcd, build);
+        var displayInfo = LoadCreatureDisplayInfo(dbcd, build);
+        var creatureModelPaths = LoadCreatureModelPaths(dbcd, build);
         foreach (var key in nodeStorage.Keys)
         {
             var row = nodeStorage[key];
@@ -49,7 +61,23 @@ public class TaxiPathLoader
             string name = Sanitize(TryGetString(row, "Name_lang") ?? $"Node #{key}");
             Vector3 pos = ReadPos(row);
 
-            var node = new TaxiNode(key, name, pos, continentId);
+            int[] mountCreatureIds = ReadIntArray(row, "MountCreatureID", 2);
+            int mountCreatureId = mountCreatureIds.FirstOrDefault(id => id > 0);
+            int mountDisplayId = 0;
+            float mountScale = 1.0f;
+            string? mountModelPath = null;
+            if (mountCreatureId > 0 && creatureDisplayIds.TryGetValue(mountCreatureId, out int[]? displayIds))
+            {
+                mountDisplayId = displayIds.FirstOrDefault(id => id > 0);
+                if (mountDisplayId > 0 && displayInfo.TryGetValue(mountDisplayId, out var display))
+                {
+                    mountScale = display.scale > 0.01f ? display.scale : 1.0f;
+                    if (display.modelId > 0)
+                        creatureModelPaths.TryGetValue(display.modelId, out mountModelPath);
+                }
+            }
+
+            var node = new TaxiNode(key, name, pos, continentId, mountCreatureIds, mountCreatureId, mountDisplayId, mountScale, mountModelPath);
             Nodes.Add(node);
             nodePositions[key] = pos;
         }
@@ -142,9 +170,94 @@ public class TaxiPathLoader
 
         // Diagnostic: print first few
         foreach (var n in Nodes.Take(5))
-            ViewerLog.Trace($"[TaxiPath]   Node [{n.Id}] \"{n.Name}\" pos=({n.Position.X:F0},{n.Position.Y:F0},{n.Position.Z:F0})");
+            ViewerLog.Trace($"[TaxiPath]   Node [{n.Id}] \"{n.Name}\" pos=({n.Position.X:F0},{n.Position.Y:F0},{n.Position.Z:F0}) mountCreature={n.MountCreatureId} model=\"{n.MountModelPath ?? "?"}\"");
         foreach (var r in Routes.Take(3))
             ViewerLog.Trace($"[TaxiPath]   Route [{r.PathId}] {r.FromNodeId}->{r.ToNodeId} ({r.Waypoints.Count} waypoints)");
+    }
+
+    private static Dictionary<int, int[]> LoadCreatureDisplayIds(DBCD.DBCD dbcd, string build)
+    {
+        var results = new Dictionary<int, int[]>();
+
+        IDBCDStorage storage;
+        try
+        {
+            storage = LoadDbc(dbcd, "Creature", build);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[TaxiPath] Failed to load Creature.dbc: {ex.Message}");
+            return results;
+        }
+
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+            int[] displayIds = ReadIntArray(row, "DisplayID", 4);
+            if (displayIds.Any(id => id > 0))
+                results[key] = displayIds;
+        }
+
+        return results;
+    }
+
+    private static Dictionary<int, (int modelId, float scale)> LoadCreatureDisplayInfo(DBCD.DBCD dbcd, string build)
+    {
+        var results = new Dictionary<int, (int modelId, float scale)>();
+
+        IDBCDStorage storage;
+        try
+        {
+            storage = LoadDbc(dbcd, "CreatureDisplayInfo", build);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[TaxiPath] Failed to load CreatureDisplayInfo.dbc: {ex.Message}");
+            return results;
+        }
+
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+            int modelId = TryGetInt(row, "ModelID") ?? TryGetInt(row, "ModelId") ?? 0;
+            float scale = TryGetFloat(row, "CreatureModelScale") ?? 1.0f;
+            if (modelId > 0)
+                results[key] = (modelId, scale);
+        }
+
+        return results;
+    }
+
+    private static Dictionary<int, string> LoadCreatureModelPaths(DBCD.DBCD dbcd, string build)
+    {
+        var results = new Dictionary<int, string>();
+
+        IDBCDStorage storage;
+        try
+        {
+            storage = LoadDbc(dbcd, "CreatureModelData", build);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Trace($"[TaxiPath] Failed to load CreatureModelData.dbc: {ex.Message}");
+            return results;
+        }
+
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+            string? modelName = TryGetString(row, "ModelName") ?? TryGetString(row, "ModelPath");
+            if (!string.IsNullOrWhiteSpace(modelName))
+                results[key] = modelName.Replace('/', '\\');
+        }
+
+        return results;
+    }
+
+    private static IDBCDStorage LoadDbc(DBCD.DBCD dbcd, string tableName, string build)
+    {
+        try { return dbcd.Load(tableName, build, Locale.EnUS); }
+        catch { return dbcd.Load(tableName, build, Locale.None); }
     }
 
     private static Vector3 ReadPos(dynamic row)
@@ -207,5 +320,53 @@ public class TaxiPathLoader
             return null;
         }
         catch { return null; }
+    }
+
+    private static float? TryGetFloat(dynamic row, string fieldName)
+    {
+        try
+        {
+            var val = row[fieldName];
+            if (val is float f) return f;
+            if (val is double d) return (float)d;
+            if (float.TryParse(val?.ToString(), out float parsed)) return parsed;
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static int[] ReadIntArray(dynamic row, string fieldName, int expectedLength)
+    {
+        try
+        {
+            var value = row[fieldName];
+            if (value is int[] intArray)
+                return intArray;
+            if (value is uint[] uintArray)
+                return uintArray.Select(static entry => (int)entry).ToArray();
+            if (value is object[] objectArray)
+                return objectArray.Select(ConvertToInt).ToArray();
+        }
+        catch { }
+
+        var fallback = new int[expectedLength];
+        for (int i = 0; i < expectedLength; i++)
+            fallback[i] = TryGetInt(row, $"{fieldName}[{i}]") ?? TryGetInt(row, $"{fieldName}_{i}") ?? 0;
+        return fallback;
+    }
+
+    private static int ConvertToInt(object? value)
+    {
+        if (value is null)
+            return 0;
+        if (value is int intValue)
+            return intValue;
+        if (value is uint uintValue)
+            return (int)uintValue;
+        if (value is short shortValue)
+            return shortValue;
+        if (value is ushort ushortValue)
+            return ushortValue;
+        return int.TryParse(value.ToString(), out int parsed) ? parsed : 0;
     }
 }
