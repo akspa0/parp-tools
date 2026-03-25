@@ -10,6 +10,8 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private const float MinimapTileCount = 64f;
+
     private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
     {
         ImGui.SetCursorScreenPos(cursorPos);
@@ -57,7 +59,34 @@ public partial class ViewerApp
     {
         clickTileY = (mousePos.X - cursorPos.X) / cellSize + viewMinTy;
         clickTileX = (mousePos.Y - cursorPos.Y) / cellSize + viewMinTx;
-        return clickTileX >= 0f && clickTileX < 64f && clickTileY >= 0f && clickTileY < 64f;
+        return clickTileX >= 0f && clickTileX < MinimapTileCount && clickTileY >= 0f && clickTileY < MinimapTileCount;
+    }
+
+    private void PrepareFullscreenMinimapState()
+    {
+        _minimapDragging = false;
+        _minimapDragStart = Vector2.Zero;
+        _minimapDragOrigin = Vector2.Zero;
+        ClampMinimapPanOffset();
+    }
+
+    private void ClampMinimapPanOffset()
+    {
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
+        float viewSpan = Math.Clamp(_minimapZoom * 2f, 2f, MinimapTileCount);
+        float viewRadius = viewSpan * 0.5f;
+        float maxViewMin = MathF.Max(0f, MinimapTileCount - viewSpan);
+        float baseViewMinTx = camTileX - viewRadius;
+        float baseViewMinTy = camTileY - viewRadius;
+        float minPanX = -baseViewMinTx;
+        float maxPanX = maxViewMin - baseViewMinTx;
+        float minPanY = -baseViewMinTy;
+        float maxPanY = maxViewMin - baseViewMinTy;
+
+        _minimapPanOffset = new Vector2(
+            Math.Clamp(_minimapPanOffset.X, minPanX, maxPanX),
+            Math.Clamp(_minimapPanOffset.Y, minPanY, maxPanY));
     }
 
     private void RegisterMinimapTeleportClick(float clickTileX, float clickTileY)
@@ -221,6 +250,7 @@ public partial class ViewerApp
 
         float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
         float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
+        ClampMinimapPanOffset();
         int ctX = (int)MathF.Floor(camTileX);
         int ctY = (int)MathF.Floor(camTileY);
 
@@ -312,6 +342,7 @@ public partial class ViewerApp
 
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.TileSize;
             float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.TileSize;
+            ClampMinimapPanOffset();
 
             MinimapHelpers.RenderMinimapContent(
                 cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,

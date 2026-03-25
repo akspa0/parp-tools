@@ -10,6 +10,8 @@ namespace MdxViewer;
 /// </summary>
 internal static class MinimapHelpers
 {
+    private const float MapTileCount = 64f;
+
     public static void RenderMinimapContent(
         Vector2 cursorPos,
         float mapSize,
@@ -31,11 +33,12 @@ internal static class MinimapHelpers
 
         // View window: minimapZoom tiles in each direction from camera + pan offset
         float viewRadius = minimapZoom;
-        viewMinTx = camTileX - viewRadius + panOffset.X;
-        float viewMaxTx = camTileX + viewRadius + panOffset.X;
-        viewMinTy = camTileY - viewRadius + panOffset.Y;
-        float viewMaxTy = camTileY + viewRadius + panOffset.Y;
         float viewSpan = viewRadius * 2f;
+        float maxViewMin = MathF.Max(0f, MapTileCount - viewSpan);
+        viewMinTx = Math.Clamp(camTileX - viewRadius + panOffset.X, 0f, maxViewMin);
+        float viewMaxTx = MathF.Min(MapTileCount, viewMinTx + viewSpan);
+        viewMinTy = Math.Clamp(camTileY - viewRadius + panOffset.Y, 0f, maxViewMin);
+        float viewMaxTy = MathF.Min(MapTileCount, viewMinTy + viewSpan);
         cellSize = mapSize / viewSpan;
 
         // Background
@@ -81,8 +84,10 @@ internal static class MinimapHelpers
         }
 
         // Camera position (centered, adjusted for pan)
-        float camOffsetX = (camTileX - viewMinTx) * cellSize;
-        float camOffsetY = (camTileY - viewMinTy) * cellSize;
+        float clampedCamTileX = Math.Clamp(camTileX, 0f, MapTileCount);
+        float clampedCamTileY = Math.Clamp(camTileY, 0f, MapTileCount);
+        float camOffsetX = (clampedCamTileX - viewMinTx) * cellSize;
+        float camOffsetY = (clampedCamTileY - viewMinTy) * cellSize;
         float camScreenX = cursorPos.X + camOffsetX;
         float camScreenY = cursorPos.Y + camOffsetY;
 

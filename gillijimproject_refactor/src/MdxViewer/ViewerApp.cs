@@ -741,6 +741,10 @@ public partial class ViewerApp : IDisposable
         if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
         {
             _fullscreenMinimap = !_fullscreenMinimap;
+            if (_fullscreenMinimap)
+                PrepareFullscreenMinimapState();
+            else
+                _minimapDragging = false;
         }
         _mKeyWasPressed = mPressed;
 
