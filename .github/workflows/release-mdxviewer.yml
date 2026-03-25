@@ -1,4 +1,4 @@
-name: Release MdxViewer
+name: Release parp-tools WoW Viewer
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.1.0)'
+        description: 'Version tag (e.g. v0.4.5)'
         required: true
 
 permissions:
@@ -93,15 +93,15 @@ jobs:
         shell: pwsh
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
-          $zipName = "MdxViewer-${version}-${{ matrix.rid }}.zip"
+          $zipName = "parp-tools-wow-viewer-${version}-${{ matrix.rid }}.zip"
           Compress-Archive -Path "publish/MdxViewer-${{ matrix.rid }}/*" -DestinationPath $zipName
           Write-Host "Created $zipName"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MdxViewer-${{ matrix.rid }}
-          path: MdxViewer-*-${{ matrix.rid }}.zip
+          name: parp-tools-wow-viewer-${{ matrix.rid }}
+          path: parp-tools-wow-viewer-*-${{ matrix.rid }}.zip
 
   release:
     needs: build
@@ -117,36 +117,40 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
-          name: MdxViewer ${{ github.event.inputs.version || github.ref_name }}
+          name: parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
           body: |
-            ## MdxViewer ${{ github.event.inputs.version || github.ref_name }}
+            ## parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
 
-            High-performance .NET 10 / OpenGL 3.3 world viewer for WoW Alpha 0.5.3, 0.6.0, and LK 3.3.5.
+            .NET 10 / OpenGL 3.3 world viewer and debugging surface for WoW data from Alpha `0.5.3` through `4.0.0.11927`.
 
-            ### What's New
-            - **MDX Skeletal Animation** — Full bone hierarchy, keyframe interpolation, GPU skinning
-            - **Compressed Quaternion Support** — Ghidra-verified C4QuaternionCompressed decompression for KGRT rotation tracks
-            - **Terrain Doodad Animation** — MDX doodads in WorldScene now animate (trees sway, creatures idle, etc.)
-            - **WMO Animated Doodads** — Animated MDX doodads embedded in WMOs now update/render correctly
-            - **Animation Sequence Selection** — UI panel to browse and switch between animation sequences
+            ### v0.4.5 Highlights
+            - **Fullscreen Minimap Repair** — fixed the previously broken docked/fullscreen marker alignment and top-right teleport behavior on the development minimap dataset.
+            - **Taxi Workflow Upgrade** — route picking, animated taxi actor controls, model override flow, return-to-world, and saved override persistence.
+            - **Render Quality Controls** — live texture filtering changes for already loaded world and standalone assets.
+            - **PM4 Inspection Utilities** — map-wide PM4 overlay loading, PM4/WMO correlation tools, and offline PM4 OBJ export.
+            - **Viewer Workflow Improvements** — minimap disk cache, safer triple-click teleport, improved tool-path seeding, and broader viewer-side debugging surfaces.
 
-            ### Bug Fixes
-            - Fixed PIVT chunk order — bone pivots were all (0,0,0) due to PIVT being parsed after BONE
-            - Fixed animation update — standalone MDX viewer was not calling animator Update()
-            - Fixed KGRT parsing — rotation keys are 8-byte compressed, not 16-byte float4
+            ### Other Included Fixes
+            - **Liquid Family Classification** — better `MH2O` liquid-type handling for later 3.3.5 and 4.0 data when DBC metadata is present.
+            - **Object Visibility Tuning** — reduced aggressive world-object pop-in and early object fogging.
+            - **Recovery-Branch Stabilization** — continued viewer recovery on the `v0.4.0` baseline without widening this release into `v0.5.0` renderer work.
 
             ### Quick Start
             1. Extract the ZIP for your platform
-            2. Run `MdxViewer path/to/game/directory`
+            2. Run `ParpToolsWoWViewer` and open a base client or loose world data from the UI
 
             ### Requirements
             - OpenGL 3.3+ capable GPU
-            - WoW game data (MPQ archives)
+            - WoW game data (MPQ archives and/or loose files)
 
             ### What's Included
             - Self-contained .NET 10 runtime (no install needed)
             - WoWDBDefs definitions for DBC parsing
             - Pure C# MPQ reader (no StormLib dependency)
-          files: artifacts/MdxViewer-*.zip
+
+            ### Validation Note
+            - The active viewer still has limited first-party automated regression coverage.
+            - This release reflects solution builds plus targeted real-data runtime checks for specific repaired issues; it is not a claim of broad automated validation across every viewer subsystem.
+          files: artifacts/parp-tools-wow-viewer-*.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

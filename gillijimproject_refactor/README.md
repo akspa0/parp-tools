@@ -14,6 +14,19 @@ This README is intentionally high level. The detailed viewer workflow lives in [
   - a WMO and MDX/M2 inspection/export tool
   - a front end for several converter and validation utilities already in this repo
 
+## v0.4.5 release snapshot
+
+- `parp-tools WoW Viewer` `0.4.5` is the current release target in this tree.
+- Recent viewer-facing changes that materially shape this release:
+  - fullscreen and docked minimap interaction/camera-marker behavior was repaired and then runtime-confirmed by the user on the fixed development minimap dataset
+  - taxi route inspection now has route picking, animated actor controls, asset override workflow, return-to-world flow, and saved override persistence
+  - render-quality controls expose live texture filtering changes for already loaded assets
+  - PM4 inspection/export workflows, minimap disk cache, and recent object-visibility tuning are all part of the active viewer path
+- Validation reality for the release target:
+  - the minimap blocker now has targeted runtime user signoff on the real development minimap data
+  - most other recent viewer slices are still build-validated only unless noted otherwise in the memory-bank files
+  - there is still very little first-party automated regression coverage for the active viewer
+
 ## Version support
 
 - Actively supported viewer range: `0.5.3` through `4.0.0.11927`.
@@ -85,6 +98,7 @@ The active viewer now includes UI and workflows for:
 - dockable navigator/inspector panels
 - hideable chrome with `Tab`
 - minimap zoom, pan, cached tiles, and guarded teleport
+- repaired fullscreen minimap marker/click behavior on the development minimap dataset
 - PM4 overlay inspection and PM4/WMO correlation browsing
 - PM4 OBJ export
 - terrain-hole rebuild override for inspection
@@ -161,9 +175,10 @@ The active viewer now includes UI and workflows for:
 
 The active viewer tree has little first-party regression coverage. Build success matters, but it is not runtime signoff.
 
-As of Mar 23, 2026:
+As of Mar 25, 2026:
 
-- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed
-- no automated tests were added for the latest render-quality/documentation slice
-- terrain, PM4, liquid, and material-order changes still require real-data runtime validation before being described as fully verified
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-transpose-repair/` passed after the final minimap repair
+- no automated tests were added for the latest viewer slices
+- the fullscreen minimap blocker now has targeted real-data runtime user confirmation on the fixed development minimap dataset
+- terrain, PM4, liquid, taxi, and most renderer follow-ups still require additional real-data runtime validation before being described as broadly verified
 

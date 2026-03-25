@@ -1,10 +1,12 @@
 # v0.4.5 Release Stabilization Prompt
 
-Use this prompt in a fresh planning chat when the goal is to define what must be fixed, validated, or explicitly deferred before a `v0.4.5` GitHub release of `parp-tools WoW Viewer` can reasonably be called stable enough.
+Use this prompt in a fresh planning chat when the goal is to define the final release-readiness pass before a `v0.4.5` GitHub release of `parp-tools WoW Viewer` is cut.
+
+Mar 25 update: the fullscreen minimap blocker was closed by runtime user confirmation after the final transpose-only repair. This prompt should now treat minimap work as recently stabilized, not as the primary open blocker.
 
 ## Prompt
 
-Design a concrete release-stabilization plan for `gillijimproject_refactor/src/MdxViewer` targeting `v0.4.5`.
+Design a concrete final release-readiness plan for `gillijimproject_refactor/src/MdxViewer` targeting `v0.4.5`.
 
 The plan must separate:
 
@@ -12,7 +14,7 @@ The plan must separate:
 - strong should-fix issues
 - acceptable post-release follow-ups
 
-The plan must assume the active tree already has meaningful in-progress work for taxi visualization, minimap interaction, WMO baked-light prototyping, and render-quality controls, but most of that work has only build validation rather than runtime signoff.
+The plan must assume the active tree already has meaningful in-progress work for taxi visualization, minimap interaction, WMO baked-light prototyping, and render-quality controls, and that only some of that work has runtime signoff.
 
 ## The Plan Must Produce
 
@@ -24,8 +26,8 @@ The plan must assume the active tree already has meaningful in-progress work for
 
 ## Required Current Assumptions
 
-- fullscreen minimap behavior is still reported broken by runtime user feedback and must be treated as unresolved even though an earlier tile-scale patch compiled successfully
-- the earlier fullscreen minimap work is only build-validated, not runtime-signed-off
+- fullscreen minimap behavior has user-confirmed runtime signoff for the previously broken top-right Designer Island scenario after the final transpose-only repair
+- minimap work should now be reviewed for release-note honesty and regression risk, not treated as the main unresolved blocker by default
 - taxi route actor work is promising but not yet release-critical unless it actively destabilizes the viewer
 - enhanced renderer and shader-family work are explicitly `v0.5.0` scope, not `v0.4.5` scope
 - branding and workflow packaging for `v0.4.5` already exist in the active tree
@@ -40,11 +42,11 @@ The plan must assume the active tree already has meaningful in-progress work for
 
 ## Minimum Areas The Plan Must Review
 
-1. fullscreen minimap correctness and interaction feel
-2. minimap teleport correctness
-3. minimap pan/zoom consistency between docked and fullscreen modes
-4. any obvious release-facing UX instability introduced by recent viewer-side interaction slices
-5. packaging/readme/release-note honesty around what is and is not validated
+1. regression spot-check of fullscreen and docked minimap behavior after the repair
+2. minimap teleport correctness and interaction-feel wording in release notes and docs
+3. any obvious release-facing UX instability introduced by recent viewer-side interaction slices
+4. packaging/readme/release-note honesty around what is and is not validated
+5. final scope boundary between `v0.4.5` and deferred `v0.5.0` renderer work
 
 ## Suggested Deliverable Structure
 
@@ -60,7 +62,7 @@ The plan must assume the active tree already has meaningful in-progress work for
 - If the plan says something is release-ready, define the runtime check that makes that statement defensible.
 - If no automated tests exist for a seam, say that explicitly.
 - If a fix only builds, say that explicitly.
-- Do not describe fullscreen minimap as fixed without runtime confirmation on the real minimap dataset.
+- Do not extend the minimap signoff beyond the runtime-confirmed real-data scenario that was actually checked.
 
 ## Fixed Data Reminder
 

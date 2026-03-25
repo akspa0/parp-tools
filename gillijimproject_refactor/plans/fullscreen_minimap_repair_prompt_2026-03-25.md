@@ -1,12 +1,14 @@
 # Fullscreen Minimap Repair Prompt
 
-Use this prompt in a fresh planning chat when the goal is to diagnose and fix the still-broken fullscreen minimap in `MdxViewer`.
+Use this prompt only if the fullscreen minimap regresses again after the Mar 25, 2026 repair.
+
+Mar 25 resolution note: the original `v0.4.5` blocker was closed after the final transpose-only repair and runtime user confirmation on the fixed development minimap dataset. Keep this prompt as regression archaeology and a fallback investigation checklist, not as a statement that the bug is still open.
 
 ## Prompt
 
-Design a concrete investigation-and-fix plan for the fullscreen minimap in `gillijimproject_refactor/src/MdxViewer`.
+Design a concrete investigation-and-fix plan for a renewed fullscreen minimap regression in `gillijimproject_refactor/src/MdxViewer`.
 
-The plan must assume an earlier patch changed the minimap math from `WoWConstants.ChunkSize` to `WoWConstants.TileSize`, but runtime user feedback still says the fullscreen minimap is broken. Treat the earlier patch as a partial hypothesis, not as a confirmed fix.
+The plan must assume the original bug was eventually fixed by reverting the bad `WoWConstants.TileSize` hypothesis, backing out the later broad world-axis swap, and keeping only the narrower marker/grid transpose repair. Treat those facts as the last known-good baseline unless new runtime evidence proves otherwise.
 
 ## The Plan Must Produce
 
@@ -37,16 +39,16 @@ The plan must inspect and reason about these specific seams:
 
 ## High-Priority Hypotheses To Evaluate
 
-1. Axis swap mismatch:
-	- camera world-to-tile conversion may still disagree with the rest of the viewer's world-coordinate conventions.
-2. Row/column mismatch:
-	- tile storage, tile drawing, and tile texture lookup may not agree on whether `(tx, ty)` means `(row, column)` or `(x, y)`.
-3. Fullscreen-only interaction drift:
+1. Tile lookup/display ordering mismatch:
+	- tile storage, tile drawing, and tile texture lookup may no longer agree on whether `(tx, ty)` means `(row, column)` or `(x, y)`.
+2. Fullscreen-only interaction drift:
 	- fullscreen minimap may share rendering helpers with the docked minimap but still differ in input hit-testing or panning behavior enough to look broken.
-4. Camera marker versus tile content disagreement:
-	- the marker may be mathematically consistent with one coordinate system while the tile imagery is being fetched or arranged in another.
-5. Teleport/click mapping drift:
-	- click-to-tile and tile-to-world conversion may still be transposed even after the scale fix.
+3. Camera marker versus tile content disagreement:
+	- the marker may again be mathematically consistent with one coordinate system while the tile imagery is being fetched or arranged in another.
+4. Teleport/click mapping drift:
+	- click-to-tile and tile-to-world conversion may have regressed away from the direct world-axis mapping restored in the final fix.
+5. Regression from reintroducing the wrong scale:
+	- a later patch may have reintroduced `WoWConstants.TileSize` or another mismatched spacing assumption into one of the minimap paths.
 
 ## Required Constraints
 

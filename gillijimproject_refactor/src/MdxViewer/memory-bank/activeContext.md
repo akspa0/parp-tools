@@ -44,25 +44,21 @@
    - no automated tests were added or run.
    - no real-data runtime signoff yet on docked/fullscreen minimap placement, panning feel, or teleport correctness.
 
-## Fullscreen Minimap Remains Open For v0.4.5 (Mar 25)
+## Fullscreen Minimap Repair Closed For v0.4.5 (Mar 25)
 
-- Runtime user feedback after the Mar 24 tile-scale patch says the fullscreen minimap is still broken.
-- The bad `TileSize` swap has now been reverted, but the minimap should still be treated as open until runtime validation proves the docked and fullscreen paths are trustworthy again.
-- Screenshot-guided follow-up on Mar 25 isolated a second concrete seam beyond raw scale:
-   - clicking the top-right Designer Island teleported the camera marker to the lower-left because minimap click-to-world mapping was writing row/column into the wrong renderer axes, and the camera marker path was not using the same row/column orientation as the drawn tile grid.
-   - `ViewerApp_MinimapAndStatus`, `MinimapHelpers`, and the legacy `DrawMinimap_OLD()` path in `ViewerApp.cs` now use the same row/column-to-renderer-axis mapping for camera tile readout, marker placement, POI/taxi overlays, and teleport.
-- Current follow-up framing:
-   - this is an active `v0.4.5` release blocker
-   - likely remaining seams are fullscreen interaction drift or any leftover tile lookup/display ordering mismatch, not the previously broken click/teleport axis mapping itself
-   - the minimap should not be described as fixed until runtime validation confirms marker placement, tile imagery alignment, and click/teleport correctness on the real dataset
-- Planning prompts captured for the next sessions:
-   - `plans/v0_4_5_release_stabilization_prompt_2026-03-25.md`
-   - `plans/fullscreen_minimap_repair_prompt_2026-03-25.md`
-   - `plans/v0_5_0_goal_stack_prompt_2026-03-25.md`
-- Validation status for the axis follow-up:
-   - build only: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-axis-repair/"` passed after this slice.
-   - no automated tests were added or run.
-   - no real-data runtime signoff yet on Designer Island/top-right teleport correctness or fullscreen marker alignment.
+- The fullscreen/docked minimap repair is now treated as closed for `v0.4.5` after the final transpose-only follow-up and runtime user confirmation on the fixed development minimap dataset.
+- Final landed behavior:
+   - the bad `TileSize` minimap hypothesis stays reverted; the active minimap grid still uses `WoWConstants.ChunkSize`
+   - the later broad world-axis swap also stays reverted
+   - the landed fix is the narrower transpose-only repair: direct world/click mapping remains intact while the camera-marker screen placement is aligned with the drawn tile grid
+   - the legacy `DrawMinimap_OLD()` path now matches that same final behavior
+- Practical release consequence:
+   - the fullscreen minimap is no longer an open `v0.4.5` blocker
+   - if the minimap regresses again, inspect tile lookup/order and fullscreen interaction parity before re-swapping world axes
+- Validation status:
+   - build plus targeted runtime user signoff: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-transpose-repair/"` passed after the final patch
+   - runtime user feedback then confirmed the repaired Designer Island/top-right minimap behavior on the fixed development dataset
+   - no automated tests were added or run
 
 ## Taxi Route Actor Prototype + Node Inspector Controls (Mar 25)
 

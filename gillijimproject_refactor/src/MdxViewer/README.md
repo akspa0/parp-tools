@@ -49,6 +49,12 @@ Optional launch flags:
 
 You can also pass a loose file path after the flags.
 
+## v0.4.5 release snapshot
+
+- `parp-tools WoW Viewer` `0.4.5` is the current release target in this tree.
+- The previously broken fullscreen minimap/top-right Designer Island case is now fixed in the active branch and has runtime user confirmation on the fixed development minimap dataset.
+- Other recent viewer slices such as taxi override workflow, object-culling tuning, and WMO baked-light prototyping should still be treated as build-validated unless a narrower runtime note says otherwise.
+
 ## Current startup workflow
 
 The current usage path is explicit and UI-driven.
@@ -78,7 +84,7 @@ Use `File > Open File...` or pass a file path on launch.
 - WMO-only world maps
 - AOI terrain streaming
 - minimap tile rendering and cache reuse
-- area names, POIs, taxi overlays (nodes and routes!), AlphaWDT <-> 3.3.5 ADT converter and lots more
+- area names, POIs, taxi overlays (nodes and routes), fullscreen minimap, AlphaWDT <-> 3.3.5 ADT converter and lots more
 
 ### PM4 inspection and development-map workflows
 
@@ -109,6 +115,7 @@ Use `File > Open File...` or pass a file path on launch.
 - render-quality window
 - PM4/WMO correlation window
 - asset catalog window
+- taxi route selection, route override workflow, and return-to-world flow
 
 ### Export and utilities
 
@@ -169,6 +176,7 @@ Current minimap behavior differs from older docs.
 - drag-vs-click handling is stricter to avoid accidental teleports
 - zoom, pan, and minimap window visibility persist in viewer settings
 - decoded minimap tiles cache to disk under `output/cache/minimap`
+- the `v0.4.5` repair closed the earlier fullscreen marker-alignment and top-right teleport regression on the fixed development minimap dataset
 
 ### Screenshot/export automation
 

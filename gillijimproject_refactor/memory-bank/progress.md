@@ -1,5 +1,26 @@
 # Progress
 
+### Mar 25, 2026 - Fullscreen Minimap Transpose Repair + Runtime User Signoff
+
+- `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`
+	- reverted the over-corrected world-axis swap from the earlier Designer Island follow-up
+	- camera tile readout and minimap teleport now stay on the direct world `X/Y` mapping used by the active viewer instead of reinterpreting the entire minimap world orientation
+- `src/MdxViewer/MinimapHelpers.cs`
+	- reverted the broad POI/taxi overlay world-axis swap
+	- kept the narrower camera-marker screen-placement transpose so marker placement matches the already-correct drawn tile grid
+- `src/MdxViewer/ViewerApp.cs`
+	- restored the legacy `DrawMinimap_OLD()` fallback path to the same final orientation logic so old code does not preserve the over-corrected behavior
+- Root cause:
+	- the minimap tile grid itself was already oriented correctly after the `ChunkSize` regression repair
+	- the first axis patch then over-corrected the world/camera layer; the real remaining seam was the marker/grid screen transposition
+- Release outcome:
+	- runtime user confirmation after this final patch says the fullscreen minimap is fixed
+	- the fullscreen minimap should no longer be treated as an open `v0.4.5` blocker
+- Validation limits:
+	- build plus targeted runtime user signoff: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-transpose-repair/"` passed on Mar 25, 2026
+	- runtime user feedback then confirmed the repaired Designer Island/top-right minimap behavior on the fixed development dataset
+	- no automated tests were added or run
+
 ### Mar 25, 2026 - World Object Culling And Object-Fog Tuning
 
 - `src/MdxViewer/Terrain/WorldScene.cs`
@@ -100,25 +121,14 @@
 	- no automated tests were added or run.
 	- no real-data runtime signoff yet on fullscreen/docked minimap marker alignment or top-right teleport correctness.
 
-### Mar 25, 2026 - Fullscreen Minimap Still Treated As Open Release Blocker
+### Mar 25, 2026 - Fullscreen Minimap Release Blocker Closed
 
-- Runtime user feedback after the earlier tile-scale patch says the fullscreen minimap is still broken.
-- Current interpretation:
-	- the Mar 24 tile-scale correction should now be treated as a partial fix attempt or narrowed hypothesis, not as a closed bug.
-	- the fullscreen minimap remains an open `v0.4.5` release blocker until runtime validation proves otherwise.
-- Current likely investigation seams for the follow-up:
-	- camera world-to-tile axis mapping
-	- tile row/column ordering across `ViewerApp_MinimapAndStatus`, `MinimapHelpers`, and `MinimapRenderer`
-	- fullscreen interaction parity with the docked minimap path
-	- click/teleport mapping versus displayed tile imagery
-- Planning follow-up captured in:
-	- `plans/mdxviewer_release_plan_set_v0_4_5_v0_5_0_2026-03-25.md`
-	- `plans/v0_4_5_release_stabilization_prompt_2026-03-25.md`
-	- `plans/fullscreen_minimap_repair_prompt_2026-03-25.md`
-	- `plans/v0_5_0_goal_stack_prompt_2026-03-25.md`
-- Validation limits:
-	- runtime report only for the minimap still-broken state
-	- no new code changes, tests, or builds were performed in this planning slice
+- The earlier fullscreen-minimap blocker status is now historical, not current.
+- Final state for `v0.4.5`:
+	- the bad `TileSize` minimap hypothesis was reverted
+	- the later broad world-axis swap was also reverted
+	- the landed fix is the narrower transpose-only repair recorded above, followed by runtime user confirmation that the previously broken top-right Designer Island scenario now behaves correctly
+- Planning prompts remain useful as archaeology if the bug regresses again, but they should no longer be read as describing an active unresolved blocker.
 
 ### Mar 25, 2026 - Taxi Route Actor Prototype + Node Inspector Controls
 

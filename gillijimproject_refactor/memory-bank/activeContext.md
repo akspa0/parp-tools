@@ -147,6 +147,23 @@
 	- no automated tests were added or run
 	- no runtime real-data signoff yet on 3.3.5 / 4.0 liquid visual parity; the build only proves the implementation compiles
 
+## Mar 25, 2026 - Fullscreen Minimap Release Blocker Closed For v0.4.5
+
+- The fullscreen/docked minimap repair is now treated as closed for `v0.4.5` after the final transpose-only follow-up and runtime user confirmation on the fixed development minimap dataset.
+- Final landed behavior in the active tree:
+	- the bad `WoWConstants.TileSize` minimap hypothesis stays reverted; the active `64x64` minimap grid continues to use `WoWConstants.ChunkSize`
+	- the broad world-axis swap attempted during the first Designer Island follow-up was backed out
+	- the landed fix instead keeps the direct world/click mapping and only transposes the screen-space marker placement seam that had drifted away from the drawn tile grid
+	- docked and fullscreen minimap now agree well enough for the user to describe the bug as fixed after runtime checking the top-right Designer Island scenario
+- Practical release consequence:
+	- the fullscreen minimap is no longer an open `v0.4.5` blocker
+	- remaining minimap work should be treated as future polish or new regressions, not as justification to keep `v0.4.5` open
+- Validation status:
+	- build plus targeted runtime user signoff: `dotnet build "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln" -c Debug -p:OutDir="i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-minimap-transpose-repair/"` passed on Mar 25, 2026 after the final transpose-only repair
+	- runtime user feedback then confirmed the repaired minimap behavior on the fixed development minimap dataset
+	- no automated tests were added or run
+	- this is not broad automated minimap coverage; it is targeted real-data runtime confirmation for the previously broken release-blocker scenario
+
 ## Current Focus: v0.4.0 Recovery Branch (Mar 17, 2026)
 
 Working branch is now reset in the main tree, not only in side worktrees.
