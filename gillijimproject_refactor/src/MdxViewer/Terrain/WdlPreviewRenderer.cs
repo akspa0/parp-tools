@@ -152,8 +152,10 @@ public class WdlPreviewRenderer : IDisposable
 
     internal static Vector3 GetTileSpawnPosition(int tileX, int tileY, float height)
     {
-        float rendererX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.TileSize);
-        float rendererY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.TileSize);
+        // WDL preview selection is on the 64x64 world-map tile grid used by the terrain loader.
+        // In this codebase that grid spacing is WoWConstants.ChunkSize (533.3333...), not TileSize.
+        float rendererX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.ChunkSize);
+        float rendererY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.ChunkSize);
         return new Vector3(rendererX, rendererY, height + 100f);
     }
 

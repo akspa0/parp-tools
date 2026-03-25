@@ -13,6 +13,16 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private bool HasLoadedContent()
+    {
+        return _terrainManager != null
+            || _vlmTerrainManager != null
+            || _worldScene != null
+            || _loadedWmo != null
+            || _loadedMdx != null
+            || !string.IsNullOrWhiteSpace(_loadedFilePath);
+    }
+
     private void DrawToolbar()
     {
         var io = ImGui.GetIO();
@@ -133,10 +143,33 @@ public partial class ViewerApp
             }
             else
             {
-                ImGui.TextDisabled("Welcome");
-                ImGui.SameLine();
-                ImGui.Text("Open a game folder or standalone file to start exploring maps, models, and WMOs.");
-                ImGui.SameLine();
+                bool hasLoadedContent = HasLoadedContent();
+                if (!hasLoadedContent)
+                {
+                    ImGui.TextDisabled("Welcome");
+                    ImGui.SameLine();
+                    ImGui.Text("Open a game folder or standalone file to start exploring maps, models, and WMOs.");
+                    ImGui.SameLine();
+                }
+                else
+                {
+                    ImGui.TextDisabled("Scene");
+                    ImGui.SameLine();
+                    string sceneLabel = !string.IsNullOrWhiteSpace(_loadedFileName)
+                        ? _loadedFileName!
+                        : !string.IsNullOrWhiteSpace(_loadedFilePath)
+                            ? Path.GetFileName(_loadedFilePath)
+                            : _loadedWmo != null
+                                ? "Standalone WMO"
+                                : _loadedMdx != null
+                                    ? "Standalone model"
+                                    : _worldScene != null
+                                        ? "World scene"
+                                        : "Loaded";
+                    ImGui.Text(sceneLabel);
+                    ImGui.SameLine();
+                }
+
                 if (ImGui.Button("Open Game Folder..."))
                 {
                     _showFolderInput = true;
@@ -212,6 +245,7 @@ public partial class ViewerApp
         float listHeight = 300f;
         if (ImGui.BeginChild("MapList", new Vector2(0, listHeight), true))
         {
+            var style = ImGui.GetStyle();
             float rowHeight = GetUniformListRowHeight();
             GetVisibleListRange(_discoveredMaps.Count, rowHeight, out int startIndex, out int endIndex);
             if (startIndex > 0)
@@ -225,9 +259,15 @@ public partial class ViewerApp
                 string label = map.HasDbcEntry
                     ? $"[{map.Id:D3}] {map.Name}"
                     : $"[custom] {map.Name}";
+                float loadButtonWidth = ImGui.CalcTextSize("Load").X + style.FramePadding.X * 2f;
+                float spawnButtonWidth = ImGui.CalcTextSize("Spawn").X + style.FramePadding.X * 2f;
+                float reservedActionWidth = spawnButtonWidth + style.ItemSpacing.X;
+                if (hasWdt)
+                    reservedActionWidth += loadButtonWidth + style.ItemSpacing.X;
+                float labelWidth = MathF.Max(1f, ImGui.GetContentRegionAvail().X - reservedActionWidth);
                 if (!hasWdt) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1f));
 
-                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick, new Vector2(labelWidth, 0f)))
                 {
                     if (hasWdt && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                         LoadMapAtDefaultSpawn(map);

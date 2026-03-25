@@ -85,6 +85,7 @@ public partial class ViewerApp : IDisposable
     private bool _showWdlPreview = false;
     private MapDefinition? _selectedMapForPreview;
     private Vector2? _selectedSpawnTile; // WDL tile coordinates (0-63)
+    private Vector3? _pendingWorldSpawnOverride;
     private string _wdlPreviewWarmupStatus = string.Empty;
     private float _minimapZoom = 4f; // Number of tiles visible in each direction from camera
     private bool _fullscreenMinimap = false; // M key toggles fullscreen minimap
@@ -6113,7 +6114,6 @@ void main() {
     {
         string basePath = $"World\\Maps\\{mapDirectory}\\{mapDirectory}.wdt";
         yield return basePath;
-        yield return basePath + ".mpq";
     }
 
     private string? ResolveMapWdtPath(string mapDirectory)
@@ -6158,6 +6158,7 @@ void main() {
 
         _selectedMapForPreview = null;
         _selectedSpawnTile = null;
+        _pendingWorldSpawnOverride = null;
         _showWdlPreview = false;
 
         LoadFileFromDataSource(resolvedWdtPath);
@@ -6177,16 +6178,13 @@ void main() {
             return;
         }
 
-        LoadFileFromDataSource(resolvedWdtPath);
-
-        if (_selectedSpawnTile.HasValue && _wdlPreviewRenderer?.HasPreview == true)
-        {
-            var spawnPos = _wdlPreviewRenderer.TileToWorldPosition(
+        _pendingWorldSpawnOverride = _selectedSpawnTile.HasValue && _wdlPreviewRenderer?.HasPreview == true
+            ? _wdlPreviewRenderer.TileToWorldPosition(
                 (int)_selectedSpawnTile.Value.X,
-                (int)_selectedSpawnTile.Value.Y);
+                (int)_selectedSpawnTile.Value.Y)
+            : null;
 
-            _camera.Position = spawnPos;
-        }
+        LoadFileFromDataSource(resolvedWdtPath);
 
         _showWdlPreview = false;
     }
@@ -6210,6 +6208,19 @@ void main() {
             _wdlPreviewRenderer = new WdlPreviewRenderer(_gl);
 
         TryLoadSelectedWdlPreviewFromCache(map.Directory);
+
+        if (!_wdlPreviewRenderer.HasPreview && _wdlPreviewCacheService != null)
+        {
+            if (_wdlPreviewCacheService.TryBuildPreviewNow(map.Directory, out var previewData, out var error) && previewData != null)
+            {
+                _wdlPreviewRenderer.LoadPreview(previewData);
+                _wdlPreviewWarmupStatus = string.Empty;
+            }
+            else if (!string.IsNullOrWhiteSpace(error))
+            {
+                _wdlPreviewWarmupStatus = error;
+            }
+        }
 
         if (_wdlPreviewRenderer.HasPreview)
         {
@@ -7693,8 +7704,11 @@ void main() {
             }
 
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
-            var startPos = _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
+            var startPos = _pendingWorldSpawnOverride ?? _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
             _camera.Position = startPos;
+            if (!_terrainManager.Adapter.IsWmoBased)
+                _terrainManager.UpdateAOI(startPos);
+            _pendingWorldSpawnOverride = null;
             _camera.Yaw = 180f;
             _camera.Pitch = -20f;
 

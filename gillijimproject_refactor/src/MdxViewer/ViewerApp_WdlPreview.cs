@@ -71,17 +71,17 @@ public partial class ViewerApp
             return;
         }
 
-        ImGui.SetNextWindowSize(new Vector2(600, 700), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(820, 900), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowPos(new Vector2(
-            ImGui.GetIO().DisplaySize.X / 2 - 300,
-            ImGui.GetIO().DisplaySize.Y / 2 - 350), ImGuiCond.FirstUseEver);
+            ImGui.GetIO().DisplaySize.X / 2 - 410,
+            ImGui.GetIO().DisplaySize.Y / 2 - 450), ImGuiCond.FirstUseEver);
 
         if (ImGui.Begin($"Map Preview - {_selectedMapForPreview.Name}", ref _showWdlPreview, ImGuiWindowFlags.NoCollapse))
         {
             ImGui.TextWrapped("Click on the map preview to select a spawn point, then click 'Load Map' to start at that location.");
             ImGui.Separator();
 
-            float previewSize = 512f;
+            float previewSize = MathF.Min(ImGui.GetContentRegionAvail().X, 768f);
             var cursorPos = ImGui.GetCursorScreenPos();
 
             ImGui.Image((nint)_wdlPreviewRenderer.TextureId, new Vector2(previewSize, previewSize));

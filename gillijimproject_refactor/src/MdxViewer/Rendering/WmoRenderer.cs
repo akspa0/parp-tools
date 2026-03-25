@@ -588,7 +588,7 @@ void main() {
     float diff = NdotL * 0.5 + 0.5; // half-Lambert: remap [-1,1] to [0,1]
     diff = diff * diff; // square for slightly sharper falloff
     vec3 lighting = uAmbientColor + uLightColor * diff;
-    vec3 bakedLighting = clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0));
+    vec3 bakedLighting = mix(vec3(1.0), clamp(vVertexLight.rgb, vec3(0.0), vec3(1.0)), 0.6);
 
     vec4 texColor;
     if (uHasTexture == 1) {
@@ -779,8 +779,7 @@ void main() {
         }
 
         averageLuminosity /= group.VertexColors.Count;
-        bool hasRawLightmapData = group.LightmapData.Length > 0 && group.LightmapUVs.Count > 0 && group.LightmapInfos.Count > 0;
-        if (averageLuminosity < 10.0 && hasRawLightmapData)
+        if (averageLuminosity < 10.0)
             return false;
 
         for (int i = 0; i < vertexLightColors.Length; i++)
@@ -820,17 +819,22 @@ void main() {
                     continue;
 
                 Vector2 uv = group.LightmapUVs[uvIndex];
+                if (!float.IsFinite(uv.X) || !float.IsFinite(uv.Y))
+                    continue;
+
                 float u = Math.Clamp(uv.X, 0f, 1f);
                 float v = Math.Clamp(uv.Y, 0f, 1f);
                 int pixelX = (int)(u * (lightmapInfo.Width - 1));
                 int pixelY = (int)(v * (lightmapInfo.Height - 1));
-                int pixelOffset = (int)(lightmapInfo.DataOffset + (pixelY * lightmapInfo.Width + pixelX) * 4);
-                if (pixelOffset + 4 > group.LightmapData.Length)
+
+                long pixelOffset = (long)lightmapInfo.DataOffset + (((long)pixelY * lightmapInfo.Width) + pixelX) * 4L;
+                if (pixelOffset < 0 || pixelOffset + 4 > group.LightmapData.LongLength)
                     continue;
 
-                blueSums[vertexIndex] += group.LightmapData[pixelOffset + 0] / 255f;
-                greenSums[vertexIndex] += group.LightmapData[pixelOffset + 1] / 255f;
-                redSums[vertexIndex] += group.LightmapData[pixelOffset + 2] / 255f;
+                int pixelOffsetInt = (int)pixelOffset;
+                blueSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 0] / 255f;
+                greenSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 1] / 255f;
+                redSums[vertexIndex] += group.LightmapData[pixelOffsetInt + 2] / 255f;
                 sampleCounts[vertexIndex]++;
                 hasSamples = true;
             }
@@ -839,22 +843,28 @@ void main() {
         if (!hasSamples)
             return false;
 
+        double averageLuminosity = 0.0;
         for (int i = 0; i < vertexCount; i++)
         {
             if (sampleCounts[i] > 0)
             {
                 float invCount = 1f / sampleCounts[i];
-                vertexLightColors[i] = new Vector4(
-                    redSums[i] * invCount,
-                    greenSums[i] * invCount,
-                    blueSums[i] * invCount,
-                    1f);
+                float red = redSums[i] * invCount;
+                float green = greenSums[i] * invCount;
+                float blue = blueSums[i] * invCount;
+                vertexLightColors[i] = new Vector4(red, green, blue, 1f);
+                averageLuminosity += (red + green + blue) / 3.0;
             }
             else
             {
                 vertexLightColors[i] = Vector4.One;
+                averageLuminosity += 1.0;
             }
         }
+
+        averageLuminosity /= vertexCount;
+        if (averageLuminosity < 0.08)
+            return false;
 
         return true;
     }

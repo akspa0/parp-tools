@@ -229,8 +229,8 @@ public class WorldAssetManager : IDisposable
             return;
         }
 
-        if (cachedRenderer == null && _wmoModels.ContainsKey(normalizedKey))
-            ViewerLog.Debug(ViewerLog.Category.Wmo, $"Retrying cached failed WMO load: \"{normalizedKey}\"");
+        if (_wmoModels.ContainsKey(normalizedKey))
+            return;
 
         var renderer = LoadWmoModel(normalizedKey);
         _wmoModels[normalizedKey] = renderer;
@@ -396,7 +396,7 @@ public class WorldAssetManager : IDisposable
     {
         normalizedKey = NormalizeKey(normalizedKey);
 
-        if (_wmoModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        if (_wmoModels.ContainsKey(normalizedKey))
             return;
 
         if (_queuedWmoLoads.Add(normalizedKey))
@@ -410,7 +410,7 @@ public class WorldAssetManager : IDisposable
     {
         normalizedKey = NormalizeKey(normalizedKey);
 
-        if (_wmoModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        if (_wmoModels.ContainsKey(normalizedKey))
             return;
 
         if (_queuedWmoLoads.Add(normalizedKey))
@@ -451,11 +451,8 @@ public class WorldAssetManager : IDisposable
             }
             else
             {
-                if (!_wmoModels.TryGetValue(key, out var cachedRenderer) || cachedRenderer == null)
+                if (!_wmoModels.TryGetValue(key, out var cachedRenderer))
                 {
-                    if (cachedRenderer == null && _wmoModels.ContainsKey(key))
-                        ViewerLog.Debug(ViewerLog.Category.Wmo, $"Retrying deferred failed WMO load: \"{key}\"");
-
                     var renderer = LoadWmoModel(key);
                     _wmoModels[key] = renderer;
                     TouchLru(_wmoLru, _wmoLruMap, key);
