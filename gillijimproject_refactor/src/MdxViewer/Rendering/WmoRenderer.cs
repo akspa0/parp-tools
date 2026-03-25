@@ -59,9 +59,8 @@ public class WmoRenderer : ISceneRenderer
     private static uint _liquidShader;
     private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
     private static int _liquidShaderRefCount;
-    // 3.3.5: WMO MLIQ XY mapping matches the client at a 270° rotation.
-    // Kept as an override (user-configurable) because some assets can still be inconsistent.
-    private static int _mliqRotationQuarterTurns = 3;
+    // Additional user-configurable quarter-turns applied after the build-aware baseline.
+    private static int _mliqRotationQuarterTurns;
     private static int _mliqRotationRevision;
     private int _builtMliqRotationRevision = -1;
 
@@ -77,7 +76,7 @@ public class WmoRenderer : ISceneRenderer
             _mliqRotationQuarterTurns = normalized;
             _mliqRotationRevision++;
             ViewerLog.Important(ViewerLog.Category.Wmo,
-                $"[WmoRenderer] MLIQ rotation override set to {normalized * 90}°");
+                $"[WmoRenderer] MLIQ additional rotation override set to {normalized * 90}°");
         }
     }
 
@@ -244,6 +243,11 @@ public class WmoRenderer : ISceneRenderer
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj)
     {
         RenderWithTransform(Matrix4x4.Identity, view, proj);
+    }
+
+    private int GetBaselineMliqRotationQuarterTurns()
+    {
+        return string.Equals(_buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase) ? 3 : 0;
     }
 
     /// <summary>
@@ -1569,11 +1573,11 @@ void main() {
                 float liquidTileSize = 4.16666f;
 
                 // Build vertex positions in WMO-local space (raw file coords, Z-up).
-                // 3.3.5 assets are not consistent about apparent MLIQ XY orientation,
-                // so choose the best mapping by fitting the liquid quad bounds to the
-                // owning group's bounds instead of forcing one hard-coded rotation.
+                // Auto-fit the liquid quad to the owning group's bounds, then apply
+                // any known build baseline plus the user-selected adjustment.
                 int liquidOrientation = SelectBestLiquidOrientation(group, cornerX, cornerY, xverts, yverts, liquidTileSize);
-                int effectiveOrientation = (liquidOrientation + _mliqRotationQuarterTurns) & 3;
+                int baselineRotation = GetBaselineMliqRotationQuarterTurns();
+                int effectiveOrientation = (liquidOrientation + baselineRotation + _mliqRotationQuarterTurns) & 3;
                 int nverts = xverts * yverts;
                 var vertices = new float[nverts * 3];
                 for (int j = 0; j < yverts; j++)
@@ -1588,9 +1592,9 @@ void main() {
                     }
                 }
 
-                if (liquidOrientation != 2 || _mliqRotationQuarterTurns != 0)
+                if (liquidOrientation != 2 || baselineRotation != 0 || _mliqRotationQuarterTurns != 0)
                 {
-                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: orientation={effectiveOrientation} (auto={liquidOrientation}, userRot={_mliqRotationQuarterTurns * 90}°)");
+                    ViewerLog.Trace($"[WmoRenderer] MLIQ group {gi}: orientation={effectiveOrientation} (auto={liquidOrientation}, baselineRot={baselineRotation * 90}°, userRot={_mliqRotationQuarterTurns * 90}°)");
                 }
 
                 // Build indices: one quad per visible tile

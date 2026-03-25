@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.5)'
+        description: 'Version tag (e.g. v0.4.5b)'
         required: true
 
 permissions:
@@ -95,7 +95,7 @@ jobs:
           body: |
             ## parp-tools WoW Viewer
 
-            Build `0.4.5` of the active WoW world/model viewer and debugging surface in this repo.
+            Build `${{ github.event.inputs.version || github.ref_name }}` of the active WoW world/model viewer and debugging surface in this repo.
 
             Author: `github.com/akspa0/parp-tools`
 

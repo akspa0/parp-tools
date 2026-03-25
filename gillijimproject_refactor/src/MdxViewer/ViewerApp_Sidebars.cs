@@ -1117,24 +1117,27 @@ public partial class ViewerApp
             endIndex = startIndex;
     }
 
-    private static void DrawWmoLiquidRotationControls(string idSuffix)
+    private void DrawWmoLiquidRotationControls(string idSuffix)
     {
         int quarterTurns = WmoRenderer.MliqRotationQuarterTurns;
         string currentLabel = WmoLiquidRotationLabels[Math.Clamp(quarterTurns, 0, WmoLiquidRotationLabels.Length - 1)];
 
-        if (ImGui.BeginCombo($"WMO MLIQ Rotation##{idSuffix}", currentLabel))
+        if (ImGui.BeginCombo($"WMO MLIQ Additional Rotation##{idSuffix}", currentLabel))
         {
             for (int i = 0; i < WmoLiquidRotationLabels.Length; i++)
             {
                 bool selected = i == quarterTurns;
                 if (ImGui.Selectable(WmoLiquidRotationLabels[i], selected))
+                {
+                    _hasExplicitWmoMliqRotationOverride = i != 0;
                     WmoRenderer.MliqRotationQuarterTurns = i;
+                }
                 if (selected)
                     ImGui.SetItemDefaultFocus();
             }
             ImGui.EndCombo();
         }
 
-        ImGui.TextDisabled("Applies to all WMO MLIQ surfaces. Changes are live.");
+        ImGui.TextDisabled("Adds on top of the build-aware WMO MLIQ baseline. Changes are live.");
     }
 }

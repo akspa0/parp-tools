@@ -346,6 +346,7 @@ public partial class ViewerApp : IDisposable
 
     private bool _autoFrameModelOnLoad = true;
     private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
+    private bool _hasExplicitWmoMliqRotationOverride;
 
     // Sky gradient for standalone model viewing
     private uint _skyVao, _skyVbo, _skyShader;
@@ -8593,8 +8594,8 @@ void main() {
 
             if (!File.Exists(ViewerSettingsPath))
             {
-                // First run: default WMO liquid rotation for 3.3.5.
-                WmoRenderer.MliqRotationQuarterTurns = 3;
+                _hasExplicitWmoMliqRotationOverride = false;
+                WmoRenderer.MliqRotationQuarterTurns = 0;
                 return;
             }
 
@@ -8603,7 +8604,25 @@ void main() {
             if (settings == null)
                 return;
 
-            WmoRenderer.MliqRotationQuarterTurns = settings.WmoMliqRotationQuarterTurns;
+            int savedWmoMliqRotation = ((settings.WmoMliqRotationQuarterTurns % 4) + 4) % 4;
+            if (settings.HasExplicitWmoMliqRotationOverride)
+            {
+                _hasExplicitWmoMliqRotationOverride = true;
+                WmoRenderer.MliqRotationQuarterTurns = savedWmoMliqRotation;
+            }
+            else if (savedWmoMliqRotation == 3)
+            {
+                _hasExplicitWmoMliqRotationOverride = false;
+                WmoRenderer.MliqRotationQuarterTurns = 0;
+                ViewerLog.Important(ViewerLog.Category.Wmo,
+                    "[ViewerSettings] Migrated legacy WMO MLIQ 270° default to neutral override; 3.3.5 now uses a build-aware baseline.");
+            }
+            else
+            {
+                _hasExplicitWmoMliqRotationOverride = savedWmoMliqRotation != 0;
+                WmoRenderer.MliqRotationQuarterTurns = savedWmoMliqRotation;
+            }
+
             _lastGameFolderPath = settings.LastGameFolderPath ?? "";
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
@@ -8683,6 +8702,7 @@ void main() {
             var settings = new ViewerSettings
             {
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
+                HasExplicitWmoMliqRotationOverride = _hasExplicitWmoMliqRotationOverride,
                 LastGameFolderPath = _lastGameFolderPath,
                 LastLooseOverlayPath = _lastLooseOverlayPath,
                 LastSelectedBuildVersion = _clientBuildOptions.Count > 0
@@ -8830,6 +8850,7 @@ void main() {
     private sealed class ViewerSettings
     {
         public int WmoMliqRotationQuarterTurns { get; set; }
+        public bool HasExplicitWmoMliqRotationOverride { get; set; }
         public string? LastGameFolderPath { get; set; }
         public string? LastLooseOverlayPath { get; set; }
         public string? LastSelectedBuildVersion { get; set; }
