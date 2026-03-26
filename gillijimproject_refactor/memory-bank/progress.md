@@ -1,5 +1,14 @@
 # Progress
 
+### Mar 26, 2026 - wow-viewer Source-Of-Truth Reset
+
+- Updated the working rule for future `wow-viewer` chats:
+	- `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` are now the canonical implementation targets for new `wow-viewer` work
+	- `MdxViewer` is now a reference or compatibility consumer, not the default PM4 source of truth
+	- default validation for `wow-viewer` work is `WowViewer.slnx` build or test plus the relevant tool command on the fixed development dataset
+	- `MdxViewer` compile validation is now optional and should be run only when a slice changes consumer compatibility or the user explicitly asks for it
+- This is a workflow and continuity reset, not runtime proof by itself.
+
 ### Mar 26, 2026 - PM4 Handoff State Prepared For Fresh Chat
 
 - Refreshed the PM4 continuity state so the next session can start from the actual current boundary instead of re-deriving it.

@@ -2,6 +2,15 @@
 
 This document locks the PM4 migration direction for wow-viewer after the Mar 25, 2026 correction from the user.
 
+## Mar 26, 2026 - Source-Of-Truth Reset
+
+- `WowViewer.Core.PM4` is now the canonical implementation target and intended source of truth for new PM4 work in `wow-viewer`.
+- `MdxViewer` is no longer the default runtime reference for PM4 library design. Use it only as a historical, extraction, or consumer-compatibility input when a task explicitly needs that comparison.
+- `Pm4Research` remains the main library seed and research input.
+- Default validation for PM4 work is `wow-viewer` build or test plus the relevant inspect command against the fixed development dataset.
+- `MdxViewer` compile validation is now optional and should be run only when a slice intentionally changes consumer compatibility or when the user explicitly asks for it.
+- If older sections below still describe `MdxViewer` as the default runtime reference, treat this reset section as the newer rule.
+
 ## Source-Of-Truth Rule
 
 - the active MdxViewer implementation is the de facto reference implementation for PM4 runtime behavior
@@ -222,15 +231,14 @@ Current status in the workspace:
 
 ## Fresh-Chat Next Slice
 
-- The clean next PM4 implementation slice is no longer another broad report family by default.
+- The clean next PM4 implementation slice is direct library completion in `Core.PM4`, not another default `MdxViewer` hookup.
 - Best next seam:
-  - wire the already-landed `ResolveCoordinateMode(...)` result into the active `WorldScene` coordinate-mode decision path through the same explicit adapter style already used for planar-transform, yaw-correction, and centroid consumption
+  - continue re-homing remaining placement, grouping, transform, and correlation ownership into `WowViewer.Core.PM4` so the library stops depending on the old viewer as its implicit authority
 - Why this is the right next step:
-  - it converts an already-tested library seam into a real consumer seam
-  - it reduces PM4 decision ownership still stranded in `WorldScene`
-  - it is narrow enough to validate without pretending the full PM4 placement pipeline is closed
+  - it moves the real implementation boundary into the library instead of preserving a permanent split with the old viewer
+  - it keeps validation centered on `wow-viewer` builds, tests, and inspect commands
+  - it matches the explicit user direction that the new repo should own the implementation rather than orbit the old app
 - Still out of scope after that slice:
-  - final renderer-space composition
-  - full object-group transform ownership
-  - viewer runtime PM4 signoff
-  - closing the remaining exploratory field semantics
+  - viewer runtime signoff
+  - treating old `MdxViewer` parity as the default success condition
+  - closing the remaining exploratory field semantics without evidence

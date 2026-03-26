@@ -39,11 +39,11 @@ user-invocable: true
 1. Start from the current validated state, not from older bootstrap assumptions.
    `wow-viewer` already exists, `Core.PM4` already has real code, and there are already passing PM4 and shared-I/O tests.
 
-2. Preserve the library-first direction unless the user changes it.
-   The default continuation path is `wow-viewer` library work, not broader `MdxViewer` hookup.
+2. Preserve `wow-viewer` as the canonical implementation target.
+   The default continuation path is direct library work in `wow-viewer`, not broader `MdxViewer` hookup or viewer-first parity work.
 
 3. Keep validation claims precise.
-   A `wow-viewer` build or test pass is library validation. An `MdxViewer` build is consumer-compile validation. Neither is viewer runtime PM4 signoff by itself.
+   A `wow-viewer` build or test pass is the primary implementation validation for `wow-viewer` work. An `MdxViewer` build is optional consumer-compile validation only when integration changed or the user asked for it. Neither is runtime signoff by itself.
 
 4. Keep continuity assets current.
    If the active workflow, commands, or status changed, update the memory bank and relevant prompt or skill instead of leaving future sessions stale.
@@ -55,4 +55,5 @@ user-invocable: true
 
 - Do not route every `wow-viewer` request back into generic migration planning when the user is clearly asking for an implementation slice.
 - Do not re-open old repo-shape debates when the active task is now inside `Core.PM4`.
+- Do not fall back to `MdxViewer` as the default PM4 source of truth when the user is explicitly prioritizing direct library completion in `wow-viewer`.
 - Do not claim runtime validation where none exists.

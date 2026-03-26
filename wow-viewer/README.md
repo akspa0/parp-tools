@@ -21,6 +21,13 @@ Current plan-adherence reality:
 - `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime` are still early and should not be described as complete library boundaries yet.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.
 
+Current implementation policy:
+
+- `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` are the canonical implementation targets for new `wow-viewer` work.
+- `gillijimproject_refactor`, including `MdxViewer` and `WoWMapConverter`, is now a reference or compatibility input for `wow-viewer` work, not the default owner of the design.
+- Default validation for `wow-viewer` work is `dotnet build .\WowViewer.slnx -c Debug`, `dotnet test .\WowViewer.slnx -c Debug`, and the relevant inspect or converter command against the fixed development dataset.
+- Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
+
 Bootstrap dependencies:
 
 - `scripts/bootstrap.ps1` now clones the baseline upstream repos described in the migration draft into `libs/`:
@@ -90,7 +97,7 @@ Current first real code-port slice:
 	- research document container
 	- binary PM4 reader
 	- exploration snapshot builder
-- This is still a raw research-facing PM4 layer. It does not replace the current MdxViewer runtime reconstruction contract yet.
+- This started as a raw research-facing PM4 layer. Remaining PM4 gaps should be closed directly in `Core.PM4` rather than deferred to `MdxViewer` as the default owner.
 
 Current PM4 inspect slice:
 
@@ -113,7 +120,7 @@ Current PM4 inspect slice:
 
 Current PM4 runtime-contract slice:
 
-- `src/core/WowViewer.Core.PM4` now contains the first MdxViewer-facing PM4 runtime placement contract slice.
+- `src/core/WowViewer.Core.PM4` now contains the first library-owned PM4 runtime placement contract slice.
 - Landed pieces:
 	- public `Pm4AxisConvention`, `Pm4CoordinateMode`, and `Pm4PlanarTransform` contracts
 	- shared `Pm4CoordinateService`
@@ -135,8 +142,10 @@ Current PM4 shared-consumer slice:
 	- `ResolvePlanarTransform(...)`
 	- `TryComputeWorldYawCorrectionRadians(...)`
 	- `ComputeSurfaceWorldCentroid(...)`
+- 	- `ResolveCk24CoordinateMode(...)`
 - Important boundary:
 	- renderer-space centroid and the broader PM4 placement or render path still remain in `WorldScene`
+	- this is a secondary compatibility seam only, not the source of truth for new PM4 implementation work
 	- this is build-validated solver sharing, not viewer runtime PM4 signoff
 
 Current PM4 linkage slice:

@@ -1,5 +1,12 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## wow-viewer Library Priority Reset (Mar 26)
+
+- Future `wow-viewer` work should no longer treat `MdxViewer` as the default PM4 source of truth.
+- The active viewer is now a secondary compatibility consumer and historical reference for `wow-viewer` library work.
+- For new `wow-viewer` implementation slices, default validation should happen in `wow-viewer` itself; build `MdxViewer` only when the slice intentionally changes consumer compatibility or the user explicitly asks for that check.
+- If a future chat is deciding between completing a library seam in `wow-viewer` and adding another viewer hookup, the default choice is to complete the library seam.
+
 ## PM4 Fresh-Chat Handoff (Mar 26)
 
 - The active viewer should now be treated as a partial consumer of shared `wow-viewer` PM4 math, not as the only place where PM4 logic lives.

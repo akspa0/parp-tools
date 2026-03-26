@@ -41,7 +41,7 @@ static void RunDetect(string[] args)
 	Console.WriteLine($"Kind: {detection.Kind}");
 	Console.WriteLine($"Version: {detection.Version?.ToString() ?? "n/a"}");
 	Console.WriteLine($"Owns families: {string.Join(", ", IoBoundaries.OwnedFamilies)}");
-	Console.WriteLine($"PM4 source-of-truth: runtime={Pm4Boundary.RuntimeReference}, seed={Pm4Boundary.LibrarySeed}");
+	Console.WriteLine($"PM4 source-of-truth: canonical={Pm4Boundary.CanonicalOwner}, seed={Pm4Boundary.LibrarySeed}, legacy={Pm4Boundary.LegacyReference}");
 	Console.WriteLine($"Planned hosts: {ToolHosts.Planned.Length}");
 }
 

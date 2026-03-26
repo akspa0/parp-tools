@@ -3,7 +3,7 @@
 ## Scope
 - The active code paths in this workspace are `gillijimproject_refactor` and `wow-viewer`.
 - Treat `wow-viewer` as the primary target when the task mentions the new repo, `Core.PM4`, PM4 library extraction, inspect CLI work, or tool-suite cutover.
-- Treat `gillijimproject_refactor`, especially `src/MdxViewer` and `src/WoWMapConverter`, as the active runtime reference path for viewer behavior, terrain work, and format compatibility work.
+- Treat `gillijimproject_refactor`, especially `src/MdxViewer` and `src/WoWMapConverter`, as the legacy or compatibility path when the task explicitly targets the current viewer, terrain work, or old-format behavior. Do not use it as the default source of truth for new `wow-viewer` library design.
 - Treat `archived_projects`, `WoWRollback/old_projects`, `WMOv14/old_sources`, and `gillijimproject_refactor/next` as non-primary unless the task explicitly targets them.
 
 ## First Reads
@@ -24,23 +24,26 @@
 - Do not add a new `wow-viewer` skill without also deciding which existing skill or prompt should hand work to it.
 
 ## Build And Validation
-- For parser and format-library work, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
+- For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
+- For legacy parser and format-library work that still explicitly targets `gillijimproject_refactor`, prefer `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug`.
 - For viewer work, use `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`.
-- For `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.
 - For `wow-viewer` PM4 inspect or report slices, validate against `gillijimproject_refactor/test_data/development/World/Maps/development` with `WowViewer.Tool.Inspect` commands when the slice changes analyzer or report output.
+- Only build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` for `wow-viewer` work when the task explicitly changes consumer compatibility or the user asks for that compatibility check.
 - The active viewer and converter path currently has little to no first-party automated regression coverage. Do not claim terrain or alpha-mask changes are safe based only on library tests under `lib/*`, archived tests, or documentation examples.
-- Do not describe a `wow-viewer` build, test pass, or active-viewer compile as real viewer runtime PM4 signoff. Active `MdxViewer` still has no non-UI command-line path to open the split development map with its required base data source.
+- Do not describe a `wow-viewer` build, test pass, or optional active-viewer compile as real viewer runtime signoff. Active `MdxViewer` still has no non-UI command-line path to open the split development map with its required base data source.
 - Prefer real-data validation using the fixed paths in `gillijimproject_refactor/memory-bank/data-paths.md`. Do not ask the user for alternate paths unless the existing fixed paths are missing.
 
 ## wow-viewer PM4 Guardrails
-- Keep `MdxViewer` as the runtime PM4 reference implementation and `Pm4Research` as the library seed until real data proves a change.
-- Favor narrow library-first slices in `wow-viewer/src/core/WowViewer.Core.PM4` over broader active-viewer consumer wiring unless the user explicitly asks for integration work.
+- Treat `wow-viewer/src/core/WowViewer.Core.PM4` as the canonical implementation target for new PM4 work.
+- Treat `Pm4Research`, `MdxViewer`, `PM4Tool`, `parpToolbox`, and `WoWRollback.PM4Module` as extraction or reference inputs, not as the default owner of PM4 behavior.
+- Favor direct library completion in `wow-viewer/src/core/WowViewer.Core.PM4` over broader active-viewer consumer wiring unless the user explicitly asks for integration work or compatibility checks.
 - Keep exploratory PM4 interpretations labeled as research or experimental, especially around `MSLK.RefIndex`, `MPRL.Unk14/16`, `MPRR.Value1`, and final coordinate ownership.
 - Each PM4 slice should land with concrete validation in `wow-viewer/tests/WowViewer.Core.PM4.Tests`, `WowViewer.Tool.Inspect`, or both.
-- If a PM4 slice only proves library or build behavior, say that explicitly instead of implying viewer runtime closure.
+- If a PM4 slice only proves library or build behavior, say that explicitly instead of implying runtime closure.
 
 ## wow-viewer Shared I/O Guardrails
 - Favor narrow shared-library slices in `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO` over tool-local parsing in inspect or converter entrypoints.
+- Treat `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO` as the canonical owners for new non-PM4 format work; use `gillijimproject_refactor` as reference input only when needed.
 - Keep file detection, top-level chunk reading, and summary contracts in shared libraries once they exist; do not duplicate those heuristics across tools.
 - Be explicit about proof level: classification, top-level summary, deep payload parsing, and writing are different milestones.
 - Each shared-I/O slice should land with concrete validation in `wow-viewer/tests/WowViewer.Core.Tests`, `WowViewer.Tool.Inspect`, `WowViewer.Tool.Converter`, or an appropriate combination.

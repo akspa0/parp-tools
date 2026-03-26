@@ -2717,108 +2717,18 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention,
         bool fallbackTileLocalCoordinates)
     {
-        if (surfaces.Count == 0)
-            return fallbackTileLocalCoordinates;
-
-        IReadOnlyList<MprlEntry> scoringRefs = anchorPositionRefs.Count > 0
-            ? anchorPositionRefs
-            : pm4.PositionRefs;
-        if (scoringRefs.Count == 0)
-            return fallbackTileLocalCoordinates;
-
-        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaces);
-        if (objectVertices.Count == 0)
-            return fallbackTileLocalCoordinates;
-
-        List<Vector3> sampledObjectVertices = SampleObjectVertices(objectVertices, 192);
-        List<Vector2> referencePlanarPoints = BuildMprlPlanarPoints(scoringRefs);
-        if (sampledObjectVertices.Count == 0 || referencePlanarPoints.Count == 0)
-            return fallbackTileLocalCoordinates;
-
-        float tileLocalScore = EvaluateCoordinateModeScore(
-            pm4,
-            surfaces,
-            scoringRefs,
-            sampledObjectVertices,
-            referencePlanarPoints,
+        CorePm4CoordinateMode resolvedMode = CorePm4PlacementMath.ResolveCoordinateMode(
+            pm4.MeshVertices,
+            pm4.MeshIndices,
+            ConvertToCorePm4Surfaces(surfaces),
+            ConvertToCorePm4PositionRefs(pm4.PositionRefs),
+            anchorPositionRefs.Count > 0 ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
             tileX,
             tileY,
-            axisConvention,
-            useTileLocalCoordinates: true);
-        float worldSpaceScore = EvaluateCoordinateModeScore(
-            pm4,
-            surfaces,
-            scoringRefs,
-            sampledObjectVertices,
-            referencePlanarPoints,
-            tileX,
-            tileY,
-            axisConvention,
-            useTileLocalCoordinates: false);
+            ToCoreAxisConvention(axisConvention),
+            ToCoreCoordinateMode(fallbackTileLocalCoordinates)).CoordinateMode;
 
-        if (!float.IsFinite(tileLocalScore) && !float.IsFinite(worldSpaceScore))
-            return fallbackTileLocalCoordinates;
-        if (!float.IsFinite(tileLocalScore))
-            return false;
-        if (!float.IsFinite(worldSpaceScore))
-            return true;
-
-        const float decisiveMargin = 512f;
-        if (tileLocalScore + decisiveMargin < worldSpaceScore)
-            return true;
-        if (worldSpaceScore + decisiveMargin < tileLocalScore)
-            return false;
-
-        return fallbackTileLocalCoordinates;
-    }
-
-    private static float EvaluateCoordinateModeScore(
-        Pm4File pm4,
-        IReadOnlyList<MsurEntry> surfaces,
-        IReadOnlyList<MprlEntry> scoringRefs,
-        IReadOnlyList<Vector3> sampledObjectVertices,
-        IReadOnlyList<Vector2> referencePlanarPoints,
-        int tileX,
-        int tileY,
-        Pm4AxisConvention axisConvention,
-        bool useTileLocalCoordinates)
-    {
-        Pm4PlanarTransform transform = ResolvePlanarTransform(
-            pm4,
-            surfaces,
-            scoringRefs,
-            tileX,
-            tileY,
-            useTileLocalCoordinates,
-            axisConvention);
-
-        float footprintScore = ComputeMprlFootprintScore(
-            referencePlanarPoints,
-            sampledObjectVertices,
-            tileX,
-            tileY,
-            useTileLocalCoordinates,
-            axisConvention,
-            transform);
-
-        if (!float.IsFinite(footprintScore))
-            return float.MaxValue;
-
-        Vector3 centroid = Vector3.Zero;
-        for (int i = 0; i < sampledObjectVertices.Count; i++)
-            centroid += sampledObjectVertices[i];
-        centroid /= sampledObjectVertices.Count;
-
-        Vector3 centroidWorld = ConvertPm4VertexToWorld(
-            centroid,
-            tileX,
-            tileY,
-            useTileLocalCoordinates,
-            axisConvention,
-            transform);
-        float centroidScore = NearestPositionRefDistanceSquared(scoringRefs, centroidWorld);
-
-        return footprintScore * 0.85f + centroidScore * 0.15f;
+        return resolvedMode == CorePm4CoordinateMode.TileLocal;
     }
 
     private static List<List<Pm4IndexedSurface>> SplitSurfaceGroupByMslk(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
@@ -3403,35 +3313,6 @@ public class WorldScene : ISceneRenderer
             worldYawCorrectionRadians);
     }
 
-    private static List<Vector3> SampleObjectVertices(IReadOnlyList<Vector3> objectVertices, int maxSamples)
-    {
-        var sampled = new List<Vector3>();
-        if (objectVertices.Count == 0)
-            return sampled;
-
-        int sampleCount = Math.Min(maxSamples, objectVertices.Count);
-        int stride = Math.Max(1, objectVertices.Count / sampleCount);
-        for (int i = 0; i < objectVertices.Count; i += stride)
-            sampled.Add(objectVertices[i]);
-
-        if (sampled.Count == 0)
-            sampled.Add(objectVertices[0]);
-
-        return sampled;
-    }
-
-    private static List<Vector2> BuildMprlPlanarPoints(IReadOnlyList<MprlEntry> positionRefs)
-    {
-        var points = new List<Vector2>(positionRefs.Count);
-        for (int i = 0; i < positionRefs.Count; i++)
-        {
-            Vector3 refWorld = ConvertMprlPositionToWorld(positionRefs[i].Position);
-            points.Add(new Vector2(refWorld.X, refWorld.Y));
-        }
-
-        return points;
-    }
-
     private static Vector3 ConvertMprlPositionToWorld(Vector3 refPos)
     {
         // Older PM4 R&D exported MSVT in a fixed viewer/world basis of (Y, X, Z).
@@ -3441,52 +3322,6 @@ public class WorldScene : ISceneRenderer
         //   MPRL Y -> raw MSVT Z
         // Folding those together gives viewer/world coordinates of (X, Z, Y).
         return new Vector3(refPos.X, refPos.Z, refPos.Y);
-    }
-
-    private static float NearestDistanceSquared(IReadOnlyList<Vector2> points, in Vector2 target)
-    {
-        float best = float.MaxValue;
-        for (int i = 0; i < points.Count; i++)
-        {
-            Vector2 delta = points[i] - target;
-            float distSq = delta.LengthSquared();
-            if (distSq < best)
-                best = distSq;
-        }
-
-        return best;
-    }
-
-    private static float ComputeMprlFootprintScore(
-        IReadOnlyList<Vector2> referencePoints,
-        IReadOnlyList<Vector3> sampledVertices,
-        int tileX,
-        int tileY,
-        bool useTileLocalCoordinates,
-        Pm4AxisConvention axisConvention,
-        Pm4PlanarTransform candidate)
-    {
-        if (referencePoints.Count == 0 || sampledVertices.Count == 0)
-            return float.MaxValue;
-
-        var candidatePoints = new List<Vector2>(sampledVertices.Count);
-        for (int i = 0; i < sampledVertices.Count; i++)
-        {
-            Vector3 world = ConvertPm4VertexToWorld(sampledVertices[i], tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
-            candidatePoints.Add(new Vector2(world.X, world.Y));
-        }
-
-        float sumObjectToRef = 0f;
-        for (int i = 0; i < candidatePoints.Count; i++)
-            sumObjectToRef += NearestDistanceSquared(referencePoints, candidatePoints[i]);
-
-        float sumRefToObject = 0f;
-        for (int i = 0; i < referencePoints.Count; i++)
-            sumRefToObject += NearestDistanceSquared(candidatePoints, referencePoints[i]);
-
-        float avgObjectToRef = sumObjectToRef / Math.Max(1, candidatePoints.Count);
-        float avgRefToObject = sumRefToObject / Math.Max(1, referencePoints.Count);
-        return avgObjectToRef + avgRefToObject;
     }
 
     private static List<Pm4LineSegment> BuildCk24ObjectLines(

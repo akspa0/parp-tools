@@ -282,7 +282,8 @@ static string? GetOption(string[] args, string longName, string shortName)
 static void PrintPm4Report(Pm4AnalysisReport report)
 {
 	Console.WriteLine("WowViewer.Tool.Inspect PM4 report");
-	Console.WriteLine($"PM4 reference: {Pm4Boundary.RuntimeReference}");
+	Console.WriteLine($"PM4 canonical owner: {Pm4Boundary.CanonicalOwner}");
+	Console.WriteLine($"PM4 legacy reference: {Pm4Boundary.LegacyReference}");
 	Console.WriteLine($"Runtime boundaries: {RuntimeBoundaries.All.Length}");
 	Console.WriteLine($"Input: {report.SourcePath ?? "<memory>"}");
 	Console.WriteLine($"Version: {report.Version}");

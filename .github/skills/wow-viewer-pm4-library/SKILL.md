@@ -25,9 +25,9 @@ user-invocable: true
 
 ## Current Source Of Truth
 
-- `MdxViewer` is still the runtime PM4 reference implementation.
-- `Pm4Research` is still the library seed for `WowViewer.Core.PM4`.
-- `PM4Tool`, `parpToolbox`, and `WoWRollback.PM4Module` are supporting evidence, not the default source of truth.
+- `WowViewer.Core.PM4` is the canonical implementation target for new PM4 work.
+- `Pm4Research` is still the library seed and a major extraction input for `WowViewer.Core.PM4`.
+- `MdxViewer`, `PM4Tool`, `parpToolbox`, and `WoWRollback.PM4Module` are reference or extraction inputs, not the default source of truth.
 
 ## Procedure
 
@@ -35,7 +35,7 @@ user-invocable: true
    Decide whether the task is a reader or report slice, a placement-contract or solver slice, a test slice, or a consumer-wiring slice.
 
 2. Inspect the active library boundary first.
-   Start in `wow-viewer/src/core/WowViewer.Core.PM4`, then check `wow-viewer/tests/WowViewer.Core.PM4.Tests`, `wow-viewer/tools/inspect/WowViewer.Tool.Inspect`, and only then inspect `MdxViewer` if the slice depends on runtime behavior.
+   Start in `wow-viewer/src/core/WowViewer.Core.PM4`, then check `wow-viewer/tests/WowViewer.Core.PM4.Tests` and `wow-viewer/tools/inspect/WowViewer.Tool.Inspect`. Inspect `MdxViewer` only when you need to harvest a missing algorithm or check consumer compatibility.
 
 3. Extract the smallest reusable slice.
    Prefer small, typed contracts and single-responsibility helpers over broad viewer rewrites.
@@ -69,5 +69,6 @@ user-invocable: true
 
 - Do not claim viewer runtime PM4 signoff from `wow-viewer` builds, tests, or active-viewer compile success.
 - Do not broaden active-viewer integration when the task is library-first unless the user explicitly asks for it.
+- Do not treat `MdxViewer` behavior as authoritative just because it exists; re-home or replace the behavior in `Core.PM4` with explicit validation.
 - Do not flatten exploratory PM4 semantics into stable contracts without saying the evidence level changed.
 - Do not replace a narrow extractable seam with a broad rewrite just because the old `WorldScene` code is messy.

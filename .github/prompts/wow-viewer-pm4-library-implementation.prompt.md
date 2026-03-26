@@ -23,10 +23,11 @@ Move one more reusable PM4 capability into `wow-viewer/src/core/WowViewer.Core.P
 
 ## Current Working Rules
 
-- `MdxViewer` is still the runtime PM4 reference implementation.
+- `WowViewer.Core.PM4` is the canonical implementation target for new PM4 work.
 - `Pm4Research` is still the library seed and report backbone.
-- The default direction is library-first `wow-viewer` work, not broader active-viewer integration.
-- Shared consumer wiring into `MdxViewer` is allowed only when it is a narrow follow-up to an already extracted library seam or when the user explicitly asks for it.
+- `MdxViewer` is a reference or compatibility input, not the default owner of PM4 behavior.
+- The default direction is direct library completion in `wow-viewer`, not broader active-viewer integration.
+- Shared consumer wiring into `MdxViewer` is allowed only when it is a narrow compatibility follow-up to an already extracted library seam or when the user explicitly asks for it.
 
 ## Active Library Surface To Build On
 
@@ -40,6 +41,7 @@ Move one more reusable PM4 capability into `wow-viewer/src/core/WowViewer.Core.P
 
 - Do not turn a narrow PM4 slice into a broad `MdxViewer` rewrite.
 - Do not claim viewer runtime PM4 signoff from library builds, tests, or active-viewer compile success.
+- Do not use `MdxViewer` as the design authority when completing a `Core.PM4` seam unless the user explicitly asks for consumer parity work.
 - Keep exploratory field semantics labeled as research.
 - Prefer one concrete seam with proof over several half-validated abstractions.
 

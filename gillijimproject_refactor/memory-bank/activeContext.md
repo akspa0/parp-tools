@@ -1,5 +1,13 @@
 # Active Context
 
+## Mar 26, 2026 - wow-viewer Source-Of-Truth Reset
+
+- The current default rule for `wow-viewer` changed: new implementation work should treat `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` as the canonical owners, not `MdxViewer`.
+- `MdxViewer` is now a historical, extraction, or consumer-compatibility input for `wow-viewer` work rather than the default runtime PM4 reference.
+- Default validation for `wow-viewer` work is `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`, `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`, and the relevant inspect or converter command against the fixed development dataset.
+- Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice intentionally changes consumer compatibility or when the user explicitly asks for it.
+- Older sections below that describe `MdxViewer` as the PM4 runtime reference are now historical context, not the live rule for new `wow-viewer` implementation work.
+
 ## Mar 26, 2026 - wow-viewer PM4 Fresh-Chat Handoff
 
 - Treat the current `wow-viewer` PM4 state as library-first progress, not PM4 completion.
