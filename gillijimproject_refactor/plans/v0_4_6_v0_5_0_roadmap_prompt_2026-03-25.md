@@ -10,7 +10,7 @@ This roadmap must assume:
 
 - `v0.4.5` was the stabilization and release milestone
 - `v0.4.6` should deliver the first visible post-release feature slice without becoming a second giant rewrite
-- `v0.5.0` should carry the larger renderer / performance / fidelity expansion once the foundations for that work are in place
+- `v0.5.0` should be the clean break into `https://github.com/akspa0/wow-viewer` with a canonical shared library, split viewer/tool consumers, and the larger performance / renderer work built on top of that cleaner structure
 - the work is happening on a clean follow-on branch rather than directly on `main`
 
 ## The Roadmap Must Produce
@@ -38,17 +38,26 @@ The roadmap should treat the following as high-priority candidates:
 
 ### Strong `v0.5.0` candidates
 
-- enhanced terrain shader and lighting path
-- renderer architecture split between historical and enhanced modes
-- deeper performance work beyond the first emergency recovery slice
-- scene liveness follow-up for NPCs if the required data actually exists
-- more ambitious shader-family and lighting rollout for terrain, WMO, models, and liquids
+- new repo bootstrap in `wow-viewer` and production-oriented project layout
+- canonical shared library for terrain / map / model / WMO / placement / SQL-facing runtime contracts, replacing the current spread across first-party/internal base libraries such as `gillijimproject-csharp`, viewer runtime code, and converter code
+- viewer split so the app becomes a consumer of the shared library instead of the place where format truth accumulates
+- CLI/tool split so exporters/converters/inspection tools stop duplicating logic
+- explicit `libs/` policy for upstream externals such as `Warcraft.NET`, `DBCD`, `WoWDBDefs`, `Alpha-Core`, `WoWTools.Minimaps`, and `SereniaBLPLib`, while first-party parsing/writing/conversion logic is rebuilt into owned code
+- bootstrap policy for support repos/data such as automatic cloning of `wow-listfile`
+- deeper performance overhaul on top of the new runtime/library boundaries
+- enhanced terrain shader and lighting path only once the new repo/library foundation is defined well enough to support it
+- scene liveness follow-up for NPCs only if correctness, budgets, and runtime hooks survive the new architecture cut
+
+The roadmap may also treat `MapUpconverter`, `ADTMeta`, `wow.export`, and `wow.tools.local` as reference or secondary integration seams, but not as substitutes for the owned first-party library plan.
 
 ## Required Constraints
 
 - do not let `v0.4.6` become a shadow `v0.5.0`
 - do not let `v0.5.0` become an unbounded wishlist
 - keep WoWRollback viewer integration on the active viewer UI/data-loading path instead of reviving a separate legacy viewer stack
+- do not treat `parp-tools` itself as the long-term production repo for `v0.5.0`
+- distinguish domain logic that should become first-party code in `wow-viewer` from commodity dependencies that can remain external
+- assume existing first-party/internal parsing libraries are migration input, not permanent release architecture
 - do not assume Alpha-Core SQL alone contains enough information to solve equipment, animation, or pathing until that is verified
 - do not promise server-emulation or PM4-driven NPC navigation in `v0.4.6` unless a much smaller proven slice is identified first
 - performance recovery must be treated as a first-class dependency, not a nice-to-have after fidelity work
@@ -58,6 +67,7 @@ The roadmap should treat the following as high-priority candidates:
 Reuse these where relevant:
 
 - `plans/post_v0_4_5_plan_set_2026-03-25.md`
+- `plans/v0_5_0_new_repo_library_migration_prompt_2026-03-25.md`
 - `plans/wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
 - `plans/alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
 - `plans/viewer_performance_recovery_prompt_2026-03-25.md`

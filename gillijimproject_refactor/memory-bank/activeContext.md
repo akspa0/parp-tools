@@ -9,14 +9,23 @@
 	- `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
 	- `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
 	- `viewer_performance_recovery_prompt_2026-03-25.md`
+	- `v0_5_0_new_repo_library_migration_prompt_2026-03-25.md`
+	- `v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`
 - Current intended milestone split:
 	- `v0.4.6` should carry the first visible WoWRollback / `UniqueID` timeline filter slice inside the active viewer, plus Alpha-Core SQL caching/fidelity follow-up and an initial performance recovery pass.
-	- `v0.5.0` should carry the broader renderer/performance/fidelity expansion, including the enhanced terrain shader/lighting path and any deeper scene-liveness follow-up that survives data/profiling scrutiny.
+	- `v0.5.0` should move into `https://github.com/akspa0/wow-viewer` as the new production repo with one canonical shared library plus split viewer/tool consumers.
 - Important boundaries for future sessions:
 	- keep WoWRollback integration on the active viewer UI/data-loading path; do not drift back to the older separate web-viewer plan as the primary delivery target.
+	- treat `parp-tools` as the R&D / archaeology repo and `wow-viewer` as the intended production home for the next major milestone.
+	- external constructive guidance now explicitly supports a sane top-level `wow-viewer` layout: the main renderer app should have one obvious root, with libraries/dependencies/tools split into their own clear folders instead of repeating the current nested sprawl.
+	- latest user constraint: fully refactor and re-own the first-party read/parse/write/convert stack, including current base libraries such as `gillijimproject-csharp`; keep upstream projects like `Warcraft.NET`, `DBCD`, `WoWDBDefs`, `Alpha-Core`, `WoWTools.Minimaps`, and `SereniaBLPLib` under `libs/` and track their original repos where practical.
+	- repo bootstrap should automatically pull support repos like `wow-listfile` instead of relying on manual setup.
+	- possible targeted integrations worth evaluating later include `MapUpconverter`, `ADTMeta`, `wow.export`, and `wow.tools.local`, but they should support the owned-library plan rather than replace it.
+	- possible future upstream work on `Noggit` / `noggit-red` alpha-era support is interesting, but should stay an explicit stretch/outreach track rather than replacing the main `wow-viewer` migration target.
+	- a concrete first-pass repo tree and migration order draft now exists in `plans/v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`; future planning should refine that draft rather than re-deriving repo shape from scratch.
 	- treat Alpha-Core SQL equipment correctness, animation-state handling, and pathing as separate seams.
 	- do not assume SQL or PM4 already prove server-like NPC pathing; that remains a later research seam, not an implicit short-term deliverable.
-	- performance recovery is now a first-class dependency because richer SQL actors and enhanced shaders will otherwise make the current sluggish-world problem worse.
+	- performance recovery is now a first-class dependency, but the deeper overhaul should be planned against the new repo/library split instead of indefinite surgery inside the R&D tree.
 - Documentation follow-up on the same slice:
 	- root `README.md` was refreshed again to make the active support headline, conversion coverage, WMO `v14/v16/v17` handling, and built-in tooling more explicit.
 	- screenshot reality remains unchanged: asset-catalog screenshot automation exists already, but a curated world/UI gallery is still future work.

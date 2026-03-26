@@ -10,12 +10,19 @@
 	- `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
 	- `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
 	- `viewer_performance_recovery_prompt_2026-03-25.md`
+	- `v0_5_0_new_repo_library_migration_prompt_2026-03-25.md`
+	- `v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`
 - Updated existing planning files:
 	- `v0_5_0_goal_stack_prompt_2026-03-25.md`
 	- `enhanced_terrain_shader_lighting_prompt_2026-03-25.md`
 - Planning direction captured:
 	- `v0.4.6` is now framed as the first WoWRollback / `UniqueID` timeline integration slice inside the active viewer, plus Alpha-Core SQL caching/fidelity work and a first performance recovery pass.
-	- `v0.5.0` remains the larger renderer/performance/fidelity milestone instead of absorbing every immediate post-release request.
+	- `v0.5.0` is now reframed as the migration into `https://github.com/akspa0/wow-viewer`, with a canonical shared library plus split viewer/tool consumers, instead of just a larger in-place renderer/performance milestone inside `parp-tools`.
+	- latest constraint on that migration: fully re-own the first-party read/parse/write/convert stack, including current base libraries such as `gillijimproject-csharp`, while keeping upstream externals like `Warcraft.NET`, `DBCD`, `WoWDBDefs`, `Alpha-Core`, `WoWTools.Minimaps`, and `SereniaBLPLib` under `libs/` and tracking original repos where practical.
+	- repository bootstrap should also automate support-material pulls such as `wow-listfile`.
+	- possible alpha-era support contributions upstream to `Noggit` / `noggit-red` remain an explicit stretch/outreach track, not the core delivery target for `v0.5.0`.
+	- possible secondary integration/evaluation seams include `MapUpconverter`, `ADTMeta`, `wow.export`, and `wow.tools.local`.
+	- a first concrete `wow-viewer` repo tree plus migration order draft now exists so future planning can refine a named proposal instead of reopening the repo-shape argument each session.
 - Documentation follow-up:
 	- root `README.md` now states the documented support range more plainly (`0.5.3` through `4.0.0.11927`) and does a better job surfacing the built-in converters, WMO `v14/v16/v17` support, SQL-driven spawns, PM4 tooling, and screenshot automation reality.
 - Validation limits:

@@ -40,7 +40,16 @@ Use:
 
 Choose this when the task is reducing world-scene frame cost, scene-state churn, or renderer overhead before piling on more fidelity.
 
-### 5. Enhanced terrain shader and lighting work
+### 5. v0.5.0 new repo and canonical library migration
+
+Use:
+
+- `plans/v0_5_0_new_repo_library_migration_prompt_2026-03-25.md`
+- `plans/v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`
+
+Choose this when the task is defining the move into `https://github.com/akspa0/wow-viewer` with a shared library plus separate viewer/tool consumers.
+
+### 6. Enhanced terrain shader and lighting work
 
 Use:
 
@@ -56,9 +65,10 @@ Choose these when the task is the enhanced renderer path itself rather than broa
 Current post-`v0.4.5` planning should generally assume:
 
 - `v0.4.6` is the first delivery slice for visible WoWRollback/UniqueID timeline value inside the active viewer
-- `v0.5.0` is the broader renderer/performance/fidelity milestone
+- `v0.5.0` is the break into `wow-viewer` with a canonical shared library, split viewer/tool consumers, and the deeper performance architecture work that should not keep accreting inside `parp-tools`
 - SQL spawn fidelity, equipment correctness, and animation/pathing ideas must be kept separate from what is already proven in the current viewer
-- performance work is not optional if scene liveness and richer shader paths are going to land without turning the viewer into a worse slideshow
+- performance work is not optional, but it should now be planned in the context of the new repo/library boundary instead of as endless local surgery on the R&D tree
+- enhanced renderer/shader work should be treated as dependent on the new canonical library/runtime split unless a very small isolated experiment is explicitly called out
 
 ## Validation Rules
 

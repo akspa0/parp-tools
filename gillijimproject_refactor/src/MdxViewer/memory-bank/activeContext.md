@@ -3,17 +3,26 @@
 ## Post-v0.4.5 Viewer Roadmap Split (Mar 25)
 
 - Viewer follow-up planning is now intentionally isolated on branch `feature/v0.4.6-v0.5.0-roadmap` instead of piling the next milestone discussion directly onto `main`.
+   - latest user constraint: the future repo should fully re-own first-party read/parse/write/convert logic, including current base libraries like `gillijimproject-csharp`, instead of carrying them forward as a permanent layered mess.
+   - upstream externals such as `Warcraft.NET`, `DBCD`, `WoWDBDefs`, `Alpha-Core`, `WoWTools.Minimaps`, and `SereniaBLPLib` should stay under a `libs/` policy and track their original repos where practical.
+   - repo bootstrap should automatically pull support material such as `wow-listfile` instead of relying on manual setup.
+   - possible targeted integrations worth evaluating later include `MapUpconverter`, `ADTMeta`, `wow.export`, and `wow.tools.local`, but they should support the owned-library plan rather than replace it.
+   - possible upstream alpha-era support work for `Noggit` / `noggit-red` is interesting but should remain stretch work, not the main viewer migration target.
 - New viewer-relevant planning prompts now exist under `gillijimproject_refactor/plans/`:
    - `v0_4_6_v0_5_0_roadmap_prompt_2026-03-25.md`
    - `wowrollback_uniqueid_timeline_prompt_2026-03-25.md`
    - `alpha_core_sql_scene_liveness_prompt_2026-03-25.md`
    - `viewer_performance_recovery_prompt_2026-03-25.md`
+   - `v0_5_0_new_repo_library_migration_prompt_2026-03-25.md`
+   - `v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`
    - updated `enhanced_terrain_shader_lighting_prompt_2026-03-25.md`
 - Current intended viewer milestone split:
    - `v0.4.6` should focus on first real WoWRollback / `UniqueID` timeline filtering inside the current viewer, Alpha-Core SQL caching/fidelity follow-up, and an initial performance recovery slice.
-   - `v0.5.0` should focus on the larger renderer/performance/fidelity push, including enhanced terrain shading/lighting and any deeper scene-liveness work that survives data and profiling review.
+   - `v0.5.0` should move into `https://github.com/akspa0/wow-viewer` as the new production repo, with one canonical shared library and separate viewer/tool consumers.
 - Important boundaries:
    - use the current viewer UI and world-loading methodology; do not treat the older WoWRollback viewer concepts as the primary product target.
+   - treat `parp-tools` as the R&D repo and `wow-viewer` as the intended production home for the next major milestone.
+   - a concrete first-pass repo tree and migration order now exists in `plans/v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md`; future sessions should refine that document rather than re-arguing the basic repo shape.
    - SQL actor equipment correctness, animation-state handling, and pathing are separate seams.
    - pathing/server-like NPC motion is still speculative until real data sources are verified and the current frame-time problem is improved.
 - Validation status:
