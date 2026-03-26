@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/core/">
+    <Project Path="src/core/WowViewer.Core.IO/WowViewer.Core.IO.csproj" />
+    <Project Path="src/core/WowViewer.Core.PM4/WowViewer.Core.PM4.csproj" />
+    <Project Path="src/core/WowViewer.Core.Runtime/WowViewer.Core.Runtime.csproj" />
+    <Project Path="src/core/WowViewer.Core/WowViewer.Core.csproj" />
+  </Folder>
+  <Folder Name="/src/tools-shared/">
+    <Project Path="src/tools-shared/WowViewer.Tools.Shared/WowViewer.Tools.Shared.csproj" />
+  </Folder>
+  <Folder Name="/src/viewer/">
+    <Project Path="src/viewer/WowViewer.App/WowViewer.App.csproj" />
+  </Folder>
+  <Folder Name="/tools/" />
+  <Folder Name="/tools/converter/">
+    <Project Path="tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj" />
+  </Folder>
+  <Folder Name="/tools/inspect/">
+    <Project Path="tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj" />
+  </Folder>
+</Solution>

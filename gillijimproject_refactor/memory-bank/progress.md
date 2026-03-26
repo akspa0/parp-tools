@@ -1,5 +1,93 @@
 # Progress
 
+### Mar 25, 2026 - wow-viewer Tool Inventory And Cutover Plan
+
+- Added planning document:
+	- `plans/wow_viewer_tool_inventory_and_cutover_plan_2026-03-25.md`
+- Purpose:
+	- inventory the old repo tool sprawl and make explicit keep, merge, kill, and archaeology calls for the future `wow-viewer` repo.
+- Main decisions captured:
+	- keep one interactive app shell, one converter CLI, one inspect CLI, one optional catalog CLI, and a real PM4 library from day one instead of porting every legacy executable.
+	- merge `WoWMapConverter.Cli`, `AlphaLkToAlphaStandalone`, and the still-useful conversion seams from `WoWRollback` into one future converter surface.
+	- merge `AlphaWdtAnalyzer.Cli` and `AlphaWdtInspector`; keep `DBCTool.V2` behavior only.
+	- PM4 correction: current `MdxViewer` behavior is the runtime reference, and `Pm4Research` should be ported into the new repo as the future PM4 library family rather than left behind as a pure archaeology seam.
+	- treat `parpToolbox` and `PM4Tool` as supporting PM4 evidence rather than as production app identities.
+	- keep poorly scoped or obsolete executables such as `ADTPrefabTool`, `DBCTool`, old WoWRollback GUI or viewer surfaces, and archived WMOv14 tools in `parp-tools` only.
+	- follow-up planning docs now exist for the bootstrap layout, the CLI or GUI dual-surface design, and the PM4 library direction.
+	- migration emphasis is now `1, 3, 2`: bootstrap layout and skeleton first, dual-surface plan second, deeper PM4 consolidation third.
+- Validation limits:
+	- planning and documentation only
+	- no builds or runtime validation were run because no code changed
+
+### Mar 25, 2026 - wow-viewer Initial Skeleton Scaffolded
+
+- Created a new `wow-viewer/` folder at the workspace root with an initial solution and project graph:
+	- `WowViewer.slnx`
+	- `src/viewer/WowViewer.App`
+	- `src/core/WowViewer.Core`
+	- `src/core/WowViewer.Core.IO`
+	- `src/core/WowViewer.Core.Runtime`
+	- `src/core/WowViewer.Core.PM4`
+	- `src/tools-shared/WowViewer.Tools.Shared`
+	- `tools/converter/WowViewer.Tool.Converter`
+	- `tools/inspect/WowViewer.Tool.Inspect`
+- Added first-pass root files and bootstrap placeholders:
+	- `Directory.Build.props`
+	- `Directory.Packages.props`
+	- `eng/Version.props`
+	- `README.md`
+	- `scripts/bootstrap.ps1`
+	- `scripts/bootstrap.sh`
+	- `scripts/validate-real-data.ps1`
+- The scaffold encodes the current PM4 planning decision directly:
+	- `Core.PM4` exists immediately
+	- placeholder code names `MdxViewer` as the PM4 runtime reference and `Pm4Research` as the library seed
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- this is still only a skeleton and placeholder-code build, not a real implementation or runtime-validated migration
+
+### Mar 25, 2026 - First PM4 Reader Slice Ported Into Core.PM4
+
+- Ported the first real PM4 code from `gillijimproject_refactor/src/Pm4Research.Core` into `wow-viewer/src/core/WowViewer.Core.PM4`.
+- Added:
+	- typed PM4 chunk models
+	- research document container
+	- binary PM4 reader
+	- exploration snapshot builder
+- Scope boundary:
+	- this is a raw research-facing PM4 layer only
+	- it does not yet move current `MdxViewer` reconstruction, grouping, transform, or correlation behavior into `Core.PM4`
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 after the port
+	- no runtime validation or viewer integration was performed in this slice
+
+### Mar 25, 2026 - Single-File PM4 Analyzer And Inspect Verbs Landed
+
+- Extended `wow-viewer/src/core/WowViewer.Core.PM4` with the first single-file PM4 analyzer or report layer.
+- Added working Tool.Inspect PM4 verbs:
+	- `pm4 inspect`
+	- `pm4 export-json`
+- Smoke-tested against the fixed development reference tile `development_00_00.pm4`.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 25, 2026
+	- this is still single-file research analysis only, not viewer integration or broad PM4 signoff
+
+### Mar 25, 2026 - PM4 Audit Path And Placement Contracts Landed
+
+- Extended `wow-viewer/src/core/WowViewer.Core.PM4` with:
+	- decode audit and corpus-audit report models plus analyzer
+	- first extracted MdxViewer-facing placement contracts: `Pm4AxisConvention`, `Pm4CoordinateMode`, `Pm4PlanarTransform`, `Pm4CoordinateService`, and `Pm4PlacementContract`
+- Added new working Tool.Inspect PM4 verbs:
+	- `pm4 audit`
+	- `pm4 audit-directory`
+- Captured the current research note that CK24 low-16 object values may align with expected `UniqueID` ranges on the development map, but this remains a hypothesis until correlated against real placement data.
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 audit --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 audit-directory --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026 and scanned `616` PM4 files with no unknown chunks or file-level diagnostics
+	- this is still not the full viewer reconstruction or solver migration
+
 ### Mar 25, 2026 - Post-v0.4.5 Roadmap Prompt Bundle + Isolated Branch
 
 - Detailed Copilot prompt assets for the larger `wow-viewer` tool-suite/library refactor now live under workspace `.github/prompts/` instead of `gillijimproject_refactor/plans`, because this work is prompt-surface/workflow material rather than just another local markdown note set.

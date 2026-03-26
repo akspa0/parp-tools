@@ -1,5 +1,99 @@
 # Active Context
 
+## Mar 25, 2026 - wow-viewer Tool Inventory And Cutover Plan
+
+- Added a concrete inventory and cutover document at `plans/wow_viewer_tool_inventory_and_cutover_plan_2026-03-25.md`.
+- New planning decisions captured there:
+	- first-class survivors are the main viewer shell, one converter CLI, one inspect CLI, one optional catalog CLI, and a real PM4 library plus workspace from day one.
+	- do not port duplicate legacy executables as permanent apps; merge WoWMapConverter with still-useful WoWRollback or AlphaLkToAlpha conversion seams, merge the Alpha WDT inspectors, and keep DBCTool.V2 behavior only.
+	- PM4 correction: current `MdxViewer` behavior is the de facto PM4 runtime reference implementation, and `Pm4Research` should be ported as the future `Core.PM4` library family because PM4 semantics are still under active research.
+	- keep parpToolbox, PM4Tool, ADTPrefabTool, and the legacy WoWRollback GUI or viewer surfaces in `parp-tools` as archaeology or reference unless a specific algorithm is deliberately re-homed.
+	- immediate follow-up planning docs now exist for bootstrap layout, CLI or GUI surfaces, and the PM4 library direction:
+		- `plans/wow_viewer_bootstrap_layout_plan_2026-03-25.md`
+		- `plans/wow_viewer_cli_gui_surface_plan_2026-03-25.md`
+		- `plans/wow_viewer_pm4_library_plan_2026-03-25.md`
+	- migration emphasis is now effectively `1, 3, 2`: bootstrap layout and project skeleton, then dual-surface tool design, then deeper PM4 library consolidation work.
+- This plan refines `plans/v0_5_0_wow_viewer_bootstrap_and_migration_draft_2026-03-25.md` rather than replacing it.
+- Validation status:
+	- planning and documentation only
+	- no viewer, converter, or renderer code changed in this slice
+
+## Mar 25, 2026 - wow-viewer Initial Skeleton Created In Workspace
+
+- A first-pass `wow-viewer/` scaffold now exists directly under the workspace root.
+- Created projects:
+	- `src/viewer/WowViewer.App`
+	- `src/core/WowViewer.Core`
+	- `src/core/WowViewer.Core.IO`
+	- `src/core/WowViewer.Core.Runtime`
+	- `src/core/WowViewer.Core.PM4`
+	- `src/tools-shared/WowViewer.Tools.Shared`
+	- `tools/converter/WowViewer.Tool.Converter`
+	- `tools/inspect/WowViewer.Tool.Inspect`
+- Added first-pass repo files:
+	- `WowViewer.slnx`
+	- `Directory.Build.props`
+	- `Directory.Packages.props`
+	- `eng/Version.props`
+	- `scripts/bootstrap.ps1`
+	- `scripts/bootstrap.sh`
+	- `scripts/validate-real-data.ps1`
+- PM4-specific rule carried into the scaffold:
+	- `Core.PM4` exists from day one
+	- the placeholder code explicitly treats `MdxViewer` as the PM4 runtime reference and `Pm4Research` as the PM4 library seed
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- this is only a structure lock and placeholder-code build, not a real code-port or runtime signoff
+
+## Mar 25, 2026 - First PM4 Code-Port Slice Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first real PM4 code port from `src/Pm4Research.Core`.
+- Landed pieces:
+	- typed chunk models for the trusted PM4 chunk set
+	- `Pm4ResearchDocument`
+	- `Pm4ResearchReader`
+	- `Pm4ResearchSnapshotBuilder`
+- Important boundary:
+	- this is still a raw research-facing PM4 reader layer
+	- current `MdxViewer` behavior remains the runtime PM4 reference implementation for reconstruction, grouping, transforms, and viewer-facing semantics
+	- no viewer PM4 logic has been re-homed onto `Core.PM4` yet
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 after the PM4 port
+	- no runtime validation or app integration has happened yet
+
+## Mar 25, 2026 - PM4 Inspect Verbs Now Work In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first single-file PM4 analyzer and report layer on top of the earlier reader port.
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect` now has working PM4 commands:
+	- `pm4 inspect --input <file.pm4>`
+	- `pm4 export-json --input <file.pm4> [--output <report.json>]`
+- Smoke-test result on the fixed reference tile:
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` succeeded
+	- output included version `12304`, `54` chunks, `6318` `MSVT` vertices, `9990` `MSCN` points, and `2493` `MPRL` refs for `development_00_00.pm4`
+- Important boundary:
+	- this is still single-file research analysis, not viewer reconstruction or PM4 correctness closure
+	- current `MdxViewer` behavior remains the runtime PM4 reference implementation
+
+## Mar 25, 2026 - PM4 Audit And Placement Contracts Follow-Up
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first decode-audit path plus the first extracted MdxViewer-facing PM4 placement-contract seam.
+- Landed pieces:
+	- `Pm4ResearchAuditAnalyzer` with single-file and directory-level decode or corpus audit entry points
+	- `WowViewer.Tool.Inspect` verbs for `pm4 audit --input <file.pm4>` and `pm4 audit-directory --input <directory>`
+	- shared `Pm4AxisConvention`, `Pm4CoordinateMode`, `Pm4PlanarTransform`, `Pm4CoordinateService`, and `Pm4PlacementContract`
+- New research note captured in the inspect layer:
+	- CK24 low-16 object values, read as integers, appear to be plausible `UniqueID` candidates on the development map, but this remains a hypothesis until correlated against real placed-object data
+- Important boundary:
+	- this is still not the full MdxViewer PM4 reconstruction or transform solver port
+	- current `MdxViewer` behavior remains the runtime reference implementation
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 after this slice
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 audit --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 audit-directory --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026 and scanned `616` PM4 files with no unknown chunks or diagnostics
+	- early audit findings worth keeping visible:
+		- `MDOS.buildingIndex->MDBH` shows real invalid references in the development corpus
+		- `MSLK.RefIndex->MSUR` also shows corpus-level mismatches in nontrivial counts, which supports keeping linkage interpretation labeled as research
+
 ## Mar 25, 2026 - Post-v0.4.5 Branch And Roadmap Prompt Bundle
 
 - Post-release planning is now intentionally split onto branch `feature/v0.4.6-v0.5.0-roadmap` so the next milestone work can stay isolated from `main` until the first real slices are ready.

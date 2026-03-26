@@ -1,5 +1,70 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Tool Cutover Planning For wow-viewer (Mar 25)
+
+- Added `plans/wow_viewer_tool_inventory_and_cutover_plan_2026-03-25.md` to make the viewer-tool cutover explicit instead of leaving it as implied bootstrap guidance.
+- Viewer-side implications captured there:
+   - `MdxViewer` remains the winning interactive surface and should become `WowViewer.App`; older WoWRollback GUI or viewer shells should not be ported as parallel apps.
+   - current viewer panels should mostly survive as panels or workflows, but the modal converter utilities should be rebuilt as thin clients over shared converter services rather than keeping viewer-owned business logic.
+   - PM4 correction: current `MdxViewer` PM4 behavior is now explicitly treated as the runtime reference implementation for the future repo.
+   - `Pm4Research` should be ported into the new repo as `Core.PM4`, while the viewer PM4 workspace becomes a consumer of that library rather than continuing to own PM4 behavior internally.
+   - the surviving core viewer panels are the shell itself, Navigator, Inspector, Minimap, runtime inspection tools, and the PM4 workspace.
+   - diagnostics windows should likely merge into cleaner docked surfaces instead of surviving as many one-off windows.
+- Migration order now favored for the new repo:
+   1. shared `Core.IO` plus `Core.PM4` and `Tool.Converter`
+   2. the new viewer shell and core panels
+   3. `Tool.Inspect` plus PM4 inspect verbs
+   4. deeper PM4 consolidation and research promotion work
+- Additional planning docs now exist for this follow-up:
+   - `plans/wow_viewer_bootstrap_layout_plan_2026-03-25.md`
+   - `plans/wow_viewer_cli_gui_surface_plan_2026-03-25.md`
+   - `plans/wow_viewer_pm4_library_plan_2026-03-25.md`
+- Validation status:
+   - planning and documentation only
+   - no active viewer code changed in this slice
+
+## wow-viewer Skeleton Follow-Up (Mar 25)
+
+- A first-pass `wow-viewer/` scaffold now exists at the workspace root.
+- Viewer-relevant consequence:
+   - `WowViewer.App` and `WowViewer.Core.PM4` are now real project identities, not only planning names.
+   - the placeholder `Core.PM4` code already encodes the planning rule that current `MdxViewer` behavior is the PM4 runtime reference and `Pm4Research` is the library seed.
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+   - no active viewer code was ported yet; this is scaffold-only validation
+
+## PM4 Library Follow-Up (Mar 25)
+
+- The first PM4 code-port slice now exists in `wow-viewer/src/core/WowViewer.Core.PM4`.
+- Current rule remains unchanged:
+   - `MdxViewer` is still the runtime reference implementation for PM4 reconstruction behavior.
+   - the new `Core.PM4` port is currently a raw research-facing reader layer seeded from `Pm4Research.Core`.
+- Ported pieces so far:
+   - typed chunk models
+   - research document container
+   - binary reader
+   - exploration snapshot builder
+- Validation status:
+   - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 after this PM4 slice
+   - no active viewer PM4 code has been moved yet
+
+## PM4 Inspect Follow-Up (Mar 25)
+
+- The new `wow-viewer` repo now has working single-file PM4 inspect verbs on top of `Core.PM4`.
+- This is useful for the viewer migration because the new repo can now inspect PM4 through shared library code without depending on `Pm4Research.Cli` directly.
+- Important boundary remains unchanged:
+   - current `MdxViewer` runtime reconstruction behavior is still the reference implementation for viewer-facing PM4 semantics.
+   - the new inspect verbs are research analysis, not a replacement for current viewer reconstruction logic.
+
+## PM4 Audit And Placement-Contract Follow-Up (Mar 25)
+
+- The new `wow-viewer` repo now also has a first decode-audit path and a first extracted viewer-facing PM4 placement-contract seam.
+- Viewer-relevant consequence:
+   - `Core.PM4` now exposes the runtime PM4 contract types already used implicitly in `WorldScene`: `Pm4AxisConvention`, `Pm4CoordinateMode`, `Pm4PlanarTransform`, and the current planar candidate set via `Pm4PlacementContract`.
+   - this is still only the first seam extraction; the active solver and reconstruction behavior still live in `WorldScene`.
+   - the inspect/report layer now preserves the current research note that CK24 low-16 object values may be plausible `UniqueID` candidates, but that remains unverified until correlated against real placed-object data.
+   - new audit commands already surfaced real `MDOS.buildingIndex->MDBH` invalid references and `MSLK.RefIndex->MSUR` mismatches in the development corpus, which is more evidence that viewer-facing linkage semantics should stay explicitly research-labeled until the solver port is backed by correlation data.
+
 ## Post-v0.4.5 Viewer Roadmap Split (Mar 25)
 
 - Viewer follow-up planning is now intentionally isolated on branch `feature/v0.4.6-v0.5.0-roadmap` instead of piling the next milestone discussion directly onto `main`.
