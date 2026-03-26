@@ -2,6 +2,14 @@
 
 ### Mar 25, 2026 - Post-v0.4.5 Roadmap Prompt Bundle + Isolated Branch
 
+- Detailed Copilot prompt assets for the larger `wow-viewer` tool-suite/library refactor now live under workspace `.github/prompts/` instead of `gillijimproject_refactor/plans`, because this work is prompt-surface/workflow material rather than just another local markdown note set.
+- Added dedicated workspace prompt files:
+	- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-bootstrap-layout-plan.prompt.md`
+	- `.github/prompts/wow-viewer-shared-io-library-plan.prompt.md`
+	- `.github/prompts/wow-viewer-tool-inventory-cutover-plan.prompt.md`
+	- `.github/prompts/wow-viewer-cli-gui-surface-plan.prompt.md`
+	- `.github/prompts/wow-viewer-tool-migration-sequence-plan.prompt.md`
 - Created a dedicated follow-on branch for next-version work:
 	- `feature/v0.4.6-v0.5.0-roadmap`
 - Added new planning prompt files under `plans/`:

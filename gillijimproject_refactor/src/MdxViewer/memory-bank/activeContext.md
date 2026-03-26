@@ -3,6 +3,8 @@
 ## Post-v0.4.5 Viewer Roadmap Split (Mar 25)
 
 - Viewer follow-up planning is now intentionally isolated on branch `feature/v0.4.6-v0.5.0-roadmap` instead of piling the next milestone discussion directly onto `main`.
+   - detailed Copilot prompt assets for the `wow-viewer` tool-suite/library refactor now live under workspace `.github/prompts/`, not under `gillijimproject_refactor/plans`.
+   - use `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md` to route future planning chats to the right detailed prompt.
    - latest user constraint: the future repo should fully re-own first-party read/parse/write/convert logic, including current base libraries like `gillijimproject-csharp`, instead of carrying them forward as a permanent layered mess.
    - upstream externals such as `Warcraft.NET`, `DBCD`, `WoWDBDefs`, `Alpha-Core`, `WoWTools.Minimaps`, and `SereniaBLPLib` should stay under a `libs/` policy and track their original repos where practical.
    - repo bootstrap should automatically pull support material such as `wow-listfile` instead of relying on manual setup.
