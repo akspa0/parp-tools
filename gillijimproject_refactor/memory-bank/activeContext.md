@@ -1,5 +1,26 @@
 # Active Context
 
+## Mar 26, 2026 - wow-viewer PM4 Fresh-Chat Handoff
+
+- Treat the current `wow-viewer` PM4 state as library-first progress, not PM4 completion.
+- What is real in `wow-viewer/src/core/WowViewer.Core.PM4` now:
+	- research-seeded PM4 reader and inspect surface
+	- working `pm4 inspect`, `pm4 audit`, `pm4 audit-directory`, `pm4 linkage`, `pm4 mscn`, `pm4 unknowns`, and `pm4 export-json`
+	- shared placement-contract and placement-math slices for axis detection, planar-transform resolution, world-yaw correction, world-space centroid, pivot rotation, corrected world-position conversion, typed placement solutions, and typed coordinate-mode resolution
+	- first narrow active-viewer consumer hookups for `ResolvePlanarTransform(...)`, `TryComputeWorldYawCorrectionRadians(...)`, and `ComputeSurfaceWorldCentroid(...)`
+- Current verified validation floor:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `18` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `11` placement-focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `32` total tests
+- Boundaries that still matter:
+	- `MdxViewer` remains the runtime PM4 reference implementation
+	- shared-library and compile validation are not viewer runtime signoff
+	- final semantics are still open around `MSLK.RefIndex`, `MPRL.Unk14/16`, `MPRR.Value1`, and full coordinate ownership
+	- renderer-space conversion, broader object-group transforms, and final viewer object composition still remain outside `Core.PM4`
+- Best next PM4 slice for a fresh chat:
+	- hook the already-landed typed coordinate-mode resolver into the active `WorldScene` call site through the same narrow adapter pattern already used for planar-transform, yaw-correction, and centroid seams
+	- keep that slice explicit about proof level: consumer hookup and regression preservation, not runtime PM4 closure
+
 ## Mar 25, 2026 - wow-viewer Tool Inventory And Cutover Plan
 
 - Added a concrete inventory and cutover document at `plans/wow_viewer_tool_inventory_and_cutover_plan_2026-03-25.md`.
@@ -93,6 +114,258 @@
 	- early audit findings worth keeping visible:
 		- `MDOS.buildingIndex->MDBH` shows real invalid references in the development corpus
 		- `MSLK.RefIndex->MSUR` also shows corpus-level mismatches in nontrivial counts, which supports keeping linkage interpretation labeled as research
+
+## Mar 25, 2026 - First wow-viewer PM4 Tests Landed
+
+- `wow-viewer/tests/WowViewer.Core.PM4.Tests` now exists as the first real-data test project in the new repo.
+- Current test coverage locks:
+	- reader counts for `development_00_00.pm4`
+	- current single-file analyzer summary and the `UniqueID` research note
+	- current single-file decode-audit findings for `development_00_00.pm4`
+	- current corpus-audit shape for `test_data/development/World/Maps/development`
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 with `6` passing tests
+	- this is still fixed-dataset regression coverage only, not broad PM4 correctness closure
+
+## Mar 25, 2026 - PM4 Linkage Slice And Placement-Math Helper Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first linkage-report family ported from `Pm4Research.Core`.
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect` now supports `pm4 linkage --input <directory> [--output <report.json>]`.
+- Validated corpus result on the fixed development PM4 directory:
+	- `616` files scanned
+	- `150` files with ref-index mismatches
+	- `58` files with bad `MDOS` refs
+	- `4553` total ref-index mismatches
+	- only `2` low16 object-id groups reused across multiple full CK24 values in this corpus slice
+- Important interpretation boundary:
+	- low16 CK24 object values may still align with expected `UniqueID` ranges, but the linkage report shows that range alignment alone is not enough to treat them as globally unique identifiers by themselves.
+- First actual `WorldScene` helper port also landed in `Core.PM4`:
+	- `Pm4PlacementMath.DetectAxisConventionByRanges`
+	- `Pm4PlacementMath.IsLikelyTileLocal`
+	- `Pm4PlacementMath.ConvertPm4VertexToWorld`
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 linkage --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 with `7` tests
+
+## Mar 25, 2026 - PM4 MSCN Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first MSCN relationship analyzer ported from `Pm4Research.Core`.
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect` now supports `pm4 mscn --input <directory> [--output <report.json>]`.
+- Validated corpus result on the fixed development PM4 directory:
+	- `616` files scanned
+	- `309` files with MSCN
+	- `1,342,410` total MSCN points
+	- `MSUR.MdosIndex -> MSCN`: `511,891` fits and `6,201` misses
+	- raw MSCN bounds overlap against mesh-backed CK24 groups: `1,162` fits and `724` misses
+	- swapped-XY MSCN bounds overlap against mesh-backed CK24 groups: only `10` fits and `1,876` misses
+- Important interpretation boundary:
+	- this slice weakens the simple XY-swapped MSCN companion-space hypothesis for the fixed development corpus
+	- it still does not make MSCN authoritative for final viewer reconstruction by itself
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 mscn --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 with `7` tests
+
+## Mar 26, 2026 - PM4 Unknowns Slice And Normal-Based Axis Scoring Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first unknowns-report family ported from `Pm4Research.Core` plus the next extracted `WorldScene` solver seam for normal-based axis scoring.
+- Landed pieces:
+	- `Pm4ResearchUnknownsAnalyzer`
+	- unknowns report records for relationship summaries, link-id patterns, MSPI interpretation, field distributions, and explicit open-question findings
+	- `WowViewer.Tool.Inspect` verb `pm4 unknowns --input <directory> [--output <report.json>]`
+	- `Pm4PlacementMath.DetectAxisConventionByTriangleNormals`
+	- `Pm4PlacementMath.DetectAxisConventionBySurfaceNormals`
+	- normal-based axis scoring helpers on triangles and surfaces
+- Validated corpus result on the fixed development PM4 directory:
+	- `616` files scanned
+	- `309` non-empty geometry or link files
+	- `1,273,335` `MSLK.LinkId` values, all currently fitting the sentinel-tile pattern in this corpus
+	- `598,882` active `MSLK` path windows with `399,183` indices-only fits and `199,699` dual-fit windows
+	- `MSLK.RefIndex -> MSUR` still partial with `1,268,782` fits and `4,553` misses
+	- `MPRR.Value1` remains mixed-domain with partial fits against both `MPRL` and `MSVT`
+- Important interpretation boundary:
+	- this strengthens the decode-evidence base, but it still does not close the final semantics of `MSLK.RefIndex`, `MPRL.Unk14/16`, `MPRR`, or PM4 coordinate ownership.
+	- normal-based axis scoring is now reusable in `Core.PM4`, but the full viewer reconstruction and transform solver still live in current `WorldScene`.
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 unknowns --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 26, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `8` tests
+
+## Mar 26, 2026 - PM4 Planar-Transform Resolver Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the next extracted `WorldScene` PM4 solver seam: planar-transform resolution against MPRL anchors.
+- Landed pieces:
+	- `Pm4PlacementMath.ResolvePlanarTransform`
+	- MPRL centroid-distance scoring against planar candidates
+	- MPRL footprint scoring for multi-anchor groups
+	- MPRL heading/yaw comparison with quarter-turn fallback
+	- reusable helpers for MPRL planar-point conversion and principal-yaw estimation
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `9` tests
+	- current measured development-tile result for the whole-tile test slice: tile-local `XYPlaneZUp` resolves to planar transform `(swap=false, invertU=false, invertV=false)`
+	- synthetic world-space regression case now also locks a quarter-turn candidate selection `(swap=true, invertU=true, invertV=false)`
+- Important boundary:
+	- this still does not port the full PM4 object-level placement pipeline or viewer yaw-correction layer.
+	- active `WorldScene` remains the runtime reference implementation for full PM4 reconstruction behavior.
+
+## Mar 26, 2026 - PM4 World-Yaw Correction Slice And First Viewer Consumer Wiring
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the next extracted `WorldScene` solver seam: world-yaw correction against MPRL heading evidence.
+- Landed pieces:
+	- `Pm4PlacementMath.TryComputeWorldYawCorrectionRadians`
+	- signed basis fallback against expected MPRL yaw
+	- synthetic regression coverage for a meaningful non-zero yaw correction case
+- Active viewer integration follow-up also landed:
+	- `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` now references `wow-viewer/src/core/WowViewer.Core.PM4`
+	- `WorldScene.ResolvePlanarTransform(...)` now delegates to shared `Core.PM4` through a narrow adapter path
+	- `WorldScene.TryComputeWorldYawCorrectionRadians(...)` now delegates to shared `Core.PM4` through the same adapter path
+- Important boundary:
+	- this is still a narrow consumer slice; `WorldScene` continues to own the broader PM4 placement/render path.
+	- no runtime signoff has happened yet on viewer-visible PM4 behavior after the shared-library hookup.
+
+## Mar 26, 2026 - PM4 World-Space Centroid Slice And Second Viewer Consumer Hookup
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the next extracted `WorldScene` solver seam above world-yaw correction: world-space surface centroid computation.
+- Landed pieces:
+	- `Pm4PlacementMath.ComputeSurfaceWorldCentroid(...)`
+	- synthetic tile-local regression coverage for the shared centroid helper
+	- `WorldScene.ComputeSurfaceWorldCentroid(...)` now delegates to shared `Core.PM4` through the existing adapter path
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `11` tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `4` placement-focused tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-centroid-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this moves the shared world-space pivot helper only; renderer-space centroid handling and the broader PM4 object placement path still remain in `WorldScene`
+	- no real-data runtime signoff yet on viewer-visible PM4 behavior after this additional shared-solver hookup
+
+## Mar 26, 2026 - First Non-PM4 Shared Map Reader Slice Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core` now contains the first shared non-PM4 map-format constants and summary contracts:
+	- `MapChunkIds`
+	- `MapFileKind`
+	- `MapChunkLocation`
+	- `MapFileSummary`
+- `wow-viewer/src/core/WowViewer.Core.IO` now contains the first reusable WDT or ADT top-level reader layer:
+	- `ChunkedFileReader`
+	- `MapFileSummaryReader`
+- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect` now has the first non-PM4 shared-I/O consumer verb:
+	- `map inspect --input <file.wdt|file.adt>`
+- Fixed-dataset scope for this slice:
+	- `development.wdt`
+	- `development_0_0.adt`
+- Important boundary:
+	- this is only top-level chunk order, version, and file-kind summarization for WDT or ADT-family files
+	- it is not yet a full ADT or WDT semantic parser, writer, or runtime cutover
+
+## Mar 26, 2026 - First Shared Cross-Family File Detector Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core` now contains the first cross-family file-detection contracts:
+	- `WowFileKind`
+	- `WowFileDetection`
+- `wow-viewer/src/core/WowViewer.Core.IO` now contains the first shared cross-family detector:
+	- `WowFileDetector`
+- `MapFileSummaryReader` now routes WDT or ADT-family classification through that shared detector instead of owning its own kind heuristics.
+- `wow-viewer/tools/converter/WowViewer.Tool.Converter` now has the first non-placeholder non-PM4 command:
+	- `detect --input <file>`
+- Fixed-dataset smoke coverage for this slice:
+	- `development.wdt` -> `Wdt`
+	- `development_00_00.pm4` -> `Pm4`
+	- `development_0_0_tex0.adt` -> `AdtTex`
+	- `development_0_0_obj0.adt` -> `AdtObj`
+- Important boundary:
+	- this is classification and version detection only
+	- it is not yet a shared read or write implementation for WMO, M2, BLP, DBC, or DB2 payload semantics
+
+## Mar 26, 2026 - PM4 World-Space Yaw Helper Slice Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the next library-only PM4 math slice adjacent to the earlier yaw solver and centroid helper.
+- Landed pieces:
+	- shared `Pm4PlacementMath.RotateWorldAroundPivot(...)`
+	- shared `Pm4PlacementMath.ConvertPm4VertexToWorld(...)` overload that can apply yaw correction around a world pivot without any renderer-space dependency
+	- synthetic regression coverage for pivot rotation and corrected world-position conversion
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `6` placement-focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `13` tests
+- Important boundary:
+	- this is a `wow-viewer` library slice only; no new `MdxViewer` consumer hookup was added in this step
+	- renderer-space conversion and object-transform composition still remain outside `Core.PM4`
+
+## Mar 26, 2026 - PM4 Placement-Solution Contract Slice Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first typed placement-result contract that bundles the current library-owned PM4 placement decision into one object.
+- Landed pieces:
+	- `Pm4PlacementSolution`
+	- `Pm4PlacementMath.ResolvePlacementSolution(...)`
+	- `Pm4PlacementMath.ConvertPm4VertexToWorld(Vector3, Pm4PlacementSolution)`
+	- synthetic end-to-end regression coverage for world-space transform, pivot, and yaw-correction resolution
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `8` placement-focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `15` tests
+- Important boundary:
+	- this is still a `wow-viewer` library slice only; no new active-viewer consumer wiring was added here
+	- object-group transforms, renderer-space conversion, and final viewer object composition still remain outside `Core.PM4`
+
+## Mar 26, 2026 - wow-viewer Copilot Workflow Surface Updated
+
+- The shared Copilot workflow surface now explicitly treats `wow-viewer` as a primary active path alongside `gillijimproject_refactor`.
+- New shared continuation assets now live under `.github/`:
+	- `.github/skills/wow-viewer-pm4-library/SKILL.md`
+	- `.github/skills/wow-viewer-migration-continuation/SKILL.md`
+	- `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`
+- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md` now routes implementation-sized PM4 library asks to the dedicated PM4 library prompt instead of only the broader repo-planning prompts.
+- Future-session workflow rule:
+	- use the PM4 library prompt or skill when the ask is the next `Core.PM4` slice, inspect verb, regression update, or narrow shared-solver extraction
+	- use the broader tool-suite prompt set only when the ask is repo-shape, tool inventory, CLI or GUI parity, or migration sequencing
+- Important boundary:
+	- this workflow update does not change runtime PM4 validation status
+	- `wow-viewer` test or build passes are still library validation, not active-viewer runtime signoff
+
+## Mar 26, 2026 - wow-viewer Shared I/O Copilot Workflow Surface Updated
+
+- The shared Copilot workflow surface now has an explicit non-PM4 implementation path in addition to the earlier PM4-only route.
+- New shared continuation assets now live under `.github/`:
+	- `.github/skills/wow-viewer-shared-io-library/SKILL.md`
+	- `.github/prompts/wow-viewer-shared-io-implementation.prompt.md`
+- `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md` now records the current shared `Core` or `Core.IO` source-of-truth, landed slices, validation surface, and immediate next seams.
+- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md` now routes implementation-sized non-PM4 shared-format work to the dedicated shared-I/O implementation prompt instead of only the broader shared-I/O planning prompt.
+- `.github/copilot-instructions.md` now explicitly covers `wow-viewer` shared I/O guardrails and first reads, so new chats can distinguish PM4, shared-I/O implementation, and broader migration planning earlier.
+- Future-session workflow rule:
+	- use the PM4 library prompt or skill when the ask is the next `Core.PM4` slice
+	- use the shared-I/O implementation prompt or skill when the ask is the next `Core` or `Core.IO` non-PM4 format slice
+	- use the broader tool-suite prompt set only when the ask is repo-shape, ownership planning, or migration sequencing
+	- whenever a new `wow-viewer` skill or implementation prompt is created, update `.github/copilot-instructions.md` and `wow-viewer/README.md` in the same slice so discovery stays automatic in future chats
+
+## Mar 26, 2026 - PM4 Coordinate-Mode Resolver Slice Landed In wow-viewer
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now contains the next library-only PM4 solver seam adjacent to the earlier placement-solution work: typed coordinate-mode resolution.
+- Landed pieces:
+	- `Pm4CoordinateModeResolution`
+	- `Pm4PlacementMath.ResolveCoordinateMode(...)`
+	- internal coordinate-mode score evaluation that reuses the shared planar-transform resolver, footprint score, and centroid score helpers instead of leaving the tile-local versus world-space decision loop only in `WorldScene`
+	- regression coverage for the fixed development tile, a synthetic world-space case, and the missing-evidence fallback path
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `11` placement-focused tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `18` tests
+- Important boundary:
+	- this is still a `wow-viewer` library slice only; no new active-viewer consumer wiring was added here
+	- the active viewer still owns the current coordinate-mode call site until a later narrow consumer slice explicitly re-homes it
+
+## Mar 26, 2026 - wow-viewer Bootstrap And Non-PM4 Core Follow-Up
+
+- The current concern about `wow-viewer` drifting into PM4-only work was valid.
+- Verified repo state before correction:
+	- `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime` were still mostly placeholders
+	- `libs/` was empty
+	- `scripts/bootstrap.ps1` and `scripts/bootstrap.sh` were literal placeholders
+- Corrective slice now landed:
+	- `wow-viewer/scripts/bootstrap.ps1` and `wow-viewer/scripts/bootstrap.sh` now clone the baseline upstream repos called out in the migration draft
+	- `wow-viewer/src/core/WowViewer.Core` now contains first non-PM4 chunk primitives: `FourCC` and `ChunkHeader`
+	- `wow-viewer/src/core/WowViewer.Core.IO` now contains `ChunkHeaderReader`
+	- `wow-viewer/tests/WowViewer.Core.Tests` now locks the FourCC and chunk-header boundary behavior
+- Important boundary:
+	- this only starts the non-PM4 shared-core path; it does not mean the broader map, object, terrain, WMO, model, texture, or runtime library families are migrated yet
+	- the next corrective slices should target shared I/O ownership, not just more PM4 seams
 
 ## Mar 25, 2026 - Post-v0.4.5 Branch And Roadmap Prompt Bundle
 

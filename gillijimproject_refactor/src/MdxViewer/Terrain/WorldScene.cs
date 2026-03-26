@@ -10,6 +10,12 @@ using MdxViewer.Rendering;
 using Pm4Research.Core;
 using Silk.NET.OpenGL;
 using WoWMapConverter.Core.Formats.PM4;
+using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
+using CorePm4CoordinateMode = WowViewer.Core.PM4.Models.Pm4CoordinateMode;
+using CorePm4MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
+using CorePm4MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
+using CorePm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
+using CorePm4PlacementMath = WowViewer.Core.PM4.Services.Pm4PlacementMath;
 
 namespace MdxViewer.Terrain;
 
@@ -3333,31 +3339,17 @@ public class WorldScene : ISceneRenderer
         Pm4PlanarTransform planarTransform,
         out float yawCorrectionRadians)
     {
-        yawCorrectionRadians = 0f;
-        if (surfaces.Count == 0 || scoringRefs.Count < 2)
-            return false;
-
-        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaces);
-        if (objectVertices.Count < 3)
-            return false;
-
-        if (!TryComputeExpectedMprlYawRadians(scoringRefs, out float expectedYaw))
-            return false;
-
-        if (!TryComputePlanarPrincipalYaw(objectVertices, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, out float candidateYaw))
-            return false;
-
-        float delta = ComputeBestSignedYawDeltaWithBasisFallback(candidateYaw, expectedYaw);
-
-        // The principal-axis solve is reliable for coarse basis recovery, but it is too noisy to
-        // drive small final yaw tweaks. Let MPRL remain authoritative unless the residual error is
-        // clearly larger than the "almost right" 5-10 degree band seen in runtime PM4 alignment.
-        const float minimumMeaningfulYawCorrectionRadians = 12f * MathF.PI / 180f;
-        if (MathF.Abs(delta) < minimumMeaningfulYawCorrectionRadians)
-            return false;
-
-        yawCorrectionRadians = delta;
-        return true;
+        return CorePm4PlacementMath.TryComputeWorldYawCorrectionRadians(
+            pm4.MeshVertices,
+            pm4.MeshIndices,
+            ConvertToCorePm4Surfaces(surfaces),
+            ConvertToCorePm4PositionRefs(scoringRefs),
+            tileX,
+            tileY,
+            ToCoreCoordinateMode(useTileLocalCoordinates),
+            ToCoreAxisConvention(axisConvention),
+            ToCorePlanarTransform(planarTransform),
+            out yawCorrectionRadians);
     }
 
     private static Vector3 ComputeSurfaceWorldCentroid(
@@ -3369,16 +3361,15 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention,
         Pm4PlanarTransform planarTransform)
     {
-        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaces);
-        if (objectVertices.Count == 0)
-            return Vector3.Zero;
-
-        Vector3 centroid = Vector3.Zero;
-        for (int i = 0; i < objectVertices.Count; i++)
-            centroid += objectVertices[i];
-        centroid /= objectVertices.Count;
-
-        return ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+        return CorePm4PlacementMath.ComputeSurfaceWorldCentroid(
+            pm4.MeshVertices,
+            pm4.MeshIndices,
+            ConvertToCorePm4Surfaces(surfaces),
+            tileX,
+            tileY,
+            ToCoreCoordinateMode(useTileLocalCoordinates),
+            ToCoreAxisConvention(axisConvention),
+            ToCorePlanarTransform(planarTransform));
     }
 
     private static Vector3 ComputeSurfaceRendererCentroid(
@@ -4204,6 +4195,73 @@ public class WorldScene : ISceneRenderer
             : DetectPm4AxisConvention(pm4);
     }
 
+    private static CorePm4CoordinateMode ToCoreCoordinateMode(bool useTileLocalCoordinates)
+    {
+        return useTileLocalCoordinates
+            ? CorePm4CoordinateMode.TileLocal
+            : CorePm4CoordinateMode.WorldSpace;
+    }
+
+    private static CorePm4AxisConvention ToCoreAxisConvention(Pm4AxisConvention convention)
+    {
+        return convention switch
+        {
+            Pm4AxisConvention.XZPlaneYUp => CorePm4AxisConvention.XZPlaneYUp,
+            Pm4AxisConvention.YZPlaneXUp => CorePm4AxisConvention.YZPlaneXUp,
+            _ => CorePm4AxisConvention.XYPlaneZUp
+        };
+    }
+
+    private static CorePm4PlanarTransform ToCorePlanarTransform(Pm4PlanarTransform transform)
+    {
+        return new CorePm4PlanarTransform(transform.SwapPlanarAxes, transform.InvertU, transform.InvertV);
+    }
+
+    private static Pm4PlanarTransform FromCorePlanarTransform(CorePm4PlanarTransform transform)
+    {
+        return new Pm4PlanarTransform(transform.SwapPlanarAxes, transform.InvertU, transform.InvertV);
+    }
+
+    private static List<CorePm4MsurEntry> ConvertToCorePm4Surfaces(IReadOnlyList<MsurEntry> surfaces)
+    {
+        var converted = new List<CorePm4MsurEntry>(surfaces.Count);
+        for (int i = 0; i < surfaces.Count; i++)
+        {
+            MsurEntry surface = surfaces[i];
+            converted.Add(new CorePm4MsurEntry(
+                surface.GroupKey,
+                surface.IndexCount,
+                surface.AttributeMask,
+                surface.Padding,
+                new Vector3(surface.NormalX, surface.NormalY, surface.NormalZ),
+                surface.Height,
+                surface.MsviFirstIndex,
+                surface.MdosIndex,
+                surface.PackedParams));
+        }
+
+        return converted;
+    }
+
+    private static List<CorePm4MprlEntry> ConvertToCorePm4PositionRefs(IReadOnlyList<MprlEntry> positionRefs)
+    {
+        var converted = new List<CorePm4MprlEntry>(positionRefs.Count);
+        for (int i = 0; i < positionRefs.Count; i++)
+        {
+            MprlEntry positionRef = positionRefs[i];
+            converted.Add(new CorePm4MprlEntry(
+                positionRef.Unk00,
+                positionRef.Unk02,
+                positionRef.Unk04,
+                positionRef.Unk06,
+                positionRef.Position,
+                positionRef.Unk14,
+                positionRef.Unk16));
+        }
+
+        return converted;
+    }
+
     private static Pm4PlanarTransform ResolvePlanarTransform(
         Pm4File pm4,
         IEnumerable<MsurEntry> surfaces,
@@ -4213,100 +4271,17 @@ public class WorldScene : ISceneRenderer
         bool useTileLocalCoordinates,
         Pm4AxisConvention axisConvention)
     {
-        Pm4PlanarTransform defaultTransform = DefaultPlanarTransform(useTileLocalCoordinates);
-        if (pm4.PositionRefs.Count == 0)
-            return defaultTransform;
-
         var surfaceList = surfaces as List<MsurEntry> ?? surfaces.ToList();
-        if (surfaceList.Count == 0)
-            return defaultTransform;
-
-        List<Vector3> objectVertices = CollectSurfaceVertices(pm4, surfaceList);
-        if (objectVertices.Count == 0)
-            return defaultTransform;
-
-        Vector3 centroid = Vector3.Zero;
-        for (int i = 0; i < objectVertices.Count; i++)
-            centroid += objectVertices[i];
-        centroid /= objectVertices.Count;
-
-        IReadOnlyList<MprlEntry> scoringRefs = (anchorPositionRefs != null && anchorPositionRefs.Count > 0)
-            ? anchorPositionRefs
-            : pm4.PositionRefs;
-        bool useFootprintScoring = anchorPositionRefs != null && anchorPositionRefs.Count >= 2;
-        List<Vector3> sampledObjectVertices = useFootprintScoring
-            ? SampleObjectVertices(objectVertices, 256)
-            : new List<Vector3>();
-        List<Vector2> referencePlanarPoints = useFootprintScoring
-            ? BuildMprlPlanarPoints(scoringRefs)
-            : new List<Vector2>();
-        bool hasExpectedYaw = TryComputeExpectedMprlYawRadians(scoringRefs, out float expectedYaw);
-
-        static bool IsCandidateBetter(
-            float score,
-            float yawDelta,
-            float bestScore,
-            float bestYawDelta,
-            bool useFootprintScoring,
-            bool hasExpectedYaw)
-        {
-            bool isBetterDistance = score < bestScore - 0.001f;
-            float tieDistanceThreshold = useFootprintScoring ? 256f : 4096f;
-            bool isNearDistance = MathF.Abs(score - bestScore) <= tieDistanceThreshold;
-            bool isBetterYaw = yawDelta + 0.01f < bestYawDelta;
-            bool yawCanOverrideDistance = useFootprintScoring
-                && hasExpectedYaw
-                && yawDelta + 0.02f < bestYawDelta
-                && score <= bestScore + 1024f;
-
-            return isBetterDistance || (isNearDistance && isBetterYaw) || yawCanOverrideDistance;
-        }
-
-        Pm4PlanarTransform bestTransform = defaultTransform;
-        float bestScore = float.MaxValue;
-        float bestYawDelta = float.MaxValue;
-
-        foreach (Pm4PlanarTransform candidate in EnumeratePlanarTransforms(useTileLocalCoordinates))
-        {
-            Vector3 candidateWorld = ConvertPm4VertexToWorld(centroid, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate);
-            float centroidScore = NearestPositionRefDistanceSquared(scoringRefs, candidateWorld);
-            float score = centroidScore;
-
-            if (useFootprintScoring)
-            {
-                float footprintScore = ComputeMprlFootprintScore(
-                    referencePlanarPoints,
-                    sampledObjectVertices,
-                    tileX,
-                    tileY,
-                    useTileLocalCoordinates,
-                    axisConvention,
-                    candidate);
-                if (float.IsFinite(footprintScore))
-                    score = footprintScore * 0.85f + centroidScore * 0.15f;
-            }
-
-            float yawDelta = float.MaxValue;
-            if (hasExpectedYaw
-                && TryComputePlanarPrincipalYaw(objectVertices, tileX, tileY, useTileLocalCoordinates, axisConvention, candidate, out float candidateYaw))
-            {
-                yawDelta = ComputeMprlYawDeltaWithQuarterTurnFallback(candidateYaw, expectedYaw);
-            }
-
-            if (candidate.InvertsWinding)
-                score += useTileLocalCoordinates
-                    ? (useFootprintScoring ? 4096f : 1024f)
-                    : (useFootprintScoring ? 8192f : 4096f);
-
-            if (IsCandidateBetter(score, yawDelta, bestScore, bestYawDelta, useFootprintScoring, hasExpectedYaw))
-            {
-                bestScore = score;
-                bestYawDelta = yawDelta;
-                bestTransform = candidate;
-            }
-        }
-
-        return bestTransform;
+        return FromCorePlanarTransform(CorePm4PlacementMath.ResolvePlanarTransform(
+            pm4.MeshVertices,
+            pm4.MeshIndices,
+            ConvertToCorePm4Surfaces(surfaceList),
+            ConvertToCorePm4PositionRefs(pm4.PositionRefs),
+            anchorPositionRefs is not null ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
+            tileX,
+            tileY,
+            ToCoreCoordinateMode(useTileLocalCoordinates),
+            ToCoreAxisConvention(axisConvention)));
     }
 
     private static Pm4PlanarTransform DefaultPlanarTransform(bool useTileLocalCoordinates)

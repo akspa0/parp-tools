@@ -12,6 +12,10 @@
   <Folder Name="/src/viewer/">
     <Project Path="src/viewer/WowViewer.App/WowViewer.App.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj" />
+    <Project Path="tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj" />
+  </Folder>
   <Folder Name="/tools/" />
   <Folder Name="/tools/converter/">
     <Project Path="tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj" />

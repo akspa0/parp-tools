@@ -1,4 +1,6 @@
 ﻿using System.Text.Json;
+using WowViewer.Core.IO.Maps;
+using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Research;
@@ -16,6 +18,9 @@ string[] tail = args.Skip(1).ToArray();
 
 switch (area)
 {
+	case "map":
+		RunMap(tail);
+		break;
 	case "pm4":
 		RunPm4(tail);
 		break;
@@ -24,6 +29,45 @@ switch (area)
 		ShowUsage();
 		Environment.ExitCode = 1;
 		break;
+}
+
+static void RunMap(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowMapUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunMapInspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown map command '{command}'.");
+			ShowMapUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunMapInspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input map file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	MapFileSummary summary = MapFileSummaryReader.Read(input);
+	PrintMapSummary(summary);
 }
 
 static void RunPm4(string[] args)
@@ -43,6 +87,15 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
+			case "linkage":
+				RunPm4Linkage(tail);
+				break;
+			case "mscn":
+				RunPm4Mscn(tail);
+				break;
+			case "unknowns":
+				RunPm4Unknowns(tail);
+				break;
 		case "audit":
 			RunPm4Audit(tail);
 			break;
@@ -100,6 +153,87 @@ static void RunPm4AuditDirectory(string[] args)
 
 	Pm4CorpusAuditReport report = Pm4ResearchAuditAnalyzer.AnalyzeDirectory(input);
 	PrintPm4CorpusAuditReport(report);
+}
+
+static void RunPm4Linkage(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4LinkageReport report = Pm4ResearchLinkageAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4LinkageReport(report);
+}
+
+static void RunPm4Mscn(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MscnRelationshipReport report = Pm4ResearchMscnAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4MscnReport(report);
+}
+
+static void RunPm4Unknowns(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4UnknownsReport report = Pm4ResearchUnknownsAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4UnknownsReport(report);
 }
 
 static void RunPm4ExportJson(string[] args)
@@ -285,20 +419,178 @@ static void PrintPm4CorpusAuditReport(Pm4CorpusAuditReport report)
 	}
 }
 
+static void PrintPm4LinkageReport(Pm4LinkageReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 linkage report");
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}");
+	Console.WriteLine($"Files with ref-index mismatches: {report.FilesWithRefIndexMismatches}");
+	Console.WriteLine($"Files with bad MDOS refs: {report.FilesWithBadMdos}");
+	Console.WriteLine($"Total ref-index mismatches: {report.TotalRefIndexMismatchCount}");
+	Console.WriteLine();
+	Console.WriteLine("Relationships:");
+	foreach (Pm4RelationshipEdgeSummary relationship in report.Relationships)
+	{
+		Console.WriteLine($"  {relationship.Edge}: status={relationship.Status} fits={relationship.Fits} misses={relationship.Misses}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"Identity summary: ck24={report.IdentitySummary.DistinctCk24Count} low16={report.IdentitySummary.DistinctCk24ObjectIdCount} groups={report.IdentitySummary.ObjectIdGroupsAnalyzed} reused={report.IdentitySummary.ReusedObjectIdGroupCount} crossType={report.IdentitySummary.ReusedAcrossTypeGroupCount}");
+
+	Console.WriteLine();
+	Console.WriteLine("Top mismatch families:");
+	foreach (Pm4LinkageMismatchFamily family in report.TopMismatchFamilies.Take(8))
+	{
+		Console.WriteLine($"  {family.FamilyKey}: files={family.FileCount} entries={family.EntryCount} low16Matches={family.MatchingCk24ObjectIdEntryCount} low24Matches={family.MatchingFullCk24EntryCount}");
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+}
+
+static void PrintPm4MscnReport(Pm4MscnRelationshipReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSCN report");
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}");
+	Console.WriteLine($"Files with MSCN: {report.FilesWithMscn}");
+	Console.WriteLine($"Files with tile coordinates: {report.FilesWithTileCoordinates}");
+	Console.WriteLine($"Total MSCN points: {report.TotalMscnPointCount}");
+	Console.WriteLine();
+	Console.WriteLine("Relationships:");
+	foreach (Pm4RelationshipEdgeSummary relationship in report.Relationships)
+	{
+		Console.WriteLine($"  {relationship.Edge}: status={relationship.Status} fits={relationship.Fits} misses={relationship.Misses}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"Coordinate space: swappedWorld={report.CoordinateSpace.SwappedWorldTileFitCount} rawWorld={report.CoordinateSpace.RawWorldTileFitCount} ambiguousWorld={report.CoordinateSpace.AmbiguousWorldTileFitCount} tileLocal={report.CoordinateSpace.TileLocalLikeCount} neither={report.CoordinateSpace.NeitherFitCount}");
+	Console.WriteLine($"Dominant files: swapped={report.CoordinateSpace.FilesSwappedDominant} raw={report.CoordinateSpace.FilesRawDominant} tileLocal={report.CoordinateSpace.FilesTileLocalDominant} noDominant={report.CoordinateSpace.FilesNoDominant}");
+
+	Console.WriteLine();
+	Console.WriteLine("Cluster distributions:");
+	foreach (Pm4FieldDistribution distribution in report.ClusterDistributions)
+	{
+		Console.WriteLine($"  {distribution.Field}: total={distribution.TotalCount} distinct={distribution.DistinctCount}");
+		foreach (Pm4ValueFrequency value in distribution.TopValues.Take(4))
+			Console.WriteLine($"    {value.Value} -> {value.Count}");
+	}
+
+	if (report.TopInvalidMdosClusters.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Top invalid-MDOS clusters:");
+		foreach (Pm4MscnClusterExample cluster in report.TopInvalidMdosClusters.Take(8))
+		{
+			Console.WriteLine($"  tile={cluster.TileX}_{cluster.TileY} ck24=0x{cluster.Ck24:X6} type=0x{cluster.Ck24Type:X2} obj={cluster.Ck24ObjectId} invalidMdos={cluster.InvalidMdosRefCount} distinctMdos={cluster.DistinctMdosCount} align={cluster.AlignmentMode}");
+		}
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+}
+
+static void PrintPm4UnknownsReport(Pm4UnknownsReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 unknowns report");
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount}");
+	Console.WriteLine($"Non-empty files: {report.NonEmptyFileCount}");
+	Console.WriteLine();
+	Console.WriteLine("Relationships:");
+	foreach (Pm4RelationshipEdgeSummary relationship in report.Relationships)
+	{
+		Console.WriteLine($"  {relationship.Edge}: status={relationship.Status} fits={relationship.Fits} misses={relationship.Misses}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine($"MSPI interpretation: active={report.MspiInterpretation.ActiveLinkCount} indicesOnly={report.MspiInterpretation.IndicesModeOnlyCount} trianglesOnly={report.MspiInterpretation.TrianglesModeOnlyCount} both={report.MspiInterpretation.BothModesCount} neither={report.MspiInterpretation.NeitherModeCount}");
+	Console.WriteLine($"LinkId patterns: total={report.LinkIdPatterns.TotalCount} sentinelTile={report.LinkIdPatterns.SentinelTileLinkCount} zero={report.LinkIdPatterns.ZeroCount} other={report.LinkIdPatterns.OtherCount}");
+
+	Console.WriteLine();
+	Console.WriteLine("Unknowns:");
+	foreach (Pm4UnknownFinding finding in report.Unknowns)
+	{
+		Console.WriteLine($"  [{finding.Status}] {finding.Name}");
+		Console.WriteLine($"    {finding.Evidence}");
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+}
+
+static void PrintMapSummary(MapFileSummary summary)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect map report");
+	Console.WriteLine($"Input: {summary.SourcePath}");
+	Console.WriteLine($"Kind: {summary.Kind}");
+	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
+	Console.WriteLine($"Top-level chunks: {summary.ChunkCount}");
+	string chunkOrder = string.Join(", ", summary.Chunks.Take(16).Select(chunk => chunk.Id.ToString()));
+	if (summary.Chunks.Count > 16)
+		chunkOrder = $"{chunkOrder}, ... ({summary.Chunks.Count - 16} more)";
+
+	Console.WriteLine($"Chunk order: {chunkOrder}");
+	Console.WriteLine();
+	Console.WriteLine("Chunk counts:");
+	foreach (IGrouping<string, MapChunkLocation> group in summary.Chunks.GroupBy(chunk => chunk.Id.ToString()).OrderBy(group => group.Key))
+	{
+		Console.WriteLine($"  {group.Key}: count={group.Count()} bytes={group.Sum(chunk => (long)chunk.Size)}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("First top-level chunks:");
+	foreach (MapChunkLocation chunk in summary.Chunks.Take(12))
+	{
+		Console.WriteLine($"  {chunk.Id}: size={chunk.Size} header={chunk.HeaderOffset} data={chunk.DataOffset}");
+	}
+
+	if (summary.Chunks.Count > 12)
+		Console.WriteLine($"  ... {summary.Chunks.Count - 12} more chunks");
+}
+
 static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>]");
+}
+
+static void ShowMapUsage()
+{
+	Console.WriteLine("Map commands:");
+	Console.WriteLine("  map inspect --input <file.wdt|file.adt>");
 }
 
 static void ShowPm4Usage()
 {
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 mscn --input <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 unknowns --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 audit --input <file.pm4>");
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>]");

@@ -1,5 +1,5 @@
 ---
-description: "Define the single owned wow-viewer library for reading and writing all supported file types. Use when planning how to unify the scattered parser/writer code across viewer, converter, toolbox, and legacy tools."
+description: "Define the broader shared wow-viewer library plan for reading and writing supported file types. Use when planning ownership, source-root consolidation, or migration order across viewer, converter, toolbox, and legacy tools."
 name: "wow-viewer Shared I/O Library Plan"
 argument-hint: "Optional file family, chunk type, or old tool to prioritize"
 agent: "agent"
@@ -21,6 +21,17 @@ Design the owned shared library plan for `wow-viewer` so there is one first-part
 ## Goal
 
 Define one owned library stack that becomes the source of truth for file-format reading, writing, conversion, and shared domain contracts instead of leaving that truth scattered across `MdxViewer`, `WoWMapConverter.Core`, `gillijimproject-csharp`, `DBCTool.V2`, `AlphaLkToAlphaStandalone`, `parpToolbox`, `PM4Tool`, and other historical tool roots.
+
+## Current Validated State To Build On
+
+- `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO` now already contain:
+	- `FourCC`, `ChunkHeader`, and `ChunkHeaderReader`
+	- `ChunkedFileReader`
+	- WDT or ADT top-level summary contracts and `MapFileSummaryReader`
+	- shared `WowFileKind`, `WowFileDetection`, and `WowFileDetector`
+- `WowViewer.Tool.Inspect` now consumes that shared surface through `map inspect`.
+- `WowViewer.Tool.Converter` now consumes that shared surface through `detect`.
+- If the ask is to implement the next narrow shared-format slice instead of planning ownership, use `wow-viewer-shared-io-implementation.prompt.md` instead of this broader planning prompt.
 
 ## File-Type Families To Cover Explicitly
 

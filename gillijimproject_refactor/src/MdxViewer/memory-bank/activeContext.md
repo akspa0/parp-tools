@@ -1,5 +1,25 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## PM4 Fresh-Chat Handoff (Mar 26)
+
+- The active viewer should now be treated as a partial consumer of shared `wow-viewer` PM4 math, not as the only place where PM4 logic lives.
+- Shared seams already consumed by `WorldScene`:
+   - `ResolvePlanarTransform(...)`
+   - `TryComputeWorldYawCorrectionRadians(...)`
+   - `ComputeSurfaceWorldCentroid(...)`
+- Shared seams already present in `Core.PM4` but not yet consumed by the active viewer call site:
+   - typed coordinate-mode resolution
+   - typed placement-solution contract
+   - world-space yaw helper layer for pivot rotation and corrected world conversion
+- Fresh validation worth carrying into the next chat:
+   - `wow-viewer` PM4 test project passed on Mar 26, 2026 with `18` tests
+   - placement-focused PM4 tests passed on Mar 26, 2026 with `11` tests
+   - full `wow-viewer` solution tests passed on Mar 26, 2026 with `32` tests
+- Important boundary for future viewer work:
+   - this is still shared-library and compile validation only
+   - do not describe current viewer PM4 behavior as runtime-signed-off just because these seams now compile and pass library tests
+   - the clean next PM4 viewer follow-up is the coordinate-mode consumer hookup, not a broad rewrite of the full PM4 placement path
+
 ## Tool Cutover Planning For wow-viewer (Mar 25)
 
 - Added `plans/wow_viewer_tool_inventory_and_cutover_plan_2026-03-25.md` to make the viewer-tool cutover explicit instead of leaving it as implied bootstrap guidance.
@@ -64,6 +84,73 @@
    - this is still only the first seam extraction; the active solver and reconstruction behavior still live in `WorldScene`.
    - the inspect/report layer now preserves the current research note that CK24 low-16 object values may be plausible `UniqueID` candidates, but that remains unverified until correlated against real placed-object data.
    - new audit commands already surfaced real `MDOS.buildingIndex->MDBH` invalid references and `MSLK.RefIndex->MSUR` mismatches in the development corpus, which is more evidence that viewer-facing linkage semantics should stay explicitly research-labeled until the solver port is backed by correlation data.
+
+## wow-viewer PM4 Test Follow-Up (Mar 25)
+
+- The new repo now has first-pass PM4 regression coverage in `tests/WowViewer.Core.PM4.Tests`.
+- Viewer-relevant consequence:
+   - the current `development_00_00.pm4` reader counts, analysis summary, audit findings, and corpus-audit shape are now locked by executable tests instead of only markdown notes.
+   - this is still not a viewer-runtime PM4 rendering test, but it gives the migration a real-data regression floor before deeper solver extraction.
+
+## PM4 Linkage And Placement-Math Follow-Up (Mar 25)
+
+- The new repo now also has a first linkage report family and a first actual `WorldScene` placement-helper extraction.
+- Viewer-relevant consequence:
+   - `Core.PM4` now owns the current range-based axis selection fallback, tile-local heuristic, and PM4-vertex-to-world conversion helper as a reusable service layer instead of leaving that logic entirely marooned inside `WorldScene`.
+   - the new linkage report gives the migration a real corpus-level view of low16 CK24 object-id reuse versus mismatch families, which is directly relevant to the current `UniqueID` hypothesis work.
+   - current fixed-corpus result: low16 values can still align with expected ranges, but the corpus does not support treating that range alignment alone as confirmation of globally unique object identity.
+
+## PM4 MSCN Follow-Up (Mar 25)
+
+- The new repo now also has a first MSCN relationship report family.
+- Viewer-relevant consequence:
+   - the migration now has a real corpus-level read on how `MSUR.MdosIndex` and `MSCN` interact, rather than leaving MSCN as a vague side theory.
+   - current fixed-corpus result strongly favors raw MSCN bounds overlap over simple XY-swapped overlap, which means the earlier swapped-XY explanation should not be treated as the dominant answer for this corpus anymore.
+   - this still does not make MSCN authoritative for final viewer reconstruction, but it gives the next PM4 research ports a much better factual baseline.
+
+## PM4 Unknowns + Normal-Axis Follow-Up (Mar 26)
+
+- The new `wow-viewer` repo now also has the first unknowns-report family plus the next extracted PM4 solver seam from `WorldScene`.
+- Viewer-relevant consequence:
+   - `Core.PM4` now exposes normal-based axis scoring and detection helpers on top of the earlier range-based fallback, so more of the existing axis-selection logic is reusable outside `WorldScene`.
+   - `pm4 unknowns --input <directory>` now gives the migration a single corpus-level surface for the still-open `MSLK`, `MPRL`, `MPRR`, and header-field questions instead of scattering that evidence across ad hoc notes.
+   - current fixed-corpus result: all observed `MSLK.LinkId` values fit the sentinel-tile pattern in the development corpus, but `MSLK.RefIndex -> MSUR` still has `4,553` misses and `MPRR.Value1` remains mixed-domain.
+- Important boundary:
+   - this still does not close the final solver or coordinate-ownership semantics for viewer reconstruction.
+   - active `WorldScene` reconstruction behavior remains the runtime reference implementation until the remaining solver slices are extracted and validated against real placement data.
+
+## PM4 Planar-Transform Resolver Follow-Up (Mar 26)
+
+- The new `wow-viewer` repo now also has the next extracted PM4 solver seam above axis selection: planar-transform resolution against MPRL anchors.
+- Viewer-relevant consequence:
+   - `Core.PM4` now owns the candidate planar-basis scoring loop instead of only the low-level axis and conversion helpers.
+   - the shared solver can now compare planar candidates using centroid proximity, multi-anchor footprint fit, and packed MPRL heading evidence with quarter-turn fallback.
+   - current fixed development-tile regression locks a whole-tile tile-local result of `(swap=false, invertU=false, invertV=false)` for this slice, while a synthetic world-space case locks a non-default quarter-turn candidate.
+- Important boundary:
+   - this is still not the full object-level PM4 placement pipeline and does not yet move world-yaw correction or final renderer alignment out of `WorldScene`.
+
+## PM4 World-Yaw Correction + Shared Solver Consumer Follow-Up (Mar 26)
+
+- The active viewer now consumes the shared `wow-viewer` PM4 solver for the first narrow PM4 object-placement slice.
+- Viewer-relevant consequence:
+   - `WorldScene.ResolvePlanarTransform(...)` and `WorldScene.TryComputeWorldYawCorrectionRadians(...)` now delegate into `WowViewer.Core.PM4.Services.Pm4PlacementMath` through explicit local-to-shared type adapters.
+   - this keeps the current viewer call sites stable while starting the real migration of solver ownership out of `WorldScene`.
+   - the shared library now also owns signed world-yaw correction fallback against MPRL heading evidence.
+- Important boundary:
+   - this is build-validated integration only so far.
+   - no runtime real-data signoff has happened yet on viewer-visible PM4 behavior after the hookup.
+
+## PM4 World-Space Centroid + Shared Solver Consumer Follow-Up (Mar 26)
+
+- The active viewer now consumes one more shared `wow-viewer` PM4 solver seam above world-yaw correction.
+- Viewer-relevant consequence:
+   - `Core.PM4` now owns `Pm4PlacementMath.ComputeSurfaceWorldCentroid(...)`, so the world-space pivot derived from PM4 surface geometry is no longer viewer-owned math.
+   - `WorldScene.ComputeSurfaceWorldCentroid(...)` now delegates to shared `Core.PM4` through the same explicit local-to-shared type adapters already used for planar-transform resolution and world-yaw correction.
+   - the added synthetic regression locks the real tile-size mapping for a tile-local centroid case, so the pivot helper is no longer only implied by the surrounding solver coverage.
+- Important boundary:
+   - this is still only the shared world-space centroid seam.
+   - renderer-space centroid handling and the broader PM4 object placement or render path still remain in `WorldScene`.
+   - validation is still build plus library tests only; no real-data viewer runtime signoff yet after this additional hookup.
 
 ## Post-v0.4.5 Viewer Roadmap Split (Mar 25)
 
