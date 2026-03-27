@@ -1,5 +1,21 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Liquid Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MLIQ` semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoLiquidBasicType`
+	- added `WowViewer.Core.Wmo.WmoGroupLiquidSummary`
+	- added shared `WowViewer.Core.IO.Wmo.WmoGroupReaderCommon` so WMO group readers share one `MOGP` payload and subchunk scan surface
+	- added `WowViewer.Core.IO.Wmo.WmoGroupLiquidSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MLIQ` semantic line when liquid is present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupLiquidSummaryReaderTests.cs` for synthetic `MLIQ` height-range and ocean-inference coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `88` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `57` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-liquid-test.wmo` passed on Mar 27, 2026 for a synthetic group-liquid smoke case
+	- this is still semantic summary work, not full WMO liquid mesh generation or write support
+
 ### Mar 27, 2026 - Shared WMO Group Semantic Summary Slice Landed
 
 - Added the next narrow WMO follow-up seam in `wow-viewer`: shared `MOGP` group semantic summary.

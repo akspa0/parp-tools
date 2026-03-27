@@ -1,5 +1,24 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Liquid Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after the `MOGP` header summary: a shared `MLIQ` semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoLiquidBasicType.cs` now owns the basic liquid-family enum used by the summary seam
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupLiquidSummary.cs` now owns the typed `MLIQ` semantic-summary contract for liquid dimensions, corner, material id, height range, tile-flag coverage, visible tile count, and inferred liquid family
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupReaderCommon.cs` now centralizes `MOGP` payload reads, header-size detection, subchunk enumeration, and shared helper logic used by both WMO group summary readers
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupLiquidSummaryReader.cs` now reads `MLIQ` payload semantics from WMO group files without pretending to own runtime mesh generation
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupSummaryReader.cs` now consumes the new shared `WmoGroupReaderCommon` helper instead of carrying its own `MOGP` scanning copy
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MLIQ` semantic line for WMO group files that contain liquid
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupLiquidSummaryReaderTests.cs` now covers a synthetic `MLIQ` payload with ocean inference and height-range validation
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `88` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `57` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-liquid-test.wmo` passed on Mar 27, 2026 and reported `MLIQ: payloadBytes=63 verts=2x2 tiles=1x1 ... visibleTiles=1/1 ... liquidType=Ocean`
+- Important boundary:
+	- this proves shared `MLIQ` payload semantic summary for dimensions, height range, visible tile counts, and basic family inference only
+	- this does not yet prove full WMO liquid mesh generation, orientation fitting, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO follow-up seam after the root summary: a shared WMO group semantic-summary reader.
