@@ -109,17 +109,26 @@ internal static class WmoGroupReaderCommon
         if (byteCount == 0)
             return 0;
 
-        int stride;
-        if (version >= 17)
-            stride = 2;
-        else if (version is not null && version <= 16)
-            stride = 4;
-        else if (byteCount % 4 == 0)
-            stride = 4;
-        else
-            stride = 2;
+        int stride = InferMopyEntrySize(checked((int)byteCount), version);
 
         return checked((int)byteCount / stride);
+    }
+
+    public static int InferMopyEntrySize(int byteCount, uint? version)
+    {
+        if (byteCount <= 0)
+            return 0;
+
+        if (version >= 17)
+            return 2;
+
+        if (version is not null && version <= 16)
+            return 4;
+
+        if (byteCount % 4 == 0)
+            return 4;
+
+        return 2;
     }
 
     public static Vector3 ReadVector3(ReadOnlySpan<byte> bytes)

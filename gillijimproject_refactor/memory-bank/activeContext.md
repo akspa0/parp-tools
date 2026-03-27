@@ -1,5 +1,22 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Face-Material Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOBA`: a shared `MOPY` face-material semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupFaceMaterialSummary.cs` now owns the typed `MOPY` face-material summary contract for face counts, inferred entry size, distinct material ids, highest material id, hidden-face count, and flagged-face count
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupFaceMaterialSummaryReader.cs` now reads `MOPY` payload semantics from WMO group files while respecting v17 two-byte and v16 four-byte entry layouts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupReaderCommon.cs` now exposes shared `MOPY` entry-size inference used by both count-level and face-material readers
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOPY` semantic line for WMO group files that contain face-material entries
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupFaceMaterialSummaryReaderTests.cs` now covers synthetic v17-style and v16-style `MOPY` payloads
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `92` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `61` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-face-v17-test.wmo` passed on Mar 27, 2026 and reported `MOPY: payloadBytes=8 entryBytes=2 faces=4 distinctMaterials=2 highestMaterialId=7 hiddenFaces=1 flaggedFaces=2`
+- Important boundary:
+	- this proves shared `MOPY` face-material semantic summary for count, flag, and material-id coverage only
+	- this does not yet prove face-to-batch reconstruction, material resolution against root tables, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Batch Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MLIQ`: a shared `MOBA` batch semantic-summary reader.

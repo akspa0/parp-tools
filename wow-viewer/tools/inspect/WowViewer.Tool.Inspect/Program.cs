@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.FaceMaterialCount > 0)
+		{
+			WmoGroupFaceMaterialSummary faceSummary = WmoGroupFaceMaterialSummaryReader.Read(input);
+			PrintWmoGroupFaceMaterialSummary(faceSummary);
+		}
 		if (summary.BatchCount > 0)
 		{
 			WmoGroupBatchSummary batchSummary = WmoGroupBatchSummaryReader.Read(input);
@@ -677,6 +682,11 @@ static void PrintWmoGroupLiquidSummary(WmoGroupLiquidSummary summary)
 static void PrintWmoGroupBatchSummary(WmoGroupBatchSummary summary)
 {
 	Console.WriteLine($"MOBA: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} hasMaterialIds={summary.HasMaterialIds} distinctMaterials={summary.DistinctMaterialIdCount} highestMaterialId={summary.HighestMaterialId} totalIndexCount={summary.TotalIndexCount} firstIndexRange={summary.MinFirstIndex}-{summary.MaxFirstIndex} maxIndexEnd={summary.MaxIndexEnd} flaggedBatches={summary.FlaggedBatchCount}");
+}
+
+static void PrintWmoGroupFaceMaterialSummary(WmoGroupFaceMaterialSummary summary)
+{
+	Console.WriteLine($"MOPY: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} faces={summary.FaceCount} distinctMaterials={summary.DistinctMaterialIdCount} highestMaterialId={summary.HighestMaterialId} hiddenFaces={summary.HiddenFaceCount} flaggedFaces={summary.FlaggedFaceCount}");
 }
 
 static void ShowUsage()
