@@ -48,6 +48,12 @@ public sealed class WmoRealDataTests
         Assert.True(embeddedGroupSummary.TotalVertexCount > 0);
         Assert.True(embeddedGroupSummary.TotalIndexCount > 0);
 
+        using MemoryStream embeddedGroupLinkageStream = new(bytes);
+        WmoEmbeddedGroupLinkageSummary embeddedGroupLinkageSummary = WmoEmbeddedGroupLinkageSummaryReader.Read(embeddedGroupLinkageStream, mpqPath);
+        Assert.Equal(summary.GroupInfoCount, embeddedGroupLinkageSummary.GroupInfoCount);
+        Assert.Equal(embeddedGroupSummary.GroupCount, embeddedGroupLinkageSummary.EmbeddedGroupCount);
+        Assert.Equal(summary.GroupInfoCount, embeddedGroupLinkageSummary.CoveredPairCount);
+
         if (summary.ReportedPortalCount > 0)
         {
             using MemoryStream portalVertexStream = new(bytes);

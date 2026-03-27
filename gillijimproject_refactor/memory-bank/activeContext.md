@@ -1,5 +1,23 @@
 # Active Context
 
+## Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
+
+- After landing the Alpha embedded-group aggregate, the next narrow follow-up linked root `MOGI` entries to the embedded top-level `MOGP` blocks by ordinal pairing instead of jumping straight to full monolithic group routing.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoEmbeddedGroupLinkageSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoEmbeddedGroupLinkageSummaryReader.cs` now own the narrow Alpha `MOGI -> MOGP(root)` linkage seam
+	- the linkage summary reports `MOGI` entry count, embedded `MOGP` count, covered pairs, missing/extra groups, flag matches, bounds matches, and maximum bounds delta across paired groups
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints an `MOGI->MOGP(root)` line for Alpha monolithic roots when both surfaces are present
+	- synthetic regression coverage landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoEmbeddedGroupLinkageSummaryReaderTests.cs`
+	- real-data regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs` now validates the linkage summary on `castle01.wmo.MPQ`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `130` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupLinkageSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `2` targeted passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026 and now reports:
+		- `MOGI->MOGP(root): infos=2 groups=2 coveredPairs=2 missingGroups=0 extraGroups=0 flagMatches=0 boundsMatches=2 maxBoundsDelta=0.000`
+- Important boundary:
+	- this proves count/flag/bounds linkage across paired Alpha root group-info and embedded-group surfaces
+	- it does not yet expose standalone per-embedded-group inspect routing or detailed per-group diff output
+
 ## Mar 27, 2026 - Alpha Monolithic Root Embedded-Group Aggregate Summary Landed
 
 - With Alpha `MOMO` root support working on real `castle01.wmo.MPQ`, the next narrow follow-up landed on the root file's embedded top-level `MOGP` blocks instead of jumping straight to full monolithic group-consumer cutover.

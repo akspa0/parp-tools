@@ -71,6 +71,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalRefRangeSummary`
   - `WmoPortalGroupRangeSummary`
   - `WmoEmbeddedGroupSummary`
+  - `WmoEmbeddedGroupLinkageSummary`
 - `WowViewer.Core/Files`
   - `WowFileKind`
   - `WowFileDetection`
@@ -123,6 +124,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalRefRangeSummaryReader`
   - `WmoPortalGroupRangeSummaryReader`
   - `WmoEmbeddedGroupSummaryReader`
+  - `WmoEmbeddedGroupLinkageSummaryReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
   - `Md5TranslateIndex`
@@ -206,6 +208,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` are now real
 - shared Alpha root-WMO `MOMO` wrapper handling is now real for the shared root-summary stack
 - shared Alpha monolithic root embedded-`MOGP` aggregate summary ownership is now real
+- shared Alpha `MOGI -> MOGP(root)` linkage-summary ownership is now real
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
@@ -283,6 +286,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `125` tests after batching the shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI`
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `128` tests after adding Alpha `MOMO` root-WMO support and real-data `castle01.wmo.MPQ` coverage
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `129` tests after adding Alpha monolithic embedded-group aggregate coverage
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `130` tests after adding Alpha `MOGI -> MOGP(root)` linkage coverage
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `37` tests after adding archive-backed `AreaIdMapper` coverage and shorthand-build normalization for archive-fed DBCD loads
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `46` tests after adding shared ADT semantic-summary coverage for root, `_tex0.adt`, and `_obj0.adt`
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `53` tests after adding shared ADT `MCNK` semantic-summary coverage plus a synthetic WMO root summary test
@@ -335,6 +339,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portal-linkage-batch-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` portal-linkage summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026 and now reports real Alpha-era root-WMO semantic and linkage lines directly from the per-asset MPQ
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` now also reports the Alpha monolithic embedded-group aggregate `MOGP(root)` line
+- the same real-data inspect path now also reports the Alpha `MOGI -> MOGP(root)` linkage line with paired flag/bounds comparison metrics
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portals-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOPV`, `MOPT`, and `MOPR` semantic summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 26, 2026

@@ -1,5 +1,20 @@
 # Progress
 
+### Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
+
+- Added the next narrow Alpha follow-up by linking root `MOGI` entries to embedded top-level `MOGP` blocks by ordinal pairing.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoEmbeddedGroupLinkageSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoEmbeddedGroupLinkageSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so Alpha monolithic roots now print an `MOGI->MOGP(root)` linkage line
+	- added synthetic regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoEmbeddedGroupLinkageSummaryReaderTests.cs`
+	- extended real-data coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `130` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupLinkageSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `2` targeted passing tests
+	- real `castle01.wmo.MPQ` inspect now reports `flagMatches=0` and `boundsMatches=2` for the paired Alpha group-info vs embedded-group linkage surface
+	- this is still linkage-summary ownership, not detailed per-group route selection or remediation logic
+
 ### Mar 27, 2026 - Alpha Monolithic Root Embedded-Group Aggregate Summary Landed
 
 - Added the next narrow Alpha follow-up after `MOMO` root support by summarizing the embedded top-level `MOGP` group blocks that still live in monolithic 0.5.3 root files.

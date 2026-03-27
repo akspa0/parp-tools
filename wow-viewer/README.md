@@ -96,6 +96,7 @@ Current shared-core foundation slice:
    - `WmoPortalRefRangeSummary`
    - `WmoPortalGroupRangeSummary`
    - `WmoEmbeddedGroupSummary`
+   - `WmoEmbeddedGroupLinkageSummary`
    - Alpha root `MOMO` wrapper handling is now also part of the shared root-summary ownership boundary
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
@@ -143,6 +144,7 @@ Current shared-core foundation slice:
    - `WmoPortalRefRangeSummaryReader`
    - `WmoPortalGroupRangeSummaryReader`
    - `WmoEmbeddedGroupSummaryReader`
+   - `WmoEmbeddedGroupLinkageSummaryReader`
    - `WmoRootReaderCommon` now also flattens Alpha `MOMO` root subchunks for shared root-summary readers
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
@@ -200,6 +202,7 @@ Current shared-core foundation slice:
 	- it now also locks a batched synthetic root-WMO portal-linkage case for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI`, plus a missing-`MOVV` regression
 	- it now also locks real 0.5.3 Alpha per-asset WMO validation via `testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ`
 	- it now also locks a synthetic Alpha monolithic embedded-`MOGP` aggregate case plus real aggregate checks on `castle01.wmo.MPQ`
+	- it now also locks a synthetic Alpha `MOGI -> MOGP(root)` linkage case plus real linkage checks on `castle01.wmo.MPQ`
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -237,6 +240,7 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
 	- it now also accepts Alpha per-asset `.wmo.MPQ` inputs for shared root-WMO inspect by routing them through the shared archive fallback and the Alpha `MOMO`-aware root reader path
 	- it now also reports an Alpha monolithic embedded-group aggregate `MOGP(root)` line when a root WMO contains top-level embedded `MOGP` blocks
+	- it now also reports an Alpha `MOGI -> MOGP(root)` linkage line showing paired count/flag/bounds metrics across root group-info and embedded-group surfaces
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

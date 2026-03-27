@@ -327,6 +327,14 @@ static void RunWmoInspect(string[] args)
 		catch (InvalidDataException)
 		{
 		}
+		try
+		{
+			WmoEmbeddedGroupLinkageSummary embeddedGroupLinkageSummary = ReadInput(WmoEmbeddedGroupLinkageSummaryReader.Read);
+			PrintWmoEmbeddedGroupLinkageSummary(embeddedGroupLinkageSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
 		return;
 	}
 
@@ -869,6 +877,11 @@ static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
 static void PrintWmoEmbeddedGroupSummary(WmoEmbeddedGroupSummary summary)
 {
 	Console.WriteLine($"MOGP(root): groups={summary.GroupCount} headerBytes={summary.MinHeaderSizeBytes}-{summary.MaxHeaderSizeBytes} groupsWithPortals={summary.GroupsWithPortals} groupsWithLiquid={summary.GroupsWithLiquid} faces={summary.TotalFaceMaterialCount} vertices={summary.TotalVertexCount} indices={summary.TotalIndexCount} normals={summary.TotalNormalCount} batches={summary.TotalBatchCount} doodadRefs={summary.TotalDoodadRefCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoEmbeddedGroupLinkageSummary(WmoEmbeddedGroupLinkageSummary summary)
+{
+	Console.WriteLine($"MOGI->MOGP(root): infos={summary.GroupInfoCount} groups={summary.EmbeddedGroupCount} coveredPairs={summary.CoveredPairCount} missingGroups={summary.MissingEmbeddedGroupCount} extraGroups={summary.ExtraEmbeddedGroupCount} flagMatches={summary.FlagMatchCount} boundsMatches={summary.BoundsMatchCount} maxBoundsDelta={summary.MaxBoundsDelta:F3}");
 }
 
 static void PrintWmoMaterialSummary(WmoMaterialSummary summary)
