@@ -104,6 +104,8 @@ public static class Program
     {
         string? inputPath = null;
         string? outputDir = null;
+        string? alphaClientPath = null;
+        string? lkClientPath = null;
         string? crosswalkDir = null;
         string? communityListfile = null;
         string? lkListfile = null;
@@ -126,6 +128,12 @@ public static class Program
                     break;
                 case "--crosswalk":
                     if (i + 1 < args.Length) crosswalkDir = args[++i];
+                    break;
+                case "--alpha-client":
+                    if (i + 1 < args.Length) alphaClientPath = args[++i];
+                    break;
+                case "--lk-client":
+                    if (i + 1 < args.Length) lkClientPath = args[++i];
                     break;
                 case "--listfile":
                     if (i + 1 < args.Length) communityListfile = args[++i];
@@ -163,6 +171,8 @@ public static class Program
 
         var options = new ConversionOptions
         {
+            AlphaClientPath = alphaClientPath,
+            LkClientPath = lkClientPath,
             CrosswalkDirectory = crosswalkDir,
             CommunityListfile = communityListfile,
             LkListfile = lkListfile,
@@ -2045,8 +2055,11 @@ public static class Program
         Console.WriteLine("Alpha → LK Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input Alpha WDT file path");
         Console.WriteLine("  --output, -o <dir>      Output directory (default: ./output)");
+        Console.WriteLine("  --alpha-client <dir>    Alpha client/archive root for direct MPQ DBC reads");
+        Console.WriteLine("  --lk-client <dir>       LK client/archive root for direct MPQ DBC reads");
         Console.WriteLine("  --crosswalk <dir>       AreaID crosswalk CSV directory");
         Console.WriteLine("  --listfile <csv>        Community listfile CSV for asset fixups");
+        Console.WriteLine("  --lk-listfile <txt>     LK listfile for archive discovery");
         Console.WriteLine("  --convert-wmos          Convert WMO v14 files to v17 with _alpha suffix");
         Console.WriteLine("  --wmo-dir <dir>         Alpha WMO source directory (e.g., test_data/0.5.3/tree)");
         Console.WriteLine("  --verbose, -v           Verbose output");

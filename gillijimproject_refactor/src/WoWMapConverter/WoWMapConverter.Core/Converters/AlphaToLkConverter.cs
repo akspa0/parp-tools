@@ -1,5 +1,6 @@
 using WoWMapConverter.Core.Services;
 using WowViewer.Core.IO.Dbc;
+using WowViewer.Core.IO.Files;
 
 using GillijimProject.WowFiles.Alpha;
 using static WoWMapConverter.Core.Services.AdtAreaIdPatcher;
@@ -15,27 +16,13 @@ public class AlphaToLkConverter
     private readonly AreaIdMapper? _areaMapper;
     private readonly ListfileService? _listfileService;
     private readonly ConversionOptions _options;
+    private bool _areaMapperInitialized;
 
 
     public AlphaToLkConverter(ConversionOptions? options = null)
     {
         _options = options ?? new ConversionOptions();
-        
-        // Initialize AreaIdMapper
         _areaMapper = new AreaIdMapper();
-        
-        // Try auto-discovery from test_data directories first
-        if (!_areaMapper.TryAutoLoadFromTestData())
-        {
-            // Fall back to CSV crosswalk directory if provided
-            if (!string.IsNullOrEmpty(_options.CrosswalkDirectory))
-            {
-                _areaMapper.LoadCrosswalkCsv(_options.CrosswalkDirectory);
-            }
-        }
-        
-        if (_options.Verbose && _areaMapper.CrosswalkCount > 0)
-            Console.WriteLine($"[INFO] AreaIdMapper ready: {_areaMapper.AlphaAreaCount} Alpha, {_areaMapper.LkAreaCount} LK, {_areaMapper.CrosswalkCount} mapped");
 
         if (!string.IsNullOrEmpty(_options.CommunityListfile))
         {
@@ -66,6 +53,8 @@ public class AlphaToLkConverter
             var mapName = Path.GetFileNameWithoutExtension(wdtPath);
             result.MapName = mapName;
             result.OutputDirectory = outputDir;
+
+            EnsureAreaMapperInitialized();
 
             // Parse Alpha WDT
             if (_options.Verbose)
@@ -139,10 +128,10 @@ public class AlphaToLkConverter
             result.TilesConverted = converted;
 
             // Apply AreaID crosswalk if available
-            if (_areaMapper != null && _areaMapper.CrosswalkCount > 0)
+            if (AreaMapperHasMappings())
             {
                 if (_options.Verbose)
-                    Console.WriteLine($"Applying AreaID crosswalk for {mapName} ({_areaMapper.CrosswalkCount} mappings)...");
+                    Console.WriteLine($"Applying AreaID mapping for {mapName} ({DescribeAreaMapperState()})...");
 
                 var (filesPatched, chunksPatched) = AdtAreaIdPatcher.PatchDirectory(
                     outputDir, 
@@ -194,6 +183,86 @@ public class AlphaToLkConverter
         sw.Stop();
         result.ElapsedMs = sw.ElapsedMilliseconds;
         return result;
+    }
+
+    private void EnsureAreaMapperInitialized()
+    {
+        if (_areaMapperInitialized || _areaMapper is null)
+        {
+            return;
+        }
+
+        bool loaded = false;
+
+        if (!string.IsNullOrWhiteSpace(_options.AlphaAreaTablePath) && !string.IsNullOrWhiteSpace(_options.LkAreaTablePath))
+        {
+            _areaMapper.LoadDbcs(
+                _options.AlphaAreaTablePath,
+                _options.LkAreaTablePath,
+                _options.AlphaMapDbcPath,
+                _options.LkMapDbcPath);
+            loaded = _areaMapper.AlphaAreaCount > 0 && _areaMapper.LkAreaCount > 0;
+        }
+        else if (!string.IsNullOrWhiteSpace(_options.AlphaClientPath) && !string.IsNullOrWhiteSpace(_options.LkClientPath))
+        {
+            using IArchiveCatalog alphaArchives = new MpqArchiveCatalogFactory().Create();
+            using IArchiveCatalog lkArchives = new MpqArchiveCatalogFactory().Create();
+
+            ArchiveCatalogBootstrapper.Bootstrap(alphaArchives, [_options.AlphaClientPath], _options.CommunityListfile);
+            ArchiveCatalogBootstrapper.Bootstrap(lkArchives, [_options.LkClientPath], _options.LkListfile);
+
+            loaded = _areaMapper.TryLoadFromArchives(alphaArchives, "0.5.3", lkArchives, "3.3.5.12340");
+        }
+
+        if (!loaded && !string.IsNullOrEmpty(_options.CrosswalkDirectory))
+        {
+            _areaMapper.LoadCrosswalkCsv(_options.CrosswalkDirectory);
+        }
+
+        if (!loaded && !string.IsNullOrEmpty(_areaMapper.LastLoadMessage))
+        {
+            Console.Error.WriteLine($"[WARN] {_areaMapper.LastLoadMessage}");
+        }
+
+        if (_options.Verbose && AreaMapperHasMappings())
+        {
+            Console.WriteLine($"[INFO] AreaIdMapper ready: {DescribeAreaMapperState()}");
+        }
+
+        _areaMapperInitialized = true;
+    }
+
+    private bool AreaMapperHasMappings()
+    {
+        return _areaMapper is not null && (
+            _areaMapper.CrosswalkCount > 0 ||
+            (_areaMapper.AlphaAreaCount > 0 && _areaMapper.LkAreaCount > 0));
+    }
+
+    private string DescribeAreaMapperState()
+    {
+        if (_areaMapper is null)
+        {
+            return "mapper unavailable";
+        }
+
+        List<string> segments =
+        [
+            $"{_areaMapper.AlphaAreaCount} Alpha",
+            $"{_areaMapper.LkAreaCount} LK"
+        ];
+
+        if (_areaMapper.CrosswalkCount > 0)
+        {
+            segments.Add($"{_areaMapper.CrosswalkCount} direct CSV mappings");
+        }
+
+        if (!string.IsNullOrEmpty(_areaMapper.LastLoadMessage))
+        {
+            segments.Add(_areaMapper.LastLoadMessage);
+        }
+
+        return string.Join(", ", segments);
     }
 
     /// <summary>
@@ -802,9 +871,19 @@ public class ConversionOptions
     public string? AlphaAreaTablePath { get; set; }
 
     /// <summary>
+    /// Path to the Alpha client/archive root for direct MPQ reads.
+    /// </summary>
+    public string? AlphaClientPath { get; set; }
+
+    /// <summary>
     /// Path to LK 3.3.5 AreaTable.dbc for crosswalk generation.
     /// </summary>
     public string? LkAreaTablePath { get; set; }
+
+    /// <summary>
+    /// Path to the LK 3.3.5 client/archive root for direct MPQ reads.
+    /// </summary>
+    public string? LkClientPath { get; set; }
 
     /// <summary>
     /// Path to Alpha Map.dbc for crosswalk (optional).

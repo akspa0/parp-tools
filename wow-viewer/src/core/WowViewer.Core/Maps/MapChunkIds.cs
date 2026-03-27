@@ -7,6 +7,8 @@ public static class MapChunkIds
     public static readonly FourCC Mver = FourCC.FromString("MVER");
     public static readonly FourCC Mphd = FourCC.FromString("MPHD");
     public static readonly FourCC Main = FourCC.FromString("MAIN");
+    public static readonly FourCC Mdnm = FourCC.FromString("MDNM");
+    public static readonly FourCC Monm = FourCC.FromString("MONM");
     public static readonly FourCC Mhdr = FourCC.FromString("MHDR");
     public static readonly FourCC Mcin = FourCC.FromString("MCIN");
     public static readonly FourCC Mtex = FourCC.FromString("MTEX");

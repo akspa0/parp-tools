@@ -29,6 +29,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `MapFileKind`
   - `MapChunkLocation`
   - `MapFileSummary`
+  - `WdtSummary`
 - `WowViewer.Core/Files`
   - `WowFileKind`
   - `WowFileDetection`
@@ -40,6 +41,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `ChunkedFileReader`
 - `WowViewer.Core.IO/Maps`
   - `MapFileSummaryReader`
+  - `WdtSummaryReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
   - `Md5TranslateIndex`
@@ -61,6 +63,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `MapDirectoryLookup`
   - `GroundEffectLookup`
   - `AreaIdMapper`
+  - `AreaIdMapper` now also prefers DBCD + WoWDBDefs for known `AreaTable` and `Map` builds when extracted tables and definitions are available, using the same vendored DBCD project and WoWDBDefs definition layout the active viewer already consumes, with raw `DbcReader` kept as a narrow fallback
 
 ### Tool consumers
 
@@ -90,12 +93,14 @@ Create one first-party shared format stack in `wow-viewer` that:
 
 - shared detection is real
 - top-level WDT or ADT chunk summary is real
+- shared WDT semantic summary for MPHD flags, MAIN occupancy, string-table counts, and top-level placement counts is now real
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
 - the concrete shared standard MPQ implementation used by the active `MdxViewer` path is now real
 - shared DBC-backed map-directory and ground-effect lookup helpers are now real
 - shared area-ID mapping plus embedded area-crosswalk ownership are now real
+- shared area-ID mapping now also has a real DBCD + WoWDBDefs-backed load path for the active `AreaTable` or `Map` seam when extracted `gillijimproject_refactor/test_data/*/tree/DBFilesClient` inputs exist, with legacy workspace-root `test_data/*/tree/DBFilesClient` kept only as a fallback probe
 - shared Alpha per-asset MPQ ownership now also covers the active `WoWMapConverter.Core` converter and VLM callers
 - the dead duplicate old-repo helper layer behind those active paths has now been deleted from `WoWMapConverter.Core`
 - this does not yet prove:
@@ -109,7 +114,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 ## Immediate Next Slices
 
 1. deepen shared ADT root and split-file top-level summaries
-2. add shared WDT semantic summary beyond raw chunk order
+2. deepen shared ADT root and split-file top-level summaries beyond raw chunk order
 3. add first shared WMO or model-family detection or top-level summary slice
 4. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints
 5. continue shrinking `MdxViewer` imports of `WoWMapConverter.Core` by moving other narrow non-MPQ helpers onto `Core` or `Core.IO`
@@ -138,7 +143,12 @@ Create one first-party shared format stack in `wow-viewer` that:
 ## Validation Status
 
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `64` tests after the shared detector, MD5 minimap translation, archive-reader, archive bootstrap, Alpha wrapper, concrete MPQ catalog, shared DBC lookup, and shared AreaIdMapper slices landed
-- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 26, 2026
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `66` tests after wiring the shared `AreaIdMapper` seam to DBCD + WoWDBDefs and adding explicit missing-tree diagnostics
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `71` tests after adding the shared WDT semantic summary slice
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `37` tests after adding archive-backed `AreaIdMapper` coverage and shorthand-build normalization for archive-fed DBCD loads
+- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and now reports the shared WDT semantic summary `wmoBased=False tiles=1496/4096 mainCellBytes=8 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 26, 2026
+- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- convert i:/parp/parp-tools/gillijimproject_refactor/test_data/0.5.3/alphawdt/World/Maps/PVPZone01/PVPZone01.wdt -o i:/parp/parp-tools/output/pvpzone01-alpha-to-lk-smoke-dbcd-check3 -v` passed on Mar 27, 2026 and confirmed the new explicit warning now names the preferred `gillijimproject_refactor/test_data/0.5.3/tree` and `gillijimproject_refactor/test_data/3.3.5/tree` `AreaTable` and `Map` roots first when extracted files are missing
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Mar 27, 2026 after switching the converter to lazy archive-backed `AreaIdMapper` initialization and adding `--alpha-client` plus `--lk-client`

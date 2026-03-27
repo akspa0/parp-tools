@@ -40,6 +40,9 @@ Bootstrap dependencies:
 - Optional evaluation repos can also be pulled with:
 	- PowerShell: `./scripts/bootstrap.ps1 -IncludeOptional`
 	- Bash: `./scripts/bootstrap.sh --include-optional`
+- The active shared `AreaTable` and `Map` seam now uses the same vendored DBCD project the viewer already consumes from `gillijimproject_refactor/lib/wow.tools.local/DBCD`, and bundles `gillijimproject_refactor/lib/WoWDBDefs/definitions` into the `WowViewer.Core.IO` output.
+- The shared `AreaIdMapper` seam now also supports archive-backed `AreaTable` and `Map` loads through `IArchiveReader` plus `DbClientFileReader`, so consumers do not need fake extracted DBC trees just to get DBCD + WoWDBDefs-backed mapping.
+- Extracted fixed-data tables under `gillijimproject_refactor/test_data/0.5.3/tree/DBFilesClient` or `gillijimproject_refactor/test_data/3.3.5/tree/DBFilesClient` remain a narrow fallback or test path; when neither archive-backed nor explicit table inputs are provided, the current `AreaIdMapper` path warns explicitly and falls back to crosswalk-only behavior instead of silently pretending schema-backed loading happened.
 
 Current shared-core foundation slice:
 
@@ -51,11 +54,13 @@ Current shared-core foundation slice:
 	- `MapFileKind`
 	- `MapChunkLocation`
 	- `MapFileSummary`
+	- `WdtSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
 	- `ChunkedFileReader`
 	- `MapFileSummaryReader`
+	- `WdtSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -79,6 +84,7 @@ Current shared-core foundation slice:
 	- `MapDirectoryLookup`
 	- `GroundEffectLookup`
 	- `AreaIdMapper`
+	- `AreaIdMapper` now also prefers DBCD + WoWDBDefs for known `0.5.3` and `3.3.5` `AreaTable` and `Map` inputs from either shared archive readers or explicit file paths, keeping the raw `DbcReader` only as a narrow fallback
 - `src/core/WowViewer.Core` now also contains the first cross-family file detection contracts:
 	- `WowFileKind`
 	- `WowFileDetection`
@@ -86,6 +92,7 @@ Current shared-core foundation slice:
 	- `WowFileDetector`
 - `tests/WowViewer.Core.Tests` now locks the current FourCC and chunk-header boundary behavior.
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
+	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
 Current non-PM4 inspect slice:
@@ -94,6 +101,7 @@ Current non-PM4 inspect slice:
 	- `map inspect --input <file.wdt|file.adt>`
 - This is intentionally narrow for now:
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
+	- it now also reports a shared WDT semantic summary for MPHD WMO-based flags, MAIN tile occupancy, string-table counts, and top-level MDDF or MODF placement counts
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:
@@ -213,7 +221,7 @@ Current shared-I/O consumer slice:
 - `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj` now also references `wow-viewer/src/core/WowViewer.Core.IO`.
 - `WoWMapConverter.Core.VLM.VlmDatasetExporter` now uses shared archive interfaces plus shared DBC-backed lookup helpers instead of `NativeMpqService`, `MapDbcService`, and `GroundEffectService` in its active path.
 - `WoWMapConverter.Core.VLM.VlmDatasetExporter`, `WmoV14ToV17Converter`, and `WmoV14ToV17ExtendedConverter` now also use shared `AlphaArchiveReader` for Alpha per-asset MPQ reads.
-- `WoWMapConverter.Core.Converters.AlphaToLkConverter` now also uses shared `AreaIdMapper` for Alpha-to-LK area-ID mapping.
+- `WoWMapConverter.Core.Converters.AlphaToLkConverter` now also uses shared `AreaIdMapper` for Alpha-to-LK area-ID mapping, and its active CLI path now accepts explicit `--alpha-client` and `--lk-client` archive roots instead of constructor-time extracted-tree probing.
 - the dead duplicate old-repo helper layer behind that active VLM path has now been deleted from `WoWMapConverter.Core`, including the old local `DbcReader`, `NativeMpqService`, `Md5TranslateResolver`, `MapDbcService`, and `GroundEffectService` files.
 - the duplicate old-repo `WoWMapConverter.Core.Services.AlphaMpqReader` file is now also gone.
 - the old-repo `WoWMapConverter.Core.Dbc.AreaIdMapper`, dead `Services.AreaIdCrosswalk`, and the old embedded `area_crosswalk.csv` copy are now gone.

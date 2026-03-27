@@ -1,5 +1,56 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WDT Semantic Summary Slice Landed
+
+- `wow-viewer` now has its first shared WDT semantic-summary seam beyond raw top-level chunk inventory.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Maps/WdtSummary.cs` now owns the typed WDT semantic-summary contract for MPHD WMO-based flags, MAIN occupancy, string-table counts, and top-level placement counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtSummaryReader.cs` now reads those signals from either Alpha-style or standard WDT top-level chunks without pretending to be a full payload parser
+	- `wow-viewer/src/core/WowViewer.Core/Maps/MapChunkIds.cs` now includes `MDNM` and `MONM` so the shared reader can treat Alpha name tables as first-class chunk ids instead of tool-local literals
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports the shared WDT semantic summary for `map inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs` now covers synthetic standard WDT, synthetic Alpha WDT, and the fixed real-data `development.wdt` semantic signals
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `71` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and reported `wmoBased=False tiles=1496/4096 mainCellBytes=8 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0`
+- Important boundary:
+	- this proves shared WDT semantic summary for top-level MPHD, MAIN, string-table, and placement-count signals
+	- this does not yet prove deep WDT payload parsing, WMO placement semantics beyond counts, or any write path
+
+## Mar 27, 2026 - Shared AreaIdMapper Archive-Backed Loading Replaced Constructor-Time Extracted-Tree Probing
+
+- The primary `AreaIdMapper` load path is now archive-backed instead of constructor-time test-data probing in `WoWMapConverter.Core.Converters.AlphaToLkConverter`.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core.IO/Dbc/AreaIdMapper.cs` now exposes `TryLoadFromArchives(...)`, reading `AreaTable` and `Map` through shared `IArchiveReader` plus `DbClientFileReader` and feeding DBCD through an in-memory provider instead of a staged file tree
+	- shorthand archive build inputs `0.5.3` and `3.3.5` now normalize to the full WoWDBDefs-compatible build strings the DBCD seam actually needs
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/AlphaToLkConverter.cs` no longer calls `TryAutoLoadFromTestData()` in its constructor; it now initializes the mapper lazily from explicit DBC paths or explicit Alpha and LK archive roots, then falls back to CSV crosswalks only if those inputs fail
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now accepts `--alpha-client` and `--lk-client` so converter runs can point directly at MPQ roots
+	- `wow-viewer/tests/WowViewer.Core.Tests/AreaIdMapperTests.cs` now covers synthetic archive-backed DBCD loading and explicit archive-missing diagnostics
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `37` passing tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Mar 27, 2026 with the existing warning floor
+- Important boundary:
+	- this proves the shared area-mapper seam can now consume archive-backed DBC bytes without extracted trees
+	- this does not yet include a real client-root converter smoke test against Alpha and LK MPQ inputs in this workspace
+
+## Mar 27, 2026 - Shared AreaIdMapper DBCD Wiring And Explicit Fallback Warning Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO/Dbc/AreaIdMapper.cs` now prefers real schema-aware loading through DBCD when extracted `AreaTable` and `Map` files are present and `WoWDBDefs` definitions can be discovered from the workspace.
+- Landed pieces:
+	- `WowViewer.Core.IO.csproj` now references the same vendored `gillijimproject_refactor/lib/wow.tools.local/DBCD/DBCD/DBCD.csproj` project the active viewer already uses, and bundles `gillijimproject_refactor/lib/WoWDBDefs/definitions` into output
+	- shared `AreaIdMapper` now discovers `WoWDBDefs/definitions` from the bundled `definitions` output first, then from `gillijimproject_refactor/lib/WoWDBDefs/definitions`, `wow-viewer/libs/wowdev/WoWDBDefs/definitions`, `libs/wowdev/WoWDBDefs/definitions`, or legacy `lib/WoWDBDefs/definitions`
+	- shared `AreaIdMapper.LoadDbcs(...)` now uses DBCD plus WoWDBDefs for known `0.5.3` and `3.3.5` paths when available, then falls back to the narrow raw `DbcReader` only when schema-backed loading is unavailable
+	- shared `AreaIdMapper.TryAutoLoadFromTestData()` and `TryLoadKnownTestDataFromRoot(...)` now prefer `gillijimproject_refactor/test_data/*/tree/DBFilesClient` before legacy `test_data/*/tree/DBFilesClient`, and record explicit diagnostics instead of silently failing when extracted tables are missing
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/AlphaToLkConverter.cs` now surfaces that missing-tree diagnostic as a runtime warning before falling back to crosswalk-only behavior
+	- added focused shared-library regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/AreaIdMapperTests.cs` for explicit missing-tree reporting and a synthetic DBCD+WoWDBDefs-backed `AreaTable`/`Map` load path
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `66` tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` passed on Mar 27, 2026 with the existing warning floor and no new build break
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- convert i:/parp/parp-tools/gillijimproject_refactor/test_data/0.5.3/alphawdt/World/Maps/PVPZone01/PVPZone01.wdt -o i:/parp/parp-tools/output/pvpzone01-alpha-to-lk-smoke-dbcd-check3 -v` passed on Mar 27, 2026 and now emits one explicit warning that names the preferred `gillijimproject_refactor/test_data/*/tree/DBFilesClient` roots first when extracted DBC trees are absent
+- Important boundary:
+	- this proves the shared area-mapper seam is now actually wired to DBCD plus WoWDBDefs when the extracted table trees exist
+	- the current real-data runtime smoke tests in this workspace still fall back because the extracted `gillijimproject_refactor/test_data/0.5.3/tree/DBFilesClient/*` and `gillijimproject_refactor/test_data/3.3.5/tree/DBFilesClient/*` files are absent here
+	- this is still narrow `AreaTable` and `Map` ownership for the mapper seam, not broad general DBC or DB2 format ownership across all tables
+
 ## Mar 26, 2026 - Shared AreaIdMapper And Crosswalk Ownership Landed
 
 - `wow-viewer/src/core/WowViewer.Core.IO/Dbc/AreaIdMapper.cs` now owns the remaining live old-repo area-mapping seam plus the embedded area-crosswalk resource it depended on.

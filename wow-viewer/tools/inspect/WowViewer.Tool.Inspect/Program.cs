@@ -541,6 +541,12 @@ static void PrintMapSummary(MapFileSummary summary)
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Kind: {summary.Kind}");
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
+	if (summary.Kind == MapFileKind.Wdt)
+	{
+		using FileStream stream = File.OpenRead(summary.SourcePath);
+		WdtSummary wdtSummary = WdtSummaryReader.Read(stream, summary);
+		Console.WriteLine($"WDT semantics: wmoBased={wdtSummary.IsWmoBased} tiles={wdtSummary.TilesWithData}/{wdtSummary.TotalTiles} mainCellBytes={wdtSummary.MainCellSizeBytes} doodadNames={wdtSummary.DoodadNameCount} wmoNames={wdtSummary.WorldModelNameCount} doodadPlacements={wdtSummary.DoodadPlacementCount} wmoPlacements={wdtSummary.WorldModelPlacementCount}");
+	}
 	Console.WriteLine($"Top-level chunks: {summary.ChunkCount}");
 	string chunkOrder = string.Join(", ", summary.Chunks.Take(16).Select(chunk => chunk.Id.ToString()));
 	if (summary.Chunks.Count > 16)
