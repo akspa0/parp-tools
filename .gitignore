@@ -556,3 +556,6 @@ gillijimproject_refactor/reference_data/\[WoW]\[3.3.5.12340] Info Dump Thread_fi
 gillijimproject_refactor/reference_data/\[WoW]\[3.3.5.12340] Info Dump Thread_files/wits.png
 gillijimproject_refactor/reference_data/\[WoW]\[3.3.5.12340] Info Dump Thread_files/yuiloader-dom-event.js
 gillijimproject_refactor/reference_data/\[WoW]\[3.3.5.12340] Info Dump Thread_files/zip.gif
+
+# wow-viewer test data
+wow-viewer/testdata/*
