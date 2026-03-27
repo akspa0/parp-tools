@@ -160,6 +160,27 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.ReportedLightCount > 0)
+		{
+			WmoLightSummary lightSummary = WmoLightSummaryReader.Read(input);
+			PrintWmoLightSummary(lightSummary);
+		}
+		try
+		{
+			WmoFogSummary fogSummary = WmoFogSummaryReader.Read(input);
+			PrintWmoFogSummary(fogSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
+		try
+		{
+			WmoOpaqueChunkSummary mcvpSummary = WmoOpaqueChunkSummaryReader.Read(input, WmoChunkIds.Mcvp);
+			PrintWmoOpaqueChunkSummary(mcvpSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
 		if (summary.ReportedPortalCount > 0)
 		{
 			WmoPortalVertexSummary portalVertexSummary = WmoPortalVertexSummaryReader.Read(input);
@@ -802,6 +823,21 @@ static void PrintWmoPortalInfoSummary(WmoPortalInfoSummary summary)
 static void PrintWmoPortalRefSummary(WmoPortalRefSummary summary)
 {
 	Console.WriteLine($"MOPR: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctPortals={summary.DistinctPortalIndexCount} maxGroupIndex={summary.MaxGroupIndex} sides(+/-/0)={summary.PositiveSideCount}/{summary.NegativeSideCount}/{summary.NeutralSideCount}");
+}
+
+static void PrintWmoLightSummary(WmoLightSummary summary)
+{
+	Console.WriteLine($"MOLT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctTypes={summary.DistinctTypeCount} attenuated={summary.AttenuatedCount} intensityRange=[{summary.MinIntensity:F3}, {summary.MaxIntensity:F3}] maxAttenEnd={summary.MaxAttenEnd:F3} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoFogSummary(WmoFogSummary summary)
+{
+	Console.WriteLine($"MFOG: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} nonZeroFlags={summary.NonZeroFlagCount} minSmallRadius={summary.MinSmallRadius:F3} maxLargeRadius={summary.MaxLargeRadius:F3} maxFogEnd={summary.MaxFogEnd:F3} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoOpaqueChunkSummary(WmoOpaqueChunkSummary summary)
+{
+	Console.WriteLine($"{summary.ChunkId}: payloadBytes={summary.PayloadSizeBytes}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)

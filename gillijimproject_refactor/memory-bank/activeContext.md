@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Metadata Slices For MOLT, MFOG, And MCVP Landed
+
+- `wow-viewer` now has another batched root-WMO metadata landing covering lights, fog, and one opaque trailing root chunk together:
+	- `MOLT` light semantic summary
+	- `MFOG` fog semantic summary
+	- `MCVP` opaque-chunk byte summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoLightSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoLightSummaryReader.cs` now own narrow `MOLT` semantics for entry counts, distinct light types, attenuation usage, intensity range, attenuation-end range, and light bounds
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoFogSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoFogSummaryReader.cs` now own narrow `MFOG` semantics for entry counts, non-zero flag counts, radius ranges, fog-end range, and fog bounds
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoOpaqueChunkSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoOpaqueChunkSummaryReader.cs` now provide a thin shared seam for byte-count reporting of opaque root chunks like `MCVP`
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now includes shared `MOLT`, `MFOG`, `MCVP`, plus root `MOVV` and `MOVB` ids for continued root-chunk ownership work
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated `MOLT`, `MFOG`, and `MCVP` semantic lines for root WMO files when those chunks are present
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoLightSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoFogSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoOpaqueChunkSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `115` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `84` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-meta-batch-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MOLT: payloadBytes=96 entries=2 distinctTypes=2 attenuated=1 intensityRange=[4.000, 8.000] maxAttenEnd=20.000 boundsMin=(-4.00, 2.00, -6.00) boundsMax=(1.00, 5.00, 3.00)`
+		- `MFOG: payloadBytes=96 entries=2 nonZeroFlags=1 minSmallRadius=1.000 maxLargeRadius=7.000 maxFogEnd=11.000 boundsMin=(-4.00, 2.00, -6.00) boundsMax=(1.00, 5.00, 3.00)`
+		- `MCVP: payloadBytes=12`
+- Important boundary:
+	- these seams prove light or fog count-level semantics plus a byte-count seam for opaque `MCVP`
+	- they do not yet prove deeper light/fog rendering semantics, `MCVP` structure ownership, or any write path
+
 ## Mar 27, 2026 - Batched Root WMO Portal Summary Slices For MOPV, MOPT, And MOPR Landed
 
 - `wow-viewer` now has a second batched root-WMO landing covering the three portal-owner chunks together:

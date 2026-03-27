@@ -1,5 +1,24 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Metadata Slices For MOLT, MFOG, And MCVP Landed
+
+- Added another batched root-WMO metadata landing in `wow-viewer` for lights, fog, and an opaque trailing chunk.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoLightSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoLightSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoFogSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoFogSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoOpaqueChunkSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoOpaqueChunkSummaryReader`
+	- expanded shared `WmoChunkIds` with `MOLT`, `MFOG`, `MCVP`, `MOVV`, and `MOVB`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated `MOLT`, `MFOG`, and `MCVP` semantic lines when present
+	- added synthetic regression coverage for all three seams
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `115` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `84` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-meta-batch-test.wmo` passed on Mar 27, 2026 for a synthetic root-metadata smoke case
+	- this is still summary work, not deeper light/fog rendering semantics or opaque `MCVP` ownership
+
 ### Mar 27, 2026 - Batched Root WMO Portal Summary Slices For MOPV, MOPT, And MOPR Landed
 
 - Added a second batched root-WMO landing in `wow-viewer` for portal-owner chunks.
