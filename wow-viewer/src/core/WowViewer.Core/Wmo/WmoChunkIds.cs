@@ -12,6 +12,9 @@ public static class WmoChunkIds
     public static readonly FourCC Mogn = FourCC.FromString("MOGN");
     public static readonly FourCC Mogi = FourCC.FromString("MOGI");
     public static readonly FourCC Mosb = FourCC.FromString("MOSB");
+    public static readonly FourCC Mopv = FourCC.FromString("MOPV");
+    public static readonly FourCC Mopt = FourCC.FromString("MOPT");
+    public static readonly FourCC Mopr = FourCC.FromString("MOPR");
     public static readonly FourCC Mods = FourCC.FromString("MODS");
     public static readonly FourCC Modn = FourCC.FromString("MODN");
     public static readonly FourCC Modd = FourCC.FromString("MODD");

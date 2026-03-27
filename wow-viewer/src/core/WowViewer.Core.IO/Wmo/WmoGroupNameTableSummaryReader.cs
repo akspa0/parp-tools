@@ -28,7 +28,7 @@ public static class WmoGroupNameTableSummaryReader
             throw new InvalidDataException($"WMO group-name summary requires a WMO root file, but found {detection.Kind}.");
 
         ChunkSpan? mognChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == FourCC.FromString("MOGN"));
-        if (mognChunk is null)
+        if (mognChunk is null || mognChunk.Value.Header.Id != WmoChunkIds.Mogn)
             throw new InvalidDataException("WMO group-name summary requires a MOGN chunk.");
 
         byte[] payload = ReadChunkPayload(stream, mognChunk.Value);

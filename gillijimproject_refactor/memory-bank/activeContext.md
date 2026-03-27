@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Portal Summary Slices For MOPV, MOPT, And MOPR Landed
+
+- `wow-viewer` now has a second batched root-WMO landing covering the three portal-owner chunks together:
+	- `MOPV` portal-vertex semantic summary
+	- `MOPT` portal-info semantic summary
+	- `MOPR` portal-ref semantic summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalVertexSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalVertexSummaryReader.cs` now own narrow `MOPV` semantics for vertex counts and computed bounds
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalInfoSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalInfoSummaryReader.cs` now own narrow `MOPT` semantics for portal-entry counts, max start vertex, max vertex count, and plane-D range
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalRefSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalRefSummaryReader.cs` now own narrow `MOPR` semantics for ref counts, distinct portal counts, max group index, and side distribution
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now includes shared `MOPV`, `MOPT`, and `MOPR` chunk ids
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated `MOPV`, `MOPT`, and `MOPR` semantic lines for root WMO files when portal data is present
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalVertexSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalInfoSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalRefSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `112` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `81` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portals-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MOPV: payloadBytes=36 vertices=3 boundsMin=(-4.00, -8.00, -6.00) boundsMax=(7.00, 5.00, 9.00)`
+		- `MOPT: payloadBytes=40 entries=2 maxStartVertex=10 maxVertexCount=4 planeDRange=[-2.000, 1.000]`
+		- `MOPR: payloadBytes=24 entries=3 distinctPortals=2 maxGroupIndex=7 sides(+/-/0)=1/1/1`
+- Important boundary:
+	- these three seams prove portal-owner count and range semantics only
+	- they do not yet prove full root-to-group portal routing behavior or any write path
+
 ## Mar 27, 2026 - Batched Root WMO Summary Slices For MODD, MOGN, And MOSB Landed
 
 - `wow-viewer` now has a batched set of three additional narrow root-WMO seams instead of a one-slice landing:
@@ -13,6 +37,7 @@
 	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now includes shared `MOGN` and `MOSB` chunk ids
 	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated `MODD`, `MOGN`, and `MOSB` semantic lines for root WMO files when those chunks are present
 	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadPlacementSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupNameTableSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoSkyboxSummaryReaderTests.cs`
+
 - Current verified validation for this batched landing:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `109` passing tests
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `78` passing tests

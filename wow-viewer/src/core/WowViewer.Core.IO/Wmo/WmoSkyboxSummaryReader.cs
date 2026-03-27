@@ -28,7 +28,7 @@ public static class WmoSkyboxSummaryReader
             throw new InvalidDataException($"WMO skybox summary requires a WMO root file, but found {detection.Kind}.");
 
         ChunkSpan? mosbChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == FourCC.FromString("MOSB"));
-        if (mosbChunk is null)
+        if (mosbChunk is null || mosbChunk.Value.Header.Id != WmoChunkIds.Mosb)
             throw new InvalidDataException("WMO skybox summary requires a MOSB chunk.");
 
         byte[] payload = ReadChunkPayload(stream, mosbChunk.Value);

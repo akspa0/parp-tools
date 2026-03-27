@@ -160,6 +160,15 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.ReportedPortalCount > 0)
+		{
+			WmoPortalVertexSummary portalVertexSummary = WmoPortalVertexSummaryReader.Read(input);
+			PrintWmoPortalVertexSummary(portalVertexSummary);
+			WmoPortalInfoSummary portalInfoSummary = WmoPortalInfoSummaryReader.Read(input);
+			PrintWmoPortalInfoSummary(portalInfoSummary);
+			WmoPortalRefSummary portalRefSummary = WmoPortalRefSummaryReader.Read(input);
+			PrintWmoPortalRefSummary(portalRefSummary);
+		}
 		try
 		{
 			WmoSkyboxSummary skyboxSummary = WmoSkyboxSummaryReader.Read(input);
@@ -778,6 +787,21 @@ static void PrintWmoGroupNameTableSummary(WmoGroupNameTableSummary summary)
 static void PrintWmoSkyboxSummary(WmoSkyboxSummary summary)
 {
 	Console.WriteLine($"MOSB: payloadBytes={summary.PayloadSizeBytes} skybox={summary.SkyboxName}");
+}
+
+static void PrintWmoPortalVertexSummary(WmoPortalVertexSummary summary)
+{
+	Console.WriteLine($"MOPV: payloadBytes={summary.PayloadSizeBytes} vertices={summary.VertexCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoPortalInfoSummary(WmoPortalInfoSummary summary)
+{
+	Console.WriteLine($"MOPT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} maxStartVertex={summary.MaxStartVertex} maxVertexCount={summary.MaxVertexCount} planeDRange=[{summary.MinPlaneD:F3}, {summary.MaxPlaneD:F3}]");
+}
+
+static void PrintWmoPortalRefSummary(WmoPortalRefSummary summary)
+{
+	Console.WriteLine($"MOPR: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctPortals={summary.DistinctPortalIndexCount} maxGroupIndex={summary.MaxGroupIndex} sides(+/-/0)={summary.PositiveSideCount}/{summary.NegativeSideCount}/{summary.NeutralSideCount}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)

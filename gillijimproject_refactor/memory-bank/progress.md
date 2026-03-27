@@ -1,5 +1,24 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Portal Summary Slices For MOPV, MOPT, And MOPR Landed
+
+- Added a second batched root-WMO landing in `wow-viewer` for portal-owner chunks.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoPortalVertexSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalVertexSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoPortalInfoSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalInfoSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoPortalRefSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalRefSummaryReader`
+	- expanded shared `WmoChunkIds` with `MOPV`, `MOPT`, and `MOPR`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated `MOPV`, `MOPT`, and `MOPR` semantic lines when portal data is present
+	- added synthetic regression coverage for all three portal seams
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `112` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `81` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portals-test.wmo` passed on Mar 27, 2026 for a synthetic root-portal smoke case
+	- this is still summary work, not root-to-group portal routing ownership or write support
+
 ### Mar 27, 2026 - Batched Root WMO Summary Slices For MODD, MOGN, And MOSB Landed
 
 - Added a batched three-slice root-WMO landing in `wow-viewer` instead of another single-slice step.
@@ -13,6 +32,7 @@
 	- expanded shared `WmoChunkIds` with `MOGN` and `MOSB`
 	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated `MODD`, `MOGN`, and `MOSB` semantic lines when present
 	- added synthetic regression coverage for all three seams
+
 - Validation limits:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `109` passing tests
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `78` passing tests
