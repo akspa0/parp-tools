@@ -42,6 +42,12 @@ public sealed class WmoRealDataTests
         WmoGroupInfoSummary groupInfoSummary = WmoGroupInfoSummaryReader.Read(groupInfoStream, mpqPath);
         Assert.True(groupInfoSummary.EntryCount > 0);
 
+        using MemoryStream embeddedGroupStream = new(bytes);
+        WmoEmbeddedGroupSummary embeddedGroupSummary = WmoEmbeddedGroupSummaryReader.Read(embeddedGroupStream, mpqPath);
+        Assert.Equal(summary.GroupInfoCount, embeddedGroupSummary.GroupCount);
+        Assert.True(embeddedGroupSummary.TotalVertexCount > 0);
+        Assert.True(embeddedGroupSummary.TotalIndexCount > 0);
+
         if (summary.ReportedPortalCount > 0)
         {
             using MemoryStream portalVertexStream = new(bytes);

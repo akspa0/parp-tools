@@ -28,6 +28,11 @@ public static class WmoGroupSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
         int faceMaterialCount = 0;
         int vertexCount = 0;

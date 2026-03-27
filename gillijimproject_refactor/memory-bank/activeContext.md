@@ -1,5 +1,24 @@
 # Active Context
 
+## Mar 27, 2026 - Alpha Monolithic Root Embedded-Group Aggregate Summary Landed
+
+- With Alpha `MOMO` root support working on real `castle01.wmo.MPQ`, the next narrow follow-up landed on the root file's embedded top-level `MOGP` blocks instead of jumping straight to full monolithic group-consumer cutover.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoEmbeddedGroupSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoEmbeddedGroupSummaryReader.cs` now own an aggregate embedded-group summary for Alpha monolithic root files with top-level `MOGP` chunks
+	- the aggregate covers embedded-group count, header-size range, groups with portals, groups with liquid, total faces, vertices, indices, normals, batches, doodad refs, and aggregate bounds
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupSummaryReader.cs` now exposes a reusable internal `MOGP` payload summary helper so the embedded-root aggregate can reuse the same group-header interpretation instead of duplicating it
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints an `MOGP(root)` aggregate line when a root WMO actually contains embedded top-level `MOGP` chunks
+	- synthetic regression coverage landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoEmbeddedGroupSummaryReaderTests.cs`
+	- real-data regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs` now also validates the embedded-group aggregate against `castle01.wmo.MPQ`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `129` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `2` targeted passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026 and now reports:
+		- `MOGP(root): groups=2 headerBytes=128-128 groupsWithPortals=2 groupsWithLiquid=0 faces=2371 vertices=7113 indices=6195 normals=7113 batches=22 doodadRefs=24 ...`
+- Important boundary:
+	- this is an embedded-group aggregate seam for Alpha monolithic roots
+	- it does not yet expose per-embedded-group detailed mesh summaries or direct monolithic-group selection/routing in inspect
+
 ## Mar 27, 2026 - Alpha MOMO Root WMO Support And Real 0.5.3 `.wmo.MPQ` Validation Landed
 
 - Real Alpha-era WMO validation exposed an important boundary gap in the shared root-WMO readers:

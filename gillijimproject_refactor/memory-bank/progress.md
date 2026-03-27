@@ -1,5 +1,21 @@
 # Progress
 
+### Mar 27, 2026 - Alpha Monolithic Root Embedded-Group Aggregate Summary Landed
+
+- Added the next narrow Alpha follow-up after `MOMO` root support by summarizing the embedded top-level `MOGP` group blocks that still live in monolithic 0.5.3 root files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoEmbeddedGroupSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoEmbeddedGroupSummaryReader`
+	- reused `WmoGroupSummaryReader` logic through a shared internal `MOGP` payload helper instead of duplicating group-header interpretation
+	- updated `WowViewer.Tool.Inspect wmo inspect` so Alpha monolithic roots now print an `MOGP(root)` aggregate line when embedded groups are present
+	- added synthetic regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoEmbeddedGroupSummaryReaderTests.cs`
+	- extended real-data coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `129` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `2` targeted passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026 and now reports embedded-group aggregate metrics
+	- this is still aggregate ownership, not per-embedded-group detailed Alpha consumer routing
+
 ### Mar 27, 2026 - Alpha MOMO Root WMO Support And Real 0.5.3 `.wmo.MPQ` Validation Landed
 
 - Added shared Alpha root-WMO support for the `MOMO` container so the existing root-summary stack can read real 0.5.3 monolithic WMO roots.

@@ -319,6 +319,14 @@ static void RunWmoInspect(string[] args)
 			WmoGroupInfoSummary groupInfoSummary = ReadInput(WmoGroupInfoSummaryReader.Read);
 			PrintWmoGroupInfoSummary(groupInfoSummary);
 		}
+		try
+		{
+			WmoEmbeddedGroupSummary embeddedGroupSummary = ReadInput(WmoEmbeddedGroupSummaryReader.Read);
+			PrintWmoEmbeddedGroupSummary(embeddedGroupSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
 		return;
 	}
 
@@ -856,6 +864,11 @@ static void PrintWmoSummary(WmoSummary summary)
 static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
 {
 	Console.WriteLine($"MOGI: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} entries={summary.EntryCount} distinctFlags={summary.DistinctFlagCount} nonZeroFlags={summary.NonZeroFlagCount} nameOffsetRange={summary.MinNameOffset}-{summary.MaxNameOffset} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoEmbeddedGroupSummary(WmoEmbeddedGroupSummary summary)
+{
+	Console.WriteLine($"MOGP(root): groups={summary.GroupCount} headerBytes={summary.MinHeaderSizeBytes}-{summary.MaxHeaderSizeBytes} groupsWithPortals={summary.GroupsWithPortals} groupsWithLiquid={summary.GroupsWithLiquid} faces={summary.TotalFaceMaterialCount} vertices={summary.TotalVertexCount} indices={summary.TotalIndexCount} normals={summary.TotalNormalCount} batches={summary.TotalBatchCount} doodadRefs={summary.TotalDoodadRefCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void PrintWmoMaterialSummary(WmoMaterialSummary summary)
