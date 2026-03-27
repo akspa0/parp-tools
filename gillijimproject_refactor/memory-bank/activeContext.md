@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Root Material Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO root seam after `MOGI`: a shared `MOMT` material semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoMaterialSummary.cs` now owns the typed root `MOMT` summary contract for payload size, inferred entry size, entry count, distinct shader counts, distinct blend-mode counts, non-zero-flag counts, and maximum texture offsets across the first three slots
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoMaterialSummaryReader.cs` now reads standard, legacy, and vintage `MOMT` payload semantics from root WMO files using `MOHD` material-count guidance when available
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOMT` semantic line for root WMO files that contain material entries
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoMaterialSummaryReaderTests.cs` now covers synthetic standard 64-byte and legacy 44-byte `MOMT` payloads
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `103` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `72` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-momt-test.wmo` passed on Mar 27, 2026 and reported `MOMT: payloadBytes=128 entryBytes=64 entries=2 distinctShaders=2 distinctBlendModes=2 nonZeroFlags=1 maxTex1Ofs=24 maxTex2Ofs=20 maxTex3Ofs=88`
+- Important boundary:
+	- this proves shared `MOMT` semantic summary for material-entry layout and selected top-level fields only
+	- this does not yet prove texture-name resolution against `MOTX`, color interpretation, or any write path
+
 ## Mar 27, 2026 - Shared WMO Root Group-Info Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO root seam after the group-level payload summaries: a shared `MOGI` group-info semantic-summary reader.

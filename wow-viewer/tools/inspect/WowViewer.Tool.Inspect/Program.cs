@@ -160,6 +160,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.MaterialEntryCount > 0)
+		{
+			WmoMaterialSummary materialSummary = WmoMaterialSummaryReader.Read(input);
+			PrintWmoMaterialSummary(materialSummary);
+		}
 		if (summary.GroupInfoCount > 0)
 		{
 			WmoGroupInfoSummary groupInfoSummary = WmoGroupInfoSummaryReader.Read(input);
@@ -702,6 +707,11 @@ static void PrintWmoSummary(WmoSummary summary)
 static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
 {
 	Console.WriteLine($"MOGI: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} entries={summary.EntryCount} distinctFlags={summary.DistinctFlagCount} nonZeroFlags={summary.NonZeroFlagCount} nameOffsetRange={summary.MinNameOffset}-{summary.MaxNameOffset} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoMaterialSummary(WmoMaterialSummary summary)
+{
+	Console.WriteLine($"MOMT: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} entries={summary.EntryCount} distinctShaders={summary.DistinctShaderCount} distinctBlendModes={summary.DistinctBlendModeCount} nonZeroFlags={summary.NonZeroFlagCount} maxTex1Ofs={summary.MaxTexture1Offset} maxTex2Ofs={summary.MaxTexture2Offset} maxTex3Ofs={summary.MaxTexture3Offset}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)

@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Root Material Semantic Summary Slice Landed
+
+- Added the next narrow WMO root seam in `wow-viewer`: shared `MOMT` material semantic summary.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoMaterialSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoMaterialSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes a dedicated `MOMT` semantic line when material entries are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoMaterialSummaryReaderTests.cs` for synthetic standard and legacy `MOMT` coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `103` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `72` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-momt-test.wmo` passed on Mar 27, 2026 for a synthetic root-material smoke case
+	- this is still semantic summary work, not `MOTX` resolution or write support
+
 ### Mar 27, 2026 - Shared WMO Root Group-Info Semantic Summary Slice Landed
 
 - Added the next narrow WMO root seam in `wow-viewer`: shared `MOGI` group-info semantic summary.

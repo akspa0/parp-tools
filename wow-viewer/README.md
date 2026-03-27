@@ -73,6 +73,7 @@ Current shared-core foundation slice:
   - `WmoGroupVertexSummary`
   - `WmoGroupNormalSummary`
   - `WmoGroupInfoSummary`
+  - `WmoMaterialSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -95,6 +96,7 @@ Current shared-core foundation slice:
   - `WmoGroupVertexSummaryReader`
   - `WmoGroupNormalSummaryReader`
   - `WmoGroupInfoSummaryReader`
+  - `WmoMaterialSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -140,6 +142,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic WMO `MOVT` vertex semantic-summary behavior including computed bounds
 	- it now also locks synthetic WMO `MONR` normal semantic-summary behavior including component-range and near-unit coverage
 	- it now also locks synthetic root WMO `MOGI` semantic-summary behavior including standard and legacy entry layouts
+	- it now also locks synthetic root WMO `MOMT` semantic-summary behavior including standard and legacy entry layouts
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -165,6 +168,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared WMO `MOVT` vertex semantic summary for vertex counts and computed bounds when a group file contains vertex payloads
 	- it now also reports a shared WMO `MONR` normal semantic summary for component ranges, length ranges, and near-unit counts when a group file contains normal payloads
 	- it now also reports a shared root WMO `MOGI` semantic summary for entry counts, flag coverage, name-offset ranges, and union bounds when group info is present
+	- it now also reports a shared root WMO `MOMT` semantic summary for entry counts, shader or blend coverage, and selected texture offsets when material entries are present
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:
