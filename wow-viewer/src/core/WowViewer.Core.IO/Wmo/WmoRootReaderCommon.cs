@@ -11,11 +11,15 @@ internal static class WmoRootReaderCommon
 {
     public static (uint? Version, IReadOnlyList<ChunkSpan> Chunks) ReadRootChunks(Stream stream, string sourcePath)
     {
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
+        IReadOnlyList<ChunkSpan> topLevelChunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+        uint? version = TryReadVersion(stream, topLevelChunks);
+        WowFileDetection detection = WowFileDetector.Detect(sourcePath, topLevelChunks, version);
         if (detection.Kind != WowFileKind.Wmo)
             throw new InvalidDataException($"WMO root summary requires a WMO root file, but found {detection.Kind}.");
+
+        IReadOnlyList<ChunkSpan> chunks = topLevelChunks.Count > 1 && topLevelChunks[1].Header.Id == WmoChunkIds.Momo
+            ? ExpandRootChunks(stream, topLevelChunks)
+            : topLevelChunks;
 
         return (version, chunks);
     }
@@ -85,6 +89,52 @@ internal static class WmoRootReaderCommon
             byte[] payload = new byte[chunk.Header.Size];
             stream.ReadExactly(payload);
             return payload;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static IReadOnlyList<ChunkSpan> ExpandRootChunks(Stream stream, IReadOnlyList<ChunkSpan> topLevelChunks)
+    {
+        List<ChunkSpan> expanded = new(topLevelChunks.Count + 8);
+        foreach (ChunkSpan chunk in topLevelChunks)
+        {
+            if (chunk.Header.Id == WmoChunkIds.Momo)
+            {
+                AddMomoSubchunks(stream, chunk, expanded);
+                continue;
+            }
+
+            expanded.Add(chunk);
+        }
+
+        return expanded;
+    }
+
+    private static void AddMomoSubchunks(Stream stream, ChunkSpan momoChunk, List<ChunkSpan> output)
+    {
+        long previousPosition = stream.Position;
+        try
+        {
+            long offset = momoChunk.DataOffset;
+            long end = momoChunk.EndOffset;
+            while (offset + ChunkHeader.SizeInBytes <= end)
+            {
+                stream.Position = offset;
+                byte[] headerBytes = new byte[ChunkHeader.SizeInBytes];
+                stream.ReadExactly(headerBytes);
+                FourCC id = FourCC.FromFileBytes(headerBytes.AsSpan(0, 4));
+                uint size = BinaryPrimitives.ReadUInt32LittleEndian(headerBytes.AsSpan(4, 4));
+                long dataOffset = offset + ChunkHeader.SizeInBytes;
+                long chunkEnd = dataOffset + size;
+                if (chunkEnd > end)
+                    break;
+
+                output.Add(new ChunkSpan(new ChunkHeader(id, size), offset, dataOffset));
+                offset = chunkEnd;
+            }
         }
         finally
         {

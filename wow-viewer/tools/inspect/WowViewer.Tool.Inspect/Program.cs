@@ -155,21 +155,41 @@ static void RunWmoInspect(string[] args)
 		return;
 	}
 
-	WowFileDetection detection = WowFileDetector.Detect(input);
+	byte[]? archivedBytes = null;
+	Stream OpenInputStream()
+	{
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	T ReadInput<T>(Func<Stream, string, T> reader)
+	{
+		using Stream stream = OpenInputStream();
+		return reader(stream, input);
+	}
+
+	WowFileDetection detection;
+	using (Stream detectionStream = OpenInputStream())
+		detection = WowFileDetector.Detect(detectionStream, input);
+
 	if (detection.Kind == WowFileKind.Wmo)
 	{
-		WmoSummary summary = WmoSummaryReader.Read(input);
+		WmoSummary summary = ReadInput(WmoSummaryReader.Read);
 		PrintWmoSummary(summary);
 		if (summary.DoodadSetEntryCount > 0 && summary.DoodadPlacementEntryCount > 0)
 		{
-			WmoDoodadSetRangeSummary doodadSetRangeSummary = WmoDoodadSetRangeSummaryReader.Read(input);
+			WmoDoodadSetRangeSummary doodadSetRangeSummary = ReadInput(WmoDoodadSetRangeSummaryReader.Read);
 			PrintWmoDoodadSetRangeSummary(doodadSetRangeSummary);
 		}
 		if (summary.GroupInfoCount > 0)
 		{
 			try
 			{
-				WmoGroupNameReferenceSummary groupNameReferenceSummary = WmoGroupNameReferenceSummaryReader.Read(input);
+				WmoGroupNameReferenceSummary groupNameReferenceSummary = ReadInput(WmoGroupNameReferenceSummaryReader.Read);
 				PrintWmoGroupNameReferenceSummary(groupNameReferenceSummary);
 			}
 			catch (InvalidDataException)
@@ -178,17 +198,17 @@ static void RunWmoInspect(string[] args)
 		}
 		if (summary.DoodadPlacementEntryCount > 0 && summary.DoodadNameTableCount > 0)
 		{
-			WmoDoodadNameReferenceSummary doodadNameReferenceSummary = WmoDoodadNameReferenceSummaryReader.Read(input);
+			WmoDoodadNameReferenceSummary doodadNameReferenceSummary = ReadInput(WmoDoodadNameReferenceSummaryReader.Read);
 			PrintWmoDoodadNameReferenceSummary(doodadNameReferenceSummary);
 		}
 		if (summary.ReportedLightCount > 0)
 		{
-			WmoLightSummary lightSummary = WmoLightSummaryReader.Read(input);
+			WmoLightSummary lightSummary = ReadInput(WmoLightSummaryReader.Read);
 			PrintWmoLightSummary(lightSummary);
 		}
 		try
 		{
-			WmoFogSummary fogSummary = WmoFogSummaryReader.Read(input);
+			WmoFogSummary fogSummary = ReadInput(WmoFogSummaryReader.Read);
 			PrintWmoFogSummary(fogSummary);
 		}
 		catch (InvalidDataException)
@@ -196,7 +216,7 @@ static void RunWmoInspect(string[] args)
 		}
 		try
 		{
-			WmoOpaqueChunkSummary mcvpSummary = WmoOpaqueChunkSummaryReader.Read(input, WmoChunkIds.Mcvp);
+			WmoOpaqueChunkSummary mcvpSummary = ReadInput((stream, sourcePath) => WmoOpaqueChunkSummaryReader.Read(stream, sourcePath, WmoChunkIds.Mcvp));
 			PrintWmoOpaqueChunkSummary(mcvpSummary);
 		}
 		catch (InvalidDataException)
@@ -206,19 +226,19 @@ static void RunWmoInspect(string[] args)
 		{
 			try
 			{
-				WmoPortalVertexSummary portalVertexSummary = WmoPortalVertexSummaryReader.Read(input);
+				WmoPortalVertexSummary portalVertexSummary = ReadInput(WmoPortalVertexSummaryReader.Read);
 				PrintWmoPortalVertexSummary(portalVertexSummary);
-				WmoPortalInfoSummary portalInfoSummary = WmoPortalInfoSummaryReader.Read(input);
+				WmoPortalInfoSummary portalInfoSummary = ReadInput(WmoPortalInfoSummaryReader.Read);
 				PrintWmoPortalInfoSummary(portalInfoSummary);
-				WmoPortalRefSummary portalRefSummary = WmoPortalRefSummaryReader.Read(input);
+				WmoPortalRefSummary portalRefSummary = ReadInput(WmoPortalRefSummaryReader.Read);
 				PrintWmoPortalRefSummary(portalRefSummary);
-				WmoPortalVertexRangeSummary portalVertexRangeSummary = WmoPortalVertexRangeSummaryReader.Read(input);
+				WmoPortalVertexRangeSummary portalVertexRangeSummary = ReadInput(WmoPortalVertexRangeSummaryReader.Read);
 				PrintWmoPortalVertexRangeSummary(portalVertexRangeSummary);
-				WmoPortalRefRangeSummary portalRefRangeSummary = WmoPortalRefRangeSummaryReader.Read(input);
+				WmoPortalRefRangeSummary portalRefRangeSummary = ReadInput(WmoPortalRefRangeSummaryReader.Read);
 				PrintWmoPortalRefRangeSummary(portalRefRangeSummary);
 				if (summary.GroupInfoCount > 0)
 				{
-					WmoPortalGroupRangeSummary portalGroupRangeSummary = WmoPortalGroupRangeSummaryReader.Read(input);
+					WmoPortalGroupRangeSummary portalGroupRangeSummary = ReadInput(WmoPortalGroupRangeSummaryReader.Read);
 					PrintWmoPortalGroupRangeSummary(portalGroupRangeSummary);
 				}
 			}
@@ -230,7 +250,7 @@ static void RunWmoInspect(string[] args)
 		{
 			try
 			{
-				WmoVisibleVertexSummary visibleVertexSummary = WmoVisibleVertexSummaryReader.Read(input);
+				WmoVisibleVertexSummary visibleVertexSummary = ReadInput(WmoVisibleVertexSummaryReader.Read);
 				PrintWmoVisibleVertexSummary(visibleVertexSummary);
 			}
 			catch (InvalidDataException)
@@ -238,7 +258,7 @@ static void RunWmoInspect(string[] args)
 			}
 			try
 			{
-				WmoVisibleBlockSummary visibleBlockSummary = WmoVisibleBlockSummaryReader.Read(input);
+				WmoVisibleBlockSummary visibleBlockSummary = ReadInput(WmoVisibleBlockSummaryReader.Read);
 				PrintWmoVisibleBlockSummary(visibleBlockSummary);
 			}
 			catch (InvalidDataException)
@@ -246,7 +266,7 @@ static void RunWmoInspect(string[] args)
 			}
 			try
 			{
-				WmoVisibleBlockReferenceSummary visibleBlockReferenceSummary = WmoVisibleBlockReferenceSummaryReader.Read(input);
+				WmoVisibleBlockReferenceSummary visibleBlockReferenceSummary = ReadInput(WmoVisibleBlockReferenceSummaryReader.Read);
 				PrintWmoVisibleBlockReferenceSummary(visibleBlockReferenceSummary);
 			}
 			catch (InvalidDataException)
@@ -255,7 +275,7 @@ static void RunWmoInspect(string[] args)
 		}
 		try
 		{
-			WmoSkyboxSummary skyboxSummary = WmoSkyboxSummaryReader.Read(input);
+			WmoSkyboxSummary skyboxSummary = ReadInput(WmoSkyboxSummaryReader.Read);
 			PrintWmoSkyboxSummary(skyboxSummary);
 		}
 		catch (InvalidDataException)
@@ -263,7 +283,7 @@ static void RunWmoInspect(string[] args)
 		}
 		try
 		{
-			WmoGroupNameTableSummary groupNameSummary = WmoGroupNameTableSummaryReader.Read(input);
+			WmoGroupNameTableSummary groupNameSummary = ReadInput(WmoGroupNameTableSummaryReader.Read);
 			PrintWmoGroupNameTableSummary(groupNameSummary);
 		}
 		catch (InvalidDataException)
@@ -271,32 +291,32 @@ static void RunWmoInspect(string[] args)
 		}
 		if (summary.DoodadSetEntryCount > 0)
 		{
-			WmoDoodadSetSummary doodadSetSummary = WmoDoodadSetSummaryReader.Read(input);
+			WmoDoodadSetSummary doodadSetSummary = ReadInput(WmoDoodadSetSummaryReader.Read);
 			PrintWmoDoodadSetSummary(doodadSetSummary);
 		}
 		if (summary.DoodadPlacementEntryCount > 0)
 		{
-			WmoDoodadPlacementSummary doodadPlacementSummary = WmoDoodadPlacementSummaryReader.Read(input);
+			WmoDoodadPlacementSummary doodadPlacementSummary = ReadInput(WmoDoodadPlacementSummaryReader.Read);
 			PrintWmoDoodadPlacementSummary(doodadPlacementSummary);
 		}
 		if (summary.DoodadNameTableCount > 0)
 		{
-			WmoDoodadNameTableSummary doodadNameSummary = WmoDoodadNameTableSummaryReader.Read(input);
+			WmoDoodadNameTableSummary doodadNameSummary = ReadInput(WmoDoodadNameTableSummaryReader.Read);
 			PrintWmoDoodadNameTableSummary(doodadNameSummary);
 		}
 		if (summary.TextureNameCount > 0)
 		{
-			WmoTextureTableSummary textureSummary = WmoTextureTableSummaryReader.Read(input);
+			WmoTextureTableSummary textureSummary = ReadInput(WmoTextureTableSummaryReader.Read);
 			PrintWmoTextureTableSummary(textureSummary);
 		}
 		if (summary.MaterialEntryCount > 0)
 		{
-			WmoMaterialSummary materialSummary = WmoMaterialSummaryReader.Read(input);
+			WmoMaterialSummary materialSummary = ReadInput(WmoMaterialSummaryReader.Read);
 			PrintWmoMaterialSummary(materialSummary);
 		}
 		if (summary.GroupInfoCount > 0)
 		{
-			WmoGroupInfoSummary groupInfoSummary = WmoGroupInfoSummaryReader.Read(input);
+			WmoGroupInfoSummary groupInfoSummary = ReadInput(WmoGroupInfoSummaryReader.Read);
 			PrintWmoGroupInfoSummary(groupInfoSummary);
 		}
 		return;
@@ -304,51 +324,51 @@ static void RunWmoInspect(string[] args)
 
 	if (detection.Kind == WowFileKind.WmoGroup)
 	{
-		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
+		WmoGroupSummary summary = ReadInput(WmoGroupSummaryReader.Read);
 		PrintWmoGroupSummary(summary);
 		if (summary.NormalCount > 0)
 		{
-			WmoGroupNormalSummary normalSummary = WmoGroupNormalSummaryReader.Read(input);
+			WmoGroupNormalSummary normalSummary = ReadInput(WmoGroupNormalSummaryReader.Read);
 			PrintWmoGroupNormalSummary(normalSummary);
 		}
 		if (summary.VertexCount > 0)
 		{
-			WmoGroupVertexSummary vertexSummary = WmoGroupVertexSummaryReader.Read(input);
+			WmoGroupVertexSummary vertexSummary = ReadInput(WmoGroupVertexSummaryReader.Read);
 			PrintWmoGroupVertexSummary(vertexSummary);
 		}
 		if (summary.IndexCount > 0)
 		{
-			WmoGroupIndexSummary indexSummary = WmoGroupIndexSummaryReader.Read(input);
+			WmoGroupIndexSummary indexSummary = ReadInput(WmoGroupIndexSummaryReader.Read);
 			PrintWmoGroupIndexSummary(indexSummary);
 		}
 		if (summary.DoodadRefCount > 0)
 		{
-			WmoGroupDoodadRefSummary doodadRefSummary = WmoGroupDoodadRefSummaryReader.Read(input);
+			WmoGroupDoodadRefSummary doodadRefSummary = ReadInput(WmoGroupDoodadRefSummaryReader.Read);
 			PrintWmoGroupDoodadRefSummary(doodadRefSummary);
 		}
 		if (summary.VertexColorCount > 0)
 		{
-			WmoGroupVertexColorSummary colorSummary = WmoGroupVertexColorSummaryReader.Read(input);
+			WmoGroupVertexColorSummary colorSummary = ReadInput(WmoGroupVertexColorSummaryReader.Read);
 			PrintWmoGroupVertexColorSummary(colorSummary);
 		}
 		if (summary.PrimaryUvCount > 0)
 		{
-			WmoGroupUvSummary uvSummary = WmoGroupUvSummaryReader.Read(input);
+			WmoGroupUvSummary uvSummary = ReadInput(WmoGroupUvSummaryReader.Read);
 			PrintWmoGroupUvSummary(uvSummary);
 		}
 		if (summary.FaceMaterialCount > 0)
 		{
-			WmoGroupFaceMaterialSummary faceSummary = WmoGroupFaceMaterialSummaryReader.Read(input);
+			WmoGroupFaceMaterialSummary faceSummary = ReadInput(WmoGroupFaceMaterialSummaryReader.Read);
 			PrintWmoGroupFaceMaterialSummary(faceSummary);
 		}
 		if (summary.BatchCount > 0)
 		{
-			WmoGroupBatchSummary batchSummary = WmoGroupBatchSummaryReader.Read(input);
+			WmoGroupBatchSummary batchSummary = ReadInput(WmoGroupBatchSummaryReader.Read);
 			PrintWmoGroupBatchSummary(batchSummary);
 		}
 		if (summary.HasLiquid)
 		{
-			WmoGroupLiquidSummary liquidSummary = WmoGroupLiquidSummaryReader.Read(input);
+			WmoGroupLiquidSummary liquidSummary = ReadInput(WmoGroupLiquidSummaryReader.Read);
 			PrintWmoGroupLiquidSummary(liquidSummary);
 		}
 		return;

@@ -1,9 +1,5 @@
 using System.Buffers.Binary;
 using System.Numerics;
-using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
@@ -27,27 +23,14 @@ public static class WmoGroupInfoSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO group-info summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? mohdChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Mohd);
-        ChunkSpan? mogiChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Mogi);
-        if (mohdChunk is null)
-            throw new InvalidDataException("WMO group-info summary requires an MOHD chunk.");
-
-        if (mogiChunk is null)
-            throw new InvalidDataException("WMO group-info summary requires an MOGI chunk.");
-
-        byte[] mohd = ReadChunkPayload(stream, mohdChunk.Value);
+        var (version, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        byte[] mohd = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Mohd);
         if (mohd.Length < MohdSize)
             throw new InvalidDataException($"MOHD payload is too short ({mohd.Length} bytes). Expected at least {MohdSize} bytes.");
 
         int reportedGroupCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(mohd.AsSpan(4, 4)));
-        byte[] mogi = ReadChunkPayload(stream, mogiChunk.Value);
-        int entrySize = InferMogiEntrySize(mogi, reportedGroupCount);
+        byte[] mogi = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Mogi);
+        int entrySize = WmoRootReaderCommon.InferMogiEntrySize(mogi, reportedGroupCount);
         if (entrySize <= 0 || mogi.Length % entrySize != 0)
             throw new InvalidDataException($"MOGI payload size {mogi.Length} is not compatible with inferred entry size {entrySize}.");
 
@@ -103,53 +86,6 @@ public static class WmoGroupInfoSummaryReader
             maxNameOffset,
             boundsMin,
             boundsMax);
-    }
-
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != WmoChunkIds.Mver)
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
-    }
-
-    private static int InferMogiEntrySize(byte[] payload, int reportedGroupCount)
-    {
-        if (payload.Length == 0)
-            return 0;
-
-        if (reportedGroupCount > 0)
-        {
-            if (payload.Length == reportedGroupCount * StandardMogiEntrySize)
-                return StandardMogiEntrySize;
-
-            if (payload.Length == reportedGroupCount * LegacyMogiEntrySize)
-                return LegacyMogiEntrySize;
-        }
-
-        if (payload.Length % StandardMogiEntrySize == 0)
-            return StandardMogiEntrySize;
-
-        if (payload.Length % LegacyMogiEntrySize == 0)
-            return LegacyMogiEntrySize;
-
-        return 0;
     }
 
     private static Vector3 ReadVector3(ReadOnlySpan<byte> bytes)

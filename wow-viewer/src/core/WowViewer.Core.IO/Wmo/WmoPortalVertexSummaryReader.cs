@@ -1,8 +1,5 @@
 using System.Numerics;
 using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
@@ -48,40 +45,8 @@ public static class WmoPortalVertexSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO portal summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? chunk = chunks.FirstOrDefault(c => c.Header.Id == chunkId);
-        if (chunk is null || chunk.Value.Header.Id != chunkId)
-            throw new InvalidDataException($"WMO portal summary requires a {chunkId} chunk.");
-
-        return ReadChunkPayload(stream, chunk.Value);
-    }
-
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != WmoChunkIds.Mver)
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
+        var (detectedVersion, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        version = detectedVersion;
+        return WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, chunkId);
     }
 }

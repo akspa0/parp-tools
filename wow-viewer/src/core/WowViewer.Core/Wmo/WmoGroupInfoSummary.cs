@@ -23,8 +23,6 @@ public sealed class WmoGroupInfoSummary
         ArgumentOutOfRangeException.ThrowIfNegative(entryCount);
         ArgumentOutOfRangeException.ThrowIfNegative(distinctFlagCount);
         ArgumentOutOfRangeException.ThrowIfNegative(nonZeroFlagCount);
-        ArgumentOutOfRangeException.ThrowIfNegative(minNameOffset);
-        ArgumentOutOfRangeException.ThrowIfNegative(maxNameOffset);
 
         SourcePath = sourcePath;
         Version = version;

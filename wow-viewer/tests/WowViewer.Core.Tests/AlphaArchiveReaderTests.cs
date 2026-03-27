@@ -21,6 +21,26 @@ public sealed class AlphaArchiveReaderTests
     }
 
     [Fact]
+    public void BuildInternalNameCandidates_WorldWmoPath_ReturnsWorldScopedVariants()
+    {
+        string filePath = @"C:\Games\Data\World\wmo\Azeroth\Buildings\Castle\castle01.wmo";
+
+        List<string> candidates = AlphaArchiveReader.BuildInternalNameCandidates(filePath).ToList();
+
+        Assert.Equal(
+        [
+            "castle01.wmo",
+            "World\\wmo\\Azeroth\\Buildings\\Castle\\castle01.wmo",
+            "wmo\\Azeroth\\Buildings\\Castle\\castle01.wmo",
+            "Azeroth\\Buildings\\Castle\\castle01.wmo",
+            "Buildings\\Castle\\castle01.wmo",
+            "Castle\\castle01.wmo",
+            "castle01\\castle01.wmo",
+            "World\\Maps\\castle01\\castle01.wmo",
+        ], candidates);
+    }
+
+    [Fact]
     public void ReadWithMpqFallback_ReadsDirectFileWhenPresent()
     {
         string tempFile = Path.GetTempFileName();
@@ -82,6 +102,31 @@ public sealed class AlphaArchiveReaderTests
                 new MpqEntry("World\\Maps\\Azeroth\\Azeroth_31_49.wdt", expected));
 
             byte[]? actual = AlphaArchiveReader.ReadWithMpqFallback(filePath);
+
+            Assert.Equal(expected, actual);
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ReadWithMpqFallback_DirectMpqPath_UsesInternalNameCandidates()
+    {
+        string tempDirectory = CreateTempDirectory();
+        string archivePath = Path.Combine(tempDirectory, "World", "wmo", "Azeroth", "Buildings", "Castle", "castle01.wmo.MPQ");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        byte[] expected = BuildChunkBytes("MVER", [17, 0, 0, 0]);
+
+        try
+        {
+            CreateMpqArchive(
+                archivePath,
+                new MpqEntry("checksum.md5", "deadbeef"u8.ToArray()),
+                new MpqEntry("World\\wmo\\Azeroth\\Buildings\\Castle\\castle01.wmo", expected));
+
+            byte[]? actual = AlphaArchiveReader.ReadWithMpqFallback(archivePath);
 
             Assert.Equal(expected, actual);
         }

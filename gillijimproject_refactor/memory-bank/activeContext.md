@@ -1,5 +1,36 @@
 # Active Context
 
+## Mar 27, 2026 - Alpha MOMO Root WMO Support And Real 0.5.3 `.wmo.MPQ` Validation Landed
+
+- Real Alpha-era WMO validation exposed an important boundary gap in the shared root-WMO readers:
+	- `castle01.wmo.MPQ` from `wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/` extracts to a v14 Alpha monolithic WMO root
+	- the file starts `MVER` then `MOMO`, not the later split-root `MVER` then `MOHD` layout
+	- pre-fix `wow-viewer` classified the extracted bytes as `Unknown`, so real 0.5.3 root-WMO validation could not run through the shared root-summary stack
+- Landed support:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now includes shared `MOMO`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Files/WowFileDetector.cs` now recognizes `MVER` + `MOMO` as a root `Wmo`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoRootReaderCommon.cs` now expands Alpha `MOMO` root subchunks into a flattened root-chunk view so shared root readers can keep using readable FourCC ownership on both Alpha monolithic roots and later split roots
+	- shared root readers that previously only scanned top-level chunks now route through `WmoRootReaderCommon`, including `WmoSummaryReader`, `WmoGroupInfoSummaryReader`, `WmoMaterialSummaryReader`, `WmoTextureTableSummaryReader`, `WmoDoodadNameTableSummaryReader`, `WmoDoodadSetSummaryReader`, `WmoDoodadPlacementSummaryReader`, `WmoGroupNameTableSummaryReader`, `WmoSkyboxSummaryReader`, and the portal-root helper in `WmoPortalVertexSummaryReader`
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupInfoSummary.cs` now allows negative `MOGI` name offsets, which real Alpha data exposed as valid sentinel-style values
+	- `wow-viewer/src/core/WowViewer.Core.IO/Files/AlphaArchiveReader.cs` now builds broader non-map `World\...` internal-name candidates and uses them even when the input path itself ends with `.MPQ`
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now opens `.MPQ` WMO inputs through shared Alpha archive fallback and runs the shared stream-based readers, so `wmo inspect` works directly on real per-asset Alpha archives
+	- real-data regression coverage landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs`
+- Concrete real-data proof now available:
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026
+	- reported key semantic lines:
+		- `Version: 14`
+		- `WMO semantics: materials=11/11 groups=2/2 portals=1 ... doodadPlacements=24/24 doodadSets=1/1`
+		- `MOPT->MOPV: portals=1 vertices=4 zeroVertexPortals=0 coveredPortals=1 outOfRangePortals=0 maxVertexEnd=4`
+		- `MOPR->MOPT: refs=2 portals=1 coveredRefs=2 outOfRangeRefs=0 distinctPortalRefs=1 maxPortalIndex=0`
+		- `MOPR->MOGI: refs=2 groups=2 coveredRefs=2 outOfRangeRefs=0 distinctGroupRefs=2 maxGroupIndex=1`
+		- `MOMT: payloadBytes=484 entryBytes=44 entries=11 ...`
+		- `MOGI: payloadBytes=80 entryBytes=40 entries=2 ... nameOffsetRange=-1--1 ...`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `128` passing tests after the Alpha `MOMO` support and real-data WMO coverage
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AlphaArchiveReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` targeted passing tests
+- Important boundary:
+	- this adds shared Alpha-root summary ownership for `MOMO`-wrapped root chunks and direct inspect support for `.wmo.MPQ` inputs
+	- it does not yet add Alpha monolithic-group mesh summary ownership beyond the root summaries already extracted from `MOMO`
+
 ## Mar 27, 2026 - Batched Root WMO Portal Linkage Summary Slices For MOPT->MOPV, MOPR->MOPT, And MOPR->MOGI Landed
 
 - `wow-viewer` now has a portal-linkage focused batched root-WMO landing that builds on the earlier raw portal summaries instead of stopping at count-only payload ownership:

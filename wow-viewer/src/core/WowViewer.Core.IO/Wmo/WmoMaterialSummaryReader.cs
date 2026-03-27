@@ -1,8 +1,4 @@
 using System.Buffers.Binary;
-using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
@@ -27,26 +23,13 @@ public static class WmoMaterialSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO material summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? mohdChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Mohd);
-        ChunkSpan? momtChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Momt);
-        if (mohdChunk is null)
-            throw new InvalidDataException("WMO material summary requires an MOHD chunk.");
-
-        if (momtChunk is null)
-            throw new InvalidDataException("WMO material summary requires a MOMT chunk.");
-
-        byte[] mohd = ReadChunkPayload(stream, mohdChunk.Value);
+        var (version, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        byte[] mohd = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Mohd);
         if (mohd.Length < MohdSize)
             throw new InvalidDataException($"MOHD payload is too short ({mohd.Length} bytes). Expected at least {MohdSize} bytes.");
 
         int reportedMaterialCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(mohd.AsSpan(0, 4)));
-        byte[] momt = ReadChunkPayload(stream, momtChunk.Value);
+        byte[] momt = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Momt);
         int entrySize = InferMomtEntrySize(momt, reportedMaterialCount);
         if (entrySize <= 0 || momt.Length % entrySize != 0)
             throw new InvalidDataException($"MOMT payload size {momt.Length} is not compatible with inferred entry size {entrySize}.");
@@ -91,30 +74,6 @@ public static class WmoMaterialSummaryReader
             maxTexture1Offset: checked((int)maxTexture1Offset),
             maxTexture2Offset: checked((int)maxTexture2Offset),
             maxTexture3Offset: checked((int)maxTexture3Offset));
-    }
-
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != WmoChunkIds.Mver)
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
     }
 
     private static int InferMomtEntrySize(byte[] payload, int reportedMaterialCount)

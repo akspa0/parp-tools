@@ -85,7 +85,11 @@ public static class AlphaArchiveReader
     public static byte[]? ReadWithMpqFallback(string filePath)
     {
         if (filePath.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
-            return ReadFromMpq(filePath);
+        {
+            string basePath = filePath[..^4];
+            List<string> candidates = BuildInternalNameCandidates(basePath).ToList();
+            return ReadFromMpq(filePath, candidates) ?? ReadFromMpq(filePath);
+        }
 
         if (File.Exists(filePath))
             return File.ReadAllBytes(filePath);
@@ -126,6 +130,12 @@ public static class AlphaArchiveReader
             }
 
             yield break;
+        }
+
+        if (worldIndex >= 0)
+        {
+            for (int start = worldIndex; start < parts.Length - 1; start++)
+                yield return string.Join('\\', parts.Skip(start));
         }
 
         string? inferredMapName = Path.GetFileNameWithoutExtension(fileName);

@@ -1,9 +1,5 @@
 using System.Buffers.Binary;
 using System.Numerics;
-using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.Wmo;
 
@@ -33,17 +29,8 @@ public static class WmoSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO semantic summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? mohdChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Mohd);
-        if (mohdChunk is null)
-            throw new InvalidDataException("WMO semantic summary requires an MOHD chunk.");
-
-        byte[] mohd = ReadChunkPayload(stream, mohdChunk.Value);
+        var (version, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        byte[] mohd = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Mohd);
         if (mohd.Length < MohdSize)
             throw new InvalidDataException($"MOHD payload is too short ({mohd.Length} bytes). Expected at least {MohdSize} bytes.");
 
@@ -58,12 +45,12 @@ public static class WmoSummaryReader
         Vector3 boundsMax = ReadVector3(mohd.AsSpan(48, 12));
         uint flags = BinaryPrimitives.ReadUInt32LittleEndian(mohd.AsSpan(60, 4));
 
-        byte[]? motx = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Motx);
-        byte[]? modn = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Modn);
-        byte[]? moms = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Mods);
-        byte[]? modd = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Modd);
-        byte[]? momt = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Momt);
-        byte[]? mogi = TryReadFirstChunkPayload(stream, chunks, WmoChunkIds.Mogi);
+        byte[]? motx = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Motx);
+        byte[]? modn = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Modn);
+        byte[]? moms = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Mods);
+        byte[]? modd = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Modd);
+        byte[]? momt = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Momt);
+        byte[]? mogi = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Mogi);
 
         return new WmoSummary(
             sourcePath,
@@ -84,36 +71,6 @@ public static class WmoSummaryReader
             flags,
             boundsMin,
             boundsMax);
-    }
-
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != FourCC.FromString("MVER"))
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[]? TryReadFirstChunkPayload(Stream stream, IReadOnlyList<ChunkSpan> chunks, FourCC id)
-    {
-        ChunkSpan? chunk = chunks.FirstOrDefault(location => location.Header.Id == id);
-        return chunk is null ? null : ReadChunkPayload(stream, chunk.Value);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
     }
 
     private static int InferMogiEntrySize(byte[]? payload, int reportedGroupCount)

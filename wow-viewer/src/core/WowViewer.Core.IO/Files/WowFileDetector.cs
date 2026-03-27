@@ -8,6 +8,7 @@ namespace WowViewer.Core.IO.Files;
 public static class WowFileDetector
 {
     private static readonly FourCC Mprl = FourCC.FromString("MPRL");
+    private static readonly FourCC Momo = FourCC.FromString("MOMO");
     private static readonly FourCC Mohd = FourCC.FromString("MOHD");
     private static readonly FourCC Mogp = FourCC.FromString("MOGP");
     private static readonly FourCC Mdid = FourCC.FromString("MDID");
@@ -108,6 +109,9 @@ public static class WowFileDetector
             return new WowFileDetection(sourcePath, WowFileKind.Wdt, version);
 
         if (secondChunkId == Mohd)
+            return new WowFileDetection(sourcePath, WowFileKind.Wmo, version);
+
+        if (secondChunkId == Momo)
             return new WowFileDetection(sourcePath, WowFileKind.Wmo, version);
 
         if (secondChunkId == Mogp)

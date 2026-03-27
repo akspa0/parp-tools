@@ -1,7 +1,3 @@
-using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
@@ -21,17 +17,8 @@ public static class WmoTextureTableSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO texture-table summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? motxChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Motx);
-        if (motxChunk is null)
-            throw new InvalidDataException("WMO texture-table summary requires a MOTX chunk.");
-
-        byte[] payload = ReadChunkPayload(stream, motxChunk.Value);
+        var (version, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        byte[] payload = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Motx);
         int textureCount = 0;
         int longestEntryLength = 0;
         int maxOffset = 0;
@@ -93,29 +80,5 @@ public static class WmoTextureTableSummaryReader
             maxOffset,
             distinctExtensionCount: extensions.Count,
             blpEntryCount);
-    }
-
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != WmoChunkIds.Mver)
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
     }
 }

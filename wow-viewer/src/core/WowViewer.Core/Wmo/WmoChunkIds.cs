@@ -5,6 +5,7 @@ namespace WowViewer.Core.Wmo;
 public static class WmoChunkIds
 {
     public static readonly FourCC Mver = FourCC.FromString("MVER");
+    public static readonly FourCC Momo = FourCC.FromString("MOMO");
     public static readonly FourCC Mohd = FourCC.FromString("MOHD");
     public static readonly FourCC Mogp = FourCC.FromString("MOGP");
     public static readonly FourCC Motx = FourCC.FromString("MOTX");

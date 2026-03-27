@@ -1,9 +1,5 @@
 using System.Buffers.Binary;
 using System.Numerics;
-using WowViewer.Core.Chunks;
-using WowViewer.Core.Files;
-using WowViewer.Core.IO.Chunked;
-using WowViewer.Core.IO.Files;
 using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
@@ -25,17 +21,8 @@ public static class WmoDoodadPlacementSummaryReader
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
-        uint? version = TryReadVersion(stream, chunks);
-        WowFileDetection detection = WowFileDetector.Detect(sourcePath, chunks, version);
-        if (detection.Kind != WowFileKind.Wmo)
-            throw new InvalidDataException($"WMO doodad-placement summary requires a WMO root file, but found {detection.Kind}.");
-
-        ChunkSpan? moddChunk = chunks.FirstOrDefault(static chunk => chunk.Header.Id == WmoChunkIds.Modd);
-        if (moddChunk is null)
-            throw new InvalidDataException("WMO doodad-placement summary requires a MODD chunk.");
-
-        byte[] payload = ReadChunkPayload(stream, moddChunk.Value);
+        var (version, chunks) = WmoRootReaderCommon.ReadRootChunks(stream, sourcePath);
+        byte[] payload = WmoRootReaderCommon.ReadRequiredChunkPayload(stream, chunks, WmoChunkIds.Modd);
         if (payload.Length % ModdEntrySize != 0)
             throw new InvalidDataException($"MODD payload size {payload.Length} is not divisible by {ModdEntrySize}.");
 
@@ -95,27 +82,4 @@ public static class WmoDoodadPlacementSummaryReader
             boundsMax);
     }
 
-    private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
-    {
-        if (chunks.Count == 0 || chunks[0].Header.Id != WmoChunkIds.Mver)
-            return null;
-
-        return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
-    }
-
-    private static byte[] ReadChunkPayload(Stream stream, ChunkSpan chunk)
-    {
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Header.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
-    }
 }

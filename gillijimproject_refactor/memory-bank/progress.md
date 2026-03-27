@@ -1,5 +1,23 @@
 # Progress
 
+### Mar 27, 2026 - Alpha MOMO Root WMO Support And Real 0.5.3 `.wmo.MPQ` Validation Landed
+
+- Added shared Alpha root-WMO support for the `MOMO` container so the existing root-summary stack can read real 0.5.3 monolithic WMO roots.
+- Landed pieces:
+	- added shared `MOMO` chunk id in `WowViewer.Core.Wmo.WmoChunkIds`
+	- updated `WowViewer.Core.IO.Files.WowFileDetector` so `MVER` + `MOMO` is classified as `Wmo`
+	- expanded `WowViewer.Core.IO.Wmo.WmoRootReaderCommon` to flatten Alpha `MOMO` subchunks into a root-chunk view reusable by later shared readers
+	- moved the main root-summary readers onto `WmoRootReaderCommon`, including the semantic summary reader, group-info reader, material reader, texture-table reader, doodad-name reader, doodad-set reader, doodad-placement reader, group-name table reader, skybox reader, and the shared portal-root helper
+	- loosened `WowViewer.Core.Wmo.WmoGroupInfoSummary` so negative `MOGI` name offsets from real Alpha data are treated as valid summary signals instead of rejected input
+	- improved `WowViewer.Core.IO.Files.AlphaArchiveReader` internal-name candidate generation for non-map `World\...` paths and direct `.MPQ` inputs
+	- updated `WowViewer.Tool.Inspect wmo inspect` to load `.wmo.MPQ` inputs through the shared Alpha archive fallback and then run the shared stream-based readers
+	- added real-data regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `128` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AlphaArchiveReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` targeted passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ` passed on Mar 27, 2026 and now reports real Alpha-era root-WMO semantic lines directly from the per-asset MPQ
+	- this is still root-summary ownership; it is not yet full Alpha monolithic group-consumer ownership
+
 ### Mar 27, 2026 - Batched Root WMO Portal Linkage Summary Slices For MOPT->MOPV, MOPR->MOPT, And MOPR->MOGI Landed
 
 - Added a portal-linkage focused batched root-WMO landing in `wow-viewer` after the earlier raw portal summary slice.
