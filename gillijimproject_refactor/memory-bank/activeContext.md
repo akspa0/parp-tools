@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Summary Slices For MODD, MOGN, And MOSB Landed
+
+- `wow-viewer` now has a batched set of three additional narrow root-WMO seams instead of a one-slice landing:
+	- `MODD` doodad-placement semantic summary
+	- `MOGN` group-name table semantic summary
+	- `MOSB` skybox semantic summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoDoodadPlacementSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoDoodadPlacementSummaryReader.cs` now own count-level `MODD` semantics for entry counts, distinct name indices, scale range, alpha range, and placement bounds
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupNameTableSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupNameTableSummaryReader.cs` now own narrow `MOGN` string-table semantics for count, longest entry, and max offset
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoSkyboxSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoSkyboxSummaryReader.cs` now own the narrow `MOSB` seam for payload size and resolved skybox name
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now includes shared `MOGN` and `MOSB` chunk ids
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated `MODD`, `MOGN`, and `MOSB` semantic lines for root WMO files when those chunks are present
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadPlacementSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupNameTableSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoSkyboxSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `109` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `78` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-batch-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MOSB: payloadBytes=4 skybox=Sky`
+		- `MOGN: payloadBytes=31 names=3 longestEntry=10 maxOffset=21`
+		- `MODD: payloadBytes=80 entries=2 distinctNameIndices=2 maxNameIndex=7 scaleRange=[1.250, 2.500] alphaRange=[170, 255] boundsMin=(-4.00, 2.00, -6.00) boundsMax=(1.00, 5.00, 3.00)`
+- Important boundary:
+	- these three seams prove string-table and placement-summary ownership only
+	- they do not yet prove `MODD` linkage back to `MODN`, `MOGN` name resolution against group metadata, or any write path
+
 ## Mar 27, 2026 - Shared WMO Root Doodad-Set Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO root seam after `MODN`: a shared `MODS` doodad-set semantic-summary reader.

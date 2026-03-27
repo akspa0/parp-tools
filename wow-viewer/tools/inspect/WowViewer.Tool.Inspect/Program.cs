@@ -160,10 +160,31 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		try
+		{
+			WmoSkyboxSummary skyboxSummary = WmoSkyboxSummaryReader.Read(input);
+			PrintWmoSkyboxSummary(skyboxSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
+		try
+		{
+			WmoGroupNameTableSummary groupNameSummary = WmoGroupNameTableSummaryReader.Read(input);
+			PrintWmoGroupNameTableSummary(groupNameSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
 		if (summary.DoodadSetEntryCount > 0)
 		{
 			WmoDoodadSetSummary doodadSetSummary = WmoDoodadSetSummaryReader.Read(input);
 			PrintWmoDoodadSetSummary(doodadSetSummary);
+		}
+		if (summary.DoodadPlacementEntryCount > 0)
+		{
+			WmoDoodadPlacementSummary doodadPlacementSummary = WmoDoodadPlacementSummaryReader.Read(input);
+			PrintWmoDoodadPlacementSummary(doodadPlacementSummary);
 		}
 		if (summary.DoodadNameTableCount > 0)
 		{
@@ -742,6 +763,21 @@ static void PrintWmoDoodadNameTableSummary(WmoDoodadNameTableSummary summary)
 static void PrintWmoDoodadSetSummary(WmoDoodadSetSummary summary)
 {
 	Console.WriteLine($"MODS: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} nonEmptySets={summary.NonEmptySetCount} longestName={summary.LongestNameLength} totalDoodadRefs={summary.TotalDoodadRefs} maxStartIndex={summary.MaxStartIndex} maxRangeEnd={summary.MaxRangeEnd}");
+}
+
+static void PrintWmoDoodadPlacementSummary(WmoDoodadPlacementSummary summary)
+{
+	Console.WriteLine($"MODD: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctNameIndices={summary.DistinctNameIndexCount} maxNameIndex={summary.MaxNameIndex} scaleRange=[{summary.MinScale:F3}, {summary.MaxScale:F3}] alphaRange=[{summary.MinAlpha}, {summary.MaxAlpha}] boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoGroupNameTableSummary(WmoGroupNameTableSummary summary)
+{
+	Console.WriteLine($"MOGN: payloadBytes={summary.PayloadSizeBytes} names={summary.NameCount} longestEntry={summary.LongestEntryLength} maxOffset={summary.MaxOffset}");
+}
+
+static void PrintWmoSkyboxSummary(WmoSkyboxSummary summary)
+{
+	Console.WriteLine($"MOSB: payloadBytes={summary.PayloadSizeBytes} skybox={summary.SkyboxName}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)

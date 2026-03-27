@@ -1,5 +1,24 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Summary Slices For MODD, MOGN, And MOSB Landed
+
+- Added a batched three-slice root-WMO landing in `wow-viewer` instead of another single-slice step.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoDoodadPlacementSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoDoodadPlacementSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoGroupNameTableSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupNameTableSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoSkyboxSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoSkyboxSummaryReader`
+	- expanded shared `WmoChunkIds` with `MOGN` and `MOSB`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated `MODD`, `MOGN`, and `MOSB` semantic lines when present
+	- added synthetic regression coverage for all three seams
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `109` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `78` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-batch-test.wmo` passed on Mar 27, 2026 for a synthetic batched root-WMO smoke case
+	- this is still summary work, not root-table linkage or write support
+
 ### Mar 27, 2026 - Shared WMO Root Doodad-Set Semantic Summary Slice Landed
 
 - Added the next narrow WMO root seam in `wow-viewer`: shared `MODS` doodad-set semantic summary.
