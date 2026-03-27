@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Root Group-Info Semantic Summary Slice Landed
+
+- Added the next narrow WMO root seam in `wow-viewer`: shared `MOGI` group-info semantic summary.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupInfoSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupInfoSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes a dedicated `MOGI` semantic line when group info is present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupInfoSummaryReaderTests.cs` for synthetic standard and legacy `MOGI` coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `101` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `70` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-mogi-test.wmo` passed on Mar 27, 2026 for a synthetic root-group-info smoke case
+	- this is still semantic summary work, not `MOGN` name resolution or write support
+
 ### Mar 27, 2026 - Shared WMO Group Normal Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MONR` normal semantic summary for WMO group files.

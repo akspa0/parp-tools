@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Root Group-Info Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO root seam after the group-level payload summaries: a shared `MOGI` group-info semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupInfoSummary.cs` now owns the typed root `MOGI` summary contract for payload size, inferred entry size, entry count, distinct-flag counts, non-zero-flag counts, name-offset range, and union bounds
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupInfoSummaryReader.cs` now reads standard and legacy `MOGI` payload semantics from root WMO files using `MOHD` group-count guidance when available
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOGI` semantic line for root WMO files that contain group info
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupInfoSummaryReaderTests.cs` now covers synthetic standard 32-byte and legacy 40-byte `MOGI` payloads
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `101` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `70` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-mogi-test.wmo` passed on Mar 27, 2026 and reported `MOGI: payloadBytes=64 entryBytes=32 entries=2 distinctFlags=2 nonZeroFlags=1 nameOffsetRange=12-40 boundsMin=(-7.00, -2.00, -3.00) boundsMax=(4.00, 8.00, 9.00)`
+- Important boundary:
+	- this proves shared `MOGI` semantic summary for root group-info entry counts, flag coverage, name-offset ranges, and union bounds only
+	- this does not yet prove root-to-group file linkage beyond raw entry counts, name resolution against `MOGN`, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Normal Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOVT`: a shared `MONR` normal semantic-summary reader.

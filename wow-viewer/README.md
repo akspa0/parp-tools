@@ -72,6 +72,7 @@ Current shared-core foundation slice:
   - `WmoGroupIndexSummary`
   - `WmoGroupVertexSummary`
   - `WmoGroupNormalSummary`
+  - `WmoGroupInfoSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -93,6 +94,7 @@ Current shared-core foundation slice:
   - `WmoGroupIndexSummaryReader`
   - `WmoGroupVertexSummaryReader`
   - `WmoGroupNormalSummaryReader`
+  - `WmoGroupInfoSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -137,6 +139,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic WMO `MOVI` and `MOIN` index semantic-summary behavior including a degenerate-triangle case
 	- it now also locks synthetic WMO `MOVT` vertex semantic-summary behavior including computed bounds
 	- it now also locks synthetic WMO `MONR` normal semantic-summary behavior including component-range and near-unit coverage
+	- it now also locks synthetic root WMO `MOGI` semantic-summary behavior including standard and legacy entry layouts
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -161,6 +164,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared WMO `MOVI` or `MOIN` index semantic summary for index counts, triangle counts, ranges, and degenerate-triangle counts when a group file contains indices
 	- it now also reports a shared WMO `MOVT` vertex semantic summary for vertex counts and computed bounds when a group file contains vertex payloads
 	- it now also reports a shared WMO `MONR` normal semantic summary for component ranges, length ranges, and near-unit counts when a group file contains normal payloads
+	- it now also reports a shared root WMO `MOGI` semantic summary for entry counts, flag coverage, name-offset ranges, and union bounds when group info is present
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

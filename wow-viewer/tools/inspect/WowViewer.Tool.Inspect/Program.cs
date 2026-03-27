@@ -160,6 +160,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.GroupInfoCount > 0)
+		{
+			WmoGroupInfoSummary groupInfoSummary = WmoGroupInfoSummaryReader.Read(input);
+			PrintWmoGroupInfoSummary(groupInfoSummary);
+		}
 		return;
 	}
 
@@ -692,6 +697,11 @@ static void PrintWmoSummary(WmoSummary summary)
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
 	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} flags=0x{summary.Flags:X8}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
+{
+	Console.WriteLine($"MOGI: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} entries={summary.EntryCount} distinctFlags={summary.DistinctFlagCount} nonZeroFlags={summary.NonZeroFlagCount} nameOffsetRange={summary.MinNameOffset}-{summary.MaxNameOffset} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)
