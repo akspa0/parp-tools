@@ -160,6 +160,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.DoodadSetEntryCount > 0)
+		{
+			WmoDoodadSetSummary doodadSetSummary = WmoDoodadSetSummaryReader.Read(input);
+			PrintWmoDoodadSetSummary(doodadSetSummary);
+		}
 		if (summary.DoodadNameTableCount > 0)
 		{
 			WmoDoodadNameTableSummary doodadNameSummary = WmoDoodadNameTableSummaryReader.Read(input);
@@ -732,6 +737,11 @@ static void PrintWmoTextureTableSummary(WmoTextureTableSummary summary)
 static void PrintWmoDoodadNameTableSummary(WmoDoodadNameTableSummary summary)
 {
 	Console.WriteLine($"MODN: payloadBytes={summary.PayloadSizeBytes} names={summary.NameCount} longestEntry={summary.LongestEntryLength} maxOffset={summary.MaxOffset} extensions={summary.DistinctExtensionCount} mdxEntries={summary.MdxEntryCount} m2Entries={summary.M2EntryCount}");
+}
+
+static void PrintWmoDoodadSetSummary(WmoDoodadSetSummary summary)
+{
+	Console.WriteLine($"MODS: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} nonEmptySets={summary.NonEmptySetCount} longestName={summary.LongestNameLength} totalDoodadRefs={summary.TotalDoodadRefs} maxStartIndex={summary.MaxStartIndex} maxRangeEnd={summary.MaxRangeEnd}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)

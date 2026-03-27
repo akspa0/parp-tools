@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Root Doodad-Set Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO root seam after `MODN`: a shared `MODS` doodad-set semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoDoodadSetSummary.cs` now owns the typed root `MODS` summary contract for payload size, set count, non-empty-set count, longest set-name length, total doodad refs, max start index, and max range end
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoDoodadSetSummaryReader.cs` now reads `MODS` payload semantics from root WMO files as a narrow doodad-set seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MODS` semantic line for root WMO files that contain doodad sets
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadSetSummaryReaderTests.cs` now covers a synthetic `MODS` table with empty and non-empty sets
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `106` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `75` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-mods-test.wmo` passed on Mar 27, 2026 and reported `MODS: payloadBytes=96 entries=3 nonEmptySets=2 longestName=7 totalDoodadRefs=10 maxStartIndex=12 maxRangeEnd=18`
+- Important boundary:
+	- this proves shared `MODS` semantic summary for doodad-set counts and range signals only
+	- this does not yet prove set-to-`MODD` linkage beyond count-level ranges or any write path
+
 ## Mar 27, 2026 - Shared WMO Root Doodad-Name Table Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO root seam after `MOTX`: a shared `MODN` doodad-name-table semantic-summary reader.
