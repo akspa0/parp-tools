@@ -23,8 +23,17 @@ internal static class WmoRootReaderCommon
     public static byte[] ReadRequiredChunkPayload(Stream stream, IReadOnlyList<ChunkSpan> chunks, FourCC chunkId)
     {
         ChunkSpan? chunk = chunks.FirstOrDefault(c => c.Header.Id == chunkId);
-        if (chunk is null)
+        if (chunk is null || chunk.Value.Header.Id != chunkId)
             throw new InvalidDataException($"WMO root summary requires a {chunkId} chunk.");
+
+        return ReadChunkPayload(stream, chunk.Value);
+    }
+
+    public static byte[]? TryReadChunkPayload(Stream stream, IReadOnlyList<ChunkSpan> chunks, FourCC chunkId)
+    {
+        ChunkSpan? chunk = chunks.FirstOrDefault(c => c.Header.Id == chunkId);
+        if (chunk is null || chunk.Value.Header.Id != chunkId)
+            return null;
 
         return ReadChunkPayload(stream, chunk.Value);
     }

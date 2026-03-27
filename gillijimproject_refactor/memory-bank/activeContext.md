@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Portal Linkage Summary Slices For MOPT->MOPV, MOPR->MOPT, And MOPR->MOGI Landed
+
+- `wow-viewer` now has a portal-linkage focused batched root-WMO landing that builds on the earlier raw portal summaries instead of stopping at count-only payload ownership:
+	- `MOPT -> MOPV` portal-vertex range coverage summary
+	- `MOPR -> MOPT` portal-ref range coverage summary
+	- `MOPR -> MOGI` portal-group range coverage summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalVertexRangeSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalVertexRangeSummaryReader.cs` now own narrow `MOPT -> MOPV` linkage semantics for zero-vertex portals, covered portals, out-of-range portals, total visible portal vertices, and max vertex end
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalRefRangeSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalRefRangeSummaryReader.cs` now own narrow `MOPR -> MOPT` linkage semantics for covered refs, out-of-range refs, distinct referenced portals, and max portal index
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoPortalGroupRangeSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoPortalGroupRangeSummaryReader.cs` now own narrow `MOPR -> MOGI` linkage semantics for covered refs, out-of-range refs, distinct referenced groups, and max group index
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoRootReaderCommon.cs` now exposes optional root-chunk reads so root readers can distinguish truly absent chunks instead of accidentally treating the first chunk as a match during optional lookup flows
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated portal-linkage lines for `MOPT->MOPV`, `MOPR->MOPT`, and `MOPR->MOGI`, and it now tolerates missing optional dependency chunks instead of aborting synthetic smoke cases
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalVertexRangeSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalRefRangeSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoPortalGroupRangeSummaryReaderTests.cs`, plus a missing-`MOVV` regression in `wow-viewer/tests/WowViewer.Core.Tests/WmoVisibleVertexSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `125` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `94` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portal-linkage-batch-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MOPT->MOPV: portals=2 vertices=6 zeroVertexPortals=0 coveredPortals=1 outOfRangePortals=1 maxVertexEnd=8`
+		- `MOPR->MOPT: refs=3 portals=2 coveredRefs=2 outOfRangeRefs=1 distinctPortalRefs=3 maxPortalIndex=4`
+		- `MOPR->MOGI: refs=3 groups=3 coveredRefs=2 outOfRangeRefs=1 distinctGroupRefs=3 maxGroupIndex=5`
+- Important boundary:
+	- these seams prove portal-linkage range coverage only
+	- they do not yet prove full portal topology validation, plane correctness, or runtime culling behavior
+
 ## Mar 27, 2026 - Batched Root WMO Visibility Summary Slices For MOVV, MOVB, And MOVB->MOVV Landed
 
 - `wow-viewer` now has another batched root-WMO follow-up landing covering the two visibility-owner chunks plus their first narrow linkage seam together:

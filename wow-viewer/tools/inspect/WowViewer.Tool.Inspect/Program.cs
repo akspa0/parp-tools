@@ -167,8 +167,14 @@ static void RunWmoInspect(string[] args)
 		}
 		if (summary.GroupInfoCount > 0)
 		{
-			WmoGroupNameReferenceSummary groupNameReferenceSummary = WmoGroupNameReferenceSummaryReader.Read(input);
-			PrintWmoGroupNameReferenceSummary(groupNameReferenceSummary);
+			try
+			{
+				WmoGroupNameReferenceSummary groupNameReferenceSummary = WmoGroupNameReferenceSummaryReader.Read(input);
+				PrintWmoGroupNameReferenceSummary(groupNameReferenceSummary);
+			}
+			catch (InvalidDataException)
+			{
+			}
 		}
 		if (summary.DoodadPlacementEntryCount > 0 && summary.DoodadNameTableCount > 0)
 		{
@@ -198,36 +204,54 @@ static void RunWmoInspect(string[] args)
 		}
 		if (summary.ReportedPortalCount > 0)
 		{
-			WmoPortalVertexSummary portalVertexSummary = WmoPortalVertexSummaryReader.Read(input);
-			PrintWmoPortalVertexSummary(portalVertexSummary);
-			WmoPortalInfoSummary portalInfoSummary = WmoPortalInfoSummaryReader.Read(input);
-			PrintWmoPortalInfoSummary(portalInfoSummary);
-			WmoPortalRefSummary portalRefSummary = WmoPortalRefSummaryReader.Read(input);
-			PrintWmoPortalRefSummary(portalRefSummary);
+			try
+			{
+				WmoPortalVertexSummary portalVertexSummary = WmoPortalVertexSummaryReader.Read(input);
+				PrintWmoPortalVertexSummary(portalVertexSummary);
+				WmoPortalInfoSummary portalInfoSummary = WmoPortalInfoSummaryReader.Read(input);
+				PrintWmoPortalInfoSummary(portalInfoSummary);
+				WmoPortalRefSummary portalRefSummary = WmoPortalRefSummaryReader.Read(input);
+				PrintWmoPortalRefSummary(portalRefSummary);
+				WmoPortalVertexRangeSummary portalVertexRangeSummary = WmoPortalVertexRangeSummaryReader.Read(input);
+				PrintWmoPortalVertexRangeSummary(portalVertexRangeSummary);
+				WmoPortalRefRangeSummary portalRefRangeSummary = WmoPortalRefRangeSummaryReader.Read(input);
+				PrintWmoPortalRefRangeSummary(portalRefRangeSummary);
+				if (summary.GroupInfoCount > 0)
+				{
+					WmoPortalGroupRangeSummary portalGroupRangeSummary = WmoPortalGroupRangeSummaryReader.Read(input);
+					PrintWmoPortalGroupRangeSummary(portalGroupRangeSummary);
+				}
+			}
+			catch (InvalidDataException)
+			{
+			}
 		}
-		try
+		if (summary.MaterialEntryCount > 0 || summary.GroupInfoCount > 0 || summary.DoodadSetEntryCount > 0 || summary.DoodadPlacementEntryCount > 0 || summary.ReportedPortalCount > 0 || summary.ReportedLightCount > 0)
 		{
-			WmoVisibleVertexSummary visibleVertexSummary = WmoVisibleVertexSummaryReader.Read(input);
-			PrintWmoVisibleVertexSummary(visibleVertexSummary);
-		}
-		catch (InvalidDataException)
-		{
-		}
-		try
-		{
-			WmoVisibleBlockSummary visibleBlockSummary = WmoVisibleBlockSummaryReader.Read(input);
-			PrintWmoVisibleBlockSummary(visibleBlockSummary);
-		}
-		catch (InvalidDataException)
-		{
-		}
-		try
-		{
-			WmoVisibleBlockReferenceSummary visibleBlockReferenceSummary = WmoVisibleBlockReferenceSummaryReader.Read(input);
-			PrintWmoVisibleBlockReferenceSummary(visibleBlockReferenceSummary);
-		}
-		catch (InvalidDataException)
-		{
+			try
+			{
+				WmoVisibleVertexSummary visibleVertexSummary = WmoVisibleVertexSummaryReader.Read(input);
+				PrintWmoVisibleVertexSummary(visibleVertexSummary);
+			}
+			catch (InvalidDataException)
+			{
+			}
+			try
+			{
+				WmoVisibleBlockSummary visibleBlockSummary = WmoVisibleBlockSummaryReader.Read(input);
+				PrintWmoVisibleBlockSummary(visibleBlockSummary);
+			}
+			catch (InvalidDataException)
+			{
+			}
+			try
+			{
+				WmoVisibleBlockReferenceSummary visibleBlockReferenceSummary = WmoVisibleBlockReferenceSummaryReader.Read(input);
+				PrintWmoVisibleBlockReferenceSummary(visibleBlockReferenceSummary);
+			}
+			catch (InvalidDataException)
+			{
+			}
 		}
 		try
 		{
@@ -862,6 +886,21 @@ static void PrintWmoPortalInfoSummary(WmoPortalInfoSummary summary)
 static void PrintWmoPortalRefSummary(WmoPortalRefSummary summary)
 {
 	Console.WriteLine($"MOPR: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctPortals={summary.DistinctPortalIndexCount} maxGroupIndex={summary.MaxGroupIndex} sides(+/-/0)={summary.PositiveSideCount}/{summary.NegativeSideCount}/{summary.NeutralSideCount}");
+}
+
+static void PrintWmoPortalVertexRangeSummary(WmoPortalVertexRangeSummary summary)
+{
+	Console.WriteLine($"MOPT->MOPV: portals={summary.EntryCount} vertices={summary.VertexCount} zeroVertexPortals={summary.ZeroVertexPortalCount} coveredPortals={summary.CoveredPortalCount} outOfRangePortals={summary.OutOfRangePortalCount} maxVertexEnd={summary.MaxVertexEnd}");
+}
+
+static void PrintWmoPortalRefRangeSummary(WmoPortalRefRangeSummary summary)
+{
+	Console.WriteLine($"MOPR->MOPT: refs={summary.RefCount} portals={summary.PortalCount} coveredRefs={summary.CoveredRefCount} outOfRangeRefs={summary.OutOfRangeRefCount} distinctPortalRefs={summary.DistinctPortalRefCount} maxPortalIndex={summary.MaxPortalIndex}");
+}
+
+static void PrintWmoPortalGroupRangeSummary(WmoPortalGroupRangeSummary summary)
+{
+	Console.WriteLine($"MOPR->MOGI: refs={summary.RefCount} groups={summary.GroupCount} coveredRefs={summary.CoveredRefCount} outOfRangeRefs={summary.OutOfRangeRefCount} distinctGroupRefs={summary.DistinctGroupRefCount} maxGroupIndex={summary.MaxGroupIndex}");
 }
 
 static void PrintWmoVisibleVertexSummary(WmoVisibleVertexSummary summary)

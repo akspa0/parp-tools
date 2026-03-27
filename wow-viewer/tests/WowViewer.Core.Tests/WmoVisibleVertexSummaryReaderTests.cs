@@ -26,6 +26,20 @@ public sealed class WmoVisibleVertexSummaryReaderTests
         Assert.Equal(new Vector3(7f, 5f, 9f), summary.BoundsMax);
     }
 
+    [Fact]
+    public void Read_WithoutMovvChunk_ThrowsInvalidDataException()
+    {
+        byte[] bytes =
+        [
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MVER", MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(17)),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOHD", new byte[64]),
+            .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOPT", new byte[20]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        Assert.Throws<InvalidDataException>(() => WmoVisibleVertexSummaryReader.Read(stream, "synthetic_missing_movv_root.wmo"));
+    }
+
     private static byte[] CreateVertices(params Vector3[] vertices)
     {
         byte[] bytes = new byte[vertices.Length * 12];

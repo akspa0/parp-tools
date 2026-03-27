@@ -92,6 +92,9 @@ Current shared-core foundation slice:
    - `WmoVisibleVertexSummary`
    - `WmoVisibleBlockSummary`
    - `WmoVisibleBlockReferenceSummary`
+   - `WmoPortalVertexRangeSummary`
+   - `WmoPortalRefRangeSummary`
+   - `WmoPortalGroupRangeSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -134,6 +137,9 @@ Current shared-core foundation slice:
    - `WmoVisibleVertexSummaryReader`
    - `WmoVisibleBlockSummaryReader`
    - `WmoVisibleBlockReferenceSummaryReader`
+   - `WmoPortalVertexRangeSummaryReader`
+   - `WmoPortalRefRangeSummaryReader`
+   - `WmoPortalGroupRangeSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -187,6 +193,7 @@ Current shared-core foundation slice:
 	- it now also locks a batched synthetic root-WMO case for `MOLT`, `MFOG`, and `MCVP`
 	- it now also locks a batched synthetic root-WMO linkage case for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`
 	- it now also locks a batched synthetic root-WMO visibility case for `MOVV`, `MOVB`, and `MOVB -> MOVV`
+	- it now also locks a batched synthetic root-WMO portal-linkage case for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI`, plus a missing-`MOVV` regression
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -221,6 +228,7 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO `MOLT`, `MFOG`, and `MCVP` semantic summaries for lights, fog, and opaque trailing root chunks when those chunks are present
 	- it now also reports shared root-WMO linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` when those related chunks are present
 	- it now also reports shared root-WMO visibility summaries for `MOVV`, `MOVB`, and `MOVB -> MOVV` when those chunks are present
+	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

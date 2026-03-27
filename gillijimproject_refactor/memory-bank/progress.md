@@ -1,5 +1,24 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Portal Linkage Summary Slices For MOPT->MOPV, MOPR->MOPT, And MOPR->MOGI Landed
+
+- Added a portal-linkage focused batched root-WMO landing in `wow-viewer` after the earlier raw portal summary slice.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoPortalVertexRangeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalVertexRangeSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoPortalRefRangeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalRefRangeSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoPortalGroupRangeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoPortalGroupRangeSummaryReader`
+	- expanded `WmoRootReaderCommon` with optional chunk reads to avoid false-positive optional root-chunk lookups
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated portal-linkage lines for `MOPT->MOPV`, `MOPR->MOPT`, and `MOPR->MOGI`
+	- added synthetic regression coverage for all three portal-linkage seams plus a missing-`MOVV` guard regression
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `125` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `94` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portal-linkage-batch-test.wmo` passed on Mar 27, 2026 for a synthetic root-portal-linkage smoke case
+	- this is still summary work, not full portal topology validation or runtime culling ownership
+
 ### Mar 27, 2026 - Batched Root WMO Visibility Summary Slices For MOVV, MOVB, And MOVB->MOVV Landed
 
 - Added another batched root-WMO landing in `wow-viewer` for visibility-owner chunks plus their first narrow linkage seam.
