@@ -5,6 +5,27 @@ namespace WowViewer.Core.IO.Maps;
 
 internal static class MapSummaryReaderCommon
 {
+    public static byte[] ReadChunkPayload(Stream stream, MapChunkLocation chunk)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        if (!stream.CanSeek)
+            throw new ArgumentException("Chunk payload reading requires a seekable stream.", nameof(stream));
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = chunk.DataOffset;
+            byte[] payload = new byte[chunk.Size];
+            stream.ReadExactly(payload);
+            return payload;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
     public static byte[]? ReadChunkPayload(Stream stream, MapFileSummary fileSummary, FourCC id)
     {
         MapChunkLocation chunk = default;
@@ -22,21 +43,7 @@ internal static class MapSummaryReaderCommon
         if (!found)
             return null;
 
-        if (!stream.CanSeek)
-            throw new ArgumentException("Chunk payload reading requires a seekable stream.", nameof(stream));
-
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
+        return ReadChunkPayload(stream, chunk);
     }
 
     public static byte[]? ReadFirstAvailableChunkPayload(Stream stream, MapFileSummary fileSummary, IReadOnlyList<FourCC> ids)

@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Shared ADT MCNK Semantic Summary And First WMO Root Summary Slices Landed
+
+- `wow-viewer` now has its first chunk-internal ADT semantic seam plus its first shared WMO root semantic-summary seam.
+- Landed ADT pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Maps/AdtChunkIds.cs` now owns the shared readable `MCNK` subchunk ids used by the ADT MCNK summary seam
+	- `wow-viewer/src/core/WowViewer.Core/Maps/AdtMcnkSummary.cs` now owns the typed ADT `MCNK` semantic-summary contract for root-header presence, index coverage, area-id coverage, hole or liquid or `MCCV` flags, subchunk presence, and per-chunk layer-count signals
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtMcnkSummaryReader.cs` now reads those `MCNK` signals from root, `_tex0.adt`, and `_obj0.adt` files while staying at count or presence level instead of deep payload decode
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports the shared ADT `MCNK` semantic summary for `map inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/AdtMcnkSummaryReaderTests.cs` now covers synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus fixed real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
+- Landed WMO pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now owns the shared readable root-WMO chunk ids used by the summary seam
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoSummary.cs` now owns the typed WMO root semantic-summary contract for `MOHD`-reported counts, string-table counts, top-level entry counts, flags, and bounds
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoSummaryReader.cs` now reads those signals from standard chunked WMO root files without pretending to be group-file or deep payload ownership
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now supports `wmo inspect --input <file.wmo>` as a thin shared-reader consumer
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoSummaryReaderTests.cs` now covers a synthetic WMO root summary case
+- Current verified validation for these slices:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `84` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `53` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now reports the shared ADT `MCNK` semantic line `mcnk=256 zero=0 headerLike=0 distinctIndex=0 duplicateIndex=0 areaIds=0 holes=0 liquidFlags=0 mccvFlags=0 mcly=256 mcal=203 mcsh=174 totalLayers=775 maxLayers=4 multiLayerChunks=203`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-summary-test.wmo` passed on Mar 27, 2026 and reported `materials=2/2 groups=4/4 portals=1 lights=3 textures=2 doodadNames=5/5 doodadPlacements=6/6 doodadSets=2/2 flags=0x00001234`
+- Important boundaries:
+	- the ADT `MCNK` seam proves count or presence level ownership for root-header signals and split-file subchunk coverage, not full terrain payload decode, alpha decode, shadow decode, liquid decode, or writer support
+	- the WMO seam proves root-file semantic summary only; it does not yet prove group-file parsing, material payload ownership beyond entry counts, or any write path
+
 ## Mar 27, 2026 - Shared ADT Semantic Summary Slice Landed
 
 - `wow-viewer` now has its first shared ADT semantic-summary seam beyond raw top-level chunk inventory.

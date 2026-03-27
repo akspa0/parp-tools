@@ -1,11 +1,13 @@
 ﻿using System.Text.Json;
 using WowViewer.Core.IO.Maps;
+using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Runtime;
+using WowViewer.Core.Wmo;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
 {
@@ -23,6 +25,9 @@ switch (area)
 		break;
 	case "pm4":
 		RunPm4(tail);
+		break;
+	case "wmo":
+		RunWmo(tail);
 		break;
 	default:
 		Console.Error.WriteLine($"Unknown inspect area '{area}'.");
@@ -111,6 +116,45 @@ static void RunPm4(string[] args)
 			Environment.ExitCode = 1;
 			break;
 	}
+}
+
+static void RunWmo(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowWmoUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunWmoInspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown wmo command '{command}'.");
+			ShowWmoUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunWmoInspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input WMO file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	WmoSummary summary = WmoSummaryReader.Read(input);
+	PrintWmoSummary(summary);
 }
 
 static void RunPm4Inspect(string[] args)
@@ -552,6 +596,8 @@ static void PrintMapSummary(MapFileSummary summary)
 		using FileStream stream = File.OpenRead(summary.SourcePath);
 		AdtSummary adtSummary = AdtSummaryReader.Read(stream, summary);
 		Console.WriteLine($"ADT semantics: kind={adtSummary.Kind} terrainChunks={adtSummary.TerrainChunkCount} textures={adtSummary.TextureNameCount} doodadNames={adtSummary.ModelNameCount} wmoNames={adtSummary.WorldModelNameCount} doodadPlacements={adtSummary.ModelPlacementCount} wmoPlacements={adtSummary.WorldModelPlacementCount} hasMfbo={adtSummary.HasFlightBounds} hasMh2o={adtSummary.HasWater} hasMamp={adtSummary.HasTextureParams} hasMtxf={adtSummary.HasTextureFlags}");
+		AdtMcnkSummary mcnkSummary = AdtMcnkSummaryReader.Read(stream, summary);
+		Console.WriteLine($"ADT MCNK semantics: mcnk={mcnkSummary.McnkCount} zero={mcnkSummary.ZeroLengthMcnkCount} headerLike={mcnkSummary.HeaderLikeMcnkCount} distinctIndex={mcnkSummary.DistinctIndexCount} duplicateIndex={mcnkSummary.DuplicateIndexCount} areaIds={mcnkSummary.DistinctAreaIdCount} holes={mcnkSummary.ChunksWithHoles} liquidFlags={mcnkSummary.ChunksWithLiquidFlags} mccvFlags={mcnkSummary.ChunksWithMccvFlag} mcvt={mcnkSummary.ChunksWithMcvt} mcnr={mcnkSummary.ChunksWithMcnr} mcly={mcnkSummary.ChunksWithMcly} mcal={mcnkSummary.ChunksWithMcal} mcsh={mcnkSummary.ChunksWithMcsh} mccv={mcnkSummary.ChunksWithMccv} mclq={mcnkSummary.ChunksWithMclq} mcrd={mcnkSummary.ChunksWithMcrd} mcrw={mcnkSummary.ChunksWithMcrw} totalLayers={mcnkSummary.TotalLayerCount} maxLayers={mcnkSummary.MaxLayerCount} multiLayerChunks={mcnkSummary.ChunksWithMultipleLayers}");
 	}
 	Console.WriteLine($"Top-level chunks: {summary.ChunkCount}");
 	string chunkOrder = string.Join(", ", summary.Chunks.Take(16).Select(chunk => chunk.Id.ToString()));
@@ -577,11 +623,21 @@ static void PrintMapSummary(MapFileSummary summary)
 		Console.WriteLine($"  ... {summary.Chunks.Count - 12} more chunks");
 }
 
+static void PrintWmoSummary(WmoSummary summary)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect WMO report");
+	Console.WriteLine($"Input: {summary.SourcePath}");
+	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
+	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} flags=0x{summary.Flags:X8}");
+	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
+}
+
 static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
+	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo>");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
@@ -589,6 +645,12 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>]");
+}
+
+static void ShowWmoUsage()
+{
+	Console.WriteLine("WMO commands:");
+	Console.WriteLine("  wmo inspect --input <file.wmo>");
 }
 
 static void ShowMapUsage()

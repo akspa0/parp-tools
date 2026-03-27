@@ -1,5 +1,27 @@
 # Progress
 
+### Mar 27, 2026 - Shared ADT MCNK Semantic Summary And First WMO Root Summary Slices Landed
+
+- Added the next narrow ADT chunk-internal semantic-summary layer in `wow-viewer` and the first shared WMO root semantic-summary seam.
+- Landed ADT pieces:
+	- added `WowViewer.Core.Maps.AdtChunkIds`
+	- added `WowViewer.Core.Maps.AdtMcnkSummary`
+	- added `WowViewer.Core.IO.Maps.AdtMcnkSummaryReader`
+	- updated `WowViewer.Tool.Inspect map inspect` to print a shared `MCNK` semantic-summary line for ADT-family files
+	- added `wow-viewer/tests/WowViewer.Core.Tests/AdtMcnkSummaryReaderTests.cs` for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
+- Landed WMO pieces:
+	- added `WowViewer.Core.Wmo.WmoChunkIds`
+	- added `WowViewer.Core.Wmo.WmoSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoSummaryReader`
+	- added `wmo inspect --input <file.wmo>` to `WowViewer.Tool.Inspect`
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoSummaryReaderTests.cs` for a synthetic WMO root summary case
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `84` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `53` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now prints the shared ADT `MCNK` semantic summary on real split-texture data
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-summary-test.wmo` passed on Mar 27, 2026 for a synthetic root-WMO smoke case because no checked-in fixed real WMO file was available in this workspace snapshot
+	- this is still semantic summary work, not deep MCNK parsing, group-file WMO parsing, or write support
+
 ### Mar 27, 2026 - Shared ADT Semantic Summary Slice Landed
 
 - Added the first shared ADT semantic-summary layer in `wow-viewer` beyond raw chunk inventory.
