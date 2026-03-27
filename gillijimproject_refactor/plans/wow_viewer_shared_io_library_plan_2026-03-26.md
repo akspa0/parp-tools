@@ -64,6 +64,9 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoDoodadNameReferenceSummary`
   - `WmoGroupNameReferenceSummary`
   - `WmoDoodadSetRangeSummary`
+  - `WmoVisibleVertexSummary`
+  - `WmoVisibleBlockSummary`
+  - `WmoVisibleBlockReferenceSummary`
 - `WowViewer.Core/Files`
   - `WowFileKind`
   - `WowFileDetection`
@@ -109,6 +112,9 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoDoodadNameReferenceSummaryReader`
   - `WmoGroupNameReferenceSummaryReader`
   - `WmoDoodadSetRangeSummaryReader`
+  - `WmoVisibleVertexSummaryReader`
+  - `WmoVisibleBlockSummaryReader`
+  - `WmoVisibleBlockReferenceSummaryReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
   - `Md5TranslateIndex`
@@ -188,6 +194,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared WMO `MFOG` root fog semantic summary for fog counts, flag coverage, radius ranges, and bounds is now real
 - shared opaque root-chunk byte reporting for `MCVP` is now real
 - shared root-WMO linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` are now real
+- shared root-WMO visibility summaries for `MOVV`, `MOVB`, and `MOVB -> MOVV` are now real
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
@@ -260,6 +267,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `112` tests after batching the shared root-WMO `MOPV`, `MOPT`, and `MOPR` semantic-summary slices
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `115` tests after batching the shared root-WMO `MOLT`, `MFOG`, and `MCVP` semantic-summary slices
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `118` tests after batching the first root-WMO linkage summary slices for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `121` tests after batching the shared root-WMO `MOVV`, `MOVB`, and `MOVB -> MOVV` visibility-summary slices
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `37` tests after adding archive-backed `AreaIdMapper` coverage and shorthand-build normalization for archive-fed DBCD loads
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `46` tests after adding shared ADT semantic-summary coverage for root, `_tex0.adt`, and `_obj0.adt`
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `53` tests after adding shared ADT `MCNK` semantic-summary coverage plus a synthetic WMO root summary test
@@ -282,6 +290,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `81` tests after batching synthetic `MOPV`, `MOPT`, and `MOPR` root-WMO coverage
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `84` tests after batching synthetic `MOLT`, `MFOG`, and `MCVP` root-WMO coverage
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `87` tests after batching synthetic `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` linkage-summary coverage
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `90` tests after batching synthetic `MOVV`, `MOVB`, and `MOVB -> MOVV` visibility-summary coverage
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and now reports the shared WDT semantic summary `wmoBased=False tiles=1496/4096 mainCellBytes=8 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now reports the shared ADT semantic summary `kind=AdtTex terrainChunks=256 textures=5 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0 hasMfbo=False hasMh2o=False hasMamp=True hasMtxf=False`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 27, 2026 and now reports the shared ADT semantic summary `kind=AdtObj terrainChunks=256 textures=0 doodadNames=6 wmoNames=12 doodadPlacements=10 wmoPlacements=15 hasMfbo=False hasMh2o=False hasMamp=False hasMtxf=False`
@@ -306,6 +315,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portals-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOPV`, `MOPT`, and `MOPR` semantic summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-meta-batch-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOLT`, `MFOG`, and `MCVP` semantic summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-linkage-batch-test.wmo` passed on Mar 27, 2026 and now reports the shared `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` linkage summaries in one batched root-WMO smoke case
+- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-visibility-batch-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOVV`, `MOVB`, and `MOVB -> MOVV` visibility summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-portals-test.wmo` passed on Mar 27, 2026 and now reports the shared `MOPV`, `MOPT`, and `MOPR` semantic summaries in one batched root-WMO smoke case
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 26, 2026

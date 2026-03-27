@@ -207,6 +207,30 @@ static void RunWmoInspect(string[] args)
 		}
 		try
 		{
+			WmoVisibleVertexSummary visibleVertexSummary = WmoVisibleVertexSummaryReader.Read(input);
+			PrintWmoVisibleVertexSummary(visibleVertexSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
+		try
+		{
+			WmoVisibleBlockSummary visibleBlockSummary = WmoVisibleBlockSummaryReader.Read(input);
+			PrintWmoVisibleBlockSummary(visibleBlockSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
+		try
+		{
+			WmoVisibleBlockReferenceSummary visibleBlockReferenceSummary = WmoVisibleBlockReferenceSummaryReader.Read(input);
+			PrintWmoVisibleBlockReferenceSummary(visibleBlockReferenceSummary);
+		}
+		catch (InvalidDataException)
+		{
+		}
+		try
+		{
 			WmoSkyboxSummary skyboxSummary = WmoSkyboxSummaryReader.Read(input);
 			PrintWmoSkyboxSummary(skyboxSummary);
 		}
@@ -838,6 +862,21 @@ static void PrintWmoPortalInfoSummary(WmoPortalInfoSummary summary)
 static void PrintWmoPortalRefSummary(WmoPortalRefSummary summary)
 {
 	Console.WriteLine($"MOPR: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctPortals={summary.DistinctPortalIndexCount} maxGroupIndex={summary.MaxGroupIndex} sides(+/-/0)={summary.PositiveSideCount}/{summary.NegativeSideCount}/{summary.NeutralSideCount}");
+}
+
+static void PrintWmoVisibleVertexSummary(WmoVisibleVertexSummary summary)
+{
+	Console.WriteLine($"MOVV: payloadBytes={summary.PayloadSizeBytes} vertices={summary.VertexCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoVisibleBlockSummary(WmoVisibleBlockSummary summary)
+{
+	Console.WriteLine($"MOVB: payloadBytes={summary.PayloadSizeBytes} blocks={summary.BlockCount} vertexRefs={summary.TotalVertexRefs} blockSizeRange={summary.MinVerticesPerBlock}-{summary.MaxVerticesPerBlock} firstVertexRange={summary.MinFirstVertex}-{summary.MaxFirstVertex} maxVertexEnd={summary.MaxVertexEnd}");
+}
+
+static void PrintWmoVisibleBlockReferenceSummary(WmoVisibleBlockReferenceSummary summary)
+{
+	Console.WriteLine($"MOVB->MOVV: blocks={summary.BlockCount} vertices={summary.VisibleVertexCount} zeroVertexBlocks={summary.ZeroVertexBlockCount} coveredBlocks={summary.CoveredBlockCount} outOfRangeBlocks={summary.OutOfRangeBlockCount} maxVertexEnd={summary.MaxVertexEnd}");
 }
 
 static void PrintWmoLightSummary(WmoLightSummary summary)

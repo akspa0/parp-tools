@@ -1,5 +1,23 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Visibility Summary Slices For MOVV, MOVB, And MOVB->MOVV Landed
+
+- Added another batched root-WMO landing in `wow-viewer` for visibility-owner chunks plus their first narrow linkage seam.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoVisibleVertexSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoVisibleVertexSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoVisibleBlockSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoVisibleBlockSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoVisibleBlockReferenceSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoVisibleBlockReferenceSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated `MOVV`, `MOVB`, and `MOVB->MOVV` semantic lines when those chunks are present
+	- added synthetic regression coverage for all three seams
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `121` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `90` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-visibility-batch-test.wmo` passed on Mar 27, 2026 for a synthetic root-visibility smoke case
+	- this is still summary work, not runtime visibility-volume ownership or write support
+
 ### Mar 27, 2026 - Batched Root WMO Linkage Summary Slices For MODD->MODN, MOGI->MOGN, And MODS->MODD Landed
 
 - Added a linkage-focused batched root-WMO landing in `wow-viewer` instead of another raw-payload-only step.

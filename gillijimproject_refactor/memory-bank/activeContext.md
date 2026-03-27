@@ -1,5 +1,28 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Visibility Summary Slices For MOVV, MOVB, And MOVB->MOVV Landed
+
+- `wow-viewer` now has another batched root-WMO follow-up landing covering the two visibility-owner chunks plus their first narrow linkage seam together:
+	- `MOVV` visible-vertex semantic summary
+	- `MOVB` visible-block semantic summary
+	- `MOVB -> MOVV` visible-block range coverage summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoVisibleVertexSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoVisibleVertexSummaryReader.cs` now own narrow `MOVV` semantics for payload size, visible-vertex counts, and computed bounds
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoVisibleBlockSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoVisibleBlockSummaryReader.cs` now own narrow `MOVB` semantics for block counts, total vertex refs, per-block vertex-count range, first-vertex range, and max vertex end
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoVisibleBlockReferenceSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoVisibleBlockReferenceSummaryReader.cs` now own narrow `MOVB -> MOVV` linkage semantics for zero-vertex blocks, covered blocks, out-of-range blocks, visible-vertex counts, and max vertex end
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated `MOVV`, `MOVB`, and `MOVB->MOVV` semantic lines for root WMO files when those chunks are present
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoVisibleVertexSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoVisibleBlockSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoVisibleBlockReferenceSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `121` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `90` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-visibility-batch-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MOVV: payloadBytes=72 vertices=6 boundsMin=(-4.00, -8.00, -6.00) boundsMax=(7.00, 5.00, 9.00)`
+		- `MOVB: payloadBytes=12 blocks=3 vertexRefs=7 blockSizeRange=0-4 firstVertexRange=0-5 maxVertexEnd=8`
+		- `MOVB->MOVV: blocks=3 vertices=6 zeroVertexBlocks=1 coveredBlocks=1 outOfRangeBlocks=1 maxVertexEnd=8`
+- Important boundary:
+	- these seams prove count, bounds, and simple block-to-vertex coverage only
+	- they do not yet prove runtime visibility-volume semantics, convexity validation, or any write path
+
 ## Mar 27, 2026 - Batched Root WMO Linkage Summary Slices For MODD->MODN, MOGI->MOGN, And MODS->MODD Landed
 
 - `wow-viewer` now has a linkage-focused batched root-WMO landing instead of another raw-payload-only step:
