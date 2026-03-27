@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Batch Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MOBA` batch semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupBatchSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupBatchSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MOBA` semantic line when batches are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupBatchSummaryReaderTests.cs` for synthetic v17-style and v16-style batch coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `90` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `59` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-batch-test.wmo` passed on Mar 27, 2026 for a synthetic group-batch smoke case
+	- this is still semantic summary work, not full batch reconstruction or write support
+
 ### Mar 27, 2026 - Shared WMO Group Liquid Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MLIQ` semantic summary for WMO group files.

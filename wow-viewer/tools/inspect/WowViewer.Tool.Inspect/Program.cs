@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.BatchCount > 0)
+		{
+			WmoGroupBatchSummary batchSummary = WmoGroupBatchSummaryReader.Read(input);
+			PrintWmoGroupBatchSummary(batchSummary);
+		}
 		if (summary.HasLiquid)
 		{
 			WmoGroupLiquidSummary liquidSummary = WmoGroupLiquidSummaryReader.Read(input);
@@ -667,6 +672,11 @@ static void PrintWmoGroupSummary(WmoGroupSummary summary)
 static void PrintWmoGroupLiquidSummary(WmoGroupLiquidSummary summary)
 {
 	Console.WriteLine($"MLIQ: payloadBytes={summary.PayloadSizeBytes} verts={summary.XVertexCount}x{summary.YVertexCount} tiles={summary.XTileCount}x{summary.YTileCount} corner={FormatVector(summary.Corner)} materialId={summary.MaterialId} heights={summary.HeightCount} range=[{summary.MinHeight:F2}, {summary.MaxHeight:F2}] visibleTiles={summary.VisibleTileCount}/{summary.TileCount} tileFlags={summary.TileFlagByteCount} liquidType={summary.LiquidType}");
+}
+
+static void PrintWmoGroupBatchSummary(WmoGroupBatchSummary summary)
+{
+	Console.WriteLine($"MOBA: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} hasMaterialIds={summary.HasMaterialIds} distinctMaterials={summary.DistinctMaterialIdCount} highestMaterialId={summary.HighestMaterialId} totalIndexCount={summary.TotalIndexCount} firstIndexRange={summary.MinFirstIndex}-{summary.MaxFirstIndex} maxIndexEnd={summary.MaxIndexEnd} flaggedBatches={summary.FlaggedBatchCount}");
 }
 
 static void ShowUsage()

@@ -64,6 +64,7 @@ Current shared-core foundation slice:
   - `WmoGroupSummary`
   - `WmoLiquidBasicType`
   - `WmoGroupLiquidSummary`
+  - `WmoGroupBatchSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -77,6 +78,7 @@ Current shared-core foundation slice:
   - `WmoGroupSummaryReader`
   - `WmoGroupReaderCommon`
   - `WmoGroupLiquidSummaryReader`
+  - `WmoGroupBatchSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -113,6 +115,7 @@ Current shared-core foundation slice:
 	- it now also locks a synthetic WMO root semantic-summary case
 	- it now also locks synthetic WMO group semantic-summary behavior for both `MVER + MOGP` and `MOGP`-first files, plus `MOGP`-first detector coverage
 	- it now also locks synthetic WMO `MLIQ` semantic-summary behavior including height-range and ocean-inference coverage
+	- it now also locks synthetic WMO `MOBA` batch semantic-summary behavior including v17-style material ids and v16-style material-less batches
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -129,6 +132,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a first shared WMO root semantic summary for `MOHD`-reported counts, top-level entry counts, string-table counts, flags, and bounds
 	- it now also reports a first shared WMO group semantic summary for `MOGP` header fields, geometry subchunk counts, optional extra UV-set count, doodad-ref count, and liquid presence
 	- it now also reports a shared WMO `MLIQ` semantic summary for liquid dimensions, height range, visible-tile counts, and basic family inference when a group file contains liquid
+	- it now also reports a shared WMO `MOBA` batch semantic summary for batch-entry counts, material-id coverage, index coverage, and flagged-batch counts when a group file contains batches
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

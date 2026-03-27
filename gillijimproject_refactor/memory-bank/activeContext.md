@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Batch Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MLIQ`: a shared `MOBA` batch semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupBatchSummary.cs` now owns the typed `MOBA` batch-summary contract for entry counts, material-id coverage, total index count, first-index range, max index end, and flagged-batch counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupBatchSummaryReader.cs` now reads `MOBA` payload semantics from WMO group files without pretending to own full batch reconstruction
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOBA` semantic line for WMO group files that contain batches
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupBatchSummaryReaderTests.cs` now covers synthetic v17-style material-bearing batches and v16-style material-less batches
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `90` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `59` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-batch-test.wmo` passed on Mar 27, 2026 and reported `MOBA: payloadBytes=48 entries=2 hasMaterialIds=True distinctMaterials=2 highestMaterialId=7 totalIndexCount=15 firstIndexRange=10-20 maxIndexEnd=29 flaggedBatches=1`
+- Important boundary:
+	- this proves shared `MOBA` batch semantic summary for top-level batch-entry counts and index or material signals only
+	- this does not yet prove full batch reconstruction, bounding-box interpretation, or write-path ownership
+
 ## Mar 27, 2026 - Shared WMO Group Liquid Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after the `MOGP` header summary: a shared `MLIQ` semantic-summary reader.
