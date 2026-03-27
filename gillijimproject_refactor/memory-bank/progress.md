@@ -1,5 +1,24 @@
 # Progress
 
+### Mar 27, 2026 - Batched Root WMO Linkage Summary Slices For MODD->MODN, MOGI->MOGN, And MODS->MODD Landed
+
+- Added a linkage-focused batched root-WMO landing in `wow-viewer` instead of another raw-payload-only step.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoDoodadNameReferenceSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoDoodadNameReferenceSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoGroupNameReferenceSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupNameReferenceSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoDoodadSetRangeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoDoodadSetRangeSummaryReader`
+	- added shared `WowViewer.Core.IO.Wmo.WmoRootReaderCommon`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes dedicated linkage lines for `MODD->MODN`, `MOGI->MOGN`, and `MODS->MODD`
+	- added synthetic regression coverage for all three linkage seams
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `118` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `87` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-linkage-batch-test.wmo` passed on Mar 27, 2026 for a synthetic root-linkage smoke case
+	- this is still summary work, not full consumer cutover or write support
+
 ### Mar 27, 2026 - Batched Root WMO Metadata Slices For MOLT, MFOG, And MCVP Landed
 
 - Added another batched root-WMO metadata landing in `wow-viewer` for lights, fog, and an opaque trailing chunk.

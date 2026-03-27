@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 27, 2026 - Batched Root WMO Linkage Summary Slices For MODD->MODN, MOGI->MOGN, And MODS->MODD Landed
+
+- `wow-viewer` now has a linkage-focused batched root-WMO landing instead of another raw-payload-only step:
+	- `MODD -> MODN` doodad-name reference summary
+	- `MOGI -> MOGN` group-name reference summary
+	- `MODS -> MODD` doodad-set range summary
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoDoodadNameReferenceSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoDoodadNameReferenceSummaryReader.cs` now own narrow `MODD -> MODN` linkage semantics for resolved-name counts, unresolved-name counts, distinct resolved names, and max resolved-name length
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupNameReferenceSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupNameReferenceSummaryReader.cs` now own narrow `MOGI -> MOGN` linkage semantics for resolved-name counts, unresolved-name counts, distinct resolved names, and max resolved-name length
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoDoodadSetRangeSummary.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoDoodadSetRangeSummaryReader.cs` now own narrow `MODS -> MODD` range semantics for empty-set counts, fully covered sets, out-of-range sets, placement counts, and max range end
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoRootReaderCommon.cs` now centralizes shared root-WMO chunk reads, version reads, root-kind validation, and string-at-offset resolution used by the linkage readers
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints dedicated linkage lines for `MODD->MODN`, `MOGI->MOGN`, and `MODS->MODD` when the needed root chunks are present
+	- tests landed in `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadNameReferenceSummaryReaderTests.cs`, `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupNameReferenceSummaryReaderTests.cs`, and `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadSetRangeSummaryReaderTests.cs`
+- Current verified validation for this batched landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `118` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `87` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-linkage-batch-test.wmo` passed on Mar 27, 2026 and reported:
+		- `MODS->MODD: sets=3 placements=3 emptySets=1 coveredSets=0 outOfRangeSets=2 maxRangeEnd=18`
+		- `MOGI->MOGN: entries=3 resolvedNames=2 unresolvedNames=1 distinctResolvedNames=2 maxNameLength=9`
+		- `MODD->MODN: entries=3 resolvedNames=2 unresolvedNames=1 distinctResolvedNames=2 maxNameLength=7`
+- Important boundary:
+	- these seams prove narrow cross-chunk linkage and range validation only
+	- they do not yet prove full root-name resolution ownership across every consumer path or any write path
+
 ## Mar 27, 2026 - Batched Root WMO Metadata Slices For MOLT, MFOG, And MCVP Landed
 
 - `wow-viewer` now has another batched root-WMO metadata landing covering lights, fog, and one opaque trailing root chunk together:

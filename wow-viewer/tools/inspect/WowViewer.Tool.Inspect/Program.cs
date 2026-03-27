@@ -160,6 +160,21 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.DoodadSetEntryCount > 0 && summary.DoodadPlacementEntryCount > 0)
+		{
+			WmoDoodadSetRangeSummary doodadSetRangeSummary = WmoDoodadSetRangeSummaryReader.Read(input);
+			PrintWmoDoodadSetRangeSummary(doodadSetRangeSummary);
+		}
+		if (summary.GroupInfoCount > 0)
+		{
+			WmoGroupNameReferenceSummary groupNameReferenceSummary = WmoGroupNameReferenceSummaryReader.Read(input);
+			PrintWmoGroupNameReferenceSummary(groupNameReferenceSummary);
+		}
+		if (summary.DoodadPlacementEntryCount > 0 && summary.DoodadNameTableCount > 0)
+		{
+			WmoDoodadNameReferenceSummary doodadNameReferenceSummary = WmoDoodadNameReferenceSummaryReader.Read(input);
+			PrintWmoDoodadNameReferenceSummary(doodadNameReferenceSummary);
+		}
 		if (summary.ReportedLightCount > 0)
 		{
 			WmoLightSummary lightSummary = WmoLightSummaryReader.Read(input);
@@ -838,6 +853,21 @@ static void PrintWmoFogSummary(WmoFogSummary summary)
 static void PrintWmoOpaqueChunkSummary(WmoOpaqueChunkSummary summary)
 {
 	Console.WriteLine($"{summary.ChunkId}: payloadBytes={summary.PayloadSizeBytes}");
+}
+
+static void PrintWmoDoodadSetRangeSummary(WmoDoodadSetRangeSummary summary)
+{
+	Console.WriteLine($"MODS->MODD: sets={summary.EntryCount} placements={summary.PlacementCount} emptySets={summary.EmptySetCount} coveredSets={summary.FullyCoveredSetCount} outOfRangeSets={summary.OutOfRangeSetCount} maxRangeEnd={summary.MaxRangeEnd}");
+}
+
+static void PrintWmoGroupNameReferenceSummary(WmoGroupNameReferenceSummary summary)
+{
+	Console.WriteLine($"MOGI->MOGN: entries={summary.EntryCount} resolvedNames={summary.ResolvedNameCount} unresolvedNames={summary.UnresolvedNameCount} distinctResolvedNames={summary.DistinctResolvedNameCount} maxNameLength={summary.MaxResolvedNameLength}");
+}
+
+static void PrintWmoDoodadNameReferenceSummary(WmoDoodadNameReferenceSummary summary)
+{
+	Console.WriteLine($"MODD->MODN: entries={summary.EntryCount} resolvedNames={summary.ResolvedNameCount} unresolvedNames={summary.UnresolvedNameCount} distinctResolvedNames={summary.DistinctResolvedNameCount} maxNameLength={summary.MaxResolvedNameLength}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)
