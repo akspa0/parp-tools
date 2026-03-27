@@ -28,8 +28,8 @@ public static class WdtSummaryReader
         if (fileSummary.Kind != MapFileKind.Wdt)
             throw new InvalidDataException($"WDT semantic summary requires a WDT file, but found {fileSummary.Kind}.");
 
-        byte[] mphdData = ReadChunkPayload(stream, fileSummary, MapChunkIds.Mphd) ?? [];
-        byte[] mainData = ReadChunkPayload(stream, fileSummary, MapChunkIds.Main) ?? [];
+        byte[] mphdData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mphd) ?? [];
+        byte[] mainData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Main) ?? [];
 
         return new WdtSummary(
             fileSummary.SourcePath,
@@ -37,10 +37,10 @@ public static class WdtSummaryReader
             tilesWithData: CountTilesWithData(mainData),
             totalTiles: WdtTileCount,
             mainCellSizeBytes: InferMainCellSize(mainData),
-            doodadNameCount: CountStringEntries(ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Mdnm, MapChunkIds.Mmdx])),
-            worldModelNameCount: CountStringEntries(ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Monm, MapChunkIds.Mwmo])),
-            doodadPlacementCount: CountPlacements(ReadChunkPayload(stream, fileSummary, MapChunkIds.Mddf), MddfEntrySize),
-            worldModelPlacementCount: CountPlacements(ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf), ModfEntrySize));
+            doodadNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Mdnm, MapChunkIds.Mmdx])),
+            worldModelNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Monm, MapChunkIds.Mwmo])),
+            doodadPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mddf), MddfEntrySize),
+            worldModelPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf), ModfEntrySize));
     }
 
     private static bool IsWmoBased(byte[] mphdData)
@@ -86,88 +86,5 @@ public static class WdtSummaryReader
             return mainData.Length / WdtTileCount;
 
         return 0;
-    }
-
-    private static int CountStringEntries(byte[]? payload)
-    {
-        if (payload is not { Length: > 0 })
-            return 0;
-
-        int count = 0;
-        bool sawText = false;
-        for (int index = 0; index < payload.Length; index++)
-        {
-            if (payload[index] == 0)
-            {
-                if (sawText)
-                {
-                    count++;
-                    sawText = false;
-                }
-
-                continue;
-            }
-
-            sawText = true;
-        }
-
-        if (sawText)
-            count++;
-
-        return count;
-    }
-
-    private static int CountPlacements(byte[]? payload, int stride)
-    {
-        if (payload is not { Length: > 0 } || stride <= 0)
-            return 0;
-
-        return payload.Length / stride;
-    }
-
-    private static byte[]? ReadFirstAvailableChunkPayload(Stream stream, MapFileSummary fileSummary, IReadOnlyList<WowViewer.Core.Chunks.FourCC> ids)
-    {
-        foreach (WowViewer.Core.Chunks.FourCC id in ids)
-        {
-            byte[]? payload = ReadChunkPayload(stream, fileSummary, id);
-            if (payload is { Length: > 0 })
-                return payload;
-        }
-
-        return null;
-    }
-
-    private static byte[]? ReadChunkPayload(Stream stream, MapFileSummary fileSummary, WowViewer.Core.Chunks.FourCC id)
-    {
-        MapChunkLocation chunk = default;
-        bool found = false;
-        foreach (MapChunkLocation location in fileSummary.Chunks)
-        {
-            if (location.Id != id)
-                continue;
-
-            chunk = location;
-            found = true;
-            break;
-        }
-
-        if (!found)
-            return null;
-
-        if (!stream.CanSeek)
-            throw new ArgumentException("Chunk payload reading requires a seekable stream.", nameof(stream));
-
-        long previousPosition = stream.Position;
-        try
-        {
-            stream.Position = chunk.DataOffset;
-            byte[] payload = new byte[chunk.Size];
-            stream.ReadExactly(payload);
-            return payload;
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
     }
 }

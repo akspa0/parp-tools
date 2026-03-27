@@ -99,6 +99,10 @@ internal static class MapTestPaths
 
     public static string DevelopmentRootAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0.adt");
 
+    public static string DevelopmentTexAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0_tex0.adt");
+
+    public static string DevelopmentObjAdtPath => Path.Combine(DevelopmentDirectoryPath, "development_0_0_obj0.adt");
+
     private static string GetWowViewerRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

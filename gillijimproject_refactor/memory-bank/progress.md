@@ -1,5 +1,22 @@
 # Progress
 
+### Mar 27, 2026 - Shared ADT Semantic Summary Slice Landed
+
+- Added the first shared ADT semantic-summary layer in `wow-viewer` beyond raw chunk inventory.
+- Landed pieces:
+	- added `WowViewer.Core.Maps.AdtSummary`
+	- added `WowViewer.Core.IO.Maps.AdtSummaryReader`
+	- added shared `MapSummaryReaderCommon` helper coverage for top-level payload and string-block reads used by both WDT and ADT summary readers
+	- expanded `MapChunkIds` with top-level `MAMP`
+	- updated `WowViewer.Tool.Inspect map inspect` to print the shared ADT semantic summary for root, `_tex0.adt`, and `_obj0.adt` files
+	- added `wow-viewer/tests/WowViewer.Core.Tests/AdtSummaryReaderTests.cs` for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `77` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `46` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now prints the shared ADT semantic summary on real texture-split data
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 27, 2026 and now prints the shared ADT semantic summary on real object-split data
+	- this is still top-level semantic summary work, not deep ADT parsing or write support
+
 ### Mar 27, 2026 - Shared WDT Semantic Summary Slice Landed
 
 - Added the first shared WDT semantic-summary layer in `wow-viewer` beyond raw chunk inventory.

@@ -1,5 +1,24 @@
 # Active Context
 
+## Mar 27, 2026 - Shared ADT Semantic Summary Slice Landed
+
+- `wow-viewer` now has its first shared ADT semantic-summary seam beyond raw top-level chunk inventory.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Maps/AdtSummary.cs` now owns the typed ADT semantic-summary contract for terrain-chunk counts, texture-name counts, doodad or WMO name counts, placement counts, and top-level MFBO or MH2O or MAMP or MTXF presence
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtSummaryReader.cs` now reads those signals from root, `_tex0.adt`, and `_obj0.adt` files without pretending to be a deep payload parser
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/MapSummaryReaderCommon.cs` now centralizes the shared top-level chunk-payload and string-block helpers used by both `AdtSummaryReader` and `WdtSummaryReader`
+	- `wow-viewer/src/core/WowViewer.Core/Maps/MapChunkIds.cs` now includes `MAMP` so texture-parameter presence is expressed as a shared map chunk id instead of a tool-local literal
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports the shared ADT semantic summary for `map inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/AdtSummaryReaderTests.cs` now covers synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus fixed real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `77` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `46` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and reported `kind=AdtTex terrainChunks=256 textures=5 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0 hasMfbo=False hasMh2o=False hasMamp=True hasMtxf=False`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 27, 2026 and reported `kind=AdtObj terrainChunks=256 textures=0 doodadNames=6 wmoNames=12 doodadPlacements=10 wmoPlacements=15 hasMfbo=False hasMh2o=False hasMamp=False hasMtxf=False`
+- Important boundary:
+	- this proves shared ADT semantic summary for top-level terrain-chunk counts, string-table counts, placement counts, and selected presence flags across root and split ADT-family files
+	- this does not yet prove deep root ADT parsing, split-texture payload parsing, split-object payload parsing, chunk-internal MCNK semantics, or any write path
+
 ## Mar 27, 2026 - Shared WDT Semantic Summary Slice Landed
 
 - `wow-viewer` now has its first shared WDT semantic-summary seam beyond raw top-level chunk inventory.
