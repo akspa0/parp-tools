@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Text;
-using WoWMapConverter.Core.Services;
+using WowViewer.Core.IO.Files;
 
 namespace WoWMapConverter.Core.Converters;
 
@@ -62,7 +62,7 @@ public class WmoV14ToV17Converter
         Console.WriteLine($"[INFO] Converting {Path.GetFileName(inputPath)} to v17...");
         
         // Try reading from file directly or from MPQ archive
-        var data = AlphaMpqReader.ReadWithMpqFallback(inputPath);
+        var data = AlphaArchiveReader.ReadWithMpqFallback(inputPath);
         if (data == null)
             throw new FileNotFoundException($"WMO not found (checked direct and MPQ): {inputPath}");
         
@@ -102,7 +102,7 @@ public class WmoV14ToV17Converter
     /// </summary>
     public WmoV14Data ParseWmoV14(string inputPath)
     {
-        var data = AlphaMpqReader.ReadWithMpqFallback(inputPath);
+        var data = AlphaArchiveReader.ReadWithMpqFallback(inputPath);
         if (data == null)
             throw new FileNotFoundException($"WMO not found (checked direct and MPQ): {inputPath}");
         

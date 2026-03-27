@@ -4,7 +4,6 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using MdxViewer.Terrain;
-using WoWMapConverter.Core.Formats.PM4;
 
 namespace MdxViewer;
 

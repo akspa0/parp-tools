@@ -1,21 +1,21 @@
 using System.IO;
 using DBCD.Providers;
-using WoWMapConverter.Core.Services;
+using WowViewer.Core.IO.Files;
 
 namespace MdxViewer.DataSources;
 
 /// <summary>
-/// IDBCProvider that reads DBC files from MPQ archives via NativeMpqService.
+/// IDBCProvider that reads DBC files through the shared archive-reader boundary.
 /// DBC files in WoW Alpha live at "DBFilesClient\TableName.dbc" inside the MPQ.
 /// </summary>
 public class MpqDBCProvider : IDBCProvider
 {
-    private readonly NativeMpqService _mpq;
+    private readonly IArchiveReader _archiveReader;
     private readonly Dictionary<string, byte[]> _cache = new(StringComparer.OrdinalIgnoreCase);
 
-    public MpqDBCProvider(NativeMpqService mpq)
+    public MpqDBCProvider(IArchiveReader archiveReader)
     {
-        _mpq = mpq;
+        _archiveReader = archiveReader;
     }
 
     public Stream StreamForTableName(string tableName, string build)
@@ -23,23 +23,11 @@ public class MpqDBCProvider : IDBCProvider
         if (_cache.TryGetValue(tableName, out var cached))
             return new MemoryStream(cached);
 
-        // Try standard DBC path inside MPQ
-        string[] paths =
+        byte[]? data = DbClientFileReader.TryReadTable(_archiveReader, tableName);
+        if (data is { Length: > 0 })
         {
-            $"DBFilesClient\\{tableName}.dbc",
-            $"DBFilesClient\\{tableName}.db2",
-            $"DBFilesClient/{tableName}.dbc",
-            $"DBFilesClient/{tableName}.db2",
-        };
-
-        foreach (var path in paths)
-        {
-            var data = _mpq.ReadFile(path);
-            if (data != null && data.Length > 0)
-            {
-                _cache[tableName] = data;
-                return new MemoryStream(data);
-            }
+            _cache[tableName] = data;
+            return new MemoryStream(data);
         }
 
         throw new FileNotFoundException($"DBC/DB2 not found in MPQ: {tableName}");

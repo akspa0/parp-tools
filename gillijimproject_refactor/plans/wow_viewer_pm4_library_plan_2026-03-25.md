@@ -9,13 +9,12 @@ This document locks the PM4 migration direction for wow-viewer after the Mar 25,
 - `Pm4Research` remains the main library seed and research input.
 - Default validation for PM4 work is `wow-viewer` build or test plus the relevant inspect command against the fixed development dataset.
 - `MdxViewer` compile validation is now optional and should be run only when a slice intentionally changes consumer compatibility or when the user explicitly asks for it.
-- If older sections below still describe `MdxViewer` as the default runtime reference, treat this reset section as the newer rule.
 
 ## Source-Of-Truth Rule
 
-- the active MdxViewer implementation is the de facto reference implementation for PM4 runtime behavior
-- Pm4Research should be ported as the future PM4 library family because PM4 semantics are still under active research
-- parpToolbox, PM4Tool, WoWRollback.PM4Module, and older PM4 helpers remain supporting evidence, not the top-level source of PM4 truth
+- `WowViewer.Core.PM4` is the canonical implementation target and intended source of truth for new PM4 work in `wow-viewer`
+- `Pm4Research` should be ported as the library seed because PM4 semantics are still under active research
+- `MdxViewer`, `parpToolbox`, `PM4Tool`, `WoWRollback.PM4Module`, and older PM4 helpers remain reference or extraction inputs, not the top-level source of PM4 truth
 
 This means wow-viewer should not wait for a mythical final PM4 winner before giving PM4 a real library home.
 
@@ -23,7 +22,7 @@ This means wow-viewer should not wait for a mythical final PM4 winner before giv
 
 Create one first-party PM4 library family in wow-viewer that:
 
-- preserves the current MdxViewer PM4 behavior that already works in runtime
+- owns PM4 behavior directly in the library instead of depending on the old viewer as the default authority
 - absorbs Pm4Research.Core as the ongoing research and decode backbone
 - exposes PM4 services to the viewer, inspect CLI, and converter CLI
 - keeps unstable research seams clearly marked instead of mixing them into stable contracts silently
@@ -49,13 +48,13 @@ Create one first-party PM4 library family in wow-viewer that:
 
 The point is not to hide research. The point is to keep research in the same PM4 family instead of leaving it marooned in parp-tools.
 
-## Reference Hierarchy
+## Reference Inputs
 
-### Runtime reference
+### Legacy or compatibility inputs
 
-- current MdxViewer PM4 behavior
-- current MdxViewer PM4 selection and overlay contracts
-- current MdxViewer PM4 transform and grouping behavior that has already been validated enough to rely on as the active viewer path
+- selected current MdxViewer PM4 behavior when a missing algorithm or consumer comparison must be inspected
+- current MdxViewer PM4 selection and overlay contracts when explicit consumer compatibility matters
+- current MdxViewer PM4 transform and grouping behavior only as extraction input, not as the default design authority
 
 ### Library seed
 
@@ -74,7 +73,7 @@ The point is not to hide research. The point is to keep research in the same PM4
 ### Immediate first slice
 
 - chunk models and typed decode contracts from Pm4Research.Core
-- object identity, grouping, and transform contracts already proven in current MdxViewer behavior
+- object identity, grouping, and transform contracts needed to move ownership into the library
 - report and validation seams needed for inspect pm4 verbs
 
 Current status in the workspace:
@@ -101,7 +100,7 @@ Current status in the workspace:
   - `WowViewer.Tool.Inspect` verb for `pm4 linkage`
   - `WowViewer.Tool.Inspect` verb for `pm4 mscn`
   - `WowViewer.Tool.Inspect` verb for `pm4 unknowns`
-- first viewer-facing runtime contract slice now also landed:
+- first library-owned runtime contract slice now also landed:
   - shared `Pm4AxisConvention`, `Pm4CoordinateMode`, and `Pm4PlanarTransform` contracts
   - shared `Pm4CoordinateService`
   - shared `Pm4PlacementContract` candidate set
@@ -113,6 +112,12 @@ Current status in the workspace:
   - first world-space yaw-application helper layer from current `WorldScene`, keeping pivot rotation and corrected world-position conversion in shared PM4 math while leaving renderer-space mapping outside the library
   - first reusable `Pm4PlacementSolution` contract plus `ResolvePlacementSolution(...)` entry point, returning typed transform, pivot, and yaw-correction results in one library-owned object
   - first typed coordinate-mode resolution seam, returning the chosen tile-local or world-space interpretation, chosen planar transform, both scores, and whether the fallback path was used
+  - first reusable `Pm4LinkedPositionRefSummary` contract plus `SummarizeLinkedPositionRefs(...)`, turning linked MPRL floor-range, heading-range, and circular-mean aggregation into a library-owned PM4 summary seam instead of leaving that ownership in `WorldScene`
+  - first reusable `Pm4ConnectorKey` contract plus `BuildConnectorKeys(...)`, turning exterior-vertex references into quantized world-space connector keys through typed placement solutions
+  - first reusable `Pm4ObjectGroupKey` and `Pm4ConnectorMergeCandidate` contracts plus `BuildMergedGroupMap(...)`, turning connector-overlap group merge heuristics into a library-owned merge-map result instead of leaving that ownership in `WorldScene`
+  - first reusable `Pm4CorrelationMetrics` and `Pm4CorrelationCandidateScore` contracts plus `Pm4CorrelationMath`, turning bounds, footprint, and candidate-ranking correlation heuristics into library-owned helpers instead of leaving those metrics as viewer-local anonymous scoring state
+  - first reusable `Pm4CorrelationObjectDescriptor`, `Pm4CorrelationObjectInput`, and `Pm4CorrelationObjectState` contracts plus `Pm4CorrelationMath.BuildObjectStates(...)`, turning PM4 correlation object summarization, bounds derivation, sampled footprint hull construction, and empty-geometry fallback into library-owned state building instead of leaving that ownership in `WorldScene`
+  - first reusable `Pm4GeometryLineSegment`, `Pm4GeometryTriangle`, and `Pm4CorrelationGeometryInput` contracts plus `Pm4CorrelationMath.BuildObjectStatesFromGeometry(...)`, turning PM4 correlation geometry-input transformation and world-point derivation into library-owned state building instead of leaving that ownership in `WorldScene`
 - first PM4 test slice now also landed:
   - `tests/WowViewer.Core.PM4.Tests`
   - real-data assertions for `development_00_00.pm4`
@@ -125,13 +130,25 @@ Current status in the workspace:
   - synthetic world-space centroid assertion for the tile-local centroid helper layer
   - synthetic pivot-rotation and corrected world-position assertions for the world-space yaw helper layer
   - synthetic end-to-end placement-solution assertions for typed transform, pivot, and yaw-correction resolution
+  - synthetic linked-position-ref summary assertions for mixed normal-or-terminator inputs and terminator-only fallback behavior
+  - synthetic PM4 geometry-input object-state assertion without viewer-specific world-point assembly
   - real-data MSCN assertions for the fixed development PM4 directory
   - real-data unknowns assertions for the fixed development PM4 directory
 - first active viewer consumer slice now also landed:
   - `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` now references `wow-viewer/src/core/WowViewer.Core.PM4`
+  - `WorldScene` now uses shared `Core.PM4` placement solutions instead of assembling planar transform, world pivot, and world yaw correction as separate consumer-owned steps
+  - `MdxViewer` no longer directly imports `WoWMapConverter.Core.Formats.PM4` in its active PM4 consumer path; `WorldScene` and `ViewerApp` now read PM4 through shared `Core.PM4` reader or document types instead of old `WoWMapConverter` PM4 wrappers
   - `WorldScene.ResolvePlanarTransform(...)` now delegates to shared `Core.PM4`
   - `WorldScene.TryComputeWorldYawCorrectionRadians(...)` now delegates to shared `Core.PM4`
   - `WorldScene.ComputeSurfaceWorldCentroid(...)` now delegates to shared `Core.PM4`
+  - `WorldScene.SummarizeLinkedPositionRefs(...)` now delegates linked MPRL summary aggregation to shared `Core.PM4`
+  - `WorldScene.BuildCk24ConnectorKeys()` now delegates PM4 connector-key derivation to shared `Core.PM4`
+  - `WorldScene.BuildPm4CorrelationObjectStates()` now delegates PM4 geometry-input object-state construction to shared `Core.PM4`
+  - `WorldScene.RebuildPm4MergedObjectGroups()` now delegates PM4 merged-group resolution to shared `Core.PM4`
+  - `WorldScene` PM4 or WMO correlation reporting now consumes shared correlation object-state, hull, and metric helpers from `Core.PM4`
+- domain boundary reaffirmed by the current slice:
+  - PM4-owned geometry, transforms, and shared object-state construction belong in `Core.PM4`
+  - WMO-facing report payloads stay in WMO or consumer space instead of being re-homed into PM4
 - current research note worth preserving:
   - CK24 low-16 object values, read as integers, appear to be plausible `UniqueID` candidates on the development map, but that remains a hypothesis until correlated against real placed-object data
 - not ported yet:
@@ -141,7 +158,7 @@ Current status in the workspace:
 
 ### Second slice
 
-- the current MdxViewer PM4 workspace should switch from app-owned internals to Core.PM4-backed services without changing visible behavior
+- optional consumer compatibility should keep switching the current MdxViewer PM4 workspace from app-owned internals to Core.PM4-backed services when a slice intentionally changes that seam
 - CLI verbs from Pm4Research.Cli should move into Tool.Inspect on top of the same Core.PM4 services
 
 ### Third slice
@@ -159,7 +176,7 @@ Current status in the workspace:
 
 | Consumer | Uses Core.PM4 for | Notes |
 | --- | --- | --- |
-| WowViewer.App | PM4 workspace, alignment, correlation, selection, metadata, export hooks | current MdxViewer behavior is the target baseline |
+| WowViewer.App | PM4 workspace, alignment, correlation, selection, metadata, export hooks | the app should consume library-owned PM4 behavior rather than define it |
 | WowViewer.Tool.Inspect | pm4 inspect, validate, export-json, scan-hypotheses, scan-linkage | unstable verbs should be labeled experimental |
 | WowViewer.Tool.Converter | pm4 restore and related conversion jobs | restore pipeline becomes a consumer, not the PM4 truth owner |
 
@@ -167,8 +184,8 @@ Current status in the workspace:
 
 1. create WowViewer.Core.PM4 as a first-class project on day one
 2. port Pm4Research.Core into it
-3. codify current MdxViewer PM4 behavior as the runtime reference contract
-4. move the app PM4 workspace onto Core.PM4 without intended behavior changes
+3. codify library-owned PM4 contracts directly in Core.PM4 with real-data validation
+4. move app and tool consumers onto Core.PM4 without creating a permanent split in ownership
 5. port Pm4Research.Cli verbs into Tool.Inspect over the same library
 6. move WoWRollback.PM4Module restore logic behind the same PM4 services
 7. selectively promote only proven algorithms from PM4Tool or parpToolbox
@@ -194,14 +211,14 @@ Current status in the workspace:
 ## Failure Modes To Avoid
 
 - letting the viewer remain the only place where working PM4 behavior exists
-- porting Pm4Research without tying it to the current MdxViewer behavior, which would risk replacing working runtime behavior with cleaner but less proven abstractions
+- porting Pm4Research without completing ownership in Core.PM4, which would risk preserving the old split where the viewer still quietly owns PM4 behavior
 - importing whole PM4Tool or parpToolbox app splits into wow-viewer instead of lifting just the useful algorithms
 
 ## Bottom Line
 
 - PM4 is not a later optional migration item anymore
 - wow-viewer should start life with a real Core.PM4 project
-- that project should be seeded from Pm4Research but anchored to current MdxViewer behavior as the runtime reference
+- that project should be seeded from Pm4Research and completed as the owned implementation surface inside wow-viewer
 - PM4 is still only one part of the intended library stack; `WowViewer.Core`, `WowViewer.Core.IO`, bootstrap dependency wiring, and later runtime/data-source cutover still need explicit follow-through or the repo will drift away from the original migration plan
 - first non-PM4 follow-through is now starting to exist:
   - `WowViewer.Core` has a first shared WDT or ADT map-summary contract family
@@ -214,19 +231,26 @@ Current status in the workspace:
 
 - planning plus first code-port slice
 - `wow-viewer/src/core/WowViewer.Core.PM4` now contains the first research-seeded PM4 reader layer ported from `Pm4Research.Core`
-- that PM4 project now also contains the first single-file analyzer or report layer, the first decode-audit path, and the first extracted runtime placement-contract seam from current MdxViewer behavior
+- that PM4 project now also contains the first single-file analyzer or report layer, the first decode-audit path, and the first extracted runtime placement-contract seam needed to keep PM4 ownership moving into the library
 - `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 25, 2026 after this port
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 25, 2026 and produced a real summary report
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 audit --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` and `pm4 audit-directory --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` are now part of the active Core.PM4 research surface
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 linkage --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026 and reported `150` mismatch-bearing files, `58` bad-MDOS files, and `4553` total ref-index mismatches in the fixed corpus
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 mscn --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 25, 2026 and reported `309` MSCN-bearing files, `1,342,410` MSCN points, and much stronger raw-than-swapped MSCN bounds overlap in the fixed corpus
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 unknowns --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development` passed on Mar 26, 2026 and reported `1,273,335` sentinel-pattern `MSLK.LinkId` values, `598,882` active `MSLK` path windows, and the same `4,553` unresolved `MSLK.RefIndex -> MSUR` misses already visible in linkage
-- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `18` PM4 tests, including the first coordinate-mode resolver regression slice on top of the planar-transform resolver, world-yaw correction, world-space centroid, world-space yaw helper, and typed placement-solution regression slices
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `29` PM4 tests, including the first PM4 geometry-input regression slice on top of the earlier coordinate-mode, placement, connector-key, connector-group merge, correlation-math, and correlation object-state regression slices
 - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-corepm4-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can compile against the shared `Core.PM4` solver slice
 - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-centroid-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving world-space centroid computation into shared `Core.PM4`
-- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed again on Mar 26, 2026 with `18` PM4 tests
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-placement-solution-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving PM4 placement-solution assembly onto shared `Core.PM4`
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-connector-key-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving PM4 connector-key derivation onto shared `Core.PM4`
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-correlation-state-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving correlation object-state, hull, and metric consumption onto shared `Core.PM4`
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-correlation-geometry-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving PM4 geometry-input object-state assembly onto shared `Core.PM4`
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-merge-map-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving PM4 merged-group resolution onto shared `Core.PM4`
+- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-linked-position-ref-summary-hookup/` passed on Mar 26, 2026 and confirmed the active viewer can also compile after moving linked MPRL summary aggregation onto shared `Core.PM4`
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed again on Mar 26, 2026 with `29` PM4 tests
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed again on Mar 26, 2026 with `31` PM4 tests after the linked-position-ref summary slice
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed again on Mar 26, 2026 with `11` placement-focused tests
-- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed again on Mar 26, 2026 with `32` total tests across PM4 and shared-I/O suites
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed again on Mar 26, 2026 with `45` total tests across PM4 and shared-I/O suites after the linked-position-ref summary slice
 - this is still not runtime viewer integration or PM4 correctness signoff
 
 ## Fresh-Chat Next Slice

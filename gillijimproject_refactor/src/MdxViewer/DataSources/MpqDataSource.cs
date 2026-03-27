@@ -1,9 +1,9 @@
 using MdxViewer.Logging;
-using WoWMapConverter.Core.Services;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
+using WowViewer.Core.IO.Files;
 
 namespace MdxViewer.DataSources;
 
@@ -48,7 +48,7 @@ internal enum MpqReadResolutionKind
 
 /// <summary>
 /// Data source backed by MPQ archives + loose files on disk.
-/// Uses WoWMapConverter.Core's NativeMpqService for MPQ reading.
+/// Uses the shared archive-catalog boundary for MPQ access.
 /// Builds file list from MPQ-internal (listfile) entries — accurate for any client version.
 /// Supports Alpha 0.5.3, Classic, TBC, and WotLK 3.3.5 game folders.
 /// </summary>
@@ -72,12 +72,12 @@ public class MpqDataSource : IDataSource
         ".pm4"
     };
 
-    private readonly NativeMpqService _mpq = new();
+    private readonly IArchiveCatalog _archiveCatalog;
+    private readonly IArchiveCatalogFactory _archiveCatalogFactory;
     private readonly string _gamePath;
     private readonly List<string> _overlayRoots = new();
 
-    /// <summary>Exposes the underlying MPQ service for DBC provider access.</summary>
-    public NativeMpqService MpqService => _mpq;
+    public IArchiveReader ArchiveReader => _archiveCatalog;
     private readonly HashSet<string> _fileSet = new(StringComparer.OrdinalIgnoreCase);
     private List<string> _fileList = new();
     private readonly Dictionary<string, string> _canonicalPathMap = new(StringComparer.OrdinalIgnoreCase);
@@ -108,7 +108,7 @@ public class MpqDataSource : IDataSource
     private SemaphoreSlim? _prefetchSignal;
     private CancellationTokenSource? _prefetchCts;
     private Task[]? _prefetchWorkers;
-    private List<NativeMpqService>? _prefetchMpqServices;
+    private List<IArchiveCatalog>? _prefetchMpqServices;
     private const int PrefetchWorkerCount = 2;
 
     private long _fileExistsRequests;
@@ -200,34 +200,36 @@ public class MpqDataSource : IDataSource
             _prefetchQueue.Count);
     }
 
-    public MpqDataSource(string gamePath, string? listfilePath = null, IEnumerable<string>? overlayRoots = null)
+    public MpqDataSource(string gamePath, string? listfilePath = null, IEnumerable<string>? overlayRoots = null, IArchiveCatalogFactory? archiveCatalogFactory = null)
     {
+        _archiveCatalogFactory = archiveCatalogFactory ?? new MpqArchiveCatalogFactory();
+        _archiveCatalog = _archiveCatalogFactory.Create();
         _gamePath = gamePath;
 
         ViewerLog.Important(ViewerLog.Category.MpqData, $"Loading game folder: {gamePath}");
 
-        // 1. Load MPQ archives (large MPQs with listfiles)
-        _mpq.LoadArchives(new[] { gamePath });
+        ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(_archiveCatalog, new[] { gamePath }, listfilePath);
 
-        // 2. Extract files from MPQ internal (listfile) entries
-        var internalFiles = _mpq.ExtractInternalListfiles();
+        // 1. Extract files from MPQ internal (listfile) entries
+        var internalFiles = bootstrap.InternalFiles;
         foreach (var file in internalFiles)
             _fileSet.Add(file);
         ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {internalFiles.Count} files from MPQ internal listfiles.");
 
-        // Also add any previously known files (from hash table / scanned)
-        var knownFiles = _mpq.GetAllKnownFiles();
+        // 2. Add any previously known files (from hash table / scanned)
+        var knownFiles = bootstrap.KnownFiles;
         foreach (var file in knownFiles)
             _fileSet.Add(file);
         if (knownFiles.Count > 0)
             ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {knownFiles.Count} previously known files.");
 
-        // 3. Optionally load user-provided external listfile
-        if (!string.IsNullOrEmpty(listfilePath) && File.Exists(listfilePath))
+        // 3. Optionally add user-provided external listfile entries
+        if (bootstrap.ExternalListfileEntries.Count > 0)
         {
-            ViewerLog.Info(ViewerLog.Category.MpqData, $"Loading listfile: {listfilePath}");
-            _mpq.LoadListfile(listfilePath);
-            AddExternalListfileEntries(listfilePath);
+            foreach (string file in bootstrap.ExternalListfileEntries)
+                _fileSet.Add(file);
+
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {bootstrap.ExternalListfileEntries.Count} listfile entries.");
         }
 
         // 4. Scan loose files on disk
@@ -409,29 +411,6 @@ public class MpqDataSource : IDataSource
             || extension.Equals(".m2", StringComparison.OrdinalIgnoreCase);
     }
 
-    private void AddExternalListfileEntries(string listfilePath)
-    {
-        int count = 0;
-        foreach (var line in File.ReadLines(listfilePath))
-        {
-            var name = line.Trim();
-            if (string.IsNullOrEmpty(name)) continue;
-
-            if (name.Contains(';'))
-            {
-                var parts = name.Split(';', 2);
-                if (parts.Length > 1) name = parts[1].Trim();
-            }
-
-            if (!string.IsNullOrEmpty(name))
-            {
-                _fileSet.Add(name);
-                count++;
-            }
-        }
-        ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {count} listfile entries.");
-    }
-
     public bool AddOverlayRoot(string rootPath, out string normalizedRoot, out string message)
     {
         normalizedRoot = Path.GetFullPath(rootPath);
@@ -605,7 +584,7 @@ public class MpqDataSource : IDataSource
         }
 
         // Check direct path in loaded MPQ archives.
-        if (_mpq.FileExists(normalized))
+        if (_archiveCatalog.FileExists(normalized))
         {
             Interlocked.Increment(ref _fileExistsMpqHits);
             return CacheExistsResult(normalized, true);
@@ -614,7 +593,7 @@ public class MpqDataSource : IDataSource
         // Try canonical file-set spelling/casing as a fallback probe.
         if (_canonicalPathMap.TryGetValue(normalized, out string? canonicalPath))
         {
-            if (_mpq.FileExists(canonicalPath))
+            if (_archiveCatalog.FileExists(canonicalPath))
             {
                 Interlocked.Increment(ref _fileExistsCanonicalHits);
                 return CacheExistsResult(normalized, true);
@@ -697,25 +676,25 @@ public class MpqDataSource : IDataSource
         }
 
         Interlocked.Increment(ref _readCacheMisses);
-        var data = ReadFileUncached(normalized, _mpq, logFailures: true, isPrefetch: false);
+        var data = ReadFileUncached(normalized, _archiveCatalog, logFailures: true, isPrefetch: false);
         CacheRead(normalized, data);
         return data;
     }
 
     /// <summary>
     /// Reads the primary data file from an Alpha listfile-less .ext.MPQ archive.
-    /// Uses AlphaMpqReader which has smart block selection (name hash lookup, largest block fallback,
+    /// Uses AlphaArchiveReader which has smart block selection (name hash lookup, largest block fallback,
     /// magic byte checking) — critical for WMO MPQs that may contain multiple files.
     /// </summary>
     private byte[]? ReadFromAlphaMpq(string mpqDiskPath, string virtualPath)
     {
         // Build internal name candidates from the virtual path for hash-based lookup
-        var candidates = AlphaMpqReader.BuildInternalNameCandidates(virtualPath).ToList();
+        var candidates = AlphaArchiveReader.BuildInternalNameCandidates(virtualPath).ToList();
         // Also add just the filename
         var fileName = Path.GetFileName(virtualPath);
         if (!string.IsNullOrEmpty(fileName) && !candidates.Contains(fileName, StringComparer.OrdinalIgnoreCase))
             candidates.Insert(0, fileName);
-        return AlphaMpqReader.ReadFromMpq(mpqDiskPath, candidates);
+        return AlphaArchiveReader.ReadFromMpq(mpqDiskPath, candidates);
     }
 
 
@@ -930,7 +909,7 @@ public class MpqDataSource : IDataSource
         return data;
     }
 
-    private byte[]? ReadFileUncached(string virtualPath, NativeMpqService mpqService, bool logFailures, bool isPrefetch)
+    private byte[]? ReadFileUncached(string virtualPath, IArchiveReader archiveReader, bool logFailures, bool isPrefetch)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
         var loosePath = TryResolveLoosePath(virtualPath);
@@ -959,7 +938,7 @@ public class MpqDataSource : IDataSource
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → alpha MPQ extraction FAILED");
         }
 
-        var mpqData = mpqService.ReadFile(virtualPath);
+        var mpqData = archiveReader.ReadFile(virtualPath);
         if (mpqData != null)
         {
             ViewerLog.Trace($"[MpqDataSource] ReadFile '{virtualPath}' → standard MPQ ({mpqData.Length} bytes)");
@@ -981,20 +960,20 @@ public class MpqDataSource : IDataSource
 
             _prefetchSignal = new SemaphoreSlim(0);
             _prefetchCts = new CancellationTokenSource();
-            _prefetchMpqServices = new List<NativeMpqService>(PrefetchWorkerCount);
+            _prefetchMpqServices = new List<IArchiveCatalog>(PrefetchWorkerCount);
             _prefetchWorkers = new Task[PrefetchWorkerCount];
 
             for (int i = 0; i < PrefetchWorkerCount; i++)
             {
-                var mpqService = new NativeMpqService();
-                mpqService.LoadArchives(new[] { _gamePath });
-                _prefetchMpqServices.Add(mpqService);
-                _prefetchWorkers[i] = Task.Run(() => PrefetchWorkerLoop(mpqService, _prefetchCts.Token));
+                IArchiveCatalog archiveCatalog = _archiveCatalogFactory.Create();
+                archiveCatalog.LoadArchives(new[] { _gamePath });
+                _prefetchMpqServices.Add(archiveCatalog);
+                _prefetchWorkers[i] = Task.Run(() => PrefetchWorkerLoop(archiveCatalog, _prefetchCts.Token));
             }
         }
     }
 
-    private async Task PrefetchWorkerLoop(NativeMpqService mpqService, CancellationToken cancellationToken)
+    private async Task PrefetchWorkerLoop(IArchiveReader archiveReader, CancellationToken cancellationToken)
     {
         if (_prefetchSignal == null)
             return;
@@ -1021,7 +1000,7 @@ public class MpqDataSource : IDataSource
                 if (TryGetCachedRead(normalizedPath, out _))
                     continue;
 
-                var data = ReadFileUncached(normalizedPath, mpqService, logFailures: false, isPrefetch: true);
+                var data = ReadFileUncached(normalizedPath, archiveReader, logFailures: false, isPrefetch: true);
                 CacheRead(normalizedPath, data);
             }
         }
@@ -1051,6 +1030,6 @@ public class MpqDataSource : IDataSource
 
         _prefetchSignal?.Dispose();
         _prefetchCts?.Dispose();
-        _mpq.Dispose();
+        _archiveCatalog.Dispose();
     }
 }

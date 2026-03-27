@@ -42,6 +42,25 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `MapFileSummaryReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
+  - `Md5TranslateIndex`
+  - `Md5TranslateResolver`
+  - `MinimapService`
+  - `IArchiveReader`
+  - `IArchiveCatalog`
+  - `IArchiveCatalogFactory`
+  - `DbClientFileReader`
+  - `ArchiveCatalogBootstrapper`
+  - `ArchiveCatalogBootstrapResult`
+  - `AlphaArchiveReader`
+  - `PkwareExplode`
+  - `MpqArchiveCatalog`
+  - `MpqArchiveCatalogFactory`
+- `WowViewer.Core.IO/Dbc`
+  - `DbcReader`
+  - `DbcHeader`
+  - `MapDirectoryLookup`
+  - `GroundEffectLookup`
+  - `AreaIdMapper`
 
 ### Tool consumers
 
@@ -71,10 +90,19 @@ Create one first-party shared format stack in `wow-viewer` that:
 
 - shared detection is real
 - top-level WDT or ADT chunk summary is real
+- shared MD5 minimap translation and minimap tile path resolution are now real
+- shared standard-archive read and DBC or DB2 table probing boundaries are now real
+- shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
+- the concrete shared standard MPQ implementation used by the active `MdxViewer` path is now real
+- shared DBC-backed map-directory and ground-effect lookup helpers are now real
+- shared area-ID mapping plus embedded area-crosswalk ownership are now real
+- shared Alpha per-asset MPQ ownership now also covers the active `WoWMapConverter.Core` converter and VLM callers
+- the dead duplicate old-repo helper layer behind those active paths has now been deleted from `WoWMapConverter.Core`
 - this does not yet prove:
   - deep WDT semantic parsing
   - deep ADT root or split payload parsing
-  - WMO, M2, BLP, DBC, or DB2 payload parsing
+  - WMO, M2, or BLP payload parsing
+  - general-purpose DBC or DB2 schema ownership beyond the narrow shared lookup helpers that now exist
   - any write path or round-trip support
   - runtime cutover inside the active viewer
 
@@ -84,6 +112,9 @@ Create one first-party shared format stack in `wow-viewer` that:
 2. add shared WDT semantic summary beyond raw chunk order
 3. add first shared WMO or model-family detection or top-level summary slice
 4. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints
+5. continue shrinking `MdxViewer` imports of `WoWMapConverter.Core` by moving other narrow non-MPQ helpers onto `Core` or `Core.IO`
+6. add first shared WMO or model-family top-level summary seam where converter or viewer compatibility still depends on old-repo ownership
+7. decide whether the next non-PM4 slice is higher-level CASC or MPQ unification, a new shared format family, or a deeper summary or reader slice for existing families
 
 ## Failure Modes To Avoid
 
@@ -106,7 +137,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 
 ## Validation Status
 
-- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `32` tests after the shared detector slice landed
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `64` tests after the shared detector, MD5 minimap translation, archive-reader, archive bootstrap, Alpha wrapper, concrete MPQ catalog, shared DBC lookup, and shared AreaIdMapper slices landed
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 26, 2026

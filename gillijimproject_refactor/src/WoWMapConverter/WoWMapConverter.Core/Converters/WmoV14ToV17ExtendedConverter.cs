@@ -1,6 +1,6 @@
 using System.Numerics;
 using System.Text;
-using WoWMapConverter.Core.Services;
+using WowViewer.Core.IO.Files;
 
 namespace WoWMapConverter.Core.Converters;
 
@@ -13,7 +13,7 @@ public class WmoV14ToV17ExtendedConverter
     public List<string> Convert(string inputPath, string outputPath)
     {
         Console.WriteLine($"[INFO] Converting {Path.GetFileName(inputPath)} to v17 (Extended Mode)...");
-        var data = AlphaMpqReader.ReadWithMpqFallback(inputPath);
+        var data = AlphaArchiveReader.ReadWithMpqFallback(inputPath);
         if (data == null)
             throw new FileNotFoundException($"WMO not found: {inputPath}");
         return ConvertFromBytes(data, outputPath);

@@ -342,6 +342,356 @@ public sealed class Pm4ResearchIntegrationTests
     }
 
     [Fact]
+    public void PlacementMath_SyntheticWorldSpace_BuildsDistinctSortedConnectorKeys()
+    {
+        List<Vector3> exteriorVertices =
+        [
+            new(0f, 8f, 4f),
+            new(8f, 8f, 4f),
+            new(8f, 0f, 4f)
+        ];
+        List<Pm4MsurEntry> surfaces =
+        [
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 1u, 0u),
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 0u, 0u),
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 1u, 0u),
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 2u, 0u),
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 9u, 0u)
+        ];
+        Pm4PlacementSolution placement = new(
+            TileX: 0,
+            TileY: 0,
+            CoordinateMode: Pm4CoordinateMode.WorldSpace,
+            AxisConvention: Pm4AxisConvention.XYPlaneZUp,
+            PlanarTransform: new Pm4PlanarTransform(false, false, false),
+            WorldPivot: Vector3.Zero,
+            WorldYawCorrectionRadians: 0f);
+
+        IReadOnlyList<Pm4ConnectorKey> connectorKeys = Pm4PlacementMath.BuildConnectorKeys(exteriorVertices, surfaces, placement);
+
+        Assert.Equal(
+            [
+                new Pm4ConnectorKey(0, 4, 2),
+                new Pm4ConnectorKey(4, 0, 2),
+                new Pm4ConnectorKey(4, 4, 2)
+            ],
+            connectorKeys);
+    }
+
+    [Fact]
+    public void PlacementMath_SyntheticWorldSpace_AppliesYawCorrectionWhenBuildingConnectorKeys()
+    {
+        List<Vector3> exteriorVertices =
+        [
+            new(0f, 8f, 4f)
+        ];
+        List<Pm4MsurEntry> surfaces =
+        [
+            new Pm4MsurEntry(0, 0, 0, 0, Vector3.UnitZ, 0f, 0u, 0u, 0u)
+        ];
+        Pm4PlacementSolution placement = new(
+            TileX: 0,
+            TileY: 0,
+            CoordinateMode: Pm4CoordinateMode.WorldSpace,
+            AxisConvention: Pm4AxisConvention.XYPlaneZUp,
+            PlanarTransform: new Pm4PlanarTransform(false, false, false),
+            WorldPivot: Vector3.Zero,
+            WorldYawCorrectionRadians: MathF.PI * 0.5f);
+
+        IReadOnlyList<Pm4ConnectorKey> connectorKeys = Pm4PlacementMath.BuildConnectorKeys(exteriorVertices, surfaces, placement);
+
+        Pm4ConnectorKey connectorKey = Assert.Single(connectorKeys);
+        Assert.Equal(new Pm4ConnectorKey(0, 4, 2), connectorKey);
+    }
+
+    [Fact]
+    public void PlacementMath_SyntheticNeighborGroupsWithSharedConnectors_BuildsMergedGroupMap()
+    {
+        Pm4ObjectGroupKey firstKey = new(0, 0, 9u);
+        Pm4ObjectGroupKey secondKey = new(1, 0, 7u);
+        Pm4ObjectGroupKey thirdKey = new(2, 0, 5u);
+
+        List<Pm4ConnectorMergeCandidate> groups =
+        [
+            new(
+                firstKey,
+                new Vector3(0f, 0f, 0f),
+                new Vector3(32f, 32f, 16f),
+                new Vector3(16f, 16f, 8f),
+                new HashSet<Pm4ConnectorKey>
+                {
+                    new(10, 10, 2),
+                    new(12, 10, 2),
+                    new(14, 10, 2)
+                }),
+            new(
+                secondKey,
+                new Vector3(24f, 0f, 0f),
+                new Vector3(56f, 32f, 16f),
+                new Vector3(40f, 16f, 8f),
+                new HashSet<Pm4ConnectorKey>
+                {
+                    new(10, 10, 2),
+                    new(12, 10, 2),
+                    new(18, 10, 2)
+                }),
+            new(
+                thirdKey,
+                new Vector3(900f, 900f, 0f),
+                new Vector3(932f, 932f, 16f),
+                new Vector3(916f, 916f, 8f),
+                new HashSet<Pm4ConnectorKey>
+                {
+                    new(40, 40, 2),
+                    new(42, 40, 2)
+                })
+        ];
+
+        IReadOnlyDictionary<Pm4ObjectGroupKey, Pm4ObjectGroupKey> mergedGroupMap = Pm4PlacementMath.BuildMergedGroupMap(groups);
+
+        Assert.Equal(firstKey, mergedGroupMap[firstKey]);
+        Assert.Equal(firstKey, mergedGroupMap[secondKey]);
+        Assert.Equal(thirdKey, mergedGroupMap[thirdKey]);
+    }
+
+    [Fact]
+    public void PlacementMath_SyntheticSameTileGroups_DoNotMergeEvenWithSharedConnectors()
+    {
+        Pm4ObjectGroupKey firstKey = new(4, 4, 100u);
+        Pm4ObjectGroupKey secondKey = new(4, 4, 200u);
+
+        List<Pm4ConnectorMergeCandidate> groups =
+        [
+            new(
+                firstKey,
+                new Vector3(0f, 0f, 0f),
+                new Vector3(32f, 32f, 16f),
+                new Vector3(16f, 16f, 8f),
+                new HashSet<Pm4ConnectorKey>
+                {
+                    new(10, 10, 2),
+                    new(12, 10, 2)
+                }),
+            new(
+                secondKey,
+                new Vector3(8f, 8f, 0f),
+                new Vector3(40f, 40f, 16f),
+                new Vector3(24f, 24f, 8f),
+                new HashSet<Pm4ConnectorKey>
+                {
+                    new(10, 10, 2),
+                    new(12, 10, 2)
+                })
+        ];
+
+        IReadOnlyDictionary<Pm4ObjectGroupKey, Pm4ObjectGroupKey> mergedGroupMap = Pm4PlacementMath.BuildMergedGroupMap(groups);
+
+        Assert.Equal(firstKey, mergedGroupMap[firstKey]);
+        Assert.Equal(secondKey, mergedGroupMap[secondKey]);
+    }
+
+    [Fact]
+    public void CorrelationMath_SyntheticMetrics_ComputesExpectedOverlapAndDistanceSignals()
+    {
+        Vector2[] referenceHull =
+        [
+            new(0f, 0f),
+            new(10f, 0f),
+            new(10f, 10f),
+            new(0f, 10f)
+        ];
+        Vector2[] candidateHull =
+        [
+            new(5f, 0f),
+            new(15f, 0f),
+            new(15f, 10f),
+            new(5f, 10f)
+        ];
+
+        Pm4CorrelationMetrics metrics = Pm4CorrelationMath.EvaluateMetrics(
+            referenceBoundsMin: new Vector3(0f, 0f, 0f),
+            referenceBoundsMax: new Vector3(10f, 10f, 10f),
+            referenceCenter: new Vector3(5f, 5f, 5f),
+            referenceFootprintHull: referenceHull,
+            referenceFootprintArea: 100f,
+            candidateBoundsMin: new Vector3(5f, 0f, 2f),
+            candidateBoundsMax: new Vector3(15f, 10f, 12f),
+            candidateCenter: new Vector3(10f, 5f, 7f),
+            candidateFootprintHull: candidateHull,
+            candidateFootprintArea: 100f);
+
+        Assert.Equal(0f, metrics.PlanarGap, 3);
+        Assert.Equal(0f, metrics.VerticalGap, 3);
+        Assert.Equal(5.385f, metrics.CenterDistance, 3);
+        Assert.Equal(0.5f, metrics.PlanarOverlapRatio, 3);
+        Assert.Equal(0.4f, metrics.VolumeOverlapRatio, 3);
+        Assert.Equal(0.5f, metrics.FootprintOverlapRatio, 3);
+        Assert.Equal(1f, metrics.FootprintAreaRatio, 3);
+        Assert.Equal(5f, metrics.FootprintDistance, 3);
+    }
+
+    [Fact]
+    public void CorrelationMath_SameTileCandidateOutranksCrossTileCandidate()
+    {
+        Pm4CorrelationCandidateScore sameTileScore = new(
+            SameTile: true,
+            Metrics: new Pm4CorrelationMetrics(20f, 20f, 50f, 0.05f, 0.01f, 0.05f, 0.1f, 40f),
+            BoundsMin: Vector3.Zero,
+            BoundsMax: Vector3.One,
+            Center: Vector3.Zero);
+        Pm4CorrelationCandidateScore crossTileScore = new(
+            SameTile: false,
+            Metrics: new Pm4CorrelationMetrics(0f, 0f, 1f, 0.9f, 0.9f, 0.9f, 1f, 0f),
+            BoundsMin: Vector3.Zero,
+            BoundsMax: Vector3.One,
+            Center: Vector3.One);
+
+        int comparison = Pm4CorrelationMath.CompareCandidateScores(sameTileScore, crossTileScore);
+
+        Assert.True(comparison < 0);
+    }
+
+    [Fact]
+    public void CorrelationMath_WhenTileParityMatches_BetterFootprintScoreWins()
+    {
+        Pm4CorrelationCandidateScore strongerScore = new(
+            SameTile: false,
+            Metrics: new Pm4CorrelationMetrics(5f, 2f, 10f, 0.6f, 0.4f, 0.8f, 0.9f, 3f),
+            BoundsMin: Vector3.Zero,
+            BoundsMax: Vector3.One,
+            Center: Vector3.Zero);
+        Pm4CorrelationCandidateScore weakerScore = new(
+            SameTile: false,
+            Metrics: new Pm4CorrelationMetrics(0f, 0f, 1f, 0.9f, 0.9f, 0.2f, 1f, 0f),
+            BoundsMin: Vector3.Zero,
+            BoundsMax: Vector3.One,
+            Center: Vector3.One);
+
+        int comparison = Pm4CorrelationMath.CompareCandidateScores(strongerScore, weakerScore);
+
+        Assert.True(comparison < 0);
+    }
+
+    [Fact]
+    public void CorrelationMath_SyntheticObjectStates_ComputesBoundsHullAndArea()
+    {
+        Pm4CorrelationObjectDescriptor descriptor = new(
+            Ck24: 0x12345678u,
+            Ck24Type: 0x12,
+            ObjectPartId: 4,
+            LinkGroupObjectId: 9u,
+            SurfaceCount: 6,
+            LinkedPositionRefCount: 2,
+            DominantGroupKey: 3,
+            DominantAttributeMask: 7,
+            DominantMdosIndex: 11u,
+            AverageSurfaceHeight: 5f);
+        Pm4CorrelationObjectInput input = new(
+            TileX: 1,
+            TileY: 2,
+            GroupKey: new Pm4ObjectGroupKey(1, 2, 0x12345678u),
+            Object: descriptor,
+            WorldGeometryPoints:
+            [
+                new Vector3(0f, 0f, 0f),
+                new Vector3(10f, 0f, 0f),
+                new Vector3(10f, 10f, 0f),
+                new Vector3(0f, 10f, 0f),
+                new Vector3(3f, 3f, 5f)
+            ],
+            EmptyGeometryCenter: new Vector3(-1f, -1f, -1f));
+
+        Pm4CorrelationObjectState state = Assert.Single(Pm4CorrelationMath.BuildObjectStates([input]));
+
+        Assert.Equal(new Pm4ObjectGroupKey(1, 2, 0x12345678u), state.GroupKey);
+        Assert.Equal(descriptor, state.Object);
+        Assert.Equal(new Vector3(0f, 0f, 0f), state.BoundsMin);
+        Assert.Equal(new Vector3(10f, 10f, 5f), state.BoundsMax);
+        Assert.Equal(new Vector3(5f, 5f, 2.5f), state.Center);
+        Assert.Equal(100f, state.FootprintArea, 3);
+        Assert.Equal(
+            [
+                new Vector2(0f, 0f),
+                new Vector2(10f, 0f),
+                new Vector2(10f, 10f),
+                new Vector2(0f, 10f)
+            ],
+            state.FootprintHull);
+    }
+
+    [Fact]
+    public void CorrelationMath_SyntheticObjectStates_UsesFallbackCenterForEmptyGeometry()
+    {
+        Pm4CorrelationObjectInput input = new(
+            TileX: 0,
+            TileY: 0,
+            GroupKey: new Pm4ObjectGroupKey(0, 0, 1u),
+            Object: new Pm4CorrelationObjectDescriptor(1u, 0, 0, 0u, 0, 0, 0, 0, 0u, 0f),
+            WorldGeometryPoints: Array.Empty<Vector3>(),
+            EmptyGeometryCenter: new Vector3(9f, 8f, 7f));
+
+        Pm4CorrelationObjectState state = Assert.Single(Pm4CorrelationMath.BuildObjectStates([input]));
+
+        Assert.Equal(new Vector3(9f, 8f, 7f), state.BoundsMin);
+        Assert.Equal(new Vector3(9f, 8f, 7f), state.BoundsMax);
+        Assert.Equal(new Vector3(9f, 8f, 7f), state.Center);
+        Assert.Empty(state.FootprintHull);
+        Assert.Equal(0f, state.FootprintArea, 3);
+    }
+
+    [Fact]
+    public void CorrelationMath_TransformedFootprintHull_AppliesWorldTransform()
+    {
+        Vector3[] sourcePoints =
+        [
+            new(0f, 0f, 0f),
+            new(2f, 0f, 0f),
+            new(2f, 1f, 0f),
+            new(0f, 1f, 0f)
+        ];
+
+        Vector2[] hull = Pm4CorrelationMath.BuildTransformedFootprintHull(
+            sourcePoints,
+            Matrix4x4.CreateTranslation(5f, 7f, 0f));
+
+        Assert.Equal(
+            [
+                new Vector2(5f, 7f),
+                new Vector2(7f, 7f),
+                new Vector2(7f, 8f),
+                new Vector2(5f, 8f)
+            ],
+            hull);
+        Assert.Equal(2f, Pm4CorrelationMath.ComputeFootprintArea(hull), 3);
+    }
+
+    [Fact]
+    public void CorrelationMath_GeometryInputs_BuildObjectStatesWithoutViewerSpecificWorldPointAssembly()
+    {
+        Pm4CorrelationGeometryInput input = new(
+            TileX: 3,
+            TileY: 4,
+            GroupKey: new Pm4ObjectGroupKey(3, 4, 0x55u),
+            Object: new Pm4CorrelationObjectDescriptor(0x55u, 1, 2, 3u, 4, 5, 6, 7, 8u, 9f),
+            Lines:
+            [
+                new Pm4GeometryLineSegment(new Vector3(0f, 0f, 0f), new Vector3(2f, 0f, 0f))
+            ],
+            Triangles:
+            [
+                new Pm4GeometryTriangle(new Vector3(0f, 0f, 0f), new Vector3(0f, 1f, 0f), new Vector3(2f, 1f, 0f))
+            ],
+            GeometryTransform: Matrix4x4.CreateTranslation(10f, 20f, 5f));
+
+        Pm4CorrelationObjectState state = Assert.Single(Pm4CorrelationMath.BuildObjectStatesFromGeometry([input]));
+
+        Assert.Equal(new Vector3(10f, 20f, 5f), state.BoundsMin);
+        Assert.Equal(new Vector3(12f, 21f, 5f), state.BoundsMax);
+        Assert.Equal(new Vector3(11f, 20.5f, 5f), state.Center);
+        Assert.Equal(2f, state.FootprintArea, 3);
+    }
+
+    [Fact]
     public void PlacementMath_SyntheticTileLocal_ConvertsExpectedWorldPositionWithYawCorrection()
     {
         Vector3 correctedWorld = Pm4PlacementMath.ConvertPm4VertexToWorld(
@@ -458,6 +808,51 @@ public sealed class Pm4ResearchIntegrationTests
             Vector2.Distance(new Vector2(correctedWorld.X, correctedWorld.Y), new Vector2(solution.WorldPivot.X, solution.WorldPivot.Y)),
             3);
         Assert.Equal(0f, correctedWorld.Z, 3);
+    }
+
+    [Fact]
+    public void PlacementMath_SyntheticLinkedPositionRefs_SummarizesHeadingAndFloorSignals()
+    {
+        List<Pm4MprlEntry> positionRefs =
+        [
+            new(0, 0, 0, 0, Vector3.Zero, -1, 0),
+            new(0, 0, 16384, 0, Vector3.Zero, 5, 0),
+            new(0, 0, 0, 0, Vector3.Zero, 0, 1)
+        ];
+
+        Pm4LinkedPositionRefSummary summary = Pm4PlacementMath.SummarizeLinkedPositionRefs(positionRefs);
+
+        Assert.Equal(3, summary.TotalCount);
+        Assert.Equal(2, summary.NormalCount);
+        Assert.Equal(1, summary.TerminatorCount);
+        Assert.Equal(-1, summary.FloorMin);
+        Assert.Equal(5, summary.FloorMax);
+        Assert.Equal(0f, summary.HeadingMinDegrees, 3);
+        Assert.Equal(90f, summary.HeadingMaxDegrees, 3);
+        Assert.Equal(45f, summary.HeadingMeanDegrees, 3);
+        Assert.True(summary.HasNormalHeadings);
+    }
+
+    [Fact]
+    public void PlacementMath_SyntheticLinkedPositionRefs_UsesNaNHeadingsWhenOnlyTerminatorsExist()
+    {
+        List<Pm4MprlEntry> positionRefs =
+        [
+            new(0, 0, 0, 0, Vector3.Zero, 7, 1),
+            new(0, 0, 8192, 0, Vector3.Zero, 3, 2)
+        ];
+
+        Pm4LinkedPositionRefSummary summary = Pm4PlacementMath.SummarizeLinkedPositionRefs(positionRefs);
+
+        Assert.Equal(2, summary.TotalCount);
+        Assert.Equal(0, summary.NormalCount);
+        Assert.Equal(2, summary.TerminatorCount);
+        Assert.Equal(0, summary.FloorMin);
+        Assert.Equal(0, summary.FloorMax);
+        Assert.True(float.IsNaN(summary.HeadingMinDegrees));
+        Assert.True(float.IsNaN(summary.HeadingMaxDegrees));
+        Assert.True(float.IsNaN(summary.HeadingMeanDegrees));
+        Assert.False(summary.HasNormalHeadings);
     }
 
     [Fact]

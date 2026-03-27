@@ -18,9 +18,11 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
+using WowViewer.Core.IO.Files;
 using WoWMapConverter.Core.Converters;
-using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.VLM;
+using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
+using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 
 namespace MdxViewer;
 
@@ -83,7 +85,7 @@ public partial class ViewerApp : IDisposable
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
-    private WoWMapConverter.Core.Services.Md5TranslateIndex? _md5Index;
+    private Md5TranslateIndex? _md5Index;
     private MinimapRenderer? _minimapRenderer;
     private WdlPreviewRenderer? _wdlPreviewRenderer;
     private WdlPreviewCacheService? _wdlPreviewCacheService;
@@ -416,8 +418,8 @@ public partial class ViewerApp : IDisposable
 
     // Terrain texture transfer state
     private bool _showTerrainTextureTransferDialog = false;
-    private string _terrainTransferSourceDir = WoWMapConverter.Core.Services.DevelopmentMapAnalyzer.DefaultDevelopmentMapDirectory;
-    private string _terrainTransferTargetDir = WoWMapConverter.Core.Services.DevelopmentMapAnalyzer.DefaultDevelopmentMapDirectory;
+    private string _terrainTransferSourceDir = Pm4CoordinateService.DefaultDevelopmentMapDirectory;
+    private string _terrainTransferTargetDir = Pm4CoordinateService.DefaultDevelopmentMapDirectory;
     private string _terrainTransferOutputDir = Path.Combine("output", "terrain-texture-transfer-ui");
     private bool _terrainTransferApplyMode = false;
     private bool _terrainTransferUseGlobalDelta = false;
@@ -5608,7 +5610,7 @@ void main() {
             var mpqDs = _dataSource as MpqDataSource;
             if (mpqDs != null)
             {
-                _dbcProvider = new MpqDBCProvider(mpqDs.MpqService);
+                _dbcProvider = new MpqDBCProvider(mpqDs.ArchiveReader);
                 var dbcProvider = _dbcProvider;
 
                 InitializeMinimapSupport();
@@ -6039,7 +6041,7 @@ void main() {
             if (string.IsNullOrWhiteSpace(pm4Path))
                 return null;
 
-            var pm4 = Pm4File.FromFile(pm4Path);
+            var pm4 = CorePm4DocumentReader.ReadFile(pm4Path);
             return pm4.Version switch
             {
                 11927 => "4.0.0.11927",
@@ -6161,9 +6163,10 @@ void main() {
 
         if (_dataSource is MpqDataSource mpqDataSource)
         {
-            if (WoWMapConverter.Core.Services.Md5TranslateResolver.TryLoad(
+            if (Md5TranslateResolver.TryLoad(
                 new[] { mpqDataSource.GamePath },
-                mpqDataSource.MpqService,
+                mpqDataSource.ArchiveReader.FileExists,
+                mpqDataSource.ArchiveReader.ReadFile,
                 out var md5Idx))
             {
                 _md5Index = md5Idx;

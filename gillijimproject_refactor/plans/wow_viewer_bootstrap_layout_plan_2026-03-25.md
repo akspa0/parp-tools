@@ -4,8 +4,9 @@ This document turns the repo-shape prompt into a concrete bootstrap layout for t
 
 It assumes the user correction from Mar 25, 2026:
 
-- the active MdxViewer PM4 behavior is the de facto runtime reference implementation
+- `WowViewer.Core.PM4` is the canonical implementation target for new PM4 work
 - Pm4Research should be ported as the future PM4 library family because PM4 semantics remain under active research
+- `MdxViewer` is a legacy or compatibility input when extraction or consumer checks are needed, not the default design authority
 - parp-tools remains the R&D and archaeology repo, not the long-term production home
 
 ## First Output

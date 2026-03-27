@@ -11,14 +11,14 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 - Interactive viewer shell: the current MdxViewer experience should survive as WowViewer.App, including core world browsing, inspection, minimap, spawn/runtime inspection, and selected embedded tool workflows.
 - Headless conversion pipeline: the current terrain, WMO, model, and texture conversion surface should survive as one canonical Tool.Converter executable backed by shared services, not as multiple competing CLIs.
 - Headless inspection and forensics pipeline: WDT, DBC, MDX-L, and selected PM4/WL audit surfaces should survive as one Tool.Inspect executable over shared services.
-- PM4 workspace and library: PM4 deserves first-class survival immediately as a shared library and viewer workspace. The active MdxViewer PM4 behavior is the runtime reference implementation, and Pm4Research should be ported as the evolving PM4 library family because PM4 semantics are still under active research.
+- PM4 workspace and library: PM4 deserves first-class survival immediately as a shared library and viewer workspace. `WowViewer.Core.PM4` should own new PM4 implementation work directly, with `Pm4Research` ported as the evolving PM4 library family because PM4 semantics are still under active research.
 
 ### 2. Biggest duplicated tools that should be merged or killed
 
 - WoWMapConverter.Cli, AlphaLkToAlphaStandalone, and overlapping WoWRollback terrain or WMO commands should collapse into one Tool.Converter surface.
 - AlphaWdtAnalyzer.Cli and AlphaWdtInspector should collapse into one WDT inspection command group in Tool.Inspect.
 - DBCTool should die in favor of DBCTool.V2 behavior only.
-- parpToolbox, PM4Tool, and overlapping older PM4 executables should not survive as separate product identities. The PM4 family should center on the current MdxViewer behavior plus a ported Pm4Research-based library, with other PM4 codebases treated as supporting evidence.
+- parpToolbox, PM4Tool, and overlapping older PM4 executables should not survive as separate product identities. The PM4 family should center on `Core.PM4` seeded from `Pm4Research`, with other PM4 codebases treated as supporting evidence or extraction input.
 - Viewer modal converter dialogs should stop owning distinct conversion logic. They should become thin clients over the same shared services used by Tool.Converter.
 
 ### 3. Old executables that look like archaeology, not production assets
@@ -50,7 +50,7 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 | DBCTool.V2 | Current DBC compare and dump CLI with better config flow | keep as standalone CLI over shared services | tools/inspect/WowViewer.Tool.Inspect with dbc verbs | Core.Runtime DBC schema and build services; Tools.Shared reporting | This is the DBC survivor. Fold its behavior into Tool.Inspect rather than keeping a separate branded app. |
 | BlpResizer | Narrow texture downscale and BLP conversion utility | keep as standalone CLI over shared services | tools/converter/WowViewer.Tool.Converter with texture verbs | Core.IO texture and image services with SereniaBLPLib wrapper | Keep headless support. Also expose thin viewer workflow hooks later if useful, but do not make a dedicated GUI app. |
 | AlphaLkToAlphaStandalone | Focused LK to Alpha terrain conversion CLI | discard as superseded duplication | none; fold into Tool.Converter terrain verbs | Core.IO terrain and placement conversion services | The behavior matters, the executable does not. Merge its proven path into Tool.Converter. |
-| Pm4Research.Core and Pm4Research.Cli | PM4 hypothesis scanning, audit, decoding research, and CLI reports around still-unknown PM4 semantics | keep as standalone CLI over shared services | src/core/WowViewer.Core.PM4 plus tools/inspect/WowViewer.Tool.Inspect pm4 verbs | Core.PM4 decode, linkage, transform, and report services; Tools.Shared reporting | Port this family into wow-viewer as the evolving PM4 library seam, but keep the current MdxViewer PM4 behavior as the runtime reference to preserve what already works. |
+| Pm4Research.Core and Pm4Research.Cli | PM4 hypothesis scanning, audit, decoding research, and CLI reports around still-unknown PM4 semantics | keep as standalone CLI over shared services | src/core/WowViewer.Core.PM4 plus tools/inspect/WowViewer.Tool.Inspect pm4 verbs | Core.PM4 decode, linkage, transform, and report services; Tools.Shared reporting | Port this family into wow-viewer as the evolving PM4 library seam and complete ownership there, using older PM4 implementations only as extraction or comparison input when needed. |
 | MDX-L_Tool | Alpha 0.5.3 MDX archaeology, inspection, and conversion CLI | keep as standalone CLI over shared services | tools/inspect/WowViewer.Tool.Inspect with mdx-l verbs; optional viewer workflow hooks later | Core.IO early-model readers and exporters; Core.Runtime listfile and texture lookup; image services | Preserve as a headless archaeology surface and optionally wire selected commands into the viewer later. |
 | WlAnalyzer | Hardcoded liquid conversion and validation harness | keep as research/reference only in parp-tools | none; move any durable liquid conversion code into Core.IO | Core.IO liquid readers and writers if logic proves reusable | This should not ship as a production executable. Keep the harness as evidence only. |
 | parpToolbox | Large PM4, WMO, correlation, and analysis suite with many overlapping CLIs | keep as research/reference only in parp-tools | none as an app identity; mine validated PM4 correlation or export logic into Core.PM4 or Tool.Inspect | Supporting PM4 correlation, export, and report evidence | Valuable source material, but not a product surface to port as-is. |
@@ -74,7 +74,7 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 | Conversion pipeline | tools/converter/WowViewer.Tool.Converter | WoWMapConverter.Cli, WoWMapConverter.Core, AlphaLkToAlphaStandalone, WoWRollback conversion modules | One canonical headless converter is enough. Viewer dialogs become thin clients over the same services. |
 | Inspection and archaeology pipeline | tools/inspect/WowViewer.Tool.Inspect | AlphaWdtAnalyzer.Cli, DBCTool.V2, MDX-L_Tool, selected WlAnalyzer reports, selected WoWRollback analysis helpers | This is where most legacy diagnostic CLIs should converge. |
 | Asset or minimap catalog work | tools/catalog/WowViewer.Tool.Catalog | Selected MdxViewer asset catalog capture paths, WoWRollback.MinimapModule | This is optional early, but it is the right home if batch catalog or screenshot generation remains important. |
-| PM4 workspace and library | src/core/WowViewer.Core.PM4 plus viewer PM4 workspace, inspect pm4 verbs, and converter pm4-restore verbs | Current MdxViewer PM4 overlay and runtime behavior first, then Pm4Research.Core and Pm4Research.Cli, then selected WoWRollback.PM4Module logic, then supporting evidence from parpToolbox and PM4Tool | The runtime reference is MdxViewer. Pm4Research becomes the new PM4 library family because PM4 semantics remain under active research. |
+| PM4 workspace and library | src/core/WowViewer.Core.PM4 plus viewer PM4 workspace, inspect pm4 verbs, and converter pm4-restore verbs | Pm4Research.Core and Pm4Research.Cli first, then selected WoWRollback.PM4Module logic, then targeted extraction or comparison against MdxViewer, PM4Tool, and parpToolbox as needed | `Core.PM4` is the canonical owner. Older PM4 codebases are reference input, not the continuing source of truth. |
 
 ## Shared-Service Requirements By Tool Family
 
@@ -143,7 +143,7 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 
 - Build WowViewer.Core, WowViewer.Core.IO, WowViewer.Core.PM4, and WowViewer.Tools.Shared skeletons.
 - Port WoWMapConverter.Core first, then merge in the still-useful AlphaLkToAlpha and WoWRollback terrain and WMO conversion seams.
-- Port Pm4Research.Core into Core.PM4 while preserving current MdxViewer PM4 behavior as the runtime reference contract.
+- Port Pm4Research.Core into Core.PM4 and continue re-homing ownership there, using older implementations only as extraction or compatibility input when necessary.
 - Publish one Tool.Converter executable with terrain, WMO, model, texture, pm4-restore, and batch verbs.
 
 ### Wave 2: Viewer Shell And Surviving Panels
@@ -160,7 +160,7 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 
 ## Major Cutover Risks
 
-- PM4 semantic drift: PM4 semantics are still under active research, so the new repo must preserve the current MdxViewer behavior as its runtime reference while allowing Core.PM4 to keep evolving through Pm4Research-backed work. Treating every legacy PM4 executable as equal would freeze disagreement into the new repo.
+- PM4 semantic drift: PM4 semantics are still under active research, so the new repo must converge on `Core.PM4` as the single owned implementation while using older PM4 codebases only as evidence or extraction input. Treating every legacy PM4 executable as equal would freeze disagreement into the new repo.
 - Converter duplication: WoWMapConverter and WoWRollback both own terrain and WMO conversion logic. If both are migrated as-is, wow-viewer will inherit the same ambiguity it is supposed to eliminate.
 - Viewer over-coupling: current MdxViewer dialogs and tool panels often reach directly into app state. If shared services are not extracted first, the new repo will just rename the old coupling.
 - Validation gap: many tools are build-validated or research-validated, but not fully signed off against broad real datasets. The cutover must keep the project memory rule that real-data validation matters more than synthetic or archival tests.
@@ -169,14 +169,14 @@ It refines the repo-shape work in plans/v0_5_0_wow_viewer_bootstrap_and_migratio
 ## Bottom Line
 
 - wow-viewer should ship one interactive app, one converter CLI, one inspect CLI, and optionally one catalog CLI.
-- PM4 should survive immediately as a shared library plus viewer workspace, with MdxViewer as the behavioral reference and Pm4Research as the evolving library seam.
+- PM4 should survive immediately as a shared library plus viewer workspace, with `Core.PM4` as the owned implementation surface and `Pm4Research` as the evolving library seam.
 - Most historical executables should not survive as executables. Their algorithms or evidence should be mined into shared services, then left behind in parp-tools.
 
 ## PM4 Correction
 
-- Current MdxViewer behavior is the de facto PM4 reference implementation for runtime behavior.
+- `WowViewer.Core.PM4` is the canonical PM4 implementation target for new wow-viewer work.
 - Pm4Research should be ported into wow-viewer as the PM4 library family because PM4 semantics are still being discovered.
-- parpToolbox, PM4Tool, and other PM4-heavy tools remain supporting evidence, not primary PM4 truth.
+- MdxViewer, parpToolbox, PM4Tool, and other PM4-heavy tools remain reference or extraction input, not primary PM4 truth.
 
 
 ## Validation Status

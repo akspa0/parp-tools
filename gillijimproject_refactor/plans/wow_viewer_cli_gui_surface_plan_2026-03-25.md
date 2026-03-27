@@ -4,8 +4,8 @@ This document defines how wow-viewer should expose the same capability through b
 
 It also applies the PM4 correction from Mar 25, 2026:
 
-- MdxViewer is the runtime reference implementation for PM4 behavior
-- Core.PM4 should be ported from Pm4Research while staying aligned with current MdxViewer behavior
+- `Core.PM4` is the canonical implementation target for PM4 behavior in wow-viewer
+- `Pm4Research` should be ported into `Core.PM4`, and older PM4 codebases should be used only as extraction or compatibility input when needed
 
 ## First Output
 
@@ -162,7 +162,7 @@ WowViewer.App
 | Terrain conversion | converter dialogs and terrain editing workflows | converter terrain verbs | Same service path, different host UX |
 | WMO and model conversion | converter dialogs and preview workflows | converter wmo and model verbs | Same service path, different host UX |
 | WDT and DBC inspection | preflight or diagnostics views | inspect wdt and dbc verbs | Most heavy reports stay CLI-first |
-| PM4 workspace | dedicated PM4 workspace in the app | inspect pm4 verbs and converter pm4-restore verbs | MdxViewer behavior remains the runtime reference |
+| PM4 workspace | dedicated PM4 workspace in the app | inspect pm4 verbs and converter pm4-restore verbs | `Core.PM4` remains the owned implementation, with app and CLI as hosts over the same service layer |
 | MDX-L archaeology | optional preview or inspector hooks | inspect mdx-l verbs | Better as CLI-first, GUI-selective |
 | Texture and minimap export | preview, catalog, and asset workflows | converter or catalog verbs | Some batch workflows stay headless-only |
 

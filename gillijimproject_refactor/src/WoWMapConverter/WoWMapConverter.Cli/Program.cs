@@ -2,7 +2,6 @@ using SixLabors.ImageSharp;
 using System.Text.Json;
 using SixLabors.ImageSharp.PixelFormats;
 using WoWMapConverter.Core.Converters;
-using WoWMapConverter.Core.Dbc;
 using WoWMapConverter.Core.Formats.PM4;
 using WoWMapConverter.Core.Services;
 using WoWMapConverter.Core.VLM;

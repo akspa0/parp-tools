@@ -9,13 +9,33 @@ using MdxViewer.Population;
 using MdxViewer.Rendering;
 using Pm4Research.Core;
 using Silk.NET.OpenGL;
-using WoWMapConverter.Core.Formats.PM4;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
+using CorePm4CorrelationCandidateScore = WowViewer.Core.PM4.Models.Pm4CorrelationCandidateScore;
+using CorePm4CorrelationMetrics = WowViewer.Core.PM4.Models.Pm4CorrelationMetrics;
+using CorePm4CorrelationObjectDescriptor = WowViewer.Core.PM4.Models.Pm4CorrelationObjectDescriptor;
+using CorePm4CorrelationGeometryInput = WowViewer.Core.PM4.Models.Pm4CorrelationGeometryInput;
+using CorePm4CorrelationObjectInput = WowViewer.Core.PM4.Models.Pm4CorrelationObjectInput;
+using CorePm4CorrelationObjectState = WowViewer.Core.PM4.Models.Pm4CorrelationObjectState;
+using CorePm4CorrelationMath = WowViewer.Core.PM4.Services.Pm4CorrelationMath;
+using CorePm4ConnectorKey = WowViewer.Core.PM4.Models.Pm4ConnectorKey;
+using CorePm4ConnectorMergeCandidate = WowViewer.Core.PM4.Models.Pm4ConnectorMergeCandidate;
 using CorePm4CoordinateMode = WowViewer.Core.PM4.Models.Pm4CoordinateMode;
+using CorePm4GeometryLineSegment = WowViewer.Core.PM4.Models.Pm4GeometryLineSegment;
+using CorePm4GeometryTriangle = WowViewer.Core.PM4.Models.Pm4GeometryTriangle;
+using CorePm4LinkedPositionRefSummary = WowViewer.Core.PM4.Models.Pm4LinkedPositionRefSummary;
 using CorePm4MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
+using CorePm4MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using CorePm4MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
+using CorePm4ObjectGroupKey = WowViewer.Core.PM4.Models.Pm4ObjectGroupKey;
 using CorePm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
+using CorePm4PlacementSolution = WowViewer.Core.PM4.Models.Pm4PlacementSolution;
 using CorePm4PlacementMath = WowViewer.Core.PM4.Services.Pm4PlacementMath;
+using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
+using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
+using MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
+using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
+using MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
+using Pm4File = WowViewer.Core.PM4.Research.Pm4ResearchDocument;
 
 namespace MdxViewer.Terrain;
 
@@ -452,29 +472,6 @@ public readonly struct Pm4SelectedObjectGraphInfo
 
 internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
 
-internal readonly struct Pm4MergeCandidateGroup
-{
-    public Pm4MergeCandidateGroup(
-        (int tileX, int tileY, uint ck24) key,
-        Vector3 boundsMin,
-        Vector3 boundsMax,
-        Vector3 center,
-        HashSet<Pm4ConnectorKey> connectorKeys)
-    {
-        Key = key;
-        BoundsMin = boundsMin;
-        BoundsMax = boundsMax;
-        Center = center;
-        ConnectorKeys = connectorKeys;
-    }
-
-    public (int tileX, int tileY, uint ck24) Key { get; }
-    public Vector3 BoundsMin { get; }
-    public Vector3 BoundsMax { get; }
-    public Vector3 Center { get; }
-    public HashSet<Pm4ConnectorKey> ConnectorKeys { get; }
-}
-
 /// <summary>
 /// Combines terrain (WDT/ADT), WMO placements (MODF), and MDX placements (MDDF)
 /// into a single world scene — the same way the game client renders a map.
@@ -488,12 +485,7 @@ public class WorldScene : ISceneRenderer
 
     private static float DecodeRawMprlPackedAngleRadians(MprlEntry positionRef)
     {
-        return (positionRef.RotationOrFlags & 0xFFFF) * (2f * MathF.PI / 65536f);
-    }
-
-    private static float DecodeRawMprlPackedAngleDegrees(MprlEntry positionRef)
-    {
-        return DecodeRawMprlPackedAngleRadians(positionRef) * (180f / MathF.PI);
+        return positionRef.Unk04 * (2f * MathF.PI / 65536f);
     }
 
     private readonly GL _gl;
@@ -549,10 +541,6 @@ public class WorldScene : ISceneRenderer
     private const int Pm4MaxPositionRefsTotal = int.MaxValue;
     private const int Pm4MaxPositionRefsPerTile = int.MaxValue;
     private const float Pm4MaxEdgeLength = 512f;
-    private const float Pm4ConnectorQuantizationUnits = 2f;
-    private const float Pm4ConnectorMergeBoundsPadding = 32f;
-    private const float Pm4ConnectorMergeMaxCenterDistance = 256f;
-    private const float Pm4ConnectorMergeCloseCenterDistance = 128f;
     private const int Pm4MinCameraTileRadius = 1;
     private const int Pm4MaxCameraTileRadius = 2;
     private const double Pm4ExpandWindowThresholdMs = 120.0;
@@ -1048,7 +1036,7 @@ public class WorldScene : ISceneRenderer
 
             try
             {
-                var pm4 = new Pm4File(bytes);
+                Pm4File pm4 = CorePm4DocumentReader.Read(bytes, pm4Path);
                 int remainingLineBudget = int.MaxValue;
                 int remainingTriangleBudget = int.MaxValue;
                 int rejectedLongEdges = 0;
@@ -1088,12 +1076,12 @@ public class WorldScene : ISceneRenderer
                     effectiveTileY,
                     exported = true,
                     version = pm4.Version,
-                    meshVertexCount = pm4.MeshVertices.Count,
-                    meshIndexCount = pm4.MeshIndices.Count,
-                    surfaceCount = pm4.Surfaces.Count,
-                    ck24SurfaceCount = pm4.Surfaces.Count(surface => surface.Ck24 != 0),
-                    linkCount = pm4.LinkEntries.Count,
-                    positionRefCount = pm4.PositionRefs.Count,
+                    meshVertexCount = pm4.KnownChunks.Msvt.Count,
+                    meshIndexCount = pm4.KnownChunks.Msvi.Count,
+                    surfaceCount = pm4.KnownChunks.Msur.Count,
+                    ck24SurfaceCount = pm4.KnownChunks.Msur.Count(surface => surface.Ck24 != 0),
+                    linkCount = pm4.KnownChunks.Mslk.Count,
+                    positionRefCount = pm4.KnownChunks.Mprl.Count,
                     exportedObjectCount = objects.Count,
                     exportedLineCount = objects.Sum(static obj => obj.Lines.Count),
                     exportedTriangleCount = objects.Sum(static obj => obj.Triangles.Count),
@@ -1203,7 +1191,7 @@ public class WorldScene : ISceneRenderer
             RebuildInstanceLists();
 
         int resolvedMaxMatches = Math.Max(1, maxMatchesPerPlacement);
-        List<Pm4CorrelationObjectState> pm4Objects = BuildPm4CorrelationObjectStates();
+        List<CorePm4CorrelationObjectState> pm4Objects = BuildPm4CorrelationObjectStates();
         int mergedPm4ObjectCount = pm4Objects.Select(static candidate => candidate.GroupKey).Distinct().Count();
         Dictionary<int, ModfPlacement> modfByUniqueId = _terrainManager.Adapter.ModfPlacements
             .GroupBy(static placement => placement.UniqueId)
@@ -1234,8 +1222,8 @@ public class WorldScene : ISceneRenderer
                     if (hasMeshSummary)
                     {
                         TransformBounds(meshSummary.BoundsMin, meshSummary.BoundsMax, instance.Transform, out worldBoundsMin, out worldBoundsMax);
-                        wmoFootprintHull = BuildTransformedFootprintHull(meshSummary.FootprintSampleVertices, instance.Transform);
-                        wmoFootprintArea = ComputePolygonArea(wmoFootprintHull);
+                        wmoFootprintHull = CorePm4CorrelationMath.BuildTransformedFootprintHull(meshSummary.FootprintSampleVertices, instance.Transform);
+                        wmoFootprintArea = CorePm4CorrelationMath.ComputeFootprintArea(wmoFootprintHull);
                     }
 
                     bool hasRawPlacement = modfByUniqueId.TryGetValue(instance.UniqueId, out ModfPlacement rawPlacement);
@@ -1245,56 +1233,43 @@ public class WorldScene : ISceneRenderer
                             && Math.Abs(candidate.TileY - tileEntry.Key.Item2) <= 1)
                         .Select(candidate =>
                         {
-                            float planarGap = ComputePlanarAabbGap(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
-                            float verticalGap = ComputeAxisGap(worldBoundsMin.Z, worldBoundsMax.Z, candidate.BoundsMin.Z, candidate.BoundsMax.Z);
-                            float centerDistance = Vector3.Distance(instance.PlacementPosition, candidate.Center);
-                            float planarOverlapRatio = ComputePlanarOverlapRatio(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
-                            float volumeOverlapRatio = ComputeAabbOverlapRatio(worldBoundsMin, worldBoundsMax, candidate.BoundsMin, candidate.BoundsMax);
-                            float footprintOverlapRatio = ComputeConvexFootprintOverlapRatio(wmoFootprintHull, candidate.FootprintHull, wmoFootprintArea, candidate.FootprintArea);
-                            float footprintAreaRatio = ComputeFootprintAreaRatio(wmoFootprintArea, candidate.FootprintArea);
-                            float footprintDistance = ComputeSymmetricFootprintDistance(wmoFootprintHull, candidate.FootprintHull);
+                            CorePm4CorrelationMetrics metrics = CorePm4CorrelationMath.EvaluateMetrics(
+                                worldBoundsMin,
+                                worldBoundsMax,
+                                instance.PlacementPosition,
+                                wmoFootprintHull,
+                                wmoFootprintArea,
+                                candidate.BoundsMin,
+                                candidate.BoundsMax,
+                                candidate.Center,
+                                candidate.FootprintHull,
+                                candidate.FootprintArea);
+
+                            bool sameTile = candidate.TileX == tileEntry.Key.Item1 && candidate.TileY == tileEntry.Key.Item2;
+                            CorePm4CorrelationCandidateScore score = new(
+                                sameTile,
+                                metrics,
+                                candidate.BoundsMin,
+                                candidate.BoundsMax,
+                                candidate.Center);
 
                             return new
                             {
                                 candidate,
-                                planarGap,
-                                verticalGap,
-                                centerDistance,
-                                planarOverlapRatio,
-                                volumeOverlapRatio,
-                                footprintOverlapRatio,
-                                footprintAreaRatio,
-                                footprintDistance,
-                                sameTile = candidate.TileX == tileEntry.Key.Item1 && candidate.TileY == tileEntry.Key.Item2,
+                                score,
                             };
                         })
                         .GroupBy(static candidate => candidate.candidate.GroupKey)
                         .Select(group => group
-                            .OrderByDescending(static candidate => candidate.sameTile)
-                            .ThenByDescending(static candidate => candidate.footprintOverlapRatio)
-                            .ThenByDescending(static candidate => candidate.planarOverlapRatio)
-                            .ThenByDescending(static candidate => candidate.footprintAreaRatio)
-                            .ThenByDescending(static candidate => candidate.volumeOverlapRatio)
-                            .ThenBy(static candidate => candidate.footprintDistance)
-                            .ThenBy(static candidate => candidate.planarGap)
-                            .ThenBy(static candidate => candidate.verticalGap)
-                            .ThenBy(static candidate => candidate.centerDistance)
+                            .OrderBy(static candidate => candidate.score, Comparer<CorePm4CorrelationCandidateScore>.Create(CorePm4CorrelationMath.CompareCandidateScores))
                             .First())
-                        .OrderByDescending(static candidate => candidate.sameTile)
-                        .ThenByDescending(static candidate => candidate.footprintOverlapRatio)
-                        .ThenByDescending(static candidate => candidate.planarOverlapRatio)
-                        .ThenByDescending(static candidate => candidate.footprintAreaRatio)
-                        .ThenByDescending(static candidate => candidate.volumeOverlapRatio)
-                        .ThenBy(static candidate => candidate.footprintDistance)
-                        .ThenBy(static candidate => candidate.planarGap)
-                        .ThenBy(static candidate => candidate.verticalGap)
-                        .ThenBy(static candidate => candidate.centerDistance)
+                        .OrderBy(static candidate => candidate.score, Comparer<CorePm4CorrelationCandidateScore>.Create(CorePm4CorrelationMath.CompareCandidateScores))
                         .ToList();
 
                     if (candidateMetrics.Count > 0)
                         placementsWithCandidates++;
 
-                    int nearCandidateCount = candidateMetrics.Count(candidate => candidate.planarGap <= 32f && candidate.verticalGap <= 64f);
+                    int nearCandidateCount = candidateMetrics.Count(candidate => candidate.score.Metrics.PlanarGap <= 32f && candidate.score.Metrics.VerticalGap <= 64f);
                     if (nearCandidateCount > 0)
                         placementsWithNearCandidates++;
 
@@ -1348,15 +1323,15 @@ public class WorldScene : ISceneRenderer
                             candidate.candidate.Object.DominantAttributeMask,
                             candidate.candidate.Object.DominantMdosIndex,
                             candidate.candidate.Object.AverageSurfaceHeight,
-                            candidate.sameTile,
-                            candidate.planarGap,
-                            candidate.verticalGap,
-                            candidate.centerDistance,
-                            candidate.planarOverlapRatio,
-                            candidate.volumeOverlapRatio,
-                            candidate.footprintOverlapRatio,
-                            candidate.footprintAreaRatio,
-                            candidate.footprintDistance,
+                            candidate.score.SameTile,
+                            candidate.score.Metrics.PlanarGap,
+                            candidate.score.Metrics.VerticalGap,
+                            candidate.score.Metrics.CenterDistance,
+                            candidate.score.Metrics.PlanarOverlapRatio,
+                            candidate.score.Metrics.VolumeOverlapRatio,
+                            candidate.score.Metrics.FootprintOverlapRatio,
+                            candidate.score.Metrics.FootprintAreaRatio,
+                            candidate.score.Metrics.FootprintDistance,
                             candidate.candidate.BoundsMin,
                             candidate.candidate.BoundsMax,
                             candidate.candidate.Center))
@@ -1893,7 +1868,7 @@ public class WorldScene : ISceneRenderer
 
                 try
                 {
-                    var pm4 = new Pm4File(bytes);
+                    Pm4File pm4 = CorePm4DocumentReader.Read(bytes, pm4Path);
                     int rejectedLongEdges = 0;
                     List<Pm4OverlayObject> objects = BuildPm4TileObjects(
                         pm4,
@@ -1909,7 +1884,7 @@ public class WorldScene : ISceneRenderer
                     {
                         zeroObjectFiles++;
                         ViewerLog.Debug(ViewerLog.Category.Terrain,
-                            $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.Surfaces.Count}, meshVerts={pm4.MeshVertices.Count}, meshIndices={pm4.MeshIndices.Count}, links={pm4.LinkEntries.Count}, refs={pm4.PositionRefs.Count}) but produced 0 overlay objects.");
+                            $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.KnownChunks.Msur.Count}, meshVerts={pm4.KnownChunks.Msvt.Count}, meshIndices={pm4.KnownChunks.Msvi.Count}, links={pm4.KnownChunks.Mslk.Count}, refs={pm4.KnownChunks.Mprl.Count}) but produced 0 overlay objects.");
                         continue;
                     }
 
@@ -2511,7 +2486,7 @@ public class WorldScene : ISceneRenderer
 
     private static List<Pm4OverlaySeedGroup> BuildPm4OverlaySeedGroups(Pm4File pm4)
     {
-        List<Pm4IndexedSurface> indexedSurfaces = pm4.Surfaces
+        List<Pm4IndexedSurface> indexedSurfaces = pm4.KnownChunks.Msur
             .Select((surface, surfaceIndex) => new Pm4IndexedSurface(surfaceIndex, surface))
             .Where(static indexedSurface => indexedSurface.Surface.IndexCount >= 3)
             .ToList();
@@ -2557,7 +2532,10 @@ public class WorldScene : ISceneRenderer
         ref int rejectedLongEdges)
     {
         var objects = new List<Pm4OverlayObject>();
-        if (remainingLineBudget <= 0 || pm4.MeshVertices.Count == 0)
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<MprlEntry> positionRefs = pm4.KnownChunks.Mprl;
+
+        if (remainingLineBudget <= 0 || meshVertices.Count == 0)
             return objects;
 
         List<Pm4OverlaySeedGroup> seedGroups = BuildPm4OverlaySeedGroups(pm4);
@@ -2565,7 +2543,7 @@ public class WorldScene : ISceneRenderer
             return objects;
 
         Pm4AxisConvention fileAxisConvention = DetectPm4AxisConvention(pm4);
-        bool fallbackTileLocalCoordinates = IsLikelyTileLocal(pm4.MeshVertices);
+        bool fallbackTileLocalCoordinates = IsLikelyTileLocal(meshVertices);
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
@@ -2583,7 +2561,7 @@ public class WorldScene : ISceneRenderer
             List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
             IReadOnlyList<MprlEntry> ck24ScoringRefs = ck24PositionRefs.Count > 0
                 ? ck24PositionRefs
-                : pm4.PositionRefs;
+                : positionRefs;
             bool useTileLocalCoordinates = ResolveCk24CoordinateMode(
                 pm4,
                 ck24Surfaces,
@@ -2593,31 +2571,19 @@ public class WorldScene : ISceneRenderer
                 ck24AxisConvention,
                 fallbackTileLocalCoordinates);
             // Keep one shared planar transform per CK24 so split linked/components stay on one coordinate plane.
-            Pm4PlanarTransform ck24PlanarTransform = ResolvePlanarTransform(pm4, ck24Surfaces, ck24PositionRefs, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention);
-            Vector3 ck24WorldPivot = ComputeSurfaceWorldCentroid(pm4, ck24Surfaces, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform);
-            float ck24WorldYawCorrection = TryComputeWorldYawCorrectionRadians(
+            CorePm4PlacementSolution ck24Placement = ResolvePlacementSolution(
                 pm4,
                 ck24Surfaces,
-                ck24ScoringRefs,
+                ck24PositionRefs,
                 tileX,
                 tileY,
                 useTileLocalCoordinates,
-                ck24AxisConvention,
-                ck24PlanarTransform,
-                out float resolvedYawCorrection)
-                ? resolvedYawCorrection
-                : 0f;
+                ck24AxisConvention);
+            Pm4PlanarTransform ck24PlanarTransform = FromCorePlanarTransform(ck24Placement.PlanarTransform);
+            Vector3 ck24WorldPivot = ck24Placement.WorldPivot;
+            float ck24WorldYawCorrection = ck24Placement.WorldYawCorrectionRadians;
             float ck24RendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(ck24WorldYawCorrection);
-            IReadOnlyList<Pm4ConnectorKey> ck24ConnectorKeys = BuildCk24ConnectorKeys(
-                pm4,
-                ck24Surfaces,
-                tileX,
-                tileY,
-                useTileLocalCoordinates,
-                ck24AxisConvention,
-                ck24PlanarTransform,
-                ck24WorldPivot,
-                ck24WorldYawCorrection);
+            IReadOnlyList<Pm4ConnectorKey> ck24ConnectorKeys = BuildCk24ConnectorKeys(pm4, ck24Surfaces, ck24Placement);
             List<List<Pm4IndexedSurface>> linkedGroups = seedGroup.RequiresConnectivitySeedSplit
                 ? SplitIndexedSurfaceGroupByConnectivity(pm4, surfaceGroup)
                 : SplitSurfaceGroupByMslk(pm4, surfaceGroup);
@@ -2718,10 +2684,10 @@ public class WorldScene : ISceneRenderer
         bool fallbackTileLocalCoordinates)
     {
         CorePm4CoordinateMode resolvedMode = CorePm4PlacementMath.ResolveCoordinateMode(
-            pm4.MeshVertices,
-            pm4.MeshIndices,
+            pm4.KnownChunks.Msvt,
+            pm4.KnownChunks.Msvi,
             ConvertToCorePm4Surfaces(surfaces),
-            ConvertToCorePm4PositionRefs(pm4.PositionRefs),
+            ConvertToCorePm4PositionRefs(pm4.KnownChunks.Mprl),
             anchorPositionRefs.Count > 0 ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
             tileX,
             tileY,
@@ -2737,7 +2703,10 @@ public class WorldScene : ISceneRenderer
         if (surfaces.Count == 0)
             return groups;
 
-        if (surfaces.Count == 1 || pm4.LinkEntries.Count == 0)
+        IReadOnlyList<CorePm4MslkEntry> linkEntries = pm4.KnownChunks.Mslk;
+        int surfaceCount = pm4.KnownChunks.Msur.Count;
+
+        if (surfaces.Count == 1 || linkEntries.Count == 0)
         {
             groups.Add(surfaces.ToList());
             return groups;
@@ -2748,25 +2717,13 @@ public class WorldScene : ISceneRenderer
             surfaceIndexToLocal[surfaces[i].SurfaceIndex] = i;
 
         var groupToMembers = new Dictionary<uint, HashSet<int>>();
-        int surfaceCount = pm4.Surfaces.Count;
-        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        for (int i = 0; i < linkEntries.Count; i++)
         {
-            MslkEntry link = pm4.LinkEntries[i];
+            CorePm4MslkEntry link = linkEntries[i];
             if (link.GroupObjectId == 0)
                 continue;
 
-            int localMsurIndex = -1;
-            if (link.MsurIndex < (uint)surfaceCount && surfaceIndexToLocal.TryGetValue((int)link.MsurIndex, out int msurLocal))
-                localMsurIndex = msurLocal;
-
-            int localRefIndex = -1;
-            if (link.RefIndex < surfaceCount && surfaceIndexToLocal.TryGetValue(link.RefIndex, out int refLocal))
-                localRefIndex = refLocal;
-
-            if (localMsurIndex >= 0)
-                localRefIndex = -1;
-
-            if (localRefIndex < 0 && localMsurIndex < 0)
+            if (link.RefIndex >= surfaceCount || !surfaceIndexToLocal.TryGetValue(link.RefIndex, out int localRefIndex))
                 continue;
 
             if (!groupToMembers.TryGetValue(link.GroupObjectId, out HashSet<int>? members))
@@ -2775,10 +2732,7 @@ public class WorldScene : ISceneRenderer
                 groupToMembers[link.GroupObjectId] = members;
             }
 
-            if (localRefIndex >= 0)
-                members.Add(localRefIndex);
-            if (localMsurIndex >= 0)
-                members.Add(localMsurIndex);
+            members.Add(localRefIndex);
         }
 
         if (groupToMembers.Count == 0)
@@ -2871,6 +2825,8 @@ public class WorldScene : ISceneRenderer
 
     private static List<List<Pm4IndexedSurface>> SplitIndexedSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var components = new List<List<Pm4IndexedSurface>>();
         if (surfaces.Count == 0)
             return components;
@@ -2887,7 +2843,7 @@ public class WorldScene : ISceneRenderer
         {
             MsurEntry surface = surfaces[s].Surface;
             int firstIndex = (int)surface.MsviFirstIndex;
-            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             var vertices = new List<int>();
             var unique = new HashSet<int>();
 
@@ -2895,8 +2851,8 @@ public class WorldScene : ISceneRenderer
             {
                 for (int idx = firstIndex; idx < endExclusive; idx++)
                 {
-                    int vertexIndex = (int)pm4.MeshIndices[idx];
-                    if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                    int vertexIndex = (int)meshIndices[idx];
+                    if ((uint)vertexIndex >= (uint)meshVertices.Count)
                         continue;
                     if (!unique.Add(vertexIndex))
                         continue;
@@ -2958,18 +2914,19 @@ public class WorldScene : ISceneRenderer
 
     private static uint SelectDominantMslkGroupObjectId(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
     {
-        if (surfaces.Count == 0 || pm4.LinkEntries.Count == 0)
+        IReadOnlyList<CorePm4MslkEntry> linkEntries = pm4.KnownChunks.Mslk;
+        if (surfaces.Count == 0 || linkEntries.Count == 0)
             return 0;
 
-        int surfaceCount = pm4.Surfaces.Count;
+        int surfaceCount = pm4.KnownChunks.Msur.Count;
         var surfaceIndices = new HashSet<int>(surfaces.Select(static surface => surface.SurfaceIndex));
         var counts = new Dictionary<uint, int>();
 
         uint bestGroupObjectId = 0;
         int bestCount = 0;
-        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        for (int i = 0; i < linkEntries.Count; i++)
         {
-            MslkEntry link = pm4.LinkEntries[i];
+            CorePm4MslkEntry link = linkEntries[i];
             if (link.GroupObjectId == 0)
                 continue;
 
@@ -2994,17 +2951,19 @@ public class WorldScene : ISceneRenderer
     private static List<MprlEntry> CollectLinkedPositionRefs(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
     {
         var refs = new List<MprlEntry>();
-        if (surfaces.Count == 0 || pm4.LinkEntries.Count == 0 || pm4.PositionRefs.Count == 0)
+        IReadOnlyList<CorePm4MslkEntry> linkEntries = pm4.KnownChunks.Mslk;
+        IReadOnlyList<MprlEntry> positionRefs = pm4.KnownChunks.Mprl;
+        if (surfaces.Count == 0 || linkEntries.Count == 0 || positionRefs.Count == 0)
             return refs;
 
-        int surfaceCount = pm4.Surfaces.Count;
+        int surfaceCount = pm4.KnownChunks.Msur.Count;
         var surfaceIndices = new HashSet<int>(surfaces.Select(static surface => surface.SurfaceIndex));
         var seenRefIndices = new HashSet<int>();
 
-        for (int i = 0; i < pm4.LinkEntries.Count; i++)
+        for (int i = 0; i < linkEntries.Count; i++)
         {
-            MslkEntry link = pm4.LinkEntries[i];
-            if ((uint)link.RefIndex >= (uint)pm4.PositionRefs.Count)
+            CorePm4MslkEntry link = linkEntries[i];
+            if ((uint)link.RefIndex >= (uint)positionRefs.Count)
                 continue;
 
             if (!LinkReferencesSurface(link, surfaceIndices, surfaceCount))
@@ -3013,7 +2972,7 @@ public class WorldScene : ISceneRenderer
             if (!seenRefIndices.Add(link.RefIndex))
                 continue;
 
-            refs.Add(pm4.PositionRefs[link.RefIndex]);
+            refs.Add(positionRefs[link.RefIndex]);
         }
 
         return refs;
@@ -3021,10 +2980,7 @@ public class WorldScene : ISceneRenderer
 
     private static bool LinkReferencesSurface(MslkEntry link, HashSet<int> surfaceIndices, int surfaceCount)
     {
-        if (link.MsurIndex < (uint)surfaceCount && surfaceIndices.Contains((int)link.MsurIndex))
-            return true;
-
-        // Fallback for variants where RefIndex stores the local surface id.
+        // The current shared PM4 reader exposes surface linkage through RefIndex.
         if (link.RefIndex < surfaceCount && surfaceIndices.Contains(link.RefIndex))
             return true;
 
@@ -3033,56 +2989,8 @@ public class WorldScene : ISceneRenderer
 
     private static Pm4LinkedPositionRefSummary SummarizeLinkedPositionRefs(IReadOnlyList<MprlEntry> positionRefs)
     {
-        if (positionRefs.Count == 0)
-            return new Pm4LinkedPositionRefSummary(0, 0, 0, 0, 0, float.NaN, float.NaN, float.NaN);
-
-        int normalCount = 0;
-        int terminatorCount = 0;
-        int floorMin = int.MaxValue;
-        int floorMax = int.MinValue;
-        float headingMinDegrees = float.PositiveInfinity;
-        float headingMaxDegrees = float.NegativeInfinity;
-        double sumSin = 0d;
-        double sumCos = 0d;
-
-        for (int i = 0; i < positionRefs.Count; i++)
-        {
-            MprlEntry positionRef = positionRefs[i];
-            if (positionRef.Unk16 != 0)
-            {
-                terminatorCount++;
-                continue;
-            }
-
-            normalCount++;
-            floorMin = Math.Min(floorMin, positionRef.Unk14);
-            floorMax = Math.Max(floorMax, positionRef.Unk14);
-
-            float headingDegrees = DecodeRawMprlPackedAngleDegrees(positionRef);
-            headingMinDegrees = Math.Min(headingMinDegrees, headingDegrees);
-            headingMaxDegrees = Math.Max(headingMaxDegrees, headingDegrees);
-
-            float headingRadians = headingDegrees * (MathF.PI / 180f);
-            sumSin += Math.Sin(headingRadians);
-            sumCos += Math.Cos(headingRadians);
-        }
-
-        if (normalCount == 0)
-            return new Pm4LinkedPositionRefSummary(positionRefs.Count, 0, terminatorCount, 0, 0, float.NaN, float.NaN, float.NaN);
-
-        float headingMeanDegrees = (float)(Math.Atan2(sumSin, sumCos) * (180d / Math.PI));
-        if (headingMeanDegrees < 0f)
-            headingMeanDegrees += 360f;
-
-        return new Pm4LinkedPositionRefSummary(
-            positionRefs.Count,
-            normalCount,
-            terminatorCount,
-            floorMin,
-            floorMax,
-            headingMinDegrees,
-            headingMaxDegrees,
-            headingMeanDegrees);
+        return FromCorePm4LinkedPositionRefSummary(
+            CorePm4PlacementMath.SummarizeLinkedPositionRefs(ConvertToCorePm4PositionRefs(positionRefs)));
     }
 
     private static bool TryComputeExpectedMprlYawRadians(IReadOnlyList<MprlEntry> positionRefs, out float yawRadians)
@@ -3238,50 +3146,6 @@ public class WorldScene : ISceneRenderer
         return bestDelta;
     }
 
-    private static bool TryComputeWorldYawCorrectionRadians(
-        Pm4File pm4,
-        IReadOnlyList<MsurEntry> surfaces,
-        IReadOnlyList<MprlEntry> scoringRefs,
-        int tileX,
-        int tileY,
-        bool useTileLocalCoordinates,
-        Pm4AxisConvention axisConvention,
-        Pm4PlanarTransform planarTransform,
-        out float yawCorrectionRadians)
-    {
-        return CorePm4PlacementMath.TryComputeWorldYawCorrectionRadians(
-            pm4.MeshVertices,
-            pm4.MeshIndices,
-            ConvertToCorePm4Surfaces(surfaces),
-            ConvertToCorePm4PositionRefs(scoringRefs),
-            tileX,
-            tileY,
-            ToCoreCoordinateMode(useTileLocalCoordinates),
-            ToCoreAxisConvention(axisConvention),
-            ToCorePlanarTransform(planarTransform),
-            out yawCorrectionRadians);
-    }
-
-    private static Vector3 ComputeSurfaceWorldCentroid(
-        Pm4File pm4,
-        IReadOnlyList<MsurEntry> surfaces,
-        int tileX,
-        int tileY,
-        bool useTileLocalCoordinates,
-        Pm4AxisConvention axisConvention,
-        Pm4PlanarTransform planarTransform)
-    {
-        return CorePm4PlacementMath.ComputeSurfaceWorldCentroid(
-            pm4.MeshVertices,
-            pm4.MeshIndices,
-            ConvertToCorePm4Surfaces(surfaces),
-            tileX,
-            tileY,
-            ToCoreCoordinateMode(useTileLocalCoordinates),
-            ToCoreAxisConvention(axisConvention),
-            ToCorePlanarTransform(planarTransform));
-    }
-
     private static Vector3 ComputeSurfaceRendererCentroid(
         Pm4File pm4,
         IReadOnlyList<MsurEntry> surfaces,
@@ -3337,6 +3201,8 @@ public class WorldScene : ISceneRenderer
         int lineBudget,
         ref int rejectedLongEdges)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var lines = new List<Pm4LineSegment>();
         var uniqueEdges = new HashSet<ulong>();
 
@@ -3348,21 +3214,21 @@ public class WorldScene : ISceneRenderer
 
             int firstIndex = (int)surface.MsviFirstIndex;
             int surfaceIndexCount = surface.IndexCount;
-            if (surfaceIndexCount < 2 || firstIndex < 0 || firstIndex >= pm4.MeshIndices.Count)
+            if (surfaceIndexCount < 2 || firstIndex < 0 || firstIndex >= meshIndices.Count)
                 continue;
 
-            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, meshIndices.Count);
             if (endExclusive - firstIndex < 2)
                 continue;
 
-            int prevVertex = (int)pm4.MeshIndices[firstIndex];
-            if ((uint)prevVertex >= (uint)pm4.MeshVertices.Count)
+            int prevVertex = (int)meshIndices[firstIndex];
+            if ((uint)prevVertex >= (uint)meshVertices.Count)
                 continue;
 
             for (int idx = firstIndex + 1; idx < endExclusive && lines.Count < lineBudget; idx++)
             {
-                int nextVertex = (int)pm4.MeshIndices[idx];
-                if ((uint)nextVertex >= (uint)pm4.MeshVertices.Count)
+                int nextVertex = (int)meshIndices[idx];
+                if ((uint)nextVertex >= (uint)meshVertices.Count)
                     continue;
 
                 AddUniqueEdge(pm4, prevVertex, nextVertex, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges, worldPivot, worldYawCorrectionRadians);
@@ -3372,9 +3238,9 @@ public class WorldScene : ISceneRenderer
             // Close each surface loop so CK24 objects stay visually self-contained.
             if (lines.Count < lineBudget)
             {
-                int firstVertex = (int)pm4.MeshIndices[firstIndex];
-                int lastVertex = (int)pm4.MeshIndices[endExclusive - 1];
-                if ((uint)firstVertex < (uint)pm4.MeshVertices.Count && (uint)lastVertex < (uint)pm4.MeshVertices.Count)
+                int firstVertex = (int)meshIndices[firstIndex];
+                int lastVertex = (int)meshIndices[endExclusive - 1];
+                if ((uint)firstVertex < (uint)meshVertices.Count && (uint)lastVertex < (uint)meshVertices.Count)
                     AddUniqueEdge(pm4, lastVertex, firstVertex, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges, worldPivot, worldYawCorrectionRadians);
             }
         }
@@ -3394,6 +3260,8 @@ public class WorldScene : ISceneRenderer
         float worldYawCorrectionRadians,
         int triangleBudget)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var triangles = new List<Pm4Triangle>();
 
         for (int s = 0; s < surfaces.Count; s++)
@@ -3404,29 +3272,29 @@ public class WorldScene : ISceneRenderer
 
             int firstIndex = (int)surface.MsviFirstIndex;
             int surfaceIndexCount = surface.IndexCount;
-            if (surfaceIndexCount < 3 || firstIndex < 0 || firstIndex >= pm4.MeshIndices.Count)
+            if (surfaceIndexCount < 3 || firstIndex < 0 || firstIndex >= meshIndices.Count)
                 continue;
 
-            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surfaceIndexCount, meshIndices.Count);
             int indexCount = endExclusive - firstIndex;
             if (indexCount < 3)
                 continue;
 
             // Most PM4 surfaces are listed as loops; use a fan from the first vertex.
-            int i0 = (int)pm4.MeshIndices[firstIndex];
-            if ((uint)i0 >= (uint)pm4.MeshVertices.Count)
+            int i0 = (int)meshIndices[firstIndex];
+            if ((uint)i0 >= (uint)meshVertices.Count)
                 continue;
 
-            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
+            Vector3 v0 = ConvertPm4VertexToRenderer(meshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
             for (int idx = firstIndex + 1; idx + 1 < endExclusive && triangles.Count < triangleBudget; idx++)
             {
-                int i1 = (int)pm4.MeshIndices[idx];
-                int i2 = (int)pm4.MeshIndices[idx + 1];
-                if ((uint)i1 >= (uint)pm4.MeshVertices.Count || (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                int i1 = (int)meshIndices[idx];
+                int i2 = (int)meshIndices[idx + 1];
+                if ((uint)i1 >= (uint)meshVertices.Count || (uint)i2 >= (uint)meshVertices.Count)
                     continue;
 
-                Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
-                Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
+                Vector3 v1 = ConvertPm4VertexToRenderer(meshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
+                Vector3 v2 = ConvertPm4VertexToRenderer(meshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
                 triangles.Add(planarTransform.InvertsWinding
                     ? new Pm4Triangle(v0, v2, v1)
                     : new Pm4Triangle(v0, v1, v2));
@@ -3446,18 +3314,20 @@ public class WorldScene : ISceneRenderer
         int lineBudget,
         ref int rejectedLongEdges)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var lines = new List<Pm4LineSegment>();
         var uniqueEdges = new HashSet<ulong>();
 
-        for (int i = 0; i + 2 < pm4.MeshIndices.Count && lines.Count < lineBudget; i += 3)
+        for (int i = 0; i + 2 < meshIndices.Count && lines.Count < lineBudget; i += 3)
         {
-            int i0 = (int)pm4.MeshIndices[i];
-            int i1 = (int)pm4.MeshIndices[i + 1];
-            int i2 = (int)pm4.MeshIndices[i + 2];
+            int i0 = (int)meshIndices[i];
+            int i1 = (int)meshIndices[i + 1];
+            int i2 = (int)meshIndices[i + 2];
 
-            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+            if ((uint)i0 >= (uint)meshVertices.Count ||
+                (uint)i1 >= (uint)meshVertices.Count ||
+                (uint)i2 >= (uint)meshVertices.Count)
                 continue;
 
             AddUniqueEdge(pm4, i0, i1, tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, uniqueEdges, lines, lineBudget, ref rejectedLongEdges);
@@ -3470,6 +3340,8 @@ public class WorldScene : ISceneRenderer
 
     private static List<List<MsurEntry>> SplitSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var components = new List<List<MsurEntry>>();
         if (surfaces.Count == 0)
             return components;
@@ -3486,7 +3358,7 @@ public class WorldScene : ISceneRenderer
         {
             MsurEntry surface = surfaces[s];
             int firstIndex = (int)surface.MsviFirstIndex;
-            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             var vertices = new List<int>();
             var unique = new HashSet<int>();
 
@@ -3494,8 +3366,8 @@ public class WorldScene : ISceneRenderer
             {
                 for (int idx = firstIndex; idx < endExclusive; idx++)
                 {
-                    int vertexIndex = (int)pm4.MeshIndices[idx];
-                    if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                    int vertexIndex = (int)meshIndices[idx];
+                    if ((uint)vertexIndex >= (uint)meshVertices.Count)
                         continue;
                     if (!unique.Add(vertexIndex))
                         continue;
@@ -3571,75 +3443,24 @@ public class WorldScene : ISceneRenderer
     private static IReadOnlyList<Pm4ConnectorKey> BuildCk24ConnectorKeys(
         Pm4File pm4,
         IReadOnlyList<MsurEntry> surfaces,
-        int tileX,
-        int tileY,
-        bool useTileLocalCoordinates,
-        Pm4AxisConvention axisConvention,
-        Pm4PlanarTransform planarTransform,
-        Vector3 worldPivot,
-        float worldYawCorrectionRadians)
+        CorePm4PlacementSolution placement)
     {
-        if (surfaces.Count == 0 || pm4.ExteriorVertices.Count == 0)
+        if (surfaces.Count == 0 || pm4.KnownChunks.Mscn.Count == 0)
             return Array.Empty<Pm4ConnectorKey>();
 
-        var distinctMdosIndices = new HashSet<uint>();
-        var connectorKeys = new HashSet<Pm4ConnectorKey>();
-        var ordered = new List<Pm4ConnectorKey>();
-
-        for (int i = 0; i < surfaces.Count; i++)
-        {
-            uint mdosIndex = surfaces[i].MdosIndex;
-            if (!distinctMdosIndices.Add(mdosIndex) || mdosIndex >= pm4.ExteriorVertices.Count)
-                continue;
-
-            Vector3 connectorPoint = ConvertPm4VertexToRenderer(
-                pm4.ExteriorVertices[(int)mdosIndex],
-                tileX,
-                tileY,
-                useTileLocalCoordinates,
-                axisConvention,
-                planarTransform,
-                worldPivot,
-                worldYawCorrectionRadians);
-
-            if (!float.IsFinite(connectorPoint.X) || !float.IsFinite(connectorPoint.Y) || !float.IsFinite(connectorPoint.Z))
-                continue;
-
-            Pm4ConnectorKey connectorKey = QuantizePm4ConnectorKey(connectorPoint);
-            if (connectorKeys.Add(connectorKey))
-                ordered.Add(connectorKey);
-        }
-
-        ordered.Sort(static (a, b) =>
-        {
-            int compareX = a.X.CompareTo(b.X);
-            if (compareX != 0)
-                return compareX;
-
-            int compareY = a.Y.CompareTo(b.Y);
-            if (compareY != 0)
-                return compareY;
-
-            return a.Z.CompareTo(b.Z);
-        });
-
-        return ordered;
-    }
-
-    private static Pm4ConnectorKey QuantizePm4ConnectorKey(Vector3 point)
-    {
-        return new Pm4ConnectorKey(
-            (int)MathF.Round(point.X / Pm4ConnectorQuantizationUnits),
-            (int)MathF.Round(point.Y / Pm4ConnectorQuantizationUnits),
-            (int)MathF.Round(point.Z / Pm4ConnectorQuantizationUnits));
+        return CorePm4PlacementMath.BuildConnectorKeys(
+                pm4.KnownChunks.Mscn,
+                ConvertToCorePm4Surfaces(surfaces),
+                placement)
+            .Select(FromCorePm4ConnectorKey)
+            .ToList();
     }
 
     private void RebuildPm4MergedObjectGroups()
     {
         _pm4MergedObjectGroupKeys.Clear();
 
-        var groups = new List<Pm4MergeCandidateGroup>();
-        var groupsByTile = new Dictionary<(int tileX, int tileY), List<int>>();
+        var groups = new List<CorePm4ConnectorMergeCandidate>();
         foreach (var tileEntry in _pm4TileObjects)
         {
             foreach (IGrouping<(int tileX, int tileY, uint ck24), Pm4OverlayObject> objectGroup in tileEntry.Value.GroupBy(obj => BuildPm4BaseObjectGroupKey((tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId))))
@@ -3648,7 +3469,7 @@ public class WorldScene : ISceneRenderer
                 Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
                 Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
                 bool hasBounds = false;
-                var connectorKeys = new HashSet<Pm4ConnectorKey>();
+                var connectorKeys = new HashSet<CorePm4ConnectorKey>();
 
                 foreach (Pm4OverlayObject obj in objectGroup)
                 {
@@ -3656,7 +3477,7 @@ public class WorldScene : ISceneRenderer
                     IncludePointInBounds(obj.BoundsMax, ref boundsMin, ref boundsMax, ref hasBounds);
 
                     for (int i = 0; i < obj.ConnectorKeys.Count; i++)
-                        connectorKeys.Add(obj.ConnectorKeys[i]);
+                        connectorKeys.Add(ToCorePm4ConnectorKey(obj.ConnectorKeys[i]));
                 }
 
                 if (!hasBounds)
@@ -3666,165 +3487,37 @@ public class WorldScene : ISceneRenderer
                 }
 
                 Vector3 center = (boundsMin + boundsMax) * 0.5f;
-                int groupIndex = groups.Count;
-                groups.Add(new Pm4MergeCandidateGroup(baseGroupKey, boundsMin, boundsMax, center, connectorKeys));
+                groups.Add(new CorePm4ConnectorMergeCandidate(
+                    new CorePm4ObjectGroupKey(baseGroupKey.tileX, baseGroupKey.tileY, baseGroupKey.ck24),
+                    boundsMin,
+                    boundsMax,
+                    center,
+                    connectorKeys));
                 _pm4MergedObjectGroupKeys[baseGroupKey] = baseGroupKey;
-
-                if (!groupsByTile.TryGetValue((tileEntry.Key.tileX, tileEntry.Key.tileY), out List<int>? tileGroupIndices))
-                {
-                    tileGroupIndices = new List<int>();
-                    groupsByTile[(tileEntry.Key.tileX, tileEntry.Key.tileY)] = tileGroupIndices;
-                }
-
-                tileGroupIndices.Add(groupIndex);
             }
         }
 
-        if (groups.Count <= 1)
+        IReadOnlyDictionary<CorePm4ObjectGroupKey, CorePm4ObjectGroupKey> mergedGroupMap = CorePm4PlacementMath.BuildMergedGroupMap(groups);
+        foreach ((CorePm4ObjectGroupKey sourceKey, CorePm4ObjectGroupKey mergedKey) in mergedGroupMap)
+            _pm4MergedObjectGroupKeys[(sourceKey.TileX, sourceKey.TileY, sourceKey.Ck24)] = (mergedKey.TileX, mergedKey.TileY, mergedKey.Ck24);
+    }
+
+    private static CorePm4ConnectorKey ToCorePm4ConnectorKey(Pm4ConnectorKey key) => new(key.X, key.Y, key.Z);
+
+    private static Pm4ConnectorKey FromCorePm4ConnectorKey(CorePm4ConnectorKey key) => new(key.X, key.Y, key.Z);
+
+    private static void IncludePointInBounds(Vector3 point, ref Vector3 boundsMin, ref Vector3 boundsMax, ref bool hasBounds)
+    {
+        if (!hasBounds)
+        {
+            boundsMin = point;
+            boundsMax = point;
+            hasBounds = true;
             return;
-
-        int[] parent = new int[groups.Count];
-        for (int i = 0; i < parent.Length; i++)
-            parent[i] = i;
-
-        static int Find(int[] parentArray, int index)
-        {
-            while (parentArray[index] != index)
-            {
-                parentArray[index] = parentArray[parentArray[index]];
-                index = parentArray[index];
-            }
-
-            return index;
         }
 
-        static void Union(int[] parentArray, int a, int b)
-        {
-            int rootA = Find(parentArray, a);
-            int rootB = Find(parentArray, b);
-            if (rootA != rootB)
-                parentArray[rootB] = rootA;
-        }
-
-        (int deltaX, int deltaY)[] neighborOffsets =
-        {
-            (1, -1),
-            (1, 0),
-            (1, 1),
-            (0, 1),
-        };
-
-        foreach (var tileEntry in groupsByTile)
-        {
-            List<int> currentTileGroupIndices = tileEntry.Value;
-            for (int offsetIndex = 0; offsetIndex < neighborOffsets.Length; offsetIndex++)
-            {
-                var neighborTileKey = (
-                    tileEntry.Key.tileX + neighborOffsets[offsetIndex].deltaX,
-                    tileEntry.Key.tileY + neighborOffsets[offsetIndex].deltaY);
-                if (!groupsByTile.TryGetValue(neighborTileKey, out List<int>? neighborTileGroupIndices))
-                    continue;
-
-                for (int i = 0; i < currentTileGroupIndices.Count; i++)
-                {
-                    int currentGroupIndex = currentTileGroupIndices[i];
-                    for (int j = 0; j < neighborTileGroupIndices.Count; j++)
-                    {
-                        int neighborGroupIndex = neighborTileGroupIndices[j];
-                        if (ShouldMergePm4Groups(groups[currentGroupIndex], groups[neighborGroupIndex]))
-                            Union(parent, currentGroupIndex, neighborGroupIndex);
-                    }
-                }
-            }
-        }
-
-        var components = new Dictionary<int, List<int>>();
-        for (int i = 0; i < groups.Count; i++)
-        {
-            int root = Find(parent, i);
-            if (!components.TryGetValue(root, out List<int>? members))
-            {
-                members = new List<int>();
-                components[root] = members;
-            }
-
-            members.Add(i);
-        }
-
-        foreach (List<int> members in components.Values)
-        {
-            if (members.Count <= 1)
-                continue;
-
-            var canonicalKey = members
-                .Select(index => groups[index].Key)
-                .OrderBy(static key => key.tileX)
-                .ThenBy(static key => key.tileY)
-                .ThenBy(static key => key.ck24)
-                .First();
-
-            for (int i = 0; i < members.Count; i++)
-                _pm4MergedObjectGroupKeys[groups[members[i]].Key] = canonicalKey;
-        }
-    }
-
-    private static bool ShouldMergePm4Groups(Pm4MergeCandidateGroup a, Pm4MergeCandidateGroup b)
-    {
-        if (a.Key.tileX == b.Key.tileX && a.Key.tileY == b.Key.tileY)
-            return false;
-
-        if (Math.Abs(a.Key.tileX - b.Key.tileX) > 1 || Math.Abs(a.Key.tileY - b.Key.tileY) > 1)
-            return false;
-
-        if (a.ConnectorKeys.Count == 0 || b.ConnectorKeys.Count == 0)
-            return false;
-
-        float centerDistanceSquared = Vector3.DistanceSquared(a.Center, b.Center);
-        bool boundsOverlap = BoundsOverlapExpanded(a.BoundsMin, a.BoundsMax, b.BoundsMin, b.BoundsMax, Pm4ConnectorMergeBoundsPadding);
-        if (!boundsOverlap && centerDistanceSquared > Pm4ConnectorMergeMaxCenterDistance * Pm4ConnectorMergeMaxCenterDistance)
-            return false;
-
-        int sharedConnectorCount = CountSharedConnectorKeys(a.ConnectorKeys, b.ConnectorKeys);
-        if (sharedConnectorCount == 0)
-            return false;
-
-        int minConnectorCount = Math.Min(a.ConnectorKeys.Count, b.ConnectorKeys.Count);
-        float sharedRatio = sharedConnectorCount / (float)minConnectorCount;
-
-        if (sharedConnectorCount >= 4)
-            return true;
-
-        if (sharedConnectorCount >= 2 && sharedRatio >= 0.5f)
-            return true;
-
-        return sharedConnectorCount >= 2
-            && sharedRatio >= 0.35f
-            && centerDistanceSquared <= Pm4ConnectorMergeCloseCenterDistance * Pm4ConnectorMergeCloseCenterDistance;
-    }
-
-    private static int CountSharedConnectorKeys(HashSet<Pm4ConnectorKey> a, HashSet<Pm4ConnectorKey> b)
-    {
-        HashSet<Pm4ConnectorKey> smaller = a.Count <= b.Count ? a : b;
-        HashSet<Pm4ConnectorKey> larger = a.Count <= b.Count ? b : a;
-        int shared = 0;
-
-        foreach (Pm4ConnectorKey key in smaller)
-        {
-            if (larger.Contains(key))
-                shared++;
-        }
-
-        return shared;
-    }
-
-    private static bool BoundsOverlapExpanded(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB, float padding)
-    {
-        return maxA.X + padding >= minB.X - padding
-            && minA.X - padding <= maxB.X + padding
-            && maxA.Y + padding >= minB.Y - padding
-            && minA.Y - padding <= maxB.Y + padding
-            && maxA.Z + padding >= minB.Z - padding
-            && minA.Z - padding <= maxB.Z + padding;
+        boundsMin = Vector3.Min(boundsMin, point);
+        boundsMax = Vector3.Max(boundsMax, point);
     }
 
     private static byte SelectDominantSurfaceValue(IReadOnlyList<MsurEntry> surfaces, Func<MsurEntry, byte> selector)
@@ -3881,10 +3574,11 @@ public class WorldScene : ISceneRenderer
     private static List<Vector3> BuildPm4PositionRefMarkers(Pm4File pm4, int limit)
     {
         var markers = new List<Vector3>();
-        int count = Math.Min(limit, pm4.PositionRefs.Count);
+        IReadOnlyList<MprlEntry> positionRefs = pm4.KnownChunks.Mprl;
+        int count = Math.Min(limit, positionRefs.Count);
         for (int i = 0; i < count; i++)
         {
-            Vector3 world = ConvertMprlPositionToWorld(pm4.PositionRefs[i].Position);
+            Vector3 world = ConvertMprlPositionToWorld(positionRefs[i].Position);
             markers.Add(new Vector3(
                 WoWConstants.MapOrigin - world.Y,
                 WoWConstants.MapOrigin - world.X,
@@ -3903,22 +3597,24 @@ public class WorldScene : ISceneRenderer
         Pm4PlanarTransform planarTransform,
         int triangleBudget)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var triangles = new List<Pm4Triangle>();
 
-        for (int i = 0; i + 2 < pm4.MeshIndices.Count && triangles.Count < triangleBudget; i += 3)
+        for (int i = 0; i + 2 < meshIndices.Count && triangles.Count < triangleBudget; i += 3)
         {
-            int i0 = (int)pm4.MeshIndices[i];
-            int i1 = (int)pm4.MeshIndices[i + 1];
-            int i2 = (int)pm4.MeshIndices[i + 2];
+            int i0 = (int)meshIndices[i];
+            int i1 = (int)meshIndices[i + 1];
+            int i2 = (int)meshIndices[i + 2];
 
-            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+            if ((uint)i0 >= (uint)meshVertices.Count ||
+                (uint)i1 >= (uint)meshVertices.Count ||
+                (uint)i2 >= (uint)meshVertices.Count)
                 continue;
 
-            Vector3 v0 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
-            Vector3 v1 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
-            Vector3 v2 = ConvertPm4VertexToRenderer(pm4.MeshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            Vector3 v0 = ConvertPm4VertexToRenderer(meshVertices[i0], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            Vector3 v1 = ConvertPm4VertexToRenderer(meshVertices[i1], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
+            Vector3 v2 = ConvertPm4VertexToRenderer(meshVertices[i2], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform);
             triangles.Add(planarTransform.InvertsWinding
                 ? new Pm4Triangle(v0, v2, v1)
                 : new Pm4Triangle(v0, v1, v2));
@@ -3941,8 +3637,9 @@ public class WorldScene : ISceneRenderer
         if (!uniqueEdges.Add(key))
             return;
 
-        Vector3 from = ConvertPm4VertexToRenderer(pm4.MeshVertices[ia], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
-        Vector3 to = ConvertPm4VertexToRenderer(pm4.MeshVertices[ib], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        Vector3 from = ConvertPm4VertexToRenderer(meshVertices[ia], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
+        Vector3 to = ConvertPm4VertexToRenderer(meshVertices[ib], tileX, tileY, useTileLocalCoordinates, axisConvention, planarTransform, worldPivot, worldYawCorrectionRadians);
 
         if (Vector3.DistanceSquared(from, to) > Pm4MaxEdgeLength * Pm4MaxEdgeLength)
         {
@@ -3993,7 +3690,7 @@ public class WorldScene : ISceneRenderer
         if (bestScore > 0f)
             return bestConvention;
 
-        return DetectAxisConventionByRanges(pm4.MeshVertices);
+        return DetectAxisConventionByRanges(pm4.KnownChunks.Msvt);
     }
 
     private static Pm4AxisConvention DetectPm4AxisConvention(Pm4File pm4, IEnumerable<MsurEntry> surfaces)
@@ -4059,45 +3756,28 @@ public class WorldScene : ISceneRenderer
 
     private static List<CorePm4MsurEntry> ConvertToCorePm4Surfaces(IReadOnlyList<MsurEntry> surfaces)
     {
-        var converted = new List<CorePm4MsurEntry>(surfaces.Count);
-        for (int i = 0; i < surfaces.Count; i++)
-        {
-            MsurEntry surface = surfaces[i];
-            converted.Add(new CorePm4MsurEntry(
-                surface.GroupKey,
-                surface.IndexCount,
-                surface.AttributeMask,
-                surface.Padding,
-                new Vector3(surface.NormalX, surface.NormalY, surface.NormalZ),
-                surface.Height,
-                surface.MsviFirstIndex,
-                surface.MdosIndex,
-                surface.PackedParams));
-        }
-
-        return converted;
+        return surfaces as List<CorePm4MsurEntry> ?? surfaces.ToList();
     }
 
     private static List<CorePm4MprlEntry> ConvertToCorePm4PositionRefs(IReadOnlyList<MprlEntry> positionRefs)
     {
-        var converted = new List<CorePm4MprlEntry>(positionRefs.Count);
-        for (int i = 0; i < positionRefs.Count; i++)
-        {
-            MprlEntry positionRef = positionRefs[i];
-            converted.Add(new CorePm4MprlEntry(
-                positionRef.Unk00,
-                positionRef.Unk02,
-                positionRef.Unk04,
-                positionRef.Unk06,
-                positionRef.Position,
-                positionRef.Unk14,
-                positionRef.Unk16));
-        }
-
-        return converted;
+        return positionRefs as List<CorePm4MprlEntry> ?? positionRefs.ToList();
     }
 
-    private static Pm4PlanarTransform ResolvePlanarTransform(
+    private static Pm4LinkedPositionRefSummary FromCorePm4LinkedPositionRefSummary(CorePm4LinkedPositionRefSummary summary)
+    {
+        return new Pm4LinkedPositionRefSummary(
+            summary.TotalCount,
+            summary.NormalCount,
+            summary.TerminatorCount,
+            summary.FloorMin,
+            summary.FloorMax,
+            summary.HeadingMinDegrees,
+            summary.HeadingMaxDegrees,
+            summary.HeadingMeanDegrees);
+    }
+
+    private static CorePm4PlacementSolution ResolvePlacementSolution(
         Pm4File pm4,
         IEnumerable<MsurEntry> surfaces,
         IReadOnlyList<MprlEntry>? anchorPositionRefs,
@@ -4107,16 +3787,16 @@ public class WorldScene : ISceneRenderer
         Pm4AxisConvention axisConvention)
     {
         var surfaceList = surfaces as List<MsurEntry> ?? surfaces.ToList();
-        return FromCorePlanarTransform(CorePm4PlacementMath.ResolvePlanarTransform(
-            pm4.MeshVertices,
-            pm4.MeshIndices,
+        return CorePm4PlacementMath.ResolvePlacementSolution(
+            pm4.KnownChunks.Msvt,
+            pm4.KnownChunks.Msvi,
             ConvertToCorePm4Surfaces(surfaceList),
-            ConvertToCorePm4PositionRefs(pm4.PositionRefs),
+            ConvertToCorePm4PositionRefs(pm4.KnownChunks.Mprl),
             anchorPositionRefs is not null ? ConvertToCorePm4PositionRefs(anchorPositionRefs) : null,
             tileX,
             tileY,
             ToCoreCoordinateMode(useTileLocalCoordinates),
-            ToCoreAxisConvention(axisConvention)));
+            ToCoreAxisConvention(axisConvention));
     }
 
     private static Pm4PlanarTransform DefaultPlanarTransform(bool useTileLocalCoordinates)
@@ -4166,26 +3846,28 @@ public class WorldScene : ISceneRenderer
 
     private static float ScoreAxisConventionByTriangleNormals(Pm4File pm4, Pm4AxisConvention convention)
     {
-        if (pm4.MeshVertices.Count == 0 || pm4.MeshIndices.Count < 3)
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
+        if (meshVertices.Count == 0 || meshIndices.Count < 3)
             return 0f;
 
         float sum = 0f;
         int samples = 0;
         const int maxSamples = 1024;
 
-        for (int i = 0; i + 2 < pm4.MeshIndices.Count && samples < maxSamples; i += 3)
+        for (int i = 0; i + 2 < meshIndices.Count && samples < maxSamples; i += 3)
         {
-            int i0 = (int)pm4.MeshIndices[i];
-            int i1 = (int)pm4.MeshIndices[i + 1];
-            int i2 = (int)pm4.MeshIndices[i + 2];
-            if ((uint)i0 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i1 >= (uint)pm4.MeshVertices.Count ||
-                (uint)i2 >= (uint)pm4.MeshVertices.Count)
+            int i0 = (int)meshIndices[i];
+            int i1 = (int)meshIndices[i + 1];
+            int i2 = (int)meshIndices[i + 2];
+            if ((uint)i0 >= (uint)meshVertices.Count ||
+                (uint)i1 >= (uint)meshVertices.Count ||
+                (uint)i2 >= (uint)meshVertices.Count)
                 continue;
 
-            Vector3 a = ConvertPm4VertexToWorld(pm4.MeshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
-            Vector3 b = ConvertPm4VertexToWorld(pm4.MeshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
-            Vector3 c = ConvertPm4VertexToWorld(pm4.MeshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 a = ConvertPm4VertexToWorld(meshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 b = ConvertPm4VertexToWorld(meshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 c = ConvertPm4VertexToWorld(meshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
 
             Vector3 normal = Vector3.Cross(b - a, c - a);
             float length = normal.Length();
@@ -4202,7 +3884,9 @@ public class WorldScene : ISceneRenderer
 
     private static float ScoreAxisConventionBySurfaceNormals(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces, Pm4AxisConvention convention)
     {
-        if (pm4.MeshVertices.Count == 0 || pm4.MeshIndices.Count < 3 || surfaces.Count == 0)
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
+        if (meshVertices.Count == 0 || meshIndices.Count < 3 || surfaces.Count == 0)
             return 0f;
 
         float sum = 0f;
@@ -4213,24 +3897,24 @@ public class WorldScene : ISceneRenderer
         {
             MsurEntry surface = surfaces[s];
             int firstIndex = (int)surface.MsviFirstIndex;
-            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             if (surface.IndexCount < 3 || firstIndex < 0 || endExclusive - firstIndex < 3)
                 continue;
 
-            int i0 = (int)pm4.MeshIndices[firstIndex];
-            if ((uint)i0 >= (uint)pm4.MeshVertices.Count)
+            int i0 = (int)meshIndices[firstIndex];
+            if ((uint)i0 >= (uint)meshVertices.Count)
                 continue;
 
-            Vector3 a = ConvertPm4VertexToWorld(pm4.MeshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
+            Vector3 a = ConvertPm4VertexToWorld(meshVertices[i0], 0, 0, false, convention, DefaultPlanarTransform(false));
             for (int idx = firstIndex + 1; idx + 1 < endExclusive && samples < maxSamples; idx++)
             {
-                int i1 = (int)pm4.MeshIndices[idx];
-                int i2 = (int)pm4.MeshIndices[idx + 1];
-                if ((uint)i1 >= (uint)pm4.MeshVertices.Count || (uint)i2 >= (uint)pm4.MeshVertices.Count)
+                int i1 = (int)meshIndices[idx];
+                int i2 = (int)meshIndices[idx + 1];
+                if ((uint)i1 >= (uint)meshVertices.Count || (uint)i2 >= (uint)meshVertices.Count)
                     continue;
 
-                Vector3 b = ConvertPm4VertexToWorld(pm4.MeshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
-                Vector3 c = ConvertPm4VertexToWorld(pm4.MeshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
+                Vector3 b = ConvertPm4VertexToWorld(meshVertices[i1], 0, 0, false, convention, DefaultPlanarTransform(false));
+                Vector3 c = ConvertPm4VertexToWorld(meshVertices[i2], 0, 0, false, convention, DefaultPlanarTransform(false));
 
                 Vector3 normal = Vector3.Cross(b - a, c - a);
                 float length = normal.Length();
@@ -4247,6 +3931,8 @@ public class WorldScene : ISceneRenderer
 
     private static List<Vector3> CollectSurfaceVertices(Pm4File pm4, IReadOnlyList<MsurEntry> surfaces)
     {
+        IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
+        IReadOnlyList<uint> meshIndices = pm4.KnownChunks.Msvi;
         var vertices = new List<Vector3>();
         var seen = new HashSet<int>();
 
@@ -4254,19 +3940,19 @@ public class WorldScene : ISceneRenderer
         {
             MsurEntry surface = surfaces[s];
             int firstIndex = (int)surface.MsviFirstIndex;
-            int endExclusive = Math.Min(firstIndex + surface.IndexCount, pm4.MeshIndices.Count);
+            int endExclusive = Math.Min(firstIndex + surface.IndexCount, meshIndices.Count);
             if (surface.IndexCount <= 0 || firstIndex < 0 || endExclusive <= firstIndex)
                 continue;
 
             for (int idx = firstIndex; idx < endExclusive; idx++)
             {
-                int vertexIndex = (int)pm4.MeshIndices[idx];
-                if ((uint)vertexIndex >= (uint)pm4.MeshVertices.Count)
+                int vertexIndex = (int)meshIndices[idx];
+                if ((uint)vertexIndex >= (uint)meshVertices.Count)
                     continue;
                 if (!seen.Add(vertexIndex))
                     continue;
 
-                vertices.Add(pm4.MeshVertices[vertexIndex]);
+                vertices.Add(meshVertices[vertexIndex]);
             }
         }
 
@@ -7109,13 +6795,13 @@ public class WorldScene : ISceneRenderer
         return transform;
     }
 
-    private List<Pm4CorrelationObjectState> BuildPm4CorrelationObjectStates()
+    private List<CorePm4CorrelationObjectState> BuildPm4CorrelationObjectStates()
     {
         bool applyPm4Transform = !IsNearZeroVector(_pm4OverlayTranslation)
             || !IsNearZeroVector(_pm4OverlayRotationDegrees)
             || !IsNearOneVector(_pm4OverlayScale);
         Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
-        var states = new List<Pm4CorrelationObjectState>(_pm4ObjectLookup.Count);
+        var inputs = new List<CorePm4CorrelationGeometryInput>(_pm4ObjectLookup.Count);
 
         foreach (var tileEntry in _pm4TileObjects)
         {
@@ -7125,385 +6811,28 @@ public class WorldScene : ISceneRenderer
                 var groupKey = ResolvePm4ObjectGroupKey(objectKey);
                 Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
                 Matrix4x4 geometryTransform = BuildPm4GeometryTransform(obj, objectTransform, applyObjectTransform);
-                ComputePm4GeometryBounds(obj, geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax, out Vector3 center);
-                ComputePm4Footprint(obj, geometryTransform, out Vector2[] footprintHull, out float footprintArea);
-                states.Add(new Pm4CorrelationObjectState(tileEntry.Key.tileX, tileEntry.Key.tileY, groupKey, obj, boundsMin, boundsMax, center, footprintHull, footprintArea));
+                inputs.Add(new CorePm4CorrelationGeometryInput(
+                    tileEntry.Key.tileX,
+                    tileEntry.Key.tileY,
+                    new CorePm4ObjectGroupKey(groupKey.tileX, groupKey.tileY, groupKey.ck24),
+                    new CorePm4CorrelationObjectDescriptor(
+                        obj.Ck24,
+                        obj.Ck24Type,
+                        obj.ObjectPartId,
+                        obj.LinkGroupObjectId,
+                        obj.SurfaceCount,
+                        obj.LinkedPositionRefCount,
+                        obj.DominantGroupKey,
+                        obj.DominantAttributeMask,
+                        obj.DominantMdosIndex,
+                        obj.AverageSurfaceHeight),
+                    obj.Lines.Select(static line => new CorePm4GeometryLineSegment(line.From, line.To)).ToList(),
+                    obj.Triangles.Select(static triangle => new CorePm4GeometryTriangle(triangle.A, triangle.B, triangle.C)).ToList(),
+                    geometryTransform));
             }
         }
 
-        return states;
-    }
-
-    private static void ComputePm4GeometryBounds(Pm4OverlayObject obj, in Matrix4x4 geometryTransform, out Vector3 boundsMin, out Vector3 boundsMax, out Vector3 center)
-    {
-        boundsMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-        boundsMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
-        bool hasBounds = false;
-
-        for (int i = 0; i < obj.Lines.Count; i++)
-        {
-            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Lines[i].From, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
-            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Lines[i].To, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
-        }
-
-        for (int i = 0; i < obj.Triangles.Count; i++)
-        {
-            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].A, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
-            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].B, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
-            IncludePointInBounds(ApplyPm4OverlayTransform(obj.Triangles[i].C, geometryTransform), ref boundsMin, ref boundsMax, ref hasBounds);
-        }
-
-        if (!hasBounds)
-        {
-            center = ApplyPm4OverlayTransform(Vector3.Zero, geometryTransform);
-            boundsMin = center;
-            boundsMax = center;
-            return;
-        }
-
-        center = (boundsMin + boundsMax) * 0.5f;
-    }
-
-    private static void IncludePointInBounds(Vector3 point, ref Vector3 boundsMin, ref Vector3 boundsMax, ref bool hasBounds)
-    {
-        boundsMin = Vector3.Min(boundsMin, point);
-        boundsMax = Vector3.Max(boundsMax, point);
-        hasBounds = true;
-    }
-
-    private static void ComputePm4Footprint(Pm4OverlayObject obj, in Matrix4x4 geometryTransform, out Vector2[] footprintHull, out float footprintArea)
-    {
-        const int maxSamples = 192;
-        Matrix4x4 transform = geometryTransform;
-
-        int totalPointCount = obj.Lines.Count * 2 + obj.Triangles.Count * 3;
-        if (totalPointCount <= 0)
-        {
-            footprintHull = Array.Empty<Vector2>();
-            footprintArea = 0f;
-            return;
-        }
-
-        int stride = Math.Max(1, totalPointCount / maxSamples);
-        var points = new List<Vector2>(Math.Min(totalPointCount, maxSamples));
-        int pointIndex = 0;
-
-        void AddPoint(Vector3 source)
-        {
-            if (points.Count >= maxSamples)
-            {
-                pointIndex++;
-                return;
-            }
-
-            if (pointIndex % stride == 0)
-            {
-                Vector3 transformed = ApplyPm4OverlayTransform(source, transform);
-                points.Add(new Vector2(transformed.X, transformed.Y));
-            }
-
-            pointIndex++;
-        }
-
-        for (int i = 0; i < obj.Lines.Count; i++)
-        {
-            AddPoint(obj.Lines[i].From);
-            AddPoint(obj.Lines[i].To);
-        }
-
-        for (int i = 0; i < obj.Triangles.Count; i++)
-        {
-            AddPoint(obj.Triangles[i].A);
-            AddPoint(obj.Triangles[i].B);
-            AddPoint(obj.Triangles[i].C);
-        }
-
-        footprintHull = BuildConvexHull(points);
-        footprintArea = ComputePolygonArea(footprintHull);
-    }
-
-    private static Vector2[] BuildTransformedFootprintHull(IReadOnlyList<Vector3> sourcePoints, in Matrix4x4 transform)
-    {
-        if (sourcePoints.Count == 0)
-            return Array.Empty<Vector2>();
-
-        var projected = new List<Vector2>(sourcePoints.Count);
-        for (int i = 0; i < sourcePoints.Count; i++)
-        {
-            Vector3 transformed = Vector3.Transform(sourcePoints[i], transform);
-            projected.Add(new Vector2(transformed.X, transformed.Y));
-        }
-
-        return BuildConvexHull(projected);
-    }
-
-    private static Vector2[] BuildConvexHull(IReadOnlyList<Vector2> points)
-    {
-        if (points.Count == 0)
-            return Array.Empty<Vector2>();
-
-        var sorted = points
-            .Where(static point => float.IsFinite(point.X) && float.IsFinite(point.Y))
-            .Distinct()
-            .OrderBy(static point => point.X)
-            .ThenBy(static point => point.Y)
-            .ToList();
-
-        if (sorted.Count <= 2)
-            return sorted.ToArray();
-
-        static float Cross(in Vector2 origin, in Vector2 a, in Vector2 b)
-        {
-            return (a.X - origin.X) * (b.Y - origin.Y) - (a.Y - origin.Y) * (b.X - origin.X);
-        }
-
-        var lower = new List<Vector2>(sorted.Count);
-        for (int i = 0; i < sorted.Count; i++)
-        {
-            Vector2 point = sorted[i];
-            while (lower.Count >= 2 && Cross(lower[lower.Count - 2], lower[lower.Count - 1], point) <= 0f)
-                lower.RemoveAt(lower.Count - 1);
-
-            lower.Add(point);
-        }
-
-        var upper = new List<Vector2>(sorted.Count);
-        for (int i = sorted.Count - 1; i >= 0; i--)
-        {
-            Vector2 point = sorted[i];
-            while (upper.Count >= 2 && Cross(upper[upper.Count - 2], upper[upper.Count - 1], point) <= 0f)
-                upper.RemoveAt(upper.Count - 1);
-
-            upper.Add(point);
-        }
-
-        lower.RemoveAt(lower.Count - 1);
-        upper.RemoveAt(upper.Count - 1);
-        lower.AddRange(upper);
-        return NormalizePolygonWinding(lower).ToArray();
-    }
-
-    private static float ComputePolygonArea(IReadOnlyList<Vector2> polygon)
-    {
-        return MathF.Abs(ComputeSignedPolygonArea(polygon));
-    }
-
-    private static float ComputeSignedPolygonArea(IReadOnlyList<Vector2> polygon)
-    {
-        if (polygon.Count < 3)
-            return 0f;
-
-        float twiceArea = 0f;
-        for (int i = 0; i < polygon.Count; i++)
-        {
-            Vector2 current = polygon[i];
-            Vector2 next = polygon[(i + 1) % polygon.Count];
-            twiceArea += current.X * next.Y - next.X * current.Y;
-        }
-
-        return twiceArea * 0.5f;
-    }
-
-    private static List<Vector2> NormalizePolygonWinding(IReadOnlyList<Vector2> polygon)
-    {
-        var normalized = RemoveDuplicatePolygonPoints(polygon);
-        if (normalized.Count >= 3 && ComputeSignedPolygonArea(normalized) < 0f)
-            normalized.Reverse();
-
-        return normalized;
-    }
-
-    private static List<Vector2> RemoveDuplicatePolygonPoints(IReadOnlyList<Vector2> polygon)
-    {
-        const float epsilon = 0.0001f;
-        var cleaned = new List<Vector2>(polygon.Count);
-
-        for (int i = 0; i < polygon.Count; i++)
-        {
-            Vector2 point = polygon[i];
-            if (cleaned.Count == 0 || Vector2.DistanceSquared(cleaned[cleaned.Count - 1], point) > epsilon * epsilon)
-                cleaned.Add(point);
-        }
-
-        if (cleaned.Count > 1 && Vector2.DistanceSquared(cleaned[0], cleaned[cleaned.Count - 1]) <= epsilon * epsilon)
-            cleaned.RemoveAt(cleaned.Count - 1);
-
-        return cleaned;
-    }
-
-    private static float ComputeFootprintAreaRatio(float areaA, float areaB)
-    {
-        float maxArea = MathF.Max(areaA, areaB);
-        if (maxArea <= 0f)
-            return 0f;
-
-        return MathF.Min(areaA, areaB) / maxArea;
-    }
-
-    private static float ComputeConvexFootprintOverlapRatio(IReadOnlyList<Vector2> hullA, IReadOnlyList<Vector2> hullB, float areaA, float areaB)
-    {
-        if (hullA.Count < 3 || hullB.Count < 3)
-            return 0f;
-
-        float minArea = MathF.Min(areaA, areaB);
-        if (minArea <= 0f)
-            return 0f;
-
-        List<Vector2> normalizedHullA = NormalizePolygonWinding(hullA);
-        List<Vector2> normalizedHullB = NormalizePolygonWinding(hullB);
-        List<Vector2> intersection = ClipConvexPolygon(normalizedHullA, normalizedHullB);
-        if (intersection.Count < 3)
-            return 0f;
-
-        float ratio = ComputePolygonArea(intersection) / minArea;
-        return Math.Clamp(ratio, 0f, 1f);
-    }
-
-    private static List<Vector2> ClipConvexPolygon(IReadOnlyList<Vector2> subjectPolygon, IReadOnlyList<Vector2> clipPolygon)
-    {
-        var output = NormalizePolygonWinding(subjectPolygon);
-        if (output.Count == 0)
-            return output;
-
-        List<Vector2> normalizedClipPolygon = NormalizePolygonWinding(clipPolygon);
-
-        for (int edgeIndex = 0; edgeIndex < normalizedClipPolygon.Count; edgeIndex++)
-        {
-            Vector2 clipStart = normalizedClipPolygon[edgeIndex];
-            Vector2 clipEnd = normalizedClipPolygon[(edgeIndex + 1) % normalizedClipPolygon.Count];
-            var input = output;
-            output = new List<Vector2>();
-            if (input.Count == 0)
-                break;
-
-            Vector2 start = input[input.Count - 1];
-            bool startInside = IsInsideClipEdge(start, clipStart, clipEnd);
-            for (int i = 0; i < input.Count; i++)
-            {
-                Vector2 end = input[i];
-                bool endInside = IsInsideClipEdge(end, clipStart, clipEnd);
-
-                if (endInside)
-                {
-                    if (!startInside)
-                        output.Add(ComputeLineIntersection(start, end, clipStart, clipEnd));
-
-                    output.Add(end);
-                }
-                else if (startInside)
-                {
-                    output.Add(ComputeLineIntersection(start, end, clipStart, clipEnd));
-                }
-
-                start = end;
-                startInside = endInside;
-            }
-
-            output = RemoveDuplicatePolygonPoints(output);
-        }
-
-        return NormalizePolygonWinding(output);
-    }
-
-    private static bool IsInsideClipEdge(Vector2 point, Vector2 edgeStart, Vector2 edgeEnd)
-    {
-        float cross = (edgeEnd.X - edgeStart.X) * (point.Y - edgeStart.Y)
-            - (edgeEnd.Y - edgeStart.Y) * (point.X - edgeStart.X);
-        return cross >= -0.0001f;
-    }
-
-    private static Vector2 ComputeLineIntersection(Vector2 a0, Vector2 a1, Vector2 b0, Vector2 b1)
-    {
-        float ax = a1.X - a0.X;
-        float ay = a1.Y - a0.Y;
-        float bx = b1.X - b0.X;
-        float by = b1.Y - b0.Y;
-        float denominator = ax * by - ay * bx;
-        if (MathF.Abs(denominator) < 0.0001f)
-            return a1;
-
-        float t = ((b0.X - a0.X) * by - (b0.Y - a0.Y) * bx) / denominator;
-        return new Vector2(a0.X + ax * t, a0.Y + ay * t);
-    }
-
-    private static float ComputeSymmetricFootprintDistance(IReadOnlyList<Vector2> hullA, IReadOnlyList<Vector2> hullB)
-    {
-        if (hullA.Count == 0 || hullB.Count == 0)
-            return float.PositiveInfinity;
-
-        return (ComputeMeanNearestFootprintDistance(hullA, hullB) + ComputeMeanNearestFootprintDistance(hullB, hullA)) * 0.5f;
-    }
-
-    private static float ComputeMeanNearestFootprintDistance(IReadOnlyList<Vector2> source, IReadOnlyList<Vector2> target)
-    {
-        if (source.Count == 0 || target.Count == 0)
-            return float.PositiveInfinity;
-
-        float totalDistance = 0f;
-        for (int sourceIndex = 0; sourceIndex < source.Count; sourceIndex++)
-        {
-            float bestDistanceSquared = float.PositiveInfinity;
-            for (int targetIndex = 0; targetIndex < target.Count; targetIndex++)
-            {
-                float distanceSquared = Vector2.DistanceSquared(source[sourceIndex], target[targetIndex]);
-                if (distanceSquared < bestDistanceSquared)
-                    bestDistanceSquared = distanceSquared;
-            }
-
-            totalDistance += MathF.Sqrt(bestDistanceSquared);
-        }
-
-        return totalDistance / source.Count;
-    }
-
-    private static float ComputeAxisGap(float minA, float maxA, float minB, float maxB)
-    {
-        if (maxA < minB)
-            return minB - maxA;
-
-        if (maxB < minA)
-            return minA - maxB;
-
-        return 0f;
-    }
-
-    private static float ComputeOverlapLength(float minA, float maxA, float minB, float maxB)
-    {
-        return MathF.Max(0f, MathF.Min(maxA, maxB) - MathF.Max(minA, minB));
-    }
-
-    private static float ComputePlanarAabbGap(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
-    {
-        float dx = ComputeAxisGap(minA.X, maxA.X, minB.X, maxB.X);
-        float dy = ComputeAxisGap(minA.Y, maxA.Y, minB.Y, maxB.Y);
-        return MathF.Sqrt(dx * dx + dy * dy);
-    }
-
-    private static float ComputePlanarOverlapRatio(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
-    {
-        float overlapX = ComputeOverlapLength(minA.X, maxA.X, minB.X, maxB.X);
-        float overlapY = ComputeOverlapLength(minA.Y, maxA.Y, minB.Y, maxB.Y);
-        float areaA = MathF.Max(0f, maxA.X - minA.X) * MathF.Max(0f, maxA.Y - minA.Y);
-        float areaB = MathF.Max(0f, maxB.X - minB.X) * MathF.Max(0f, maxB.Y - minB.Y);
-        float minArea = MathF.Min(areaA, areaB);
-        if (minArea <= 0f)
-            return 0f;
-
-        return (overlapX * overlapY) / minArea;
-    }
-
-    private static float ComputeAabbOverlapRatio(Vector3 minA, Vector3 maxA, Vector3 minB, Vector3 maxB)
-    {
-        float overlapX = ComputeOverlapLength(minA.X, maxA.X, minB.X, maxB.X);
-        float overlapY = ComputeOverlapLength(minA.Y, maxA.Y, minB.Y, maxB.Y);
-        float overlapZ = ComputeOverlapLength(minA.Z, maxA.Z, minB.Z, maxB.Z);
-        float volumeA = MathF.Max(0f, maxA.X - minA.X) * MathF.Max(0f, maxA.Y - minA.Y) * MathF.Max(0f, maxA.Z - minA.Z);
-        float volumeB = MathF.Max(0f, maxB.X - minB.X) * MathF.Max(0f, maxB.Y - minB.Y) * MathF.Max(0f, maxB.Z - minB.Z);
-        float minVolume = MathF.Min(volumeA, volumeB);
-        if (minVolume <= 0f)
-            return 0f;
-
-        return (overlapX * overlapY * overlapZ) / minVolume;
+        return CorePm4CorrelationMath.BuildObjectStatesFromGeometry(inputs).ToList();
     }
 
     private bool ShouldRenderPm4Object(
@@ -8039,17 +7368,6 @@ internal sealed class Pm4ResearchContext
     public Pm4MslkRefIndexFileAudit RefIndexAudit { get; }
     public Pm4TileObjectHypothesisReport HypothesisReport { get; }
 }
-
-internal sealed record Pm4CorrelationObjectState(
-    int TileX,
-    int TileY,
-    (int tileX, int tileY, uint ck24) GroupKey,
-    Pm4OverlayObject Object,
-    Vector3 BoundsMin,
-    Vector3 BoundsMax,
-    Vector3 Center,
-    Vector2[] FootprintHull,
-    float FootprintArea);
 
 internal sealed record Pm4WmoCorrelationSummary(
     int WmoPlacementCount,

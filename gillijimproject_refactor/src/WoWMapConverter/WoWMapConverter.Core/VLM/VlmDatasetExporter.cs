@@ -4,8 +4,11 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using WoWMapConverter.Core.Services;
+using WowViewer.Core.IO.Dbc;
+using WowViewer.Core.IO.Files;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
+using SharedMd5TranslateIndex = WowViewer.Core.IO.Files.Md5TranslateIndex;
 
 namespace WoWMapConverter.Core.VLM;
 
@@ -24,9 +27,7 @@ public class VlmDatasetExporter
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
     
-    // Cache for model bounding boxes: modelPath -> (boundsMin, boundsMax)
     private readonly ConcurrentDictionary<string, (float[] Min, float[] Max)?> _modelBoundsCache = new();
-    private NativeMpqService? _mpqService;
 
     public async Task ExportBatchAsync(VlmBatchExportConfig config, IProgress<string>? progress = null)
     {
@@ -96,19 +97,20 @@ public class VlmDatasetExporter
         string? wdtPath = null;
         byte[]? wdtData = null;
         
-        // Initialize MPQ Service early so we can search archives for WDT
-        using var mpqService = new NativeMpqService();
-        mpqService.LoadArchives(searchPaths);
+        // Initialize the shared archive catalog early so we can search MPQ archives for WDT.
+        using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
 
-        // Load community listfile — check cached download, app-local, then CWD
-        string[] listfileSearchPaths = {
+        string[] listfileSearchPaths =
+        {
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdxViewer", "community-listfile-withcapitals.csv"),
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "community-listfile-withcapitals.csv"),
             "community-listfile-withcapitals.csv",
             "listfile.csv",
         };
-        var listfile = listfileSearchPaths.FirstOrDefault(File.Exists);
-        if (listfile != null) mpqService.LoadListfile(listfile);
+        string? resolvedListfile = !string.IsNullOrWhiteSpace(listfilePath) && File.Exists(listfilePath)
+            ? listfilePath
+            : listfileSearchPaths.FirstOrDefault(File.Exists);
+        ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, searchPaths, resolvedListfile);
         
         foreach (var tryPath in wdtPaths)
         {
@@ -121,7 +123,7 @@ public class VlmDatasetExporter
             }
             
             // Try per-asset MPQ (file.wdt.MPQ) - Alpha 0.5.3 style
-            wdtData = AlphaMpqReader.ReadWithMpqFallback(tryPath);
+            wdtData = AlphaArchiveReader.ReadWithMpqFallback(tryPath);
             if (wdtData != null)
             {
                 var tempWdt = Path.Combine(outputDir, $"{mapName}.wdt");
@@ -136,9 +138,9 @@ public class VlmDatasetExporter
         if (wdtPath == null)
         {
             var wdtInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdt";
-            if (mpqService.FileExists(wdtInternalPath))
+            if (archiveCatalog.FileExists(wdtInternalPath))
             {
-                wdtData = mpqService.ReadFile(wdtInternalPath);
+                wdtData = archiveCatalog.ReadFile(wdtInternalPath);
                 if (wdtData != null)
                 {
                     var tempWdt = Path.Combine(outputDir, $"{mapName}.wdt");
@@ -163,24 +165,28 @@ public class VlmDatasetExporter
         
 
 
-        // Initialize MapDbcService to check for strict directory names
-        var mapDbcService = new MapDbcService();
-        mapDbcService.Load(searchPaths, mpqService);
-        
-        string mapDirectory = mapDbcService.ResolveDirectory(mapName) ?? mapName;
+        var mapDirectoryLookup = new MapDirectoryLookup();
+        mapDirectoryLookup.Load(searchPaths, archiveCatalog);
+
+        string mapDirectory = mapDirectoryLookup.ResolveDirectory(mapName) ?? mapName;
         if (!string.Equals(mapDirectory, mapName, StringComparison.Ordinal))
         {
             Console.WriteLine($"Resolved map '{mapName}' to directory '{mapDirectory}' via Map.dbc");
         }
 
         // Initialize MD5 Translate Service (Legacy)
-        Md5TranslateIndex? md5Index = null;
+        SharedMd5TranslateIndex? md5Index = null;
         
         // Also check map-specific TRS file (often found in newer clients)
         var mapTrs = $"World\\Maps\\{mapDirectory}\\md5translate.trs";
         var extraCandidates = new[] { mapTrs };
 
-        if (Md5TranslateResolver.TryLoad(searchPaths, mpqService, out var loadedIndex, extraCandidates))
+        if (WowViewer.Core.IO.Files.Md5TranslateResolver.TryLoad(
+            searchPaths,
+            archiveCatalog.FileExists,
+            archiveCatalog.ReadFile,
+            out var loadedIndex,
+            extraCandidates))
         {
             md5Index = loadedIndex;
             Console.WriteLine($"Loaded MD5 Translate Index with {md5Index?.HashToPlain.Count} entries.");
@@ -188,9 +194,8 @@ public class VlmDatasetExporter
             // md5Index loaded successfully
         }
 
-        // Initialize GroundEffectService
-        var groundEffectService = new GroundEffectService();
-        groundEffectService.Load(searchPaths, mpqService);  // Pass mpqService to GroundEffectService (need update)
+        var groundEffectLookup = new GroundEffectLookup();
+        groundEffectLookup.Load(searchPaths, archiveCatalog);
 
         // Detect WDT format using file size:
         // - Alpha 0.5.3 WDT: Large file (contains embedded ADT data, typically several MB)
@@ -266,9 +271,9 @@ public class VlmDatasetExporter
                      if (File.Exists(wdlMpqDiscovered))
                      {
                          var wdlExpectedPath = Path.Combine(path, "World", "Maps", mapName, $"{mapName}.wdl");
-                         var wdlBytes = AlphaMpqReader.ReadFromMpq(
+                         var wdlBytes = AlphaArchiveReader.ReadFromMpq(
                              wdlMpqDiscovered,
-                             AlphaMpqReader.BuildInternalNameCandidates(wdlExpectedPath));
+                             AlphaArchiveReader.BuildInternalNameCandidates(wdlExpectedPath));
                          if (wdlBytes != null)
                          {
                              wdlData = WdlParser.Parse(wdlBytes);
@@ -283,9 +288,9 @@ public class VlmDatasetExporter
                  if (!loaded)
                  {
                     var wdlInternalPath = $"World\\Maps\\{mapName}\\{mapName}.wdl";
-                    if (mpqService.FileExists(wdlInternalPath))
+                    if (archiveCatalog.FileExists(wdlInternalPath))
                     {
-                        var wdlBytes = mpqService.ReadFile(wdlInternalPath);
+                        var wdlBytes = archiveCatalog.ReadFile(wdlInternalPath);
                         if (wdlBytes != null)
                         {
                             wdlData = WdlParser.Parse(wdlBytes);
@@ -342,13 +347,13 @@ public class VlmDatasetExporter
                 string? imageRelPath = null;
                 
                 // Try to find minimap (common to both formats)
-                var minimapPath = FindMinimapTile(searchPaths, mpqService, md5Index, mapDirectory, x, y);
+                var minimapPath = FindMinimapTile(searchPaths, archiveCatalog, md5Index, mapDirectory, x, y);
                 if (minimapPath != null)
                 {
                     var imageFileName = $"{tileName}.png";
                     var outputImagePath = Path.Combine(imagesDir, imageFileName);
                     
-                    if (ConvertBlpToPng(minimapPath, outputImagePath, mpqService))
+                    if (ConvertBlpToPng(minimapPath, outputImagePath, archiveCatalog))
                     {
                         imageRelPath = $"images/{imageFileName}";
                     }
@@ -382,7 +387,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using AdtAlpha's methods
                     sample = await ExtractFromAdtAlpha(adtAlpha, wdtPath, adtOffset, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, mdnmNames!, monmNames!, allTextures, groundEffectService, wdlTile, clientPath);
+                        shadowsDir, masksDir, mdnmNames!, monmNames!, allTextures, groundEffectLookup, wdlTile, clientPath);
                 }
                 else
                 {
@@ -393,19 +398,19 @@ public class VlmDatasetExporter
                     var texAdtPath = $"{adtBase}_tex0.adt";
                     var objAdtPath = $"{adtBase}_obj0.adt";
 
-                    var adtBytes = mpqService.ReadFile(rootAdtPath);
+                    var adtBytes = archiveCatalog.ReadFile(rootAdtPath);
                     byte[]? texBytes = null;
                     byte[]? objBytes = null;
 
-                    if (mpqService.FileExists(texAdtPath))
+                    if (archiveCatalog.FileExists(texAdtPath))
                     {
-                        texBytes = mpqService.ReadFile(texAdtPath);
+                        texBytes = archiveCatalog.ReadFile(texAdtPath);
                         progress?.Report($"[Split ADT] Found tex0 for {tileName}");
                     }
 
-                    if (mpqService.FileExists(objAdtPath))
+                    if (archiveCatalog.FileExists(objAdtPath))
                     {
-                        objBytes = mpqService.ReadFile(objAdtPath);
+                        objBytes = archiveCatalog.ReadFile(objAdtPath);
                          progress?.Report($"[Split ADT] Found obj0 for {tileName}");
                     }
                     
@@ -417,7 +422,7 @@ public class VlmDatasetExporter
 
                     // Extract terrain data using LK/Modern ADT parsing
                     sample = await ExtractFromLkAdt(adtBytes, texBytes, objBytes, tileIndex, tileName, outputDir,
-                        shadowsDir, masksDir, allTextures, mpqService, groundEffectService, wdlTile, wdtMphdFlags);
+                        shadowsDir, masksDir, allTextures, archiveCatalog, groundEffectLookup, wdlTile, wdtMphdFlags);
                 }
 
                 if (sample == null)
@@ -560,8 +565,7 @@ public class VlmDatasetExporter
                     bool converted = false;
                      foreach (var path in candidates)
                     {
-                         // Pass mpqService so it can read MPQ: paths
-                         if (ConvertBlpToPng(path, pngPath, mpqService))
+                         if (ConvertBlpToPng(path, pngPath, archiveCatalog))
                          {
                              converted = true;
                              break;
@@ -672,7 +676,7 @@ public class VlmDatasetExporter
         AdtAlpha adt, string wdtPath, int adtOffset, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
         List<string> mdnmNames, List<string> monmNames,
-        ConcurrentDictionary<string, byte> textureCollector, GroundEffectService? groundEffectService = null,
+        ConcurrentDictionary<string, byte> textureCollector, GroundEffectLookup? groundEffectLookup = null,
         WdlParser.WdlTile? wdlTile = null, string? clientPath = null)
     {
         var heights = new List<VlmChunkHeights>();
@@ -871,9 +875,9 @@ public class VlmDatasetExporter
                             string? texturePath = textureId < textures.Count ? textures[(int)textureId] : null;
                             
                             string[]? groundEffects = null;
-                            if (effectId > 0 && groundEffectService != null)
+                            if (effectId > 0 && groundEffectLookup != null)
                             {
-                                groundEffects = groundEffectService.GetDoodadsEffect(effectId);
+                                groundEffects = groundEffectLookup.GetDoodadsEffect(effectId);
                             }
                             
                             // Get raw alpha bits if available (only for layers > 0)
@@ -986,7 +990,7 @@ public class VlmDatasetExporter
                 string fullPath = nameId < mdnmNames.Count ? mdnmNames[(int)nameId] : "";
                 string name = Path.GetFileNameWithoutExtension(fullPath);
                 
-                // Extract bounding box from MDX via AlphaMpqReader
+                // Extract bounding box from MDX via AlphaArchiveReader
                 float[]? boundsMin = null;
                 float[]? boundsMax = null;
                 if (!string.IsNullOrEmpty(clientPath) && !string.IsNullOrEmpty(fullPath))
@@ -1021,7 +1025,7 @@ public class VlmDatasetExporter
                 string fullPath = nameId < monmNames.Count ? monmNames[(int)nameId] : "";
                 string name = Path.GetFileNameWithoutExtension(fullPath);
                 
-                // Extract bounding box from WMO via AlphaMpqReader
+                // Extract bounding box from WMO via AlphaArchiveReader
                 float[]? boundsMin = null;
                 float[]? boundsMax = null;
                 if (!string.IsNullOrEmpty(clientPath) && !string.IsNullOrEmpty(fullPath))
@@ -1085,8 +1089,8 @@ public class VlmDatasetExporter
     private async Task<VlmTerrainData?> ExtractFromLkAdt(
         byte[] adtBytes, byte[]? texBytes, byte[]? objBytes, int tileIndex, string tileName,
         string outputDir, string shadowsDir, string masksDir,
-        ConcurrentDictionary<string, byte> textureCollector, NativeMpqService mpqService,
-        GroundEffectService? groundEffectService = null, WdlParser.WdlTile? wdlTile = null,
+        ConcurrentDictionary<string, byte> textureCollector, IArchiveReader archiveReader,
+        GroundEffectLookup? groundEffectLookup = null, WdlParser.WdlTile? wdlTile = null,
         uint wdtMphdFlags = 0)
     {
         float heightMin = float.MaxValue;
@@ -1500,7 +1504,7 @@ public class VlmDatasetExporter
         return tiles;
     }
 
-    private string? FindMinimapTile(IEnumerable<string> searchPaths, NativeMpqService mpqService, Md5TranslateIndex? index, string mapName, int x, int y)
+    private string? FindMinimapTile(IEnumerable<string> searchPaths, IArchiveReader archiveReader, SharedMd5TranslateIndex? index, string mapName, int x, int y)
     {
         // Generate all possible plain-name candidates for this tile
         // TRS format per wowdev.wiki/TRS.md: map_%d_%02d.blp (x not padded, y 2-digit padded)
@@ -1618,7 +1622,7 @@ public class VlmDatasetExporter
                         Console.WriteLine($"  MPQ key to check: '{mpqKey}'");
                     }
                     
-                    if (mpqService.FileExists(mpqKey))
+                    if (archiveReader.FileExists(mpqKey))
                     {
                         Console.WriteLine($"[Match] Translated '{candidate}' -> '{hashed}' (Found in MPQ)");
                         return $"MPQ:{mpqKey}";
@@ -1670,7 +1674,7 @@ public class VlmDatasetExporter
              
              // Check MPQ by plain name (fallback)
              var mpqPlainKey = candidate.Replace("/", "\\");
-             if (mpqService.FileExists(mpqPlainKey))
+             if (archiveReader.FileExists(mpqPlainKey))
              {
                  Console.WriteLine($"Found minimap in Archive (Plain): {mpqPlainKey}");
                  return $"MPQ:{mpqPlainKey}";
@@ -2158,7 +2162,7 @@ public class VlmDatasetExporter
         progress?.Report($"Global heightmaps generated with range {globalMin} to {globalMax}");
     }
 
-    private bool ConvertBlpToPng(string blpPath, string pngPath, NativeMpqService? mpqService = null)
+    private bool ConvertBlpToPng(string blpPath, string pngPath, IArchiveReader? archiveReader = null)
     {
         try
         {
@@ -2167,11 +2171,11 @@ public class VlmDatasetExporter
             if (blpPath.StartsWith("MPQ:"))
             {
                 var key = blpPath.Substring(4);
-                blpData = mpqService?.ReadFile(key);
+                blpData = archiveReader?.ReadFile(key);
             }
             else if (blpPath.EndsWith(".MPQ", StringComparison.OrdinalIgnoreCase))
             {
-                blpData = AlphaMpqReader.ReadFromMpq(blpPath);
+                blpData = AlphaArchiveReader.ReadFromMpq(blpPath);
             }
             else if (File.Exists(blpPath))
             {
@@ -2181,10 +2185,10 @@ public class VlmDatasetExporter
             if (blpData == null || blpData.Length == 0)
             {
                 Console.WriteLine($"Empty BLP data: {blpPath}");
-                if (blpPath.StartsWith("MPQ:") && mpqService != null)
+                if (blpPath.StartsWith("MPQ:") && archiveReader != null)
                 {
                      string k = blpPath.Substring(4);
-                     if (mpqService.HasFile(k))
+                     if (archiveReader.FileExists(k))
                          Console.WriteLine($"[DEBUG] CRITICAL: File exists in MPQ but ReadFile failed! Key: {k}");
                      else
                          Console.WriteLine($"[DEBUG] File not found in MPQ archives: {k}");
@@ -2344,7 +2348,7 @@ public class VlmDatasetExporter
     /// <summary>
     /// Get model bounding box from MDX or WMO file.
     /// </summary>
-    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, NativeMpqService mpqService)
+    private (float[] Min, float[] Max)? GetModelBounds(string modelPath, IArchiveReader archiveReader)
     {
         if (string.IsNullOrEmpty(modelPath)) return null;
         
@@ -2355,7 +2359,7 @@ public class VlmDatasetExporter
         try
         {
             // Try to read from MPQ
-            var data = mpqService.ReadFile(modelPath);
+            var data = archiveReader.ReadFile(modelPath);
             if (data == null || data.Length < 100) 
             {
                 _modelBoundsCache[modelPath.ToLowerInvariant()] = null;
@@ -2449,7 +2453,7 @@ public class VlmDatasetExporter
     }
     
     /// <summary>
-    /// Extract bounding box from MDX file via AlphaMpqReader (per-asset MPQ).
+    /// Extract bounding box from MDX file via AlphaArchiveReader (per-asset MPQ).
     /// </summary>
     private (float[] Min, float[] Max)? GetMdxBounds(string mdxMpqPath)
     {
@@ -2462,7 +2466,7 @@ public class VlmDatasetExporter
         
         try
         {
-            var data = AlphaMpqReader.ReadFromMpq(mdxMpqPath);
+            var data = AlphaArchiveReader.ReadFromMpq(mdxMpqPath);
             if (data == null || data.Length < 100)
             {
                 _modelBoundsCache[key] = null;
@@ -2500,7 +2504,7 @@ public class VlmDatasetExporter
     }
     
     /// <summary>
-    /// Extract bounding box from WMO file via AlphaMpqReader (per-asset MPQ).
+    /// Extract bounding box from WMO file via AlphaArchiveReader (per-asset MPQ).
     /// </summary>
     private (float[] Min, float[] Max)? GetWmoBounds(string wmoMpqPath)
     {
@@ -2513,7 +2517,7 @@ public class VlmDatasetExporter
         
         try
         {
-            var data = AlphaMpqReader.ReadFromMpq(wmoMpqPath);
+            var data = AlphaArchiveReader.ReadFromMpq(wmoMpqPath);
             if (data == null || data.Length < 100)
             {
                 _modelBoundsCache[key] = null;

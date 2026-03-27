@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\gillijimproject-csharp\gillijimproject-csharp.csproj" />
     <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.LkToAlphaModule\WoWRollback.LkToAlphaModule.csproj" />
     <ProjectReference Include="..\..\..\WoWRollback\WoWRollback.PM4Module\WoWRollback.PM4Module.csproj" />
+    <ProjectReference Include="..\..\..\..\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\lib\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
     <ProjectReference Include="..\..\..\lib\wow.tools.local\DBCD\DBCD.IO\DBCD.IO.csproj" />
@@ -23,10 +24,6 @@
     <PackageReference Include="BCnEncoder.Net" Version="2.1.0" />
     <PackageReference Include="SharpZipLib" Version="1.4.2" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <EmbeddedResource Include="Resources\area_crosswalk.csv" />
   </ItemGroup>
 
   <ItemGroup>

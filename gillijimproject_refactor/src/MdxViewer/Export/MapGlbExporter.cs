@@ -11,8 +11,8 @@ using SharpGLTF.Materials;
 using SharpGLTF.Scenes;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using WowViewer.Core.IO.Files;
 using WoWMapConverter.Core.Converters;
-using WoWMapConverter.Core.Services;
 
 namespace MdxViewer.Export;
 

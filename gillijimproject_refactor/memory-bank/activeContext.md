@@ -1,5 +1,323 @@
 # Active Context
 
+## Mar 26, 2026 - Shared AreaIdMapper And Crosswalk Ownership Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO/Dbc/AreaIdMapper.cs` now owns the remaining live old-repo area-mapping seam plus the embedded area-crosswalk resource it depended on.
+- Landed pieces:
+	- added shared `AreaIdMapper`
+	- moved `area_crosswalk.csv` into `wow-viewer/src/core/WowViewer.Core.IO/Resources/area_crosswalk.csv`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/AlphaToLkConverter.cs` now uses shared `WowViewer.Core.IO.Dbc.AreaIdMapper`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Dbc/AreaIdMapper.cs`
+	- deleted dead `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/AreaIdCrosswalk.cs`
+	- deleted the old embedded `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Resources/area_crosswalk.csv`
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/AreaIdMapperTests.cs` for embedded-default loading, matching-report CSV parsing, and continent-hinted name matching
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `64` tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` passed on Mar 26, 2026 with `53` warnings and no new build break
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Mar 26, 2026 with `3` warnings
+- Important boundary:
+	- this proves shared ownership of the active old-repo area-ID mapping seam and its embedded crosswalk data plus consumer compile validation
+	- this does not prove broader DBC schema ownership beyond the narrow shared mapper or runtime converter signoff on real data
+	- no runtime validation was run
+
+## Mar 26, 2026 - Shared Alpha MPQ Old-Repo Caller Cutover Landed
+
+- The shared `wow-viewer/src/core/WowViewer.Core.IO/Files/AlphaArchiveReader.cs` seam now owns the remaining active old-repo per-asset MPQ callers that were still using the deleted duplicate reader in `WoWMapConverter.Core`.
+- Landed pieces:
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` now uses shared `AlphaArchiveReader`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/WmoV14ToV17Converter.cs` now uses shared `AlphaArchiveReader`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/WmoV14ToV17ExtendedConverter.cs` now uses shared `AlphaArchiveReader`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/AlphaMpqReader.cs`
+	- added focused regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/AlphaArchiveReaderTests.cs` for per-asset MPQ block selection and companion `.MPQ` fallback
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `61` tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` passed on Mar 26, 2026 with `53` warnings and no new build break
+- Important boundary:
+	- this proves shared ownership of the active old-repo Alpha per-asset MPQ caller seam plus consumer compile validation
+	- this does not prove broader WMO, MDX, or BLP format ownership beyond read access through the shared Alpha archive seam
+	- no viewer runtime validation was run
+
+## Mar 26, 2026 - Dead Old DBC Helper Cleanup Landed
+
+- The old `WoWMapConverter.Core` archive or DBC helper layer left behind after the shared `Core.IO` cutovers has now been narrowed and cleaned up instead of being carried forward as dead compatibility code.
+- Landed pieces:
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/NativeMpqService.cs`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/Md5TranslateResolver.cs`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/MapDbcService.cs`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Services/GroundEffectService.cs`
+	- deleted `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Dbc/DbcReader.cs`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Dbc/AreaIdMapper.cs` now reads tables through shared `WowViewer.Core.IO.Dbc.DbcReader`
+- Current live-boundary result from the targeted review:
+	- the deleted helper files were definition-only in the active `gillijimproject_refactor/src` tree after the earlier `Core.IO` cutovers
+	- `AreaIdMapper` remains the only clearly live DBC-backed seam still owned by `WoWMapConverter.Core`
+	- the current active consumer of that seam is `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/Converters/AlphaToLkConverter.cs`
+- Current verified validation for this slice:
+	- workspace diagnostics for `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core` reported no errors after the cleanup
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` passed on Mar 26, 2026 with `54` warnings and no new build break
+- Important boundary:
+	- this is old-repo cleanup plus dependency-boundary tightening, not a new `wow-viewer` library slice
+	- no new `wow-viewer` tests were run in this pass because the shared library code did not change
+	- the next real DBC ownership decision is whether `AreaIdMapper` and the Alpha-to-LK area crosswalk should move into `wow-viewer`
+
+## Mar 26, 2026 - Shared DBC Lookup And VLM Archive Cutover Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO` now owns the next narrow non-PM4 table-backed helper slice that was still stranded in `WoWMapConverter.Core`.
+- Landed pieces:
+	- shared `DbcReader`
+	- shared `DbcHeader`
+	- shared `MapDirectoryLookup`
+	- shared `GroundEffectLookup`
+	- expanded shared `DbClientFileReader` table probing to cover `DBFilesClient`, `DBC`, and root `.dbc` or `.db2` candidates
+	- focused regression coverage for shared DBC lookup behavior in `wow-viewer/tests/WowViewer.Core.Tests/DbcLookupTests.cs`
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj` now references `wow-viewer/src/core/WowViewer.Core.IO`
+	- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` now uses shared `IArchiveCatalog` or `IArchiveReader` instead of `WoWMapConverter.Core.Services.NativeMpqService`
+	- `VlmDatasetExporter` now resolves `Map.dbc` through shared `MapDirectoryLookup`
+	- `VlmDatasetExporter` now resolves ground-effect doodads through shared `GroundEffectLookup`
+	- `VlmDatasetExporter` now loads MD5 minimap translation through shared callback-based `WowViewer.Core.IO.Files.Md5TranslateResolver`
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `59` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj -c Debug` passed on Mar 26, 2026 with the existing warning floor plus no new build break
+- Important boundary:
+	- this proves shared DBC-backed lookup ownership plus active VLM consumer compile validation
+	- this does not prove general DBC or DB2 format ownership, write support, or viewer runtime behavior
+	- `MdxViewer` was not rebuilt in this slice because the change targeted `WowViewer.Core.IO` plus `WoWMapConverter.Core`
+	- the old `MapDbcService`, `GroundEffectService`, local `DbcReader`, old `Md5TranslateResolver`, and `NativeMpqService` helper layer was later deleted from `WoWMapConverter.Core` once the active-path review showed it was dead in the current tree
+	- `AreaIdMapper` is now the remaining active DBC-backed seam in `WoWMapConverter.Core`, and it already reads through shared `Core.IO`
+
+## Mar 26, 2026 - Concrete Shared MPQ Catalog Port Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO` now owns the concrete standard MPQ implementation used by the active `MdxViewer` path, not just the contracts and bootstrap helpers around it.
+- Landed pieces:
+	- shared `MpqArchiveCatalog`
+	- shared `MpqArchiveCatalogFactory`
+	- internal `MpqDiagnostics`
+	- focused regression coverage for archive priority, patched-delete fallback, internal listfile extraction, and direct file-0 reads in `wow-viewer/tests/WowViewer.Core.Tests/MpqArchiveCatalogTests.cs`
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDataSource.cs` now defaults to shared `MpqArchiveCatalogFactory`
+	- deleted the active bridge file `gillijimproject_refactor/src/MdxViewer/DataSources/NativeMpqArchiveCatalog.cs`
+	- active `MdxViewer` `.cs` source no longer instantiates or references `WoWMapConverter.Core.Services.NativeMpqService` in its standard MPQ consumer path
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `57` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 26, 2026 with the existing `32` warning floor
+- Important boundary:
+	- this proves concrete shared MPQ catalog ownership for the active `MdxViewer` path plus consumer compile validation
+	- older `WoWMapConverter.Core.Services.NativeMpqService` code still exists for other non-migrated old-repo consumers, but it is no longer the active `MdxViewer` standard MPQ implementation path
+	- no viewer runtime validation was run
+
+## Mar 26, 2026 - Shared Archive Bootstrap And Alpha Wrapper Cutovers Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO` now owns the next two archive-adjacent seams that `MpqDataSource` was still keeping locally or routing directly to old services.
+- Landed pieces:
+	- shared `ArchiveCatalogBootstrapper`
+	- shared `ArchiveCatalogBootstrapResult`
+	- shared `AlphaArchiveReader`
+	- shared `PkwareExplode`
+	- focused regression coverage for external listfile parsing, archive bootstrap aggregation, Alpha internal-name candidate generation, and direct-file fallback behavior in `wow-viewer/tests/WowViewer.Core.Tests`
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDataSource.cs` now uses shared `ArchiveCatalogBootstrapper` instead of owning the standard archive bootstrap or external listfile parsing path locally
+	- `MpqDataSource` now uses shared `AlphaArchiveReader` instead of directly calling `WoWMapConverter.Core.Services.AlphaMpqReader`
+	- the active `MdxViewer` source no longer references the old Alpha wrapper reader in its MPQ data source path
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `53` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 26, 2026 after the cutovers
+- Important boundary:
+	- this proves shared archive bootstrap and shared Alpha wrapper helper ownership plus consumer compile validation
+	- `NativeMpqService` still remains behind `gillijimproject_refactor/src/MdxViewer/DataSources/NativeMpqArchiveCatalog.cs`; the concrete standard MPQ implementation is not ported yet
+	- no viewer runtime validation was run
+
+## Mar 26, 2026 - Shared Archive-Reader MPQ Cutover Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO` now owns the shared archive-reader or archive-catalog boundary that `MdxViewer` was still expressing directly through `WoWMapConverter.Core.Services.NativeMpqService`.
+- Landed pieces:
+	- shared `IArchiveReader`
+	- shared `IArchiveCatalog`
+	- shared `IArchiveCatalogFactory`
+	- shared `DbClientFileReader` for `DBFilesClient` DBC or DB2 path probing
+	- focused regression coverage for DBC or DB2 candidate ordering and first-match table reads in `wow-viewer/tests/WowViewer.Core.Tests`
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDataSource.cs` now depends on shared archive interfaces instead of `NativeMpqService`
+	- `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDBCProvider.cs` now reads tables through shared `IArchiveReader` and `DbClientFileReader`
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` now consumes `MpqDataSource.ArchiveReader` instead of `MpqService`
+	- direct `NativeMpqService` ownership is isolated to `gillijimproject_refactor/src/MdxViewer/DataSources/NativeMpqArchiveCatalog.cs`
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `49` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 26, 2026 after the cutover
+- Important boundary:
+	- this proves shared archive-reader ownership plus consumer compile validation
+	- `NativeMpqService` itself is not ported into `wow-viewer`; it is still the current implementation behind the compatibility adapter
+	- Alpha wrapper reads still call `WoWMapConverter.Core.Services.AlphaMpqReader` directly inside `MpqDataSource`; that is a separate seam from standard MPQ archive access
+	- no viewer runtime validation was run
+
+## Mar 26, 2026 - Shared MD5 Minimap Translation Cutover Landed
+
+- `wow-viewer/src/core/WowViewer.Core.IO` now owns the shared MD5 minimap translation seam that `MdxViewer` was still importing from `WoWMapConverter.Core.Services`.
+- Landed pieces:
+	- shared `Md5TranslateIndex`
+	- shared `Md5TranslateResolver.TryLoad(...)` with archive read callbacks instead of direct `NativeMpqService` type ownership
+	- shared `MinimapService.GetMinimapTilePath(...)` and `MinimapTileExists(...)`
+	- focused regression coverage for map-specific TRS loading and `dir:` directory-context parsing in `wow-viewer/tests/WowViewer.Core.Tests`
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` now loads the MD5 minimap translation index through shared `WowViewer.Core.IO.Files.Md5TranslateResolver`
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/MinimapRenderer.cs` and `Export/MapGlbExporter.cs` now consume shared `Md5TranslateIndex` and `MinimapService`
+	- `MdxViewer.csproj` now references `wow-viewer/src/core/WowViewer.Core.IO`
+	- `ViewerApp` no longer pulls the default development-map directory from `WoWMapConverter.Core.Services.DevelopmentMapAnalyzer`; it now uses shared `Pm4CoordinateService.DefaultDevelopmentMapDirectory`
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `47` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 26, 2026 after the cutover
+- Important boundary:
+	- this proves shared MD5 minimap translation ownership plus consumer compile validation
+	- `MdxViewer` still depends on `WoWMapConverter.Core` for broader MPQ, terrain, converter, and VLM subsystems; that wider cutover is still open
+	- no viewer runtime validation was run
+
+## Mar 26, 2026 - PM4 Linked-Position-Ref Summary Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the linked MPRL position-ref summary seam that was still being aggregated inside `WorldScene`.
+- Landed pieces:
+	- shared `Pm4LinkedPositionRefSummary` contract
+	- shared `Pm4PlacementMath.SummarizeLinkedPositionRefs(...)`
+	- focused regression coverage for mixed normal-or-terminator linked refs and terminator-only fallback behavior
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now maps local `MprlEntry` values into shared `Core.PM4` position-ref entries and delegates linked-ref summary aggregation to `Core.PM4`
+	- the viewer-local heading-range, floor-range, and circular-mean aggregation no longer owns that PM4 seam
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `31` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `45` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-linked-position-ref-summary-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this proves shared PM4 linked-position-ref summary ownership plus consumer compile validation
+	- no PM4 inspect or viewer runtime validation was run in this slice because analyzer or report output did not change
+	- this is not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Placement-Solution Consumer Hookup Landed
+
+- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now delegates PM4 placement-solution assembly to the already-landed `Core.PM4` placement-solution seam.
+- Landed pieces:
+	- the CK24 overlay path now calls shared `Pm4PlacementMath.ResolvePlacementSolution(...)` instead of resolving planar transform, world pivot, and world yaw correction as separate consumer-owned steps
+	- local per-piece consumer wrappers for those already-shared PM4 placement pieces no longer own that path
+- Current verified validation for this slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-placement-solution-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this slice reuses an already-tested `Core.PM4` placement-solution seam; no new `wow-viewer` library code changed
+	- the currently recorded `31` PM4-test and `45` total-test floor is the latest library-test proof
+	- this is consumer compile validation only, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Connector-Key Consumer Hookup Landed
+
+- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now delegates PM4 connector-key derivation to the already-landed `Core.PM4` connector-key seam.
+- Landed pieces:
+	- `BuildCk24ConnectorKeys()` now builds a shared `Pm4PlacementSolution` and delegates connector-key derivation to `Pm4PlacementMath.BuildConnectorKeys(...)`
+	- local viewer-owned connector-point conversion and quantization logic no longer owns that PM4 grouping input path
+- Current verified validation for this slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-connector-key-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this slice reuses an already-tested `Core.PM4` connector-key seam; no new `wow-viewer` library code changed
+	- the currently recorded `31` PM4-test and `45` total-test floor is the latest library-test proof
+	- this is consumer compile validation only, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Merge-Map Consumer Hookup Landed
+
+- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now delegates PM4 merged-group resolution to the already-landed `Core.PM4` merge-map seam.
+- Landed pieces:
+	- `RebuildPm4MergedObjectGroups()` now builds shared `Pm4ConnectorMergeCandidate` inputs and delegates canonical merge resolution to `Pm4PlacementMath.BuildMergedGroupMap(...)`
+	- local viewer-owned union-find and merge-heuristic logic no longer owns that PM4 grouping path
+- Current verified validation for this slice:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-merge-map-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this slice reuses an already-tested `Core.PM4` merge-map seam; no new `wow-viewer` library code changed
+	- the currently recorded `31` PM4-test and `45` total-test floor is the latest library-test proof
+	- this is consumer compile validation only, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Correlation Geometry-Input Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the next PM4-only correlation seam: geometry-input assembly for shared object-state construction.
+- Landed pieces:
+	- shared `Pm4GeometryLineSegment` contract
+	- shared `Pm4GeometryTriangle` contract
+	- shared `Pm4CorrelationGeometryInput` contract
+	- `Pm4CorrelationMath.BuildObjectStatesFromGeometry(...)`
+	- regression coverage for building shared PM4 correlation object states directly from PM4 line or triangle geometry plus a transform
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now maps PM4 overlay lines and triangles into shared PM4 geometry-input contracts and delegates object-state construction to `Core.PM4`
+	- local viewer-specific world-point flattening for PM4 correlation object-state assembly is no longer the owner of that seam
+- Current verified validation floor after this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `29` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `45` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-correlation-geometry-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- PM4-owned geometry, transforms, and shared object-state construction belong in `Core.PM4`
+	- WMO-facing correlation report payloads stay in WMO or consumer space and should not be moved into PM4 just because the report compares PM4 against WMO
+	- this proves shared PM4 geometry-input ownership plus consumer compile validation, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Correlation Object-State Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the next reusable correlation object-state seam for PM4 placement or report work.
+- Landed pieces:
+	- shared `Pm4CorrelationObjectDescriptor` contract
+	- shared `Pm4CorrelationObjectInput` contract
+	- shared `Pm4CorrelationObjectState` contract
+	- `Pm4CorrelationMath.BuildObjectStates(...)`
+	- public `Pm4CorrelationMath.BuildFootprintHull(...)`, `BuildTransformedFootprintHull(...)`, and `ComputeFootprintArea(...)`
+	- regression coverage for synthetic object-state bounds or footprint derivation, empty-geometry fallback, and transformed footprint-hull construction
+- Consumer follow-up now also landed:
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now builds shared correlation object inputs and consumes shared correlation states
+	- `BuildPm4WmoPlacementCorrelationReport(...)` now uses shared hull and metric helpers from `Core.PM4` instead of duplicating that scoring path locally
+- Current verified validation floor after this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `28` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `42` total tests
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -p:OutDir=i:/parp/parp-tools/gillijimproject_refactor/output/build-validation/mdxviewer-pm4-correlation-state-hookup/` passed on Mar 26, 2026
+- Important boundary:
+	- this proves shared object-state, hull, and scoring consumption plus consumer compile validation, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Correlation-Math Library Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the next reusable correlation-scoring seam for PM4 placement or report work.
+- Landed pieces:
+	- shared `Pm4CorrelationMetrics` contract
+	- shared `Pm4CorrelationCandidateScore` contract
+	- `Pm4CorrelationMath.EvaluateMetrics(...)`
+	- `Pm4CorrelationMath.CompareCandidateScores(...)`
+	- library-owned planar-gap, vertical-gap, footprint-distance, polygon-overlap, footprint-area-ratio, planar-overlap, and AABB-overlap helpers extracted from the current `WorldScene` correlation logic
+	- regression coverage for synthetic metric calculation and ranking precedence
+- Current verified validation floor after this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `25` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `39` total tests
+- Important boundary:
+	- no active-viewer consumer wiring changed in this slice
+	- this proves library-owned correlation metrics and ranking, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Connector-Group Merge Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the first connector-based group-merge seam for PM4 grouping work.
+- Landed pieces:
+	- shared `Pm4ObjectGroupKey` contract
+	- shared `Pm4ConnectorMergeCandidate` contract
+	- `Pm4PlacementMath.BuildMergedGroupMap(...)`
+	- library-owned connector-overlap, bounds-padding, and center-distance merge heuristics extracted from the current `WorldScene`
+	- regression coverage for neighbor-tile merge resolution and same-tile non-merge behavior
+- Current verified validation floor after this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `22` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `36` total tests
+- Important boundary:
+	- no active-viewer consumer wiring changed in this slice
+	- this proves library-owned merge heuristics, not viewer runtime PM4 closure
+
+## Mar 26, 2026 - PM4 Connector-Key Library Slice Landed
+
+- `wow-viewer/src/core/WowViewer.Core.PM4` now owns the first reusable connector-key extraction seam for PM4 grouping or correlation work.
+- Landed pieces:
+	- shared `Pm4ConnectorKey` contract
+	- `Pm4PlacementMath.BuildConnectorKeys(...)`
+	- library-owned conversion of `MSUR.MdosIndex` exterior vertices into quantized world-space connector keys through typed `Pm4PlacementSolution`
+	- dedupe and deterministic ordering of connector keys
+	- regression coverage for distinct sorted connector extraction and yaw-corrected connector placement
+- Current verified validation floor after this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `20` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `34` total tests
+- Important boundary:
+	- no active-viewer consumer wiring changed in this slice
+	- this is library-owned grouping or correlation groundwork, not viewer runtime PM4 signoff
+
 ## Mar 26, 2026 - wow-viewer Source-Of-Truth Reset
 
 - The current default rule for `wow-viewer` changed: new implementation work should treat `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` as the canonical owners, not `MdxViewer`.
@@ -15,11 +333,13 @@
 	- research-seeded PM4 reader and inspect surface
 	- working `pm4 inspect`, `pm4 audit`, `pm4 audit-directory`, `pm4 linkage`, `pm4 mscn`, `pm4 unknowns`, and `pm4 export-json`
 	- shared placement-contract and placement-math slices for axis detection, planar-transform resolution, world-yaw correction, world-space centroid, pivot rotation, corrected world-position conversion, typed placement solutions, and typed coordinate-mode resolution
+	- first reusable connector-key extraction seam for grouping or correlation work through typed placement solutions
+	- first connector-based group-merge seam for PM4 grouping work through typed merge candidates and merge-map resolution
 	- first narrow active-viewer consumer hookups for `ResolvePlanarTransform(...)`, `TryComputeWorldYawCorrectionRadians(...)`, and `ComputeSurfaceWorldCentroid(...)`
 - Current verified validation floor:
-	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `18` PM4 tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug` passed on Mar 26, 2026 with `22` PM4 tests
 	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter PlacementMath` passed on Mar 26, 2026 with `11` placement-focused tests
-	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `32` total tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 26, 2026 with `36` total tests
 - Boundaries that still matter:
 	- `MdxViewer` remains the runtime PM4 reference implementation
 	- shared-library and compile validation are not viewer runtime signoff

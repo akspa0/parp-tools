@@ -1,5 +1,5 @@
 using WoWMapConverter.Core.Services;
-using WoWMapConverter.Core.Dbc;
+using WowViewer.Core.IO.Dbc;
 
 using GillijimProject.WowFiles.Alpha;
 using static WoWMapConverter.Core.Services.AdtAreaIdPatcher;

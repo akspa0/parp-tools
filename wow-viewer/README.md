@@ -56,6 +56,29 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
 	- `ChunkedFileReader`
 	- `MapFileSummaryReader`
+- `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
+	- `Md5TranslateIndex`
+	- `Md5TranslateResolver`
+	- `MinimapService`
+- `src/core/WowViewer.Core.IO` now also contains the first shared archive-access contracts and DBC path helper:
+	- `IArchiveReader`
+	- `IArchiveCatalog`
+	- `IArchiveCatalogFactory`
+	- `DbClientFileReader`
+- `src/core/WowViewer.Core.IO` now also contains the first shared archive bootstrap and Alpha wrapper helpers:
+	- `ArchiveCatalogBootstrapper`
+	- `ArchiveCatalogBootstrapResult`
+	- `AlphaArchiveReader`
+	- `PkwareExplode`
+- `src/core/WowViewer.Core.IO` now also contains the concrete shared standard MPQ implementation used by the active consumer path:
+	- `MpqArchiveCatalog`
+	- `MpqArchiveCatalogFactory`
+- `src/core/WowViewer.Core.IO` now also contains the first narrow shared DBC-backed lookup slice:
+	- `DbcReader`
+	- `DbcHeader`
+	- `MapDirectoryLookup`
+	- `GroundEffectLookup`
+	- `AreaIdMapper`
 - `src/core/WowViewer.Core` now also contains the first cross-family file detection contracts:
 	- `WowFileKind`
 	- `WowFileDetection`
@@ -133,20 +156,75 @@ Current PM4 runtime-contract slice:
 	- first world-space yaw-application helper layer ported from `WorldScene`, keeping pivot rotation and corrected world-position conversion in shared PM4 math without pulling renderer-space mapping into the library
 	- first reusable `Pm4PlacementSolution` contract and resolver entry point, so future consumers can ask `Core.PM4` for one typed placement result instead of stitching together transform, pivot, and yaw pieces manually
 	- first typed coordinate-mode resolver, so future consumers can ask `Core.PM4` to score tile-local versus world-space interpretation with an explicit fallback contract instead of keeping that decision loop in `WorldScene`
+	- first reusable linked-position-ref summary contract and summary helper, so future consumers can summarize linked MPRL floor-range, heading-range, and circular-mean evidence in `Core.PM4` instead of leaving that aggregation in `WorldScene`
+	- first reusable `Pm4ConnectorKey` contract and connector-key builder, so future grouping or correlation work can derive quantized world-space connector keys from exterior vertices through typed placement solutions instead of leaving that derivation marooned in `WorldScene`
+	- first reusable connector-group merge contracts and merge-map builder, so future grouping work can resolve canonical merged object groups from connector overlap, bounds padding, and center distance in `Core.PM4` instead of leaving those heuristics marooned in `WorldScene`
+	- first reusable correlation-score contracts and correlation math helpers, so future placement or report work can score planar gaps, overlap ratios, footprint distance, and candidate ordering in `Core.PM4` instead of leaving those heuristics marooned in `WorldScene`
+	- first reusable correlation object-state contracts and object-state builder, so future placement or report work can summarize PM4 correlation objects, sampled footprint hulls, and empty-geometry fallback state in `Core.PM4` instead of leaving that ownership in `WorldScene`
+	- first reusable PM4 geometry-input contracts and geometry-input object-state builder, so future placement or report work can transform PM4 line or triangle geometry into shared correlation states in `Core.PM4` instead of leaving that world-point assembly in `WorldScene`
 - The current single-file inspect output also records the working research note that CK24 low-16 object values may be plausible `UniqueID` candidates, but this remains unverified until correlated against real placement data.
 
 Current PM4 shared-consumer slice:
 
 - `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` now references `wow-viewer/src/core/WowViewer.Core.PM4`.
 - `WorldScene` now delegates these narrow PM4 solver seams to shared `Core.PM4` through explicit adapters:
+	- shared `ResolvePlacementSolution(...)` consumption in the CK24 overlay path
 	- `ResolvePlanarTransform(...)`
 	- `TryComputeWorldYawCorrectionRadians(...)`
 	- `ComputeSurfaceWorldCentroid(...)`
-- 	- `ResolveCk24CoordinateMode(...)`
+	- `SummarizeLinkedPositionRefs(...)`
+	- `ResolveCk24CoordinateMode(...)`
+	- `BuildCk24ConnectorKeys()`
+	- `RebuildPm4MergedObjectGroups()`
+	- `BuildPm4CorrelationObjectStates()`
+	- shared correlation object-state, footprint-hull, and metric helpers in the PM4 or WMO correlation reporting path
 - Important boundary:
+	- PM4-owned geometry, transforms, and shared object-state construction now belong in `Core.PM4`
+	- WMO-facing correlation report payloads stay in WMO or consumer space rather than being re-homed into PM4
 	- renderer-space centroid and the broader PM4 placement or render path still remain in `WorldScene`
 	- this is a secondary compatibility seam only, not the source of truth for new PM4 implementation work
 	- this is build-validated solver sharing, not viewer runtime PM4 signoff
+
+Current shared-I/O consumer slice:
+
+- `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` now also references `wow-viewer/src/core/WowViewer.Core.IO`.
+- `MdxViewer` now consumes these shared non-PM4 helpers from `Core.IO` instead of `WoWMapConverter.Core.Services`:
+	- `Md5TranslateIndex`
+	- `Md5TranslateResolver`
+	- `MinimapService`
+- `MdxViewer` now also consumes these shared archive contracts from `Core.IO` instead of exposing `NativeMpqService` directly in its active standard-MPQ consumer path:
+	- `IArchiveReader`
+	- `IArchiveCatalog`
+	- `IArchiveCatalogFactory`
+	- `DbClientFileReader`
+- `MdxViewer` now also consumes these shared archive helpers from `Core.IO` instead of owning them locally or calling the old Alpha wrapper reader directly:
+	- `ArchiveCatalogBootstrapper`
+	- `ArchiveCatalogBootstrapResult`
+	- `AlphaArchiveReader`
+	- `PkwareExplode`
+- `MdxViewer` now also instantiates the concrete standard MPQ implementation from `Core.IO` instead of using an adapter over `WoWMapConverter.Core.Services.NativeMpqService`:
+	- `MpqArchiveCatalog`
+	- `MpqArchiveCatalogFactory`
+- `ViewerApp` now loads the optional MD5 minimap translation index through shared `Core.IO`.
+- `MinimapRenderer` and `MapGlbExporter` now use shared minimap path and translation helpers.
+- `MpqDataSource` and `MpqDBCProvider` now use shared archive-reader contracts for standard MPQ access.
+- `MpqDataSource` now also uses shared archive bootstrap and Alpha wrapper helpers.
+- the active bridge file `gillijimproject_refactor/src/MdxViewer/DataSources/NativeMpqArchiveCatalog.cs` is gone.
+- `gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core/WoWMapConverter.Core.csproj` now also references `wow-viewer/src/core/WowViewer.Core.IO`.
+- `WoWMapConverter.Core.VLM.VlmDatasetExporter` now uses shared archive interfaces plus shared DBC-backed lookup helpers instead of `NativeMpqService`, `MapDbcService`, and `GroundEffectService` in its active path.
+- `WoWMapConverter.Core.VLM.VlmDatasetExporter`, `WmoV14ToV17Converter`, and `WmoV14ToV17ExtendedConverter` now also use shared `AlphaArchiveReader` for Alpha per-asset MPQ reads.
+- `WoWMapConverter.Core.Converters.AlphaToLkConverter` now also uses shared `AreaIdMapper` for Alpha-to-LK area-ID mapping.
+- the dead duplicate old-repo helper layer behind that active VLM path has now been deleted from `WoWMapConverter.Core`, including the old local `DbcReader`, `NativeMpqService`, `Md5TranslateResolver`, `MapDbcService`, and `GroundEffectService` files.
+- the duplicate old-repo `WoWMapConverter.Core.Services.AlphaMpqReader` file is now also gone.
+- the old-repo `WoWMapConverter.Core.Dbc.AreaIdMapper`, dead `Services.AreaIdCrosswalk`, and the old embedded `area_crosswalk.csv` copy are now gone.
+- Important boundary:
+	- the active `MdxViewer` standard MPQ implementation now lives in `Core.IO`
+	- the active old-repo Alpha per-asset MPQ caller seam now also runs on shared `Core.IO` through `VlmDatasetExporter` and the WMO converters
+	- the active old-repo area-ID mapping seam now also runs on shared `Core.IO` through `AlphaToLkConverter`
+	- `MdxViewer` and `WoWMapConverter.Core` still depend on old-repo code for broader terrain, converter, VLM, and other non-migrated services
+	- the old archive or lookup helper layer used by the active VLM and area-mapping paths no longer exists in `WoWMapConverter.Core`
+	- the new shared DBC slice proves narrow lookup ownership, not full general DBC or DB2 format ownership
+	- this is build or test validation, not runtime viewer signoff
 
 Current PM4 linkage slice:
 
@@ -208,7 +286,7 @@ Current validation:
 
 - `dotnet build .\WowViewer.slnx -c Debug` passed on Mar 25, 2026 in this workspace scaffold.
 - `dotnet test .\WowViewer.slnx -c Debug` currently also covers the first shared WDT or ADT top-level summary slice in addition to PM4 and FourCC tests.
-- `dotnet test .\WowViewer.slnx -c Debug` also now covers the first shared cross-family detector slice, with `32` passing tests on Mar 26, 2026.
+- `dotnet test .\WowViewer.slnx -c Debug` also now covers the first shared cross-family detector slice, the shared archive-reader, concrete MPQ catalog, and shared DBC lookup slices, plus the PM4 connector-key, connector-group merge, correlation-math, correlation object-state, correlation geometry-input, and linked-position-ref summary regression slices, with `59` passing tests on Mar 26, 2026.
 
 Current Copilot continuity surface:
 
@@ -235,8 +313,12 @@ Current PM4 test slice:
 	- the current world-space surface centroid behavior in a synthetic tile-local centroid case
 	- the current world-space pivot rotation and corrected world-position conversion behavior in synthetic solver cases
 	- the current end-to-end placement-solution contract behavior in synthetic world-space resolver cases
+	- the current linked-position-ref summary behavior in synthetic mixed normal-or-terminator and terminator-only cases
+	- the current correlation-math metric and candidate-ranking behavior in synthetic overlap or same-tile precedence cases
+	- the current correlation object-state bounds, empty-geometry fallback, and transformed footprint-hull behavior in synthetic cases
+	- the current PM4 geometry-input object-state behavior in a synthetic transform case without viewer-specific world-point assembly
 	- the current MSCN relationship counts and raw-vs-swapped overlap signals for the fixed development PM4 directory
 	- the current unknowns-report signals for the fixed development PM4 directory
 - Validation command that passed on Mar 25, 2026:
 	- `dotnet test .\WowViewer.slnx -c Debug`
-	- current result as of Mar 26, 2026: `22` passing tests
+		- current result as of Mar 26, 2026: `31` passing PM4 tests

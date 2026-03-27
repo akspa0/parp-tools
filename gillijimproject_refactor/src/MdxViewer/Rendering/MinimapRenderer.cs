@@ -4,7 +4,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using SereniaBLPLib;
 using Silk.NET.OpenGL;
-using WoWMapConverter.Core.Services;
+using WowViewer.Core.IO.Files;
 
 namespace MdxViewer.Rendering;
 
