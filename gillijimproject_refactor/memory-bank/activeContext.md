@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Normal Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOVT`: a shared `MONR` normal semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupNormalSummary.cs` now owns the typed normal-summary contract for payload size, normal count, component ranges, length ranges, average length, and near-unit counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupNormalSummaryReader.cs` now reads `MONR` payload semantics from WMO group files as a narrow count-and-range seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MONR` semantic line for WMO group files that contain normal payloads
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupNormalSummaryReaderTests.cs` now covers a synthetic `MONR` payload with two unit-length normals and one shorter vector
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `99` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `68` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-normal-test.wmo` passed on Mar 27, 2026 and reported `MONR: payloadBytes=36 normals=3 rangeX=[0.000, 1.000] rangeY=[-1.000, 0.500] rangeZ=[0.000, 0.500] lengthRange=[0.866, 1.000] avgLength=0.955 nearUnit=2`
+- Important boundary:
+	- this proves shared `MONR` semantic summary for count, component ranges, and length ranges only
+	- this does not yet prove tangent-space ownership, generated-normal fallback logic, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Vertex Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOVI`: a shared `MOVT` vertex semantic-summary reader.

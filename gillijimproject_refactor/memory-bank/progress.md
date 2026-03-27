@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Normal Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MONR` normal semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupNormalSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupNormalSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MONR` semantic line when normal payloads are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupNormalSummaryReaderTests.cs` for synthetic component-range and near-unit coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `99` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `68` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-normal-test.wmo` passed on Mar 27, 2026 for a synthetic normal smoke case
+	- this is still semantic summary work, not tangent-space ownership or write support
+
 ### Mar 27, 2026 - Shared WMO Group Vertex Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MOVT` vertex semantic summary for WMO group files.

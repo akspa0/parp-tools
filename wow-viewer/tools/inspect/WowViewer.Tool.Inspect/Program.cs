@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.NormalCount > 0)
+		{
+			WmoGroupNormalSummary normalSummary = WmoGroupNormalSummaryReader.Read(input);
+			PrintWmoGroupNormalSummary(normalSummary);
+		}
 		if (summary.VertexCount > 0)
 		{
 			WmoGroupVertexSummary vertexSummary = WmoGroupVertexSummaryReader.Read(input);
@@ -737,6 +742,11 @@ static void PrintWmoGroupIndexSummary(WmoGroupIndexSummary summary)
 static void PrintWmoGroupVertexSummary(WmoGroupVertexSummary summary)
 {
 	Console.WriteLine($"MOVT: payloadBytes={summary.PayloadSizeBytes} vertices={summary.VertexCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoGroupNormalSummary(WmoGroupNormalSummary summary)
+{
+	Console.WriteLine($"MONR: payloadBytes={summary.PayloadSizeBytes} normals={summary.NormalCount} rangeX=[{summary.MinX:F3}, {summary.MaxX:F3}] rangeY=[{summary.MinY:F3}, {summary.MaxY:F3}] rangeZ=[{summary.MinZ:F3}, {summary.MaxZ:F3}] lengthRange=[{summary.MinLength:F3}, {summary.MaxLength:F3}] avgLength={summary.AverageLength:F3} nearUnit={summary.NearUnitCount}");
 }
 
 static void ShowUsage()
