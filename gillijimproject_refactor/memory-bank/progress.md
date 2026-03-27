@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Index Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MOVI` or `MOIN` index semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupIndexSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupIndexSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MOVI` or `MOIN` semantic line when index payloads are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupIndexSummaryReaderTests.cs` for synthetic `MOVI` and `MOIN` coverage including a degenerate-triangle case
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `97` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `66` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-index-test.wmo` passed on Mar 27, 2026 for a synthetic index smoke case
+	- this is still semantic summary work, not topology ownership or write support
+
 ### Mar 27, 2026 - Shared WMO Group Doodad-Ref Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MODR` doodad-ref semantic summary for WMO group files.

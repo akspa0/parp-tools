@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Index Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MODR`: a shared `MOVI` or `MOIN` index semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupIndexSummary.cs` now owns the typed index-summary contract for chunk id, payload size, index count, triangle count, distinct index count, index range, and degenerate-triangle count
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupIndexSummaryReader.cs` now reads either `MOVI` or `MOIN` payload semantics from WMO group files as a narrow count-level seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOVI` or `MOIN` semantic line for WMO group files that contain index payloads
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupIndexSummaryReaderTests.cs` now covers synthetic `MOVI` and `MOIN` payloads including a degenerate-triangle case
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `97` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `66` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-index-test.wmo` passed on Mar 27, 2026 and reported `MOVI: payloadBytes=12 indices=6 triangles=2 distinctIndices=4 indexRange=0-3 degenerateTriangles=1`
+- Important boundary:
+	- this proves shared `MOVI` or `MOIN` semantic summary for count, range, and degenerate-triangle coverage only
+	- this does not yet prove topology ownership, face-material alignment, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Doodad-Ref Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOCV`: a shared `MODR` doodad-ref semantic-summary reader.
