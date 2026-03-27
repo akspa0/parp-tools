@@ -67,6 +67,7 @@ Current shared-core foundation slice:
   - `WmoGroupBatchSummary`
   - `WmoGroupFaceMaterialSummary`
   - `WmoGroupUvSummary`
+  - `WmoGroupVertexColorSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -83,6 +84,7 @@ Current shared-core foundation slice:
   - `WmoGroupBatchSummaryReader`
   - `WmoGroupFaceMaterialSummaryReader`
   - `WmoGroupUvSummaryReader`
+  - `WmoGroupVertexColorSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -122,6 +124,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic WMO `MOBA` batch semantic-summary behavior including v17-style material ids and v16-style material-less batches
 	- it now also locks synthetic WMO `MOPY` face-material semantic-summary behavior including v17 two-byte and v16 four-byte entry layouts
 	- it now also locks synthetic WMO `MOTV` UV semantic-summary behavior including one primary and one extra UV set
+	- it now also locks synthetic WMO `MOCV` vertex-color semantic-summary behavior including one primary and one extra color set
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -141,6 +144,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared WMO `MOBA` batch semantic summary for batch-entry counts, material-id coverage, index coverage, and flagged-batch counts when a group file contains batches
 	- it now also reports a shared WMO `MOPY` face-material semantic summary for face counts, hidden-face counts, flag coverage, and material-id coverage when a group file contains face-material entries
 	- it now also reports a shared WMO `MOTV` UV semantic summary for primary UV ranges and extra-set counts when a group file contains UV data
+	- it now also reports a shared WMO `MOCV` vertex-color semantic summary for BGRA channel ranges, average alpha, and extra-set counts when a group file contains vertex colors
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

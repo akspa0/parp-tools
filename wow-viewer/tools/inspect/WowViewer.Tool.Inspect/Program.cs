@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.VertexColorCount > 0)
+		{
+			WmoGroupVertexColorSummary colorSummary = WmoGroupVertexColorSummaryReader.Read(input);
+			PrintWmoGroupVertexColorSummary(colorSummary);
+		}
 		if (summary.PrimaryUvCount > 0)
 		{
 			WmoGroupUvSummary uvSummary = WmoGroupUvSummaryReader.Read(input);
@@ -697,6 +702,11 @@ static void PrintWmoGroupFaceMaterialSummary(WmoGroupFaceMaterialSummary summary
 static void PrintWmoGroupUvSummary(WmoGroupUvSummary summary)
 {
 	Console.WriteLine($"MOTV: payloadBytes={summary.PrimaryPayloadSizeBytes} primaryUv={summary.PrimaryUvCount} rangeU=[{summary.MinU:F3}, {summary.MaxU:F3}] rangeV=[{summary.MinV:F3}, {summary.MaxV:F3}] extraUvSets={summary.AdditionalUvSetCount} totalExtraUv={summary.TotalAdditionalUvCount} maxExtraUv={summary.MaxAdditionalUvCount}");
+}
+
+static void PrintWmoGroupVertexColorSummary(WmoGroupVertexColorSummary summary)
+{
+	Console.WriteLine($"MOCV: payloadBytes={summary.PrimaryPayloadSizeBytes} primaryColors={summary.PrimaryColorCount} rangeR=[{summary.MinRed}, {summary.MaxRed}] rangeG=[{summary.MinGreen}, {summary.MaxGreen}] rangeB=[{summary.MinBlue}, {summary.MaxBlue}] rangeA=[{summary.MinAlpha}, {summary.MaxAlpha}] avgA={summary.AverageAlpha} extraColorSets={summary.AdditionalColorSetCount} totalExtraColors={summary.TotalAdditionalColorCount} maxExtraColors={summary.MaxAdditionalColorCount}");
 }
 
 static void ShowUsage()

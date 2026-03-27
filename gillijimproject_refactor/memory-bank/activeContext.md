@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Vertex-Color Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOTV`: a shared `MOCV` vertex-color semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupVertexColorSummary.cs` now owns the typed `MOCV` summary contract for primary color payload size, primary color count, BGRA-derived channel ranges, average alpha, and extra color-set counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupVertexColorSummaryReader.cs` now reads `MOCV` payload semantics from WMO group files while keeping the primary set separate from optional extra color sets
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOCV` semantic line for WMO group files that contain vertex colors
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupVertexColorSummaryReaderTests.cs` now covers a synthetic WMO group with one primary and one extra `MOCV` set
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `94` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `63` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-color-test.wmo` passed on Mar 27, 2026 and reported `MOCV: payloadBytes=8 primaryColors=2 rangeR=[30, 70] rangeG=[20, 60] rangeB=[10, 50] rangeA=[40, 80] avgA=60 extraColorSets=1 totalExtraColors=3 maxExtraColors=3`
+- Important boundary:
+	- this proves shared `MOCV` semantic summary for count, channel-range, and extra-set coverage only
+	- this does not yet prove runtime lighting interpretation, second color-set semantics, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group UV Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOPY`: a shared `MOTV` UV semantic-summary reader.

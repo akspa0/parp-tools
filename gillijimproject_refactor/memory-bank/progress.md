@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Vertex-Color Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MOCV` vertex-color semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupVertexColorSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupVertexColorSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MOCV` semantic line when vertex colors are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupVertexColorSummaryReaderTests.cs` for synthetic primary plus extra-set color coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `94` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `63` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-color-test.wmo` passed on Mar 27, 2026 for a synthetic vertex-color smoke case
+	- this is still semantic summary work, not runtime lighting interpretation or write support
+
 ### Mar 27, 2026 - Shared WMO Group UV Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MOTV` UV semantic summary for WMO group files.
