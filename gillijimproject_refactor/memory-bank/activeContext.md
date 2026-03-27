@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Root Doodad-Name Table Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO root seam after `MOTX`: a shared `MODN` doodad-name-table semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoDoodadNameTableSummary.cs` now owns the typed root `MODN` summary contract for payload size, name count, longest entry length, max string offset, distinct extension counts, and `.mdx` or `.m2` entry counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoDoodadNameTableSummaryReader.cs` now reads `MODN` payload semantics from root WMO files as a narrow string-table seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MODN` semantic line for root WMO files that contain doodad-name tables
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadNameTableSummaryReaderTests.cs` now covers a synthetic `MODN` table with mixed `.mdx` and `.m2` entries plus a nested path
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `105` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `74` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-modn-test.wmo` passed on Mar 27, 2026 and reported `MODN: payloadBytes=31 names=3 longestEntry=15 maxOffset=15 extensions=2 mdxEntries=2 m2Entries=1`
+- Important boundary:
+	- this proves shared `MODN` semantic summary for string-table counts and extension-shape signals only
+	- this does not yet prove offset resolution against `MODD`, path canonicalization, or any write path
+
 ## Mar 27, 2026 - Shared WMO Root Texture-Table Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO root seam after `MOMT`: a shared `MOTX` texture-table semantic-summary reader.

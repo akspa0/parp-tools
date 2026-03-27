@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Root Doodad-Name Table Semantic Summary Slice Landed
+
+- Added the next narrow WMO root seam in `wow-viewer`: shared `MODN` doodad-name-table semantic summary.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoDoodadNameTableSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoDoodadNameTableSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes a dedicated `MODN` semantic line when doodad-name tables are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoDoodadNameTableSummaryReaderTests.cs` for synthetic mixed `.mdx` or `.m2` `MODN` coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `105` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `74` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-modn-test.wmo` passed on Mar 27, 2026 for a synthetic root doodad-name smoke case
+	- this is still semantic summary work, not `MODD` linkage or write support
+
 ### Mar 27, 2026 - Shared WMO Root Texture-Table Semantic Summary Slice Landed
 
 - Added the next narrow WMO root seam in `wow-viewer`: shared `MOTX` texture-table semantic summary.

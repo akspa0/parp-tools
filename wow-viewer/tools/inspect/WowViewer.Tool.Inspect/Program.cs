@@ -160,6 +160,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoSummary summary = WmoSummaryReader.Read(input);
 		PrintWmoSummary(summary);
+		if (summary.DoodadNameTableCount > 0)
+		{
+			WmoDoodadNameTableSummary doodadNameSummary = WmoDoodadNameTableSummaryReader.Read(input);
+			PrintWmoDoodadNameTableSummary(doodadNameSummary);
+		}
 		if (summary.TextureNameCount > 0)
 		{
 			WmoTextureTableSummary textureSummary = WmoTextureTableSummaryReader.Read(input);
@@ -722,6 +727,11 @@ static void PrintWmoMaterialSummary(WmoMaterialSummary summary)
 static void PrintWmoTextureTableSummary(WmoTextureTableSummary summary)
 {
 	Console.WriteLine($"MOTX: payloadBytes={summary.PayloadSizeBytes} textures={summary.TextureCount} longestEntry={summary.LongestEntryLength} maxOffset={summary.MaxOffset} extensions={summary.DistinctExtensionCount} blpEntries={summary.BlpEntryCount}");
+}
+
+static void PrintWmoDoodadNameTableSummary(WmoDoodadNameTableSummary summary)
+{
+	Console.WriteLine($"MODN: payloadBytes={summary.PayloadSizeBytes} names={summary.NameCount} longestEntry={summary.LongestEntryLength} maxOffset={summary.MaxOffset} extensions={summary.DistinctExtensionCount} mdxEntries={summary.MdxEntryCount} m2Entries={summary.M2EntryCount}");
 }
 
 static void PrintWmoGroupSummary(WmoGroupSummary summary)
