@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Root Texture-Table Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO root seam after `MOMT`: a shared `MOTX` texture-table semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoTextureTableSummary.cs` now owns the typed root `MOTX` summary contract for payload size, texture count, longest entry length, max string offset, distinct extension counts, and `.blp` entry counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoTextureTableSummaryReader.cs` now reads `MOTX` payload semantics from root WMO files as a narrow table-summary seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOTX` semantic line for root WMO files that contain texture tables
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoTextureTableSummaryReaderTests.cs` now covers a synthetic `MOTX` table with mixed texture extensions and nested paths
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `104` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `73` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-motx-test.wmo` passed on Mar 27, 2026 and reported `MOTX: payloadBytes=33 textures=3 longestEntry=16 maxOffset=16 extensions=2 blpEntries=2`
+- Important boundary:
+	- this proves shared `MOTX` semantic summary for table counts and string-shape signals only
+	- this does not yet prove offset resolution against `MOMT`, path canonicalization, or any write path
+
 ## Mar 27, 2026 - Shared WMO Root Material Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next narrow WMO root seam after `MOGI`: a shared `MOMT` material semantic-summary reader.

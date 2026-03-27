@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Root Texture-Table Semantic Summary Slice Landed
+
+- Added the next narrow WMO root seam in `wow-viewer`: shared `MOTX` texture-table semantic summary.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoTextureTableSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoTextureTableSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so root-WMO output now includes a dedicated `MOTX` semantic line when texture tables are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoTextureTableSummaryReaderTests.cs` for synthetic mixed-extension `MOTX` coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `104` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `73` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-root-motx-test.wmo` passed on Mar 27, 2026 for a synthetic root texture-table smoke case
+	- this is still semantic summary work, not `MOMT` offset resolution or write support
+
 ### Mar 27, 2026 - Shared WMO Root Material Semantic Summary Slice Landed
 
 - Added the next narrow WMO root seam in `wow-viewer`: shared `MOMT` material semantic summary.
