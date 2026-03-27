@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.PrimaryUvCount > 0)
+		{
+			WmoGroupUvSummary uvSummary = WmoGroupUvSummaryReader.Read(input);
+			PrintWmoGroupUvSummary(uvSummary);
+		}
 		if (summary.FaceMaterialCount > 0)
 		{
 			WmoGroupFaceMaterialSummary faceSummary = WmoGroupFaceMaterialSummaryReader.Read(input);
@@ -687,6 +692,11 @@ static void PrintWmoGroupBatchSummary(WmoGroupBatchSummary summary)
 static void PrintWmoGroupFaceMaterialSummary(WmoGroupFaceMaterialSummary summary)
 {
 	Console.WriteLine($"MOPY: payloadBytes={summary.PayloadSizeBytes} entryBytes={summary.EntrySizeBytes} faces={summary.FaceCount} distinctMaterials={summary.DistinctMaterialIdCount} highestMaterialId={summary.HighestMaterialId} hiddenFaces={summary.HiddenFaceCount} flaggedFaces={summary.FlaggedFaceCount}");
+}
+
+static void PrintWmoGroupUvSummary(WmoGroupUvSummary summary)
+{
+	Console.WriteLine($"MOTV: payloadBytes={summary.PrimaryPayloadSizeBytes} primaryUv={summary.PrimaryUvCount} rangeU=[{summary.MinU:F3}, {summary.MaxU:F3}] rangeV=[{summary.MinV:F3}, {summary.MaxV:F3}] extraUvSets={summary.AdditionalUvSetCount} totalExtraUv={summary.TotalAdditionalUvCount} maxExtraUv={summary.MaxAdditionalUvCount}");
 }
 
 static void ShowUsage()

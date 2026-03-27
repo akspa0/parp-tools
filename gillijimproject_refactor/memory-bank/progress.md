@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group UV Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MOTV` UV semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupUvSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupUvSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MOTV` semantic line when UV data is present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupUvSummaryReaderTests.cs` for synthetic primary plus extra-set UV coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `93` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `62` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-uv-test.wmo` passed on Mar 27, 2026 for a synthetic UV smoke case
+	- this is still semantic summary work, not runtime UV selection or write support
+
 ### Mar 27, 2026 - Shared WMO Group Face-Material Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MOPY` face-material semantic summary for WMO group files.

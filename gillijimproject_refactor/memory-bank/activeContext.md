@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group UV Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOPY`: a shared `MOTV` UV semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupUvSummary.cs` now owns the typed `MOTV` UV-summary contract for primary UV payload size, primary UV count, primary U or V ranges, additional UV-set counts, and aggregate extra-UV counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupUvSummaryReader.cs` now reads `MOTV` payload semantics from WMO group files while keeping the primary set separate from optional extra UV sets
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOTV` semantic line for WMO group files that contain UV data
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupUvSummaryReaderTests.cs` now covers a synthetic WMO group with one primary and one extra `MOTV` set
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `93` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `62` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-uv-test.wmo` passed on Mar 27, 2026 and reported `MOTV: payloadBytes=24 primaryUv=3 rangeU=[-0.200, 0.800] rangeV=[0.200, 0.900] extraUvSets=1 totalExtraUv=2 maxExtraUv=2`
+- Important boundary:
+	- this proves shared `MOTV` UV semantic summary for counts and value ranges only
+	- this does not yet prove runtime UV-set selection, secondary-set semantics, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Face-Material Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOBA`: a shared `MOPY` face-material semantic-summary reader.
