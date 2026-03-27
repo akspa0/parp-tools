@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.DoodadRefCount > 0)
+		{
+			WmoGroupDoodadRefSummary doodadRefSummary = WmoGroupDoodadRefSummaryReader.Read(input);
+			PrintWmoGroupDoodadRefSummary(doodadRefSummary);
+		}
 		if (summary.VertexColorCount > 0)
 		{
 			WmoGroupVertexColorSummary colorSummary = WmoGroupVertexColorSummaryReader.Read(input);
@@ -707,6 +712,11 @@ static void PrintWmoGroupUvSummary(WmoGroupUvSummary summary)
 static void PrintWmoGroupVertexColorSummary(WmoGroupVertexColorSummary summary)
 {
 	Console.WriteLine($"MOCV: payloadBytes={summary.PrimaryPayloadSizeBytes} primaryColors={summary.PrimaryColorCount} rangeR=[{summary.MinRed}, {summary.MaxRed}] rangeG=[{summary.MinGreen}, {summary.MaxGreen}] rangeB=[{summary.MinBlue}, {summary.MaxBlue}] rangeA=[{summary.MinAlpha}, {summary.MaxAlpha}] avgA={summary.AverageAlpha} extraColorSets={summary.AdditionalColorSetCount} totalExtraColors={summary.TotalAdditionalColorCount} maxExtraColors={summary.MaxAdditionalColorCount}");
+}
+
+static void PrintWmoGroupDoodadRefSummary(WmoGroupDoodadRefSummary summary)
+{
+	Console.WriteLine($"MODR: payloadBytes={summary.PayloadSizeBytes} refs={summary.RefCount} distinctRefs={summary.DistinctRefCount} refRange={summary.MinRef}-{summary.MaxRef} duplicateRefs={summary.DuplicateRefCount}");
 }
 
 static void ShowUsage()

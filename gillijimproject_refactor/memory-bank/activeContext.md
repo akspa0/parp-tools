@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Doodad-Ref Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOCV`: a shared `MODR` doodad-ref semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupDoodadRefSummary.cs` now owns the typed `MODR` summary contract for ref counts, distinct ref counts, min or max ref range, and duplicate-ref counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupDoodadRefSummaryReader.cs` now reads `MODR` payload semantics from WMO group files as a narrow count-level seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MODR` semantic line for WMO group files that contain doodad refs
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupDoodadRefSummaryReaderTests.cs` now covers a synthetic `MODR` payload with duplicate refs
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `95` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `64` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-doodadref-test.wmo` passed on Mar 27, 2026 and reported `MODR: payloadBytes=8 refs=4 distinctRefs=3 refRange=3-9 duplicateRefs=1`
+- Important boundary:
+	- this proves shared `MODR` semantic summary for doodad-ref counts and ranges only
+	- this does not yet prove linkage back to root doodad tables, placement ownership, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Vertex-Color Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MOTV`: a shared `MOCV` vertex-color semantic-summary reader.
