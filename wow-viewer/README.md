@@ -70,6 +70,7 @@ Current shared-core foundation slice:
   - `WmoGroupVertexColorSummary`
   - `WmoGroupDoodadRefSummary`
   - `WmoGroupIndexSummary`
+  - `WmoGroupVertexSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -89,6 +90,7 @@ Current shared-core foundation slice:
   - `WmoGroupVertexColorSummaryReader`
   - `WmoGroupDoodadRefSummaryReader`
   - `WmoGroupIndexSummaryReader`
+  - `WmoGroupVertexSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -131,6 +133,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic WMO `MOCV` vertex-color semantic-summary behavior including one primary and one extra color set
 	- it now also locks synthetic WMO `MODR` doodad-ref semantic-summary behavior including duplicate-ref coverage
 	- it now also locks synthetic WMO `MOVI` and `MOIN` index semantic-summary behavior including a degenerate-triangle case
+	- it now also locks synthetic WMO `MOVT` vertex semantic-summary behavior including computed bounds
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -153,6 +156,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared WMO `MOCV` vertex-color semantic summary for BGRA channel ranges, average alpha, and extra-set counts when a group file contains vertex colors
 	- it now also reports a shared WMO `MODR` doodad-ref semantic summary for ref counts, distinct refs, duplicate refs, and ref range when a group file contains doodad refs
 	- it now also reports a shared WMO `MOVI` or `MOIN` index semantic summary for index counts, triangle counts, ranges, and degenerate-triangle counts when a group file contains indices
+	- it now also reports a shared WMO `MOVT` vertex semantic summary for vertex counts and computed bounds when a group file contains vertex payloads
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

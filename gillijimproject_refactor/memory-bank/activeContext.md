@@ -1,5 +1,21 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Vertex Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next deeper WMO group seam after `MOVI`: a shared `MOVT` vertex semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupVertexSummary.cs` now owns the typed vertex-summary contract for payload size, vertex count, and computed vertex bounds
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupVertexSummaryReader.cs` now reads `MOVT` payload semantics from WMO group files as a narrow count-and-bounds seam
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints a dedicated `MOVT` semantic line for WMO group files that contain vertex payloads
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupVertexSummaryReaderTests.cs` now covers a synthetic `MOVT` payload with mixed positive and negative coordinates
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `98` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `67` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-vertex-test.wmo` passed on Mar 27, 2026 and reported `MOVT: payloadBytes=36 vertices=3 boundsMin=(-4.00, -8.00, -6.00) boundsMax=(7.00, 5.00, 9.00)`
+- Important boundary:
+	- this proves shared `MOVT` semantic summary for count and computed bounds only
+	- this does not yet prove topology linkage, coordinate ownership beyond the payload, or any write path
+
 ## Mar 27, 2026 - Shared WMO Group Index Semantic Summary Slice Landed
 
 - `wow-viewer` now has the next deeper WMO group seam after `MODR`: a shared `MOVI` or `MOIN` index semantic-summary reader.

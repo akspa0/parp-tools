@@ -167,6 +167,11 @@ static void RunWmoInspect(string[] args)
 	{
 		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
 		PrintWmoGroupSummary(summary);
+		if (summary.VertexCount > 0)
+		{
+			WmoGroupVertexSummary vertexSummary = WmoGroupVertexSummaryReader.Read(input);
+			PrintWmoGroupVertexSummary(vertexSummary);
+		}
 		if (summary.IndexCount > 0)
 		{
 			WmoGroupIndexSummary indexSummary = WmoGroupIndexSummaryReader.Read(input);
@@ -727,6 +732,11 @@ static void PrintWmoGroupDoodadRefSummary(WmoGroupDoodadRefSummary summary)
 static void PrintWmoGroupIndexSummary(WmoGroupIndexSummary summary)
 {
 	Console.WriteLine($"{summary.ChunkId}: payloadBytes={summary.PayloadSizeBytes} indices={summary.IndexCount} triangles={summary.TriangleCount} distinctIndices={summary.DistinctIndexCount} indexRange={summary.MinIndex}-{summary.MaxIndex} degenerateTriangles={summary.DegenerateTriangleCount}");
+}
+
+static void PrintWmoGroupVertexSummary(WmoGroupVertexSummary summary)
+{
+	Console.WriteLine($"MOVT: payloadBytes={summary.PayloadSizeBytes} vertices={summary.VertexCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void ShowUsage()

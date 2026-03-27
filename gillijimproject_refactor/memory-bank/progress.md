@@ -1,5 +1,19 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Vertex Semantic Summary Slice Landed
+
+- Added the next deeper WMO seam in `wow-viewer`: shared `MOVT` vertex semantic summary for WMO group files.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupVertexSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupVertexSummaryReader`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group-file output now includes a dedicated `MOVT` semantic line when vertex payloads are present
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupVertexSummaryReaderTests.cs` for synthetic vertex-bound coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `98` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `67` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-vertex-test.wmo` passed on Mar 27, 2026 for a synthetic vertex smoke case
+	- this is still semantic summary work, not topology linkage or write support
+
 ### Mar 27, 2026 - Shared WMO Group Index Semantic Summary Slice Landed
 
 - Added the next deeper WMO seam in `wow-viewer`: shared `MOVI` or `MOIN` index semantic summary for WMO group files.
