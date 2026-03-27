@@ -1,5 +1,24 @@
 # Active Context
 
+## Mar 27, 2026 - Shared WMO Group Semantic Summary Slice Landed
+
+- `wow-viewer` now has the next narrow WMO follow-up seam after the root summary: a shared WMO group semantic-summary reader.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoGroupSummary.cs` now owns the typed WMO group semantic-summary contract for `MOGP` header fields, declared batch counts, geometry subchunk counts, optional extra UV-set count, doodad-ref count, and liquid presence
+	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoGroupSummaryReader.cs` now reads standard `MOGP` group files at count or presence level without pretending to own deep mesh reconstruction
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoChunkIds.cs` now also owns the shared readable WMO group subchunk ids used by the new seam
+	- `wow-viewer/src/core/WowViewer.Core.IO/Files/WowFileDetector.cs` now recognizes `MOGP`-first files as `WmoGroup` instead of treating them as unknown when `MVER` is absent
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now routes `wmo inspect` to either the root-WMO or group-WMO reader based on shared detection and prints a dedicated WMO group report for group files
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupSummaryReaderTests.cs` now covers synthetic `MVER + MOGP` and `MOGP`-first group files
+	- `wow-viewer/tests/WowViewer.Core.Tests/WowFileDetectorTests.cs` now locks `MOGP`-first detection as `WmoGroup`
+- Current verified validation for this slice:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `87` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `56` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-summary-test.wmo` passed on Mar 27, 2026 and reported `Header: bytes=68 ... Geometry: faces=3 vertices=2 indices=3 ... hasLiquid=False`
+- Important boundary:
+	- this proves shared WMO group semantic summary for `MOGP` headers and top-level geometry or metadata subchunk counts only
+	- this does not yet prove full group mesh decode, batch reconstruction, liquid payload ownership, or any write path
+
 ## Mar 27, 2026 - Shared ADT MCNK Semantic Summary And First WMO Root Summary Slices Landed
 
 - `wow-viewer` now has its first chunk-internal ADT semantic seam plus its first shared WMO root semantic-summary seam.

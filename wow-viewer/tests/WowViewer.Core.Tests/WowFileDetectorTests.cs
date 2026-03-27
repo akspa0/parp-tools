@@ -22,6 +22,21 @@ public sealed class WowFileDetectorTests
         Assert.Equal(18u, detection.Version);
     }
 
+    [Fact]
+    public void Detect_SyntheticWmoGroupBufferWithoutMver_ReturnsWmoGroup()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MOGP", new byte[0x80 + 8 + 12]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "synthetic_000.wmo");
+
+        Assert.Equal(WowFileKind.WmoGroup, detection.Kind);
+        Assert.Null(detection.Version);
+    }
+
     [Theory]
     [InlineData("development.wdt", WowFileKind.Wdt, 18u)]
     [InlineData("development_0_0.adt", WowFileKind.Adt, 18u)]

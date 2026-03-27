@@ -36,6 +36,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `WowViewer.Core/Wmo`
   - `WmoChunkIds`
   - `WmoSummary`
+  - `WmoGroupSummary`
 - `WowViewer.Core/Files`
   - `WowFileKind`
   - `WowFileDetection`
@@ -52,6 +53,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WdtSummaryReader`
 - `WowViewer.Core.IO/Wmo`
   - `WmoSummaryReader`
+  - `WmoGroupSummaryReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
   - `Md5TranslateIndex`
@@ -108,6 +110,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals is now real
 - shared WDT semantic summary for MPHD flags, MAIN occupancy, string-table counts, and top-level placement counts is now real
 - shared WMO root semantic summary for `MOHD`-reported counts, selected top-level entry counts, string-table counts, flags, and bounds is now real
+- shared WMO group semantic summary for `MOGP` headers and top-level geometry or metadata subchunk counts is now real
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
@@ -129,7 +132,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 
 1. deepen shared ADT root and split-file top-level summaries
 2. deepen shared ADT root and split-file summaries beyond the new semantic-summary layer into narrower chunk-internal signals only when a deep payload proof target is clear
-3. deepen shared WMO ownership from root semantic summary into the next narrow root-or-group seam only when a fixed validation target is available
+3. deepen shared WMO ownership from root and group semantic summary into the next narrow deep-payload seam only when a fixed validation target is available
 4. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints
 5. continue shrinking `MdxViewer` imports of `WoWMapConverter.Core` by moving other narrow non-MPQ helpers onto `Core` or `Core.IO`
 6. add first shared WMO or model-family top-level summary seam where converter or viewer compatibility still depends on old-repo ownership
@@ -161,14 +164,17 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `71` tests after adding the shared WDT semantic summary slice
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `77` tests after adding the shared ADT semantic summary slice
 - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `84` tests after adding the shared ADT `MCNK` semantic summary slice and the first shared WMO root semantic-summary slice
+- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `87` tests after adding the shared WMO group semantic-summary slice and `MOGP`-first detection coverage
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `37` tests after adding archive-backed `AreaIdMapper` coverage and shorthand-build normalization for archive-fed DBCD loads
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `46` tests after adding shared ADT semantic-summary coverage for root, `_tex0.adt`, and `_obj0.adt`
 - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `53` tests after adding shared ADT `MCNK` semantic-summary coverage plus a synthetic WMO root summary test
+- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `56` tests after adding synthetic WMO group summary coverage plus `MOGP`-first detector coverage
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and now reports the shared WDT semantic summary `wmoBased=False tiles=1496/4096 mainCellBytes=8 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now reports the shared ADT semantic summary `kind=AdtTex terrainChunks=256 textures=5 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0 hasMfbo=False hasMh2o=False hasMamp=True hasMtxf=False`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 27, 2026 and now reports the shared ADT semantic summary `kind=AdtObj terrainChunks=256 textures=0 doodadNames=6 wmoNames=12 doodadPlacements=10 wmoPlacements=15 hasMfbo=False hasMh2o=False hasMamp=False hasMtxf=False`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 27, 2026 and now also reports the shared ADT `MCNK` semantic summary `mcnk=256 zero=0 headerLike=0 distinctIndex=0 duplicateIndex=0 areaIds=0 holes=0 liquidFlags=0 mccvFlags=0 mcly=256 mcal=203 mcsh=174 mccv=0 mclq=0 mcrd=0 mcrw=0 totalLayers=775 maxLayers=4 multiLayerChunks=203`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-summary-test.wmo` passed on Mar 27, 2026 and now reports the first shared WMO root semantic summary `materials=2/2 groups=4/4 portals=1 lights=3 textures=2 doodadNames=5/5 doodadPlacements=6/6 doodadSets=2/2 flags=0x00001234`
+- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-summary-test.wmo` passed on Mar 27, 2026 and now reports the first shared WMO group semantic summary `Header: bytes=68 ... Geometry: faces=3 vertices=2 indices=3 ... hasLiquid=False`
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 26, 2026
 - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- detect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt` passed on Mar 26, 2026

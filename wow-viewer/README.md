@@ -61,6 +61,7 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core/Wmo` now contains the first shared WMO root-summary contracts:
   - `WmoChunkIds`
   - `WmoSummary`
+  - `WmoGroupSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -71,6 +72,7 @@ Current shared-core foundation slice:
   - `WdtSummaryReader`
 - `src/core/WowViewer.Core.IO/Wmo` now contains the first shared WMO root-summary reader:
   - `WmoSummaryReader`
+  - `WmoGroupSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -105,6 +107,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks a synthetic WMO root semantic-summary case
+	- it now also locks synthetic WMO group semantic-summary behavior for both `MVER + MOGP` and `MOGP`-first files, plus `MOGP`-first detector coverage
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -119,6 +122,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared WDT semantic summary for MPHD WMO-based flags, MAIN tile occupancy, string-table counts, and top-level MDDF or MODF placement counts
 	- it now also reports a first shared WMO root semantic summary for `MOHD`-reported counts, top-level entry counts, string-table counts, flags, and bounds
+	- it now also reports a first shared WMO group semantic summary for `MOGP` header fields, geometry subchunk counts, optional extra UV-set count, doodad-ref count, and liquid presence
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

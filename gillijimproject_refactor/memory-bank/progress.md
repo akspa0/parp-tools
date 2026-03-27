@@ -1,5 +1,21 @@
 # Progress
 
+### Mar 27, 2026 - Shared WMO Group Semantic Summary Slice Landed
+
+- Added the next narrow WMO follow-up seam in `wow-viewer`: shared `MOGP` group semantic summary.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupSummaryReader`
+	- expanded shared `WmoChunkIds` to cover group subchunk ids used by the summary seam
+	- updated shared `WowFileDetector` so `MOGP`-first files classify as `WmoGroup`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so it prints either a root-WMO or group-WMO report through shared detection
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoGroupSummaryReaderTests.cs` and an additional `WowFileDetectorTests` case for `MOGP`-first detection
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `87` passing tests
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug` passed on Mar 27, 2026 with `56` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/output/synthetic-wmo-group-summary-test.wmo` passed on Mar 27, 2026 for a synthetic group-file smoke case
+	- this is still summary work, not deep WMO group parsing or write support
+
 ### Mar 27, 2026 - Shared ADT MCNK Semantic Summary And First WMO Root Summary Slices Landed
 
 - Added the next narrow ADT chunk-internal semantic-summary layer in `wow-viewer` and the first shared WMO root semantic-summary seam.

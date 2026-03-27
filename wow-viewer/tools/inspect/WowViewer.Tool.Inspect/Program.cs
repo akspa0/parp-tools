@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+using System.Text.Json;
+using WowViewer.Core.Files;
+using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
 using WowViewer.Core.Maps;
@@ -153,8 +155,23 @@ static void RunWmoInspect(string[] args)
 		return;
 	}
 
-	WmoSummary summary = WmoSummaryReader.Read(input);
-	PrintWmoSummary(summary);
+	WowFileDetection detection = WowFileDetector.Detect(input);
+	if (detection.Kind == WowFileKind.Wmo)
+	{
+		WmoSummary summary = WmoSummaryReader.Read(input);
+		PrintWmoSummary(summary);
+		return;
+	}
+
+	if (detection.Kind == WowFileKind.WmoGroup)
+	{
+		WmoGroupSummary summary = WmoGroupSummaryReader.Read(input);
+		PrintWmoGroupSummary(summary);
+		return;
+	}
+
+	Console.Error.WriteLine($"Error: expected WMO root or group file, but detected {detection.Kind}.");
+	Environment.ExitCode = 1;
 }
 
 static void RunPm4Inspect(string[] args)
@@ -629,6 +646,16 @@ static void PrintWmoSummary(WmoSummary summary)
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
 	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} flags=0x{summary.Flags:X8}");
+	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoGroupSummary(WmoGroupSummary summary)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect WMO group report");
+	Console.WriteLine($"Input: {summary.SourcePath}");
+	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
+	Console.WriteLine($"Header: bytes={summary.HeaderSizeBytes} nameOff={summary.NameOffset} descOff={summary.DescriptiveNameOffset} flags=0x{summary.Flags:X8} portals={summary.PortalCount}@{summary.PortalStart} liquid={summary.GroupLiquid}");
+	Console.WriteLine($"Geometry: faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} primaryUv={summary.PrimaryUvCount} extraUvSets={summary.AdditionalUvSetCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} vertexColors={summary.VertexColorCount} doodadRefs={summary.DoodadRefCount} hasLiquid={summary.HasLiquid}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
 }
 

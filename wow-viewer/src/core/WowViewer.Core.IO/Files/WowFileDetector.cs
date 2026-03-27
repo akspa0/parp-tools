@@ -56,6 +56,12 @@ public static class WowFileDetector
             if (MatchesAscii(signature, "M3DT") || MatchesAscii(signature, "33DM"))
                 return new WowFileDetection(sourcePath, WowFileKind.M3, null);
 
+            if (FourCC.FromFileBytes(signature) == Mogp)
+            {
+                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+                return Detect(sourcePath, chunks, version: null);
+            }
+
             if (FourCC.FromFileBytes(signature) == MapChunkIds.Mver)
             {
                 IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
@@ -84,7 +90,13 @@ public static class WowFileDetector
         if (fileName.EndsWith("_obj0.adt", StringComparison.OrdinalIgnoreCase))
             return new WowFileDetection(sourcePath, WowFileKind.AdtObj, version);
 
-        if (chunks.Count == 0 || chunks[0].Header.Id != MapChunkIds.Mver)
+        if (chunks.Count == 0)
+            return new WowFileDetection(sourcePath, WowFileKind.Unknown, version);
+
+        if (chunks[0].Header.Id == Mogp)
+            return new WowFileDetection(sourcePath, WowFileKind.WmoGroup, version);
+
+        if (chunks[0].Header.Id != MapChunkIds.Mver)
             return new WowFileDetection(sourcePath, WowFileKind.Unknown, version);
 
         FourCC? secondChunkId = chunks.Count > 1 ? chunks[1].Header.Id : null;
