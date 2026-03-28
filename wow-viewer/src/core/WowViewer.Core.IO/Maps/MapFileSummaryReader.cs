@@ -47,6 +47,7 @@ public static class MapFileSummaryReader
             WowFileKind.Adt => MapFileKind.Adt,
             WowFileKind.AdtTex => MapFileKind.AdtTex,
             WowFileKind.AdtObj => MapFileKind.AdtObj,
+            WowFileKind.AdtLod => MapFileKind.AdtLod,
             _ => MapFileKind.Unknown,
         };
     }

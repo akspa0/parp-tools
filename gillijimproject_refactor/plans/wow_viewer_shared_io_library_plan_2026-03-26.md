@@ -1,5 +1,20 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared `ADT` Split-Family Routing And Direct `MCAL` Decode Summary Slice
+
+- The first terrain-focused shared-I/O tranche under the full-ownership reset is now landed.
+- Landed pieces:
+  - `WowViewer.Core.Maps` now includes shared `AdtTileFamily`, `AdtTextureLayerDescriptor`, `AdtMcalDecodeProfile`, `AdtMcalAlphaEncoding`, `AdtMcalDecodedLayer`, and `AdtMcalSummary`
+  - `WowViewer.Core.IO.Maps.AdtTileFamilyResolver` now resolves root / `_tex0` / `_obj0` / `_lod` routing from any local ADT-family file path
+  - `WowViewer.Core.IO.Maps.AdtMcalDecoder` now owns the first shared direct-layer `MCAL` decode path for LK strict and Cataclysm 4.0 direct payload reads
+  - `WowViewer.Core.IO.Maps.AdtMcalSummaryReader` now aggregates `MCAL` decode signals across root or `_tex0` `MCNK` payloads
+  - `WowViewer.Tool.Inspect map inspect` now prints both split-family routing and `MCAL` decode summary output
+  - `_lod.adt` is now preserved through `MapFileKind.AdtLod`
+- Current proof level:
+  - shared direct payload decode and routing only
+  - not yet a full shared port of Cataclysm `TerrainBlend` residual-alpha synthesis or neighbor-chunk stitching
+  - not yet a shared write path or a consumer cutover away from `StandardTerrainAdapter`
+
 This document locks the current non-PM4 shared-format direction for `wow-viewer` after the first shared map-summary and cross-family detection slices landed on Mar 26, 2026.
 
 ## Mar 28, 2026 - Full Ownership Reset

@@ -50,6 +50,23 @@ public sealed class MapFileSummaryReaderTests
     }
 
     [Fact]
+    public void Read_AdtLodBuffer_ProducesExpectedSummary()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MLHD", new byte[32]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic_0_0_lod.adt");
+
+        Assert.Equal(MapFileKind.AdtLod, summary.Kind);
+        Assert.Equal(18u, summary.Version);
+        Assert.Equal(2, summary.ChunkCount);
+    }
+
+    [Fact]
     public void Read_DevelopmentWdt_ProducesExpectedTopLevelSignals()
     {
         MapFileSummary summary = MapFileSummaryReader.Read(MapTestPaths.DevelopmentWdtPath);

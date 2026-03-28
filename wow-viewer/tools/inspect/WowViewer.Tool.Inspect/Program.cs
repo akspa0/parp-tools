@@ -1057,13 +1057,24 @@ static void PrintMapSummary(MapFileSummary summary)
 		WdtSummary wdtSummary = WdtSummaryReader.Read(stream, summary);
 		Console.WriteLine($"WDT semantics: wmoBased={wdtSummary.IsWmoBased} tiles={wdtSummary.TilesWithData}/{wdtSummary.TotalTiles} mainCellBytes={wdtSummary.MainCellSizeBytes} doodadNames={wdtSummary.DoodadNameCount} wmoNames={wdtSummary.WorldModelNameCount} doodadPlacements={wdtSummary.DoodadPlacementCount} wmoPlacements={wdtSummary.WorldModelPlacementCount}");
 	}
-	else if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj)
+	else if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj or MapFileKind.AdtLod)
+	{
+		AdtTileFamily family = AdtTileFamilyResolver.Resolve(summary.SourcePath);
+		Console.WriteLine($"ADT family: root={(family.HasRoot ? "present" : "missing")} tex0={(family.HasTex0 ? "present" : "missing")} obj0={(family.HasObj0 ? "present" : "missing")} lod={(family.HasLod ? "present" : "missing")} textureSource={FormatMapFileKind(family.TextureSourceKind)} placementSource={FormatMapFileKind(family.PlacementSourceKind)}");
+	}
+
+	if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj)
 	{
 		using FileStream stream = File.OpenRead(summary.SourcePath);
 		AdtSummary adtSummary = AdtSummaryReader.Read(stream, summary);
 		Console.WriteLine($"ADT semantics: kind={adtSummary.Kind} terrainChunks={adtSummary.TerrainChunkCount} textures={adtSummary.TextureNameCount} doodadNames={adtSummary.ModelNameCount} wmoNames={adtSummary.WorldModelNameCount} doodadPlacements={adtSummary.ModelPlacementCount} wmoPlacements={adtSummary.WorldModelPlacementCount} hasMfbo={adtSummary.HasFlightBounds} hasMh2o={adtSummary.HasWater} hasMamp={adtSummary.HasTextureParams} hasMtxf={adtSummary.HasTextureFlags}");
 		AdtMcnkSummary mcnkSummary = AdtMcnkSummaryReader.Read(stream, summary);
 		Console.WriteLine($"ADT MCNK semantics: mcnk={mcnkSummary.McnkCount} zero={mcnkSummary.ZeroLengthMcnkCount} headerLike={mcnkSummary.HeaderLikeMcnkCount} distinctIndex={mcnkSummary.DistinctIndexCount} duplicateIndex={mcnkSummary.DuplicateIndexCount} areaIds={mcnkSummary.DistinctAreaIdCount} holes={mcnkSummary.ChunksWithHoles} liquidFlags={mcnkSummary.ChunksWithLiquidFlags} mccvFlags={mcnkSummary.ChunksWithMccvFlag} mcvt={mcnkSummary.ChunksWithMcvt} mcnr={mcnkSummary.ChunksWithMcnr} mcly={mcnkSummary.ChunksWithMcly} mcal={mcnkSummary.ChunksWithMcal} mcsh={mcnkSummary.ChunksWithMcsh} mccv={mcnkSummary.ChunksWithMccv} mclq={mcnkSummary.ChunksWithMclq} mcrd={mcnkSummary.ChunksWithMcrd} mcrw={mcnkSummary.ChunksWithMcrw} totalLayers={mcnkSummary.TotalLayerCount} maxLayers={mcnkSummary.MaxLayerCount} multiLayerChunks={mcnkSummary.ChunksWithMultipleLayers}");
+		if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex)
+		{
+			AdtMcalSummary mcalSummary = AdtMcalSummaryReader.Read(stream, summary);
+			Console.WriteLine($"ADT MCAL semantics: profile={mcalSummary.DecodeProfile} mcnkWithLayers={mcalSummary.McnkWithLayerTableCount} overlayLayers={mcalSummary.OverlayLayerCount} decodedLayers={mcalSummary.DecodedLayerCount} missingPayloadLayers={mcalSummary.MissingPayloadLayerCount} decodeFailures={mcalSummary.DecodeFailureCount} compressed={mcalSummary.CompressedLayerCount} bigAlpha={mcalSummary.BigAlphaLayerCount} bigAlphaFixed={mcalSummary.BigAlphaFixedLayerCount} packed4={mcalSummary.PackedLayerCount}");
+		}
 	}
 	Console.WriteLine($"Top-level chunks: {summary.ChunkCount}");
 	string chunkOrder = string.Join(", ", summary.Chunks.Take(16).Select(chunk => chunk.Id.ToString()));
@@ -1096,6 +1107,11 @@ static void PrintWmoSummary(WmoSummary summary)
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
 	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} flags=0x{summary.Flags:X8}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
+}
+
+static string FormatMapFileKind(MapFileKind? kind)
+{
+	return kind?.ToString() ?? "n/a";
 }
 
 static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)

@@ -87,6 +87,22 @@ public sealed class WowFileDetectorTests
         Assert.Equal(expectedVersion, detection.Version);
     }
 
+    [Fact]
+    public void Detect_SyntheticAdtLodBuffer_ReturnsAdtLod()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MLHD", new byte[32]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "synthetic_0_0_lod.adt");
+
+        Assert.Equal(WowFileKind.AdtLod, detection.Kind);
+        Assert.Equal(18u, detection.Version);
+    }
+
     private static byte[] CreateChunk(string id, byte[] payload)
     {
         return MapFileSummaryReaderTestsAccessor.CreateChunk(id, payload);

@@ -1,5 +1,32 @@
 # Progress
 
+### Mar 28, 2026 - Shared `ADT` Split-Family Routing And Direct `MCAL` Decode Summary Seams Landed
+
+- Added the first terrain-focused shared ownership slice in `wow-viewer` under the broader full-format-ownership reset.
+- Landed pieces:
+	- added `WowViewer.Core.Maps.AdtTileFamily`
+	- added `WowViewer.Core.Maps.AdtTextureLayerDescriptor`
+	- added `WowViewer.Core.Maps.AdtMcalDecodeProfile`
+	- added `WowViewer.Core.Maps.AdtMcalAlphaEncoding`
+	- added `WowViewer.Core.Maps.AdtMcalDecodedLayer`
+	- added `WowViewer.Core.Maps.AdtMcalSummary`
+	- added `WowViewer.Core.IO.Maps.AdtTileFamilyResolver`
+	- added `WowViewer.Core.IO.Maps.AdtMcalDecoder`
+	- added `WowViewer.Core.IO.Maps.AdtMcalSummaryReader`
+	- updated `WowViewer.Tool.Inspect map inspect` to print shared ADT family routing and `MCAL` decode summary lines
+	- updated `MapFileKind` plus `MapFileSummaryReader` so `_lod.adt` is preserved as `AdtLod`
+	- added focused synthetic and real-data coverage in:
+		- `AdtTileFamilyResolverTests`
+		- `AdtMcalDecoderTests`
+		- `AdtMcalSummaryReaderTests`
+		- plus adjacent map-summary and detector assertions
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtMcalDecoderTests|AdtMcalSummaryReaderTests|AdtTileFamilyResolverTests|AdtSummaryReaderTests|AdtMcnkSummaryReaderTests|MapFileSummaryReaderTests|WowFileDetectorTests"` passed on Mar 28, 2026 with `35` passing tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `164` passing tests
+	- real-data `map inspect` on `test_data/development/World/Maps/development/development_0_0_tex0.adt` passed and reported `overlayLayers=519`, `decodedLayers=519`, `missingPayloadLayers=0`, `compressed=515`, and `bigAlpha=4`
+	- this is still not runtime `MdxViewer` terrain signoff and not a full shared port of Cataclysm residual-alpha synthesis or chunk-edge stitching
+
 ### Mar 28, 2026 - Full Format Ownership Program Reset Captured
 
 - The migration target for `wow-viewer` was clarified beyond the earlier narrow summary-seam framing.

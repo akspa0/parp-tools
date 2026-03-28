@@ -58,6 +58,12 @@ Current shared-core foundation slice:
   - `AdtSummary`
   - `AdtChunkIds`
   - `AdtMcnkSummary`
+	- `AdtTileFamily`
+	- `AdtTextureLayerDescriptor`
+	- `AdtMcalDecodeProfile`
+	- `AdtMcalAlphaEncoding`
+	- `AdtMcalDecodedLayer`
+	- `AdtMcalSummary`
   - `WdtSummary`
 - `src/core/WowViewer.Core/Wmo` now contains the first shared WMO root-summary contracts:
   - `WmoChunkIds`
@@ -119,6 +125,9 @@ Current shared-core foundation slice:
   - `MapFileSummaryReader`
   - `AdtSummaryReader`
   - `AdtMcnkSummaryReader`
+	- `AdtTileFamilyResolver`
+	- `AdtMcalDecoder`
+	- `AdtMcalSummaryReader`
   - `WdtSummaryReader`
 - `src/core/WowViewer.Core.IO/Wmo` now contains the first shared WMO root-summary reader:
   - `WmoSummaryReader`

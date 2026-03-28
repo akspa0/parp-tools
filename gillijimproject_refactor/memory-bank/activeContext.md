@@ -1,5 +1,27 @@
 # Active Context
 
+## Mar 28, 2026 - Shared `ADT` Split-Family Routing And Direct `MCAL` Decode Summary Seams Landed In `wow-viewer`
+
+- The first terrain-focused shared-I/O tranche under the full-format-ownership reset is now landed in `wow-viewer` core/core.io.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Maps/` now also owns shared `AdtTileFamily`, `AdtTextureLayerDescriptor`, `AdtMcalDecodeProfile`, `AdtMcalAlphaEncoding`, `AdtMcalDecodedLayer`, and `AdtMcalSummary`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtTileFamilyResolver.cs` now resolves root / `_tex0` / `_obj0` / `_lod` companion paths from any local ADT-family input and exposes preferred texture and placement owners
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtMcalDecoder.cs` now owns a first shared direct-layer `MCAL` decode seam for LK strict and Cataclysm 4.0-style direct payload reads, including compressed alpha, packed 4-bit alpha, direct big-alpha, and the current fixed `63x63 -> 64x64` big-alpha expansion path
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtMcalSummaryReader.cs` now aggregates per-file `MCAL` decode signals across root `ADT` and `_tex0.adt` `MCNK` payloads
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `ADT family:` routing plus `ADT MCAL semantics:` lines during `map inspect`
+	- `MapFileKind` and `MapFileSummaryReader` now carry `_lod.adt` through as `AdtLod` instead of dropping it back to `Unknown`
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtMcalDecoderTests|AdtMcalSummaryReaderTests|AdtTileFamilyResolverTests|AdtSummaryReaderTests|AdtMcnkSummaryReaderTests|MapFileSummaryReaderTests|WowFileDetectorTests"` passed on Mar 28, 2026 with `35` targeted passing tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `164` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_tex0.adt` passed on Mar 28, 2026 and reported:
+		- `ADT family: root=present tex0=present obj0=present lod=missing textureSource=AdtTex placementSource=AdtObj`
+		- `ADT MCAL semantics: profile=Cataclysm400 ... overlayLayers=519 decodedLayers=519 missingPayloadLayers=0 decodeFailures=0 compressed=515 bigAlpha=4 bigAlphaFixed=0 packed4=0`
+- Important boundary:
+	- this is direct split-family routing plus direct `MCAL` payload decode ownership only
+	- it does not yet port the full Cataclysm `TerrainBlend` runtime behavior from `StandardTerrainAdapter`, especially residual-alpha synthesis and neighbor-chunk stitching semantics as first-class shared-core services
+	- it does not replace the active `MdxViewer` terrain runtime or claim full terrain visual parity by itself
+
 ## Mar 28, 2026 - wow-viewer Full Format Ownership Reset
 
 - User direction is now explicit: `wow-viewer` is expected to become the first-party owner of every active `MdxViewer` format family, fully, not just through detector or summary seams.

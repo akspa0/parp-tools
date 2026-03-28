@@ -7,4 +7,5 @@ public enum MapFileKind
     Adt,
     AdtTex,
     AdtObj,
+    AdtLod,
 }
