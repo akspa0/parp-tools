@@ -12,12 +12,16 @@ public sealed class MdxSummary
         uint? blendTime,
         Vector3? boundsMin,
         Vector3? boundsMax,
+        IReadOnlyList<MdxTextureSummary> textures,
+        IReadOnlyList<MdxMaterialSummary> materials,
         IReadOnlyList<MdxChunkSummary> chunks,
         int knownChunkCount,
         int unknownChunkCount)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
+        ArgumentNullException.ThrowIfNull(textures);
+        ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(chunks);
         ArgumentOutOfRangeException.ThrowIfNegative(knownChunkCount);
         ArgumentOutOfRangeException.ThrowIfNegative(unknownChunkCount);
@@ -29,6 +33,12 @@ public sealed class MdxSummary
         BlendTime = blendTime;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
+        Textures = textures;
+        TextureCount = textures.Count;
+        ReplaceableTextureCount = textures.Count(static texture => texture.IsReplaceable);
+        Materials = materials;
+        MaterialCount = materials.Count;
+        MaterialLayerCount = materials.Sum(static material => material.LayerCount);
         Chunks = chunks;
         ChunkCount = chunks.Count;
         KnownChunkCount = knownChunkCount;
@@ -48,6 +58,18 @@ public sealed class MdxSummary
     public Vector3? BoundsMin { get; }
 
     public Vector3? BoundsMax { get; }
+
+    public IReadOnlyList<MdxTextureSummary> Textures { get; }
+
+    public int TextureCount { get; }
+
+    public int ReplaceableTextureCount { get; }
+
+    public IReadOnlyList<MdxMaterialSummary> Materials { get; }
+
+    public int MaterialCount { get; }
+
+    public int MaterialLayerCount { get; }
 
     public IReadOnlyList<MdxChunkSummary> Chunks { get; }
 

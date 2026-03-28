@@ -1392,14 +1392,51 @@ static void PrintMdxSummary(MdxSummary summary)
 	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
 	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
+	for (int index = 0; index < summary.Textures.Count; index++)
+		PrintMdxTextureSummary(summary.Textures[index]);
+	for (int index = 0; index < summary.Materials.Count; index++)
+		PrintMdxMaterialSummary(summary.Materials[index]);
 }
 
 static void PrintMdxChunkSummary(int index, MdxChunkSummary chunk)
 {
 	Console.WriteLine($"CHUNK[{index}]: id={chunk.Id} payloadBytes={chunk.PayloadSizeBytes} headerOffset={chunk.HeaderOffset} dataOffset={chunk.DataOffset} known={chunk.IsKnownChunk}");
+}
+
+static void PrintMdxTextureSummary(MdxTextureSummary texture)
+{
+	string path = string.IsNullOrWhiteSpace(texture.Path) ? "n/a" : texture.Path;
+	Console.WriteLine($"TEXS[{texture.Index}]: replaceableId={texture.ReplaceableId} flags=0x{texture.Flags:X8} path={path}");
+}
+
+static void PrintMdxMaterialSummary(MdxMaterialSummary material)
+{
+	Console.WriteLine($"MTLS[{material.Index}]: priorityPlane={material.PriorityPlane} layers={material.LayerCount}");
+	for (int layerIndex = 0; layerIndex < material.Layers.Count; layerIndex++)
+		PrintMdxMaterialLayerSummary(material.Index, material.Layers[layerIndex]);
+}
+
+static void PrintMdxMaterialLayerSummary(int materialIndex, MdxMaterialLayerSummary layer)
+{
+	Console.WriteLine($"MTLS[{materialIndex}].LAYER[{layer.Index}]: blendMode={FormatMdxBlendMode(layer.BlendMode)} flags=0x{layer.Flags:X8} textureId={layer.TextureId} transformId={layer.TransformId} coordId={layer.CoordId} staticAlpha={layer.StaticAlpha:F3}");
+}
+
+static string FormatMdxBlendMode(uint blendMode)
+{
+	return blendMode switch
+	{
+		0 => "Load(0)",
+		1 => "Transparent(1)",
+		2 => "Blend(2)",
+		3 => "Add(3)",
+		4 => "AddAlpha(4)",
+		5 => "Modulate(5)",
+		6 => "Modulate2X(6)",
+		_ => blendMode.ToString()
+	};
 }
 
 static void ShowUsage()

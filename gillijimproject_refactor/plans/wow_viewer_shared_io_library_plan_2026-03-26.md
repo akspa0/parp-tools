@@ -2,6 +2,13 @@
 
 This document locks the current non-PM4 shared-format direction for `wow-viewer` after the first shared map-summary and cross-family detection slices landed on Mar 26, 2026.
 
+## Mar 28, 2026 - Full Ownership Reset
+
+- User direction is now explicit: `wow-viewer` must fully re-own every active format family currently handled by `MdxViewer`, not just classify files and accumulate narrow summary seams.
+- This shared-I/O plan remains valid as the non-PM4 implementation track, but current summary readers should be treated as stepping stones toward full first-party parse, write, and runtime-service ownership.
+- In-scope non-PM4 families now explicitly include full `ADT` root and split ownership, `WDT`, `WDL`, `WMO` root/group ownership, `MDX`, `M2`, `BLP`, and the active `DBC`/`DB2` families consumed by viewer and converter paths.
+- The dedicated program document for this reset is `gillijimproject_refactor/plans/wow_viewer_full_format_ownership_plan_2026-03-28.md`.
+
 ## Source-Of-Truth Rule
 
 - `wow-viewer/src/core/WowViewer.Core` and `wow-viewer/src/core/WowViewer.Core.IO` are the intended home for first-party non-PM4 file-format ownership.
@@ -81,6 +88,9 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `WowViewer.Core/Mdx`
   - `MdxChunkIds`
   - `MdxChunkSummary`
+  - `MdxTextureSummary`
+  - `MdxMaterialLayerSummary`
+  - `MdxMaterialSummary`
   - `MdxSummary`
 - `WowViewer.Core/Files`
   - `WowFileKind`
@@ -247,7 +257,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared `BLP` header-summary ownership is now real for `BLP1` and `BLP2`, including compression fields, pixel format, image dimensions, palette or JPEG-header presence, and per-mip offset or size coverage
-- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, and narrow `MODL` name or bounds or blend-time fields
+- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time fields, shared `TEXS` texture-table summary coverage for replaceable ids, paths, and flags, and narrow `MTLS` material-layer summary coverage for priority plane, blend mode, flags, texture id, transform id, coord id, and static alpha
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
 - the concrete shared standard MPQ implementation used by the active `MdxViewer` path is now real
 - shared DBC-backed map-directory and ground-effect lookup helpers are now real
@@ -258,7 +268,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - this does not yet prove:
   - deep WDT semantic parsing
   - deep ADT root or split payload parsing
-  - deep WMO, `MDX`, `M2`, or `BLP` payload parsing beyond the new `BLP` and top-level `MDX` summary seams
+  - deep WMO, `MDX`, `M2`, or `BLP` payload parsing beyond the new `BLP` and `MDX` top-level-plus-`TEXS` summary seams
   - general-purpose DBC or DB2 schema ownership beyond the narrow shared lookup helpers that now exist
   - any write path or round-trip support
   - runtime cutover inside the active viewer
@@ -268,7 +278,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 1. deepen shared ADT root and split-file top-level summaries
 2. deepen shared ADT root and split-file summaries beyond the new semantic-summary layer into narrower chunk-internal signals only when a deep payload proof target is clear
 3. deepen shared WMO ownership from root, group, `MOGI`, `MOGN`, `MOSB`, `MOMT`, `MOTX`, `MODN`, `MODS`, `MODD`, `MOPV`, `MOPT`, `MOPR`, `MOLT`, `MFOG`, `MCVP`, plus the first linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`, into the next narrow deep-payload seam only when a fixed validation target is available
-4. start the first shared `M2` seam or a deeper but still narrow `MDX` chunk-internal seam only when a fixed real-data target is clear
+4. start the first shared `M2` seam or a deeper but still narrow `MDX` chunk-internal seam such as `MTLS` only when a fixed real-data target is clear
   the current clean WMO continuation after the landed `MOLT` detail seam is wider real-data proof for standard `headerFlagsWord` variability across additional roots
 4. keep Alpha root-WMO `MOMO` support aligned with real 0.5.3 per-asset archive validation as additional root summaries land
 5. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints

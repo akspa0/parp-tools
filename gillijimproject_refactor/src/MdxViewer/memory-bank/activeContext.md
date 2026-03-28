@@ -1,20 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
-## AssetProbe Shared `MDX` Consumer Validation (Mar 27)
+## AssetProbe Shared `MDX` Consumer Validation (Mar 28)
 
 - The active viewer now consumes the first shared `wow-viewer` `MDX` model-family seam through the existing non-UI probe path instead of limiting model validation to shared file detection only.
 - Landed pieces:
    - `src/MdxViewer/AssetProbe.cs` now runs `WowViewer.Core.IO.Mdx.MdxSummaryReader` on the probed model bytes after shared file detection succeeds
-   - probe output now prints `SharedMDX` lines with version, model name, blend time, chunk counts, and the first few top-level chunk ids
+   - probe output now prints `SharedMDX` lines with version, model name, blend time, chunk counts, texture counts, replaceable-texture counts, material counts, material-layer counts, the first few top-level chunk ids, the first shared `TEXS` texture paths, and compact first-layer `MTLS` signals
    - the earlier shared `BLP` texture-summary output remains in place, so the same chest-model probe now surfaces shared model and texture seams together
 - Current verified validation:
    - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` targeted passing tests
-   - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+   - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and reported `version=1300`, `model=Chest01`, `textures=2`, `materials=2`, and real `MTLS` layer lines on the archive-backed asset
    - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 27, 2026 with existing warnings
-   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and now reports `SharedMDX: version=1300 model=Chest01 blendTime=0 chunks=9 knownChunks=9 unknownChunks=0`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and now reports `SharedMDX: ... textures=2 replaceableTextures=0 materials=2 materialLayers=2 ... firstTextures=... firstMaterials=tex0/blend0/alpha1.000,tex1/blend0/alpha1.000`
 - Important boundary:
    - this is compile plus non-UI probe validation only
    - `MdxViewer` still uses `MdxFile.Load(...)` for the actual model parse and render path
+   - the shared `MTLS` seam is summary-only; it does not replace the legacy material or animation-track parse path
    - do not describe this as runtime viewer signoff or a full shared-library model cutover
 
 ## AssetProbe Shared `BLP` Consumer Validation (Mar 27)

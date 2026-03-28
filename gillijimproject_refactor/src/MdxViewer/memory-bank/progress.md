@@ -1,18 +1,18 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
-## 2026-03-27 — AssetProbe Now Consumes Shared `wow-viewer` `MDX` Summary Signals
+## 2026-03-28 — AssetProbe Now Consumes Shared `wow-viewer` `MDX` Summary Signals
 
 - `src/MdxViewer/AssetProbe.cs`
 	- now runs shared `MdxSummaryReader` on the probed model bytes after shared `WowFileDetector` classification
-	- now prints `SharedMDX` summary lines with version, model name, blend time, chunk counts, and the first top-level chunk ids
+	- now prints `SharedMDX` summary lines with version, model name, blend time, chunk counts, texture counts, replaceable-texture counts, material counts, material-layer counts, the first top-level chunk ids, the first shared `TEXS` texture paths, and compact first-layer `MTLS` signals
 	- still uses `MdxFile.Load(...)` for the actual model parse path, so this is compatibility validation rather than a full runtime cutover
 - Validation status:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed with `11` passing tests
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, `textures=2`, `materials=2`, and real `MTLS` layer lines on the archive-backed asset
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
-	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and produced a real `SharedMDX` line plus the earlier shared `BLP` texture-summary lines
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and produced a real `SharedMDX` line with first `TEXS` texture paths, first-layer `MTLS` signals, plus the earlier shared `BLP` texture-summary lines
 	- no automated tests were added or run in `gillijimproject_refactor`
-	- no runtime viewer signoff yet on the live model/render path
+	- no runtime viewer signoff yet on the live model/render path, deep material semantics, or animation-track parity
 
 ## 2026-03-27 — AssetProbe Now Consumes Shared `wow-viewer` `BLP` Summary Signals
 

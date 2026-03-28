@@ -12,6 +12,10 @@ public static class MdxSummaryReader
     private const int ModlNameSizeBytes = 0x50;
     private const int ModlBoundsAndBlendSizeBytes = 0x18 + sizeof(uint);
     private const int ModlSummarySizeBytes = ModlNameSizeBytes + ModlBoundsAndBlendSizeBytes;
+    private const int TexsEntrySizeLegacy = 0x108;
+    private const int TexsEntrySizeExtended = 0x10C;
+    private const int TexsPathSizeLegacy = 0x100;
+    private const int TexsPathSizeExtended = 0x104;
 
     private static readonly HashSet<FourCC> KnownChunkIds =
     [
@@ -75,6 +79,8 @@ public static class MdxSummaryReader
             uint? blendTime = null;
             Vector3? boundsMin = null;
             Vector3? boundsMax = null;
+            List<MdxTextureSummary> textures = [];
+            List<MdxMaterialSummary> materials = [];
             int knownChunkCount = 0;
             int unknownChunkCount = 0;
             Span<byte> headerBytes = stackalloc byte[ChunkHeader.SizeInBytes];
@@ -107,11 +113,19 @@ public static class MdxSummaryReader
                 {
                     ReadModlSummary(stream, dataOffset, header.Size, out modelName, out blendTime, out boundsMin, out boundsMax);
                 }
+                else if (header.Id == MdxChunkIds.Texs)
+                {
+                    textures = ReadTexsSummary(stream, dataOffset, header.Size);
+                }
+                else if (header.Id == MdxChunkIds.Mtls)
+                {
+                    materials = ReadMtlsSummary(stream, dataOffset, header.Size);
+                }
 
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, textures, materials, chunks, knownChunkCount, unknownChunkCount);
         }
         finally
         {
@@ -148,6 +162,129 @@ public static class MdxSummaryReader
         uint size = BinaryPrimitives.ReadUInt32LittleEndian(data[4..]);
         header = new ChunkHeader(id, size);
         return true;
+    }
+
+    private static List<MdxTextureSummary> ReadTexsSummary(Stream stream, long dataOffset, uint size)
+    {
+        long previousPosition = stream.Position;
+        try
+        {
+            (int entrySize, int pathSize) = ResolveTexsLayout(size);
+            int count = checked((int)(size / entrySize));
+            List<MdxTextureSummary> textures = new(count);
+            byte[] replaceableBytes = new byte[sizeof(uint)];
+            byte[] flagsBytes = new byte[sizeof(uint)];
+
+            stream.Position = dataOffset;
+            for (int index = 0; index < count; index++)
+            {
+                stream.ReadExactly(replaceableBytes);
+                uint replaceableId = BinaryPrimitives.ReadUInt32LittleEndian(replaceableBytes);
+
+                byte[] pathBytes = new byte[pathSize];
+                stream.ReadExactly(pathBytes);
+                string path = ReadNullTerminatedAscii(pathBytes);
+
+                stream.ReadExactly(flagsBytes);
+                uint flags = BinaryPrimitives.ReadUInt32LittleEndian(flagsBytes);
+
+                textures.Add(new MdxTextureSummary(index, replaceableId, path, flags));
+            }
+
+            return textures;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static (int EntrySize, int PathSize) ResolveTexsLayout(uint size)
+    {
+        if (size % TexsEntrySizeExtended == 0)
+            return (TexsEntrySizeExtended, TexsPathSizeExtended);
+
+        if (size % TexsEntrySizeLegacy == 0)
+            return (TexsEntrySizeLegacy, TexsPathSizeLegacy);
+
+        throw new InvalidDataException($"Invalid TEXS size 0x{size:X}: expected divisibility by 0x{TexsEntrySizeLegacy:X} or 0x{TexsEntrySizeExtended:X}.");
+    }
+
+    private static List<MdxMaterialSummary> ReadMtlsSummary(Stream stream, long dataOffset, uint size)
+    {
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = dataOffset;
+            if (size < 8)
+                return [];
+
+            uint materialCount = ReadUInt32(stream);
+            _ = ReadUInt32(stream);
+
+            List<MdxMaterialSummary> materials = new(checked((int)materialCount));
+            for (int materialIndex = 0; materialIndex < materialCount; materialIndex++)
+            {
+                long materialSizeOffset = stream.Position;
+                uint materialSize = ReadUInt32(stream);
+                long materialEnd = checked(materialSizeOffset + materialSize);
+                if (materialEnd > dataOffset + size)
+                    throw new InvalidDataException($"MTLS material {materialIndex} overruns the MTLS payload.");
+
+                int priorityPlane = ReadInt32(stream);
+                uint layerCount = ReadUInt32(stream);
+                List<MdxMaterialLayerSummary> layers = new(checked((int)layerCount));
+
+                for (int layerIndex = 0; layerIndex < layerCount; layerIndex++)
+                {
+                    long layerSizeOffset = stream.Position;
+                    uint layerSize = ReadUInt32(stream);
+                    long layerEnd = checked(layerSizeOffset + layerSize);
+                    if (layerEnd > materialEnd)
+                        throw new InvalidDataException($"MTLS layer {layerIndex} in material {materialIndex} overruns the material payload.");
+
+                    uint blendMode = ReadUInt32(stream);
+                    uint flags = ReadUInt32(stream);
+                    int textureId = ReadInt32(stream);
+                    int transformId = ReadInt32(stream);
+                    int coordId = ReadInt32(stream);
+                    float staticAlpha = ReadSingle(stream);
+
+                    layers.Add(new MdxMaterialLayerSummary(layerIndex, blendMode, flags, textureId, transformId, coordId, staticAlpha));
+                    stream.Position = layerEnd;
+                }
+
+                materials.Add(new MdxMaterialSummary(materialIndex, priorityPlane, layers));
+                stream.Position = materialEnd;
+            }
+
+            return materials;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static uint ReadUInt32(Stream stream)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(uint)];
+        stream.ReadExactly(bytes);
+        return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+    }
+
+    private static int ReadInt32(Stream stream)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(int)];
+        stream.ReadExactly(bytes);
+        return BinaryPrimitives.ReadInt32LittleEndian(bytes);
+    }
+
+    private static float ReadSingle(Stream stream)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(float)];
+        stream.ReadExactly(bytes);
+        return BinaryPrimitives.ReadSingleLittleEndian(bytes);
     }
 
     private static void ReadModlSummary(Stream stream, long dataOffset, uint size, out string? modelName, out uint? blendTime, out Vector3? boundsMin, out Vector3? boundsMax)

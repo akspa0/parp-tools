@@ -1,22 +1,36 @@
 # Progress
 
-### Mar 27, 2026 - Shared `MDX` Top-Level Summary Seam And Consumer Validation Landed
+### Mar 28, 2026 - Full Format Ownership Program Reset Captured
+
+- The migration target for `wow-viewer` was clarified beyond the earlier narrow summary-seam framing.
+- New explicit rule:
+	- `wow-viewer` must fully re-own every active `MdxViewer` format family as first-party library and tooling behavior.
+	- current detector and summary slices are progress, but not closure.
+- Added `gillijimproject_refactor/plans/wow_viewer_full_format_ownership_plan_2026-03-28.md` to lock the broader program target, ownership standard, format-family scope, workstreams, and execution order.
+- Added `gillijimproject_refactor/plans/wow_viewer_format_parity_matrix_2026-03-28.md` to track the family-by-family gap between active `MdxViewer` behavior and `wow-viewer` ownership.
+- Updated the shared-I/O plan and continuity docs so future sessions do not mistake current `BLP`, `MDX`, `WMO`, `ADT`, or `WDT` summary ownership for the final migration target.
+- This was planning and continuity work only. No new implementation or validation was performed in this reset itself.
+
+### Mar 28, 2026 - Shared `MDX` Top-Level Plus `TEXS` And `MTLS` Summary Seams And Consumer Validation Landed
 
 - Added the first shared `MDX` model-family seam in `wow-viewer` and immediately validated it through the existing non-UI `MdxViewer` probe path.
 - Landed pieces:
 	- added `WowViewer.Core.Mdx.MdxChunkIds`
 	- added `WowViewer.Core.Mdx.MdxChunkSummary`
+	- added `WowViewer.Core.Mdx.MdxTextureSummary`
+	- added `WowViewer.Core.Mdx.MdxMaterialLayerSummary`
+	- added `WowViewer.Core.Mdx.MdxMaterialSummary`
 	- added `WowViewer.Core.Mdx.MdxSummary`
-	- added `WowViewer.Core.IO.Mdx.MdxSummaryReader`
+	- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with shared `TEXS` texture-table summary support and narrow `MTLS` material-layer summary support
 	- updated `WowViewer.Tool.Inspect` with `mdx inspect --input <file.mdx>` and `mdx inspect --archive-root <dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
 	- added synthetic plus real standard-archive coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs`
-	- extended `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` so the consumer probe now prints shared `MDX` summary signals for the probed model bytes
+	- extended `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` so the consumer probe now prints shared `MDX` summary signals for the probed model bytes, including `TEXS` texture-count and first-path signals plus compact `MTLS` material-layer summary signals
 - Validation limits:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` passing tests
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, `textures=2`, `materials=2`, and real `TEXS` plus `MTLS` layer lines on the archive-backed asset
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
-	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and now prints `SharedMDX` alongside the earlier `SharedBLP` signals
-	- this is still top-level `MDX` summary ownership and consumer validation only, not runtime viewer model-path signoff or `M2` parity
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and now prints `SharedMDX` plus real first-texture `TEXS` paths and first-layer `MTLS` signals alongside the earlier `SharedBLP` signals
+	- this is still top-level `MDX` plus narrow `TEXS` and `MTLS` summary ownership and consumer validation only, not runtime viewer model-path signoff, deep material semantics, animation-track parity, or `M2` parity
 
 ### Mar 27, 2026 - `MdxViewer` Compatibility Validation Now Exercises Shared `BLP` Summary Reads
 

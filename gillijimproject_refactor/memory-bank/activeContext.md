@@ -1,21 +1,36 @@
 # Active Context
 
-## Mar 27, 2026 - Shared `MDX` Top-Level Summary Seam And `MdxViewer` Consumer Validation Landed
+## Mar 28, 2026 - wow-viewer Full Format Ownership Reset
+
+- User direction is now explicit: `wow-viewer` is expected to become the first-party owner of every active `MdxViewer` format family, fully, not just through detector or summary seams.
+- The migration target is no longer "enough shared readers to inspect files". The target is full parse, decode, write, runtime-service, and tool ownership for the formats the active viewer currently handles.
+- Current summary seams in `wow-viewer` remain valid, but they are now only stepping stones toward that larger ownership target.
+- A dedicated program document now exists at `gillijimproject_refactor/plans/wow_viewer_full_format_ownership_plan_2026-03-28.md`.
+- A family-by-family backlog now also exists at `gillijimproject_refactor/plans/wow_viewer_format_parity_matrix_2026-03-28.md`.
+- Immediate high-risk ownership gaps called out by the reset:
+	- `ADT` alpha decode and split-file routing parity
+	- deep `WMO` ownership beyond current summaries
+	- deep `MDX` ownership beyond top-level summary
+	- first-party `M2` ownership instead of Warcraft.NET-only behavior
+	- first-party `BLP` decode/write ownership instead of SereniaBLPLib-only behavior
+	- continued `PM4` extraction until `WorldScene` is no longer the hidden owner of active semantics
+
+## Mar 28, 2026 - Shared `MDX` Top-Level Plus `TEXS` And `MTLS` Summary Seams And `MdxViewer` Consumer Validation Landed
 
 - `wow-viewer` now owns its first narrow `MDX` model-family seam instead of stopping model validation at cross-family detection.
 - Landed pieces:
-	- `wow-viewer/src/core/WowViewer.Core/Mdx/` now owns shared `MdxChunkIds`, `MdxChunkSummary`, and `MdxSummary` contracts for top-level `MDX` header-summary work
-	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads `MDLX` files through an `MDX`-specific top-level chunk path, including `VERS`, `MODL`, chunk order, known-vs-unknown chunk counts, model name, bounds, and blend time
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/` now owns shared `MdxChunkIds`, `MdxChunkSummary`, `MdxTextureSummary`, `MdxMaterialLayerSummary`, `MdxMaterialSummary`, and `MdxSummary` contracts for top-level `MDX` header-summary work
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads `MDLX` files through an `MDX`-specific top-level chunk path, including `VERS`, `MODL`, `TEXS`, `MTLS`, chunk order, known-vs-unknown chunk counts, model name, bounds, blend time, texture count, replaceable-texture count, material count, material-layer count, per-texture path/flag summary, and narrow per-material layer summary fields
 	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now accepts `mdx inspect --input <file.mdx>` and `mdx inspect --archive-root <dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
 	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers both a synthetic `MDX` fixture and a real standard-archive `world/generic/activedoodads/chest01/chest01.mdx` read
-	- `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` now also prints shared `MDX` summary output for probed model bytes, alongside the earlier shared `BLP` texture-summary output
+	- `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` now also prints shared `MDX` summary output for probed model bytes, including `textures`, `replaceableTextures`, `materials`, `materialLayers`, the first shared `TEXS` paths, and compact first-layer `MTLS` signals alongside the earlier shared `BLP` texture-summary output
 - Current verified validation for this landing:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` targeted passing tests
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and reported `version=1300`, `model=Chest01`, and `9` known top-level chunks
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and reported `version=1300`, `model=Chest01`, `textures=2`, `materials=2`, and real `TEXS[...]` plus `MTLS[0].LAYER[0]` / `MTLS[1].LAYER[0]` lines for the chest asset
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 27, 2026 with existing warnings
-	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and now reports `SharedMDX: version=1300 model=Chest01 blendTime=0 chunks=9 knownChunks=9 unknownChunks=0`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and now reports `SharedMDX: ... textures=2 replaceableTextures=0 materials=2 materialLayers=2 ... firstTextures=... firstMaterials=tex0/blend0/alpha1.000,tex1/blend0/alpha1.000`
 - Important boundary:
-	- this is shared `MDX` top-level summary ownership only; it does not replace `MdxFile.Load(...)`, `M2` handling, or any live viewer render-path model loading
+	- this is shared `MDX` top-level plus narrow `TEXS` and `MTLS` summary ownership only; it does not replace `MdxFile.Load(...)`, animation-track parsing, `M2` handling, or any live viewer render-path model loading
 	- real `MDX` chunk ids are stored as direct ASCII on disk, so this seam intentionally uses an `MDX`-specific header decode path instead of the generic reversed-FourCC chunk reader used by ADT/WDT/WMO files
 	- this is still build plus inspect/probe validation, not runtime viewer signoff
 

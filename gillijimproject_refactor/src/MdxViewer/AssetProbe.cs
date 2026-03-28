@@ -77,7 +77,7 @@ internal static class AssetProbe
         Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
         if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
         {
-            Console.WriteLine($"[AssetProbe] SharedMDX: version={FormatVersion(sharedMdx.Version)} model={sharedMdx.ModelName ?? "n/a"} blendTime={FormatVersion(sharedMdx.BlendTime)} chunks={sharedMdx.ChunkCount} knownChunks={sharedMdx.KnownChunkCount} unknownChunks={sharedMdx.UnknownChunkCount} firstChunks={FormatChunkList(sharedMdx.Chunks)}");
+            Console.WriteLine($"[AssetProbe] SharedMDX: version={FormatVersion(sharedMdx.Version)} model={sharedMdx.ModelName ?? "n/a"} blendTime={FormatVersion(sharedMdx.BlendTime)} chunks={sharedMdx.ChunkCount} knownChunks={sharedMdx.KnownChunkCount} unknownChunks={sharedMdx.UnknownChunkCount} textures={sharedMdx.TextureCount} replaceableTextures={sharedMdx.ReplaceableTextureCount} materials={sharedMdx.MaterialCount} materialLayers={sharedMdx.MaterialLayerCount} firstChunks={FormatChunkList(sharedMdx.Chunks)} firstTextures={FormatTextureList(sharedMdx.TexturePaths)} firstMaterials={FormatMaterialList(sharedMdx.MaterialLayers)}");
         }
         else if (!string.IsNullOrWhiteSpace(sharedMdxError))
         {
@@ -322,6 +322,14 @@ internal static class AssetProbe
                 summary.ChunkCount,
                 summary.KnownChunkCount,
                 summary.UnknownChunkCount,
+                summary.TextureCount,
+                summary.ReplaceableTextureCount,
+                summary.Textures.Take(2).Select(static texture => string.IsNullOrWhiteSpace(texture.Path) ? $"Replaceable#{texture.ReplaceableId}" : texture.Path!).ToArray(),
+                summary.MaterialCount,
+                summary.MaterialLayerCount,
+                summary.Materials.Take(2)
+                    .SelectMany(static material => material.Layers.Take(1).Select(layer => $"tex{layer.TextureId}/blend{layer.BlendMode}/alpha{layer.StaticAlpha:F3}"))
+                    .ToArray(),
                 summary.Chunks.Take(4).Select(static chunk => chunk.Id.ToString()).ToArray());
         }
         catch (Exception ex)
@@ -339,6 +347,16 @@ internal static class AssetProbe
     private static string FormatChunkList(IReadOnlyList<string> chunkIds)
     {
         return chunkIds.Count == 0 ? "n/a" : string.Join(",", chunkIds);
+    }
+
+    private static string FormatTextureList(IReadOnlyList<string> texturePaths)
+    {
+        return texturePaths.Count == 0 ? "n/a" : string.Join(",", texturePaths);
+    }
+
+    private static string FormatMaterialList(IReadOnlyList<string> materialLayers)
+    {
+        return materialLayers.Count == 0 ? "n/a" : string.Join(",", materialLayers);
     }
 
     private static string ClassifyTextureAlpha(int zeroAlphaPixels, int translucentAlphaPixels)
@@ -386,5 +404,11 @@ internal static class AssetProbe
         int ChunkCount,
         int KnownChunkCount,
         int UnknownChunkCount,
+        int TextureCount,
+        int ReplaceableTextureCount,
+        IReadOnlyList<string> TexturePaths,
+        int MaterialCount,
+        int MaterialLayerCount,
+        IReadOnlyList<string> MaterialLayers,
         IReadOnlyList<string> Chunks);
 }
