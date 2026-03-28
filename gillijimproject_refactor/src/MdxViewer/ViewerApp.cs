@@ -38,6 +38,8 @@ public partial class ViewerApp : IDisposable
 {
     private const string ViewerProductName = "parp-tools WoW Viewer";
     private const string ViewerAboutPopupTitle = "About parp-tools WoW Viewer";
+    private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
+        typeof(ImGuiController).GetMethod("WindowResized", BindingFlags.Instance | BindingFlags.NonPublic);
 
     private enum ModelContainerKind
     {
@@ -53,6 +55,7 @@ public partial class ViewerApp : IDisposable
     private ImGuiController _imGui = null!;
     private Camera _camera = new();
     private ISceneRenderer? _renderer;
+    private Vector2D<int> _lastSyncedImGuiWindowSize;
 
     // Data source
     private IDataSource? _dataSource;
@@ -471,6 +474,7 @@ public partial class ViewerApp : IDisposable
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
+        SyncImGuiWindowSize(_window.Size);
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
         _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
@@ -672,6 +676,7 @@ public partial class ViewerApp : IDisposable
 
     private void OnUpdate(double dt)
     {
+        SyncImGuiWindowSize(_window.Size);
         _imGui.Update((float)dt);
         HandleKeyboardInput((float)dt);
         UpdateSqlSpawnStreaming();
@@ -8662,6 +8667,15 @@ void main() {
     private void OnResize(Vector2D<int> size)
     {
         _gl.Viewport(size);
+    }
+
+    private void SyncImGuiWindowSize(Vector2D<int> size)
+    {
+        if (size.X <= 0 || size.Y <= 0 || size.Equals(_lastSyncedImGuiWindowSize))
+            return;
+
+        ImGuiControllerWindowResizedMethod?.Invoke(_imGui, new object[] { size });
+        _lastSyncedImGuiWindowSize = size;
     }
 
     private void LoadViewerSettings()
