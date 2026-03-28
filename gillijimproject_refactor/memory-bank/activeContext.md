@@ -1,5 +1,35 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `HTST` summary ownership into first shared classic `CLID` collision-summary ownership for ordered `VRTX` or `TRI ` or `NRMS` collision-mesh metadata.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxCollisionSummary.cs` now carries shared collision counts, max-index coverage, and derived collision bounds
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now exposes nullable `Collision` and `HasCollision`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic `CLID` chunks for `v1300` and `v1400`, including ordered `VRTX` or `TRI ` or `NRMS` subchunks, derived collision bounds, and index coverage
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports `collisionVertices=` and `collisionTriangles=` in the header and prints a `CLID:` line during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `CLID` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` collision regression
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` `MdxSummaryReaderTests` passed after the new synthetic and real Alpha `CLID` coverage landed
+	- `WowViewer.Tool.Inspect mdx inspect` on Alpha `0.5.3` `Wisp.mdx` now reports `collisionVertices=8`, `collisionTriangles=12`, `CHUNK[17]: id=CLID`, and stable `CLID: vertices=8 triIndices=36 triangles=12 facetNormals=12 maxIndex=7 ...`
+- Scope guardrail:
+	- this is still classic `CLID` summary ownership only; it does not expose full collision geometry payloads, collision queries, export surfaces, or runtime physics behavior
+
+## Mar 28, 2026 - Shared Classic `MDX` `HTST` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `EVTS` summary ownership into first shared classic `HTST` hit-test-shape summary ownership for counted `MDLGENOBJECT` hit-test nodes and fixed box or cylinder or sphere or plane payload metadata.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx` now carries shared `MdxGeometryShapeType` and `MdxHitTestShapeSummary` contracts for classic hit-test shapes beside the earlier event, camera, ribbon, particle, attachment, helper, and bone seams
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now exposes `HitTestShapes` and `HitTestShapeCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `HTST` entries for `v1300` and `v1400`, including inherited node metadata plus fixed `SHAPE_BOX` or `SHAPE_CYLINDER` or `SHAPE_SPHERE` or `SHAPE_PLANE` payload fields
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports `hitTestShapes=` in the header and prints `HTST[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `HTST` fixture across box or cylinder or sphere or plane shapes plus a fixed real Alpha `0.5.3` `Wisp.mdx` sphere regression
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` `MdxSummaryReaderTests` passed after the new synthetic and real Alpha `HTST` coverage landed
+	- `WowViewer.Tool.Inspect mdx inspect` on Alpha `0.5.3` `Wisp.mdx` now reports `hitTestShapes=1`, `CHUNK[16]: id=HTST`, and stable `HTST[0]: name=HIT01 ... shapeType=Sphere(2) shape=center=(0.366, 0.009, 1.890) radius=0.833333`
+- Scope guardrail:
+	- this is still classic `HTST` summary ownership only; it does not evaluate runtime collision or hit detection, animation-driven shape transforms, or viewer physics behavior
+
 ## Mar 28, 2026 - Shared Classic `MDX` `EVTS` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past classic `CAMS` summary ownership into first shared classic `EVTS` event-summary ownership for counted `MDLGENOBJECT` event nodes and optional summary-only `KEVT` time-track metadata.

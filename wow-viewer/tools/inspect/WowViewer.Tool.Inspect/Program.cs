@@ -1434,7 +1434,9 @@ static void PrintMdxSummary(MdxSummary summary)
 	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
 	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	string collisionVertices = summary.Collision?.VertexCount.ToString() ?? "0";
+	string collisionTriangles = summary.Collision?.TriangleCount.ToString() ?? "0";
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} hitTestShapes={summary.HitTestShapeCount} collisionVertices={collisionVertices} collisionTriangles={collisionTriangles} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
 	for (int index = 0; index < summary.Sequences.Count; index++)
@@ -1457,6 +1459,10 @@ static void PrintMdxSummary(MdxSummary summary)
 		PrintMdxCameraSummary(summary.Cameras[index]);
 	for (int index = 0; index < summary.Events.Count; index++)
 		PrintMdxEventSummary(summary.Events[index]);
+	for (int index = 0; index < summary.HitTestShapes.Count; index++)
+		PrintMdxHitTestShapeSummary(summary.HitTestShapes[index]);
+	if (summary.Collision is not null)
+		PrintMdxCollisionSummary(summary.Collision);
 	for (int index = 0; index < summary.PivotPoints.Count; index++)
 		PrintMdxPivotPointSummary(summary.PivotPoints[index]);
 	for (int index = 0; index < summary.Textures.Count; index++)
@@ -1553,6 +1559,19 @@ static void PrintMdxEventSummary(MdxEventSummary evnt)
 	Console.WriteLine($"EVTS[{evnt.Index}]: name={evnt.Name} objectId={evnt.ObjectId} parentId={parentId} flags=0x{evnt.Flags:X8} translationTrack={FormatMdxNodeTrack(evnt.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(evnt.RotationTrack)} scalingTrack={FormatMdxNodeTrack(evnt.ScalingTrack)} eventTrack={FormatMdxEventTrack(evnt.EventTrack)}");
 }
 
+static void PrintMdxHitTestShapeSummary(MdxHitTestShapeSummary shape)
+{
+	string parentId = shape.HasParent ? shape.ParentId.ToString() : "none(-1)";
+	Console.WriteLine($"HTST[{shape.Index}]: name={shape.Name} objectId={shape.ObjectId} parentId={parentId} flags=0x{shape.Flags:X8} shapeType={FormatMdxGeometryShapeType(shape.ShapeType)} shape={FormatMdxHitTestShapeGeometry(shape)} translationTrack={FormatMdxNodeTrack(shape.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(shape.RotationTrack)} scalingTrack={FormatMdxNodeTrack(shape.ScalingTrack)}");
+}
+
+static void PrintMdxCollisionSummary(MdxCollisionSummary collision)
+{
+	string boundsMin = collision.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
+	string boundsMax = collision.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
+	Console.WriteLine($"CLID: vertices={collision.VertexCount} triIndices={collision.TriangleIndexCount} triangles={collision.TriangleCount} facetNormals={collision.FacetNormalCount} maxIndex={collision.MaxTriangleIndex} boundsMin={boundsMin} boundsMax={boundsMax}");
+}
+
 static void PrintMdxPivotPointSummary(MdxPivotPointSummary pivotPoint)
 {
 	Vector3 position = pivotPoint.Position;
@@ -1644,6 +1663,34 @@ static string FormatMdxEventTrack(MdxEventTrackSummary? track)
 		: "n/a";
 
 	return $"{track.Tag}(keys={track.KeyCount} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxGeometryShapeType(MdxGeometryShapeType shapeType)
+{
+	return shapeType switch
+	{
+		MdxGeometryShapeType.Box => "Box(0)",
+		MdxGeometryShapeType.Cylinder => "Cylinder(1)",
+		MdxGeometryShapeType.Sphere => "Sphere(2)",
+		MdxGeometryShapeType.Plane => "Plane(3)",
+		_ => ((byte)shapeType).ToString(),
+	};
+}
+
+static string FormatMdxHitTestShapeGeometry(MdxHitTestShapeSummary shape)
+{
+	return shape.ShapeType switch
+	{
+		MdxGeometryShapeType.Box when shape.Minimum is Vector3 minimum && shape.Maximum is Vector3 maximum
+			=> $"boxMin=({minimum.X:F3}, {minimum.Y:F3}, {minimum.Z:F3}) boxMax=({maximum.X:F3}, {maximum.Y:F3}, {maximum.Z:F3})",
+		MdxGeometryShapeType.Cylinder when shape.BasePoint is Vector3 basePoint && shape.Height is float height && shape.Radius is float radius
+			=> $"base=({basePoint.X:F3}, {basePoint.Y:F3}, {basePoint.Z:F3}) height={height:F6} radius={radius:F6}",
+		MdxGeometryShapeType.Sphere when shape.Center is Vector3 center && shape.Radius is float sphereRadius
+			=> $"center=({center.X:F3}, {center.Y:F3}, {center.Z:F3}) radius={sphereRadius:F6}",
+		MdxGeometryShapeType.Plane when shape.Length is float length && shape.Width is float width
+			=> $"length={length:F6} width={width:F6}",
+		_ => "n/a",
+	};
 }
 
 static string FormatMdxInterpolation(uint interpolationType)

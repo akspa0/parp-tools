@@ -1011,6 +1011,233 @@ public sealed class MdxSummaryReaderTests
     }
 
     [Fact]
+    public void Read_SyntheticClassicHtst_ProducesExpectedHitTestShapeSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticHtst",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("HTST", CreateHitTestShapePayload(
+                [
+                    ("HitBox", 21, 7, 0x1000u, MdxGeometryShapeType.Box, new Vector3(-1.0f, -2.0f, -3.0f), new Vector3(4.0f, 5.0f, 6.0f), 0.0f, 0.0f, (1u, -1, new[] { 10, 40 }), null, null),
+                    ("HitCylinder", 22, 7, 0x1001u, MdxGeometryShapeType.Cylinder, new Vector3(1.5f, 2.5f, 3.5f), Vector3.Zero, 7.0f, 0.75f, null, null, null),
+                    ("HitSphere", 23, -1, 0x1002u, MdxGeometryShapeType.Sphere, new Vector3(0.25f, 0.5f, 0.75f), Vector3.Zero, 1.25f, 0.0f, null, (3u, 7, new[] { 15 }), null),
+                    ("HitPlane", 24, -1, 0x1003u, MdxGeometryShapeType.Plane, Vector3.Zero, Vector3.Zero, 9.0f, 4.5f, null, null, (2u, 5, new[] { 20 })),
+                ])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_htst.mdx");
+
+        Assert.Equal(4, summary.HitTestShapeCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Htst);
+
+        MdxHitTestShapeSummary box = summary.HitTestShapes[0];
+        Assert.Equal("HitBox", box.Name);
+        Assert.Equal(MdxGeometryShapeType.Box, box.ShapeType);
+        Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), box.Minimum);
+        Assert.Equal(new Vector3(4.0f, 5.0f, 6.0f), box.Maximum);
+        Assert.NotNull(box.TranslationTrack);
+        Assert.Equal("KGTR", box.TranslationTrack!.Tag);
+        Assert.Null(box.RotationTrack);
+        Assert.Null(box.ScalingTrack);
+
+        MdxHitTestShapeSummary cylinder = summary.HitTestShapes[1];
+        Assert.Equal(MdxGeometryShapeType.Cylinder, cylinder.ShapeType);
+        Assert.Equal(new Vector3(1.5f, 2.5f, 3.5f), cylinder.BasePoint);
+        Assert.Equal(7.0f, cylinder.Height);
+        Assert.Equal(0.75f, cylinder.Radius);
+
+        MdxHitTestShapeSummary sphere = summary.HitTestShapes[2];
+        Assert.Equal(MdxGeometryShapeType.Sphere, sphere.ShapeType);
+        Assert.Equal(new Vector3(0.25f, 0.5f, 0.75f), sphere.Center);
+        Assert.Equal(1.25f, sphere.Radius);
+        Assert.NotNull(sphere.RotationTrack);
+        Assert.Equal("KGRT", sphere.RotationTrack!.Tag);
+
+        MdxHitTestShapeSummary plane = summary.HitTestShapes[3];
+        Assert.Equal(MdxGeometryShapeType.Plane, plane.ShapeType);
+        Assert.Equal(9.0f, plane.Length);
+        Assert.Equal(4.5f, plane.Width);
+        Assert.NotNull(plane.ScalingTrack);
+        Assert.Equal("KGSC", plane.ScalingTrack!.Tag);
+    }
+
+    [Fact]
+    public void Read_RealAlpha053WispMdx_WithHtst_ProducesExpectedFixedSignals()
+    {
+        if (!File.Exists(MdxTestPaths.Alpha053WispMdxPath))
+            return;
+
+        MdxSummary summary = MdxSummaryReader.Read(MdxTestPaths.Alpha053WispMdxPath);
+
+        Assert.Equal("Wisp", summary.ModelName);
+        Assert.Equal(1, summary.HitTestShapeCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Htst);
+
+        MdxHitTestShapeSummary shape = summary.HitTestShapes[0];
+        Assert.Equal("HIT01", shape.Name);
+        Assert.Equal(51, shape.ObjectId);
+        Assert.Equal(24, shape.ParentId);
+        Assert.Equal(0x1002u, shape.Flags);
+        Assert.Equal(MdxGeometryShapeType.Sphere, shape.ShapeType);
+        Assert.Equal(0.3661754f, shape.Center!.Value.X, 6);
+        Assert.Equal(0.008944444f, shape.Center!.Value.Y, 6);
+        Assert.Equal(1.889694f, shape.Center!.Value.Z, 6);
+        Assert.Equal(0.8333333f, shape.Radius!.Value, 6);
+        Assert.Null(shape.Minimum);
+        Assert.Null(shape.Maximum);
+        Assert.Null(shape.BasePoint);
+        Assert.Null(shape.Height);
+        Assert.Null(shape.Length);
+        Assert.Null(shape.Width);
+        Assert.Null(shape.TranslationTrack);
+        Assert.Null(shape.RotationTrack);
+        Assert.Null(shape.ScalingTrack);
+    }
+
+    [Fact]
+    public void Read_SyntheticClassicClid_ProducesExpectedCollisionSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticClid",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("CLID", CreateCollisionPayload(
+                    [
+                        new Vector3(-1.0f, -2.0f, -3.0f),
+                        new Vector3(4.0f, -2.0f, -3.0f),
+                        new Vector3(4.0f, 5.0f, 6.0f),
+                        new Vector3(-1.0f, 5.0f, 6.0f),
+                    ],
+                    [0, 1, 2, 0, 2, 3],
+                    [
+                        new Vector3(0.0f, 0.0f, 1.0f),
+                        new Vector3(0.0f, 1.0f, 0.0f),
+                    ])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_clid.mdx");
+
+        Assert.NotNull(summary.Collision);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Clid);
+
+        MdxCollisionSummary collision = summary.Collision!;
+        Assert.Equal(4, collision.VertexCount);
+        Assert.Equal(6, collision.TriangleIndexCount);
+        Assert.Equal(2, collision.TriangleCount);
+        Assert.Equal(2, collision.FacetNormalCount);
+        Assert.Equal(3, collision.MaxTriangleIndex);
+        Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), collision.BoundsMin);
+        Assert.Equal(new Vector3(4.0f, 5.0f, 6.0f), collision.BoundsMax);
+    }
+
+    [Fact]
+    public void Read_SyntheticClassicClid_WithNonTriangleMultipleIndexCount_ThrowsInvalidDataException()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticClidBadTriCount",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("CLID", CreateCollisionPayload(
+                    [
+                        new Vector3(0.0f, 0.0f, 0.0f),
+                        new Vector3(1.0f, 0.0f, 0.0f),
+                        new Vector3(0.0f, 1.0f, 0.0f),
+                    ],
+                    [0, 1, 2, 0],
+                    [new Vector3(0.0f, 0.0f, 1.0f)])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => MdxSummaryReader.Read(stream, "synthetic_clid_bad_tri_count.mdx"));
+        Assert.Contains("TRI count must be divisible by 3", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Read_SyntheticClassicClid_WithOutOfRangeTriangleIndex_ThrowsInvalidDataException()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticClidBadIndex",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("CLID", CreateCollisionPayload(
+                    [
+                        new Vector3(0.0f, 0.0f, 0.0f),
+                        new Vector3(1.0f, 0.0f, 0.0f),
+                        new Vector3(0.0f, 1.0f, 0.0f),
+                    ],
+                    [0, 1, 3],
+                    [new Vector3(0.0f, 0.0f, 1.0f)])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+
+        InvalidDataException exception = Assert.Throws<InvalidDataException>(() => MdxSummaryReader.Read(stream, "synthetic_clid_bad_index.mdx"));
+        Assert.Contains("TRI index 3 exceeded VRTX count 3", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Read_RealAlpha053WispMdx_WithClid_ProducesExpectedFixedSignals()
+    {
+        if (!File.Exists(MdxTestPaths.Alpha053WispMdxPath))
+            return;
+
+        MdxSummary summary = MdxSummaryReader.Read(MdxTestPaths.Alpha053WispMdxPath);
+
+        Assert.Equal("Wisp", summary.ModelName);
+        Assert.NotNull(summary.Collision);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Clid);
+
+        MdxCollisionSummary collision = summary.Collision!;
+        Assert.Equal(8, collision.VertexCount);
+        Assert.Equal(36, collision.TriangleIndexCount);
+        Assert.Equal(12, collision.TriangleCount);
+        Assert.Equal(12, collision.FacetNormalCount);
+        Assert.Equal(7, collision.MaxTriangleIndex);
+        Assert.Equal(-0.3472222f, collision.BoundsMin!.Value.X, 6);
+        Assert.Equal(-0.3472222f, collision.BoundsMin!.Value.Y, 6);
+        Assert.Equal(0.0f, collision.BoundsMin!.Value.Z, 6);
+        Assert.Equal(0.3472222f, collision.BoundsMax!.Value.X, 6);
+        Assert.Equal(0.3472222f, collision.BoundsMax!.Value.Y, 6);
+        Assert.Equal(2.083333f, collision.BoundsMax!.Value.Z, 6);
+    }
+
+    [Fact]
     public void Read_RealStandardArchiveMdx_ProducesExpectedSignals()
     {
         if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
@@ -1465,6 +1692,82 @@ public sealed class MdxSummaryReaderTests
 
             payload.AddRange(CreateSizedPayload(entryPayload));
         }
+
+        return [.. payload];
+    }
+
+    private static byte[] CreateHitTestShapePayload(IReadOnlyList<(string Name, int ObjectId, int ParentId, uint Flags, MdxGeometryShapeType ShapeType, Vector3 PrimaryVector, Vector3 SecondaryVector, float PrimaryScalar, float SecondaryScalar, (uint InterpolationType, int GlobalSequenceId, int[] Times)? TranslationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? RotationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ScalingTrack)> shapes)
+    {
+        List<byte> payload = [];
+        payload.AddRange(CreateUInt32Payload((uint)shapes.Count));
+
+        foreach ((string name, int objectId, int parentId, uint flags, MdxGeometryShapeType shapeType, Vector3 primaryVector, Vector3 secondaryVector, float primaryScalar, float secondaryScalar, (uint InterpolationType, int GlobalSequenceId, int[] Times)? translationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? rotationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? scalingTrack) in shapes)
+        {
+            List<byte> entryPayload = [];
+            List<byte> nodePayload = [];
+            nodePayload.AddRange(CreateFixedAsciiPayload(name, 0x50));
+            nodePayload.AddRange(CreateInt32Payload(objectId));
+            nodePayload.AddRange(CreateInt32Payload(parentId));
+            nodePayload.AddRange(CreateUInt32Payload(flags));
+
+            if (translationTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGTR", translationTrack.Value.InterpolationType, translationTrack.Value.GlobalSequenceId, translationTrack.Value.Times, TrackValueKind.Vector3));
+
+            if (rotationTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGRT", rotationTrack.Value.InterpolationType, rotationTrack.Value.GlobalSequenceId, rotationTrack.Value.Times, TrackValueKind.Quaternion));
+
+            if (scalingTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGSC", scalingTrack.Value.InterpolationType, scalingTrack.Value.GlobalSequenceId, scalingTrack.Value.Times, TrackValueKind.Vector3));
+
+            entryPayload.AddRange(CreateSizedPayload(nodePayload));
+            entryPayload.Add((byte)shapeType);
+
+            switch (shapeType)
+            {
+                case MdxGeometryShapeType.Box:
+                    entryPayload.AddRange(CreateVector3Payload(primaryVector));
+                    entryPayload.AddRange(CreateVector3Payload(secondaryVector));
+                    break;
+                case MdxGeometryShapeType.Cylinder:
+                    entryPayload.AddRange(CreateVector3Payload(primaryVector));
+                    entryPayload.AddRange(CreateSinglePayload(primaryScalar));
+                    entryPayload.AddRange(CreateSinglePayload(secondaryScalar));
+                    break;
+                case MdxGeometryShapeType.Sphere:
+                    entryPayload.AddRange(CreateVector3Payload(primaryVector));
+                    entryPayload.AddRange(CreateSinglePayload(primaryScalar));
+                    break;
+                case MdxGeometryShapeType.Plane:
+                    entryPayload.AddRange(CreateSinglePayload(primaryScalar));
+                    entryPayload.AddRange(CreateSinglePayload(secondaryScalar));
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(shapeType), shapeType, null);
+            }
+
+            payload.AddRange(CreateSizedPayload(entryPayload));
+        }
+
+        return [.. payload];
+    }
+
+    private static byte[] CreateCollisionPayload(IReadOnlyList<Vector3> vertices, IReadOnlyList<ushort> triangleIndices, IReadOnlyList<Vector3> facetNormals)
+    {
+        List<byte> payload = [];
+        payload.AddRange(Encoding.ASCII.GetBytes("VRTX"));
+        payload.AddRange(CreateUInt32Payload((uint)vertices.Count));
+        foreach (Vector3 vertex in vertices)
+            payload.AddRange(CreateVector3Payload(vertex));
+
+        payload.AddRange(Encoding.ASCII.GetBytes("TRI "));
+        payload.AddRange(CreateUInt32Payload((uint)triangleIndices.Count));
+        foreach (ushort triangleIndex in triangleIndices)
+            payload.AddRange(BitConverter.GetBytes(triangleIndex));
+
+        payload.AddRange(Encoding.ASCII.GetBytes("NRMS"));
+        payload.AddRange(CreateUInt32Payload((uint)facetNormals.Count));
+        foreach (Vector3 normal in facetNormals)
+            payload.AddRange(CreateVector3Payload(normal));
 
         return [.. payload];
     }

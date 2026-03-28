@@ -22,6 +22,8 @@ public sealed class MdxSummary
         IReadOnlyList<MdxRibbonEmitterSummary> ribbons,
         IReadOnlyList<MdxCameraSummary> cameras,
         IReadOnlyList<MdxEventSummary> events,
+        IReadOnlyList<MdxHitTestShapeSummary> hitTestShapes,
+        MdxCollisionSummary? collision,
         IReadOnlyList<MdxPivotPointSummary> pivotPoints,
         IReadOnlyList<MdxTextureSummary> textures,
         IReadOnlyList<MdxMaterialSummary> materials,
@@ -41,6 +43,7 @@ public sealed class MdxSummary
         ArgumentNullException.ThrowIfNull(ribbons);
         ArgumentNullException.ThrowIfNull(cameras);
         ArgumentNullException.ThrowIfNull(events);
+        ArgumentNullException.ThrowIfNull(hitTestShapes);
         ArgumentNullException.ThrowIfNull(pivotPoints);
         ArgumentNullException.ThrowIfNull(textures);
         ArgumentNullException.ThrowIfNull(materials);
@@ -75,6 +78,9 @@ public sealed class MdxSummary
         CameraCount = cameras.Count;
         Events = events;
         EventCount = events.Count;
+        HitTestShapes = hitTestShapes;
+        HitTestShapeCount = hitTestShapes.Count;
+        Collision = collision;
         PivotPoints = pivotPoints;
         PivotPointCount = pivotPoints.Count;
         Textures = textures;
@@ -142,6 +148,14 @@ public sealed class MdxSummary
     public IReadOnlyList<MdxEventSummary> Events { get; }
 
     public int EventCount { get; }
+
+    public IReadOnlyList<MdxHitTestShapeSummary> HitTestShapes { get; }
+
+    public int HitTestShapeCount { get; }
+
+    public MdxCollisionSummary? Collision { get; }
+
+    public bool HasCollision => Collision is not null;
 
     public IReadOnlyList<MdxPivotPointSummary> PivotPoints { get; }
 

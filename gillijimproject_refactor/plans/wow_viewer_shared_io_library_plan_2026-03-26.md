@@ -1,5 +1,35 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxCollisionSummary` for classic collision-mesh counts, bounds, and max-index coverage
+  - `WowViewer.Core.Mdx.MdxSummary` now carries nullable collision ownership through `Collision` and `HasCollision`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic `CLID` chunks for `v1300` and `v1400`, including ordered `VRTX` or `TRI ` or `NRMS` subchunks, derived bounds, and max-index coverage
+  - `WowViewer.Tool.Inspect mdx inspect` now reports `collisionVertices=` or `collisionTriangles=` and prints a `CLID:` line from the shared reader so the new seam is visible on real data
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- notes:
+  - real fixed-signal `CLID` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `collisionVertices=8`, `collisionTriangles=12`, `CHUNK[17]: id=CLID`, and stable collision-summary bounds through the inspect surface and tests
+  - this seam remains summary-only and does not claim full collision-mesh ownership or runtime collision behavior
+
+## Mar 28, 2026 - Shared Classic `MDX` `HTST` Summary Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxGeometryShapeType` and `MdxHitTestShapeSummary` contracts for classic hit-test shapes and their fixed box or cylinder or sphere or plane payload metadata
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `HitTestShapes` and `HitTestShapeCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `HTST` entries for `v1300` and `v1400`, including inherited `MDLGENOBJECT` metadata plus fixed shape payload fields
+  - `WowViewer.Tool.Inspect mdx inspect` now reports `hitTestShapes=` and prints `HTST[n]` lines from the shared reader so the new seam is visible on real data
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- notes:
+  - real fixed-signal `HTST` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `hitTestShapes=1`, `CHUNK[16]: id=HTST`, and stable `HIT01` sphere metadata through the inspect surface and tests
+  - this seam remains summary-only and does not claim runtime collision or hit-test behavior
+
 ## Mar 28, 2026 - Shared Classic `MDX` `EVTS` Summary Slice
 
 - status: landed

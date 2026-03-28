@@ -1,5 +1,25 @@
 # Progress
 
+### Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice Landed
+
+- advanced the shared classic `MDX` migration from `HTST` into `CLID` so collision meshes no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`
+- added shared `MdxCollisionSummary` and extended `MdxSummary` with nullable collision ownership
+- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with classic `CLID` summary support for `v1300` and `v1400`, including ordered `VRTX` or `TRI ` or `NRMS` subchunk parsing, derived bounds, and max-index coverage
+- updated `WowViewer.Tool.Inspect mdx inspect` to report `collisionVertices=` or `collisionTriangles=` and print a `CLID:` line
+- extended `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` with a synthetic classic-`CLID` fixture and a fixed real Alpha `0.5.3` `Wisp.mdx` collision case
+- validated the seam with focused shared-reader tests plus real inspect output on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- this landing now has strong synthetic coverage plus fixed real Alpha `0.5.3` `MDX` validation for classic `CLID`
+
+### Mar 28, 2026 - Shared Classic `MDX` `HTST` Summary Slice Landed
+
+- advanced the shared classic `MDX` migration from `EVTS` into `HTST` so hit-test shapes no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`
+- added shared `MdxGeometryShapeType` and `MdxHitTestShapeSummary` contracts and extended `MdxSummary` with `HitTestShapes` plus `HitTestShapeCount`
+- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with classic counted `HTST` summary support for `v1300` and `v1400`, including inherited node metadata plus fixed box or cylinder or sphere or plane payload fields
+- updated `WowViewer.Tool.Inspect mdx inspect` to report `hitTestShapes=` and print `HTST[n]` lines
+- extended `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` with a synthetic classic-`HTST` fixture and a fixed real Alpha `0.5.3` `Wisp.mdx` hit-test-shape case
+- validated the seam with focused shared-reader tests plus real inspect output on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- this landing now has strong synthetic coverage plus fixed real Alpha `0.5.3` `MDX` validation for classic `HTST`
+
 ### Mar 28, 2026 - Shared Classic `MDX` `EVTS` Summary Slice Landed
 
 - advanced the shared classic `MDX` migration from `CAMS` into `EVTS` so event nodes no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`

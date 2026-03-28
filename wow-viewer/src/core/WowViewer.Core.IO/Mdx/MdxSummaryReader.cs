@@ -97,6 +97,8 @@ public static class MdxSummaryReader
             List<MdxRibbonEmitterSummary> ribbons = [];
             List<MdxCameraSummary> cameras = [];
             List<MdxEventSummary> events = [];
+            List<MdxHitTestShapeSummary> hitTestShapes = [];
+            MdxCollisionSummary? collision = null;
             List<MdxPivotPointSummary> pivotPoints = [];
             List<MdxTextureSummary> textures = [];
             List<MdxMaterialSummary> materials = [];
@@ -172,6 +174,14 @@ public static class MdxSummaryReader
                 {
                     events = ReadEvtsSummary(stream, dataOffset, header.Size, version);
                 }
+                else if (header.Id == MdxChunkIds.Htst)
+                {
+                    hitTestShapes = ReadHtstSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Clid)
+                {
+                    collision = ReadClidSummary(stream, dataOffset, header.Size, version);
+                }
                 else if (header.Id == MdxChunkIds.Pivt)
                 {
                     pivotPoints = ReadPivtSummary(stream, dataOffset, header.Size);
@@ -188,7 +198,7 @@ public static class MdxSummaryReader
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, hitTestShapes, collision, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
         }
         finally
         {
@@ -803,6 +813,169 @@ public static class MdxSummaryReader
 
             stream.Position = chunkEnd;
             return particleEmitters2;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static MdxCollisionSummary? ReadClidSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return null;
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+
+            ExpectTag(stream, "VRTX", "CLID(v1300): expected VRTX.");
+            int vertexCount = ReadNonNegativeCount(stream, "CLID(v1300): negative VRTX count.");
+
+            Vector3? boundsMin = null;
+            Vector3? boundsMax = null;
+            if (vertexCount > 0)
+            {
+                Vector3 firstVertex = ReadVector3(stream);
+                Vector3 min = firstVertex;
+                Vector3 max = firstVertex;
+                for (int index = 1; index < vertexCount; index++)
+                {
+                    Vector3 vertex = ReadVector3(stream);
+                    min = Vector3.Min(min, vertex);
+                    max = Vector3.Max(max, vertex);
+                }
+
+                boundsMin = min;
+                boundsMax = max;
+            }
+
+            ExpectTag(stream, "TRI ", "CLID(v1300): expected TRI .");
+            int triangleIndexCount = ReadNonNegativeCount(stream, "CLID(v1300): negative TRI count.");
+            if (triangleIndexCount % 3 != 0)
+                throw new InvalidDataException("CLID(v1300): TRI count must be divisible by 3.");
+
+            int maxTriangleIndex = 0;
+            for (int index = 0; index < triangleIndexCount; index++)
+            {
+                int triangleIndex = ReadUInt16(stream);
+
+                if (triangleIndex >= vertexCount)
+                    throw new InvalidDataException($"CLID(v1300): TRI index {triangleIndex} exceeded VRTX count {vertexCount}.");
+
+                maxTriangleIndex = Math.Max(maxTriangleIndex, triangleIndex);
+            }
+
+            ExpectTag(stream, "NRMS", "CLID(v1300): expected NRMS.");
+            int facetNormalCount = ReadNonNegativeCount(stream, "CLID(v1300): negative NRMS count.");
+            SkipBytes(stream, checked((long)facetNormalCount * sizeof(float) * 3), chunkEnd, "CLID(v1300): NRMS payload overran the chunk.");
+
+            if (stream.Position != chunkEnd)
+                throw new InvalidDataException("CLID(v1300): chunk contained unexpected trailing bytes.");
+
+            return new MdxCollisionSummary(vertexCount, triangleIndexCount, triangleIndexCount / 3, facetNormalCount, maxTriangleIndex, boundsMin, boundsMax);
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxHitTestShapeSummary> ReadHtstSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("HTST(v1300): missing hit-test shape count.");
+
+            uint shapeCount = ReadUInt32(stream);
+            if (shapeCount > 100000)
+                throw new InvalidDataException($"HTST(v1300): invalid hit-test shape count {shapeCount}.");
+
+            List<MdxHitTestShapeSummary> hitTestShapes = new(checked((int)shapeCount));
+            for (int index = 0; index < shapeCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"HTST(v1300): truncated section header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"HTST(v1300): invalid section size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"HTST(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "HTST(v1300)");
+
+                if (entryEnd - stream.Position < 1)
+                    throw new InvalidDataException($"HTST(v1300): missing shape type at index {index}.");
+
+                MdxGeometryShapeType shapeType = ReadGeometryShapeType(stream, $"HTST(v1300): invalid shape type at index {index}.");
+                Vector3? minimum = null;
+                Vector3? maximum = null;
+                Vector3? basePoint = null;
+                float? height = null;
+                float? radius = null;
+                Vector3? center = null;
+                float? length = null;
+                float? width = null;
+
+                switch (shapeType)
+                {
+                    case MdxGeometryShapeType.Box:
+                        if (entryEnd - stream.Position < sizeof(float) * 6)
+                            throw new InvalidDataException($"HTST(v1300): truncated box payload at index {index}.");
+
+                        minimum = ReadVector3(stream);
+                        maximum = ReadVector3(stream);
+                        break;
+                    case MdxGeometryShapeType.Cylinder:
+                        if (entryEnd - stream.Position < sizeof(float) * 5)
+                            throw new InvalidDataException($"HTST(v1300): truncated cylinder payload at index {index}.");
+
+                        basePoint = ReadVector3(stream);
+                        height = ReadSingle(stream);
+                        radius = ReadSingle(stream);
+                        break;
+                    case MdxGeometryShapeType.Sphere:
+                        if (entryEnd - stream.Position < sizeof(float) * 4)
+                            throw new InvalidDataException($"HTST(v1300): truncated sphere payload at index {index}.");
+
+                        center = ReadVector3(stream);
+                        radius = ReadSingle(stream);
+                        break;
+                    case MdxGeometryShapeType.Plane:
+                        if (entryEnd - stream.Position < sizeof(float) * 2)
+                            throw new InvalidDataException($"HTST(v1300): truncated plane payload at index {index}.");
+
+                        length = ReadSingle(stream);
+                        width = ReadSingle(stream);
+                        break;
+                }
+
+                if (stream.Position > entryEnd)
+                    throw new InvalidDataException($"HTST(v1300): payload overran section {index}.");
+
+                stream.Position = entryEnd;
+                hitTestShapes.Add(new MdxHitTestShapeSummary(index, name, objectId, parentId, flags, translationTrack, rotationTrack, scalingTrack, shapeType, minimum, maximum, basePoint, height, radius, center, length, width));
+            }
+
+            stream.Position = chunkEnd;
+            return hitTestShapes;
         }
         finally
         {
@@ -1583,6 +1756,15 @@ public static class MdxSummaryReader
         return new MdxEventTrackSummary(tag, checked((int)keyCount), globalSequenceId, firstKeyTime, lastKeyTime);
     }
 
+    private static MdxGeometryShapeType ReadGeometryShapeType(Stream stream, string invalidMessage)
+    {
+        byte value = ReadByte(stream);
+        if (value > (byte)MdxGeometryShapeType.Plane)
+            throw new InvalidDataException(invalidMessage);
+
+        return (MdxGeometryShapeType)value;
+    }
+
     private static MdxNodeTrackSummary ReadNodeVectorTrackSummary(Stream stream, long limit, string tag, string overrunMessage)
     {
         return ReadNodeTrackSummary(stream, limit, tag, sizeof(float) * 3, overrunMessage);
@@ -1691,6 +1873,13 @@ public static class MdxSummaryReader
         Span<byte> bytes = stackalloc byte[sizeof(uint)];
         stream.ReadExactly(bytes);
         return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+    }
+
+    private static ushort ReadUInt16(Stream stream)
+    {
+        Span<byte> bytes = stackalloc byte[sizeof(ushort)];
+        stream.ReadExactly(bytes);
+        return BinaryPrimitives.ReadUInt16LittleEndian(bytes);
     }
 
     private static byte ReadByte(Stream stream)
