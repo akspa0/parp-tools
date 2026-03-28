@@ -19,8 +19,12 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Mdx;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
+using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
+using CoreMdxGeometryFile = WowViewer.Core.Mdx.MdxGeometryFile;
+using CoreMdxSummary = WowViewer.Core.Mdx.MdxSummary;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
 using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
 
@@ -6961,11 +6965,13 @@ void main() {
                     ViewerLog.Important(ViewerLog.Category.Mdx,
                         $"[ModelRouting] Extension/container mismatch: '{ext}' with MDLX root. Routing as MDX: {Path.GetFileName(sourcePath)}");
 
+                MdxRuntimeSharedInfo? sharedRuntimeInfo = TryReadSharedMdxRuntimeInfo(sourcePath, modelBytes);
+
                 using (var ms = new MemoryStream(modelBytes))
                 using (var br = new BinaryReader(ms))
                 {
                     var mdx = MdxFile.Load(br);
-                    LoadMdxModel(mdx, dir, sourcePath);
+                    LoadMdxModel(mdx, dir, sourcePath, sharedRuntimeInfo: sharedRuntimeInfo);
                 }
                 return;
 
@@ -7627,30 +7633,63 @@ void main() {
         }
     }
 
-    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false)
+    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null)
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
-        
-        int validGeosets = mdx.Geosets.Count(g => g.Vertices.Count > 0 && g.Indices.Count > 0);
-        int totalVerts = mdx.Geosets.Sum(g => g.Vertices.Count);
-        int totalTris = mdx.Geosets.Sum(g => g.Indices.Count / 3);
+
+        CoreMdxSummary? sharedSummary = sharedRuntimeInfo?.Summary;
+        CoreMdxGeometryFile? sharedGeometry = sharedRuntimeInfo?.Geometry;
+
+        int geosetCount = sharedGeometry?.GeosetCount ?? mdx.Geosets.Count;
+        int validGeosets = sharedGeometry != null
+            ? sharedGeometry.Geosets.Count(g => g.VertexCount > 0 && g.IndexCount > 0)
+            : mdx.Geosets.Count(g => g.Vertices.Count > 0 && g.Indices.Count > 0);
+        int totalVerts = sharedGeometry != null
+            ? sharedGeometry.Geosets.Sum(g => g.VertexCount)
+            : mdx.Geosets.Sum(g => g.Vertices.Count);
+        int totalTris = sharedGeometry != null
+            ? sharedGeometry.Geosets.Sum(g => g.TriangleCount)
+            : mdx.Geosets.Sum(g => g.Indices.Count / 3);
+        string versionLabel = sharedSummary?.Version?.ToString()
+            ?? sharedGeometry?.Version?.ToString()
+            ?? mdx.Version.ToString();
+        string modelName = sharedSummary?.ModelName
+            ?? sharedGeometry?.ModelName
+            ?? mdx.Model.Name;
+        int textureCount = sharedSummary?.TextureCount ?? mdx.Textures.Count;
+        int materialCount = sharedSummary?.MaterialCount ?? mdx.Materials.Count;
+        int boneCount = sharedSummary?.BoneCount ?? mdx.Bones.Count;
+        int sequenceCount = sharedSummary?.SequenceCount ?? mdx.Sequences.Count;
+        int pivotPointCount = sharedSummary?.PivotPointCount ?? mdx.PivotPoints.Count;
+        CoreMdxCollisionSummary? collision = sharedSummary?.Collision;
 
         _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild);
+
+        if (sharedRuntimeInfo != null)
+        {
+            ViewerLog.Trace(
+                $"[SharedMDX] Runtime metadata consumer: summary={(sharedSummary != null ? "yes" : "no")} geometry={(sharedGeometry != null ? "yes" : "no")} file={Path.GetFileName(virtualPath ?? _loadedFileName ?? "<memory>")}");
+        }
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
 
         _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +
-                     $"Version: {mdx.Version}\n" +
-                     $"Name: {mdx.Model.Name}\n\n" +
-                     $"Geosets: {mdx.Geosets.Count} ({validGeosets} valid)\n" +
+                     $"Version: {versionLabel}\n" +
+                     $"Name: {modelName}\n\n" +
+                     $"Geosets: {geosetCount} ({validGeosets} valid)\n" +
                      $"Vertices: {totalVerts:N0}\n" +
-                     $"Triangles: {totalTris:N0}\n\n" +
-                     $"Materials: {mdx.Materials.Count}\n" +
-                     $"Textures: {mdx.Textures.Count}\n" +
-                     $"Bones: {mdx.Bones.Count}\n" +
-                     $"Sequences: {mdx.Sequences.Count}\n";
+                     $"Triangles: {totalTris:N0}\n" +
+                     $"Pivot Points: {pivotPointCount}\n" +
+                     (collision != null
+                        ? $"Collision: {collision.VertexCount} verts, {collision.TriangleCount} tris\n"
+                        : string.Empty) +
+                     "\n" +
+                     $"Materials: {materialCount}\n" +
+                     $"Textures: {textureCount}\n" +
+                     $"Bones: {boneCount}\n" +
+                     $"Sequences: {sequenceCount}\n";
 
         if (mdx.Sequences.Count > 0)
         {
@@ -7671,6 +7710,43 @@ void main() {
 
         _statusMessage = $"Loaded MDX: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
     }
+
+    private MdxRuntimeSharedInfo? TryReadSharedMdxRuntimeInfo(string sourcePath, byte[] modelBytes)
+    {
+        CoreMdxSummary? summary = null;
+        CoreMdxGeometryFile? geometry = null;
+
+        try
+        {
+            using var summaryStream = new MemoryStream(modelBytes, writable: false);
+            summary = MdxSummaryReader.Read(summaryStream, sourcePath);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[SharedMDX] Summary metadata unavailable for runtime consumer {Path.GetFileName(sourcePath)}: {ex.Message}");
+        }
+
+        try
+        {
+            using var geometryStream = new MemoryStream(modelBytes, writable: false);
+            geometry = MdxGeometryReader.Read(geometryStream, sourcePath);
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"[SharedMDX] GEOS metadata unavailable for runtime consumer {Path.GetFileName(sourcePath)}: {ex.Message}");
+        }
+
+        if (summary == null && geometry == null)
+            return null;
+
+        return new MdxRuntimeSharedInfo(summary, geometry);
+    }
+
+    private readonly record struct MdxRuntimeSharedInfo(
+        CoreMdxSummary? Summary,
+        CoreMdxGeometryFile? Geometry);
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {

@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
@@ -83,6 +84,15 @@ internal static class AssetProbe
         if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
         {
             Console.WriteLine($"[AssetProbe] SharedMDX: version={FormatVersion(sharedMdx.Version)} model={sharedMdx.ModelName ?? "n/a"} blendTime={FormatVersion(sharedMdx.BlendTime)} chunks={sharedMdx.ChunkCount} knownChunks={sharedMdx.KnownChunkCount} unknownChunks={sharedMdx.UnknownChunkCount} textures={sharedMdx.TextureCount} replaceableTextures={sharedMdx.ReplaceableTextureCount} materials={sharedMdx.MaterialCount} materialLayers={sharedMdx.MaterialLayerCount} firstChunks={FormatChunkList(sharedMdx.Chunks)} firstTextures={FormatTextureList(sharedMdx.TexturePaths)} firstMaterials={FormatMaterialList(sharedMdx.MaterialLayers)}");
+
+            if (sharedMdx.PivotPointCount > 0)
+                Console.WriteLine($"[AssetProbe] SharedPIVT: count={sharedMdx.PivotPointCount} first={FormatVector(sharedMdx.FirstPivotPoint)}");
+
+            if (sharedMdx.CollisionVertexCount.HasValue && sharedMdx.CollisionTriangleCount.HasValue)
+            {
+                Console.WriteLine(
+                    $"[AssetProbe] SharedCLID: vertices={sharedMdx.CollisionVertexCount.Value} triangles={sharedMdx.CollisionTriangleCount.Value} bounds={FormatBounds(sharedMdx.CollisionBoundsMin, sharedMdx.CollisionBoundsMax)}");
+            }
         }
         else if (!string.IsNullOrWhiteSpace(sharedMdxError))
         {
@@ -350,6 +360,12 @@ internal static class AssetProbe
                 summary.Materials.Take(2)
                     .SelectMany(static material => material.Layers.Take(1).Select(layer => $"tex{layer.TextureId}/blend{layer.BlendMode}/alpha{layer.StaticAlpha:F3}"))
                     .ToArray(),
+                summary.PivotPointCount,
+                summary.PivotPoints.FirstOrDefault()?.Position,
+                summary.Collision?.VertexCount,
+                summary.Collision?.TriangleCount,
+                summary.Collision?.BoundsMin,
+                summary.Collision?.BoundsMax,
                 summary.Chunks.Take(4).Select(static chunk => chunk.Id.ToString()).ToArray());
         }
         catch (Exception ex)
@@ -395,6 +411,20 @@ internal static class AssetProbe
     private static string FormatMaterialList(IReadOnlyList<string> materialLayers)
     {
         return materialLayers.Count == 0 ? "n/a" : string.Join(",", materialLayers);
+    }
+
+    private static string FormatVector(Vector3? vector)
+    {
+        if (!vector.HasValue)
+            return "n/a";
+
+        Vector3 value = vector.Value;
+        return $"({value.X:F3},{value.Y:F3},{value.Z:F3})";
+    }
+
+    private static string FormatBounds(Vector3? min, Vector3? max)
+    {
+        return $"{FormatVector(min)}..{FormatVector(max)}";
     }
 
     private static string ClassifyTextureAlpha(int zeroAlphaPixels, int translucentAlphaPixels)
@@ -448,6 +478,12 @@ internal static class AssetProbe
         int MaterialCount,
         int MaterialLayerCount,
         IReadOnlyList<string> MaterialLayers,
+        int PivotPointCount,
+        Vector3? FirstPivotPoint,
+        int? CollisionVertexCount,
+        int? CollisionTriangleCount,
+        Vector3? CollisionBoundsMin,
+        Vector3? CollisionBoundsMax,
         IReadOnlyList<string> Chunks);
 
     private readonly record struct MdxGeometryProbeResult(

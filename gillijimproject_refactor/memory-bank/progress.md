@@ -1,5 +1,28 @@
 # Progress
 
+### Mar 28, 2026 - ViewerApp Shared `MDX` Runtime Metadata Consumer Landed
+
+- started the first non-probe runtime `MDX` consumer cutover in `MdxViewer` without changing the renderer ownership boundary
+- updated `src/MdxViewer/ViewerApp.cs` so the real `MDLX` disk or data-source route now reads shared `MdxSummaryReader` plus `MdxGeometryReader` metadata before the legacy `MdxFile.Load(...)` render load
+- switched standalone runtime model-info and load-status counts to prefer shared version or model-name or geoset or vertex or triangle or pivot or collision metadata, while keeping explicit legacy fallback when shared reads fail
+- validated the slice with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` plus a real startup smoke on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` that printed `[SharedMDX] Runtime metadata consumer: summary=yes geometry=yes file=Wisp.mdx`
+- this is still a metadata-only runtime consumer cutover, not a renderer cutover or world-scene asset-loader cutover
+
+### Mar 28, 2026 - AssetProbe Shared `PIVT` And `CLID` Signals Landed
+
+- expanded the existing `AssetProbe` shared `MDX` compatibility surface past summary or `GEOS` counts into visible shared pivot-table and collision-mesh reporting
+- updated `src/MdxViewer/AssetProbe.cs` so `SharedMDX` probes now emit `SharedPIVT` and `SharedCLID` lines when the shared summary exposes those chunks
+- validated the output on archive-backed real assets: `chest01.mdx` now reports `SharedPIVT: count=6`, and `Creature/AncientOfWar/AncientofWar.mdx` now reports both `SharedPIVT: count=72` and `SharedCLID: vertices=8 triangles=12`
+- this is still probe-only validation; it does not move collision or pivot handling into the runtime renderer path by itself
+
+### Mar 28, 2026 - AssetProbe Shared `GEOS` Consumer Cutover Landed
+
+- advanced the active `MdxViewer` compatibility surface from shared `MDX` summary-only probe validation into first shared `GEOS` payload consumer validation
+- updated `src/MdxViewer/AssetProbe.cs` so probe-side geoset reporting now comes from `WowViewer.Core.IO.Mdx.MdxGeometryReader` instead of depending on `MdxFile.Load(...)` geoset objects
+- kept the cutover narrow: the probe still uses legacy `MdxFile.Load(...)` for the rest of the model parse and texture or material reporting
+- validated the change by building `MdxViewer` and running `--probe-mdx` on both archive-backed `chest01.mdx` and `Creature/AncientOfWar/AncientofWar.mdx`, with the latter confirming full shared reporting across `5` geosets
+- this is still non-UI compatibility validation only, not a runtime model-loading cutover
+
 ### Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice Landed
 
 - advanced the shared classic `MDX` migration from `GEOS` summary-only ownership into first typed geoset payload ownership so render-facing mesh data no longer has to stay trapped behind `MdxFile.Load(...)`

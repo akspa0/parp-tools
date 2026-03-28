@@ -1,5 +1,38 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## ViewerApp Shared `MDX` Runtime Metadata Consumer Validation (Mar 28)
+
+- The active standalone viewer now consumes shared `wow-viewer` classic `MDX` summary and `GEOS` payload metadata in the real runtime load path instead of deriving all model-info sidebar counts from `MdxFile.Load(...)` geosets alone.
+- Landed pieces:
+   - `src/MdxViewer/ViewerApp.cs` now reads shared `MdxSummaryReader` plus `MdxGeometryReader` results during the `MDLX` container route in `LoadModelFromBytesWithContainerProbe(...)`
+   - `LoadMdxModel(...)` now prefers shared version or model-name or geoset-count or valid-geoset-count or total-vertex-count or total-triangle-count or pivot-count values when shared reads succeed, while still falling back to the legacy `MdxFile` object when they do not
+   - the standalone model-info panel now also surfaces shared `CLID` collision counts when present
+   - the actual runtime renderer still uses `MdxFile.Load(...)`; this slice only moves runtime metadata ownership, not render-buffer assembly or animation or material evaluation
+- Current verified validation:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 28, 2026 with existing warnings
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --verbose i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` reached the real disk-load path on Mar 28, 2026 and printed `[SharedMDX] Runtime metadata consumer: summary=yes geometry=yes file=Wisp.mdx`
+- Important boundary:
+   - this is the first non-probe runtime `MDX` consumer cutover in `MdxViewer`, but it is still metadata-only
+   - do not describe this as a renderer cutover, a world-scene cutover, or full runtime signoff
+
+## AssetProbe Shared `GEOS` Payload Consumer Validation (Mar 28)
+
+- The active viewer now consumes the first shared `wow-viewer` classic `GEOS` payload seam through the existing non-UI probe path instead of relying on `MdxFile.Load(...)` for probe-side geoset inspection.
+- Landed pieces:
+   - `src/MdxViewer/AssetProbe.cs` now runs `WowViewer.Core.IO.Mdx.MdxGeometryReader` on the probed model bytes after shared file detection succeeds
+   - probe output now reports geoset counts from the shared geometry result when available
+   - probe geoset lines now print shared payload-level signals such as `Triangles`, `UvSets`, `PrimaryTexCoords`, `MatrixGroups`, and `MatrixIndices` instead of only the legacy `Vertices` or `Indices` or flat `TexCoords` counts from `MdxFile.Load(...)`
+   - the rest of the probe still intentionally uses the legacy model parse for material and texture-path reporting, so this is a narrow geoset consumer cutover rather than a full shared-library model cutover
+- Current verified validation:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 28, 2026 with existing warnings
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and now reports shared geoset payload fields on both chest geosets
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "Creature/AncientOfWar/AncientofWar.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 28, 2026 and reports all `5` geosets with shared payload counts, confirming the path scales beyond the small chest fixture
+   - those same Mar 28 probe runs now also report shared `PIVT` or `CLID` signals when present, for example `SharedPIVT: count=6` on chest and both `SharedPIVT: count=72` plus `SharedCLID: vertices=8 triangles=12` on `Creature/AncientOfWar/AncientofWar.mdx`
+- Important boundary:
+   - this is probe-only consumer validation
+   - `MdxViewer` still uses `MdxFile.Load(...)` for actual runtime model loading and rendering
+   - do not describe this as a full shared-model runtime cutover or runtime viewer signoff
+
 ## AssetProbe Shared `MDX` Consumer Validation (Mar 28)
 
 - The active viewer now consumes the first shared `wow-viewer` `MDX` model-family seam through the existing non-UI probe path instead of limiting model validation to shared file detection only.
