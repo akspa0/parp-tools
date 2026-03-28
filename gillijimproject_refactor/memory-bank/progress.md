@@ -1,5 +1,13 @@
 # Progress
 
+### Mar 28, 2026 - Viewer UI Resize And Input Regression Fixed
+
+- fixed a real `MdxViewer` shell regression where panels drew at the wrong size and toolbar or sidebar buttons stopped responding after window resize or maximize
+- updated `src/MdxViewer/ViewerApp.cs` to explicitly resync the packaged Silk `ImGuiController` logical window size through its private `WindowResized(Vector2D<int>)` hook, while keeping the OpenGL viewport bound to framebuffer resize
+- validated the patch with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` plus a short viewer startup smoke
+- the user manually retested the resized UI on Mar 28, 2026 and reported that it now seems to be working
+- this is still manual runtime validation only; there is no automated UI regression coverage for the resize or hit-testing path
+
 ### Mar 28, 2026 - ViewerApp Shared `MDX` Runtime Metadata Consumer Landed
 
 - started the first non-probe runtime `MDX` consumer cutover in `MdxViewer` without changing the renderer ownership boundary

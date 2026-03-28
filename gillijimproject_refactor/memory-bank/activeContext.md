@@ -1,5 +1,16 @@
 # Active Context
 
+## Mar 28, 2026 - Viewer UI Resize And Hit-Testing Regression Fixed In `MdxViewer`
+
+- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` now explicitly resyncs the Silk `ImGuiController` logical window size so the active viewer shell no longer drifts into broken panel sizing and unusable button hit-testing after resize or maximize.
+- Verification completed on Mar 28, 2026:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed after the fix
+	- a short viewer startup smoke launched cleanly after the patch
+	- the user manually retested the UI and reported that it now seems to be working
+- Important boundary:
+	- this is still manual runtime signoff only for the shell regression; no automated UI regression coverage exists yet
+	- the current implementation reflects a private Silk `ImGuiController.WindowResized(Vector2D<int>)` method, so future package upgrades should treat that integration point as fragile and re-check resize behavior first
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past classic `GEOS` summary ownership into first shared classic geoset payload ownership for render-facing vertex or normal or UV or index or skin-table data.

@@ -1,5 +1,24 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Viewer UI Resize And Hit-Testing Regression Fixed (Mar 28)
+
+- The active viewer had a real UI-shell regression where panels stopped sizing correctly and buttons became effectively unclickable after resize or maximize.
+- Current best root-cause assessment:
+   - `ViewerApp` was updating the OpenGL viewport on `FramebufferResize`, but the packaged Silk `ImGuiController` could drift out of sync with the logical window size used for layout and mouse hit-testing on Windows.
+   - The visible symptom matched stale `ImGui` display-size or input-space state rather than a single broken panel.
+- Landed fix:
+   - `src/MdxViewer/ViewerApp.cs` now reflects the packaged private `ImGuiController.WindowResized(Vector2D<int>)` method once and uses it through `SyncImGuiWindowSize(...)`.
+   - `SyncImGuiWindowSize(...)` now runs once after controller creation and again before each `_imGui.Update(...)`, using `_window.Size` and a last-synced guard to avoid redundant calls.
+   - `OnResize(...)` still keeps `_gl.Viewport(...)` tied to framebuffer resize; the fix only resyncs the `ImGui` logical window size.
+- Current verified validation:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 28, 2026 after the patch.
+   - a short `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj --` startup smoke launched cleanly on Mar 28, 2026.
+   - the user manually retested the resized shell on Mar 28, 2026 and reported that it now seems to be working.
+- Important boundary:
+   - this is build plus startup smoke plus user manual UI validation only.
+   - no automated UI regression test exists yet for this resize or hit-testing path.
+   - the current fix depends on the private Silk `ImGuiController` resize method name staying stable; if the package is upgraded and the regression reappears, revisit the controller integration first.
+
 ## ViewerApp Shared `MDX` Runtime Metadata Consumer Validation (Mar 28)
 
 - The active standalone viewer now consumes shared `wow-viewer` classic `MDX` summary and `GEOS` payload metadata in the real runtime load path instead of deriving all model-info sidebar counts from `MdxFile.Load(...)` geosets alone.
