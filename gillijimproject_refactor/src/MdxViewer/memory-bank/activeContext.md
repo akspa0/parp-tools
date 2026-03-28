@@ -1,5 +1,37 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## AssetProbe Shared `MDX` Consumer Validation (Mar 27)
+
+- The active viewer now consumes the first shared `wow-viewer` `MDX` model-family seam through the existing non-UI probe path instead of limiting model validation to shared file detection only.
+- Landed pieces:
+   - `src/MdxViewer/AssetProbe.cs` now runs `WowViewer.Core.IO.Mdx.MdxSummaryReader` on the probed model bytes after shared file detection succeeds
+   - probe output now prints `SharedMDX` lines with version, model name, blend time, chunk counts, and the first few top-level chunk ids
+   - the earlier shared `BLP` texture-summary output remains in place, so the same chest-model probe now surfaces shared model and texture seams together
+- Current verified validation:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` targeted passing tests
+   - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 27, 2026 with existing warnings
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and now reports `SharedMDX: version=1300 model=Chest01 blendTime=0 chunks=9 knownChunks=9 unknownChunks=0`
+- Important boundary:
+   - this is compile plus non-UI probe validation only
+   - `MdxViewer` still uses `MdxFile.Load(...)` for the actual model parse and render path
+   - do not describe this as runtime viewer signoff or a full shared-library model cutover
+
+## AssetProbe Shared `BLP` Consumer Validation (Mar 27)
+
+- The active viewer now has a narrow non-UI compatibility check for the latest shared `wow-viewer` `BLP` seam instead of leaving that validation only inside `wow-viewer` itself.
+- Landed pieces:
+   - `src/MdxViewer/AssetProbe.cs` now runs `WowViewer.Core.IO.Files.WowFileDetector` on the probed model bytes before loading them through `MdxFile`
+   - the same probe path now also runs `WowViewer.Core.IO.Blp.BlpSummaryReader` on resolved texture bytes when the shared detector classifies them as `Blp`
+   - probe output now prints shared `BLP` header-summary signals alongside the existing `SereniaBLPLib` decode-based width or alpha analysis
+- Current verified validation:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 27, 2026 with existing warnings
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and now reports `SharedDetect kind=Mdx` for the model plus per-texture `SharedBLP` lines such as `format=BLP2 version=1 compression=Dxtc pixelFormat=Dxt1 size=128x64 mips=8 inBoundsMips=8 outOfBoundsMips=0`
+- Important boundary:
+   - this is consumer compile plus non-UI probe validation only
+   - `MdxViewer` still uses `SereniaBLPLib` for actual bitmap decode in the probe and main render/export paths
+   - do not describe this as a runtime viewer signoff or a full texture-pipeline cutover away from the legacy decode library
+
 ## wow-viewer Library Priority Reset (Mar 26)
 
 - Future `wow-viewer` work should no longer treat `MdxViewer` as the default PM4 source of truth.

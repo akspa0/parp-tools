@@ -1,8 +1,13 @@
+using System.Numerics;
 using System.Text.Json;
+using WowViewer.Core.Blp;
 using WowViewer.Core.Files;
+using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Core.PM4.Models;
@@ -22,6 +27,12 @@ string[] tail = args.Skip(1).ToArray();
 
 switch (area)
 {
+	case "blp":
+		RunBlp(tail);
+		break;
+	case "mdx":
+		RunMdx(tail);
+		break;
 	case "map":
 		RunMap(tail);
 		break;
@@ -36,6 +47,142 @@ switch (area)
 		ShowUsage();
 		Environment.ExitCode = 1;
 		break;
+}
+
+static void RunBlp(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowBlpUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunBlpInspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown blp command '{command}'.");
+			ShowBlpUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunBlpInspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <file.blp> or --archive-root <dir> with --virtual-path <path/to/file.blp>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	BlpSummary summary;
+	using (Stream stream = OpenInputStream())
+		summary = BlpSummaryReader.Read(stream, sourceLabel);
+
+	PrintBlpSummary(summary);
+}
+
+static void RunMdx(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowMdxUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunMdxInspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown mdx command '{command}'.");
+			ShowMdxUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunMdxInspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	MdxSummary summary;
+	using (Stream stream = OpenInputStream())
+		summary = MdxSummaryReader.Read(stream, sourceLabel);
+
+	PrintMdxSummary(summary);
 }
 
 static void RunMap(string[] args)
@@ -177,7 +324,7 @@ static void RunWmoInspect(string[] args)
 		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
 			return File.OpenRead(input);
 
-		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input)
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
 			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
 		return new MemoryStream(archivedBytes, writable: false);
 	}
@@ -1227,10 +1374,42 @@ static void PrintWmoGroupNormalSummary(WmoGroupNormalSummary summary)
 	Console.WriteLine($"MONR: payloadBytes={summary.PayloadSizeBytes} normals={summary.NormalCount} rangeX=[{summary.MinX:F3}, {summary.MaxX:F3}] rangeY=[{summary.MinY:F3}, {summary.MaxY:F3}] rangeZ=[{summary.MinZ:F3}, {summary.MaxZ:F3}] lengthRange=[{summary.MinLength:F3}, {summary.MaxLength:F3}] avgLength={summary.AverageLength:F3} nearUnit={summary.NearUnitCount}");
 }
 
+static void PrintBlpSummary(BlpSummary summary)
+{
+	Console.WriteLine($"BLP: format={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} compression={summary.Compression} alphaBits={summary.AlphaDepthBits} pixelFormat={summary.PixelFormat} mipType={summary.MipMapTypeRaw} size={summary.Width}x{summary.Height} headerBytes={summary.HeaderSizeBytes} paletteBytes={summary.PaletteSizeBytes} jpegHeaderBytes={summary.JpegHeaderSizeBytes} mips={summary.MipMaps.Count} inBoundsMips={summary.InBoundsMipLevelCount} outOfBoundsMips={summary.OutOfBoundsMipLevelCount} maxMipEnd={summary.MaxMipEndOffset}");
+	foreach (BlpMipMapEntry mipMap in summary.MipMaps)
+		PrintBlpMipMap(mipMap);
+}
+
+static void PrintBlpMipMap(BlpMipMapEntry mipMap)
+{
+	Console.WriteLine($"MIP[{mipMap.Level}]: size={mipMap.Width}x{mipMap.Height} offset={mipMap.Offset} bytes={mipMap.SizeBytes} inBounds={mipMap.IsInBounds}");
+}
+
+static void PrintMdxSummary(MdxSummary summary)
+{
+	string modelName = string.IsNullOrWhiteSpace(summary.ModelName) ? "n/a" : summary.ModelName;
+	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
+	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
+	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	for (int index = 0; index < summary.Chunks.Count; index++)
+		PrintMdxChunkSummary(index, summary.Chunks[index]);
+}
+
+static void PrintMdxChunkSummary(int index, MdxChunkSummary chunk)
+{
+	Console.WriteLine($"CHUNK[{index}]: id={chunk.Id} payloadBytes={chunk.PayloadSizeBytes} headerOffset={chunk.HeaderOffset} dataOffset={chunk.DataOffset} known={chunk.IsKnownChunk}");
+}
+
 static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-inspect blp inspect --input <file.blp>");
+	Console.WriteLine("  wowviewer-inspect blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wowviewer-inspect mdx inspect --input <file.mdx>");
+	Console.WriteLine("  wowviewer-inspect mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
@@ -1241,6 +1420,20 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>]");
+}
+
+static void ShowBlpUsage()
+{
+	Console.WriteLine("BLP commands:");
+	Console.WriteLine("  blp inspect --input <file.blp>");
+	Console.WriteLine("  blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
+}
+
+static void ShowMdxUsage()
+{
+	Console.WriteLine("MDX commands:");
+	Console.WriteLine("  mdx inspect --input <file.mdx>");
+	Console.WriteLine("  mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
 }
 
 static void ShowWmoUsage()

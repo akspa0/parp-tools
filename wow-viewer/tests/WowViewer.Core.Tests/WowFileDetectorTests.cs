@@ -6,6 +6,42 @@ namespace WowViewer.Core.Tests;
 public sealed class WowFileDetectorTests
 {
     [Fact]
+    public void Detect_SyntheticMdxBuffer_ReturnsMdx()
+    {
+        byte[] bytes =
+        [
+            (byte)'M', (byte)'D', (byte)'L', (byte)'X',
+            .. CreateChunk("VERS", CreateUInt32Payload(1300)),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "synthetic.mdx");
+
+        Assert.Equal(WowFileKind.Mdx, detection.Kind);
+        Assert.Null(detection.Version);
+    }
+
+    [Fact]
+    public void Detect_SyntheticBlp2Buffer_ReturnsBlp()
+    {
+        byte[] bytes =
+        [
+            (byte)'B', (byte)'L', (byte)'P', (byte)'2',
+            1, 0, 0, 0,
+            2, 8, 7, 1,
+            64, 0, 0, 0,
+            64, 0, 0, 0,
+            .. new byte[128],
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "synthetic.blp");
+
+        Assert.Equal(WowFileKind.Blp, detection.Kind);
+        Assert.Null(detection.Version);
+    }
+
+    [Fact]
     public void Detect_SyntheticWdtBuffer_ReturnsWdtAndVersion()
     {
         byte[] bytes =

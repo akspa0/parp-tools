@@ -1,5 +1,53 @@
 # Progress
 
+### Mar 27, 2026 - Shared `MDX` Top-Level Summary Seam And Consumer Validation Landed
+
+- Added the first shared `MDX` model-family seam in `wow-viewer` and immediately validated it through the existing non-UI `MdxViewer` probe path.
+- Landed pieces:
+	- added `WowViewer.Core.Mdx.MdxChunkIds`
+	- added `WowViewer.Core.Mdx.MdxChunkSummary`
+	- added `WowViewer.Core.Mdx.MdxSummary`
+	- added `WowViewer.Core.IO.Mdx.MdxSummaryReader`
+	- updated `WowViewer.Tool.Inspect` with `mdx inspect --input <file.mdx>` and `mdx inspect --archive-root <dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
+	- added synthetic plus real standard-archive coverage in `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs`
+	- extended `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` so the consumer probe now prints shared `MDX` summary signals for the probed model bytes
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and now prints `SharedMDX` alongside the earlier `SharedBLP` signals
+	- this is still top-level `MDX` summary ownership and consumer validation only, not runtime viewer model-path signoff or `M2` parity
+
+### Mar 27, 2026 - `MdxViewer` Compatibility Validation Now Exercises Shared `BLP` Summary Reads
+
+- Updated `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` so the active viewer consumer now uses the latest shared `wow-viewer` `BLP` seam during non-UI asset probing.
+- Landed pieces:
+	- added shared `WowFileDetector` output for probed model and texture bytes
+	- added shared `BlpSummaryReader` output for resolved texture files classified as `Blp`
+	- kept `SereniaBLPLib` decode in place for width and alpha inspection, so the probe now shows both shared-header signals and legacy decode signals together
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 27, 2026 with existing warnings
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed on Mar 27, 2026 and printed real `SharedBLP` summary lines for both chest textures
+	- this is not automated test coverage and not runtime viewer signoff
+
+### Mar 27, 2026 - Shared `BLP` Header Summary Seam And Inspect Surface Landed
+
+- Added the first real texture-family shared-I/O seam in `wow-viewer` instead of stopping at cross-family file detection.
+- Landed pieces:
+	- added `WowViewer.Core.Blp.BlpFormat`
+	- added `WowViewer.Core.Blp.BlpCompressionType`
+	- added `WowViewer.Core.Blp.BlpPixelFormat`
+	- added `WowViewer.Core.Blp.BlpMipMapEntry`
+	- added `WowViewer.Core.Blp.BlpSummary`
+	- added `WowViewer.Core.IO.Blp.BlpSummaryReader`
+	- updated `WowViewer.Tool.Inspect` with `blp inspect --input <file.blp>` and `blp inspect --archive-root <dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
+	- added synthetic and archive-backed real-data regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/BlpSummaryReaderTests.cs`
+	- extended `wow-viewer/tests/WowViewer.Core.Tests/WowFileDetectorTests.cs` with a synthetic `BLP2` detector case
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "BlpSummaryReaderTests|WowFileDetectorTests"` passed on Mar 27, 2026 with `11` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- blp inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path interface/minimap/minimaparrow.blp` now reports a real archive-backed `BLP2` summary and per-mip coverage through the shared reader
+	- this is still header-summary ownership only, not full pixel decode, write support, or model-family parity
+
 ### Mar 27, 2026 - Shared `MOLT` Per-Light Detail Seam And Opt-In Inspect Dump Landed
 
 - Added the next narrow WMO follow-up after the root-light summary fix: shared per-entry `MOLT` detail ownership plus an inspect flag that exposes those raw fields on demand.

@@ -4,7 +4,16 @@ using System.Runtime.InteropServices;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
-using SereniaBLPLib;
+using WowViewer.Core.Blp;
+using WowViewer.Core.Files;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Blp;
+using WowViewer.Core.IO.Files;
+using WowViewer.Core.Mdx;
+using CoreBlpCompressionType = WowViewer.Core.Blp.BlpCompressionType;
+using CoreBlpPixelFormat = WowViewer.Core.Blp.BlpPixelFormat;
+using CoreMdxChunkSummary = WowViewer.Core.Mdx.MdxChunkSummary;
+using SereniaBlpFile = SereniaBLPLib.BlpFile;
 
 namespace MdxViewer;
 
@@ -56,7 +65,24 @@ internal static class AssetProbe
             throw new FileNotFoundException($"Model not found in data source: {modelVirtualPath}");
 
         using var ms = new MemoryStream(modelBytes);
+        WowFileDetection modelDetection = WowFileDetector.Detect(ms, modelVirtualPath);
+        ms.Position = 0;
+        MdxSharedProbeResult? sharedMdxSummary = null;
+        string? sharedMdxError = null;
+        if (modelDetection.Kind == WowFileKind.Mdx)
+            sharedMdxSummary = TryReadSharedMdxSummary(modelVirtualPath, modelBytes, out sharedMdxError);
+
         var mdx = MdxFile.Load(ms);
+
+        Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
+        if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
+        {
+            Console.WriteLine($"[AssetProbe] SharedMDX: version={FormatVersion(sharedMdx.Version)} model={sharedMdx.ModelName ?? "n/a"} blendTime={FormatVersion(sharedMdx.BlendTime)} chunks={sharedMdx.ChunkCount} knownChunks={sharedMdx.KnownChunkCount} unknownChunks={sharedMdx.UnknownChunkCount} firstChunks={FormatChunkList(sharedMdx.Chunks)}");
+        }
+        else if (!string.IsNullOrWhiteSpace(sharedMdxError))
+        {
+            Console.WriteLine($"[AssetProbe] SharedMDXError: {sharedMdxError}");
+        }
 
         Console.WriteLine($"[AssetProbe] Version={mdx.Version} Name={mdx.Model.Name}");
         Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={mdx.Geosets.Count}");
@@ -75,8 +101,26 @@ internal static class AssetProbe
             else
             {
                 Console.WriteLine($"  ResolvedPath: {probe.Value.ResolvedPath}");
-                Console.WriteLine($"  Size: {probe.Value.Width}x{probe.Value.Height}");
-                Console.WriteLine($"  Alpha: kind={probe.Value.AlphaKind} zero={probe.Value.ZeroAlphaPixels} full={probe.Value.FullAlphaPixels} translucent={probe.Value.TranslucentAlphaPixels}");
+                Console.WriteLine($"  SharedDetect: kind={probe.Value.DetectedKind} version={FormatVersion(probe.Value.DetectedVersion)}");
+                if (probe.Value.SharedBlpSummary is BlpSharedProbeResult sharedBlp)
+                {
+                    Console.WriteLine(
+                        $"  SharedBLP: format={sharedBlp.Signature} version={FormatVersion(sharedBlp.Version)} compression={sharedBlp.Compression} alphaBits={sharedBlp.AlphaDepthBits} pixelFormat={sharedBlp.PixelFormat} size={sharedBlp.Width}x{sharedBlp.Height} mips={sharedBlp.MipCount} inBoundsMips={sharedBlp.InBoundsMipLevelCount} outOfBoundsMips={sharedBlp.OutOfBoundsMipLevelCount}");
+                }
+                else if (!string.IsNullOrWhiteSpace(probe.Value.SharedBlpError))
+                {
+                    Console.WriteLine($"  SharedBLPError: {probe.Value.SharedBlpError}");
+                }
+
+                if (probe.Value.DecodeSucceeded)
+                {
+                    Console.WriteLine($"  Size: {probe.Value.Width}x{probe.Value.Height}");
+                    Console.WriteLine($"  Alpha: kind={probe.Value.AlphaKind} zero={probe.Value.ZeroAlphaPixels} full={probe.Value.FullAlphaPixels} translucent={probe.Value.TranslucentAlphaPixels}");
+                }
+                else
+                {
+                    Console.WriteLine($"  DecodeError: {probe.Value.DecodeError}");
+                }
             }
         }
 
@@ -121,14 +165,32 @@ internal static class AssetProbe
             if (data == null)
                 continue;
 
+            WowFileDetection detection = DetectFile(candidate, data);
+            BlpSharedProbeResult? sharedBlpSummary = null;
+            string? sharedBlpError = null;
+            if (detection.Kind == WowFileKind.Blp)
+                sharedBlpSummary = TryReadSharedBlpSummary(candidate, data, out sharedBlpError);
+
             try
             {
-                return DecodeTexture(candidate, data);
+                return DecodeTexture(candidate, data, detection.Kind, detection.Version, sharedBlpSummary, sharedBlpError);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"  DecodeError: {candidate} -> {ex.Message}");
-                return null;
+                return new TextureProbeResult(
+                    candidate,
+                    detection.Kind,
+                    detection.Version,
+                    sharedBlpSummary,
+                    sharedBlpError,
+                    0,
+                    0,
+                    "n/a",
+                    0,
+                    0,
+                    0,
+                    false,
+                    ex.Message);
             }
         }
 
@@ -159,10 +221,16 @@ internal static class AssetProbe
         }
     }
 
-    private static TextureProbeResult DecodeTexture(string resolvedPath, byte[] data)
+    private static TextureProbeResult DecodeTexture(
+        string resolvedPath,
+        byte[] data,
+        WowFileKind detectedKind,
+        uint? detectedVersion,
+        BlpSharedProbeResult? sharedBlpSummary,
+        string? sharedBlpError)
     {
         using var stream = new MemoryStream(data);
-        using var blp = new BlpFile(stream);
+        using var blp = new SereniaBlpFile(stream);
         using Bitmap bitmap = blp.GetBitmap(0);
 
         var rect = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
@@ -189,17 +257,88 @@ internal static class AssetProbe
 
             return new TextureProbeResult(
                 resolvedPath,
+                detectedKind,
+                detectedVersion,
+                sharedBlpSummary,
+                sharedBlpError,
                 bitmap.Width,
                 bitmap.Height,
                 ClassifyTextureAlpha(zeroAlpha, translucentAlpha),
                 zeroAlpha,
                 fullAlpha,
-                translucentAlpha);
+                translucentAlpha,
+                true,
+                null);
         }
         finally
         {
             bitmap.UnlockBits(bitmapData);
         }
+    }
+
+    private static WowFileDetection DetectFile(string path, byte[] data)
+    {
+        using var stream = new MemoryStream(data, writable: false);
+        return WowFileDetector.Detect(stream, path);
+    }
+
+    private static BlpSharedProbeResult? TryReadSharedBlpSummary(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            BlpSummary summary = BlpSummaryReader.Read(stream, resolvedPath);
+            error = null;
+            return new BlpSharedProbeResult(
+                summary.Signature,
+                summary.Version,
+                summary.Compression,
+                summary.AlphaDepthBits,
+                summary.PixelFormat,
+                summary.Width,
+                summary.Height,
+                summary.MipMaps.Count,
+                summary.InBoundsMipLevelCount,
+                summary.OutOfBoundsMipLevelCount);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    private static MdxSharedProbeResult? TryReadSharedMdxSummary(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            MdxSummary summary = MdxSummaryReader.Read(stream, resolvedPath);
+            error = null;
+            return new MdxSharedProbeResult(
+                summary.Version,
+                summary.ModelName,
+                summary.BlendTime,
+                summary.ChunkCount,
+                summary.KnownChunkCount,
+                summary.UnknownChunkCount,
+                summary.Chunks.Take(4).Select(static chunk => chunk.Id.ToString()).ToArray());
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    private static string FormatVersion(uint? version)
+    {
+        return version?.ToString() ?? "n/a";
+    }
+
+    private static string FormatChunkList(IReadOnlyList<string> chunkIds)
+    {
+        return chunkIds.Count == 0 ? "n/a" : string.Join(",", chunkIds);
     }
 
     private static string ClassifyTextureAlpha(int zeroAlphaPixels, int translucentAlphaPixels)
@@ -215,10 +354,37 @@ internal static class AssetProbe
 
     private readonly record struct TextureProbeResult(
         string ResolvedPath,
+        WowFileKind DetectedKind,
+        uint? DetectedVersion,
+        BlpSharedProbeResult? SharedBlpSummary,
+        string? SharedBlpError,
         int Width,
         int Height,
         string AlphaKind,
         int ZeroAlphaPixels,
         int FullAlphaPixels,
-        int TranslucentAlphaPixels);
+        int TranslucentAlphaPixels,
+        bool DecodeSucceeded,
+        string? DecodeError);
+
+    private readonly record struct BlpSharedProbeResult(
+        string Signature,
+        uint? Version,
+        CoreBlpCompressionType Compression,
+        byte AlphaDepthBits,
+        CoreBlpPixelFormat PixelFormat,
+        int Width,
+        int Height,
+        int MipCount,
+        int InBoundsMipLevelCount,
+        int OutOfBoundsMipLevelCount);
+
+    private readonly record struct MdxSharedProbeResult(
+        uint? Version,
+        string? ModelName,
+        uint? BlendTime,
+        int ChunkCount,
+        int KnownChunkCount,
+        int UnknownChunkCount,
+        IReadOnlyList<string> Chunks);
 }

@@ -1,0 +1,59 @@
+using System.Numerics;
+
+namespace WowViewer.Core.Mdx;
+
+public sealed class MdxSummary
+{
+    public MdxSummary(
+        string sourcePath,
+        string signature,
+        uint? version,
+        string? modelName,
+        uint? blendTime,
+        Vector3? boundsMin,
+        Vector3? boundsMax,
+        IReadOnlyList<MdxChunkSummary> chunks,
+        int knownChunkCount,
+        int unknownChunkCount)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(signature);
+        ArgumentNullException.ThrowIfNull(chunks);
+        ArgumentOutOfRangeException.ThrowIfNegative(knownChunkCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(unknownChunkCount);
+
+        SourcePath = sourcePath;
+        Signature = signature;
+        Version = version;
+        ModelName = modelName;
+        BlendTime = blendTime;
+        BoundsMin = boundsMin;
+        BoundsMax = boundsMax;
+        Chunks = chunks;
+        ChunkCount = chunks.Count;
+        KnownChunkCount = knownChunkCount;
+        UnknownChunkCount = unknownChunkCount;
+    }
+
+    public string SourcePath { get; }
+
+    public string Signature { get; }
+
+    public uint? Version { get; }
+
+    public string? ModelName { get; }
+
+    public uint? BlendTime { get; }
+
+    public Vector3? BoundsMin { get; }
+
+    public Vector3? BoundsMax { get; }
+
+    public IReadOnlyList<MdxChunkSummary> Chunks { get; }
+
+    public int ChunkCount { get; }
+
+    public int KnownChunkCount { get; }
+
+    public int UnknownChunkCount { get; }
+}

@@ -1,5 +1,31 @@
 # Progress — AlphaWoW Viewer (MdxViewer)
 
+## 2026-03-27 — AssetProbe Now Consumes Shared `wow-viewer` `MDX` Summary Signals
+
+- `src/MdxViewer/AssetProbe.cs`
+	- now runs shared `MdxSummaryReader` on the probed model bytes after shared `WowFileDetector` classification
+	- now prints `SharedMDX` summary lines with version, model name, blend time, chunk counts, and the first top-level chunk ids
+	- still uses `MdxFile.Load(...)` for the actual model parse path, so this is compatibility validation rather than a full runtime cutover
+- Validation status:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxSummaryReaderTests|WowFileDetectorTests"` passed with `11` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --virtual-path world/generic/activedoodads/chest01/chest01.mdx --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and reported `version=1300`, `model=Chest01`, and `9` known chunks on the real archive-backed asset
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and produced a real `SharedMDX` line plus the earlier shared `BLP` texture-summary lines
+	- no automated tests were added or run in `gillijimproject_refactor`
+	- no runtime viewer signoff yet on the live model/render path
+
+## 2026-03-27 — AssetProbe Now Consumes Shared `wow-viewer` `BLP` Summary Signals
+
+- `src/MdxViewer/AssetProbe.cs`
+	- now runs shared `WowFileDetector` on probed model and texture bytes
+	- now runs shared `BlpSummaryReader` on resolved texture bytes when they classify as `Blp`
+	- still uses `SereniaBLPLib` for actual texture decode and alpha classification, so this is compatibility validation rather than a render-path cutover
+- Validation status:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -- --probe-mdx "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" "world/generic/activedoodads/chest01/chest01.mdx" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"` passed and produced real shared `BLP` summary lines for both chest textures
+	- no automated tests were added or run in `gillijimproject_refactor`
+	- no runtime viewer signoff yet on the live texture/render path
+
 ## Status: v0.4.0 Released — 0.5.3 Rendering Improvements + 3.3.5 Groundwork (In Progress)
 
 **Supported client versions: 0.5.3 through 0.12** — fully usable

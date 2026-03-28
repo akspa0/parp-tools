@@ -104,6 +104,10 @@ Current shared-core foundation slice:
    - `WmoEmbeddedGroupLinkageSummary`
 	- `WmoEmbeddedGroupDetail`
    - Alpha root `MOMO` wrapper handling is now also part of the shared root-summary ownership boundary
+- `src/core/WowViewer.Core/Mdx` now contains the first shared `MDX` top-level summary contracts:
+	- `MdxChunkIds`
+	- `MdxChunkSummary`
+	- `MdxSummary`
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared WDT or ADT top-level reader slice:
@@ -158,6 +162,8 @@ Current shared-core foundation slice:
    - `WmoEmbeddedGroupLinkageSummaryReader`
 	- `WmoEmbeddedGroupDetailReader`
    - `WmoRootReaderCommon` now also flattens Alpha `MOMO` root subchunks for shared root-summary readers
+- `src/core/WowViewer.Core.IO/Mdx` now contains the first shared `MDX` top-level summary reader:
+	- `MdxSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
 	- `Md5TranslateResolver`
@@ -188,6 +194,8 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core.IO` now also contains the first shared cross-family detector:
 	- `WowFileDetector`
 - `tests/WowViewer.Core.Tests` now locks the current FourCC and chunk-header boundary behavior.
+	- it now also locks synthetic `BLP1` and `BLP2` header-summary behavior plus archive-backed real `0.6.0` standard-MPQ `BLP` coverage through the shared archive catalog
+	- it now also locks synthetic and real standard-archive `MDX` top-level summary behavior for `world/generic/activedoodads/chest01/chest01.mdx`
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
@@ -224,10 +232,16 @@ Current shared-core foundation slice:
 Current non-PM4 inspect slice:
 
 - `tools/inspect/WowViewer.Tool.Inspect` now also supports:
+	- `blp inspect --input <file.blp>`
+	- `blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
+	- `mdx inspect --input <file.mdx>`
+	- `mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
 	- `map inspect --input <file.wdt|file.adt>`
 	- `wmo inspect --input <file.wmo> [--dump-lights]`
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
+	- it now also reports a first shared `BLP` header summary for format signature, version, compression fields, pixel format, image size, palette or JPEG-header presence, and per-mip offset or size coverage when a texture file is inspected
+	- it now also reports a first shared `MDX` top-level summary for `MDLX` signature, chunk order, known-vs-unknown chunk coverage, `VERS`, and narrow `MODL` name or bounds or blend-time signals when a model file is inspected
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
@@ -271,6 +285,7 @@ Current non-PM4 inspect slice:
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- blp inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path interface/minimap/minimaparrow.blp`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0.adt`
