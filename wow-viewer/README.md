@@ -117,6 +117,8 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core/Mdx` now contains the first shared `MDX` top-level summary contracts:
 	- `MdxChunkIds`
 	- `MdxChunkSummary`
+	- `MdxGeometryFile`
+	- `MdxGeosetGeometry`
 	- `MdxGlobalSequenceSummary`
 	- `MdxSequenceSummary`
 	- `MdxGeosetSummary`
@@ -196,6 +198,7 @@ Current shared-core foundation slice:
 	- `WmoEmbeddedGroupDetailReader`
    - `WmoRootReaderCommon` now also flattens Alpha `MOMO` root subchunks for shared root-summary readers
 - `src/core/WowViewer.Core.IO/Mdx` now contains the first shared `MDX` top-level summary reader:
+	- `MdxGeometryReader`
 	- `MdxSummaryReader`
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
@@ -229,6 +232,7 @@ Current shared-core foundation slice:
 - `tests/WowViewer.Core.Tests` now locks the current FourCC and chunk-header boundary behavior.
 	- it now also locks synthetic `BLP1` and `BLP2` header-summary behavior plus archive-backed real `0.6.0` standard-MPQ `BLP` coverage through the shared archive catalog
 	- it now also locks synthetic `GLBS`, `GEOA`, `BONE`, `LITE`, `HELP`, `ATCH`, `PRE2`, `RIBB`, `CAMS`, `EVTS`, `HTST`, and `CLID` summary behavior plus fixed real `MDX` coverage on files such as `testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` and archive-backed `0.6.0` `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx`; the focused reader suite also smoke-parses the current unpacked `0.5.3` alpha corpus (`229` MDX files) to verify the new `LITE` path does not regress alpha-era parsing even though that bundled sample set currently contains no `LITE` chunks
+	- it now also locks synthetic classic `GEOS` payload behavior plus real shared geometry coverage on the local standard-era archive dataset and the existing on-disk alpha-era creature corpus through `MdxGeometryReaderTests`
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`

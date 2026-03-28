@@ -1,5 +1,19 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxGeometryFile` and `MdxGeosetGeometry` contracts for payload-level classic geoset ownership
+  - `WowViewer.Core.IO.Mdx.MdxGeometryReader` now reads classic counted `GEOS` payloads for `v1300` and `v1400`, including vertices, normals, UV sets, primitive types, face groups, flat indices, vertex groups, matrix tables, bone tables, and footer metadata
+  - the reader preserves the currently validated classic ordering and Alpha-era direct `UVAS` behavior instead of inventing a new geoset framing
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxGeometryReaderTests|MdxSummaryReaderTests"`
+- notes:
+  - the fixed real standard-era path prefers `Creature/AncientOfWar/AncientofWar.mdx` when that archive-backed asset exists in the local `0.6.0` dataset and falls back to the already-proven `chest01.mdx` carrier otherwise
+  - the current workspace does not yet contain the user-provided alpha `AncientofWar.mdx` under `wow-viewer/testdata/0.5.3/tree`, so the landed alpha positive test uses the existing unpacked creature corpus instead; once that file is committed it should become the fixed alpha `GEOS` payload carrier
+  - this seam remains payload-only and does not yet claim runtime render-buffer or skeleton ownership
+
 ## Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice
 
 - status: landed

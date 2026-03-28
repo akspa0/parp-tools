@@ -1,5 +1,14 @@
 # Progress
 
+### Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice Landed
+
+- advanced the shared classic `MDX` migration from `GEOS` summary-only ownership into first typed geoset payload ownership so render-facing mesh data no longer has to stay trapped behind `MdxFile.Load(...)`
+- added shared `MdxGeometryFile` and `MdxGeosetGeometry` contracts for vertices, normals, UV sets, primitive types, face groups, indices, vertex groups, matrix tables, bone tables, and footer metadata
+- added `WowViewer.Core.IO.Mdx.MdxGeometryReader` with classic counted `GEOS` payload support for `v1300` and `v1400`, including Alpha-style direct `UVAS` reads and optional explicit `UVBS` support
+- added `wow-viewer/tests/WowViewer.Core.Tests/MdxGeometryReaderTests.cs` with a synthetic classic-`GEOS` payload fixture, a fixed real standard-era positive carrier, and a real on-disk alpha-era positive carrier from the existing `0.5.3` corpus
+- validated the slice with focused shared-reader tests against both standard-era and alpha-era real data
+- this landing now has the first shared classic `GEOS` payload seam in `wow-viewer`; it is still not runtime buffer assembly, skinning evaluation, or viewer render cutover
+
 ### Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice Landed
 
 - advanced the shared classic `MDX` migration from `GLBS` into `LITE` so classic light metadata no longer remains only as a known-but-unparsed top-level chunk id in `wow-viewer`

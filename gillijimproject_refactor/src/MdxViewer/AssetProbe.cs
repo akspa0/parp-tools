@@ -68,9 +68,14 @@ internal static class AssetProbe
         WowFileDetection modelDetection = WowFileDetector.Detect(ms, modelVirtualPath);
         ms.Position = 0;
         MdxSharedProbeResult? sharedMdxSummary = null;
+        MdxGeometryProbeResult? sharedMdxGeometry = null;
         string? sharedMdxError = null;
+        string? sharedMdxGeometryError = null;
         if (modelDetection.Kind == WowFileKind.Mdx)
+        {
             sharedMdxSummary = TryReadSharedMdxSummary(modelVirtualPath, modelBytes, out sharedMdxError);
+            sharedMdxGeometry = TryReadSharedMdxGeometry(modelVirtualPath, modelBytes, out sharedMdxGeometryError);
+        }
 
         var mdx = MdxFile.Load(ms);
 
@@ -84,8 +89,11 @@ internal static class AssetProbe
             Console.WriteLine($"[AssetProbe] SharedMDXError: {sharedMdxError}");
         }
 
+        if (!string.IsNullOrWhiteSpace(sharedMdxGeometryError))
+            Console.WriteLine($"[AssetProbe] SharedMDXGeometryError: {sharedMdxGeometryError}");
+
         Console.WriteLine($"[AssetProbe] Version={mdx.Version} Name={mdx.Model.Name}");
-        Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={mdx.Geosets.Count}");
+        Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={(sharedMdxGeometry?.GeosetCount ?? mdx.Geosets.Count)}");
         Console.WriteLine();
 
         for (int i = 0; i < mdx.Textures.Count; i++)
@@ -138,11 +146,23 @@ internal static class AssetProbe
         }
 
         Console.WriteLine();
-        for (int geosetIndex = 0; geosetIndex < mdx.Geosets.Count; geosetIndex++)
+        if (sharedMdxGeometry is MdxGeometryProbeResult geometryProbe)
         {
-            var geoset = mdx.Geosets[geosetIndex];
-            Console.WriteLine(
-                $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
+            for (int geosetIndex = 0; geosetIndex < geometryProbe.Geosets.Count; geosetIndex++)
+            {
+                MdxGeosetGeometry geoset = geometryProbe.Geosets[geosetIndex];
+                Console.WriteLine(
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
+            }
+        }
+        else
+        {
+            for (int geosetIndex = 0; geosetIndex < mdx.Geosets.Count; geosetIndex++)
+            {
+                var geoset = mdx.Geosets[geosetIndex];
+                Console.WriteLine(
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
+            }
         }
     }
 
@@ -339,6 +359,24 @@ internal static class AssetProbe
         }
     }
 
+    private static MdxGeometryProbeResult? TryReadSharedMdxGeometry(string resolvedPath, byte[] data, out string? error)
+    {
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            MdxGeometryFile geometry = MdxGeometryReader.Read(stream, resolvedPath);
+            error = null;
+            return new MdxGeometryProbeResult(
+                geometry.GeosetCount,
+                geometry.Geosets.ToArray());
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
     private static string FormatVersion(uint? version)
     {
         return version?.ToString() ?? "n/a";
@@ -411,4 +449,8 @@ internal static class AssetProbe
         int MaterialLayerCount,
         IReadOnlyList<string> MaterialLayers,
         IReadOnlyList<string> Chunks);
+
+    private readonly record struct MdxGeometryProbeResult(
+        int GeosetCount,
+        IReadOnlyList<MdxGeosetGeometry> Geosets);
 }

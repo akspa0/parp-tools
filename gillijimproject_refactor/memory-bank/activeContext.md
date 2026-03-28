@@ -1,5 +1,20 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `GEOS` summary ownership into first shared classic geoset payload ownership for render-facing vertex or normal or UV or index or skin-table data.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxGeometryFile.cs` now carries the shared top-level classic `MDX` geometry-file contract for payload-level `GEOS` reads
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxGeosetGeometry.cs` now carries shared per-geoset payload ownership for vertices, normals, UV sets, primitive types, face groups, indices, vertex groups, matrix tables, bone tables, and footer metadata
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxGeometryReader.cs` now reads classic counted `GEOS` payloads for `v1300` and `v1400`, including direct `UVAS` sets used in Alpha-era files plus optional explicit `UVBS` data when present
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxGeometryReaderTests.cs` now covers a synthetic classic `GEOS` payload fixture, a fixed real standard-era archive-backed positive carrier, and a real on-disk alpha-era positive carrier from the existing `0.5.3` corpus
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` geometry and summary reader coverage passed after the new synthetic and real `GEOS` payload tests landed
+	- the real standard-era path now uses a fixed archive-backed positive `GEOS` carrier, preferring `Creature/AncientOfWar/AncientofWar.mdx` when present and falling back to the existing `chest01.mdx` validation surface otherwise
+	- the real alpha-era path now uses the existing unpacked `0.5.3` creature corpus as the positive payload surface; the user-provided `AncientofWar.mdx` attachment remains a good future fixed carrier once it is committed into `wow-viewer/testdata/0.5.3/tree`
+- Scope guardrail:
+	- this is still classic `GEOS` payload ownership only; it does not yet build runtime render buffers, bind skeleton state, evaluate geoset animation visibility, or replace `MdxViewer` model loading
+
 ## Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past classic `GLBS` summary ownership into first shared classic `LITE` light-summary ownership for counted `MDLGENOBJECT`-derived light metadata.
