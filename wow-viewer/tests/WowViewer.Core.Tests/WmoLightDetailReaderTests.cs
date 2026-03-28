@@ -5,10 +5,10 @@ using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.Tests;
 
-public sealed class WmoLightSummaryReaderTests
+public sealed class WmoLightDetailReaderTests
 {
     [Fact]
-    public void Read_MoltV17Buffer_ProducesLightSummary()
+    public void Read_MoltV17Buffer_ProducesPerEntryDetails()
     {
         byte[] bytes =
         [
@@ -20,31 +20,48 @@ public sealed class WmoLightSummaryReaderTests
         ];
 
         using MemoryStream stream = new(bytes);
-        WmoLightSummary summary = WmoLightSummaryReader.Read(stream, "synthetic_lights_root.wmo");
+        IReadOnlyList<WmoLightDetail> details = WmoLightDetailReader.Read(stream, "synthetic_lights_root.wmo");
 
-        Assert.Equal(96, summary.PayloadSizeBytes);
-        Assert.Equal(2, summary.EntryCount);
-        Assert.Equal(2, summary.DistinctTypeCount);
-        Assert.Equal(1, summary.AttenuatedCount);
-        Assert.Equal(4f, summary.MinIntensity);
-        Assert.Equal(8f, summary.MaxIntensity);
-        Assert.Equal(2f, summary.MinAttenStart);
-        Assert.Equal(3f, summary.MaxAttenStart);
-        Assert.Equal(20f, summary.MaxAttenEnd);
-        Assert.Equal(1, summary.NonZeroHeaderFlagsWordCount);
-        Assert.Equal(2, summary.DistinctHeaderFlagsWordCount);
-        Assert.Equal((ushort)0x0000, summary.MinHeaderFlagsWord);
-        Assert.Equal((ushort)0x0101, summary.MaxHeaderFlagsWord);
-        Assert.Equal(2, summary.RotationEntryCount);
-        Assert.Equal(1, summary.NonIdentityRotationCount);
-        Assert.Equal(1f, summary.MinRotationLength);
-        Assert.Equal(1.118f, summary.MaxRotationLength, 3);
-        Assert.Equal(new Vector3(-4f, 2f, -6f), summary.BoundsMin);
-        Assert.Equal(new Vector3(1f, 5f, 3f), summary.BoundsMax);
+        Assert.Equal(2, details.Count);
+
+        WmoLightDetail first = details[0];
+        Assert.Equal(0, first.LightIndex);
+        Assert.Equal(0, first.PayloadOffset);
+        Assert.Equal(48, first.EntrySizeBytes);
+        Assert.Equal((byte)1, first.LightType);
+        Assert.True(first.UsesAttenuation);
+        Assert.Equal(0xFF00FF00u, first.ColorBgra);
+        Assert.Equal(new Vector3(1f, 2f, 3f), first.Position);
+        Assert.Equal(4f, first.Intensity);
+        Assert.Equal(2f, first.AttenStart);
+        Assert.Equal(10f, first.AttenEnd);
+        Assert.Equal((ushort)0x0101, first.HeaderFlagsWord);
+        Assert.True(first.Rotation.HasValue);
+        Assert.Equal(Quaternion.Identity, first.Rotation!.Value);
+        Assert.True(first.RotationLength.HasValue);
+        Assert.Equal(1f, first.RotationLength!.Value);
+
+        WmoLightDetail second = details[1];
+        Assert.Equal(1, second.LightIndex);
+        Assert.Equal(48, second.PayloadOffset);
+        Assert.Equal(48, second.EntrySizeBytes);
+        Assert.Equal((byte)2, second.LightType);
+        Assert.False(second.UsesAttenuation);
+        Assert.Equal(0xFF00FF00u, second.ColorBgra);
+        Assert.Equal(new Vector3(-4f, 5f, -6f), second.Position);
+        Assert.Equal(8f, second.Intensity);
+        Assert.Equal(3f, second.AttenStart);
+        Assert.Equal(20f, second.AttenEnd);
+        Assert.Equal((ushort)0x0000, second.HeaderFlagsWord);
+        Assert.True(second.Rotation.HasValue);
+        Assert.Equal(-1f, second.Rotation!.Value.Z);
+        Assert.Equal(-0.5f, second.Rotation.Value.W);
+        Assert.True(second.RotationLength.HasValue);
+        Assert.Equal(1.118f, second.RotationLength!.Value, 3);
     }
 
     [Fact]
-    public void Read_MoltV14Buffer_ProducesLightSummary()
+    public void Read_MoltV14Buffer_ProducesLegacyPerEntryDetails()
     {
         byte[] bytes =
         [
@@ -56,27 +73,35 @@ public sealed class WmoLightSummaryReaderTests
         ];
 
         using MemoryStream stream = new(bytes);
-        WmoLightSummary summary = WmoLightSummaryReader.Read(stream, "synthetic_alpha_lights_root.wmo");
+        IReadOnlyList<WmoLightDetail> details = WmoLightDetailReader.Read(stream, "synthetic_alpha_lights_root.wmo");
 
-        Assert.Equal(64, summary.PayloadSizeBytes);
-        Assert.Equal(2, summary.EntryCount);
-        Assert.Equal(2, summary.DistinctTypeCount);
-        Assert.Equal(1, summary.AttenuatedCount);
-        Assert.Equal(6f, summary.MinIntensity);
-        Assert.Equal(9f, summary.MaxIntensity);
-        Assert.Equal(1f, summary.MinAttenStart);
-        Assert.Equal(4f, summary.MaxAttenStart);
-        Assert.Equal(18f, summary.MaxAttenEnd);
-        Assert.Equal(0, summary.NonZeroHeaderFlagsWordCount);
-        Assert.Equal(0, summary.DistinctHeaderFlagsWordCount);
-        Assert.Equal((ushort)0x0000, summary.MinHeaderFlagsWord);
-        Assert.Equal((ushort)0x0000, summary.MaxHeaderFlagsWord);
-        Assert.Equal(0, summary.RotationEntryCount);
-        Assert.Equal(0, summary.NonIdentityRotationCount);
-        Assert.Equal(0f, summary.MinRotationLength);
-        Assert.Equal(0f, summary.MaxRotationLength);
-        Assert.Equal(new Vector3(-7f, 8f, -9f), summary.BoundsMin);
-        Assert.Equal(new Vector3(10f, 20f, 30f), summary.BoundsMax);
+        Assert.Equal(2, details.Count);
+
+        WmoLightDetail first = details[0];
+        Assert.Equal(32, first.EntrySizeBytes);
+        Assert.Equal((byte)3, first.LightType);
+        Assert.True(first.UsesAttenuation);
+        Assert.Equal(0xFF00FF00u, first.ColorBgra);
+        Assert.Equal(new Vector3(10f, 20f, 30f), first.Position);
+        Assert.Equal(6f, first.Intensity);
+        Assert.Equal(1f, first.AttenStart);
+        Assert.Equal(12f, first.AttenEnd);
+        Assert.Null(first.HeaderFlagsWord);
+        Assert.Null(first.Rotation);
+        Assert.Null(first.RotationLength);
+
+        WmoLightDetail second = details[1];
+        Assert.Equal(32, second.EntrySizeBytes);
+        Assert.Equal(32, second.PayloadOffset);
+        Assert.Equal((byte)4, second.LightType);
+        Assert.False(second.UsesAttenuation);
+        Assert.Equal(new Vector3(-7f, 8f, -9f), second.Position);
+        Assert.Equal(9f, second.Intensity);
+        Assert.Equal(4f, second.AttenStart);
+        Assert.Equal(18f, second.AttenEnd);
+        Assert.Null(second.HeaderFlagsWord);
+        Assert.Null(second.Rotation);
+        Assert.Null(second.RotationLength);
     }
 
     private static byte[] CreateMohdWithLightCount(uint lightCount)

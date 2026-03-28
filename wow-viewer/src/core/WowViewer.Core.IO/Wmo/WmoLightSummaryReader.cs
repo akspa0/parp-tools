@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Numerics;
 using WowViewer.Core.Wmo;
 
@@ -6,9 +5,6 @@ namespace WowViewer.Core.IO.Wmo;
 
 public static class WmoLightSummaryReader
 {
-    private const int LegacyEntrySize = 32;
-    private const int StandardEntrySize = 48;
-
     public static WmoLightSummary Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -19,11 +15,8 @@ public static class WmoLightSummaryReader
     public static WmoLightSummary Read(Stream stream, string sourcePath = "<memory>")
     {
         byte[] payload = WmoPortalVertexSummaryReader.ReadPortalChunk(stream, sourcePath, WmoChunkIds.Molt, out uint? version);
-        int entrySize = InferEntrySize(payload.Length, version);
-        if (payload.Length % entrySize != 0)
-            throw new InvalidDataException($"MOLT payload size {payload.Length} is not divisible by inferred entry size {entrySize}.");
-
-        int entryCount = payload.Length / entrySize;
+        IReadOnlyList<WmoLightDetail> details = WmoLightReaderCommon.ReadDetails(payload, sourcePath, version);
+        int entryCount = details.Count;
         HashSet<byte> types = [];
         int attenuatedCount = 0;
         float minIntensity = 0f;
@@ -31,8 +24,17 @@ public static class WmoLightSummaryReader
         float minAttenStart = 0f;
         float maxAttenStart = 0f;
         float maxAttenEnd = 0f;
+        HashSet<ushort> headerFlagsWords = [];
+        int nonZeroHeaderFlagsWordCount = 0;
+        ushort minHeaderFlagsWord = 0;
+        ushort maxHeaderFlagsWord = 0;
+        int rotationEntryCount = 0;
+        int nonIdentityRotationCount = 0;
+        float minRotationLength = 0f;
+        float maxRotationLength = 0f;
         Vector3 boundsMin = Vector3.Zero;
         Vector3 boundsMax = Vector3.Zero;
+        bool hasStandardLayoutEntries = entryCount > 0 && details[0].HeaderFlagsWord.HasValue;
 
         if (entryCount > 0)
         {
@@ -42,72 +44,69 @@ public static class WmoLightSummaryReader
             maxAttenStart = float.MinValue;
             boundsMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
             boundsMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+            if (hasStandardLayoutEntries)
+            {
+                minHeaderFlagsWord = ushort.MaxValue;
+                maxHeaderFlagsWord = ushort.MinValue;
+                minRotationLength = float.MaxValue;
+                maxRotationLength = float.MinValue;
+            }
         }
 
-        for (int i = 0; i < entryCount; i++)
+        foreach (WmoLightDetail detail in details)
         {
-            int offset = i * entrySize;
-            byte type = payload[offset];
-            bool useAtten = payload[offset + 1] != 0;
-            Vector3 position = new(BitConverter.ToSingle(payload, offset + 8), BitConverter.ToSingle(payload, offset + 12), BitConverter.ToSingle(payload, offset + 16));
-            float intensity = BitConverter.ToSingle(payload, offset + 20);
-            float attenStart = ReadAttenuationValue(payload, offset, entrySize, endValue: false);
-            float attenEnd = ReadAttenuationValue(payload, offset, entrySize, endValue: true);
-
-            types.Add(type);
-            if (useAtten)
+            types.Add(detail.LightType);
+            if (detail.UsesAttenuation)
                 attenuatedCount++;
 
-            minIntensity = Math.Min(minIntensity, intensity);
-            maxIntensity = Math.Max(maxIntensity, intensity);
-            minAttenStart = Math.Min(minAttenStart, attenStart);
-            maxAttenStart = Math.Max(maxAttenStart, attenStart);
-            maxAttenEnd = Math.Max(maxAttenEnd, attenEnd);
-            boundsMin = Vector3.Min(boundsMin, position);
-            boundsMax = Vector3.Max(boundsMax, position);
+            minIntensity = Math.Min(minIntensity, detail.Intensity);
+            maxIntensity = Math.Max(maxIntensity, detail.Intensity);
+            minAttenStart = Math.Min(minAttenStart, detail.AttenStart);
+            maxAttenStart = Math.Max(maxAttenStart, detail.AttenStart);
+            maxAttenEnd = Math.Max(maxAttenEnd, detail.AttenEnd);
+
+            if (detail.HeaderFlagsWord is ushort headerFlagsWord && detail.RotationLength is float rotationLength)
+            {
+                headerFlagsWords.Add(headerFlagsWord);
+                if (headerFlagsWord != 0)
+                    nonZeroHeaderFlagsWordCount++;
+
+                minHeaderFlagsWord = Math.Min(minHeaderFlagsWord, headerFlagsWord);
+                maxHeaderFlagsWord = Math.Max(maxHeaderFlagsWord, headerFlagsWord);
+                rotationEntryCount++;
+                if (detail.Rotation is Quaternion rotation && !WmoLightReaderCommon.IsIdentityRotation(rotation))
+                    nonIdentityRotationCount++;
+
+                minRotationLength = Math.Min(minRotationLength, rotationLength);
+                maxRotationLength = Math.Max(maxRotationLength, rotationLength);
+            }
+
+            boundsMin = Vector3.Min(boundsMin, detail.Position);
+            boundsMax = Vector3.Max(boundsMax, detail.Position);
         }
 
-        return new WmoLightSummary(sourcePath, version, payload.Length, entryCount, types.Count, attenuatedCount, minIntensity, maxIntensity, minAttenStart, maxAttenStart, maxAttenEnd, boundsMin, boundsMax);
-    }
-
-    private static float ReadAttenuationValue(byte[] payload, int entryOffset, int entrySize, bool endValue)
-    {
-        int offsetWithinEntry = entrySize switch
-        {
-            LegacyEntrySize => endValue ? 28 : 24,
-            StandardEntrySize => endValue ? 44 : 40,
-            _ => throw new InvalidDataException($"Unsupported MOLT entry size {entrySize}."),
-        };
-
-        return BitConverter.ToSingle(payload, entryOffset + offsetWithinEntry);
-    }
-
-    private static int InferEntrySize(int payloadLength, uint? version)
-    {
-        if (payloadLength == 0)
-            return version is not null && version <= 14 ? LegacyEntrySize : StandardEntrySize;
-
-        if (version is not null && version <= 14)
-            return LegacyEntrySize;
-
-        if (version is not null && version >= 17)
-            return StandardEntrySize;
-
-        bool divisibleByLegacy = payloadLength % LegacyEntrySize == 0;
-        bool divisibleByStandard = payloadLength % StandardEntrySize == 0;
-
-        if (divisibleByStandard && !divisibleByLegacy)
-            return StandardEntrySize;
-
-        if (divisibleByLegacy && !divisibleByStandard)
-            return LegacyEntrySize;
-
-        if (divisibleByStandard)
-            return StandardEntrySize;
-
-        if (divisibleByLegacy)
-            return LegacyEntrySize;
-
-        return StandardEntrySize;
+        return new WmoLightSummary(
+            sourcePath,
+            version,
+            payload.Length,
+            entryCount,
+            types.Count,
+            attenuatedCount,
+            minIntensity,
+            maxIntensity,
+            minAttenStart,
+            maxAttenStart,
+            maxAttenEnd,
+            nonZeroHeaderFlagsWordCount,
+            headerFlagsWords.Count,
+            minHeaderFlagsWord,
+            maxHeaderFlagsWord,
+            rotationEntryCount,
+            nonIdentityRotationCount,
+            minRotationLength,
+            maxRotationLength,
+            boundsMin,
+            boundsMax);
     }
 }

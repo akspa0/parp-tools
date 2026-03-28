@@ -26,6 +26,15 @@ Move one more reusable non-PM4 format capability into `wow-viewer/src/core/WowVi
 - The default direction is library-first `wow-viewer` work, not broader `MdxViewer` integration.
 - Shared detection or summary behavior is real progress, but it is not the same thing as deep payload parsing or write support.
 
+## Current WMO Continuation Note
+
+- The current validated WMO root-light seam is standard and Alpha `MOLT` semantic summary in shared `Core.IO`, with real proof for Alpha `ironforge.wmo.MPQ` and standard `0.6.0` `world/wmo/khazmodan/cities/ironforge/ironforge.wmo`.
+- Already-settled facts for the standard 48-byte layout: bytes `2..3` are a raw non-zero `headerFlagsWord` on real Ironforge (`0x0101`), offsets `24..39` are quaternion rotation, and offsets `40` and `44` are attenuation start and end.
+- If the user says to continue this work without naming a narrower seam, default to one of these next WMO follow-ups instead of revisiting resolved offsets:
+	1. prove whether `headerFlagsWord` varies across additional real standard roots
+	2. add a per-light inspect dump for standard `MOLT` entries
+- Do not claim per-bit meaning for `headerFlagsWord` until more than Ironforge has been checked.
+
 ## Active Shared Surface To Build On
 
 - `FourCC`, `ChunkHeader`, `ChunkHeaderReader`

@@ -151,6 +151,7 @@ static void RunWmoInspect(string[] args)
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
 	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	bool dumpLights = HasOption(args, "--dump-lights");
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
@@ -222,6 +223,11 @@ static void RunWmoInspect(string[] args)
 			{
 				WmoLightSummary lightSummary = ReadInput(WmoLightSummaryReader.Read);
 				PrintWmoLightSummary(lightSummary);
+				if (dumpLights)
+				{
+					IReadOnlyList<WmoLightDetail> lightDetails = ReadInput(WmoLightDetailReader.Read);
+					PrintWmoLightDetails(lightDetails);
+				}
 			}
 			catch (InvalidDataException)
 			{
@@ -609,6 +615,11 @@ static string? GetOption(string[] args, string longName, string shortName)
 	return null;
 }
 
+static bool HasOption(string[] args, string name)
+{
+	return args.Any(arg => string.Equals(arg, name, StringComparison.OrdinalIgnoreCase));
+}
+
 static string? TryFindDefaultListfilePath()
 {
 	DirectoryInfo? current = new(AppContext.BaseDirectory);
@@ -688,6 +699,11 @@ static void PrintVectorSet(Pm4VectorSetSummary summary)
 static string FormatVector(System.Numerics.Vector3 value)
 {
 	return $"({value.X:F2}, {value.Y:F2}, {value.Z:F2})";
+}
+
+static string FormatQuaternion(System.Numerics.Quaternion value)
+{
+	return $"({value.X:F3}, {value.Y:F3}, {value.Z:F3}, {value.W:F3})";
 }
 
 static void PrintPm4AuditReport(Pm4DecodeAuditReport report)
@@ -958,6 +974,29 @@ static void PrintWmoEmbeddedGroupDetails(IReadOnlyList<WmoEmbeddedGroupDetail> d
 	}
 }
 
+static void PrintWmoLightDetails(IReadOnlyList<WmoLightDetail> details)
+{
+	foreach (WmoLightDetail detail in details)
+	{
+		PrintWmoLightDetail(detail);
+	}
+}
+
+static void PrintWmoLightDetail(WmoLightDetail detail)
+{
+	string headerFlagsText = detail.HeaderFlagsWord is ushort headerFlagsWord
+		? $"0x{headerFlagsWord:X4}"
+		: "n/a";
+	string rotationText = detail.Rotation is System.Numerics.Quaternion rotation
+		? FormatQuaternion(rotation)
+		: "n/a";
+	string rotationLengthText = detail.RotationLength is float rotationLength
+		? rotationLength.ToString("F3")
+		: "n/a";
+
+	Console.WriteLine($"MOLT[{detail.LightIndex}]: offset={detail.PayloadOffset} entryBytes={detail.EntrySizeBytes} type={detail.LightType} attenuated={detail.UsesAttenuation} headerFlagsWord={headerFlagsText} color=0x{detail.ColorBgra:X8} position={FormatVector(detail.Position)} intensity={detail.Intensity:F3} attenStart={detail.AttenStart:F3} attenEnd={detail.AttenEnd:F3} rotation={rotationText} rotationLen={rotationLengthText}");
+}
+
 static void PrintWmoEmbeddedGroupDetail(WmoEmbeddedGroupDetail detail)
 {
 	WmoGroupSummary summary = detail.GroupSummary;
@@ -1085,7 +1124,7 @@ static void PrintWmoVisibleBlockReferenceSummary(WmoVisibleBlockReferenceSummary
 
 static void PrintWmoLightSummary(WmoLightSummary summary)
 {
-	Console.WriteLine($"MOLT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctTypes={summary.DistinctTypeCount} attenuated={summary.AttenuatedCount} intensityRange=[{summary.MinIntensity:F3}, {summary.MaxIntensity:F3}] attenStartRange=[{summary.MinAttenStart:F3}, {summary.MaxAttenStart:F3}] maxAttenEnd={summary.MaxAttenEnd:F3} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+	Console.WriteLine($"MOLT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctTypes={summary.DistinctTypeCount} attenuated={summary.AttenuatedCount} intensityRange=[{summary.MinIntensity:F3}, {summary.MaxIntensity:F3}] attenStartRange=[{summary.MinAttenStart:F3}, {summary.MaxAttenStart:F3}] maxAttenEnd={summary.MaxAttenEnd:F3} headerFlagsWordRange=[0x{summary.MinHeaderFlagsWord:X4}, 0x{summary.MaxHeaderFlagsWord:X4}] headerFlagsWordDistinct={summary.DistinctHeaderFlagsWordCount} headerFlagsWordNonZero={summary.NonZeroHeaderFlagsWordCount} rotationEntries={summary.RotationEntryCount} nonIdentityRotations={summary.NonIdentityRotationCount} rotationLenRange=[{summary.MinRotationLength:F3}, {summary.MaxRotationLength:F3}] boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void PrintWmoFogSummary(WmoFogSummary summary)
@@ -1193,8 +1232,8 @@ static void ShowUsage()
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
-	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo>");
-	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
+	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
@@ -1207,8 +1246,8 @@ static void ShowUsage()
 static void ShowWmoUsage()
 {
 	Console.WriteLine("WMO commands:");
-	Console.WriteLine("  wmo inspect --input <file.wmo>");
-	Console.WriteLine("  wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wmo inspect --input <file.wmo> [--dump-lights]");
+	Console.WriteLine("  wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 }
 
 static void ShowMapUsage()

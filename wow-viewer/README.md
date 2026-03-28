@@ -84,6 +84,7 @@ Current shared-core foundation slice:
   - `WmoPortalInfoSummary`
   - `WmoPortalRefSummary`
   - `WmoLightSummary`
+	- `WmoLightDetail`
   - `WmoFogSummary`
    - `WmoOpaqueChunkSummary`
    - `WmoDoodadNameReferenceSummary`
@@ -136,6 +137,7 @@ Current shared-core foundation slice:
   - `WmoPortalInfoSummaryReader`
   - `WmoPortalRefSummaryReader`
   - `WmoLightSummaryReader`
+	- `WmoLightDetailReader`
   - `WmoFogSummaryReader`
    - `WmoOpaqueChunkSummaryReader`
    - `WmoRootReaderCommon`
@@ -207,6 +209,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic root WMO `MODS` doodad-set semantic-summary behavior including empty and non-empty sets
 	- it now also locks batched synthetic root-WMO cases for `MODD`, `MOGN`, `MOSB`, `MOPV`, `MOPT`, and `MOPR`
 	- it now also locks a batched synthetic root-WMO case for `MOLT`, `MFOG`, and `MCVP`
+	- it now also locks synthetic `MOLT` per-light detail behavior for Alpha and standard root layouts plus real Ironforge Alpha and `0.6.0` standard root-light detail coverage
 	- it now also locks a batched synthetic root-WMO linkage case for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`
 	- it now also locks a batched synthetic root-WMO visibility case for `MOVV`, `MOVB`, and `MOVB -> MOVV`
 	- it now also locks a batched synthetic root-WMO portal-linkage case for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI`, plus a missing-`MOVV` regression
@@ -222,8 +225,8 @@ Current non-PM4 inspect slice:
 
 - `tools/inspect/WowViewer.Tool.Inspect` now also supports:
 	- `map inspect --input <file.wdt|file.adt>`
-	- `wmo inspect --input <file.wmo>`
-	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]`
+	- `wmo inspect --input <file.wmo> [--dump-lights]`
+	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
@@ -249,6 +252,7 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO `MODD`, `MOGN`, and `MOSB` semantic summaries for doodad placements, group-name tables, and skybox name ownership when those chunks are present
 	- it now also reports shared root-WMO `MOPV`, `MOPT`, and `MOPR` semantic summaries for portal vertices, portal entries, and portal refs when those chunks are present
 	- it now also reports shared root-WMO `MOLT`, `MFOG`, and `MCVP` semantic summaries for lights, fog, and opaque trailing root chunks when those chunks are present
+	- it now also prints opt-in per-entry `MOLT[n]` lines when `--dump-lights` is provided, reusing the shared `WmoLightDetailReader` seam for Alpha `32`-byte and later `48`-byte root-light layouts
 	- it now also reports shared root-WMO linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` when those related chunks are present
 	- it now also reports shared root-WMO visibility summaries for `MOVV`, `MOVB`, and `MOVB -> MOVV` when those chunks are present
 	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
@@ -260,8 +264,10 @@ Current non-PM4 inspect slice:
 	- it now also reports real per-embedded-group `MOGP(root)[n]`, `MONR(root)[n]`, `MOVT(root)[n]`, `MOVI(root)[n]` or `MOIN(root)[n]`, `MODR(root)[n]`, `MOCV(root)[n]`, `MOTV(root)[n]`, `MOPY(root)[n]`, `MOBA(root)[n]`, `MOBN(root)[n]`, `MOBR(root)[n]`, and `MOBN->MOBR(root)[n]` lines for Alpha monolithic roots such as `castle01.wmo.MPQ`, with `MOLR(root)[n]` or `MLIQ(root)[n]` emitted when present
 	- real `ironforge.wmo.MPQ` now provides positive per-group proof for both `MOLR(root)[n]` and `MLIQ(root)[n]`
 	- shared root `MOLT` semantic summary now also reads real Alpha `ironforge.wmo.MPQ`, reporting `payloadBytes=6976`, `entries=218`, and `attenStartRange=[1.306, 8.333]`
-	- a real standard `0.6.0` Ironforge root loaded through shared `MpqArchiveCatalog` + `wow-listfile` now also proves that 48-byte `MOLT` entries store attenuation at offsets `40` and `44`, not `24` and `28`
-	- optional root `MOLT` summary failures still remain non-fatal in inspect, but Ironforge now exercises the actual shared `MOLT` summary path instead of only the fallback path; the middle 16 bytes of later 48-byte entries remain intentionally opaque
+	- a real standard `0.6.0` Ironforge root loaded through shared `MpqArchiveCatalog` + `wow-listfile` now also proves that 48-byte `MOLT` entries store quaternion rotation at offsets `24..39` and attenuation at offsets `40` and `44`
+	- that same real standard root also proves bytes `2..3` are a non-zero `headerFlagsWord`, not padding; Ironforge currently reports `headerFlagsWordRange=[0x0101, 0x0101]`, `headerFlagsWordDistinct=1`, and `headerFlagsWordNonZero=218`
+	- later-layout `MOLT` inspect output now reports `rotationEntries`, `nonIdentityRotations`, and `rotationLenRange`; real standard Ironforge currently proves `218`, `218`, and `[1.118, 1.118]`
+	- optional root `MOLT` summary failures still remain non-fatal in inspect, but Ironforge now exercises the actual shared `MOLT` summary path instead of only the fallback path
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

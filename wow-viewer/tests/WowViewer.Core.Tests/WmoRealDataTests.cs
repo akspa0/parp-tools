@@ -1,4 +1,5 @@
 using WowViewer.Core.Files;
+using System.Buffers.Binary;
 using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Wmo;
@@ -230,6 +231,27 @@ public sealed class WmoRealDataTests
     }
 
     [Fact]
+    public void Read_IronforgeAlphaPerAssetMpq_RootLightDetails_UseLegacyLayout()
+    {
+        string mpqPath = WmoTestPaths.IronforgeAlphaMpqPath;
+        if (!File.Exists(mpqPath))
+            return;
+
+        byte[] bytes = AlphaArchiveReader.ReadWithMpqFallback(mpqPath)!;
+
+        using MemoryStream lightStream = new(bytes);
+        IReadOnlyList<WmoLightDetail> details = WmoLightDetailReader.Read(lightStream, mpqPath);
+
+        Assert.Equal(218, details.Count);
+        Assert.All(details, static detail => Assert.Equal(32, detail.EntrySizeBytes));
+        Assert.All(details, static detail => Assert.Null(detail.HeaderFlagsWord));
+        Assert.All(details, static detail => Assert.Null(detail.Rotation));
+        Assert.All(details, static detail => Assert.Null(detail.RotationLength));
+        Assert.Contains(details, static detail => detail.AttenStart > 0f);
+        Assert.Contains(details, static detail => detail.AttenEnd > detail.AttenStart);
+    }
+
+    [Fact]
     public void Read_IronforgeStandard060_RootLightSummary_UsesStandardTailAttenuationOffsets()
     {
         if (!Directory.Exists(WmoTestPaths.Standard060DataPath) || !File.Exists(WmoTestPaths.ListfilePath))
@@ -257,6 +279,7 @@ public sealed class WmoRealDataTests
         Assert.Equal("[-0.500, -0.500] nonZero=218", DescribeFloatRange(payload, 48, 36));
         Assert.Equal("[1.306, 8.333] nonZero=218", DescribeFloatRange(payload, 48, 40));
         Assert.Equal("[9.167, 29.611] nonZero=218", DescribeFloatRange(payload, 48, 44));
+        Assert.Equal("[0x0101, 0x0101] nonZero=218 distinct=1", DescribeUInt16Range(payload, 48, 2));
 
         using MemoryStream lightStream = new(bytes);
         WmoLightSummary summary = WmoLightSummaryReader.Read(lightStream, WmoTestPaths.Standard060IronforgeRootPath);
@@ -266,6 +289,35 @@ public sealed class WmoRealDataTests
         Assert.Equal(1.306f, summary.MinAttenStart, 3);
         Assert.Equal(8.333f, summary.MaxAttenStart, 3);
         Assert.Equal(29.611f, summary.MaxAttenEnd, 3);
+        Assert.Equal(payload.Length / 48, summary.NonZeroHeaderFlagsWordCount);
+        Assert.Equal(1, summary.DistinctHeaderFlagsWordCount);
+        Assert.Equal((ushort)0x0101, summary.MinHeaderFlagsWord);
+        Assert.Equal((ushort)0x0101, summary.MaxHeaderFlagsWord);
+        Assert.Equal(payload.Length / 48, summary.RotationEntryCount);
+        Assert.Equal(payload.Length / 48, summary.NonIdentityRotationCount);
+        Assert.Equal(1.118f, summary.MinRotationLength, 3);
+        Assert.Equal(1.118f, summary.MaxRotationLength, 3);
+    }
+
+    [Fact]
+    public void Read_IronforgeStandard060_RootLightDetails_ExposeRawStandardLayoutFields()
+    {
+        if (!Directory.Exists(WmoTestPaths.Standard060DataPath) || !File.Exists(WmoTestPaths.ListfilePath))
+            return;
+
+        byte[]? bytes = ReadStandardArchiveWmo(WmoTestPaths.Standard060IronforgeRootPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream lightStream = new(bytes);
+        IReadOnlyList<WmoLightDetail> details = WmoLightDetailReader.Read(lightStream, WmoTestPaths.Standard060IronforgeRootPath);
+
+        Assert.NotEmpty(details);
+        Assert.All(details, static detail => Assert.Equal(48, detail.EntrySizeBytes));
+        Assert.All(details, static detail => Assert.Equal((ushort)0x0101, detail.HeaderFlagsWord));
+        Assert.All(details, static detail => Assert.True(detail.Rotation.HasValue));
+        Assert.All(details, static detail => Assert.True(detail.RotationLength.HasValue));
+        Assert.All(details, static detail => Assert.Equal(1.118f, detail.RotationLength!.Value, 3));
+        Assert.Contains(details, static detail => detail.AttenStart >= 1.306f && detail.AttenEnd <= 29.611f);
     }
 
     private static byte[]? ReadStandardArchiveWmo(string virtualPath)
@@ -292,6 +344,27 @@ public sealed class WmoRealDataTests
         }
 
         return $"[{min:F3}, {max:F3}] nonZero={nonZeroCount}";
+    }
+
+    private static string DescribeUInt16Range(byte[] payload, int entrySize, int wordOffset)
+    {
+        ushort min = ushort.MaxValue;
+        ushort max = ushort.MinValue;
+        int nonZeroCount = 0;
+        HashSet<ushort> distinct = [];
+
+        for (int offset = wordOffset; offset < payload.Length; offset += entrySize)
+        {
+            ushort value = BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset, sizeof(ushort)));
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
+            if (value != 0)
+                nonZeroCount++;
+
+            distinct.Add(value);
+        }
+
+        return $"[0x{min:X4}, 0x{max:X4}] nonZero={nonZeroCount} distinct={distinct.Count}";
     }
 
     private static byte[] ReadPayload(Stream stream, ChunkSpan chunk)

@@ -59,6 +59,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalInfoSummary`
   - `WmoPortalRefSummary`
   - `WmoLightSummary`
+  - `WmoLightDetail`
   - `WmoFogSummary`
   - `WmoOpaqueChunkSummary`
   - `WmoDoodadNameReferenceSummary`
@@ -116,6 +117,7 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalInfoSummaryReader`
   - `WmoPortalRefSummaryReader`
   - `WmoLightSummaryReader`
+  - `WmoLightDetailReader`
   - `WmoFogSummaryReader`
   - `WmoOpaqueChunkSummaryReader`
   - `WmoRootReaderCommon`
@@ -162,8 +164,8 @@ Create one first-party shared format stack in `wow-viewer` that:
 
 - `WowViewer.Tool.Inspect`
   - `map inspect --input <file.wdt|file.adt>`
-  - `wmo inspect --input <file.wmo>`
-  - `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]`
+  - `wmo inspect --input <file.wmo> [--dump-lights]`
+  - `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - `WowViewer.Tool.Converter`
   - `detect --input <file>`
 
@@ -216,6 +218,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared WMO `MOSB` root skybox semantic summary for payload size and resolved skybox name is now real
 - shared WMO `MOPV`, `MOPT`, and `MOPR` root portal semantic summaries for vertex counts, portal-entry counts, ref counts, and related ranges are now real
 - shared WMO `MOLT` root light semantic summary for light counts, attenuation usage, intensity range, and bounds is now real
+- shared WMO `MOLT` per-light detail ownership is now also real across Alpha `32`-byte and standard `48`-byte root-light layouts, including raw `headerFlagsWord`, quaternion rotation, and attenuation fields when the later layout is present
 - shared WMO `MFOG` root fog semantic summary for fog counts, flag coverage, radius ranges, and bounds is now real
 - shared opaque root-chunk byte reporting for `MCVP` is now real
 - shared root-WMO linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD` are now real
@@ -230,7 +233,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared Alpha monolithic root per-embedded-group inspect routing now also has positive real proof for `MOLR(root)[n]` and `MLIQ(root)[n]` on `ironforge.wmo.MPQ`
 - `WowViewer.Tool.Inspect wmo inspect` still treats invalid optional `MOLT` root-summary reads as non-fatal, but that guard is now a malformed-payload fallback rather than an Ironforge compatibility workaround
 - shared Alpha root `MOLT` semantic-summary ownership is now also proven directly on real `ironforge.wmo.MPQ`, with `6976` payload bytes, `218` lights, and a positive `attenStartRange` reported through the shared reader
-- shared standard `v16` root `MOLT` semantic-summary ownership is now also proven on `world/wmo/khazmodan/cities/ironforge/ironforge.wmo` loaded from the `0.6.0` MPQ set through `MpqArchiveCatalog` + `wow-listfile`, fixing the real 48-byte attenuation offsets to `40` and `44` while keeping the intermediate `24..39` bytes opaque
+- shared standard `v16` root `MOLT` semantic-summary ownership is now also proven on `world/wmo/khazmodan/cities/ironforge/ironforge.wmo` loaded from the `0.6.0` MPQ set through `MpqArchiveCatalog` + `wow-listfile`, fixing the real 48-byte layout to a non-zero `headerFlagsWord` of `0x0101` at bytes `2..3`, quaternion rotation at offsets `24..39`, and attenuation at offsets `40` and `44`
 - `WowViewer.Tool.Inspect wmo inspect` now also consumes that same shared standard-archive seam directly through `--archive-root` plus `--virtual-path`, with default vendored-listfile discovery when the repo-local `wow-listfile` is present
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
@@ -254,6 +257,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 1. deepen shared ADT root and split-file top-level summaries
 2. deepen shared ADT root and split-file summaries beyond the new semantic-summary layer into narrower chunk-internal signals only when a deep payload proof target is clear
 3. deepen shared WMO ownership from root, group, `MOGI`, `MOGN`, `MOSB`, `MOMT`, `MOTX`, `MODN`, `MODS`, `MODD`, `MOPV`, `MOPT`, `MOPR`, `MOLT`, `MFOG`, `MCVP`, plus the first linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`, into the next narrow deep-payload seam only when a fixed validation target is available
+  the current clean WMO continuation after the landed `MOLT` detail seam is wider real-data proof for standard `headerFlagsWord` variability across additional roots
 4. keep Alpha root-WMO `MOMO` support aligned with real 0.5.3 per-asset archive validation as additional root summaries land
 5. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints
 6. continue shrinking `MdxViewer` imports of `WoWMapConverter.Core` by moving other narrow non-MPQ helpers onto `Core` or `Core.IO`

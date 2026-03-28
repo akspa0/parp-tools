@@ -1,5 +1,22 @@
 # Progress
 
+### Mar 27, 2026 - Shared `MOLT` Per-Light Detail Seam And Opt-In Inspect Dump Landed
+
+- Added the next narrow WMO follow-up after the root-light summary fix: shared per-entry `MOLT` detail ownership plus an inspect flag that exposes those raw fields on demand.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoLightDetail`
+	- added `WowViewer.Core.IO.Wmo.WmoLightReaderCommon`
+	- added `WowViewer.Core.IO.Wmo.WmoLightDetailReader`
+	- updated `WowViewer.Core.IO.Wmo.WmoLightSummaryReader` so summary aggregation reuses the shared detail decode path instead of duplicating `MOLT` layout logic
+	- updated `WowViewer.Tool.Inspect wmo inspect` with `--dump-lights` so root WMO reports can print `MOLT[n]` lines for Alpha `32`-byte and standard `48`-byte entries without changing the default summary output
+	- added synthetic regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoLightDetailReaderTests.cs`
+	- extended `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs` with real Alpha and standard per-light detail assertions on Ironforge
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|WmoLightDetailReaderTests|Read_IronforgeAlphaPerAssetMpq_ProducesExpectedRootLightSummary|Read_IronforgeAlphaPerAssetMpq_RootLightDetails_UseLegacyLayout|Read_IronforgeStandard060_RootLightSummary_UsesStandardTailAttenuationOffsets|Read_IronforgeStandard060_RootLightDetails_ExposeRawStandardLayoutFields"` passed on Mar 27, 2026 with `8` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo --dump-lights` now prints real standard per-light `MOLT[n]` lines with raw `headerFlagsWord` and quaternion rotation values
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/KhazModan/Cities/Ironforge/ironforge.wmo.MPQ --dump-lights` now prints real Alpha per-light `MOLT[n]` lines with legacy `32`-byte entry sizing and no later-layout fields
+	- this is still a shared detail-read and inspect-surface slice, not broader light-behavior interpretation or a write path
+
 ### Mar 27, 2026 - WMO Group Optional `MOLR`, `MOBN`, `MOBR`, And `MOBN->MOBR` Summary Slice Landed
 
 - Added the next narrow shared WMO group slice in `wow-viewer` for the remaining low-risk optional group chunks plus one first linkage seam between BSP nodes and BSP face refs.
@@ -65,17 +82,18 @@
 - Fixed the narrow real-data gap exposed by Ironforge: the shared `MOLT` reader now handles legacy 32-byte Alpha root-light entries instead of assuming only the later 48-byte layout.
 - Landed pieces:
 	- updated `WowViewer.Core.IO.Wmo.WmoLightSummaryReader` with version-aware `MOLT` entry-size inference
-	- extended `WmoLightSummary` and inspect output with `attenStartRange`
+	- extended `WmoLightSummary` and inspect output with `attenStartRange`, a raw later-layout `headerFlagsWord` summary from bytes `2..3`, and later-layout rotation metrics (`rotationEntries`, `nonIdentityRotations`, `rotationLenRange`)
 	- extended `WmoLightSummaryReaderTests` with explicit synthetic `v14` and `v17` coverage
 	- extended `WmoRealDataTests` with a direct Ironforge root-light assertion, including positive attenuation-start coverage
-	- corrected the standard 48-byte layout after real `0.6.0` archive proof: attenuation now reads from offsets `40` and `44`, with the intermediate `24..39` bytes left opaque
+	- corrected the standard 48-byte layout after real `0.6.0` archive proof: bytes `2..3` now land as a raw `headerFlagsWord`, quaternion rotation reads from offsets `24..39`, and attenuation reads from offsets `40` and `44`
 	- added shared `ArchiveVirtualFileReader` and updated `WowViewer.Tool.Inspect wmo inspect` with `--archive-root` plus `--virtual-path` so standard-archive root WMOs can be inspected without extracting them first
 - Validation limits:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` passing tests
 	- real Ironforge inspect now prints `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] attenStartRange=[1.306, 8.333] maxAttenEnd=29.611 ...`
-	- a real `0.6.0` standard-archive Ironforge regression now also proves `48`-byte `MOLT` attenuation lives at offsets `40` and `44`
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo` now also reports the same standard root-light summary through the CLI
-	- this is still a shared semantic-summary slice, not deeper light behavior or a write path; the later-layout middle 16 bytes remain intentionally opaque
+	- a real `0.6.0` standard-archive Ironforge regression now also proves `48`-byte `MOLT` uses a non-zero `headerFlagsWord` of `0x0101` at bytes `2..3`, quaternion rotation at offsets `24..39`, and attenuation at offsets `40` and `44`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo` now also reports the same standard root-light summary through the CLI, including `headerFlagsWordRange=[0x0101, 0x0101]`, `headerFlagsWordDistinct=1`, `headerFlagsWordNonZero=218`, `rotationEntries=218`, `nonIdentityRotations=218`, and `rotationLenRange=[1.118, 1.118]`
+	- this is still a shared semantic-summary slice, not deeper light behavior or a write path
+	- the per-light inspect dump has now landed, so the clean next step is to test more real standard roots for `headerFlagsWord` variability instead of re-opening the already-settled Ironforge attenuation and rotation offsets
 
 ### Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
 

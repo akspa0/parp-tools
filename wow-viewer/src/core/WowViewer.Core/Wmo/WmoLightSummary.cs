@@ -16,6 +16,14 @@ public sealed class WmoLightSummary
         float minAttenStart,
         float maxAttenStart,
         float maxAttenEnd,
+        int nonZeroHeaderFlagsWordCount,
+        int distinctHeaderFlagsWordCount,
+        ushort minHeaderFlagsWord,
+        ushort maxHeaderFlagsWord,
+        int rotationEntryCount,
+        int nonIdentityRotationCount,
+        float minRotationLength,
+        float maxRotationLength,
         Vector3 boundsMin,
         Vector3 boundsMax)
     {
@@ -24,6 +32,10 @@ public sealed class WmoLightSummary
         ArgumentOutOfRangeException.ThrowIfNegative(entryCount);
         ArgumentOutOfRangeException.ThrowIfNegative(distinctTypeCount);
         ArgumentOutOfRangeException.ThrowIfNegative(attenuatedCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(nonZeroHeaderFlagsWordCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(distinctHeaderFlagsWordCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(rotationEntryCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(nonIdentityRotationCount);
 
         SourcePath = sourcePath;
         Version = version;
@@ -36,6 +48,14 @@ public sealed class WmoLightSummary
         MinAttenStart = minAttenStart;
         MaxAttenStart = maxAttenStart;
         MaxAttenEnd = maxAttenEnd;
+        NonZeroHeaderFlagsWordCount = nonZeroHeaderFlagsWordCount;
+        DistinctHeaderFlagsWordCount = distinctHeaderFlagsWordCount;
+        MinHeaderFlagsWord = minHeaderFlagsWord;
+        MaxHeaderFlagsWord = maxHeaderFlagsWord;
+        RotationEntryCount = rotationEntryCount;
+        NonIdentityRotationCount = nonIdentityRotationCount;
+        MinRotationLength = minRotationLength;
+        MaxRotationLength = maxRotationLength;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
     }
@@ -51,6 +71,14 @@ public sealed class WmoLightSummary
     public float MinAttenStart { get; }
     public float MaxAttenStart { get; }
     public float MaxAttenEnd { get; }
+    public int NonZeroHeaderFlagsWordCount { get; }
+    public int DistinctHeaderFlagsWordCount { get; }
+    public ushort MinHeaderFlagsWord { get; }
+    public ushort MaxHeaderFlagsWord { get; }
+    public int RotationEntryCount { get; }
+    public int NonIdentityRotationCount { get; }
+    public float MinRotationLength { get; }
+    public float MaxRotationLength { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }
 }
