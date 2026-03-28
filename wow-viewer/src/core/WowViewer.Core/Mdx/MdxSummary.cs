@@ -12,6 +12,7 @@ public sealed class MdxSummary
         uint? blendTime,
         Vector3? boundsMin,
         Vector3? boundsMax,
+        IReadOnlyList<MdxSequenceSummary> sequences,
         IReadOnlyList<MdxTextureSummary> textures,
         IReadOnlyList<MdxMaterialSummary> materials,
         IReadOnlyList<MdxChunkSummary> chunks,
@@ -20,6 +21,7 @@ public sealed class MdxSummary
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
+        ArgumentNullException.ThrowIfNull(sequences);
         ArgumentNullException.ThrowIfNull(textures);
         ArgumentNullException.ThrowIfNull(materials);
         ArgumentNullException.ThrowIfNull(chunks);
@@ -33,6 +35,8 @@ public sealed class MdxSummary
         BlendTime = blendTime;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
+        Sequences = sequences;
+        SequenceCount = sequences.Count;
         Textures = textures;
         TextureCount = textures.Count;
         ReplaceableTextureCount = textures.Count(static texture => texture.IsReplaceable);
@@ -58,6 +62,10 @@ public sealed class MdxSummary
     public Vector3? BoundsMin { get; }
 
     public Vector3? BoundsMax { get; }
+
+    public IReadOnlyList<MdxSequenceSummary> Sequences { get; }
+
+    public int SequenceCount { get; }
 
     public IReadOnlyList<MdxTextureSummary> Textures { get; }
 

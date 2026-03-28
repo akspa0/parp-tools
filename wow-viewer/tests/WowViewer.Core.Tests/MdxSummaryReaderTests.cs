@@ -18,6 +18,10 @@ public sealed class MdxSummaryReaderTests
             blendTime: 150,
             boundsMin: new Vector3(-1.0f, -2.0f, -3.0f),
             boundsMax: new Vector3(4.0f, 5.0f, 6.0f),
+            sequences:
+            [
+                ("Stand", 10, 40, 1.25f, 0x2u, 3.0f, 5, 35, -2.0f, -1.5f, -1.0f, 2.0f, 2.5f, 3.0f, 4.5f),
+            ],
             textures:
             [
                 (0u, "Textures\\SyntheticChestMain.blp", 3u),
@@ -42,9 +46,23 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(150u, summary.BlendTime);
         Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), summary.BoundsMin);
         Assert.Equal(new Vector3(4.0f, 5.0f, 6.0f), summary.BoundsMax);
-        Assert.Equal(5, summary.ChunkCount);
-        Assert.Equal(4, summary.KnownChunkCount);
+        Assert.Equal(6, summary.ChunkCount);
+        Assert.Equal(5, summary.KnownChunkCount);
         Assert.Equal(1, summary.UnknownChunkCount);
+        Assert.Equal(1, summary.SequenceCount);
+        Assert.Equal("Stand", summary.Sequences[0].Name);
+        Assert.Equal(10, summary.Sequences[0].StartTime);
+        Assert.Equal(40, summary.Sequences[0].EndTime);
+        Assert.Equal(30, summary.Sequences[0].Duration);
+        Assert.Equal(1.25f, summary.Sequences[0].MoveSpeed);
+        Assert.Equal(0x2u, summary.Sequences[0].Flags);
+        Assert.Equal(3.0f, summary.Sequences[0].Frequency);
+        Assert.Equal(5, summary.Sequences[0].ReplayStart);
+        Assert.Equal(35, summary.Sequences[0].ReplayEnd);
+        Assert.Null(summary.Sequences[0].BlendTime);
+        Assert.Equal(new Vector3(-2.0f, -1.5f, -1.0f), summary.Sequences[0].BoundsMin);
+        Assert.Equal(new Vector3(2.0f, 2.5f, 3.0f), summary.Sequences[0].BoundsMax);
+        Assert.Equal(4.5f, summary.Sequences[0].BoundsRadius);
         Assert.Equal(2, summary.TextureCount);
         Assert.Equal(1, summary.ReplaceableTextureCount);
         Assert.Equal("Textures\\SyntheticChestMain.blp", summary.Textures[0].Path);
@@ -63,10 +81,49 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(0.5f, summary.Materials[1].Layers[0].StaticAlpha);
         Assert.Equal(MdxChunkIds.Vers, summary.Chunks[0].Id);
         Assert.Equal(MdxChunkIds.Modl, summary.Chunks[1].Id);
-        Assert.Equal(MdxChunkIds.Texs, summary.Chunks[2].Id);
-        Assert.Equal(MdxChunkIds.Mtls, summary.Chunks[3].Id);
-        Assert.Equal("UNKN", summary.Chunks[4].Id.ToString());
-        Assert.False(summary.Chunks[4].IsKnownChunk);
+        Assert.Equal(MdxChunkIds.Seqs, summary.Chunks[2].Id);
+        Assert.Equal(MdxChunkIds.Texs, summary.Chunks[3].Id);
+        Assert.Equal(MdxChunkIds.Mtls, summary.Chunks[4].Id);
+        Assert.Equal("UNKN", summary.Chunks[5].Id.ToString());
+        Assert.False(summary.Chunks[5].IsKnownChunk);
+    }
+
+    [Fact]
+    public void Read_SyntheticCountedNamed8CSeqs_ProducesExpectedSequenceSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticParticle",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("SEQS", CreateSeqsPayloadNamed8C(
+                [
+                    ("Birth", 0, 100, 0.5f, 0x4u, -1.0f, -2.0f, -3.0f, 1.0f, 2.0f, 3.0f, 10, 90, 25u),
+                ])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_8c.mdx");
+
+        Assert.Equal(1, summary.SequenceCount);
+        Assert.Equal("Birth", summary.Sequences[0].Name);
+        Assert.Equal(0, summary.Sequences[0].StartTime);
+        Assert.Equal(100, summary.Sequences[0].EndTime);
+        Assert.Equal(0.5f, summary.Sequences[0].MoveSpeed);
+        Assert.Equal(0x4u, summary.Sequences[0].Flags);
+        Assert.Equal(1.0f, summary.Sequences[0].Frequency);
+        Assert.Equal(10, summary.Sequences[0].ReplayStart);
+        Assert.Equal(90, summary.Sequences[0].ReplayEnd);
+        Assert.Equal(25u, summary.Sequences[0].BlendTime);
+        Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), summary.Sequences[0].BoundsMin);
+        Assert.Equal(new Vector3(1.0f, 2.0f, 3.0f), summary.Sequences[0].BoundsMax);
+        Assert.Null(summary.Sequences[0].BoundsRadius);
     }
 
     [Fact]
@@ -114,7 +171,35 @@ public sealed class MdxSummaryReaderTests
         Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Texs);
     }
 
-    private static byte[] CreateMdxBytes(uint version, string modelName, uint blendTime, Vector3 boundsMin, Vector3 boundsMax, IReadOnlyList<(uint ReplaceableId, string Path, uint Flags)> textures, IReadOnlyList<(int PriorityPlane, IReadOnlyList<(uint BlendMode, uint Flags, int TextureId, int TransformId, int CoordId, float StaticAlpha)> Layers)> materials, IReadOnlyList<byte[]> extraChunks)
+    [Fact]
+    public void Read_RealStandardArchiveAnimatedMdx_ProducesSequenceSignals()
+    {
+        if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
+            return;
+
+        using IArchiveCatalog catalog = new MpqArchiveCatalog();
+        ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(catalog, [MdxTestPaths.Standard060DataPath], MdxTestPaths.ListfilePath);
+        Assert.NotNull(bootstrap);
+
+        string? virtualPath = MdxTestPaths.Standard060AnimatedMdxCandidates.FirstOrDefault(catalog.FileExists);
+        if (virtualPath is null)
+            return;
+
+        byte[]? bytes = catalog.ReadFile(virtualPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream summaryStream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(summaryStream, virtualPath);
+
+        if (summary.SequenceCount == 0)
+            return;
+
+        Assert.All(summary.Sequences, static sequence => Assert.False(string.IsNullOrWhiteSpace(sequence.Name)));
+        Assert.All(summary.Sequences, static sequence => Assert.True(sequence.EndTime >= sequence.StartTime));
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Seqs);
+    }
+
+    private static byte[] CreateMdxBytes(uint version, string modelName, uint blendTime, Vector3 boundsMin, Vector3 boundsMax, IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float Frequency, int ReplayStart, int ReplayEnd, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, float BoundsRadius)> sequences, IReadOnlyList<(uint ReplaceableId, string Path, uint Flags)> textures, IReadOnlyList<(int PriorityPlane, IReadOnlyList<(uint BlendMode, uint Flags, int TextureId, int TransformId, int CoordId, float StaticAlpha)> Layers)> materials, IReadOnlyList<byte[]> extraChunks)
     {
         List<byte> bytes =
         [
@@ -123,6 +208,7 @@ public sealed class MdxSummaryReaderTests
 
         bytes.AddRange(CreateChunk("VERS", CreateUInt32Payload(version)));
         bytes.AddRange(CreateChunk("MODL", CreateModlPayload(modelName, blendTime, boundsMin, boundsMax)));
+        bytes.AddRange(CreateChunk("SEQS", CreateSeqsPayload(sequences)));
         bytes.AddRange(CreateChunk("TEXS", CreateTexsPayload(textures)));
         bytes.AddRange(CreateChunk("MTLS", CreateMtlsPayload(materials)));
         foreach (byte[] chunk in extraChunks)
@@ -157,6 +243,63 @@ public sealed class MdxSummaryReaderTests
             BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset, 4), textures[index].ReplaceableId);
             WriteFixedAscii(payload, offset + 4, pathSize, textures[index].Path);
             BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 4 + pathSize, 4), textures[index].Flags);
+        }
+
+        return payload;
+    }
+
+    private static byte[] CreateSeqsPayload(IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float Frequency, int ReplayStart, int ReplayEnd, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, float BoundsRadius)> sequences)
+    {
+        const int entrySize = 136;
+
+        byte[] payload = new byte[4 + (sequences.Count * entrySize)];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)sequences.Count);
+        for (int index = 0; index < sequences.Count; index++)
+        {
+            int offset = 4 + (index * entrySize);
+            WriteFixedAscii(payload, offset, 0x50, sequences[index].Name);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x50, 4), sequences[index].StartTime);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x54, 4), sequences[index].EndTime);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x58, 4), sequences[index].MoveSpeed);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 0x5C, 4), sequences[index].Flags);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x60, 4), sequences[index].Frequency);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x64, 4), sequences[index].ReplayStart);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x68, 4), sequences[index].ReplayEnd);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x6C, 4), sequences[index].BoundsRadius);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x70, 4), sequences[index].BoundsMinX);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x74, 4), sequences[index].BoundsMinY);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x78, 4), sequences[index].BoundsMinZ);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x7C, 4), sequences[index].BoundsMaxX);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x80, 4), sequences[index].BoundsMaxY);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x84, 4), sequences[index].BoundsMaxZ);
+        }
+
+        return payload;
+    }
+
+    private static byte[] CreateSeqsPayloadNamed8C(IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, int ReplayStart, int ReplayEnd, uint BlendTime)> sequences)
+    {
+        const int entrySize = 0x8C;
+
+        byte[] payload = new byte[4 + (sequences.Count * entrySize)];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0, 4), (uint)sequences.Count);
+        for (int index = 0; index < sequences.Count; index++)
+        {
+            int offset = 4 + (index * entrySize);
+            WriteFixedAscii(payload, offset, 0x50, sequences[index].Name);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x50, 4), sequences[index].StartTime);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x54, 4), sequences[index].EndTime);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x58, 4), sequences[index].MoveSpeed);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 0x5C, 4), sequences[index].Flags);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x60, 4), sequences[index].BoundsMinX);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x64, 4), sequences[index].BoundsMinY);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x68, 4), sequences[index].BoundsMinZ);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x6C, 4), sequences[index].BoundsMaxX);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x70, 4), sequences[index].BoundsMaxY);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 0x74, 4), sequences[index].BoundsMaxZ);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x80, 4), sequences[index].ReplayStart);
+            BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset + 0x84, 4), sequences[index].ReplayEnd);
+            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(offset + 0x88, 4), sequences[index].BlendTime);
         }
 
         return payload;
@@ -242,6 +385,14 @@ public sealed class MdxSummaryReaderTests
 internal static class MdxTestPaths
 {
     public const string Standard060MdxVirtualPath = "world/generic/activedoodads/chest01/chest01.mdx";
+
+    public static readonly string[] Standard060AnimatedMdxCandidates =
+    [
+        "world/generic/passivedoodads/particleemitters/greengroundfog.mdx",
+        "world/azeroth/burningsteppes/passivedoodads/fallingembers/fallingembers.mdx",
+        "world/azeroth/burningsteppes/passivedoodads/lavafalls/lavafallsblackrock01.mdx",
+        "world/azeroth/burningsteppes/passivedoodads/volcanicvents/volcanicventlarge01.mdx",
+    ];
 
     public static string Standard060DataPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.6.0", "World of Warcraft", "Data");
 

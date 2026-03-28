@@ -1,5 +1,21 @@
 # Progress
 
+### Mar 28, 2026 - Shared `MDX` `SEQS` Summary Slice Landed
+
+- Extended the shared `MDX` seam in `wow-viewer` beyond `TEXS` and `MTLS` so `MdxSummaryReader` now also exposes first `SEQS` summary coverage.
+- Landed pieces:
+	- added `WowViewer.Core.Mdx.MdxSequenceSummary`
+	- extended `WowViewer.Core.Mdx.MdxSummary` with `Sequences` and `SequenceCount`
+	- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with counted legacy named `128/132/136/140`-byte `SEQS` summary support, counted named `0x8C` support, and the numeric-heavy `0x8C` `0.9.0` path as summary-only metadata
+	- updated `WowViewer.Tool.Inspect mdx inspect` to print `SEQS[n]` lines
+	- extended `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` with synthetic sequence fixtures and optional real animated-archive coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `4` passing tests
+	- real archive-backed `mdx inspect` on `world/generic/passivedoodads/particleemitters/greengroundfog.mdx` passed and reported `sequences=1`, `CHUNK[2]: id=SEQS`, and `SEQS[0]: name=Stand ... blendTime=150`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `170` passing tests
+	- this is still summary-only animation ownership, not animation-track parsing, bone/geoset ownership, or runtime viewer playback parity
+
 ### Mar 28, 2026 - Shared Root-ADT Plus `_tex0` Texture Reader And Broadened JSON Export Landed
 
 - Generalized the earlier `_tex0`-only terrain-detail seam into a shared ADT texture reader for root `ADT` and `_tex0.adt` files.

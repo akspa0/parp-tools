@@ -1434,9 +1434,11 @@ static void PrintMdxSummary(MdxSummary summary)
 	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
 	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
+	for (int index = 0; index < summary.Sequences.Count; index++)
+		PrintMdxSequenceSummary(summary.Sequences[index]);
 	for (int index = 0; index < summary.Textures.Count; index++)
 		PrintMdxTextureSummary(summary.Textures[index]);
 	for (int index = 0; index < summary.Materials.Count; index++)
@@ -1452,6 +1454,16 @@ static void PrintMdxTextureSummary(MdxTextureSummary texture)
 {
 	string path = string.IsNullOrWhiteSpace(texture.Path) ? "n/a" : texture.Path;
 	Console.WriteLine($"TEXS[{texture.Index}]: replaceableId={texture.ReplaceableId} flags=0x{texture.Flags:X8} path={path}");
+}
+
+static void PrintMdxSequenceSummary(MdxSequenceSummary sequence)
+{
+	string name = string.IsNullOrWhiteSpace(sequence.Name) ? "n/a" : sequence.Name;
+	string blendTime = sequence.BlendTime?.ToString() ?? "n/a";
+	string boundsMin = sequence.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
+	string boundsMax = sequence.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
+	string boundsRadius = sequence.BoundsRadius?.ToString("F3") ?? "n/a";
+	Console.WriteLine($"SEQS[{sequence.Index}]: name={name} time=[{sequence.StartTime}, {sequence.EndTime}] duration={sequence.Duration} moveSpeed={sequence.MoveSpeed:F3} flags=0x{sequence.Flags:X8} frequency={sequence.Frequency:F3} replay=[{sequence.ReplayStart}, {sequence.ReplayEnd}] blendTime={blendTime} boundsMin={boundsMin} boundsMax={boundsMax} boundsRadius={boundsRadius}");
 }
 
 static void PrintMdxMaterialSummary(MdxMaterialSummary material)
