@@ -1,5 +1,20 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `CLID` summary ownership into first shared classic `GLBS` global-sequence summary ownership for strict counted `uint32` duration tables.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxGlobalSequenceSummary.cs` now carries shared per-index global-sequence duration metadata
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now exposes `GlobalSequences` and `GlobalSequenceCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads `GLBS` as a strict `uint32` table and rejects payload sizes that are not divisible by `4`
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports `globalSequences=` in the header and prints `GLBS[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic `GLBS` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` global-sequence regression
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` `MdxSummaryReaderTests` passed after the new synthetic and real Alpha `GLBS` coverage landed
+	- `WowViewer.Tool.Inspect mdx inspect` on Alpha `0.5.3` `Wisp.mdx` now reports `globalSequences=11`, `CHUNK[3]: id=GLBS`, and stable `GLBS[0..10]` durations `267,133,533,0,567,900,1167,667,467,933,300`
+- Scope guardrail:
+	- this is still classic `GLBS` summary ownership only; it does not evaluate track playback, resolve `globalSeqId` references into runtime animation state, or claim full animation-system ownership
+
 ## Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past classic `HTST` summary ownership into first shared classic `CLID` collision-summary ownership for ordered `VRTX` or `TRI ` or `NRMS` collision-mesh metadata.

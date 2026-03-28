@@ -87,6 +87,7 @@ public static class MdxSummaryReader
             uint? blendTime = null;
             Vector3? boundsMin = null;
             Vector3? boundsMax = null;
+            List<MdxGlobalSequenceSummary> globalSequences = [];
             List<MdxSequenceSummary> sequences = [];
             List<MdxGeosetSummary> geosets = [];
             List<MdxGeosetAnimationSummary> geosetAnimations = [];
@@ -133,6 +134,10 @@ public static class MdxSummaryReader
                 else if (header.Id == MdxChunkIds.Modl)
                 {
                     ReadModlSummary(stream, dataOffset, header.Size, out modelName, out blendTime, out boundsMin, out boundsMax);
+                }
+                else if (header.Id == MdxChunkIds.Glbs)
+                {
+                    globalSequences = ReadGlbsSummary(stream, dataOffset, header.Size);
                 }
                 else if (header.Id == MdxChunkIds.Seqs)
                 {
@@ -198,7 +203,30 @@ public static class MdxSummaryReader
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, hitTestShapes, collision, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, globalSequences, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, hitTestShapes, collision, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxGlobalSequenceSummary> ReadGlbsSummary(Stream stream, long dataOffset, uint size)
+    {
+        if (size % sizeof(uint) != 0)
+            throw new InvalidDataException("GLBS: payload size must be divisible by 4.");
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = dataOffset;
+            int count = checked((int)(size / sizeof(uint)));
+            List<MdxGlobalSequenceSummary> globalSequences = new(count);
+
+            for (int index = 0; index < count; index++)
+                globalSequences.Add(new MdxGlobalSequenceSummary(index, ReadUInt32(stream)));
+
+            return globalSequences;
         }
         finally
         {

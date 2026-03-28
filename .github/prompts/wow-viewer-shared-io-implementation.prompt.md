@@ -19,6 +19,13 @@ Implement the next narrow `wow-viewer` shared-format or shared-I/O slice without
 
 Move one more reusable non-PM4 format capability into `wow-viewer/src/core/WowViewer.Core` or `wow-viewer/src/core/WowViewer.Core.IO` with explicit validation and without reintroducing tool-local parser ownership. Typical slices include ADT root or split ADT family seams, WDT summaries, WMO top-level readers, or early BLP or DBC or DB2 detection or summary work.
 
+## Current MDX Continuation Note
+
+- The current validated classic `MDX` top-level seam is shared `GLBS` summary ownership in `Core` and `Core.IO`, with fixed real proof on Alpha `0.5.3` `Creature/Wisp/Wisp.mdx`.
+- `GLBS` is now settled as strict counted `uint32` global-sequence durations. Do not reopen whether it is counted or variable-width.
+- If the user says to continue classic `MDX` summary work without naming a narrower seam, default to a read-only carrier search for the next real-data-backed known-but-unparsed classic chunk after `GLBS`, preferring `LITE`, `PREM`, `TXAN`, or `CORN` only after a fixed positive carrier has been identified.
+- Do not describe `GLBS` as animation playback or runtime `globalSeqId` evaluation; it remains summary-only duration ownership.
+
 ## Current Working Rules
 
 - `WowViewer.Core` and `WowViewer.Core.IO` are the intended shared home for non-PM4 file detection, chunk reading, and future format ownership.

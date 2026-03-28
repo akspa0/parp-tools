@@ -1,5 +1,20 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxGlobalSequenceSummary` for classic global-sequence duration metadata
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `GlobalSequences` and `GlobalSequenceCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes `GLBS` chunks as strict counted `uint32` duration tables and rejects payload sizes that are not divisible by `4`
+  - `WowViewer.Tool.Inspect mdx inspect` now reports `globalSequences=` and prints `GLBS[n]` lines from the shared reader so the new seam is visible on real data
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- notes:
+  - real fixed-signal `GLBS` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `globalSequences=11`, `CHUNK[3]: id=GLBS`, and stable `GLBS[0..10]` durations through the inspect surface and tests
+  - this seam remains summary-only and does not claim runtime animation or track-evaluation ownership
+
 ## Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice
 
 - status: landed

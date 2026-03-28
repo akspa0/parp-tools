@@ -138,6 +138,35 @@ public sealed class MdxSummaryReaderTests
     }
 
     [Fact]
+    public void Read_SyntheticGlbs_ProducesExpectedGlobalSequenceSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticGlbs",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("GLBS", CreateGlobalSequencesPayload([267u, 133u, 533u, 0u])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_glbs.mdx");
+
+        Assert.Equal(4, summary.GlobalSequenceCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Glbs);
+        Assert.Equal(267u, summary.GlobalSequences[0].Duration);
+        Assert.Equal(133u, summary.GlobalSequences[1].Duration);
+        Assert.Equal(533u, summary.GlobalSequences[2].Duration);
+        Assert.Equal(0u, summary.GlobalSequences[3].Duration);
+    }
+
+    [Fact]
     public void Read_SyntheticPivt_ProducesExpectedPivotSummary()
     {
         byte[] bytes = CreateMdxBytes(
@@ -1238,6 +1267,27 @@ public sealed class MdxSummaryReaderTests
     }
 
     [Fact]
+    public void Read_RealAlpha053WispMdx_WithGlbs_ProducesExpectedFixedSignals()
+    {
+        if (!File.Exists(MdxTestPaths.Alpha053WispMdxPath))
+            return;
+
+        MdxSummary summary = MdxSummaryReader.Read(MdxTestPaths.Alpha053WispMdxPath);
+
+        Assert.Equal("Wisp", summary.ModelName);
+        Assert.Equal(11, summary.GlobalSequenceCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Glbs);
+
+        uint[] expectedDurations = [267u, 133u, 533u, 0u, 567u, 900u, 1167u, 667u, 467u, 933u, 300u];
+        Assert.Equal(expectedDurations.Length, summary.GlobalSequences.Count);
+        for (int index = 0; index < expectedDurations.Length; index++)
+        {
+            Assert.Equal(index, summary.GlobalSequences[index].Index);
+            Assert.Equal(expectedDurations[index], summary.GlobalSequences[index].Duration);
+        }
+    }
+
+    [Fact]
     public void Read_RealStandardArchiveMdx_ProducesExpectedSignals()
     {
         if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
@@ -1768,6 +1818,15 @@ public sealed class MdxSummaryReaderTests
         payload.AddRange(CreateUInt32Payload((uint)facetNormals.Count));
         foreach (Vector3 normal in facetNormals)
             payload.AddRange(CreateVector3Payload(normal));
+
+        return [.. payload];
+    }
+
+    private static byte[] CreateGlobalSequencesPayload(IReadOnlyList<uint> durations)
+    {
+        List<byte> payload = [];
+        foreach (uint duration in durations)
+            payload.AddRange(CreateUInt32Payload(duration));
 
         return [.. payload];
     }

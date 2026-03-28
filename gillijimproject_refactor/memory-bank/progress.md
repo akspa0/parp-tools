@@ -1,5 +1,15 @@
 # Progress
 
+### Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice Landed
+
+- advanced the shared classic `MDX` migration from `CLID` into `GLBS` so global sequence duration tables no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`
+- added shared `MdxGlobalSequenceSummary` and extended `MdxSummary` with `GlobalSequences` plus `GlobalSequenceCount`
+- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with strict `GLBS` summary support for counted `uint32` durations and invalid payload-size rejection
+- updated `WowViewer.Tool.Inspect mdx inspect` to report `globalSequences=` and print `GLBS[n]` lines
+- extended `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` with a synthetic `GLBS` fixture and a fixed real Alpha `0.5.3` `Wisp.mdx` global-sequence case
+- validated the seam with focused shared-reader tests plus real inspect output on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- this landing now has strong synthetic coverage plus fixed real Alpha `0.5.3` `MDX` validation for classic `GLBS`
+
 ### Mar 28, 2026 - Shared Classic `MDX` `CLID` Summary Slice Landed
 
 - advanced the shared classic `MDX` migration from `HTST` into `CLID` so collision meshes no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`

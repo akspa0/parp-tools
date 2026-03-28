@@ -12,6 +12,7 @@ public sealed class MdxSummary
         uint? blendTime,
         Vector3? boundsMin,
         Vector3? boundsMax,
+        IReadOnlyList<MdxGlobalSequenceSummary> globalSequences,
         IReadOnlyList<MdxSequenceSummary> sequences,
         IReadOnlyList<MdxGeosetSummary> geosets,
         IReadOnlyList<MdxGeosetAnimationSummary> geosetAnimations,
@@ -33,6 +34,7 @@ public sealed class MdxSummary
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
+        ArgumentNullException.ThrowIfNull(globalSequences);
         ArgumentNullException.ThrowIfNull(sequences);
         ArgumentNullException.ThrowIfNull(geosets);
         ArgumentNullException.ThrowIfNull(geosetAnimations);
@@ -58,6 +60,8 @@ public sealed class MdxSummary
         BlendTime = blendTime;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
+        GlobalSequences = globalSequences;
+        GlobalSequenceCount = globalSequences.Count;
         Sequences = sequences;
         SequenceCount = sequences.Count;
         Geosets = geosets;
@@ -108,6 +112,10 @@ public sealed class MdxSummary
     public Vector3? BoundsMin { get; }
 
     public Vector3? BoundsMax { get; }
+
+    public IReadOnlyList<MdxGlobalSequenceSummary> GlobalSequences { get; }
+
+    public int GlobalSequenceCount { get; }
 
     public IReadOnlyList<MdxSequenceSummary> Sequences { get; }
 

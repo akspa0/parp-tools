@@ -1436,9 +1436,11 @@ static void PrintMdxSummary(MdxSummary summary)
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
 	string collisionVertices = summary.Collision?.VertexCount.ToString() ?? "0";
 	string collisionTriangles = summary.Collision?.TriangleCount.ToString() ?? "0";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} hitTestShapes={summary.HitTestShapeCount} collisionVertices={collisionVertices} collisionTriangles={collisionTriangles} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} globalSequences={summary.GlobalSequenceCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} hitTestShapes={summary.HitTestShapeCount} collisionVertices={collisionVertices} collisionTriangles={collisionTriangles} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
+	for (int index = 0; index < summary.GlobalSequences.Count; index++)
+		PrintMdxGlobalSequenceSummary(summary.GlobalSequences[index]);
 	for (int index = 0; index < summary.Sequences.Count; index++)
 		PrintMdxSequenceSummary(summary.Sequences[index]);
 	for (int index = 0; index < summary.Geosets.Count; index++)
@@ -1480,6 +1482,11 @@ static void PrintMdxTextureSummary(MdxTextureSummary texture)
 {
 	string path = string.IsNullOrWhiteSpace(texture.Path) ? "n/a" : texture.Path;
 	Console.WriteLine($"TEXS[{texture.Index}]: replaceableId={texture.ReplaceableId} flags=0x{texture.Flags:X8} path={path}");
+}
+
+static void PrintMdxGlobalSequenceSummary(MdxGlobalSequenceSummary globalSequence)
+{
+	Console.WriteLine($"GLBS[{globalSequence.Index}]: duration={globalSequence.Duration}");
 }
 
 static void PrintMdxSequenceSummary(MdxSequenceSummary sequence)

@@ -117,6 +117,7 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core/Mdx` now contains the first shared `MDX` top-level summary contracts:
 	- `MdxChunkIds`
 	- `MdxChunkSummary`
+	- `MdxGlobalSequenceSummary`
 	- `MdxSequenceSummary`
 	- `MdxGeosetSummary`
 	- `MdxGeosetAnimationSummary`
@@ -225,7 +226,7 @@ Current shared-core foundation slice:
 	- `WowFileDetector`
 - `tests/WowViewer.Core.Tests` now locks the current FourCC and chunk-header boundary behavior.
 	- it now also locks synthetic `BLP1` and `BLP2` header-summary behavior plus archive-backed real `0.6.0` standard-MPQ `BLP` coverage through the shared archive catalog
-	- it now also locks synthetic `GEOA`, `BONE`, `HELP`, `ATCH`, `PRE2`, `RIBB`, `CAMS`, `EVTS`, `HTST`, and `CLID` summary behavior plus fixed real Alpha `0.5.3` `MDX` coverage on files such as `testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, while keeping the older `0.6.0` effect-asset probe path explicitly opportunistic rather than a fixed positive carrier
+	- it now also locks synthetic `GLBS`, `GEOA`, `BONE`, `HELP`, `ATCH`, `PRE2`, `RIBB`, `CAMS`, `EVTS`, `HTST`, and `CLID` summary behavior plus fixed real Alpha `0.5.3` `MDX` coverage on files such as `testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, while keeping the older `0.6.0` effect-asset probe path explicitly opportunistic rather than a fixed positive carrier
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
@@ -272,7 +273,7 @@ Current non-PM4 inspect slice:
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
 	- it now also reports a first shared `BLP` header summary for format signature, version, compression fields, pixel format, image size, palette or JPEG-header presence, and per-mip offset or size coverage when a texture file is inspected
-	- it now also reports a first shared `MDX` top-level summary for `MDLX` signature, chunk order, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time signals, shared `SEQS` sequence signals, shared classic `GEOS` geoset signals, shared classic `GEOA` geoset-animation signals, shared classic `BONE` skeleton signals, shared classic `HELP` node signals, shared classic `ATCH` attachment signals, shared classic `PRE2` particle-emitter signals, shared classic `RIBB` ribbon-emitter signals, shared classic `CAMS` camera signals, shared classic `EVTS` event-node signals, shared classic `HTST` hit-test-shape signals, shared classic `CLID` collision-mesh signals, shared `PIVT` pivot-point signals, shared `TEXS` texture-table paths or flags, and narrow `MTLS` material-layer signals when a model file is inspected
+	- it now also reports a first shared `MDX` top-level summary for `MDLX` signature, chunk order, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time signals, shared `GLBS` global-sequence signals, shared `SEQS` sequence signals, shared classic `GEOS` geoset signals, shared classic `GEOA` geoset-animation signals, shared classic `BONE` skeleton signals, shared classic `HELP` node signals, shared classic `ATCH` attachment signals, shared classic `PRE2` particle-emitter signals, shared classic `RIBB` ribbon-emitter signals, shared classic `CAMS` camera signals, shared classic `EVTS` event-node signals, shared classic `HTST` hit-test-shape signals, shared classic `CLID` collision-mesh signals, shared `PIVT` pivot-point signals, shared `TEXS` texture-table paths or flags, and narrow `MTLS` material-layer signals when a model file is inspected
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
