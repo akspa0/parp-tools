@@ -92,6 +92,7 @@ public static class MdxSummaryReader
             List<MdxGeosetSummary> geosets = [];
             List<MdxGeosetAnimationSummary> geosetAnimations = [];
             List<MdxBoneSummary> bones = [];
+            List<MdxLightSummary> lights = [];
             List<MdxHelperSummary> helpers = [];
             List<MdxAttachmentSummary> attachments = [];
             List<MdxParticleEmitter2Summary> particleEmitters2 = [];
@@ -155,6 +156,10 @@ public static class MdxSummaryReader
                 {
                     bones = ReadBoneSummary(stream, dataOffset, header.Size, version);
                 }
+                else if (header.Id == MdxChunkIds.Lite)
+                {
+                    lights = ReadLiteSummary(stream, dataOffset, header.Size, version);
+                }
                 else if (header.Id == MdxChunkIds.Help)
                 {
                     helpers = ReadHelpSummary(stream, dataOffset, header.Size, version);
@@ -203,7 +208,7 @@ public static class MdxSummaryReader
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, globalSequences, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, hitTestShapes, collision, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, globalSequences, sequences, geosets, geosetAnimations, bones, lights, helpers, attachments, particleEmitters2, ribbons, cameras, events, hitTestShapes, collision, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
         }
         finally
         {
@@ -320,6 +325,110 @@ public static class MdxSummaryReader
 
             stream.Position = chunkEnd;
             return helpers;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxLightSummary> ReadLiteSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("LITE(v1300): missing light count.");
+
+            uint lightCount = ReadUInt32(stream);
+            if (lightCount > 100000)
+                throw new InvalidDataException($"LITE(v1300): invalid light count {lightCount}.");
+
+            List<MdxLightSummary> lights = new(checked((int)lightCount));
+            for (int index = 0; index < lightCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"LITE(v1300): truncated light header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"LITE(v1300): invalid light size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"LITE(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "LITE(v1300)");
+
+                if (entryEnd - stream.Position < 44)
+                    throw new InvalidDataException($"LITE(v1300): missing light fields at index {index}.");
+
+                MdxLightType lightType = ReadLightType(stream, $"LITE(v1300): invalid light type at index {index}.");
+                float staticAttenuationStart = ReadSingle(stream);
+                float staticAttenuationEnd = ReadSingle(stream);
+                Vector3 staticColor = ReadVector3(stream);
+                float staticIntensity = ReadSingle(stream);
+                Vector3 staticAmbientColor = ReadVector3(stream);
+                float staticAmbientIntensity = ReadSingle(stream);
+
+                MdxTrackSummary? attenuationStartTrack = null;
+                MdxTrackSummary? attenuationEndTrack = null;
+                MdxTrackSummary? colorTrack = null;
+                MdxTrackSummary? intensityTrack = null;
+                MdxTrackSummary? ambientColorTrack = null;
+                MdxTrackSummary? ambientIntensityTrack = null;
+                MdxVisibilityTrackSummary? visibilityTrack = null;
+
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KLAS":
+                            attenuationStartTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KLAE":
+                            attenuationEndTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KLAC":
+                            colorTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float) * 3, $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KLAI":
+                            intensityTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KLBC":
+                            ambientColorTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float) * 3, $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KLBI":
+                            ambientIntensityTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        case "KVIS":
+                        case "KATV":
+                            visibilityTrack = ReadVisibilityTrackSummary(stream, entryEnd, tag, $"LITE(v1300): {tag} payload overran the light.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            goto LightDone;
+                    }
+                }
+
+            LightDone:
+                stream.Position = entryEnd;
+                lights.Add(new MdxLightSummary(index, name, objectId, parentId, flags, lightType, staticAttenuationStart, staticAttenuationEnd, staticColor, staticIntensity, staticAmbientColor, staticAmbientIntensity, translationTrack, rotationTrack, scalingTrack, attenuationStartTrack, attenuationEndTrack, colorTrack, intensityTrack, ambientColorTrack, ambientIntensityTrack, visibilityTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return lights;
         }
         finally
         {
@@ -1791,6 +1900,15 @@ public static class MdxSummaryReader
             throw new InvalidDataException(invalidMessage);
 
         return (MdxGeometryShapeType)value;
+    }
+
+    private static MdxLightType ReadLightType(Stream stream, string invalidMessage)
+    {
+        uint value = ReadUInt32(stream);
+        if (value > (uint)MdxLightType.Ambient)
+            throw new InvalidDataException(invalidMessage);
+
+        return (MdxLightType)value;
     }
 
     private static MdxNodeTrackSummary ReadNodeVectorTrackSummary(Stream stream, long limit, string tag, string overrunMessage)

@@ -1,5 +1,22 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `GLBS` summary ownership into first shared classic `LITE` light-summary ownership for counted `MDLGENOBJECT`-derived light metadata.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxLightType.cs` now carries the shared classic light kind enum for `Omni`, `Direct`, and `Ambient`
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxLightSummary.cs` now carries shared per-light identity, hierarchy, static attenuation or color or intensity metadata, and summary-only `KLAS`, `KLAE`, `KLAC`, `KLAI`, `KLBC`, `KLBI`, and `KVIS` track metadata
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now exposes `Lights` and `LightCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `LITE` entries for `v1300` and `v1400`, including inherited node metadata plus fixed light payload fields and optional summary-only light-track metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports `lights=` in the header and prints `LITE[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `LITE` fixture plus a fixed real archive-backed `0.6.0` `dwarvenbrazier01.mdx` light regression
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` `MdxSummaryReaderTests` passed after the new synthetic and real archive-backed `LITE` coverage landed
+	- the focused MDX reader suite now also includes a real unpacked `0.5.3` alpha-corpus smoke over `229` MDX files under `wow-viewer/testdata/0.5.3/tree`, proving the new `LITE` summary path does not break current alpha-era parsing and that the bundled `0.5.3` sample set contains no `LITE` chunks today
+	- `WowViewer.Tool.Inspect mdx inspect` on `0.6.0` `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx` now reports `lights=1`, `CHUNK[7]: id=LITE`, and stable `LITE[0]` light metadata including `Omni02`, static attenuation `0.8333333 -> 0.9722222`, and a `KLAI(keys=26 ... time=[0, 3333])` intensity track
+- Scope guardrail:
+	- this is still classic `LITE` summary ownership only; it does not evaluate runtime lighting, animation-driven intensity/color playback, or viewer render-light parity
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past classic `CLID` summary ownership into first shared classic `GLBS` global-sequence summary ownership for strict counted `uint32` duration tables.

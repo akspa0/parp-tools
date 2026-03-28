@@ -1,5 +1,16 @@
 # Progress
 
+### Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice Landed
+
+- advanced the shared classic `MDX` migration from `GLBS` into `LITE` so classic light metadata no longer remains only as a known-but-unparsed top-level chunk id in `wow-viewer`
+- added shared `MdxLightType` and `MdxLightSummary` and extended `MdxSummary` with `Lights` plus `LightCount`
+- extended `WowViewer.Core.IO.Mdx.MdxSummaryReader` with classic counted `LITE` summary support for `v1300` and `v1400`, including inherited node metadata plus static attenuation or color or intensity fields and optional `KLAS`, `KLAE`, `KLAC`, `KLAI`, `KLBC`, `KLBI`, and `KVIS` metadata
+- updated `WowViewer.Tool.Inspect mdx inspect` to report `lights=` and print `LITE[n]` lines
+- extended `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` with a synthetic classic-`LITE` fixture and a fixed real archive-backed `0.6.0` `dwarvenbrazier01.mdx` light case
+- added a real unpacked `0.5.3` alpha-corpus smoke over `229` MDX files to prove the new `LITE` path does not regress current alpha-era parsing even though the bundled `0.5.3` sample set contains no `LITE` chunks today
+- validated the seam with focused shared-reader tests plus real inspect output on `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx`
+- this landing now has strong synthetic coverage plus fixed real standard `0.6.0` `MDX` validation for classic `LITE`
+
 ### Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice Landed
 
 - advanced the shared classic `MDX` migration from `CLID` into `GLBS` so global sequence duration tables no longer remain only as known-but-unparsed top-level chunk ids in `wow-viewer`

@@ -425,6 +425,169 @@ public sealed class MdxSummaryReaderTests
     }
 
     [Fact]
+    public void Read_SyntheticClassicLite_ProducesExpectedLightSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticLite",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("LITE", CreateLightPayload(
+                [
+                    ("OmniLight", 8, 2, 0x100u, MdxLightType.Omni, 4.0f, 12.0f, new Vector3(1.0f, 0.5f, 0.25f), 2.0f, new Vector3(0.25f, 0.5f, 1.0f), 0.75f, (1u, -1, new[] { 10, 40 }), null, null, (0u, -1, new[] { 20 }), (1u, 3, new[] { 25, 45 }), null, (2u, 5, new[] { 30 }), (3u, 7, new[] { 35 }), null, (0u, -1, new[] { 50 })),
+                    ("AmbientLight", 9, -1, 0x101u, MdxLightType.Ambient, 0.0f, 0.0f, new Vector3(0.1f, 0.2f, 0.3f), 1.0f, new Vector3(0.4f, 0.5f, 0.6f), 1.5f, null, (0u, -1, new[] { 15 }), (3u, 8, new[] { 25 }), null, null, (1u, 4, new[] { 55, 90 }), null, null, (2u, 6, new[] { 65 }), (1u, 2, new[] { 75 })),
+                ])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_lite.mdx");
+
+        Assert.Equal(2, summary.LightCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Lite);
+
+        MdxLightSummary first = summary.Lights[0];
+        Assert.Equal("OmniLight", first.Name);
+        Assert.Equal(8, first.ObjectId);
+        Assert.True(first.HasParent);
+        Assert.Equal(2, first.ParentId);
+        Assert.Equal(0x100u, first.Flags);
+        Assert.Equal(MdxLightType.Omni, first.LightType);
+        Assert.Equal(4.0f, first.StaticAttenuationStart);
+        Assert.Equal(12.0f, first.StaticAttenuationEnd);
+        Assert.Equal(new Vector3(1.0f, 0.5f, 0.25f), first.StaticColor);
+        Assert.Equal(2.0f, first.StaticIntensity);
+        Assert.Equal(new Vector3(0.25f, 0.5f, 1.0f), first.StaticAmbientColor);
+        Assert.Equal(0.75f, first.StaticAmbientIntensity);
+        Assert.NotNull(first.TranslationTrack);
+        Assert.Equal("KGTR", first.TranslationTrack!.Tag);
+        Assert.Null(first.RotationTrack);
+        Assert.Null(first.ScalingTrack);
+        Assert.NotNull(first.AttenuationStartTrack);
+        Assert.Equal("KLAS", first.AttenuationStartTrack!.Tag);
+        Assert.NotNull(first.AttenuationEndTrack);
+        Assert.Equal("KLAE", first.AttenuationEndTrack!.Tag);
+        Assert.Null(first.ColorTrack);
+        Assert.NotNull(first.IntensityTrack);
+        Assert.Equal("KLAI", first.IntensityTrack!.Tag);
+        Assert.NotNull(first.AmbientColorTrack);
+        Assert.Equal("KLBC", first.AmbientColorTrack!.Tag);
+        Assert.Null(first.AmbientIntensityTrack);
+        Assert.NotNull(first.VisibilityTrack);
+        Assert.Equal("KVIS", first.VisibilityTrack!.Tag);
+
+        MdxLightSummary second = summary.Lights[1];
+        Assert.Equal("AmbientLight", second.Name);
+        Assert.False(second.HasParent);
+        Assert.Equal(0x101u, second.Flags);
+        Assert.Equal(MdxLightType.Ambient, second.LightType);
+        Assert.Null(second.TranslationTrack);
+        Assert.NotNull(second.RotationTrack);
+        Assert.Equal("KGRT", second.RotationTrack!.Tag);
+        Assert.NotNull(second.ScalingTrack);
+        Assert.Equal("KGSC", second.ScalingTrack!.Tag);
+        Assert.Null(second.AttenuationStartTrack);
+        Assert.Null(second.AttenuationEndTrack);
+        Assert.NotNull(second.ColorTrack);
+        Assert.Equal("KLAC", second.ColorTrack!.Tag);
+        Assert.Null(second.IntensityTrack);
+        Assert.Null(second.AmbientColorTrack);
+        Assert.NotNull(second.AmbientIntensityTrack);
+        Assert.Equal("KLBI", second.AmbientIntensityTrack!.Tag);
+        Assert.NotNull(second.VisibilityTrack);
+        Assert.Equal("KVIS", second.VisibilityTrack!.Tag);
+    }
+
+    [Fact]
+    public void Read_RealStandardArchiveMdx_WithLite_ProducesExpectedFixedSignals()
+    {
+        if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
+            return;
+
+        using IArchiveCatalog catalog = new MpqArchiveCatalog();
+        ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(catalog, [MdxTestPaths.Standard060DataPath], MdxTestPaths.ListfilePath);
+        Assert.NotNull(bootstrap);
+
+        if (!catalog.FileExists(MdxTestPaths.Standard060LightMdxVirtualPath))
+            return;
+
+        byte[]? bytes = catalog.ReadFile(MdxTestPaths.Standard060LightMdxVirtualPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream summaryStream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(summaryStream, MdxTestPaths.Standard060LightMdxVirtualPath);
+
+        Assert.Equal("DwarvenBrazier01", summary.ModelName);
+        Assert.Equal(1, summary.LightCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Lite);
+
+        MdxLightSummary light = summary.Lights[0];
+        Assert.Equal("Omni02", light.Name);
+        Assert.Equal(1, light.ObjectId);
+        Assert.True(light.HasParent);
+        Assert.Equal(0, light.ParentId);
+        Assert.Equal(0x00000100u, light.Flags);
+        Assert.Equal(MdxLightType.Omni, light.LightType);
+        Assert.Equal(0.8333333f, light.StaticAttenuationStart, 6);
+        Assert.Equal(0.9722222f, light.StaticAttenuationEnd, 6);
+        Assert.Equal(0.97647065f, light.StaticColor.X, 6);
+        Assert.Equal(0.77647066f, light.StaticColor.Y, 6);
+        Assert.Equal(0.23529413f, light.StaticColor.Z, 6);
+        Assert.Equal(0f, light.StaticIntensity, 6);
+        Assert.Equal(1f, light.StaticAmbientColor.X, 6);
+        Assert.Equal(1f, light.StaticAmbientColor.Y, 6);
+        Assert.Equal(1f, light.StaticAmbientColor.Z, 6);
+        Assert.Equal(0f, light.StaticAmbientIntensity, 6);
+        Assert.Null(light.TranslationTrack);
+        Assert.Null(light.RotationTrack);
+        Assert.Null(light.ScalingTrack);
+        Assert.Null(light.AttenuationStartTrack);
+        Assert.Null(light.AttenuationEndTrack);
+        Assert.Null(light.ColorTrack);
+        Assert.NotNull(light.IntensityTrack);
+        Assert.Equal("KLAI", light.IntensityTrack!.Tag);
+        Assert.Equal(26, light.IntensityTrack.KeyCount);
+        Assert.Equal(3u, light.IntensityTrack.InterpolationType);
+        Assert.Equal(-1, light.IntensityTrack.GlobalSequenceId);
+        Assert.Equal(0, light.IntensityTrack.FirstKeyTime);
+        Assert.Equal(3333, light.IntensityTrack.LastKeyTime);
+        Assert.Null(light.AmbientColorTrack);
+        Assert.Null(light.AmbientIntensityTrack);
+        Assert.Null(light.VisibilityTrack);
+    }
+
+    [Fact]
+    public void Read_RealAlpha053Corpus_CurrentSample_ParsesAndReportsNoLite()
+    {
+        if (!Directory.Exists(MdxTestPaths.Alpha053TreePath))
+            return;
+
+        string[] inputPaths = Directory
+            .EnumerateFiles(MdxTestPaths.Alpha053TreePath, "*.mdx", SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(MdxTestPaths.Alpha053TreePath, "*.MDX", SearchOption.AllDirectories))
+            .OrderBy(static path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.NotEmpty(inputPaths);
+
+        foreach (string inputPath in inputPaths)
+        {
+            MdxSummary summary = MdxSummaryReader.Read(inputPath);
+
+            Assert.Equal("MDLX", summary.Signature);
+            Assert.True(summary.Version is 1300u or 1400u, $"Unexpected MDX version {summary.Version} for {inputPath}");
+            Assert.True(summary.LightCount == 0, $"Expected no lights in current 0.5.3 sample file {inputPath}");
+            Assert.DoesNotContain(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Lite);
+        }
+    }
+
+    [Fact]
     public void Read_SyntheticClassicAtch_ProducesExpectedAttachmentSummary()
     {
         byte[] bytes = CreateMdxBytes(
@@ -1712,6 +1875,65 @@ public sealed class MdxSummaryReaderTests
         return [.. payload];
     }
 
+    private static byte[] CreateLightPayload(IReadOnlyList<(string Name, int ObjectId, int ParentId, uint Flags, MdxLightType LightType, float StaticAttenuationStart, float StaticAttenuationEnd, Vector3 StaticColor, float StaticIntensity, Vector3 StaticAmbientColor, float StaticAmbientIntensity, (uint InterpolationType, int GlobalSequenceId, int[] Times)? TranslationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? RotationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ScalingTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? AttenuationStartTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? AttenuationEndTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ColorTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? IntensityTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? AmbientColorTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? AmbientIntensityTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? VisibilityTrack)> lights)
+    {
+        List<byte> payload = [];
+        payload.AddRange(CreateUInt32Payload((uint)lights.Count));
+
+        foreach ((string name, int objectId, int parentId, uint flags, MdxLightType lightType, float staticAttenuationStart, float staticAttenuationEnd, Vector3 staticColor, float staticIntensity, Vector3 staticAmbientColor, float staticAmbientIntensity, (uint InterpolationType, int GlobalSequenceId, int[] Times)? translationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? rotationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? scalingTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? attenuationStartTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? attenuationEndTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? colorTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? intensityTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ambientColorTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ambientIntensityTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? visibilityTrack) in lights)
+        {
+            List<byte> entryPayload = [];
+            List<byte> nodePayload = [];
+            nodePayload.AddRange(CreateFixedAsciiPayload(name, 0x50));
+            nodePayload.AddRange(CreateInt32Payload(objectId));
+            nodePayload.AddRange(CreateInt32Payload(parentId));
+            nodePayload.AddRange(CreateUInt32Payload(flags));
+
+            if (translationTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGTR", translationTrack.Value.InterpolationType, translationTrack.Value.GlobalSequenceId, translationTrack.Value.Times, TrackValueKind.Vector3));
+
+            if (rotationTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGRT", rotationTrack.Value.InterpolationType, rotationTrack.Value.GlobalSequenceId, rotationTrack.Value.Times, TrackValueKind.Quaternion));
+
+            if (scalingTrack is not null)
+                nodePayload.AddRange(CreateNodeTrackChunk("KGSC", scalingTrack.Value.InterpolationType, scalingTrack.Value.GlobalSequenceId, scalingTrack.Value.Times, TrackValueKind.Vector3));
+
+            entryPayload.AddRange(CreateSizedPayload(nodePayload));
+            entryPayload.AddRange(CreateUInt32Payload((uint)lightType));
+            entryPayload.AddRange(CreateSinglePayload(staticAttenuationStart));
+            entryPayload.AddRange(CreateSinglePayload(staticAttenuationEnd));
+            entryPayload.AddRange(CreateVector3Payload(staticColor));
+            entryPayload.AddRange(CreateSinglePayload(staticIntensity));
+            entryPayload.AddRange(CreateVector3Payload(staticAmbientColor));
+            entryPayload.AddRange(CreateSinglePayload(staticAmbientIntensity));
+
+            if (attenuationStartTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLAS", attenuationStartTrack.Value.InterpolationType, attenuationStartTrack.Value.GlobalSequenceId, attenuationStartTrack.Value.Times, TrackValueKind.Scalar));
+
+            if (attenuationEndTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLAE", attenuationEndTrack.Value.InterpolationType, attenuationEndTrack.Value.GlobalSequenceId, attenuationEndTrack.Value.Times, TrackValueKind.Scalar));
+
+            if (colorTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLAC", colorTrack.Value.InterpolationType, colorTrack.Value.GlobalSequenceId, colorTrack.Value.Times, TrackValueKind.Vector3));
+
+            if (intensityTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLAI", intensityTrack.Value.InterpolationType, intensityTrack.Value.GlobalSequenceId, intensityTrack.Value.Times, TrackValueKind.Scalar));
+
+            if (ambientColorTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLBC", ambientColorTrack.Value.InterpolationType, ambientColorTrack.Value.GlobalSequenceId, ambientColorTrack.Value.Times, TrackValueKind.Vector3));
+
+            if (ambientIntensityTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KLBI", ambientIntensityTrack.Value.InterpolationType, ambientIntensityTrack.Value.GlobalSequenceId, ambientIntensityTrack.Value.Times, TrackValueKind.Scalar));
+
+            if (visibilityTrack is not null)
+                entryPayload.AddRange(CreateNodeTrackChunk("KVIS", visibilityTrack.Value.InterpolationType, visibilityTrack.Value.GlobalSequenceId, visibilityTrack.Value.Times, TrackValueKind.Scalar));
+
+            payload.AddRange(CreateSizedPayload(entryPayload));
+        }
+
+        return [.. payload];
+    }
+
     private static byte[] CreateEventPayload(IReadOnlyList<(string Name, int ObjectId, int ParentId, uint Flags, (uint InterpolationType, int GlobalSequenceId, int[] Times)? TranslationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? RotationTrack, (uint InterpolationType, int GlobalSequenceId, int[] Times)? ScalingTrack, (int GlobalSequenceId, int[] Times)? EventTrack)> events)
     {
         List<byte> payload = [];
@@ -2527,7 +2749,9 @@ internal enum TrackValueKind
 internal static class MdxTestPaths
 {
     public const string Standard060MdxVirtualPath = "world/generic/activedoodads/chest01/chest01.mdx";
+    public const string Standard060LightMdxVirtualPath = "world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx";
 
+    public static readonly string Alpha053TreePath = Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree");
     public static readonly string Alpha053WispMdxPath = Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree", "Creature", "Wisp", "Wisp.mdx");
 
     public static readonly string[] Standard060AnimatedMdxCandidates =

@@ -123,6 +123,8 @@ Current shared-core foundation slice:
 	- `MdxGeosetAnimationSummary`
 	- `MdxGeosetAnimationTrackSummary`
 	- `MdxBoneSummary`
+	- `MdxLightType`
+	- `MdxLightSummary`
 	- `MdxHelperSummary`
 	- `MdxAttachmentSummary`
 	- `MdxParticleEmitter2Summary`
@@ -226,7 +228,7 @@ Current shared-core foundation slice:
 	- `WowFileDetector`
 - `tests/WowViewer.Core.Tests` now locks the current FourCC and chunk-header boundary behavior.
 	- it now also locks synthetic `BLP1` and `BLP2` header-summary behavior plus archive-backed real `0.6.0` standard-MPQ `BLP` coverage through the shared archive catalog
-	- it now also locks synthetic `GLBS`, `GEOA`, `BONE`, `HELP`, `ATCH`, `PRE2`, `RIBB`, `CAMS`, `EVTS`, `HTST`, and `CLID` summary behavior plus fixed real Alpha `0.5.3` `MDX` coverage on files such as `testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, while keeping the older `0.6.0` effect-asset probe path explicitly opportunistic rather than a fixed positive carrier
+	- it now also locks synthetic `GLBS`, `GEOA`, `BONE`, `LITE`, `HELP`, `ATCH`, `PRE2`, `RIBB`, `CAMS`, `EVTS`, `HTST`, and `CLID` summary behavior plus fixed real `MDX` coverage on files such as `testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` and archive-backed `0.6.0` `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx`; the focused reader suite also smoke-parses the current unpacked `0.5.3` alpha corpus (`229` MDX files) to verify the new `LITE` path does not regress alpha-era parsing even though that bundled sample set currently contains no `LITE` chunks
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`

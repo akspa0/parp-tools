@@ -17,6 +17,7 @@ public sealed class MdxSummary
         IReadOnlyList<MdxGeosetSummary> geosets,
         IReadOnlyList<MdxGeosetAnimationSummary> geosetAnimations,
         IReadOnlyList<MdxBoneSummary> bones,
+        IReadOnlyList<MdxLightSummary> lights,
         IReadOnlyList<MdxHelperSummary> helpers,
         IReadOnlyList<MdxAttachmentSummary> attachments,
         IReadOnlyList<MdxParticleEmitter2Summary> particleEmitters2,
@@ -39,6 +40,7 @@ public sealed class MdxSummary
         ArgumentNullException.ThrowIfNull(geosets);
         ArgumentNullException.ThrowIfNull(geosetAnimations);
         ArgumentNullException.ThrowIfNull(bones);
+        ArgumentNullException.ThrowIfNull(lights);
         ArgumentNullException.ThrowIfNull(helpers);
         ArgumentNullException.ThrowIfNull(attachments);
         ArgumentNullException.ThrowIfNull(particleEmitters2);
@@ -70,6 +72,8 @@ public sealed class MdxSummary
         GeosetAnimationCount = geosetAnimations.Count;
         Bones = bones;
         BoneCount = bones.Count;
+        Lights = lights;
+        LightCount = lights.Count;
         Helpers = helpers;
         HelperCount = helpers.Count;
         Attachments = attachments;
@@ -132,6 +136,10 @@ public sealed class MdxSummary
     public IReadOnlyList<MdxBoneSummary> Bones { get; }
 
     public int BoneCount { get; }
+
+    public IReadOnlyList<MdxLightSummary> Lights { get; }
+
+    public int LightCount { get; }
 
     public IReadOnlyList<MdxHelperSummary> Helpers { get; }
 

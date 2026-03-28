@@ -1436,7 +1436,7 @@ static void PrintMdxSummary(MdxSummary summary)
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
 	string collisionVertices = summary.Collision?.VertexCount.ToString() ?? "0";
 	string collisionTriangles = summary.Collision?.TriangleCount.ToString() ?? "0";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} globalSequences={summary.GlobalSequenceCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} hitTestShapes={summary.HitTestShapeCount} collisionVertices={collisionVertices} collisionTriangles={collisionTriangles} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} globalSequences={summary.GlobalSequenceCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} lights={summary.LightCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} hitTestShapes={summary.HitTestShapeCount} collisionVertices={collisionVertices} collisionTriangles={collisionTriangles} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
 	for (int index = 0; index < summary.GlobalSequences.Count; index++)
@@ -1449,6 +1449,8 @@ static void PrintMdxSummary(MdxSummary summary)
 		PrintMdxGeosetAnimationSummary(summary.GeosetAnimations[index]);
 	for (int index = 0; index < summary.Bones.Count; index++)
 		PrintMdxBoneSummary(summary.Bones[index]);
+	for (int index = 0; index < summary.Lights.Count; index++)
+		PrintMdxLightSummary(summary.Lights[index]);
 	for (int index = 0; index < summary.Helpers.Count; index++)
 		PrintMdxHelperSummary(summary.Helpers[index]);
 	for (int index = 0; index < summary.Attachments.Count; index++)
@@ -1520,6 +1522,14 @@ static void PrintMdxBoneSummary(MdxBoneSummary bone)
 	string geosetId = bone.UsesGeoset ? bone.GeosetId.ToString() : "none(0xFFFFFFFF)";
 	string geosetAnimationId = bone.UsesGeosetAnimation ? bone.GeosetAnimationId.ToString() : "none(0xFFFFFFFF)";
 	Console.WriteLine($"BONE[{bone.Index}]: name={bone.Name} objectId={bone.ObjectId} parentId={parentId} flags=0x{bone.Flags:X8} geosetId={geosetId} geosetAnimId={geosetAnimationId} translationTrack={FormatMdxNodeTrack(bone.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(bone.RotationTrack)} scalingTrack={FormatMdxNodeTrack(bone.ScalingTrack)}");
+}
+
+static void PrintMdxLightSummary(MdxLightSummary light)
+{
+	string parentId = light.HasParent ? light.ParentId.ToString() : "none(-1)";
+	Vector3 staticColor = light.StaticColor;
+	Vector3 staticAmbientColor = light.StaticAmbientColor;
+	Console.WriteLine($"LITE[{light.Index}]: name={light.Name} objectId={light.ObjectId} parentId={parentId} flags=0x{light.Flags:X8} type={FormatMdxLightType(light.LightType)} staticAttenStart={light.StaticAttenuationStart:F3} staticAttenEnd={light.StaticAttenuationEnd:F3} staticColor=({staticColor.X:F3}, {staticColor.Y:F3}, {staticColor.Z:F3}) staticIntensity={light.StaticIntensity:F3} staticAmbientColor=({staticAmbientColor.X:F3}, {staticAmbientColor.Y:F3}, {staticAmbientColor.Z:F3}) staticAmbientIntensity={light.StaticAmbientIntensity:F3} translationTrack={FormatMdxNodeTrack(light.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(light.RotationTrack)} scalingTrack={FormatMdxNodeTrack(light.ScalingTrack)} attenuationStartTrack={FormatMdxTrack(light.AttenuationStartTrack)} attenuationEndTrack={FormatMdxTrack(light.AttenuationEndTrack)} colorTrack={FormatMdxTrack(light.ColorTrack)} intensityTrack={FormatMdxTrack(light.IntensityTrack)} ambientColorTrack={FormatMdxTrack(light.AmbientColorTrack)} ambientIntensityTrack={FormatMdxTrack(light.AmbientIntensityTrack)} visibilityTrack={FormatMdxVisibilityTrack(light.VisibilityTrack)}");
 }
 
 static void PrintMdxHelperSummary(MdxHelperSummary helper)
@@ -1681,6 +1691,17 @@ static string FormatMdxGeometryShapeType(MdxGeometryShapeType shapeType)
 		MdxGeometryShapeType.Sphere => "Sphere(2)",
 		MdxGeometryShapeType.Plane => "Plane(3)",
 		_ => ((byte)shapeType).ToString(),
+	};
+}
+
+static string FormatMdxLightType(MdxLightType lightType)
+{
+	return lightType switch
+	{
+		MdxLightType.Omni => "Omni(0)",
+		MdxLightType.Direct => "Direct(1)",
+		MdxLightType.Ambient => "Ambient(2)",
+		_ => ((uint)lightType).ToString(),
 	};
 }
 

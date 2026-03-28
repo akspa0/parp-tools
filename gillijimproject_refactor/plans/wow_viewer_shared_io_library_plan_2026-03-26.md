@@ -1,5 +1,21 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `LITE` Summary Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxLightType` and `MdxLightSummary` for classic `LITE` light kind, identity, static attenuation or color or intensity fields, and summary-only track metadata
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Lights` and `LightCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `LITE` entries for `v1300` and `v1400`, including inherited `MDLGENOBJECT` metadata plus fixed light fields and optional `KLAS`, `KLAE`, `KLAC`, `KLAI`, `KLBC`, `KLBI`, and `KVIS` payloads
+  - `WowViewer.Tool.Inspect mdx inspect` now reports `lights=` and prints `LITE[n]` lines from the shared reader so the new seam is visible on real data
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path "world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx"`
+- notes:
+  - fixed real `LITE` validation now belongs on `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx`, which proves `lights=1`, `CHUNK[7]: id=LITE`, static attenuation `0.8333333 -> 0.9722222`, and a `KLAI(keys=26 ... time=[0, 3333])` intensity track through the inspect surface and tests
+  - the focused MDX reader suite also now parses the current unpacked `0.5.3` alpha corpus (`229` MDX files under `wow-viewer/testdata/0.5.3/tree`) and verifies that the bundled sample set reports no `LITE` chunks, so the new light-summary seam is checked against both alpha-era and standard-era real data
+  - this seam remains summary-only and does not claim runtime lighting ownership or animation-driven light evaluation
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GLBS` Summary Slice
 
 - status: landed
