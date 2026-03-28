@@ -12,6 +12,7 @@ public static class MdxSummaryReader
     private const int ModlNameSizeBytes = 0x50;
     private const int ModlBoundsAndBlendSizeBytes = 0x18 + sizeof(uint);
     private const int ModlSummarySizeBytes = ModlNameSizeBytes + ModlBoundsAndBlendSizeBytes;
+    private const int PivtEntrySizeBytes = 12;
     private const int SeqsNameSizeBytes = 0x50;
     private const int SeqsCountedNamedRecordSizeBytes = 0x8C;
     private const int TexsEntrySizeLegacy = 0x108;
@@ -84,6 +85,8 @@ public static class MdxSummaryReader
             Vector3? boundsMin = null;
             Vector3? boundsMax = null;
             List<MdxSequenceSummary> sequences = [];
+            List<MdxGeosetSummary> geosets = [];
+            List<MdxPivotPointSummary> pivotPoints = [];
             List<MdxTextureSummary> textures = [];
             List<MdxMaterialSummary> materials = [];
             int knownChunkCount = 0;
@@ -122,6 +125,14 @@ public static class MdxSummaryReader
                 {
                     sequences = ReadSeqsSummary(stream, dataOffset, header.Size);
                 }
+                else if (header.Id == MdxChunkIds.Geos)
+                {
+                    geosets = ReadGeosSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Pivt)
+                {
+                    pivotPoints = ReadPivtSummary(stream, dataOffset, header.Size);
+                }
                 else if (header.Id == MdxChunkIds.Texs)
                 {
                     textures = ReadTexsSummary(stream, dataOffset, header.Size);
@@ -134,7 +145,152 @@ public static class MdxSummaryReader
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxGeosetSummary> ReadGeosSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(int))
+                throw new InvalidDataException("GEOS(v1300): missing geoset count.");
+
+            int geosetCount = ReadInt32(stream);
+            if (geosetCount < 0 || geosetCount > 100000)
+                throw new InvalidDataException($"GEOS(v1300): invalid geoset count {geosetCount}.");
+
+            List<MdxGeosetSummary> geosets = new(geosetCount);
+            for (int index = 0; index < geosetCount; index++)
+            {
+                long geosetStart = stream.Position;
+                if (chunkEnd - geosetStart < sizeof(uint))
+                    throw new InvalidDataException($"GEOS(v1300): truncated geoset header at index {index}.");
+
+                uint geosetSize = ReadUInt32(stream);
+                long geosetEnd = checked(geosetStart + geosetSize);
+                if (geosetEnd > chunkEnd || geosetEnd <= geosetStart)
+                    throw new InvalidDataException($"GEOS(v1300): invalid geoset size 0x{geosetSize:X} at index {index}.");
+
+                ExpectTag(stream, "VRTX", $"GEOS(v1300): expected VRTX at index {index}.");
+                int vertexCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative VRTX count.");
+                SkipBytes(stream, checked((long)vertexCount * 12), geosetEnd, "GEOS(v1300): VRTX payload overran the geoset.");
+
+                ExpectTag(stream, "NRMS", $"GEOS(v1300): expected NRMS at index {index}.");
+                int normalCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative NRMS count.");
+                SkipBytes(stream, checked((long)normalCount * 12), geosetEnd, "GEOS(v1300): NRMS payload overran the geoset.");
+
+                int uvSetCount = 0;
+                int primaryUvCount = 0;
+                if (TryReadTag(stream, "UVAS"))
+                {
+                    uvSetCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative UVAS count.");
+                    primaryUvCount = vertexCount;
+                    SkipBytes(stream, checked((long)uvSetCount * vertexCount * 8), geosetEnd, "GEOS(v1300): UVAS payload overran the geoset.");
+                }
+
+                ExpectTag(stream, "PTYP", $"GEOS(v1300): expected PTYP at index {index}.");
+                int primitiveTypeCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative PTYP count.");
+                for (int primitiveIndex = 0; primitiveIndex < primitiveTypeCount; primitiveIndex++)
+                {
+                    int primitiveType = stream.ReadByte();
+                    if (primitiveType < 0)
+                        throw new EndOfStreamException("GEOS(v1300): truncated PTYP payload.");
+
+                    if (primitiveType != 4)
+                        throw new InvalidDataException($"GEOS(v1300): unsupported primitive type {primitiveType}.");
+                }
+
+                ExpectTag(stream, "PCNT", $"GEOS(v1300): expected PCNT at index {index}.");
+                int faceGroupCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative PCNT count.");
+                SkipBytes(stream, checked((long)faceGroupCount * sizeof(int)), geosetEnd, "GEOS(v1300): PCNT payload overran the geoset.");
+
+                ExpectTag(stream, "PVTX", $"GEOS(v1300): expected PVTX at index {index}.");
+                int indexCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative PVTX count.");
+                SkipBytes(stream, checked((long)indexCount * sizeof(ushort)), geosetEnd, "GEOS(v1300): PVTX payload overran the geoset.");
+
+                ExpectTag(stream, "GNDX", $"GEOS(v1300): expected GNDX at index {index}.");
+                int vertexGroupCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative GNDX count.");
+                SkipBytes(stream, vertexGroupCount, geosetEnd, "GEOS(v1300): GNDX payload overran the geoset.");
+
+                ExpectTag(stream, "MTGC", $"GEOS(v1300): expected MTGC at index {index}.");
+                int matrixGroupCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative MTGC count.");
+                SkipBytes(stream, checked((long)matrixGroupCount * sizeof(uint)), geosetEnd, "GEOS(v1300): MTGC payload overran the geoset.");
+
+                ExpectTag(stream, "MATS", $"GEOS(v1300): expected MATS at index {index}.");
+                int matrixIndexCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative MATS count.");
+                SkipBytes(stream, checked((long)matrixIndexCount * sizeof(uint)), geosetEnd, "GEOS(v1300): MATS payload overran the geoset.");
+
+                if (TryReadTag(stream, "UVBS"))
+                {
+                    int uvCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative UVBS count.");
+                    if (primaryUvCount == 0)
+                    {
+                        primaryUvCount = uvCount;
+                        uvSetCount = Math.Max(uvSetCount, 1);
+                    }
+
+                    SkipBytes(stream, checked((long)uvCount * 8), geosetEnd, "GEOS(v1300): UVBS payload overran the geoset.");
+                }
+
+                ExpectTag(stream, "BIDX", $"GEOS(v1300): expected BIDX at index {index}.");
+                int boneIndexCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative BIDX count.");
+                SkipBytes(stream, checked((long)boneIndexCount * sizeof(uint)), geosetEnd, "GEOS(v1300): BIDX payload overran the geoset.");
+
+                ExpectTag(stream, "BWGT", $"GEOS(v1300): expected BWGT at index {index}.");
+                int boneWeightCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative BWGT count.");
+                SkipBytes(stream, checked((long)boneWeightCount * sizeof(uint)), geosetEnd, "GEOS(v1300): BWGT payload overran the geoset.");
+
+                int materialId = ReadInt32(stream);
+                uint selectionGroup = unchecked((uint)ReadInt32(stream));
+                uint flags = unchecked((uint)ReadInt32(stream));
+                float boundsRadius = ReadSingle(stream);
+                Vector3 boundsMin = ReadVector3(stream);
+                Vector3 boundsMax = ReadVector3(stream);
+                int animationExtentCount = ReadNonNegativeCount(stream, "GEOS(v1300): negative geosetAnimCount.");
+                SkipBytes(stream, checked((long)animationExtentCount * 28), geosetEnd, "GEOS(v1300): geoset animation extents overran the geoset.");
+
+                geosets.Add(new MdxGeosetSummary(index, vertexCount, normalCount, uvSetCount, primaryUvCount, primitiveTypeCount, faceGroupCount, indexCount, vertexGroupCount, matrixGroupCount, matrixIndexCount, boneIndexCount, boneWeightCount, materialId, selectionGroup, flags, boundsRadius, boundsMin, boundsMax, animationExtentCount));
+                stream.Position = geosetEnd;
+            }
+
+            stream.Position = chunkEnd;
+            return geosets;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxPivotPointSummary> ReadPivtSummary(Stream stream, long dataOffset, uint size)
+    {
+        if (size % PivtEntrySizeBytes != 0)
+            throw new InvalidDataException($"Invalid PIVT size 0x{size:X}: expected multiple of {PivtEntrySizeBytes}.");
+
+        long previousPosition = stream.Position;
+        try
+        {
+            int count = checked((int)(size / PivtEntrySizeBytes));
+            List<MdxPivotPointSummary> pivotPoints = new(count);
+
+            stream.Position = dataOffset;
+            for (int index = 0; index < count; index++)
+            {
+                pivotPoints.Add(new MdxPivotPointSummary(index, ReadVector3(stream)));
+            }
+
+            return pivotPoints;
         }
         finally
         {
@@ -593,6 +749,52 @@ public static class MdxSummaryReader
         Span<byte> bytes = stackalloc byte[sizeof(float)];
         stream.ReadExactly(bytes);
         return BinaryPrimitives.ReadSingleLittleEndian(bytes);
+    }
+
+    private static string ReadTag(Stream stream)
+    {
+        Span<byte> bytes = stackalloc byte[4];
+        stream.ReadExactly(bytes);
+        return Encoding.ASCII.GetString(bytes);
+    }
+
+    private static void ExpectTag(Stream stream, string expected, string message)
+    {
+        string actual = ReadTag(stream);
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            throw new InvalidDataException($"{message} Found '{actual}'.");
+    }
+
+    private static bool TryReadTag(Stream stream, string expected)
+    {
+        long previousPosition = stream.Position;
+        string actual = ReadTag(stream);
+        if (string.Equals(actual, expected, StringComparison.Ordinal))
+            return true;
+
+        stream.Position = previousPosition;
+        return false;
+    }
+
+    private static int ReadNonNegativeCount(Stream stream, string errorMessage)
+    {
+        int count = ReadInt32(stream);
+        if (count < 0)
+            throw new InvalidDataException(errorMessage);
+
+        return count;
+    }
+
+    private static void SkipBytes(Stream stream, long byteCount, long limit, string errorMessage)
+    {
+        if (byteCount < 0)
+            throw new InvalidDataException(errorMessage);
+
+        long nextPosition = checked(stream.Position + byteCount);
+        if (nextPosition > limit)
+            throw new InvalidDataException(errorMessage);
+
+        stream.Position = nextPosition;
     }
 
     private static Vector3 ReadVector3(Stream stream)

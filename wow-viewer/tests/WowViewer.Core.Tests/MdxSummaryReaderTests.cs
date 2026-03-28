@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Numerics;
+using System.Text;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Mdx;
@@ -21,6 +22,11 @@ public sealed class MdxSummaryReaderTests
             sequences:
             [
                 ("Stand", 10, 40, 1.25f, 0x2u, 3.0f, 5, 35, -2.0f, -1.5f, -1.0f, 2.0f, 2.5f, 3.0f, 4.5f),
+            ],
+            pivotPoints:
+            [
+                new Vector3(1.0f, 2.0f, 3.0f),
+                new Vector3(-4.0f, 5.5f, -6.25f),
             ],
             textures:
             [
@@ -46,8 +52,8 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(150u, summary.BlendTime);
         Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), summary.BoundsMin);
         Assert.Equal(new Vector3(4.0f, 5.0f, 6.0f), summary.BoundsMax);
-        Assert.Equal(6, summary.ChunkCount);
-        Assert.Equal(5, summary.KnownChunkCount);
+        Assert.Equal(7, summary.ChunkCount);
+        Assert.Equal(6, summary.KnownChunkCount);
         Assert.Equal(1, summary.UnknownChunkCount);
         Assert.Equal(1, summary.SequenceCount);
         Assert.Equal("Stand", summary.Sequences[0].Name);
@@ -63,6 +69,9 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(new Vector3(-2.0f, -1.5f, -1.0f), summary.Sequences[0].BoundsMin);
         Assert.Equal(new Vector3(2.0f, 2.5f, 3.0f), summary.Sequences[0].BoundsMax);
         Assert.Equal(4.5f, summary.Sequences[0].BoundsRadius);
+        Assert.Equal(2, summary.PivotPointCount);
+        Assert.Equal(new Vector3(1.0f, 2.0f, 3.0f), summary.PivotPoints[0].Position);
+        Assert.Equal(new Vector3(-4.0f, 5.5f, -6.25f), summary.PivotPoints[1].Position);
         Assert.Equal(2, summary.TextureCount);
         Assert.Equal(1, summary.ReplaceableTextureCount);
         Assert.Equal("Textures\\SyntheticChestMain.blp", summary.Textures[0].Path);
@@ -82,10 +91,11 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(MdxChunkIds.Vers, summary.Chunks[0].Id);
         Assert.Equal(MdxChunkIds.Modl, summary.Chunks[1].Id);
         Assert.Equal(MdxChunkIds.Seqs, summary.Chunks[2].Id);
-        Assert.Equal(MdxChunkIds.Texs, summary.Chunks[3].Id);
-        Assert.Equal(MdxChunkIds.Mtls, summary.Chunks[4].Id);
-        Assert.Equal("UNKN", summary.Chunks[5].Id.ToString());
-        Assert.False(summary.Chunks[5].IsKnownChunk);
+        Assert.Equal(MdxChunkIds.Pivt, summary.Chunks[3].Id);
+        Assert.Equal(MdxChunkIds.Texs, summary.Chunks[4].Id);
+        Assert.Equal(MdxChunkIds.Mtls, summary.Chunks[5].Id);
+        Assert.Equal("UNKN", summary.Chunks[6].Id.ToString());
+        Assert.False(summary.Chunks[6].IsKnownChunk);
     }
 
     [Fact]
@@ -98,6 +108,7 @@ public sealed class MdxSummaryReaderTests
             boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
             boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
             sequences: [],
+            pivotPoints: [],
             textures: [],
             materials: [],
             extraChunks:
@@ -124,6 +135,77 @@ public sealed class MdxSummaryReaderTests
         Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), summary.Sequences[0].BoundsMin);
         Assert.Equal(new Vector3(1.0f, 2.0f, 3.0f), summary.Sequences[0].BoundsMax);
         Assert.Null(summary.Sequences[0].BoundsRadius);
+    }
+
+    [Fact]
+    public void Read_SyntheticPivt_ProducesExpectedPivotSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticPivot",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints:
+            [
+                new Vector3(0.0f, 0.0f, 0.0f),
+                new Vector3(3.5f, -2.25f, 8.0f),
+                new Vector3(-7.0f, 4.0f, 1.5f),
+            ],
+            textures: [],
+            materials: [],
+            extraChunks: []);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_pivt.mdx");
+
+        Assert.Equal(3, summary.PivotPointCount);
+        Assert.Equal(new Vector3(0.0f, 0.0f, 0.0f), summary.PivotPoints[0].Position);
+        Assert.Equal(new Vector3(3.5f, -2.25f, 8.0f), summary.PivotPoints[1].Position);
+        Assert.Equal(new Vector3(-7.0f, 4.0f, 1.5f), summary.PivotPoints[2].Position);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Pivt);
+    }
+
+    [Fact]
+    public void Read_SyntheticClassicGeos_ProducesExpectedGeosetSummary()
+    {
+        byte[] bytes = CreateMdxBytes(
+            version: 1300,
+            modelName: "SyntheticGeos",
+            blendTime: 0,
+            boundsMin: new Vector3(-1.0f, -1.0f, -1.0f),
+            boundsMax: new Vector3(1.0f, 1.0f, 1.0f),
+            sequences: [],
+            pivotPoints: [],
+            textures: [],
+            materials: [],
+            extraChunks:
+            [
+                CreateChunk("GEOS", CreateClassicGeosPayload(
+                [
+                    (3, 7, 2u, 0x10u, 5.5f, new Vector3(-1.0f, -2.0f, -3.0f), new Vector3(4.0f, 5.0f, 6.0f), 1),
+                ])),
+            ]);
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_geos.mdx");
+
+        Assert.Equal(1, summary.GeosetCount);
+        Assert.Equal(3, summary.Geosets[0].VertexCount);
+        Assert.Equal(3, summary.Geosets[0].NormalCount);
+        Assert.Equal(1, summary.Geosets[0].UvSetCount);
+        Assert.Equal(3, summary.Geosets[0].PrimaryUvCount);
+        Assert.Equal(3, summary.Geosets[0].IndexCount);
+        Assert.Equal(1, summary.Geosets[0].TriangleCount);
+        Assert.Equal(7, summary.Geosets[0].MaterialId);
+        Assert.Equal(2u, summary.Geosets[0].SelectionGroup);
+        Assert.Equal(0x10u, summary.Geosets[0].Flags);
+        Assert.Equal(5.5f, summary.Geosets[0].BoundsRadius);
+        Assert.Equal(new Vector3(-1.0f, -2.0f, -3.0f), summary.Geosets[0].BoundsMin);
+        Assert.Equal(new Vector3(4.0f, 5.0f, 6.0f), summary.Geosets[0].BoundsMax);
+        Assert.Equal(1, summary.Geosets[0].AnimationExtentCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Geos);
     }
 
     [Fact]
@@ -199,7 +281,67 @@ public sealed class MdxSummaryReaderTests
         Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Seqs);
     }
 
-    private static byte[] CreateMdxBytes(uint version, string modelName, uint blendTime, Vector3 boundsMin, Vector3 boundsMax, IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float Frequency, int ReplayStart, int ReplayEnd, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, float BoundsRadius)> sequences, IReadOnlyList<(uint ReplaceableId, string Path, uint Flags)> textures, IReadOnlyList<(int PriorityPlane, IReadOnlyList<(uint BlendMode, uint Flags, int TextureId, int TransformId, int CoordId, float StaticAlpha)> Layers)> materials, IReadOnlyList<byte[]> extraChunks)
+    [Fact]
+    public void Read_RealStandardArchiveMdx_WithGeos_ProducesGeosetSignals()
+    {
+        if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
+            return;
+
+        using IArchiveCatalog catalog = new MpqArchiveCatalog();
+        ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(catalog, [MdxTestPaths.Standard060DataPath], MdxTestPaths.ListfilePath);
+        Assert.NotNull(bootstrap);
+
+        if (!catalog.FileExists(MdxTestPaths.Standard060MdxVirtualPath))
+            return;
+
+        byte[]? bytes = catalog.ReadFile(MdxTestPaths.Standard060MdxVirtualPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream summaryStream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(summaryStream, MdxTestPaths.Standard060MdxVirtualPath);
+
+        Assert.Equal(2, summary.GeosetCount);
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Geos);
+        Assert.Equal(6, summary.Geosets[0].IndexCount);
+        Assert.Equal(102, summary.Geosets[1].IndexCount);
+        Assert.Equal(1, summary.Geosets[0].MaterialId);
+        Assert.Equal(0, summary.Geosets[1].MaterialId);
+        Assert.Equal(4, summary.Geosets[1].AnimationExtentCount);
+    }
+
+    [Fact]
+    public void Read_RealStandardArchiveMdx_WithPivt_ProducesPivotSignals()
+    {
+        if (!Directory.Exists(MdxTestPaths.Standard060DataPath) || !File.Exists(MdxTestPaths.ListfilePath))
+            return;
+
+        using IArchiveCatalog catalog = new MpqArchiveCatalog();
+        ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(catalog, [MdxTestPaths.Standard060DataPath], MdxTestPaths.ListfilePath);
+        Assert.NotNull(bootstrap);
+
+        string? virtualPath = MdxTestPaths.Standard060PivotMdxCandidates.FirstOrDefault(catalog.FileExists);
+        if (virtualPath is null)
+            return;
+
+        byte[]? bytes = catalog.ReadFile(virtualPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream summaryStream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(summaryStream, virtualPath);
+
+        if (summary.PivotPointCount == 0)
+            return;
+
+        Assert.Contains(summary.Chunks, static chunk => chunk.Id == MdxChunkIds.Pivt);
+        Assert.All(summary.PivotPoints, static pivot =>
+        {
+            Assert.True(float.IsFinite(pivot.Position.X));
+            Assert.True(float.IsFinite(pivot.Position.Y));
+            Assert.True(float.IsFinite(pivot.Position.Z));
+        });
+    }
+
+    private static byte[] CreateMdxBytes(uint version, string modelName, uint blendTime, Vector3 boundsMin, Vector3 boundsMax, IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float Frequency, int ReplayStart, int ReplayEnd, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, float BoundsRadius)> sequences, IReadOnlyList<Vector3> pivotPoints, IReadOnlyList<(uint ReplaceableId, string Path, uint Flags)> textures, IReadOnlyList<(int PriorityPlane, IReadOnlyList<(uint BlendMode, uint Flags, int TextureId, int TransformId, int CoordId, float StaticAlpha)> Layers)> materials, IReadOnlyList<byte[]> extraChunks)
     {
         List<byte> bytes =
         [
@@ -209,6 +351,7 @@ public sealed class MdxSummaryReaderTests
         bytes.AddRange(CreateChunk("VERS", CreateUInt32Payload(version)));
         bytes.AddRange(CreateChunk("MODL", CreateModlPayload(modelName, blendTime, boundsMin, boundsMax)));
         bytes.AddRange(CreateChunk("SEQS", CreateSeqsPayload(sequences)));
+        bytes.AddRange(CreateChunk("PIVT", CreatePivtPayload(pivotPoints)));
         bytes.AddRange(CreateChunk("TEXS", CreateTexsPayload(textures)));
         bytes.AddRange(CreateChunk("MTLS", CreateMtlsPayload(materials)));
         foreach (byte[] chunk in extraChunks)
@@ -246,6 +389,119 @@ public sealed class MdxSummaryReaderTests
         }
 
         return payload;
+    }
+
+    private static byte[] CreatePivtPayload(IReadOnlyList<Vector3> pivotPoints)
+    {
+        byte[] payload = new byte[pivotPoints.Count * 12];
+        for (int index = 0; index < pivotPoints.Count; index++)
+        {
+            int offset = index * 12;
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset, 4), pivotPoints[index].X);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 4, 4), pivotPoints[index].Y);
+            BinaryPrimitives.WriteSingleLittleEndian(payload.AsSpan(offset + 8, 4), pivotPoints[index].Z);
+        }
+
+        return payload;
+    }
+
+    private static byte[] CreateClassicGeosPayload(IReadOnlyList<(int VertexCount, int MaterialId, uint SelectionGroup, uint Flags, float BoundsRadius, Vector3 BoundsMin, Vector3 BoundsMax, int AnimationExtentCount)> geosets)
+    {
+        List<byte> payload = [];
+        payload.AddRange(CreateInt32Payload(geosets.Count));
+
+        foreach ((int vertexCount, int materialId, uint selectionGroup, uint flags, float boundsRadius, Vector3 boundsMin, Vector3 boundsMax, int animationExtentCount) in geosets)
+        {
+            int safeVertexCount = Math.Max(vertexCount, 3);
+            int indexCount = safeVertexCount;
+
+            List<byte> geosetPayload = [];
+            WriteTagAndCount(geosetPayload, "VRTX", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+            {
+                geosetPayload.AddRange(CreateSinglePayload(index));
+                geosetPayload.AddRange(CreateSinglePayload(index + 0.25f));
+                geosetPayload.AddRange(CreateSinglePayload(index + 0.5f));
+            }
+
+            WriteTagAndCount(geosetPayload, "NRMS", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+            {
+                geosetPayload.AddRange(CreateSinglePayload(0.0f));
+                geosetPayload.AddRange(CreateSinglePayload(0.0f));
+                geosetPayload.AddRange(CreateSinglePayload(1.0f));
+            }
+
+            WriteTagAndCount(geosetPayload, "UVAS", 1);
+            for (int index = 0; index < safeVertexCount; index++)
+            {
+                geosetPayload.AddRange(CreateSinglePayload(index / 10.0f));
+                geosetPayload.AddRange(CreateSinglePayload(index / 20.0f));
+            }
+
+            WriteTagAndCount(geosetPayload, "PTYP", 1);
+            geosetPayload.Add(4);
+
+            WriteTagAndCount(geosetPayload, "PCNT", 1);
+            geosetPayload.AddRange(CreateInt32Payload(indexCount));
+
+            WriteTagAndCount(geosetPayload, "PVTX", indexCount);
+            for (ushort index = 0; index < indexCount; index++)
+            {
+                byte[] indexBytes = new byte[2];
+                BinaryPrimitives.WriteUInt16LittleEndian(indexBytes, index);
+                geosetPayload.AddRange(indexBytes);
+            }
+
+            WriteTagAndCount(geosetPayload, "GNDX", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+                geosetPayload.Add((byte)index);
+
+            WriteTagAndCount(geosetPayload, "MTGC", 1);
+            geosetPayload.AddRange(CreateInt32Payload(safeVertexCount));
+
+            WriteTagAndCount(geosetPayload, "MATS", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+                geosetPayload.AddRange(CreateInt32Payload(index));
+
+            WriteTagAndCount(geosetPayload, "BIDX", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+                geosetPayload.AddRange(CreateUInt32Payload((uint)index));
+
+            WriteTagAndCount(geosetPayload, "BWGT", safeVertexCount);
+            for (int index = 0; index < safeVertexCount; index++)
+                geosetPayload.AddRange(CreateUInt32Payload(255u));
+
+            geosetPayload.AddRange(CreateInt32Payload(materialId));
+            geosetPayload.AddRange(CreateInt32Payload(unchecked((int)selectionGroup)));
+            geosetPayload.AddRange(CreateInt32Payload(unchecked((int)flags)));
+            geosetPayload.AddRange(CreateSinglePayload(boundsRadius));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMin.X));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMin.Y));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMin.Z));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMax.X));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMax.Y));
+            geosetPayload.AddRange(CreateSinglePayload(boundsMax.Z));
+            geosetPayload.AddRange(CreateInt32Payload(animationExtentCount));
+
+            for (int extentIndex = 0; extentIndex < animationExtentCount; extentIndex++)
+            {
+                geosetPayload.AddRange(CreateSinglePayload(boundsRadius + extentIndex));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMin.X));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMin.Y));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMin.Z));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMax.X));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMax.Y));
+                geosetPayload.AddRange(CreateSinglePayload(boundsMax.Z));
+            }
+
+            byte[] geosetBytes = new byte[4 + geosetPayload.Count];
+            BinaryPrimitives.WriteUInt32LittleEndian(geosetBytes.AsSpan(0, 4), (uint)(4 + geosetPayload.Count));
+            geosetPayload.CopyTo(geosetBytes, 4);
+            payload.AddRange(geosetBytes);
+        }
+
+        return [.. payload];
     }
 
     private static byte[] CreateSeqsPayload(IReadOnlyList<(string Name, int StartTime, int EndTime, float MoveSpeed, uint Flags, float Frequency, int ReplayStart, int ReplayEnd, float BoundsMinX, float BoundsMinY, float BoundsMinZ, float BoundsMaxX, float BoundsMaxY, float BoundsMaxZ, float BoundsRadius)> sequences)
@@ -380,6 +636,12 @@ public sealed class MdxSummaryReaderTests
         payload.CopyTo(bytes, 4);
         return bytes;
     }
+
+    private static void WriteTagAndCount(List<byte> bytes, string tag, int count)
+    {
+        bytes.AddRange(Encoding.ASCII.GetBytes(tag));
+        bytes.AddRange(CreateInt32Payload(count));
+    }
 }
 
 internal static class MdxTestPaths
@@ -392,6 +654,13 @@ internal static class MdxTestPaths
         "world/azeroth/burningsteppes/passivedoodads/fallingembers/fallingembers.mdx",
         "world/azeroth/burningsteppes/passivedoodads/lavafalls/lavafallsblackrock01.mdx",
         "world/azeroth/burningsteppes/passivedoodads/volcanicvents/volcanicventlarge01.mdx",
+    ];
+
+    public static readonly string[] Standard060PivotMdxCandidates =
+    [
+        Standard060MdxVirtualPath,
+        "world/generic/passivedoodads/particleemitters/greengroundfog.mdx",
+        "world/azeroth/burningsteppes/passivedoodads/lavafalls/lavafallsblackrock01.mdx",
     ];
 
     public static string Standard060DataPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.6.0", "World of Warcraft", "Data");

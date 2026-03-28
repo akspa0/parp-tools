@@ -1,5 +1,31 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than `SEQS` plus `PIVT` internal summary coverage into first classic geoset ownership for render-facing mesh structure.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxGeosetSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Geosets` and `GeosetCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted tagged `GEOS` entries for `v1300` and `v1400`, including core count fields, material linkage, selection or flags, and bounds signals
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `GEOS[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` geoset summary ownership is now real
+  - real archive-backed `mdx inspect` now proves positive `GEOS` output on `world/generic/activedoodads/chest01/chest01.mdx`
+  - not yet full mesh payload decode, geoset-animation ownership, skinning semantics, or runtime render parity
+
+## Mar 28, 2026 - Shared `MDX` `PIVT` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than `SEQS`-only internal summary coverage into first pivot-table ownership.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxPivotPointSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `PivotPoints` and `PivotPointCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes `PIVT` as strict `12`-byte pivot vectors and rejects invalid payload sizes instead of guessing
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `PIVT[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared `MDX` pivot-table summary ownership is now real
+  - real archive-backed `mdx inspect` now proves positive `PIVT` output on `world/generic/activedoodads/chest01/chest01.mdx`
+  - not yet bone binding, helper/emitter pivot attachment, or runtime skeleton parity
+
 ## Mar 28, 2026 - Shared `MDX` `SEQS` Summary Slice
 
 - The shared `MDX` seam in `wow-viewer` has moved past `TEXS`-plus-`MTLS`-only summary coverage into first sequence-summary ownership.
@@ -324,7 +350,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared `BLP` header-summary ownership is now real for `BLP1` and `BLP2`, including compression fields, pixel format, image dimensions, palette or JPEG-header presence, and per-mip offset or size coverage
-- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time fields, shared `SEQS` sequence summary coverage for name, time range, move speed, replay range, optional blend time, and optional bounds, shared `TEXS` texture-table summary coverage for replaceable ids, paths, and flags, and narrow `MTLS` material-layer summary coverage for priority plane, blend mode, flags, texture id, transform id, coord id, and static alpha
+- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time fields, shared `SEQS` sequence summary coverage for name, time range, move speed, replay range, optional blend time, and optional bounds, shared classic `GEOS` geoset summary coverage for per-geoset counts, material linkage, selection or flag fields, and bounds signals, shared `PIVT` pivot-table summary coverage for indexed pivot positions, shared `TEXS` texture-table summary coverage for replaceable ids, paths, and flags, and narrow `MTLS` material-layer summary coverage for priority plane, blend mode, flags, texture id, transform id, coord id, and static alpha
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
 - the concrete shared standard MPQ implementation used by the active `MdxViewer` path is now real
 - shared DBC-backed map-directory and ground-effect lookup helpers are now real
@@ -335,7 +361,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - this does not yet prove:
   - deep WDT semantic parsing
   - deep ADT root or split payload parsing
-  - deep WMO, `MDX`, `M2`, or `BLP` payload parsing beyond the new `BLP` and `MDX` top-level-plus-`SEQS`-and-`TEXS` summary seams
+  - deep WMO, `MDX`, `M2`, or `BLP` payload parsing beyond the new `BLP` and `MDX` top-level-plus-`SEQS`-and-`GEOS`-and-`PIVT`-and-`TEXS` summary seams
   - general-purpose DBC or DB2 schema ownership beyond the narrow shared lookup helpers that now exist
   - any write path or round-trip support
   - runtime cutover inside the active viewer
@@ -345,12 +371,12 @@ Create one first-party shared format stack in `wow-viewer` that:
 1. deepen shared ADT root and split-file top-level summaries
 2. deepen shared ADT root and split-file summaries beyond the new semantic-summary layer into narrower chunk-internal signals only when a deep payload proof target is clear
 3. deepen shared WMO ownership from root, group, `MOGI`, `MOGN`, `MOSB`, `MOMT`, `MOTX`, `MODN`, `MODS`, `MODD`, `MOPV`, `MOPT`, `MOPR`, `MOLT`, `MFOG`, `MCVP`, plus the first linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`, into the next narrow deep-payload seam only when a fixed validation target is available
-4. start the first shared `M2` seam or a deeper but still narrow `MDX` chunk-internal seam such as `PIVT` or `GEOS` only when a fixed real-data target is clear
+4. start the first shared `M2` seam or the next deeper but still narrow `MDX` chunk-internal seam such as `BONE`, `GEOA`, or helper/emitter linkage only when a fixed real-data target is clear
   the current clean WMO continuation after the landed `MOLT` detail seam is wider real-data proof for standard `headerFlagsWord` variability across additional roots
 4. keep Alpha root-WMO `MOMO` support aligned with real 0.5.3 per-asset archive validation as additional root summaries land
 5. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints
 6. continue shrinking `MdxViewer` imports of `WoWMapConverter.Core` by moving other narrow non-MPQ helpers onto `Core` or `Core.IO`
-7. follow the landed first shared model or texture-family seam with the next highest-value missing family, most likely `M2` or a deeper `MDX` payload seam beyond `SEQS`/`TEXS`/`MTLS`
+7. follow the landed first shared model or texture-family seam with the next highest-value missing family, most likely `M2` or a deeper `MDX` payload seam beyond `SEQS`/`GEOS`/`PIVT`/`TEXS`/`MTLS`
 8. decide whether the next non-PM4 slice after that is higher-level CASC or MPQ unification, another new shared format family, or a deeper summary or reader slice for existing families
 
 ## Failure Modes To Avoid

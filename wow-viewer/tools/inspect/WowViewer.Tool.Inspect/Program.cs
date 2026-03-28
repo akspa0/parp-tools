@@ -1434,11 +1434,15 @@ static void PrintMdxSummary(MdxSummary summary)
 	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
 	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
 	for (int index = 0; index < summary.Sequences.Count; index++)
 		PrintMdxSequenceSummary(summary.Sequences[index]);
+	for (int index = 0; index < summary.Geosets.Count; index++)
+		PrintMdxGeosetSummary(summary.Geosets[index]);
+	for (int index = 0; index < summary.PivotPoints.Count; index++)
+		PrintMdxPivotPointSummary(summary.PivotPoints[index]);
 	for (int index = 0; index < summary.Textures.Count; index++)
 		PrintMdxTextureSummary(summary.Textures[index]);
 	for (int index = 0; index < summary.Materials.Count; index++)
@@ -1464,6 +1468,20 @@ static void PrintMdxSequenceSummary(MdxSequenceSummary sequence)
 	string boundsMax = sequence.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
 	string boundsRadius = sequence.BoundsRadius?.ToString("F3") ?? "n/a";
 	Console.WriteLine($"SEQS[{sequence.Index}]: name={name} time=[{sequence.StartTime}, {sequence.EndTime}] duration={sequence.Duration} moveSpeed={sequence.MoveSpeed:F3} flags=0x{sequence.Flags:X8} frequency={sequence.Frequency:F3} replay=[{sequence.ReplayStart}, {sequence.ReplayEnd}] blendTime={blendTime} boundsMin={boundsMin} boundsMax={boundsMax} boundsRadius={boundsRadius}");
+}
+
+static void PrintMdxGeosetSummary(MdxGeosetSummary geoset)
+{
+	string boundsMin = geoset.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
+	string boundsMax = geoset.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
+	string boundsRadius = geoset.BoundsRadius?.ToString("F3") ?? "n/a";
+	Console.WriteLine($"GEOS[{geoset.Index}]: vertices={geoset.VertexCount} normals={geoset.NormalCount} uvSets={geoset.UvSetCount} primaryUvs={geoset.PrimaryUvCount} primitiveTypes={geoset.PrimitiveTypeCount} faceGroups={geoset.FaceGroupCount} indices={geoset.IndexCount} triangles={geoset.TriangleCount} vertexGroups={geoset.VertexGroupCount} matrixGroups={geoset.MatrixGroupCount} matrixIndices={geoset.MatrixIndexCount} boneIndices={geoset.BoneIndexCount} boneWeights={geoset.BoneWeightCount} materialId={geoset.MaterialId} selectionGroup={geoset.SelectionGroup} flags=0x{geoset.Flags:X8} animExtents={geoset.AnimationExtentCount} boundsMin={boundsMin} boundsMax={boundsMax} boundsRadius={boundsRadius}");
+}
+
+static void PrintMdxPivotPointSummary(MdxPivotPointSummary pivotPoint)
+{
+	Vector3 position = pivotPoint.Position;
+	Console.WriteLine($"PIVT[{pivotPoint.Index}]: position=({position.X:F3}, {position.Y:F3}, {position.Z:F3})");
 }
 
 static void PrintMdxMaterialSummary(MdxMaterialSummary material)

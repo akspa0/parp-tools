@@ -1,5 +1,41 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past `SEQS` plus `PIVT` internal `MDX` summary ownership: the shared `MDX` seam now also exposes first classic geoset coverage for render-facing mesh structure.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxGeosetSummary.cs` now owns shared per-geoset summary contracts for core render-facing counts, material linkage, selection or flag fields, optional bounds, and animation-extent count
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `Geosets` and `GeosetCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted tagged `GEOS` entries for `v1300` and `v1400`, including vertex, normal, UV, index, matrix, and bone-table counts plus material or bounds summary fields
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `GEOS[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic geoset fixture and a real archive-backed `chest01.mdx` geoset case with exact fixed-asset signals
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `8` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path "world/generic/activedoodads/chest01/chest01.mdx"` passed on Mar 28, 2026 and reported `geosets=2`, `CHUNK[5]: id=GEOS`, and real `GEOS[0]` plus `GEOS[1]` lines with stable counts
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `174` passing tests
+- Important boundary:
+	- this is still classic `GEOS` summary ownership only; it does not yet decode full mesh payloads, skinning semantics, geoset animations, or runtime render buffers
+	- it does not replace `MdxViewer` model loading or claim runtime viewer mesh or skeleton parity
+
+## Mar 28, 2026 - Shared `MDX` `PIVT` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past `SEQS`-only deeper `MDX` summary ownership: the shared `MDX` seam now also exposes first pivot-table coverage.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxPivotPointSummary.cs` now owns shared per-pivot summary contracts for pivot index and pivot position
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `PivotPoints` and `PivotPointCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads `PIVT` as strict `12`-byte `Vector3` entries and preserves the legacy hard-fail behavior for invalid `PIVT` payload sizes
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `PIVT[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers synthetic pivot tables, keeps the real `chest01.mdx` archive-backed summary case, and adds an optional real pivot-positive probe path
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `6` passing tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- mdx inspect --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path "world/generic/activedoodads/chest01/chest01.mdx"` passed on Mar 28, 2026 and reported `pivotPoints=6`, `CHUNK[8]: id=PIVT`, and real `PIVT[0]` through `PIVT[5]` lines
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `172` passing tests
+- Important boundary:
+	- this is still `MDX` pivot-table summary ownership only; it does not yet bind pivots onto bones, helpers, emitters, or runtime node transforms
+	- it does not replace `MdxViewer` model loading or claim runtime viewer animation or skeleton parity
+
 ## Mar 28, 2026 - Shared `MDX` `SEQS` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past `TEXS`-plus-`MTLS`-only `MDX` summary ownership: the shared `MDX` seam now also exposes first sequence/animation-summary coverage.

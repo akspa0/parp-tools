@@ -1,4 +1,7 @@
 {
     "workbench.colorTheme": "Dark+",
-    "explorer.incrementalNaming": "smart"
+    "explorer.incrementalNaming": "smart",
+    "chat.tools.terminal.autoApprove": {
+        "dotnet test": true
+    }
 }
