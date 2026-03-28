@@ -1,5 +1,43 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Root-ADT Plus `_tex0` Texture Reader And Broadened Export Consumer
+
+- The terrain texture-detail seam has been generalized from `_tex0`-only reads into one shared ADT texture reader for root `ADT` and `_tex0.adt` files.
+- Landed pieces:
+  - `WowViewer.Core.Maps` now exposes `AdtTextureChunkLayer`, `AdtTextureChunk`, and `AdtTextureFile`
+  - `WowViewer.Core.IO.Maps.AdtTextureReader` now owns shared root or `_tex0` per-chunk layer and decoded-alpha reads
+  - `AdtMcalSummaryReader` now aggregates through that one shared reader for both file kinds
+  - `WowViewer.Tool.Converter export-tex-json` now consumes the shared reader for `file.adt` and `file_tex0.adt`
+  - `WowViewer.Tool.Inspect map inspect --dump-tex-chunks` now also consumes the generalized shared reader
+- Current proof level:
+  - shared root-plus-`_tex0` texture-detail ownership is now real
+  - thin JSON export over that shared root-plus-`_tex0` seam is now real
+  - the fixed development root dataset still only proves command-path and chunk-metadata export for root files; positive real root-layer decode remains synthetic in this slice
+  - not yet a terrain conversion workflow, family merge artifact, or write-back path
+
+## Mar 28, 2026 - Thin `_tex0` Converter Export Consumer
+
+- The shared `_tex0` seam now has its first converter/export consumer instead of living only behind inspect output.
+- Landed pieces:
+  - `WowViewer.Tool.Converter` now supports `export-tex-json --input <file_tex0.adt> [--output <report.json>]`
+  - the command validates `_tex0` classification through `WowFileDetector` and serializes shared `AdtTexReader` output directly
+- Current proof level:
+  - thin converter/export consumption of shared `_tex0` ownership is now real
+  - not yet a terrain conversion workflow, family merge, or write-back path
+
+## Mar 28, 2026 - Shared `_tex0` Per-Chunk Layer And Decoded Alpha Slice
+
+- The terrain shared-I/O path has moved past aggregate `_tex0` `MCAL` counts into reusable per-chunk data ownership.
+- Landed pieces:
+  - `WowViewer.Core.Maps` now also includes `AdtTexChunkLayer`, `AdtTexChunk`, and `AdtTexFile`
+  - `WowViewer.Core.IO.Maps.AdtTexReader` now exposes typed `_tex0.adt` texture-name, per-`MCNK` layer, and decoded per-layer alpha reads
+  - `AdtMcalSummaryReader` now reuses that shared `_tex0` reader instead of keeping a second private `_tex0` parser
+  - `WowViewer.Tool.Inspect map inspect` now accepts `--dump-tex-chunks` as a thin consumer of the shared reader
+- Current proof level:
+  - shared `_tex0` texture-table and per-chunk layer ownership is now real
+  - shared direct overlay alpha decode reuse for `_tex0` is now real
+  - not yet a full shared port of Cataclysm residual-alpha synthesis, neighbor-edge stitching, write support, or runtime consumer cutover
+
 ## Mar 28, 2026 - Shared `ADT` Split-Family Routing And Direct `MCAL` Decode Summary Slice
 
 - The first terrain-focused shared-I/O tranche under the full-ownership reset is now landed.

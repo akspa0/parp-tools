@@ -1,6 +1,9 @@
-﻿using WowViewer.Core.Files;
+﻿using System.Text.Json;
+using System.Text.Json.Serialization;
+using WowViewer.Core.Files;
 using WowViewer.Core.IO;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Maps;
 using WowViewer.Core.PM4;
 using WowViewer.Tools.Shared;
 
@@ -17,6 +20,9 @@ switch (command)
 {
 	case "detect":
 		RunDetect(tail);
+		break;
+	case "export-tex-json":
+		RunExportTexJson(tail);
 		break;
 	default:
 		Console.Error.WriteLine($"Unknown converter command '{command}'.");
@@ -45,6 +51,44 @@ static void RunDetect(string[] args)
 	Console.WriteLine($"Planned hosts: {ToolHosts.Planned.Length}");
 }
 
+static void RunExportTexJson(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input root ADT or _tex0.adt file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	WowFileDetection detection = WowFileDetector.Detect(input);
+	if (detection.Kind is not (WowFileKind.Adt or WowFileKind.AdtTex))
+	{
+		Console.Error.WriteLine($"Error: export-tex-json requires a root ADT or _tex0.adt input, but detected {detection.Kind}.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string json = JsonSerializer.Serialize(
+		AdtTextureReader.Read(input),
+		CreateJsonOptions());
+
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
 static string? GetOption(string[] args, string longName, string shortName)
 {
 	for (int index = 0; index < args.Length - 1; index++)
@@ -59,9 +103,20 @@ static string? GetOption(string[] args, string longName, string shortName)
 	return null;
 }
 
+static JsonSerializerOptions CreateJsonOptions()
+{
+	JsonSerializerOptions options = new()
+	{
+		WriteIndented = true,
+	};
+	options.Converters.Add(new JsonStringEnumConverter());
+	return options;
+}
+
 static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Converter");
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-converter detect --input <file>");
+	Console.WriteLine("  wowviewer-converter export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]");
 }

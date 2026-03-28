@@ -1,16 +1,9 @@
-using System.Buffers.Binary;
-using WowViewer.Core.Chunks;
-using WowViewer.Core.IO.Chunked;
 using WowViewer.Core.Maps;
 
 namespace WowViewer.Core.IO.Maps;
 
 public static class AdtMcalSummaryReader
 {
-    private const int RootMcnkHeaderSize = 128;
-    private const int RootMcnkMcalSizeOffset = 0x28;
-    private const int McnrConsumedSize = 0x1C0;
-
     public static AdtMcalSummary Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -28,10 +21,8 @@ public static class AdtMcalSummaryReader
         if (fileSummary.Kind is not (MapFileKind.Adt or MapFileKind.AdtTex))
             throw new InvalidDataException($"ADT MCAL summary requires a root ADT or _tex0.adt file, but found {fileSummary.Kind}.");
 
-        AdtMcalDecodeProfile decodeProfile = fileSummary.Kind == MapFileKind.AdtTex
-            ? AdtMcalDecodeProfile.Cataclysm400
-            : AdtMcalDecodeProfile.LichKingStrict;
-        bool defaultBigAlpha = fileSummary.Kind == MapFileKind.AdtTex;
+        AdtTextureFile textureFile = AdtTextureReader.Read(stream, fileSummary);
+        AdtMcalDecodeProfile decodeProfile = textureFile.DecodeProfile;
 
         int mcnkWithLayerTableCount = 0;
         int overlayLayerCount = 0;
@@ -43,35 +34,24 @@ public static class AdtMcalSummaryReader
         int bigAlphaFixedLayerCount = 0;
         int packedLayerCount = 0;
 
-        foreach (MapChunkLocation mcnkChunk in fileSummary.Chunks.Where(static chunk => chunk.Id == MapChunkIds.Mcnk))
+        foreach (AdtTextureChunk chunk in textureFile.Chunks)
         {
-            byte[] payload = MapSummaryReaderCommon.ReadChunkPayload(stream, mcnkChunk);
-            ParsedMcnkTextureData parsed = ParseMcnkTextureData(payload, fileSummary.Kind);
-            if (parsed.Layers.Count == 0)
+            if (chunk.Layers.Count == 0)
                 continue;
 
             mcnkWithLayerTableCount++;
-            for (int layerIndex = 1; layerIndex < parsed.Layers.Count; layerIndex++)
+            overlayLayerCount += Math.Max(0, chunk.Layers.Count - 1);
+            foreach (AdtTextureChunkLayer layer in chunk.Layers.Skip(1))
             {
-                overlayLayerCount++;
-                if (parsed.McalData is not { Length: > 0 })
+                if (chunk.AlphaPayloadBytes == 0)
                 {
                     missingPayloadLayerCount++;
                     continue;
                 }
 
-                AdtTextureLayerDescriptor layer = parsed.Layers[layerIndex];
-                AdtTextureLayerDescriptor? nextLayer = layerIndex + 1 < parsed.Layers.Count ? parsed.Layers[layerIndex + 1] : null;
-                AdtMcalDecodedLayer? decodedLayer = AdtMcalDecoder.DecodeLayer(
-                    parsed.McalData,
-                    layer,
-                    nextLayer,
-                    defaultBigAlpha,
-                    parsed.DoNotFixAlphaMap,
-                    decodeProfile);
-                if (decodedLayer is null)
+                if (layer.DecodedAlpha is null)
                 {
-                    if (unchecked((int)layer.AlphaOffset) >= 0 && unchecked((int)layer.AlphaOffset) < parsed.McalData.Length)
+                    if (unchecked((int)layer.AlphaOffset) >= 0 && unchecked((int)layer.AlphaOffset) < chunk.AlphaPayloadBytes)
                         decodeFailureCount++;
                     else
                         missingPayloadLayerCount++;
@@ -80,7 +60,7 @@ public static class AdtMcalSummaryReader
                 }
 
                 decodedLayerCount++;
-                switch (decodedLayer.Encoding)
+                switch (layer.DecodedAlpha.Encoding)
                 {
                     case AdtMcalAlphaEncoding.Compressed:
                         compressedLayerCount++;
@@ -111,78 +91,5 @@ public static class AdtMcalSummaryReader
             bigAlphaLayerCount,
             bigAlphaFixedLayerCount,
             packedLayerCount);
-    }
-
-    private static ParsedMcnkTextureData ParseMcnkTextureData(byte[] payload, MapFileKind kind)
-    {
-        uint flags = 0;
-        int startOffset = 0;
-        int? headerMcalPayloadSize = null;
-        if (kind == MapFileKind.Adt && payload.Length >= RootMcnkHeaderSize)
-        {
-            flags = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(0, 4));
-            uint sizeMcal = BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(RootMcnkMcalSizeOffset, 4));
-            if (sizeMcal >= ChunkHeader.SizeInBytes)
-                headerMcalPayloadSize = checked((int)(sizeMcal - ChunkHeader.SizeInBytes));
-
-            startOffset = RootMcnkHeaderSize;
-        }
-
-        List<AdtTextureLayerDescriptor> layers = [];
-        byte[]? mcalData = null;
-        int position = startOffset;
-        while (position <= payload.Length - ChunkHeader.SizeInBytes)
-        {
-            if (!ChunkHeaderReader.TryRead(payload.AsSpan(position, ChunkHeader.SizeInBytes), out ChunkHeader header))
-                break;
-
-            int declaredSize = checked((int)header.Size);
-            int consumedSize = header.Id == AdtChunkIds.Mcnr
-                ? Math.Max(declaredSize, McnrConsumedSize)
-                : declaredSize;
-            long nextOffset = (long)position + ChunkHeader.SizeInBytes + consumedSize;
-            if (nextOffset > payload.Length)
-                break;
-
-            int dataOffset = position + ChunkHeader.SizeInBytes;
-            if (header.Id == AdtChunkIds.Mcly)
-            {
-                byte[] layerPayload = new byte[declaredSize];
-                Buffer.BlockCopy(payload, dataOffset, layerPayload, 0, declaredSize);
-                layers.AddRange(AdtMcalDecoder.ReadTextureLayers(layerPayload));
-            }
-            else if (header.Id == AdtChunkIds.Mcal)
-            {
-                int mcalPayloadSize = declaredSize;
-                if (headerMcalPayloadSize.HasValue && headerMcalPayloadSize.Value > mcalPayloadSize && dataOffset + headerMcalPayloadSize.Value <= payload.Length)
-                {
-                    mcalPayloadSize = headerMcalPayloadSize.Value;
-                    nextOffset = (long)position + ChunkHeader.SizeInBytes + mcalPayloadSize;
-                }
-
-                mcalData = new byte[mcalPayloadSize];
-                Buffer.BlockCopy(payload, dataOffset, mcalData, 0, mcalPayloadSize);
-            }
-
-            position = checked((int)nextOffset);
-        }
-
-        return new ParsedMcnkTextureData(layers, mcalData, (flags & 0x8000u) != 0);
-    }
-
-    private sealed class ParsedMcnkTextureData
-    {
-        public ParsedMcnkTextureData(IReadOnlyList<AdtTextureLayerDescriptor> layers, byte[]? mcalData, bool doNotFixAlphaMap)
-        {
-            Layers = layers;
-            McalData = mcalData;
-            DoNotFixAlphaMap = doNotFixAlphaMap;
-        }
-
-        public IReadOnlyList<AdtTextureLayerDescriptor> Layers { get; }
-
-        public byte[]? McalData { get; }
-
-        public bool DoNotFixAlphaMap { get; }
     }
 }

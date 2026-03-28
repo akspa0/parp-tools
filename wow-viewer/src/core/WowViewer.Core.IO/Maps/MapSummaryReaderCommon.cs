@@ -87,6 +87,30 @@ internal static class MapSummaryReaderCommon
         return count;
     }
 
+    public static IReadOnlyList<string> ReadStringEntries(byte[]? payload)
+    {
+        if (payload is not { Length: > 0 })
+            return Array.Empty<string>();
+
+        List<string> entries = [];
+        int start = 0;
+        for (int index = 0; index < payload.Length; index++)
+        {
+            if (payload[index] != 0)
+                continue;
+
+            if (index > start)
+                entries.Add(System.Text.Encoding.UTF8.GetString(payload, start, index - start));
+
+            start = index + 1;
+        }
+
+        if (start < payload.Length)
+            entries.Add(System.Text.Encoding.UTF8.GetString(payload, start, payload.Length - start));
+
+        return entries;
+    }
+
     public static int CountPlacements(byte[]? payload, int stride)
     {
         if (payload is not { Length: > 0 } || stride <= 0)

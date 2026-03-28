@@ -213,6 +213,7 @@ static void RunMap(string[] args)
 static void RunMapInspect(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	bool dumpTexChunks = HasOption(args, "--dump-tex-chunks");
 	if (string.IsNullOrWhiteSpace(input))
 	{
 		Console.Error.WriteLine("Error: input map file is required.");
@@ -221,7 +222,7 @@ static void RunMapInspect(string[] args)
 	}
 
 	MapFileSummary summary = MapFileSummaryReader.Read(input);
-	PrintMapSummary(summary);
+	PrintMapSummary(summary, dumpTexChunks);
 }
 
 static void RunPm4(string[] args)
@@ -1045,7 +1046,7 @@ static void PrintPm4UnknownsReport(Pm4UnknownsReport report)
 	}
 }
 
-static void PrintMapSummary(MapFileSummary summary)
+static void PrintMapSummary(MapFileSummary summary, bool dumpTexChunks)
 {
 	Console.WriteLine("WowViewer.Tool.Inspect map report");
 	Console.WriteLine($"Input: {summary.SourcePath}");
@@ -1074,6 +1075,11 @@ static void PrintMapSummary(MapFileSummary summary)
 		{
 			AdtMcalSummary mcalSummary = AdtMcalSummaryReader.Read(stream, summary);
 			Console.WriteLine($"ADT MCAL semantics: profile={mcalSummary.DecodeProfile} mcnkWithLayers={mcalSummary.McnkWithLayerTableCount} overlayLayers={mcalSummary.OverlayLayerCount} decodedLayers={mcalSummary.DecodedLayerCount} missingPayloadLayers={mcalSummary.MissingPayloadLayerCount} decodeFailures={mcalSummary.DecodeFailureCount} compressed={mcalSummary.CompressedLayerCount} bigAlpha={mcalSummary.BigAlphaLayerCount} bigAlphaFixed={mcalSummary.BigAlphaFixedLayerCount} packed4={mcalSummary.PackedLayerCount}");
+			if (dumpTexChunks && summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex)
+			{
+				AdtTextureFile textureFile = AdtTextureReader.Read(stream, summary);
+				PrintAdtTextureFile(textureFile);
+			}
 		}
 	}
 	Console.WriteLine($"Top-level chunks: {summary.ChunkCount}");
@@ -1112,6 +1118,26 @@ static void PrintWmoSummary(WmoSummary summary)
 static string FormatMapFileKind(MapFileKind? kind)
 {
 	return kind?.ToString() ?? "n/a";
+}
+
+static void PrintAdtTextureFile(AdtTextureFile textureFile)
+{
+	Console.WriteLine($"ADT texture detail: kind={textureFile.Kind} profile={textureFile.DecodeProfile} textures={textureFile.TextureNames.Count} chunks={textureFile.Chunks.Count}");
+	foreach (AdtTextureChunk chunk in textureFile.Chunks)
+	{
+		if (chunk.Layers.Count == 0)
+			continue;
+
+		Console.WriteLine($"MCNK(texture)[{chunk.ChunkIndex}]: xy=({chunk.ChunkX},{chunk.ChunkY}) layers={chunk.Layers.Count} alphaBytes={chunk.AlphaPayloadBytes} doNotFixAlphaMap={chunk.DoNotFixAlphaMap} decodedLayers={chunk.DecodedLayerCount}");
+		foreach (AdtTextureChunkLayer layer in chunk.Layers)
+		{
+			string texturePath = string.IsNullOrWhiteSpace(layer.TexturePath) ? "n/a" : layer.TexturePath;
+			string alphaSummary = layer.DecodedAlpha is null
+				? "alpha=n/a"
+				: $"alpha={layer.DecodedAlpha.Encoding} bytes={layer.DecodedAlpha.SourceBytesConsumed}";
+			Console.WriteLine($"MCNK(texture)[{chunk.ChunkIndex}].LAYER[{layer.Index}]: textureId={layer.TextureId} texture={texturePath} flags=0x{layer.Flags:X8} alphaOffset={layer.AlphaOffset} effectId={layer.EffectId} {alphaSummary}");
+		}
+	}
 }
 
 static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
@@ -1499,7 +1525,7 @@ static void ShowWmoUsage()
 static void ShowMapUsage()
 {
 	Console.WriteLine("Map commands:");
-	Console.WriteLine("  map inspect --input <file.wdt|file.adt>");
+	Console.WriteLine("  map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]");
 }
 
 static void ShowPm4Usage()

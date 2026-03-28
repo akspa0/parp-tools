@@ -64,6 +64,9 @@ Current shared-core foundation slice:
 	- `AdtMcalAlphaEncoding`
 	- `AdtMcalDecodedLayer`
 	- `AdtMcalSummary`
+	- `AdtTextureChunkLayer`
+	- `AdtTextureChunk`
+	- `AdtTextureFile`
   - `WdtSummary`
 - `src/core/WowViewer.Core/Wmo` now contains the first shared WMO root-summary contracts:
   - `WmoChunkIds`
@@ -128,6 +131,7 @@ Current shared-core foundation slice:
 	- `AdtTileFamilyResolver`
 	- `AdtMcalDecoder`
 	- `AdtMcalSummaryReader`
+	- `AdtTextureReader`
   - `WdtSummaryReader`
 - `src/core/WowViewer.Core.IO/Wmo` now contains the first shared WMO root-summary reader:
   - `WmoSummaryReader`
@@ -212,6 +216,7 @@ Current shared-core foundation slice:
 	- it now also locks synthetic and real-data WDT or ADT summary behavior against `development.wdt` and `development_0_0.adt`
 	- it now also locks synthetic and real-data ADT semantic-summary behavior for `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
 	- it now also locks shared ADT `MCNK` semantic-summary behavior for synthetic root, `_tex0.adt`, and `_obj0.adt` buffers plus real-data `development_0_0.adt`, `development_0_0_tex0.adt`, and `development_0_0_obj0.adt`
+	- it now also locks shared root-plus-`_tex0` texture-layer and decoded-alpha behavior for synthetic root and synthetic `_tex0` fixtures plus real-data `development_0_0.adt` and `development_0_0_tex0.adt`
 	- it now also locks a synthetic WMO root semantic-summary case
 	- it now also locks synthetic WMO group semantic-summary behavior for both `MVER + MOGP` and `MOGP`-first files, plus `MOGP`-first detector coverage
 	- it now also locks synthetic WMO `MLIQ` semantic-summary behavior including height-range and ocean-inference coverage
@@ -249,7 +254,7 @@ Current non-PM4 inspect slice:
 	- `blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
 	- `mdx inspect --input <file.mdx>`
 	- `mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
-	- `map inspect --input <file.wdt|file.adt>`
+	- `map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]`
 	- `wmo inspect --input <file.wmo> [--dump-lights]`
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
@@ -258,6 +263,7 @@ Current non-PM4 inspect slice:
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
+	- it now also reports shared root-plus-`_tex0` per-chunk layer and decoded alpha detail on demand through `--dump-tex-chunks`
 	- it now also reports a shared WDT semantic summary for MPHD WMO-based flags, MAIN tile occupancy, string-table counts, and top-level MDDF or MODF placement counts
 	- it now also reports a first shared WMO root semantic summary for `MOHD`-reported counts, top-level entry counts, string-table counts, flags, and bounds
 	- it now also reports a first shared WMO group semantic summary for `MOGP` header fields, geometry subchunk counts, optional extra UV-set count, doodad-ref count, and liquid presence
@@ -307,13 +313,17 @@ Current non-PM4 converter slice:
 
 - `tools/converter/WowViewer.Tool.Converter` now also supports:
 	- `detect --input <file>`
+	- `export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]`
 - This is intentionally narrow for now:
 	- it reports shared file-family classification and version using `WowFileDetector`
-	- it is the first non-placeholder converter command, but it is not yet a conversion workflow
+	- it now also exports shared root-plus-`_tex0` per-chunk layer and decoded-alpha data as JSON through `AdtTextureReader`
+	- it is still not yet a broader terrain conversion workflow
 - Smoke-test commands that should now work on the fixed development dataset:
 	- `dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- detect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
+	- `dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- export-tex-json --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0.adt`
 	- `dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- detect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0_tex0.adt`
 	- `dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- detect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0_obj0.adt`
+	- `dotnet run --project .\tools\converter\WowViewer.Tool.Converter\WowViewer.Tool.Converter.csproj -- export-tex-json --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0_tex0.adt`
 
 Current first real code-port slice:
 

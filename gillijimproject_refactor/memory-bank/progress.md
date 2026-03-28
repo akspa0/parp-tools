@@ -1,5 +1,55 @@
 # Progress
 
+### Mar 28, 2026 - Shared Root-ADT Plus `_tex0` Texture Reader And Broadened JSON Export Landed
+
+- Generalized the earlier `_tex0`-only terrain-detail seam into a shared ADT texture reader for root `ADT` and `_tex0.adt` files.
+- Landed pieces:
+	- replaced `_tex0`-specific `AdtTex*` contracts with `AdtTextureChunkLayer`, `AdtTextureChunk`, and `AdtTextureFile`
+	- added `WowViewer.Core.IO.Maps.AdtTextureReader` for shared root or `_tex0` per-chunk layer-table and decoded-alpha reads
+	- updated `AdtMcalSummaryReader` to aggregate through the generalized shared reader
+	- broadened `WowViewer.Tool.Converter export-tex-json` so it now accepts `file.adt` and `file_tex0.adt`
+	- updated inspect `--dump-tex-chunks` to consume the generalized shared reader
+	- replaced `_tex0`-only regression coverage with `AdtTextureReaderTests`, including synthetic root plus real development-root coverage
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtTextureReaderTests|AdtMcalSummaryReaderTests|AdtMcalDecoderTests|AdtSummaryReaderTests|AdtMcnkSummaryReaderTests|MapFileSummaryReaderTests|WowFileDetectorTests"` passed on Mar 28, 2026 with `37` passing tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `168` passing tests
+	- real-data converter export now passes on both `development_0_0.adt` and `development_0_0_tex0.adt`, and root `--output` file-write also passed
+	- the fixed development root dataset still does not positively prove real root-layer payload decode because its texture layering lives in `_tex0.adt`; that proof remains synthetic in this slice
+
+### Mar 28, 2026 - Thin `_tex0` JSON Export Surface Landed In `WowViewer.Tool.Converter`
+
+- Added the first real converter/export consumer for the new shared `_tex0` terrain seam.
+- Landed pieces:
+	- updated `WowViewer.Tool.Converter` with `export-tex-json --input <file_tex0.adt> [--output <report.json>]`
+	- validated `_tex0` inputs through shared `WowFileDetector`
+	- serialized shared `AdtTexReader` output directly to stdout or an output file instead of adding tool-local parsing
+- Validation limits:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `166` passing tests
+	- real-data stdout export on `development_0_0_tex0.adt` passed and printed JSON with shared `SourcePath`, `TextureNames`, and `Chunks`
+	- real-data file export on `development_0_0_tex0.adt` passed and wrote `wowviewer-development_0_0_tex0.json` under `%TEMP%`
+	- this is still a thin JSON export over the shared read seam, not a broader terrain conversion workflow or a WoW terrain write path
+
+### Mar 28, 2026 - Shared `_tex0` Per-Chunk Layer And Decoded Alpha Reader Landed
+
+- Added the next terrain shared-I/O slice in `wow-viewer` after split-family routing plus aggregate `MCAL` summary.
+- Landed pieces:
+	- added `WowViewer.Core.Maps.AdtTexChunkLayer`
+	- added `WowViewer.Core.Maps.AdtTexChunk`
+	- added `WowViewer.Core.Maps.AdtTexFile`
+	- added `WowViewer.Core.IO.Maps.AdtTexReader`
+	- extended `MapSummaryReaderCommon` with shared `ReadStringEntries(...)`
+	- updated `AdtMcalSummaryReader` so `_tex0` summary aggregation now consumes the shared reader instead of duplicating `_tex0` parsing logic
+	- updated `WowViewer.Tool.Inspect map inspect` with `--dump-tex-chunks` so `_tex0` reports can print shared per-chunk `MCNK(tex)` and `LAYER` detail lines on demand
+	- added synthetic plus real-data coverage in `AdtTexReaderTests`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "AdtTexReaderTests|AdtMcalSummaryReaderTests|AdtMcalDecoderTests|AdtSummaryReaderTests|AdtMcnkSummaryReaderTests|MapFileSummaryReaderTests|WowFileDetectorTests"` passed on Mar 28, 2026 with `35` passing tests
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 28, 2026 with `166` passing tests
+	- real-data `map inspect --dump-tex-chunks` on `test_data/development/World/Maps/development/development_0_0_tex0.adt` passed and reported `ADT TEX detail: textures=5 chunks=256`, preserved aggregate `decodedLayers=519`, and printed real per-layer `Compressed` plus `BigAlpha` outputs
+	- this is still not runtime `MdxViewer` terrain signoff and not a shared port of Cataclysm residual-alpha synthesis or chunk-edge stitching
+
 ### Mar 28, 2026 - Shared `ADT` Split-Family Routing And Direct `MCAL` Decode Summary Seams Landed
 
 - Added the first terrain-focused shared ownership slice in `wow-viewer` under the broader full-format-ownership reset.
