@@ -18,6 +18,9 @@ public sealed class WmoEmbeddedGroupSummary
         int totalNormalCount,
         int totalBatchCount,
         int totalDoodadRefCount,
+        int totalLightRefCount,
+        int totalBspNodeCount,
+        int totalBspFaceRefCount,
         Vector3 boundsMin,
         Vector3 boundsMax)
     {
@@ -33,6 +36,9 @@ public sealed class WmoEmbeddedGroupSummary
         ArgumentOutOfRangeException.ThrowIfNegative(totalNormalCount);
         ArgumentOutOfRangeException.ThrowIfNegative(totalBatchCount);
         ArgumentOutOfRangeException.ThrowIfNegative(totalDoodadRefCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(totalLightRefCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(totalBspNodeCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(totalBspFaceRefCount);
 
         SourcePath = sourcePath;
         Version = version;
@@ -47,6 +53,9 @@ public sealed class WmoEmbeddedGroupSummary
         TotalNormalCount = totalNormalCount;
         TotalBatchCount = totalBatchCount;
         TotalDoodadRefCount = totalDoodadRefCount;
+        TotalLightRefCount = totalLightRefCount;
+        TotalBspNodeCount = totalBspNodeCount;
+        TotalBspFaceRefCount = totalBspFaceRefCount;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
     }
@@ -64,6 +73,9 @@ public sealed class WmoEmbeddedGroupSummary
     public int TotalNormalCount { get; }
     public int TotalBatchCount { get; }
     public int TotalDoodadRefCount { get; }
+    public int TotalLightRefCount { get; }
+    public int TotalBspNodeCount { get; }
+    public int TotalBspFaceRefCount { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }
 }

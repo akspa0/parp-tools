@@ -22,18 +22,16 @@ public static class WmoGroupNormalSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupNormalSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
 
-        byte[]? monrPayload = null;
-        foreach ((var header, int dataOffset) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
-        {
-            if (header.Id != WmoChunkIds.Monr)
-                continue;
-
-            monrPayload = mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
-            break;
-        }
-
+        byte[]? monrPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Monr);
         if (monrPayload is null)
             throw new InvalidDataException("WMO group normal summary requires a MONR subchunk.");
 

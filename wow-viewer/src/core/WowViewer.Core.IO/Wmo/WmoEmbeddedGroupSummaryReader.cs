@@ -33,6 +33,9 @@ public static class WmoEmbeddedGroupSummaryReader
         int totalNormalCount = 0;
         int totalBatchCount = 0;
         int totalDoodadRefCount = 0;
+        int totalLightRefCount = 0;
+        int totalBspNodeCount = 0;
+        int totalBspFaceRefCount = 0;
         Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
         Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
 
@@ -54,6 +57,9 @@ public static class WmoEmbeddedGroupSummaryReader
             totalNormalCount += groupSummary.NormalCount;
             totalBatchCount += groupSummary.BatchCount;
             totalDoodadRefCount += groupSummary.DoodadRefCount;
+            totalLightRefCount += groupSummary.LightRefCount;
+            totalBspNodeCount += groupSummary.BspNodeCount;
+            totalBspFaceRefCount += groupSummary.BspFaceRefCount;
             boundsMin = Vector3.Min(boundsMin, groupSummary.BoundsMin);
             boundsMax = Vector3.Max(boundsMax, groupSummary.BoundsMax);
         }
@@ -72,6 +78,9 @@ public static class WmoEmbeddedGroupSummaryReader
             totalNormalCount,
             totalBatchCount,
             totalDoodadRefCount,
+            totalLightRefCount,
+            totalBspNodeCount,
+            totalBspFaceRefCount,
             boundsMin,
             boundsMax);
     }

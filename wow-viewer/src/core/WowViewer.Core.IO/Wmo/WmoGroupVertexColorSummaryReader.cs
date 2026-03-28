@@ -20,6 +20,13 @@ public static class WmoGroupVertexColorSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupVertexColorSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
 
         bool foundPrimary = false;

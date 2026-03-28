@@ -1,5 +1,77 @@
 # Progress
 
+### Mar 27, 2026 - WMO Group Optional `MOLR`, `MOBN`, `MOBR`, And `MOBN->MOBR` Summary Slice Landed
+
+- Added the next narrow shared WMO group slice in `wow-viewer` for the remaining low-risk optional group chunks plus one first linkage seam between BSP nodes and BSP face refs.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoGroupLightRefSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupLightRefSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoGroupBspNodeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupBspNodeSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoGroupBspFaceSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupBspFaceSummaryReader`
+	- added `WowViewer.Core.Wmo.WmoGroupBspFaceRangeSummary`
+	- added `WowViewer.Core.IO.Wmo.WmoGroupBspFaceRangeSummaryReader`
+	- extended `WmoGroupSummary` and `WmoEmbeddedGroupSummary` so shared consumers can see `lightRefs`, `bspNodes`, and `bspFaceRefs` without their own chunk scans
+	- updated `WowViewer.Tool.Inspect wmo inspect` so group files now print `MOLR`, `MOBN`, `MOBR`, and `MOBN->MOBR`, and Alpha monolithic root aggregate output now includes optional-chunk totals
+	- added synthetic regression coverage for all four new seams and real-data `castle01.wmo.MPQ` coverage for embedded BSP totals and embedded-group reader replay
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoRealDataTests|WmoEmbeddedGroupSummaryReaderTests|WmoGroupSummaryReaderTests|WmoGroupLightRefSummaryReaderTests|WmoGroupBspNodeSummaryReaderTests|WmoGroupBspFaceSummaryReaderTests|WmoGroupBspFaceRangeSummaryReaderTests"` passed on Mar 27, 2026 with `9` passing tests
+	- real `castle01.wmo.MPQ` inspect now reports `lightRefs=0`, `bspNodes=583`, and `bspFaceRefs=6716` across its embedded Alpha root groups
+	- this is still summary and range coverage only, not full BSP traversal or consumer cutover
+
+### Mar 27, 2026 - Alpha Root Per-Embedded-Group Inspect Routing Landed For `MOBN`, `MOBR`, And `MOBN->MOBR`
+
+- Added the next narrow follow-up after the embedded-group aggregate: real per-group inspect routing for Alpha monolithic roots so the existing shared BSP summaries are visible on each embedded `MOGP` instead of only in totals.
+- Landed pieces:
+	- added `WowViewer.Core.Wmo.WmoEmbeddedGroupDetail`
+	- added `WowViewer.Core.IO.Wmo.WmoEmbeddedGroupDetailReader`
+	- extended the group optional readers with internal `ReadMogpPayload(...)` entry points for embedded-root reuse
+	- updated `WowViewer.Tool.Inspect wmo inspect` so Alpha roots now print `MOGP(root)[n]`, `MOBN(root)[n]`, `MOBR(root)[n]`, and `MOBN->MOBR(root)[n]`
+	- added synthetic regression coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoEmbeddedGroupDetailReaderTests.cs`
+	- extended real-data `castle01.wmo.MPQ` coverage in `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupDetailReaderTests|WmoRealDataTests|WmoEmbeddedGroupSummaryReaderTests|WmoGroupBspNodeSummaryReaderTests|WmoGroupBspFaceSummaryReaderTests|WmoGroupBspFaceRangeSummaryReaderTests"` passed on Mar 27, 2026 with `8` passing tests
+	- real `castle01.wmo.MPQ` inspect now prints per-group BSP lines for both embedded groups, including `127` or `456` `MOBN` nodes and `1145` or `5571` `MOBR` refs respectively
+	- this is still shared inspect routing for the current BSP summaries, not full per-group routing for every embedded subchunk family
+
+### Mar 27, 2026 - Alpha Root Per-Embedded-Group Inspect Routing Expanded To Existing Shared Group Summaries
+
+- Expanded the earlier BSP-only root detail seam so Alpha monolithic roots now reuse the already-owned shared group readers for additional geometry and metadata lines instead of only printing BSP summaries per embedded group.
+- Landed pieces:
+	- extended `WowViewer.Core.Wmo.WmoEmbeddedGroupDetail` to carry `MLIQ`, `MOBA`, `MOPY`, `MOTV`, `MOCV`, `MODR`, `MOVI` or `MOIN`, `MOVT`, and `MONR` summaries
+	- added internal `ReadMogpPayload(...)` entry points to the matching shared group readers
+	- updated `WowViewer.Core.IO.Wmo.WmoEmbeddedGroupDetailReader` to populate those additional summaries from root-embedded `MOGP` payloads
+	- updated `WowViewer.Tool.Inspect wmo inspect` so Alpha roots now print `MONR(root)[n]`, `MOVT(root)[n]`, `MOVI(root)[n]` or `MOIN(root)[n]`, `MODR(root)[n]`, `MOCV(root)[n]`, `MOTV(root)[n]`, `MOPY(root)[n]`, and `MOBA(root)[n]`, with `MLIQ(root)[n]` ready when present
+	- extended synthetic and real-data regression coverage in `WmoEmbeddedGroupDetailReaderTests` and `WmoRealDataTests`
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoEmbeddedGroupDetailReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `4` passing tests
+	- real `castle01.wmo.MPQ` inspect now prints positive per-group lines for `MONR`, `MOVT`, `MOIN`, `MOCV`, `MOTV`, `MOPY`, and `MOBA`, plus `MODR` on the embedded group that actually has doodad refs
+	- `castle01.wmo.MPQ` still does not positively prove per-group `MOLR` or `MLIQ`, because those embedded groups remain zero-ref or liquid-free on this asset
+
+### Mar 27, 2026 - `ironforge.wmo.MPQ` Added Positive Real Coverage For Per-Group `MOLR` And `MLIQ`
+
+- Used real `ironforge.wmo.MPQ` as the next Alpha validation asset because it exercises the remaining per-group light-ref and liquid paths that `castle01.wmo.MPQ` does not.
+- Landed pieces:
+	- added `WmoRealDataTests.Read_IronforgeAlphaPerAssetMpq_EmbeddedGroupDetailsExposePositiveLightAndLiquidSignals`
+	- updated `WowViewer.Tool.Inspect wmo inspect` so an invalid optional `MOLT` summary no longer aborts the whole report before later root or embedded-group lines print
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoRealDataTests"` passed on Mar 27, 2026 with `4` passing tests
+	- real `ironforge.wmo.MPQ` inspect now reaches positive per-group `MOLR(root)[n]` lines such as groups `120`, `121`, `123`, `124`, and `125`, plus a positive `MLIQ(root)[127]` line with `liquidType=Magma`
+	- this validates the per-group shared detail seam on a second real Alpha monolithic root, but it does not claim Ironforge `MOLT` root-light parsing is fully understood yet
+
+### Mar 27, 2026 - Shared `MOLT` Root-Light Summary Now Reads Real Alpha `ironforge.wmo.MPQ`
+
+- Fixed the narrow real-data gap exposed by Ironforge: the shared `MOLT` reader now handles legacy 32-byte Alpha root-light entries instead of assuming only the later 48-byte layout.
+- Landed pieces:
+	- updated `WowViewer.Core.IO.Wmo.WmoLightSummaryReader` with version-aware `MOLT` entry-size inference
+	- extended `WmoLightSummaryReaderTests` with explicit synthetic `v14` and `v17` coverage
+	- extended `WmoRealDataTests` with a direct Ironforge root-light assertion
+- Validation limits:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` passing tests
+	- real Ironforge inspect now prints `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] maxAttenEnd=29.611 ...`
+	- this is still a shared semantic-summary slice, not deeper light behavior or a write path
+
 ### Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
 
 - Added the next narrow Alpha follow-up by linking root `MOGI` entries to embedded top-level `MOGP` blocks by ordinal pairing.

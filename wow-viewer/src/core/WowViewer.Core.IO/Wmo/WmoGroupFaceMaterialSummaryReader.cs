@@ -18,17 +18,15 @@ public static class WmoGroupFaceMaterialSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupFaceMaterialSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
-        byte[]? mopyPayload = null;
-        foreach ((var header, int dataOffset) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
-        {
-            if (header.Id != WmoChunkIds.Mopy)
-                continue;
-
-            mopyPayload = mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
-            break;
-        }
-
+        byte[]? mopyPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Mopy);
         if (mopyPayload is null)
             throw new InvalidDataException("WMO group face-material summary requires an MOPY subchunk.");
 

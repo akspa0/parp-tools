@@ -22,6 +22,9 @@ internal static class WmoGroupReaderCommon
         WmoChunkIds.Monr,
         WmoChunkIds.Motv,
         WmoChunkIds.Moba,
+        WmoChunkIds.Molr,
+        WmoChunkIds.Mobn,
+        WmoChunkIds.Mobr,
         WmoChunkIds.Mocv,
         WmoChunkIds.Mliq,
         WmoChunkIds.Modr,
@@ -102,6 +105,19 @@ internal static class WmoGroupReaderCommon
             yield return (header, position + ChunkHeader.SizeInBytes);
             position = checked((int)nextOffset);
         }
+    }
+
+    public static byte[]? TryReadFirstSubchunkPayload(byte[] mogp, int headerSizeBytes, FourCC chunkId)
+    {
+        foreach ((ChunkHeader header, int dataOffset) in EnumerateSubchunks(mogp, headerSizeBytes))
+        {
+            if (header.Id != chunkId)
+                continue;
+
+            return mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
+        }
+
+        return null;
     }
 
     public static int CountMopyEntries(uint byteCount, uint? version)

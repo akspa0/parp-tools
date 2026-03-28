@@ -11,8 +11,9 @@ public static class WmoGroupSummaryReader
     private const int NormalStride = 12;
     private const int UvStride = 8;
     private const int BatchStride = 24;
+    private const int RefStride = 2;
+    private const int BspNodeStride = 16;
     private const int VertexColorStride = 4;
-    private const int DoodadRefStride = 2;
 
     public static WmoGroupSummary Read(string path)
     {
@@ -43,6 +44,9 @@ public static class WmoGroupSummaryReader
         int batchCount = 0;
         int vertexColorCount = 0;
         int doodadRefCount = 0;
+        int lightRefCount = 0;
+        int bspNodeCount = 0;
+        int bspFaceRefCount = 0;
         bool hasLiquid = false;
 
         foreach ((var header, _) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
@@ -65,10 +69,16 @@ public static class WmoGroupSummaryReader
             }
             else if (header.Id == WmoChunkIds.Moba)
                 batchCount += checked((int)header.Size / BatchStride);
+            else if (header.Id == WmoChunkIds.Molr)
+                lightRefCount += checked((int)header.Size / RefStride);
+            else if (header.Id == WmoChunkIds.Mobn)
+                bspNodeCount += checked((int)header.Size / BspNodeStride);
+            else if (header.Id == WmoChunkIds.Mobr)
+                bspFaceRefCount += checked((int)header.Size / RefStride);
             else if (header.Id == WmoChunkIds.Mocv)
                 vertexColorCount += checked((int)header.Size / VertexColorStride);
             else if (header.Id == WmoChunkIds.Modr)
-                doodadRefCount += checked((int)header.Size / DoodadRefStride);
+                doodadRefCount += checked((int)header.Size / RefStride);
             else if (header.Id == WmoChunkIds.Mliq)
                 hasLiquid = true;
         }
@@ -97,6 +107,9 @@ public static class WmoGroupSummaryReader
             batchCount,
             vertexColorCount,
             doodadRefCount,
+            lightRefCount,
+            bspNodeCount,
+            bspFaceRefCount,
             hasLiquid);
     }
 }

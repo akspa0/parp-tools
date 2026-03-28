@@ -28,6 +28,9 @@ public sealed class WmoGroupSummary
         int batchCount,
         int vertexColorCount,
         int doodadRefCount,
+        int lightRefCount,
+        int bspNodeCount,
+        int bspFaceRefCount,
         bool hasLiquid)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
@@ -46,6 +49,9 @@ public sealed class WmoGroupSummary
         ArgumentOutOfRangeException.ThrowIfNegative(batchCount);
         ArgumentOutOfRangeException.ThrowIfNegative(vertexColorCount);
         ArgumentOutOfRangeException.ThrowIfNegative(doodadRefCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(lightRefCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(bspNodeCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(bspFaceRefCount);
 
         SourcePath = sourcePath;
         Version = version;
@@ -70,6 +76,9 @@ public sealed class WmoGroupSummary
         BatchCount = batchCount;
         VertexColorCount = vertexColorCount;
         DoodadRefCount = doodadRefCount;
+        LightRefCount = lightRefCount;
+        BspNodeCount = bspNodeCount;
+        BspFaceRefCount = bspFaceRefCount;
         HasLiquid = hasLiquid;
     }
 
@@ -120,6 +129,12 @@ public sealed class WmoGroupSummary
     public int VertexColorCount { get; }
 
     public int DoodadRefCount { get; }
+
+    public int LightRefCount { get; }
+
+    public int BspNodeCount { get; }
+
+    public int BspFaceRefCount { get; }
 
     public bool HasLiquid { get; }
 }

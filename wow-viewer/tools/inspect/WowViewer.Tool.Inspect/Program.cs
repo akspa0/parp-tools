@@ -203,8 +203,14 @@ static void RunWmoInspect(string[] args)
 		}
 		if (summary.ReportedLightCount > 0)
 		{
-			WmoLightSummary lightSummary = ReadInput(WmoLightSummaryReader.Read);
-			PrintWmoLightSummary(lightSummary);
+			try
+			{
+				WmoLightSummary lightSummary = ReadInput(WmoLightSummaryReader.Read);
+				PrintWmoLightSummary(lightSummary);
+			}
+			catch (InvalidDataException)
+			{
+			}
 		}
 		try
 		{
@@ -335,6 +341,14 @@ static void RunWmoInspect(string[] args)
 		catch (InvalidDataException)
 		{
 		}
+		try
+		{
+			IReadOnlyList<WmoEmbeddedGroupDetail> embeddedGroupDetails = ReadInput(WmoEmbeddedGroupDetailReader.Read);
+			PrintWmoEmbeddedGroupDetails(embeddedGroupDetails);
+		}
+		catch (InvalidDataException)
+		{
+		}
 		return;
 	}
 
@@ -362,6 +376,11 @@ static void RunWmoInspect(string[] args)
 			WmoGroupDoodadRefSummary doodadRefSummary = ReadInput(WmoGroupDoodadRefSummaryReader.Read);
 			PrintWmoGroupDoodadRefSummary(doodadRefSummary);
 		}
+		if (summary.LightRefCount > 0)
+		{
+			WmoGroupLightRefSummary lightRefSummary = ReadInput(WmoGroupLightRefSummaryReader.Read);
+			PrintWmoGroupLightRefSummary(lightRefSummary);
+		}
 		if (summary.VertexColorCount > 0)
 		{
 			WmoGroupVertexColorSummary colorSummary = ReadInput(WmoGroupVertexColorSummaryReader.Read);
@@ -381,6 +400,21 @@ static void RunWmoInspect(string[] args)
 		{
 			WmoGroupBatchSummary batchSummary = ReadInput(WmoGroupBatchSummaryReader.Read);
 			PrintWmoGroupBatchSummary(batchSummary);
+		}
+		if (summary.BspNodeCount > 0)
+		{
+			WmoGroupBspNodeSummary bspNodeSummary = ReadInput(WmoGroupBspNodeSummaryReader.Read);
+			PrintWmoGroupBspNodeSummary(bspNodeSummary);
+		}
+		if (summary.BspFaceRefCount > 0)
+		{
+			WmoGroupBspFaceSummary bspFaceSummary = ReadInput(WmoGroupBspFaceSummaryReader.Read);
+			PrintWmoGroupBspFaceSummary(bspFaceSummary);
+		}
+		if (summary.BspNodeCount > 0 && summary.BspFaceRefCount > 0)
+		{
+			WmoGroupBspFaceRangeSummary bspFaceRangeSummary = ReadInput(WmoGroupBspFaceRangeSummaryReader.Read);
+			PrintWmoGroupBspFaceRangeSummary(bspFaceRangeSummary);
 		}
 		if (summary.HasLiquid)
 		{
@@ -876,12 +910,65 @@ static void PrintWmoGroupInfoSummary(WmoGroupInfoSummary summary)
 
 static void PrintWmoEmbeddedGroupSummary(WmoEmbeddedGroupSummary summary)
 {
-	Console.WriteLine($"MOGP(root): groups={summary.GroupCount} headerBytes={summary.MinHeaderSizeBytes}-{summary.MaxHeaderSizeBytes} groupsWithPortals={summary.GroupsWithPortals} groupsWithLiquid={summary.GroupsWithLiquid} faces={summary.TotalFaceMaterialCount} vertices={summary.TotalVertexCount} indices={summary.TotalIndexCount} normals={summary.TotalNormalCount} batches={summary.TotalBatchCount} doodadRefs={summary.TotalDoodadRefCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+	Console.WriteLine($"MOGP(root): groups={summary.GroupCount} headerBytes={summary.MinHeaderSizeBytes}-{summary.MaxHeaderSizeBytes} groupsWithPortals={summary.GroupsWithPortals} groupsWithLiquid={summary.GroupsWithLiquid} faces={summary.TotalFaceMaterialCount} vertices={summary.TotalVertexCount} indices={summary.TotalIndexCount} normals={summary.TotalNormalCount} batches={summary.TotalBatchCount} doodadRefs={summary.TotalDoodadRefCount} lightRefs={summary.TotalLightRefCount} bspNodes={summary.TotalBspNodeCount} bspFaceRefs={summary.TotalBspFaceRefCount} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void PrintWmoEmbeddedGroupLinkageSummary(WmoEmbeddedGroupLinkageSummary summary)
 {
 	Console.WriteLine($"MOGI->MOGP(root): infos={summary.GroupInfoCount} groups={summary.EmbeddedGroupCount} coveredPairs={summary.CoveredPairCount} missingGroups={summary.MissingEmbeddedGroupCount} extraGroups={summary.ExtraEmbeddedGroupCount} flagMatches={summary.FlagMatchCount} boundsMatches={summary.BoundsMatchCount} maxBoundsDelta={summary.MaxBoundsDelta:F3}");
+}
+
+static void PrintWmoEmbeddedGroupDetails(IReadOnlyList<WmoEmbeddedGroupDetail> details)
+{
+	foreach (WmoEmbeddedGroupDetail detail in details)
+	{
+		PrintWmoEmbeddedGroupDetail(detail);
+	}
+}
+
+static void PrintWmoEmbeddedGroupDetail(WmoEmbeddedGroupDetail detail)
+{
+	WmoGroupSummary summary = detail.GroupSummary;
+	Console.WriteLine($"MOGP(root)[{detail.GroupIndex}]: offset={detail.GroupHeaderOffset} flags=0x{summary.Flags:X8} portals={summary.PortalCount}@{summary.PortalStart} faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} doodadRefs={summary.DoodadRefCount} lightRefs={summary.LightRefCount} bspNodes={summary.BspNodeCount} bspFaceRefs={summary.BspFaceRefCount} hasLiquid={summary.HasLiquid} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+
+	if (detail.NormalSummary is not null)
+		Console.WriteLine($"MONR(root)[{detail.GroupIndex}]: payloadBytes={detail.NormalSummary.PayloadSizeBytes} normals={detail.NormalSummary.NormalCount} rangeX=[{detail.NormalSummary.MinX:F3}, {detail.NormalSummary.MaxX:F3}] rangeY=[{detail.NormalSummary.MinY:F3}, {detail.NormalSummary.MaxY:F3}] rangeZ=[{detail.NormalSummary.MinZ:F3}, {detail.NormalSummary.MaxZ:F3}] lengthRange=[{detail.NormalSummary.MinLength:F3}, {detail.NormalSummary.MaxLength:F3}] avgLength={detail.NormalSummary.AverageLength:F3} nearUnit={detail.NormalSummary.NearUnitCount}");
+
+	if (detail.VertexSummary is not null)
+		Console.WriteLine($"MOVT(root)[{detail.GroupIndex}]: payloadBytes={detail.VertexSummary.PayloadSizeBytes} vertices={detail.VertexSummary.VertexCount} boundsMin={FormatVector(detail.VertexSummary.BoundsMin)} boundsMax={FormatVector(detail.VertexSummary.BoundsMax)}");
+
+	if (detail.IndexSummary is not null)
+		Console.WriteLine($"{detail.IndexSummary.ChunkId}(root)[{detail.GroupIndex}]: payloadBytes={detail.IndexSummary.PayloadSizeBytes} indices={detail.IndexSummary.IndexCount} triangles={detail.IndexSummary.TriangleCount} distinctIndices={detail.IndexSummary.DistinctIndexCount} indexRange={detail.IndexSummary.MinIndex}-{detail.IndexSummary.MaxIndex} degenerateTriangles={detail.IndexSummary.DegenerateTriangleCount}");
+
+	if (detail.DoodadRefSummary is not null)
+		Console.WriteLine($"MODR(root)[{detail.GroupIndex}]: payloadBytes={detail.DoodadRefSummary.PayloadSizeBytes} refs={detail.DoodadRefSummary.RefCount} distinctRefs={detail.DoodadRefSummary.DistinctRefCount} refRange={detail.DoodadRefSummary.MinRef}-{detail.DoodadRefSummary.MaxRef} duplicateRefs={detail.DoodadRefSummary.DuplicateRefCount}");
+
+	if (detail.LightRefSummary is not null)
+		Console.WriteLine($"MOLR(root)[{detail.GroupIndex}]: payloadBytes={detail.LightRefSummary.PayloadSizeBytes} refs={detail.LightRefSummary.RefCount} distinctRefs={detail.LightRefSummary.DistinctRefCount} refRange={detail.LightRefSummary.MinRef}-{detail.LightRefSummary.MaxRef} duplicateRefs={detail.LightRefSummary.DuplicateRefCount}");
+
+	if (detail.VertexColorSummary is not null)
+		Console.WriteLine($"MOCV(root)[{detail.GroupIndex}]: payloadBytes={detail.VertexColorSummary.PrimaryPayloadSizeBytes} primaryColors={detail.VertexColorSummary.PrimaryColorCount} rangeR=[{detail.VertexColorSummary.MinRed}, {detail.VertexColorSummary.MaxRed}] rangeG=[{detail.VertexColorSummary.MinGreen}, {detail.VertexColorSummary.MaxGreen}] rangeB=[{detail.VertexColorSummary.MinBlue}, {detail.VertexColorSummary.MaxBlue}] rangeA=[{detail.VertexColorSummary.MinAlpha}, {detail.VertexColorSummary.MaxAlpha}] avgA={detail.VertexColorSummary.AverageAlpha} extraColorSets={detail.VertexColorSummary.AdditionalColorSetCount} totalExtraColors={detail.VertexColorSummary.TotalAdditionalColorCount} maxExtraColors={detail.VertexColorSummary.MaxAdditionalColorCount}");
+
+	if (detail.UvSummary is not null)
+		Console.WriteLine($"MOTV(root)[{detail.GroupIndex}]: payloadBytes={detail.UvSummary.PrimaryPayloadSizeBytes} primaryUv={detail.UvSummary.PrimaryUvCount} rangeU=[{detail.UvSummary.MinU:F3}, {detail.UvSummary.MaxU:F3}] rangeV=[{detail.UvSummary.MinV:F3}, {detail.UvSummary.MaxV:F3}] extraUvSets={detail.UvSummary.AdditionalUvSetCount} totalExtraUv={detail.UvSummary.TotalAdditionalUvCount} maxExtraUv={detail.UvSummary.MaxAdditionalUvCount}");
+
+	if (detail.FaceMaterialSummary is not null)
+		Console.WriteLine($"MOPY(root)[{detail.GroupIndex}]: payloadBytes={detail.FaceMaterialSummary.PayloadSizeBytes} entryBytes={detail.FaceMaterialSummary.EntrySizeBytes} faces={detail.FaceMaterialSummary.FaceCount} distinctMaterials={detail.FaceMaterialSummary.DistinctMaterialIdCount} highestMaterialId={detail.FaceMaterialSummary.HighestMaterialId} hiddenFaces={detail.FaceMaterialSummary.HiddenFaceCount} flaggedFaces={detail.FaceMaterialSummary.FlaggedFaceCount}");
+
+	if (detail.BatchSummary is not null)
+		Console.WriteLine($"MOBA(root)[{detail.GroupIndex}]: payloadBytes={detail.BatchSummary.PayloadSizeBytes} entries={detail.BatchSummary.EntryCount} hasMaterialIds={detail.BatchSummary.HasMaterialIds} distinctMaterials={detail.BatchSummary.DistinctMaterialIdCount} highestMaterialId={detail.BatchSummary.HighestMaterialId} totalIndexCount={detail.BatchSummary.TotalIndexCount} firstIndexRange={detail.BatchSummary.MinFirstIndex}-{detail.BatchSummary.MaxFirstIndex} maxIndexEnd={detail.BatchSummary.MaxIndexEnd} flaggedBatches={detail.BatchSummary.FlaggedBatchCount}");
+
+	if (detail.BspNodeSummary is not null)
+		Console.WriteLine($"MOBN(root)[{detail.GroupIndex}]: payloadBytes={detail.BspNodeSummary.PayloadSizeBytes} nodes={detail.BspNodeSummary.NodeCount} leafNodes={detail.BspNodeSummary.LeafNodeCount} branchNodes={detail.BspNodeSummary.BranchNodeCount} childRefs={detail.BspNodeSummary.ChildReferenceCount} noChildRefs={detail.BspNodeSummary.NoChildReferenceCount} outOfRangeChildRefs={detail.BspNodeSummary.OutOfRangeChildReferenceCount} faceCountRange={detail.BspNodeSummary.MinFaceCount}-{detail.BspNodeSummary.MaxFaceCount} faceStartRange={detail.BspNodeSummary.MinFaceStart}-{detail.BspNodeSummary.MaxFaceStart} maxFaceEnd={detail.BspNodeSummary.MaxFaceEnd} planeDistRange=[{detail.BspNodeSummary.MinPlaneDistance:F3}, {detail.BspNodeSummary.MaxPlaneDistance:F3}]");
+
+	if (detail.BspFaceSummary is not null)
+		Console.WriteLine($"MOBR(root)[{detail.GroupIndex}]: payloadBytes={detail.BspFaceSummary.PayloadSizeBytes} refs={detail.BspFaceSummary.RefCount} distinctRefs={detail.BspFaceSummary.DistinctFaceRefCount} refRange={detail.BspFaceSummary.MinFaceRef}-{detail.BspFaceSummary.MaxFaceRef} duplicateRefs={detail.BspFaceSummary.DuplicateFaceRefCount}");
+
+	if (detail.BspFaceRangeSummary is not null)
+		Console.WriteLine($"MOBN->MOBR(root)[{detail.GroupIndex}]: nodes={detail.BspFaceRangeSummary.NodeCount} faceRefs={detail.BspFaceRangeSummary.FaceRefCount} zeroFaceNodes={detail.BspFaceRangeSummary.ZeroFaceNodeCount} coveredNodes={detail.BspFaceRangeSummary.CoveredNodeCount} outOfRangeNodes={detail.BspFaceRangeSummary.OutOfRangeNodeCount} maxFaceEnd={detail.BspFaceRangeSummary.MaxFaceEnd}");
+
+	if (detail.LiquidSummary is not null)
+		Console.WriteLine($"MLIQ(root)[{detail.GroupIndex}]: payloadBytes={detail.LiquidSummary.PayloadSizeBytes} verts={detail.LiquidSummary.XVertexCount}x{detail.LiquidSummary.YVertexCount} tiles={detail.LiquidSummary.XTileCount}x{detail.LiquidSummary.YTileCount} corner={FormatVector(detail.LiquidSummary.Corner)} materialId={detail.LiquidSummary.MaterialId} heights={detail.LiquidSummary.HeightCount} range=[{detail.LiquidSummary.MinHeight:F2}, {detail.LiquidSummary.MaxHeight:F2}] visibleTiles={detail.LiquidSummary.VisibleTileCount}/{detail.LiquidSummary.TileCount} tileFlags={detail.LiquidSummary.TileFlagByteCount} liquidType={detail.LiquidSummary.LiquidType}");
 }
 
 static void PrintWmoMaterialSummary(WmoMaterialSummary summary)
@@ -1000,7 +1087,7 @@ static void PrintWmoGroupSummary(WmoGroupSummary summary)
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
 	Console.WriteLine($"Header: bytes={summary.HeaderSizeBytes} nameOff={summary.NameOffset} descOff={summary.DescriptiveNameOffset} flags=0x{summary.Flags:X8} portals={summary.PortalCount}@{summary.PortalStart} liquid={summary.GroupLiquid}");
-	Console.WriteLine($"Geometry: faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} primaryUv={summary.PrimaryUvCount} extraUvSets={summary.AdditionalUvSetCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} vertexColors={summary.VertexColorCount} doodadRefs={summary.DoodadRefCount} hasLiquid={summary.HasLiquid}");
+	Console.WriteLine($"Geometry: faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} primaryUv={summary.PrimaryUvCount} extraUvSets={summary.AdditionalUvSetCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} vertexColors={summary.VertexColorCount} doodadRefs={summary.DoodadRefCount} lightRefs={summary.LightRefCount} bspNodes={summary.BspNodeCount} bspFaceRefs={summary.BspFaceRefCount} hasLiquid={summary.HasLiquid}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
 }
 
@@ -1034,9 +1121,29 @@ static void PrintWmoGroupDoodadRefSummary(WmoGroupDoodadRefSummary summary)
 	Console.WriteLine($"MODR: payloadBytes={summary.PayloadSizeBytes} refs={summary.RefCount} distinctRefs={summary.DistinctRefCount} refRange={summary.MinRef}-{summary.MaxRef} duplicateRefs={summary.DuplicateRefCount}");
 }
 
+static void PrintWmoGroupLightRefSummary(WmoGroupLightRefSummary summary)
+{
+	Console.WriteLine($"MOLR: payloadBytes={summary.PayloadSizeBytes} refs={summary.RefCount} distinctRefs={summary.DistinctRefCount} refRange={summary.MinRef}-{summary.MaxRef} duplicateRefs={summary.DuplicateRefCount}");
+}
+
 static void PrintWmoGroupIndexSummary(WmoGroupIndexSummary summary)
 {
 	Console.WriteLine($"{summary.ChunkId}: payloadBytes={summary.PayloadSizeBytes} indices={summary.IndexCount} triangles={summary.TriangleCount} distinctIndices={summary.DistinctIndexCount} indexRange={summary.MinIndex}-{summary.MaxIndex} degenerateTriangles={summary.DegenerateTriangleCount}");
+}
+
+static void PrintWmoGroupBspNodeSummary(WmoGroupBspNodeSummary summary)
+{
+	Console.WriteLine($"MOBN: payloadBytes={summary.PayloadSizeBytes} nodes={summary.NodeCount} leafNodes={summary.LeafNodeCount} branchNodes={summary.BranchNodeCount} childRefs={summary.ChildReferenceCount} noChildRefs={summary.NoChildReferenceCount} outOfRangeChildRefs={summary.OutOfRangeChildReferenceCount} faceCountRange={summary.MinFaceCount}-{summary.MaxFaceCount} faceStartRange={summary.MinFaceStart}-{summary.MaxFaceStart} maxFaceEnd={summary.MaxFaceEnd} planeDistRange=[{summary.MinPlaneDistance:F3}, {summary.MaxPlaneDistance:F3}]");
+}
+
+static void PrintWmoGroupBspFaceSummary(WmoGroupBspFaceSummary summary)
+{
+	Console.WriteLine($"MOBR: payloadBytes={summary.PayloadSizeBytes} refs={summary.RefCount} distinctRefs={summary.DistinctFaceRefCount} refRange={summary.MinFaceRef}-{summary.MaxFaceRef} duplicateRefs={summary.DuplicateFaceRefCount}");
+}
+
+static void PrintWmoGroupBspFaceRangeSummary(WmoGroupBspFaceRangeSummary summary)
+{
+	Console.WriteLine($"MOBN->MOBR: nodes={summary.NodeCount} faceRefs={summary.FaceRefCount} zeroFaceNodes={summary.ZeroFaceNodeCount} coveredNodes={summary.CoveredNodeCount} outOfRangeNodes={summary.OutOfRangeNodeCount} maxFaceEnd={summary.MaxFaceEnd}");
 }
 
 static void PrintWmoGroupVertexSummary(WmoGroupVertexSummary summary)

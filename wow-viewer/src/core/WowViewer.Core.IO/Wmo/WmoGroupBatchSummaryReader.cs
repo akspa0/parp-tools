@@ -21,17 +21,15 @@ public static class WmoGroupBatchSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupBatchSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
-        byte[]? mobaPayload = null;
-        foreach ((var header, int dataOffset) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
-        {
-            if (header.Id != WmoChunkIds.Moba)
-                continue;
-
-            mobaPayload = mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
-            break;
-        }
-
+        byte[]? mobaPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Moba);
         if (mobaPayload is null)
             throw new InvalidDataException("WMO group batch summary requires a MOBA subchunk.");
 

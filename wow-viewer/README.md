@@ -95,8 +95,13 @@ Current shared-core foundation slice:
    - `WmoPortalVertexRangeSummary`
    - `WmoPortalRefRangeSummary`
    - `WmoPortalGroupRangeSummary`
+	- `WmoGroupLightRefSummary`
+	- `WmoGroupBspNodeSummary`
+	- `WmoGroupBspFaceSummary`
+	- `WmoGroupBspFaceRangeSummary`
    - `WmoEmbeddedGroupSummary`
    - `WmoEmbeddedGroupLinkageSummary`
+	- `WmoEmbeddedGroupDetail`
    - Alpha root `MOMO` wrapper handling is now also part of the shared root-summary ownership boundary
 - `src/core/WowViewer.Core.IO` now contains the first non-PM4 I/O seam:
 	- `ChunkHeaderReader`
@@ -143,8 +148,13 @@ Current shared-core foundation slice:
    - `WmoPortalVertexRangeSummaryReader`
    - `WmoPortalRefRangeSummaryReader`
    - `WmoPortalGroupRangeSummaryReader`
+	- `WmoGroupLightRefSummaryReader`
+	- `WmoGroupBspNodeSummaryReader`
+	- `WmoGroupBspFaceSummaryReader`
+	- `WmoGroupBspFaceRangeSummaryReader`
    - `WmoEmbeddedGroupSummaryReader`
    - `WmoEmbeddedGroupLinkageSummaryReader`
+	- `WmoEmbeddedGroupDetailReader`
    - `WmoRootReaderCommon` now also flattens Alpha `MOMO` root subchunks for shared root-summary readers
 - `src/core/WowViewer.Core.IO` now also contains the first shared minimap translation or path helpers:
 	- `Md5TranslateIndex`
@@ -200,9 +210,11 @@ Current shared-core foundation slice:
 	- it now also locks a batched synthetic root-WMO linkage case for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`
 	- it now also locks a batched synthetic root-WMO visibility case for `MOVV`, `MOVB`, and `MOVB -> MOVV`
 	- it now also locks a batched synthetic root-WMO portal-linkage case for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI`, plus a missing-`MOVV` regression
+	- it now also locks synthetic WMO group optional-chunk cases for `MOLR`, `MOBN`, `MOBR`, and `MOBN -> MOBR`
 	- it now also locks real 0.5.3 Alpha per-asset WMO validation via `testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ`
 	- it now also locks a synthetic Alpha monolithic embedded-`MOGP` aggregate case plus real aggregate checks on `castle01.wmo.MPQ`
 	- it now also locks a synthetic Alpha `MOGI -> MOGP(root)` linkage case plus real linkage checks on `castle01.wmo.MPQ`
+	- it now also locks real `castle01.wmo.MPQ` embedded-group optional-chunk totals and replays the real embedded groups through the shared `MOBN`, `MOBR`, and `MOBN -> MOBR` readers
 	- it now also locks synthetic Alpha and standard WDT semantic-summary behavior plus real-data `development.wdt` occupancy and MPHD signals
 	- it now also locks shared file detection for `development.wdt`, `development_0_0.adt`, `development_0_0_tex0.adt`, `development_0_0_obj0.adt`, and `development_00_00.pm4`
 
@@ -224,6 +236,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared WMO `MOTV` UV semantic summary for primary UV ranges and extra-set counts when a group file contains UV data
 	- it now also reports a shared WMO `MOCV` vertex-color semantic summary for BGRA channel ranges, average alpha, and extra-set counts when a group file contains vertex colors
 	- it now also reports a shared WMO `MODR` doodad-ref semantic summary for ref counts, distinct refs, duplicate refs, and ref range when a group file contains doodad refs
+	- it now also reports shared WMO group `MOLR`, `MOBN`, `MOBR`, and `MOBN -> MOBR` summaries when those optional chunks are present
 	- it now also reports a shared WMO `MOVI` or `MOIN` index semantic summary for index counts, triangle counts, ranges, and degenerate-triangle counts when a group file contains indices
 	- it now also reports a shared WMO `MOVT` vertex semantic summary for vertex counts and computed bounds when a group file contains vertex payloads
 	- it now also reports a shared WMO `MONR` normal semantic summary for component ranges, length ranges, and near-unit counts when a group file contains normal payloads
@@ -240,7 +253,12 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
 	- it now also accepts Alpha per-asset `.wmo.MPQ` inputs for shared root-WMO inspect by routing them through the shared archive fallback and the Alpha `MOMO`-aware root reader path
 	- it now also reports an Alpha monolithic embedded-group aggregate `MOGP(root)` line when a root WMO contains top-level embedded `MOGP` blocks
+	- that same `MOGP(root)` aggregate now also reports embedded `lightRefs`, `bspNodes`, and `bspFaceRefs`, which real `castle01.wmo.MPQ` currently proves as `0`, `583`, and `6716`
 	- it now also reports an Alpha `MOGI -> MOGP(root)` linkage line showing paired count/flag/bounds metrics across root group-info and embedded-group surfaces
+	- it now also reports real per-embedded-group `MOGP(root)[n]`, `MONR(root)[n]`, `MOVT(root)[n]`, `MOVI(root)[n]` or `MOIN(root)[n]`, `MODR(root)[n]`, `MOCV(root)[n]`, `MOTV(root)[n]`, `MOPY(root)[n]`, `MOBA(root)[n]`, `MOBN(root)[n]`, `MOBR(root)[n]`, and `MOBN->MOBR(root)[n]` lines for Alpha monolithic roots such as `castle01.wmo.MPQ`, with `MOLR(root)[n]` or `MLIQ(root)[n]` emitted when present
+	- real `ironforge.wmo.MPQ` now provides positive per-group proof for both `MOLR(root)[n]` and `MLIQ(root)[n]`
+	- shared root `MOLT` semantic summary now also reads real Alpha `ironforge.wmo.MPQ`, reporting `payloadBytes=6976` and `entries=218`
+	- optional root `MOLT` summary failures still remain non-fatal in inspect, but Ironforge now exercises the actual shared `MOLT` summary path instead of only the fallback path
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:

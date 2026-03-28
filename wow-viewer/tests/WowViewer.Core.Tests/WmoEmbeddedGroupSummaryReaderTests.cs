@@ -34,6 +34,9 @@ public sealed class WmoEmbeddedGroupSummaryReaderTests
                     ("MOVT", new byte[24]),
                     ("MONR", new byte[24]),
                     ("MOBA", new byte[24]),
+                    ("MOLR", new byte[4]),
+                    ("MOBN", new byte[16]),
+                    ("MOBR", new byte[2]),
                     ("MODR", new byte[4]),
                 ])),
             .. MapFileSummaryReaderTestsAccessor.CreateChunk("MOGP", CreateMogpPayload(
@@ -56,6 +59,9 @@ public sealed class WmoEmbeddedGroupSummaryReaderTests
                     ("MOVT", new byte[36]),
                     ("MONR", new byte[36]),
                     ("MOBA", new byte[48]),
+                    ("MOLR", new byte[2]),
+                    ("MOBN", new byte[32]),
+                    ("MOBR", new byte[6]),
                     ("MODR", new byte[2]),
                     ("MLIQ", new byte[32]),
                 ])),
@@ -76,6 +82,9 @@ public sealed class WmoEmbeddedGroupSummaryReaderTests
         Assert.Equal(5, summary.TotalNormalCount);
         Assert.Equal(3, summary.TotalBatchCount);
         Assert.Equal(3, summary.TotalDoodadRefCount);
+        Assert.Equal(3, summary.TotalLightRefCount);
+        Assert.Equal(3, summary.TotalBspNodeCount);
+        Assert.Equal(4, summary.TotalBspFaceRefCount);
         Assert.Equal(new Vector3(-7f, -3f, -4f), summary.BoundsMin);
         Assert.Equal(new Vector3(5f, 8f, 9f), summary.BoundsMax);
     }

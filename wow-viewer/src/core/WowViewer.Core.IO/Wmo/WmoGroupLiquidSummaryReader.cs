@@ -22,18 +22,16 @@ public static class WmoGroupLiquidSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupLiquidSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         uint groupFlags = BinaryPrimitives.ReadUInt32LittleEndian(mogp.AsSpan(0x08, 4));
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
-        byte[]? liquidPayload = null;
-        foreach ((var header, int dataOffset) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
-        {
-            if (header.Id != WmoChunkIds.Mliq)
-                continue;
-
-            liquidPayload = mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
-            break;
-        }
-
+        byte[]? liquidPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Mliq);
         if (liquidPayload is null)
             throw new InvalidDataException("WMO group liquid summary requires an MLIQ subchunk.");
 

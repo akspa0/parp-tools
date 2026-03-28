@@ -35,6 +35,9 @@ public sealed class WmoGroupSummaryReaderTests
                     ("MOTV", new byte[24]),
                     ("MOTV", new byte[24]),
                     ("MOBA", new byte[48]),
+                    ("MOLR", new byte[4]),
+                    ("MOBN", new byte[32]),
+                    ("MOBR", new byte[6]),
                     ("MOCV", new byte[12]),
                     ("MODR", new byte[6]),
                     ("MLIQ", new byte[32]),
@@ -67,6 +70,9 @@ public sealed class WmoGroupSummaryReaderTests
         Assert.Equal(2, summary.BatchCount);
         Assert.Equal(3, summary.VertexColorCount);
         Assert.Equal(3, summary.DoodadRefCount);
+        Assert.Equal(2, summary.LightRefCount);
+        Assert.Equal(2, summary.BspNodeCount);
+        Assert.Equal(3, summary.BspFaceRefCount);
         Assert.True(summary.HasLiquid);
     }
 

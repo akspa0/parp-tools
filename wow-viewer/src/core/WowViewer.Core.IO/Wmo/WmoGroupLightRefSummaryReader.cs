@@ -3,11 +3,11 @@ using WowViewer.Core.Wmo;
 
 namespace WowViewer.Core.IO.Wmo;
 
-public static class WmoGroupDoodadRefSummaryReader
+public static class WmoGroupLightRefSummaryReader
 {
     private const int RefStride = 2;
 
-    public static WmoGroupDoodadRefSummary Read(string path)
+    public static WmoGroupLightRefSummary Read(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -15,7 +15,7 @@ public static class WmoGroupDoodadRefSummaryReader
         return Read(stream, Path.GetFullPath(path));
     }
 
-    public static WmoGroupDoodadRefSummary Read(Stream stream, string sourcePath = "<memory>")
+    public static WmoGroupLightRefSummary Read(Stream stream, string sourcePath = "<memory>")
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
@@ -24,19 +24,17 @@ public static class WmoGroupDoodadRefSummaryReader
         return ReadMogpPayload(mogp, sourcePath, version);
     }
 
-    internal static WmoGroupDoodadRefSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    internal static WmoGroupLightRefSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
     {
-        ArgumentNullException.ThrowIfNull(mogp);
-
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
-        byte[]? modrPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Modr);
-        if (modrPayload is null)
-            throw new InvalidDataException("WMO group doodad-ref summary requires a MODR subchunk.");
+        byte[]? molrPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Molr);
+        if (molrPayload is null)
+            throw new InvalidDataException("WMO group light-ref summary requires a MOLR subchunk.");
 
-        if (modrPayload.Length % RefStride != 0)
-            throw new InvalidDataException($"MODR payload size {modrPayload.Length} is not divisible by {RefStride}.");
+        if (molrPayload.Length % RefStride != 0)
+            throw new InvalidDataException($"MOLR payload size {molrPayload.Length} is not divisible by {RefStride}.");
 
-        int refCount = modrPayload.Length / RefStride;
+        int refCount = molrPayload.Length / RefStride;
         HashSet<ushort> refs = [];
         int minRef = 0;
         int maxRef = 0;
@@ -48,20 +46,20 @@ public static class WmoGroupDoodadRefSummaryReader
 
         for (int index = 0; index < refCount; index++)
         {
-            ushort value = BinaryPrimitives.ReadUInt16LittleEndian(modrPayload.AsSpan(index * RefStride, RefStride));
+            ushort value = BinaryPrimitives.ReadUInt16LittleEndian(molrPayload.AsSpan(index * RefStride, RefStride));
             refs.Add(value);
             minRef = Math.Min(minRef, value);
             maxRef = Math.Max(maxRef, value);
         }
 
-        return new WmoGroupDoodadRefSummary(
+        return new WmoGroupLightRefSummary(
             sourcePath,
             version,
-            modrPayload.Length,
+            molrPayload.Length,
             refCount,
-            distinctRefCount: refs.Count,
+            refs.Count,
             minRef,
             maxRef,
-            duplicateRefCount: refCount - refs.Count);
+            refCount - refs.Count);
     }
 }

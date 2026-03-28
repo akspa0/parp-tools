@@ -70,8 +70,13 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalVertexRangeSummary`
   - `WmoPortalRefRangeSummary`
   - `WmoPortalGroupRangeSummary`
+  - `WmoGroupLightRefSummary`
+  - `WmoGroupBspNodeSummary`
+  - `WmoGroupBspFaceSummary`
+  - `WmoGroupBspFaceRangeSummary`
   - `WmoEmbeddedGroupSummary`
   - `WmoEmbeddedGroupLinkageSummary`
+  - `WmoEmbeddedGroupDetail`
 - `WowViewer.Core/Files`
   - `WowFileKind`
   - `WowFileDetection`
@@ -123,8 +128,13 @@ Create one first-party shared format stack in `wow-viewer` that:
   - `WmoPortalVertexRangeSummaryReader`
   - `WmoPortalRefRangeSummaryReader`
   - `WmoPortalGroupRangeSummaryReader`
+  - `WmoGroupLightRefSummaryReader`
+  - `WmoGroupBspNodeSummaryReader`
+  - `WmoGroupBspFaceSummaryReader`
+  - `WmoGroupBspFaceRangeSummaryReader`
   - `WmoEmbeddedGroupSummaryReader`
   - `WmoEmbeddedGroupLinkageSummaryReader`
+  - `WmoEmbeddedGroupDetailReader`
 - `WowViewer.Core.IO/Files`
   - `WowFileDetector`
   - `Md5TranslateIndex`
@@ -188,6 +198,10 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared WMO `MOTV` UV semantic summary for primary UV ranges and extra-set counts is now real
 - shared WMO `MOCV` vertex-color semantic summary for channel ranges, average alpha, and extra-set counts is now real
 - shared WMO `MODR` doodad-ref semantic summary for ref counts, distinct refs, duplicate refs, and min or max ref ranges is now real
+- shared WMO `MOLR` light-ref semantic summary for ref counts, distinct refs, duplicate refs, and ref ranges is now real
+- shared WMO `MOBN` BSP-node semantic summary for node counts, leaf or branch coverage, child-reference coverage, face-count ranges, and plane-distance ranges is now real
+- shared WMO `MOBR` BSP-face-ref semantic summary for ref counts, distinct refs, duplicate refs, and ref ranges is now real
+- shared WMO `MOBN -> MOBR` BSP-face range coverage summary is now real
 - shared WMO `MOVI` or `MOIN` index semantic summary for index counts, triangle counts, ranges, and degenerate-triangle counts is now real
 - shared WMO `MOVT` vertex semantic summary for vertex counts and computed bounds is now real
 - shared WMO `MONR` normal semantic summary for component ranges, length ranges, and near-unit counts is now real
@@ -208,7 +222,13 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` are now real
 - shared Alpha root-WMO `MOMO` wrapper handling is now real for the shared root-summary stack
 - shared Alpha monolithic root embedded-`MOGP` aggregate summary ownership is now real
+- shared Alpha monolithic root embedded-`MOGP` aggregate ownership now also covers optional `lightRefs`, `bspNodes`, and `bspFaceRefs` totals, with real `castle01.wmo.MPQ` proof of `0`, `583`, and `6716`
 - shared Alpha `MOGI -> MOGP(root)` linkage-summary ownership is now real
+- shared Alpha monolithic root per-embedded-group inspect routing is now real for `MOGP`, `MOBN`, `MOBR`, and `MOBN -> MOBR` on `castle01.wmo.MPQ`
+- shared Alpha monolithic root per-embedded-group inspect routing now also reuses the existing shared `MONR`, `MOVT`, `MOVI` or `MOIN`, `MODR`, `MOCV`, `MOTV`, `MOPY`, and `MOBA` readers directly on embedded `MOGP` payloads, with real positive `castle01.wmo.MPQ` proof for those lines
+- shared Alpha monolithic root per-embedded-group inspect routing now also has positive real proof for `MOLR(root)[n]` and `MLIQ(root)[n]` on `ironforge.wmo.MPQ`
+- `WowViewer.Tool.Inspect wmo inspect` now treats invalid optional `MOLT` root-summary reads as non-fatal so later shared outputs still print on real Alpha assets that do not match the current narrow `MOLT` stride assumptions
+- shared Alpha root `MOLT` semantic-summary ownership is now also proven directly on real `ironforge.wmo.MPQ`, with `6976` payload bytes and `218` lights reported through the shared reader
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real

@@ -6,7 +6,8 @@ namespace WowViewer.Core.IO.Wmo;
 
 public static class WmoLightSummaryReader
 {
-    private const int EntrySize = 48;
+    private const int LegacyEntrySize = 32;
+    private const int StandardEntrySize = 48;
 
     public static WmoLightSummary Read(string path)
     {
@@ -18,10 +19,11 @@ public static class WmoLightSummaryReader
     public static WmoLightSummary Read(Stream stream, string sourcePath = "<memory>")
     {
         byte[] payload = WmoPortalVertexSummaryReader.ReadPortalChunk(stream, sourcePath, WmoChunkIds.Molt, out uint? version);
-        if (payload.Length % EntrySize != 0)
-            throw new InvalidDataException($"MOLT payload size {payload.Length} is not divisible by {EntrySize}.");
+        int entrySize = InferEntrySize(payload.Length, version);
+        if (payload.Length % entrySize != 0)
+            throw new InvalidDataException($"MOLT payload size {payload.Length} is not divisible by inferred entry size {entrySize}.");
 
-        int entryCount = payload.Length / EntrySize;
+        int entryCount = payload.Length / entrySize;
         HashSet<byte> types = [];
         int attenuatedCount = 0;
         float minIntensity = 0f;
@@ -40,7 +42,7 @@ public static class WmoLightSummaryReader
 
         for (int i = 0; i < entryCount; i++)
         {
-            int offset = i * EntrySize;
+            int offset = i * entrySize;
             byte type = payload[offset];
             bool useAtten = payload[offset + 1] != 0;
             Vector3 position = new(BitConverter.ToSingle(payload, offset + 8), BitConverter.ToSingle(payload, offset + 12), BitConverter.ToSingle(payload, offset + 16));
@@ -59,5 +61,34 @@ public static class WmoLightSummaryReader
         }
 
         return new WmoLightSummary(sourcePath, version, payload.Length, entryCount, types.Count, attenuatedCount, minIntensity, maxIntensity, maxAttenEnd, boundsMin, boundsMax);
+    }
+
+    private static int InferEntrySize(int payloadLength, uint? version)
+    {
+        if (payloadLength == 0)
+            return version is not null && version <= 14 ? LegacyEntrySize : StandardEntrySize;
+
+        if (version is not null && version <= 14)
+            return LegacyEntrySize;
+
+        if (version is not null && version >= 17)
+            return StandardEntrySize;
+
+        bool divisibleByLegacy = payloadLength % LegacyEntrySize == 0;
+        bool divisibleByStandard = payloadLength % StandardEntrySize == 0;
+
+        if (divisibleByStandard && !divisibleByLegacy)
+            return StandardEntrySize;
+
+        if (divisibleByLegacy && !divisibleByStandard)
+            return LegacyEntrySize;
+
+        if (divisibleByStandard)
+            return StandardEntrySize;
+
+        if (divisibleByLegacy)
+            return LegacyEntrySize;
+
+        return StandardEntrySize;
     }
 }

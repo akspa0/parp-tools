@@ -21,18 +21,16 @@ public static class WmoGroupVertexSummaryReader
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
         (uint? version, byte[] mogp) = WmoGroupReaderCommon.ReadGroupPayload(stream, sourcePath);
+        return ReadMogpPayload(mogp, sourcePath, version);
+    }
+
+    internal static WmoGroupVertexSummary ReadMogpPayload(byte[] mogp, string sourcePath, uint? version)
+    {
+        ArgumentNullException.ThrowIfNull(mogp);
+
         int headerSizeBytes = WmoGroupReaderCommon.FindHeaderSize(mogp);
 
-        byte[]? movtPayload = null;
-        foreach ((var header, int dataOffset) in WmoGroupReaderCommon.EnumerateSubchunks(mogp, headerSizeBytes))
-        {
-            if (header.Id != WmoChunkIds.Movt)
-                continue;
-
-            movtPayload = mogp.AsSpan(dataOffset, checked((int)header.Size)).ToArray();
-            break;
-        }
-
+        byte[]? movtPayload = WmoGroupReaderCommon.TryReadFirstSubchunkPayload(mogp, headerSizeBytes, WmoChunkIds.Movt);
         if (movtPayload is null)
             throw new InvalidDataException("WMO group vertex summary requires a MOVT subchunk.");
 
