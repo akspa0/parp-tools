@@ -91,17 +91,24 @@
 - Followed the non-fatal inspect guard with the actual shared-library fix: `WowViewer.Core.IO.Wmo.WmoLightSummaryReader` now supports both the legacy 32-byte Alpha light entries and the later 48-byte root-light entries instead of assuming only the later size.
 - Landed pieces:
 	- `wow-viewer/src/core/WowViewer.Core.IO/Wmo/WmoLightSummaryReader.cs` now infers `MOLT` entry size from version and payload shape, using 32-byte entries for Alpha `v14` roots and 48-byte entries for later roots
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoLightSummary.cs` and `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now expose and print `attenStartRange` alongside the existing intensity and `maxAttenEnd` metrics
 	- `wow-viewer/tests/WowViewer.Core.Tests/WmoLightSummaryReaderTests.cs` now covers both synthetic `v14` 32-byte `MOLT` payloads and synthetic `v17` 48-byte payloads
-	- `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs` now verifies the real Ironforge root light summary directly, including the exact `218` light count and `6976` payload bytes from `ironforge.wmo.MPQ`
+	- `wow-viewer/tests/WowViewer.Core.Tests/WmoRealDataTests.cs` now verifies the real Ironforge root light summary directly, including the exact `218` light count, `6976` payload bytes, and positive attenuation-start range from `ironforge.wmo.MPQ`
+	- the same real-data test surface now also loads `world/wmo/khazmodan/cities/ironforge/ironforge.wmo` from the shared `0.6.0` standard MPQ set via `MpqArchiveCatalog` + the vendored `wow-listfile`, proving that 48-byte standard `MOLT` entries keep opaque middle floats at offsets `24..39` while attenuation values actually live at offsets `40` and `44`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Files/ArchiveVirtualFileReader.cs` now owns the shared “read a virtual file from standard archive roots” seam, and `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now consumes it for `wmo inspect --archive-root <dir> --virtual-path <world/...wmo>` with default vendored-listfile discovery
 - Current verified validation for this landing:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` targeted passing tests
 	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/KhazModan/Cities/Ironforge/ironforge.wmo.MPQ | Select-String '^(WMO semantics:|MOLT:|MFOG:)'` passed on Mar 27, 2026 and now reports:
 		- `WMO semantics: ... lights=218 ...`
-		- `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] maxAttenEnd=29.611 ...`
+		- `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] attenStartRange=[1.306, 8.333] maxAttenEnd=29.611 ...`
 		- `MFOG: payloadBytes=96 entries=2 ...`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|Read_IronforgeAlphaPerAssetMpq_ProducesExpectedRootLightSummary|Read_IronforgeStandard060_RootLightSummary_UsesStandardTailAttenuationOffsets"` passed on Mar 27, 2026 with `4` targeted passing tests, including the real `0.6.0` standard-archive Ironforge root-light case
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo | Select-String '^(Version:|WMO semantics:|MOLT:|MFOG:)'` passed on Mar 27, 2026 and now reports the real standard root-light summary through the inspect CLI, not only through test code
 - Important boundary:
 	- this proves the shared root `MOLT` semantic-summary seam on a real Alpha monolithic root instead of only surviving past a failure
-	- it still does not prove deeper light rendering semantics beyond the existing count, attenuation, intensity, and bounds summary contract
+	- it also now proves the real standard `v16` attenuation offsets for 48-byte entries, so the shared reader no longer reports zero attenuation on standard roots
+	- it also now proves that `WowViewer.Tool.Inspect` can consume the shared standard-archive seam directly for root WMO virtual paths instead of requiring an extracted loose file or per-asset Alpha MPQ wrapper
+	- it still does not prove deeper light rendering semantics beyond the existing count, attenuation, attenuation-start range, intensity, and bounds summary contract; the middle 16 bytes of later 48-byte light entries remain intentionally opaque for now
 
 ## Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
 

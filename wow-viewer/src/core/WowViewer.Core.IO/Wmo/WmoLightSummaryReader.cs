@@ -28,6 +28,8 @@ public static class WmoLightSummaryReader
         int attenuatedCount = 0;
         float minIntensity = 0f;
         float maxIntensity = 0f;
+        float minAttenStart = 0f;
+        float maxAttenStart = 0f;
         float maxAttenEnd = 0f;
         Vector3 boundsMin = Vector3.Zero;
         Vector3 boundsMax = Vector3.Zero;
@@ -36,6 +38,8 @@ public static class WmoLightSummaryReader
         {
             minIntensity = float.MaxValue;
             maxIntensity = float.MinValue;
+            minAttenStart = float.MaxValue;
+            maxAttenStart = float.MinValue;
             boundsMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
             boundsMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
         }
@@ -47,7 +51,8 @@ public static class WmoLightSummaryReader
             bool useAtten = payload[offset + 1] != 0;
             Vector3 position = new(BitConverter.ToSingle(payload, offset + 8), BitConverter.ToSingle(payload, offset + 12), BitConverter.ToSingle(payload, offset + 16));
             float intensity = BitConverter.ToSingle(payload, offset + 20);
-            float attenEnd = BitConverter.ToSingle(payload, offset + 28);
+            float attenStart = ReadAttenuationValue(payload, offset, entrySize, endValue: false);
+            float attenEnd = ReadAttenuationValue(payload, offset, entrySize, endValue: true);
 
             types.Add(type);
             if (useAtten)
@@ -55,12 +60,26 @@ public static class WmoLightSummaryReader
 
             minIntensity = Math.Min(minIntensity, intensity);
             maxIntensity = Math.Max(maxIntensity, intensity);
+            minAttenStart = Math.Min(minAttenStart, attenStart);
+            maxAttenStart = Math.Max(maxAttenStart, attenStart);
             maxAttenEnd = Math.Max(maxAttenEnd, attenEnd);
             boundsMin = Vector3.Min(boundsMin, position);
             boundsMax = Vector3.Max(boundsMax, position);
         }
 
-        return new WmoLightSummary(sourcePath, version, payload.Length, entryCount, types.Count, attenuatedCount, minIntensity, maxIntensity, maxAttenEnd, boundsMin, boundsMax);
+        return new WmoLightSummary(sourcePath, version, payload.Length, entryCount, types.Count, attenuatedCount, minIntensity, maxIntensity, minAttenStart, maxAttenStart, maxAttenEnd, boundsMin, boundsMax);
+    }
+
+    private static float ReadAttenuationValue(byte[] payload, int entryOffset, int entrySize, bool endValue)
+    {
+        int offsetWithinEntry = entrySize switch
+        {
+            LegacyEntrySize => endValue ? 28 : 24,
+            StandardEntrySize => endValue ? 44 : 40,
+            _ => throw new InvalidDataException($"Unsupported MOLT entry size {entrySize}."),
+        };
+
+        return BitConverter.ToSingle(payload, entryOffset + offsetWithinEntry);
     }
 
     private static int InferEntrySize(int payloadLength, uint? version)

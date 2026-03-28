@@ -13,6 +13,8 @@ public sealed class WmoLightSummary
         int attenuatedCount,
         float minIntensity,
         float maxIntensity,
+        float minAttenStart,
+        float maxAttenStart,
         float maxAttenEnd,
         Vector3 boundsMin,
         Vector3 boundsMax)
@@ -31,6 +33,8 @@ public sealed class WmoLightSummary
         AttenuatedCount = attenuatedCount;
         MinIntensity = minIntensity;
         MaxIntensity = maxIntensity;
+        MinAttenStart = minAttenStart;
+        MaxAttenStart = maxAttenStart;
         MaxAttenEnd = maxAttenEnd;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
@@ -44,6 +48,8 @@ public sealed class WmoLightSummary
     public int AttenuatedCount { get; }
     public float MinIntensity { get; }
     public float MaxIntensity { get; }
+    public float MinAttenStart { get; }
+    public float MaxAttenStart { get; }
     public float MaxAttenEnd { get; }
     public Vector3 BoundsMin { get; }
     public Vector3 BoundsMax { get; }

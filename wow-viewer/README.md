@@ -223,6 +223,7 @@ Current non-PM4 inspect slice:
 - `tools/inspect/WowViewer.Tool.Inspect` now also supports:
 	- `map inspect --input <file.wdt|file.adt>`
 	- `wmo inspect --input <file.wmo>`
+	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]`
 - This is intentionally narrow for now:
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
@@ -252,17 +253,20 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO visibility summaries for `MOVV`, `MOVB`, and `MOVB -> MOVV` when those chunks are present
 	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
 	- it now also accepts Alpha per-asset `.wmo.MPQ` inputs for shared root-WMO inspect by routing them through the shared archive fallback and the Alpha `MOMO`-aware root reader path
+	- it now also accepts standard shared-MPQ archive roots plus virtual WMO paths, defaulting to the vendored `wow-listfile` when that file is available under the repo root
 	- it now also reports an Alpha monolithic embedded-group aggregate `MOGP(root)` line when a root WMO contains top-level embedded `MOGP` blocks
 	- that same `MOGP(root)` aggregate now also reports embedded `lightRefs`, `bspNodes`, and `bspFaceRefs`, which real `castle01.wmo.MPQ` currently proves as `0`, `583`, and `6716`
 	- it now also reports an Alpha `MOGI -> MOGP(root)` linkage line showing paired count/flag/bounds metrics across root group-info and embedded-group surfaces
 	- it now also reports real per-embedded-group `MOGP(root)[n]`, `MONR(root)[n]`, `MOVT(root)[n]`, `MOVI(root)[n]` or `MOIN(root)[n]`, `MODR(root)[n]`, `MOCV(root)[n]`, `MOTV(root)[n]`, `MOPY(root)[n]`, `MOBA(root)[n]`, `MOBN(root)[n]`, `MOBR(root)[n]`, and `MOBN->MOBR(root)[n]` lines for Alpha monolithic roots such as `castle01.wmo.MPQ`, with `MOLR(root)[n]` or `MLIQ(root)[n]` emitted when present
 	- real `ironforge.wmo.MPQ` now provides positive per-group proof for both `MOLR(root)[n]` and `MLIQ(root)[n]`
-	- shared root `MOLT` semantic summary now also reads real Alpha `ironforge.wmo.MPQ`, reporting `payloadBytes=6976` and `entries=218`
-	- optional root `MOLT` summary failures still remain non-fatal in inspect, but Ironforge now exercises the actual shared `MOLT` summary path instead of only the fallback path
+	- shared root `MOLT` semantic summary now also reads real Alpha `ironforge.wmo.MPQ`, reporting `payloadBytes=6976`, `entries=218`, and `attenStartRange=[1.306, 8.333]`
+	- a real standard `0.6.0` Ironforge root loaded through shared `MpqArchiveCatalog` + `wow-listfile` now also proves that 48-byte `MOLT` entries store attenuation at offsets `40` and `44`, not `24` and `28`
+	- optional root `MOLT` summary failures still remain non-fatal in inspect, but Ironforge now exercises the actual shared `MOLT` summary path instead of only the fallback path; the middle 16 bytes of later 48-byte entries remain intentionally opaque
 	- it now gets file-kind classification from shared `WowFileDetector` instead of its own private heuristics
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0.adt`
 
 Current non-PM4 converter slice:

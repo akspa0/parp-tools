@@ -148,16 +148,31 @@ static void RunWmo(string[] args)
 static void RunWmoInspect(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
-	if (string.IsNullOrWhiteSpace(input))
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
 	{
-		Console.Error.WriteLine("Error: input WMO file is required.");
+		Console.Error.WriteLine("Error: provide --input <file.wmo|file.wmo.MPQ> or --archive-root <dir> with --virtual-path <world/...wmo>.");
 		Environment.ExitCode = 1;
 		return;
 	}
 
 	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
 	Stream OpenInputStream()
 	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
 		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
 			return File.OpenRead(input);
 
@@ -169,12 +184,12 @@ static void RunWmoInspect(string[] args)
 	T ReadInput<T>(Func<Stream, string, T> reader)
 	{
 		using Stream stream = OpenInputStream();
-		return reader(stream, input);
+		return reader(stream, sourceLabel);
 	}
 
 	WowFileDetection detection;
 	using (Stream detectionStream = OpenInputStream())
-		detection = WowFileDetector.Detect(detectionStream, input);
+		detection = WowFileDetector.Detect(detectionStream, sourceLabel);
 
 	if (detection.Kind == WowFileKind.Wmo)
 	{
@@ -589,6 +604,23 @@ static string? GetOption(string[] args, string longName, string shortName)
 		{
 			return args[index + 1];
 		}
+	}
+
+	return null;
+}
+
+static string? TryFindDefaultListfilePath()
+{
+	DirectoryInfo? current = new(AppContext.BaseDirectory);
+	while (current is not null)
+	{
+		if (File.Exists(Path.Combine(current.FullName, "WowViewer.slnx")))
+		{
+			string candidate = Path.Combine(current.FullName, "libs", "wowdev", "wow-listfile", "listfile.txt");
+			return File.Exists(candidate) ? candidate : null;
+		}
+
+		current = current.Parent;
 	}
 
 	return null;
@@ -1053,7 +1085,7 @@ static void PrintWmoVisibleBlockReferenceSummary(WmoVisibleBlockReferenceSummary
 
 static void PrintWmoLightSummary(WmoLightSummary summary)
 {
-	Console.WriteLine($"MOLT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctTypes={summary.DistinctTypeCount} attenuated={summary.AttenuatedCount} intensityRange=[{summary.MinIntensity:F3}, {summary.MaxIntensity:F3}] maxAttenEnd={summary.MaxAttenEnd:F3} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+	Console.WriteLine($"MOLT: payloadBytes={summary.PayloadSizeBytes} entries={summary.EntryCount} distinctTypes={summary.DistinctTypeCount} attenuated={summary.AttenuatedCount} intensityRange=[{summary.MinIntensity:F3}, {summary.MaxIntensity:F3}] attenStartRange=[{summary.MinAttenStart:F3}, {summary.MaxAttenStart:F3}] maxAttenEnd={summary.MaxAttenEnd:F3} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 }
 
 static void PrintWmoFogSummary(WmoFogSummary summary)
@@ -1162,6 +1194,7 @@ static void ShowUsage()
 	Console.WriteLine("Usage:");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo>");
+	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
@@ -1175,6 +1208,7 @@ static void ShowWmoUsage()
 {
 	Console.WriteLine("WMO commands:");
 	Console.WriteLine("  wmo inspect --input <file.wmo>");
+	Console.WriteLine("  wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]");
 }
 
 static void ShowMapUsage()

@@ -224,7 +224,74 @@ public sealed class WmoRealDataTests
         Assert.Equal(6976, lightSummary.PayloadSizeBytes);
         Assert.Equal(218, lightSummary.EntryCount);
         Assert.True(lightSummary.DistinctTypeCount > 0);
+        Assert.True(lightSummary.MaxAttenStart > 0f);
         Assert.True(lightSummary.MaxAttenEnd > 0f);
+        Assert.True(lightSummary.MaxAttenEnd >= lightSummary.MaxAttenStart);
+    }
+
+    [Fact]
+    public void Read_IronforgeStandard060_RootLightSummary_UsesStandardTailAttenuationOffsets()
+    {
+        if (!Directory.Exists(WmoTestPaths.Standard060DataPath) || !File.Exists(WmoTestPaths.ListfilePath))
+            return;
+
+        byte[]? bytes = ReadStandardArchiveWmo(WmoTestPaths.Standard060IronforgeRootPath);
+        Assert.NotNull(bytes);
+
+        using MemoryStream chunkStream = new(bytes);
+        IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(chunkStream);
+        ChunkSpan mver = Assert.Single(chunks, static chunk => chunk.Header.Id == WmoChunkIds.Mver);
+        ChunkSpan molt = Assert.Single(chunks, static chunk => chunk.Header.Id == WmoChunkIds.Molt);
+        uint? version = ChunkedFileReader.TryReadUInt32(chunkStream, mver);
+        Assert.DoesNotContain(chunks, static chunk => chunk.Header.Id == WmoChunkIds.Momo);
+        byte[] payload = ReadPayload(chunkStream, molt);
+
+        Assert.NotNull(version);
+        Assert.True(version >= 16);
+        Assert.NotEmpty(payload);
+        Assert.Equal(0, payload.Length % 48);
+
+        Assert.Equal("[-0.000, 0.000] nonZero=0", DescribeFloatRange(payload, 48, 24));
+        Assert.Equal("[-0.000, 0.000] nonZero=0", DescribeFloatRange(payload, 48, 28));
+        Assert.Equal("[-1.000, -1.000] nonZero=218", DescribeFloatRange(payload, 48, 32));
+        Assert.Equal("[-0.500, -0.500] nonZero=218", DescribeFloatRange(payload, 48, 36));
+        Assert.Equal("[1.306, 8.333] nonZero=218", DescribeFloatRange(payload, 48, 40));
+        Assert.Equal("[9.167, 29.611] nonZero=218", DescribeFloatRange(payload, 48, 44));
+
+        using MemoryStream lightStream = new(bytes);
+        WmoLightSummary summary = WmoLightSummaryReader.Read(lightStream, WmoTestPaths.Standard060IronforgeRootPath);
+
+        Assert.Equal(payload.Length, summary.PayloadSizeBytes);
+        Assert.Equal(payload.Length / 48, summary.EntryCount);
+        Assert.Equal(1.306f, summary.MinAttenStart, 3);
+        Assert.Equal(8.333f, summary.MaxAttenStart, 3);
+        Assert.Equal(29.611f, summary.MaxAttenEnd, 3);
+    }
+
+    private static byte[]? ReadStandardArchiveWmo(string virtualPath)
+    {
+        using MpqArchiveCatalog catalog = new();
+        catalog.LoadArchives([WmoTestPaths.Standard060DataPath]);
+        catalog.LoadListfile(WmoTestPaths.ListfilePath);
+        return catalog.ReadFile(virtualPath);
+    }
+
+    private static string DescribeFloatRange(byte[] payload, int entrySize, int floatOffset)
+    {
+        float min = float.MaxValue;
+        float max = float.MinValue;
+        int nonZeroCount = 0;
+
+        for (int offset = floatOffset; offset < payload.Length; offset += entrySize)
+        {
+            float value = BitConverter.ToSingle(payload, offset);
+            min = Math.Min(min, value);
+            max = Math.Max(max, value);
+            if (value != 0f)
+                nonZeroCount++;
+        }
+
+        return $"[{min:F3}, {max:F3}] nonZero={nonZeroCount}";
     }
 
     private static byte[] ReadPayload(Stream stream, ChunkSpan chunk)
@@ -258,6 +325,12 @@ internal static class WmoTestPaths
     public static string Castle01AlphaMpqPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree", "World", "wmo", "Azeroth", "Buildings", "Castle", "castle01.wmo.MPQ");
 
     public static string IronforgeAlphaMpqPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.5.3", "tree", "World", "wmo", "KhazModan", "Cities", "Ironforge", "ironforge.wmo.MPQ");
+
+    public static string Standard060DataPath => Path.Combine(GetWowViewerRoot(), "testdata", "0.6.0", "World of Warcraft", "Data");
+
+    public static string ListfilePath => Path.Combine(GetWowViewerRoot(), "libs", "wowdev", "wow-listfile", "listfile.txt");
+
+    public static string Standard060IronforgeRootPath => "world/wmo/khazmodan/cities/ironforge/ironforge.wmo";
 
     private static string GetWowViewerRoot()
     {

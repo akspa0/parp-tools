@@ -163,6 +163,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - `WowViewer.Tool.Inspect`
   - `map inspect --input <file.wdt|file.adt>`
   - `wmo inspect --input <file.wmo>`
+  - `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>]`
 - `WowViewer.Tool.Converter`
   - `detect --input <file>`
 
@@ -227,8 +228,10 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared Alpha monolithic root per-embedded-group inspect routing is now real for `MOGP`, `MOBN`, `MOBR`, and `MOBN -> MOBR` on `castle01.wmo.MPQ`
 - shared Alpha monolithic root per-embedded-group inspect routing now also reuses the existing shared `MONR`, `MOVT`, `MOVI` or `MOIN`, `MODR`, `MOCV`, `MOTV`, `MOPY`, and `MOBA` readers directly on embedded `MOGP` payloads, with real positive `castle01.wmo.MPQ` proof for those lines
 - shared Alpha monolithic root per-embedded-group inspect routing now also has positive real proof for `MOLR(root)[n]` and `MLIQ(root)[n]` on `ironforge.wmo.MPQ`
-- `WowViewer.Tool.Inspect wmo inspect` now treats invalid optional `MOLT` root-summary reads as non-fatal so later shared outputs still print on real Alpha assets that do not match the current narrow `MOLT` stride assumptions
-- shared Alpha root `MOLT` semantic-summary ownership is now also proven directly on real `ironforge.wmo.MPQ`, with `6976` payload bytes and `218` lights reported through the shared reader
+- `WowViewer.Tool.Inspect wmo inspect` still treats invalid optional `MOLT` root-summary reads as non-fatal, but that guard is now a malformed-payload fallback rather than an Ironforge compatibility workaround
+- shared Alpha root `MOLT` semantic-summary ownership is now also proven directly on real `ironforge.wmo.MPQ`, with `6976` payload bytes, `218` lights, and a positive `attenStartRange` reported through the shared reader
+- shared standard `v16` root `MOLT` semantic-summary ownership is now also proven on `world/wmo/khazmodan/cities/ironforge/ironforge.wmo` loaded from the `0.6.0` MPQ set through `MpqArchiveCatalog` + `wow-listfile`, fixing the real 48-byte attenuation offsets to `40` and `44` while keeping the intermediate `24..39` bytes opaque
+- `WowViewer.Tool.Inspect wmo inspect` now also consumes that same shared standard-archive seam directly through `--archive-root` plus `--virtual-path`, with default vendored-listfile discovery when the repo-local `wow-listfile` is present
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real

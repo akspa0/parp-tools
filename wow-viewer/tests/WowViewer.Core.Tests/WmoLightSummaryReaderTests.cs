@@ -28,6 +28,8 @@ public sealed class WmoLightSummaryReaderTests
         Assert.Equal(1, summary.AttenuatedCount);
         Assert.Equal(4f, summary.MinIntensity);
         Assert.Equal(8f, summary.MaxIntensity);
+        Assert.Equal(2f, summary.MinAttenStart);
+        Assert.Equal(3f, summary.MaxAttenStart);
         Assert.Equal(20f, summary.MaxAttenEnd);
         Assert.Equal(new Vector3(-4f, 2f, -6f), summary.BoundsMin);
         Assert.Equal(new Vector3(1f, 5f, 3f), summary.BoundsMax);
@@ -54,6 +56,8 @@ public sealed class WmoLightSummaryReaderTests
         Assert.Equal(1, summary.AttenuatedCount);
         Assert.Equal(6f, summary.MinIntensity);
         Assert.Equal(9f, summary.MaxIntensity);
+        Assert.Equal(1f, summary.MinAttenStart);
+        Assert.Equal(4f, summary.MaxAttenStart);
         Assert.Equal(18f, summary.MaxAttenEnd);
         Assert.Equal(new Vector3(-7f, 8f, -9f), summary.BoundsMin);
         Assert.Equal(new Vector3(10f, 20f, 30f), summary.BoundsMax);
@@ -99,8 +103,12 @@ public sealed class WmoLightSummaryReaderTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12, 4), BitConverter.SingleToInt32Bits(position.Y));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16, 4), BitConverter.SingleToInt32Bits(position.Z));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20, 4), BitConverter.SingleToInt32Bits(intensity));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(24, 4), BitConverter.SingleToInt32Bits(attenStart));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(28, 4), BitConverter.SingleToInt32Bits(attenEnd));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(24, 4), BitConverter.SingleToInt32Bits(0f));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(28, 4), BitConverter.SingleToInt32Bits(0f));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(32, 4), BitConverter.SingleToInt32Bits(-1f));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(36, 4), BitConverter.SingleToInt32Bits(-0.5f));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(40, 4), BitConverter.SingleToInt32Bits(attenStart));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(44, 4), BitConverter.SingleToInt32Bits(attenEnd));
         return bytes;
     }
 }

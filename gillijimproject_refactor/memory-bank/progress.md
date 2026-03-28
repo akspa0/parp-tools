@@ -65,12 +65,17 @@
 - Fixed the narrow real-data gap exposed by Ironforge: the shared `MOLT` reader now handles legacy 32-byte Alpha root-light entries instead of assuming only the later 48-byte layout.
 - Landed pieces:
 	- updated `WowViewer.Core.IO.Wmo.WmoLightSummaryReader` with version-aware `MOLT` entry-size inference
+	- extended `WmoLightSummary` and inspect output with `attenStartRange`
 	- extended `WmoLightSummaryReaderTests` with explicit synthetic `v14` and `v17` coverage
-	- extended `WmoRealDataTests` with a direct Ironforge root-light assertion
+	- extended `WmoRealDataTests` with a direct Ironforge root-light assertion, including positive attenuation-start coverage
+	- corrected the standard 48-byte layout after real `0.6.0` archive proof: attenuation now reads from offsets `40` and `44`, with the intermediate `24..39` bytes left opaque
+	- added shared `ArchiveVirtualFileReader` and updated `WowViewer.Tool.Inspect wmo inspect` with `--archive-root` plus `--virtual-path` so standard-archive root WMOs can be inspected without extracting them first
 - Validation limits:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WmoLightSummaryReaderTests|WmoRealDataTests"` passed on Mar 27, 2026 with `7` passing tests
-	- real Ironforge inspect now prints `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] maxAttenEnd=29.611 ...`
-	- this is still a shared semantic-summary slice, not deeper light behavior or a write path
+	- real Ironforge inspect now prints `MOLT: payloadBytes=6976 entries=218 distinctTypes=1 attenuated=218 intensityRange=[0.120, 1.000] attenStartRange=[1.306, 8.333] maxAttenEnd=29.611 ...`
+	- a real `0.6.0` standard-archive Ironforge regression now also proves `48`-byte `MOLT` attenuation lives at offsets `40` and `44`
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo` now also reports the same standard root-light summary through the CLI
+	- this is still a shared semantic-summary slice, not deeper light behavior or a write path; the later-layout middle 16 bytes remain intentionally opaque
 
 ### Mar 27, 2026 - Alpha `MOGI -> MOGP(root)` Linkage Summary Landed
 
