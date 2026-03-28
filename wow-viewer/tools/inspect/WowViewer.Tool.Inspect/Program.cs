@@ -1434,13 +1434,29 @@ static void PrintMdxSummary(MdxSummary summary)
 	string blendTime = summary.BlendTime?.ToString() ?? "n/a";
 	string boundsMin = summary.BoundsMin is Vector3 min ? $"({min.X:F3}, {min.Y:F3}, {min.Z:F3})" : "n/a";
 	string boundsMax = summary.BoundsMax is Vector3 max ? $"({max.X:F3}, {max.Y:F3}, {max.Z:F3})" : "n/a";
-	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
+	Console.WriteLine($"MDX: signature={summary.Signature} version={summary.Version?.ToString() ?? "n/a"} model={modelName} blendTime={blendTime} chunks={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount} sequences={summary.SequenceCount} geosets={summary.GeosetCount} geosetAnimations={summary.GeosetAnimationCount} bones={summary.BoneCount} helpers={summary.HelperCount} attachments={summary.AttachmentCount} particleEmitters2={summary.ParticleEmitter2Count} ribbons={summary.RibbonCount} cameras={summary.CameraCount} events={summary.EventCount} pivotPoints={summary.PivotPointCount} textures={summary.TextureCount} replaceableTextures={summary.ReplaceableTextureCount} materials={summary.MaterialCount} materialLayers={summary.MaterialLayerCount} boundsMin={boundsMin} boundsMax={boundsMax}");
 	for (int index = 0; index < summary.Chunks.Count; index++)
 		PrintMdxChunkSummary(index, summary.Chunks[index]);
 	for (int index = 0; index < summary.Sequences.Count; index++)
 		PrintMdxSequenceSummary(summary.Sequences[index]);
 	for (int index = 0; index < summary.Geosets.Count; index++)
 		PrintMdxGeosetSummary(summary.Geosets[index]);
+	for (int index = 0; index < summary.GeosetAnimations.Count; index++)
+		PrintMdxGeosetAnimationSummary(summary.GeosetAnimations[index]);
+	for (int index = 0; index < summary.Bones.Count; index++)
+		PrintMdxBoneSummary(summary.Bones[index]);
+	for (int index = 0; index < summary.Helpers.Count; index++)
+		PrintMdxHelperSummary(summary.Helpers[index]);
+	for (int index = 0; index < summary.Attachments.Count; index++)
+		PrintMdxAttachmentSummary(summary.Attachments[index]);
+	for (int index = 0; index < summary.ParticleEmitters2.Count; index++)
+		PrintMdxParticleEmitter2Summary(summary.ParticleEmitters2[index]);
+	for (int index = 0; index < summary.Ribbons.Count; index++)
+		PrintMdxRibbonEmitterSummary(summary.Ribbons[index]);
+	for (int index = 0; index < summary.Cameras.Count; index++)
+		PrintMdxCameraSummary(summary.Cameras[index]);
+	for (int index = 0; index < summary.Events.Count; index++)
+		PrintMdxEventSummary(summary.Events[index]);
 	for (int index = 0; index < summary.PivotPoints.Count; index++)
 		PrintMdxPivotPointSummary(summary.PivotPoints[index]);
 	for (int index = 0; index < summary.Textures.Count; index++)
@@ -1478,6 +1494,65 @@ static void PrintMdxGeosetSummary(MdxGeosetSummary geoset)
 	Console.WriteLine($"GEOS[{geoset.Index}]: vertices={geoset.VertexCount} normals={geoset.NormalCount} uvSets={geoset.UvSetCount} primaryUvs={geoset.PrimaryUvCount} primitiveTypes={geoset.PrimitiveTypeCount} faceGroups={geoset.FaceGroupCount} indices={geoset.IndexCount} triangles={geoset.TriangleCount} vertexGroups={geoset.VertexGroupCount} matrixGroups={geoset.MatrixGroupCount} matrixIndices={geoset.MatrixIndexCount} boneIndices={geoset.BoneIndexCount} boneWeights={geoset.BoneWeightCount} materialId={geoset.MaterialId} selectionGroup={geoset.SelectionGroup} flags=0x{geoset.Flags:X8} animExtents={geoset.AnimationExtentCount} boundsMin={boundsMin} boundsMax={boundsMax} boundsRadius={boundsRadius}");
 }
 
+static void PrintMdxGeosetAnimationSummary(MdxGeosetAnimationSummary geosetAnimation)
+{
+	Vector3 staticColor = geosetAnimation.StaticColor;
+	string geosetId = geosetAnimation.GeosetId == uint.MaxValue ? "none(0xFFFFFFFF)" : geosetAnimation.GeosetId.ToString();
+	Console.WriteLine($"GEOA[{geosetAnimation.Index}]: geosetId={geosetId} staticAlpha={geosetAnimation.StaticAlpha:F3} staticColor=({staticColor.X:F3}, {staticColor.Y:F3}, {staticColor.Z:F3}) flags=0x{geosetAnimation.Flags:X8} usesStaticColor={geosetAnimation.UsesStaticColor} alphaTrack={FormatMdxGeosetAnimationTrack(geosetAnimation.AlphaTrack)} colorTrack={FormatMdxGeosetAnimationTrack(geosetAnimation.ColorTrack)}");
+}
+
+static void PrintMdxBoneSummary(MdxBoneSummary bone)
+{
+	string parentId = bone.HasParent ? bone.ParentId.ToString() : "none(-1)";
+	string geosetId = bone.UsesGeoset ? bone.GeosetId.ToString() : "none(0xFFFFFFFF)";
+	string geosetAnimationId = bone.UsesGeosetAnimation ? bone.GeosetAnimationId.ToString() : "none(0xFFFFFFFF)";
+	Console.WriteLine($"BONE[{bone.Index}]: name={bone.Name} objectId={bone.ObjectId} parentId={parentId} flags=0x{bone.Flags:X8} geosetId={geosetId} geosetAnimId={geosetAnimationId} translationTrack={FormatMdxNodeTrack(bone.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(bone.RotationTrack)} scalingTrack={FormatMdxNodeTrack(bone.ScalingTrack)}");
+}
+
+static void PrintMdxHelperSummary(MdxHelperSummary helper)
+{
+	string parentId = helper.HasParent ? helper.ParentId.ToString() : "none(-1)";
+	Console.WriteLine($"HELP[{helper.Index}]: name={helper.Name} objectId={helper.ObjectId} parentId={parentId} flags=0x{helper.Flags:X8} translationTrack={FormatMdxNodeTrack(helper.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(helper.RotationTrack)} scalingTrack={FormatMdxNodeTrack(helper.ScalingTrack)}");
+}
+
+static void PrintMdxAttachmentSummary(MdxAttachmentSummary attachment)
+{
+	string parentId = attachment.HasParent ? attachment.ParentId.ToString() : "none(-1)";
+	string path = string.IsNullOrWhiteSpace(attachment.Path) ? "n/a" : attachment.Path;
+	Console.WriteLine($"ATCH[{attachment.Index}]: name={attachment.Name} objectId={attachment.ObjectId} parentId={parentId} flags=0x{attachment.Flags:X8} attachmentId={attachment.AttachmentId} path={path} translationTrack={FormatMdxNodeTrack(attachment.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(attachment.RotationTrack)} scalingTrack={FormatMdxNodeTrack(attachment.ScalingTrack)} visibilityTrack={FormatMdxVisibilityTrack(attachment.VisibilityTrack)}");
+}
+
+static void PrintMdxParticleEmitter2Summary(MdxParticleEmitter2Summary particleEmitter)
+{
+	string parentId = particleEmitter.HasParent ? particleEmitter.ParentId.ToString() : "none(-1)";
+	string geometryModel = string.IsNullOrWhiteSpace(particleEmitter.GeometryModel) ? "n/a" : particleEmitter.GeometryModel;
+	string recursionModel = string.IsNullOrWhiteSpace(particleEmitter.RecursionModel) ? "n/a" : particleEmitter.RecursionModel;
+	Vector3 startColor = particleEmitter.StartColor;
+	Vector3 middleColor = particleEmitter.MiddleColor;
+	Vector3 endColor = particleEmitter.EndColor;
+	Console.WriteLine($"PRE2[{particleEmitter.Index}]: name={particleEmitter.Name} objectId={particleEmitter.ObjectId} parentId={parentId} flags=0x{particleEmitter.Flags:X8} emitterType={particleEmitter.EmitterType} staticSpeed={particleEmitter.StaticSpeed:F3} staticVariation={particleEmitter.StaticVariation:F3} staticLatitude={particleEmitter.StaticLatitude:F3} staticLongitude={particleEmitter.StaticLongitude:F3} staticGravity={particleEmitter.StaticGravity:F3} staticZSource={particleEmitter.StaticZSource:F3} staticLife={particleEmitter.StaticLife:F3} staticEmissionRate={particleEmitter.StaticEmissionRate:F3} staticLength={particleEmitter.StaticLength:F3} staticWidth={particleEmitter.StaticWidth:F3} rows={particleEmitter.Rows} cols={particleEmitter.Columns} particleType={particleEmitter.ParticleType} tailLength={particleEmitter.TailLength:F3} middleTime={particleEmitter.MiddleTime:F3} startColor=({startColor.X:F3}, {startColor.Y:F3}, {startColor.Z:F3}) middleColor=({middleColor.X:F3}, {middleColor.Y:F3}, {middleColor.Z:F3}) endColor=({endColor.X:F3}, {endColor.Y:F3}, {endColor.Z:F3}) alphas=[{particleEmitter.StartAlpha},{particleEmitter.MiddleAlpha},{particleEmitter.EndAlpha}] scales=[{particleEmitter.StartScale:F3},{particleEmitter.MiddleScale:F3},{particleEmitter.EndScale:F3}] blendMode={particleEmitter.BlendMode} textureId={particleEmitter.TextureId} priorityPlane={particleEmitter.PriorityPlane} replaceableId={particleEmitter.ReplaceableId} geometryModel={geometryModel} recursionModel={recursionModel} splineCount={particleEmitter.SplineCount} squirts={particleEmitter.Squirts} translationTrack={FormatMdxNodeTrack(particleEmitter.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(particleEmitter.RotationTrack)} scalingTrack={FormatMdxNodeTrack(particleEmitter.ScalingTrack)} visibilityTrack={FormatMdxVisibilityTrack(particleEmitter.VisibilityTrack)} speedTrack={FormatMdxTrack(particleEmitter.SpeedTrack)} variationTrack={FormatMdxTrack(particleEmitter.VariationTrack)} latitudeTrack={FormatMdxTrack(particleEmitter.LatitudeTrack)} longitudeTrack={FormatMdxTrack(particleEmitter.LongitudeTrack)} gravityTrack={FormatMdxTrack(particleEmitter.GravityTrack)} lifeTrack={FormatMdxTrack(particleEmitter.LifeTrack)} emissionRateTrack={FormatMdxTrack(particleEmitter.EmissionRateTrack)} widthTrack={FormatMdxTrack(particleEmitter.WidthTrack)} lengthTrack={FormatMdxTrack(particleEmitter.LengthTrack)} zSourceTrack={FormatMdxTrack(particleEmitter.ZSourceTrack)}");
+}
+
+static void PrintMdxRibbonEmitterSummary(MdxRibbonEmitterSummary ribbon)
+{
+	string parentId = ribbon.HasParent ? ribbon.ParentId.ToString() : "none(-1)";
+	Vector3 staticColor = ribbon.StaticColor;
+	Console.WriteLine($"RIBB[{ribbon.Index}]: name={ribbon.Name} objectId={ribbon.ObjectId} parentId={parentId} flags=0x{ribbon.Flags:X8} staticHeightAbove={ribbon.StaticHeightAbove:F3} staticHeightBelow={ribbon.StaticHeightBelow:F3} staticAlpha={ribbon.StaticAlpha:F3} staticColor=({staticColor.X:F3}, {staticColor.Y:F3}, {staticColor.Z:F3}) edgeLifetime={ribbon.EdgeLifetime:F3} staticTextureSlot={ribbon.StaticTextureSlot} edgesPerSecond={ribbon.EdgesPerSecond} textureRows={ribbon.TextureRows} textureCols={ribbon.TextureColumns} materialId={ribbon.MaterialId} gravity={ribbon.Gravity:F3} translationTrack={FormatMdxNodeTrack(ribbon.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(ribbon.RotationTrack)} scalingTrack={FormatMdxNodeTrack(ribbon.ScalingTrack)} heightAboveTrack={FormatMdxTrack(ribbon.HeightAboveTrack)} heightBelowTrack={FormatMdxTrack(ribbon.HeightBelowTrack)} alphaTrack={FormatMdxTrack(ribbon.AlphaTrack)} colorTrack={FormatMdxTrack(ribbon.ColorTrack)} textureSlotTrack={FormatMdxTrack(ribbon.TextureSlotTrack)} visibilityTrack={FormatMdxVisibilityTrack(ribbon.VisibilityTrack)}");
+}
+
+static void PrintMdxCameraSummary(MdxCameraSummary camera)
+{
+	Vector3 pivotPoint = camera.PivotPoint;
+	Vector3 targetPivotPoint = camera.TargetPivotPoint;
+	Console.WriteLine($"CAMS[{camera.Index}]: name={camera.Name} pivot=({pivotPoint.X:F3}, {pivotPoint.Y:F3}, {pivotPoint.Z:F3}) fieldOfView={camera.FieldOfView:F6} farClip={camera.FarClip:F6} nearClip={camera.NearClip:F6} targetPivot=({targetPivotPoint.X:F3}, {targetPivotPoint.Y:F3}, {targetPivotPoint.Z:F3}) positionTrack={FormatMdxTrack(camera.PositionTrack)} rollTrack={FormatMdxTrack(camera.RollTrack)} visibilityTrack={FormatMdxVisibilityTrack(camera.VisibilityTrack)} targetPositionTrack={FormatMdxTrack(camera.TargetPositionTrack)}");
+}
+
+static void PrintMdxEventSummary(MdxEventSummary evnt)
+{
+	string parentId = evnt.HasParent ? evnt.ParentId.ToString() : "none(-1)";
+	Console.WriteLine($"EVTS[{evnt.Index}]: name={evnt.Name} objectId={evnt.ObjectId} parentId={parentId} flags=0x{evnt.Flags:X8} translationTrack={FormatMdxNodeTrack(evnt.TranslationTrack)} rotationTrack={FormatMdxNodeTrack(evnt.RotationTrack)} scalingTrack={FormatMdxNodeTrack(evnt.ScalingTrack)} eventTrack={FormatMdxEventTrack(evnt.EventTrack)}");
+}
+
 static void PrintMdxPivotPointSummary(MdxPivotPointSummary pivotPoint)
 {
 	Vector3 position = pivotPoint.Position;
@@ -1508,6 +1583,79 @@ static string FormatMdxBlendMode(uint blendMode)
 		5 => "Modulate(5)",
 		6 => "Modulate2X(6)",
 		_ => blendMode.ToString()
+	};
+}
+
+static string FormatMdxGeosetAnimationTrack(MdxGeosetAnimationTrackSummary? track)
+{
+	if (track is null)
+		return "none";
+
+	string timeRange = track.FirstKeyTime is int firstKeyTime && track.LastKeyTime is int lastKeyTime
+		? $"[{firstKeyTime}, {lastKeyTime}]"
+		: "n/a";
+
+	return $"{track.Tag}(keys={track.KeyCount} interpolation={FormatMdxInterpolation(track.InterpolationType)} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxNodeTrack(MdxNodeTrackSummary? track)
+{
+	if (track is null)
+		return "none";
+
+	string timeRange = track.FirstKeyTime is int firstKeyTime && track.LastKeyTime is int lastKeyTime
+		? $"[{firstKeyTime}, {lastKeyTime}]"
+		: "n/a";
+
+	return $"{track.Tag}(keys={track.KeyCount} interpolation={FormatMdxInterpolation(track.InterpolationType)} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxTrack(MdxTrackSummary? track)
+{
+	if (track is null)
+		return "none";
+
+	string timeRange = track.FirstKeyTime is int firstKeyTime && track.LastKeyTime is int lastKeyTime
+		? $"[{firstKeyTime}, {lastKeyTime}]"
+		: "n/a";
+
+	return $"{track.Tag}(keys={track.KeyCount} interpolation={FormatMdxInterpolation(track.InterpolationType)} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxVisibilityTrack(MdxVisibilityTrackSummary? track)
+{
+	if (track is null)
+		return "none";
+
+	string timeRange = track.FirstKeyTime is int firstKeyTime && track.LastKeyTime is int lastKeyTime
+		? $"[{firstKeyTime}, {lastKeyTime}]"
+		: "n/a";
+
+	return $"{track.Tag}(keys={track.KeyCount} interpolation={FormatMdxInterpolation(track.InterpolationType)} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxEventTrack(MdxEventTrackSummary? track)
+{
+	if (track is null)
+		return "none";
+
+	string timeRange = track.FirstKeyTime is int firstKeyTime && track.LastKeyTime is int lastKeyTime
+		? $"[{firstKeyTime}, {lastKeyTime}]"
+		: "n/a";
+
+	return $"{track.Tag}(keys={track.KeyCount} globalSeqId={track.GlobalSequenceId} time={timeRange})";
+}
+
+static string FormatMdxInterpolation(uint interpolationType)
+{
+	return interpolationType switch
+	{
+		0 => "None(0)",
+		1 => "Linear(1)",
+		2 => "Hermite(2)",
+		3 => "Bezier(3)",
+		4 => "Bezier2(4)",
+		_ => interpolationType.ToString()
 	};
 }
 

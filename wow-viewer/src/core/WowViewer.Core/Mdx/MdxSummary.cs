@@ -14,6 +14,14 @@ public sealed class MdxSummary
         Vector3? boundsMax,
         IReadOnlyList<MdxSequenceSummary> sequences,
         IReadOnlyList<MdxGeosetSummary> geosets,
+        IReadOnlyList<MdxGeosetAnimationSummary> geosetAnimations,
+        IReadOnlyList<MdxBoneSummary> bones,
+        IReadOnlyList<MdxHelperSummary> helpers,
+        IReadOnlyList<MdxAttachmentSummary> attachments,
+        IReadOnlyList<MdxParticleEmitter2Summary> particleEmitters2,
+        IReadOnlyList<MdxRibbonEmitterSummary> ribbons,
+        IReadOnlyList<MdxCameraSummary> cameras,
+        IReadOnlyList<MdxEventSummary> events,
         IReadOnlyList<MdxPivotPointSummary> pivotPoints,
         IReadOnlyList<MdxTextureSummary> textures,
         IReadOnlyList<MdxMaterialSummary> materials,
@@ -25,6 +33,14 @@ public sealed class MdxSummary
         ArgumentException.ThrowIfNullOrWhiteSpace(signature);
         ArgumentNullException.ThrowIfNull(sequences);
         ArgumentNullException.ThrowIfNull(geosets);
+        ArgumentNullException.ThrowIfNull(geosetAnimations);
+        ArgumentNullException.ThrowIfNull(bones);
+        ArgumentNullException.ThrowIfNull(helpers);
+        ArgumentNullException.ThrowIfNull(attachments);
+        ArgumentNullException.ThrowIfNull(particleEmitters2);
+        ArgumentNullException.ThrowIfNull(ribbons);
+        ArgumentNullException.ThrowIfNull(cameras);
+        ArgumentNullException.ThrowIfNull(events);
         ArgumentNullException.ThrowIfNull(pivotPoints);
         ArgumentNullException.ThrowIfNull(textures);
         ArgumentNullException.ThrowIfNull(materials);
@@ -43,6 +59,22 @@ public sealed class MdxSummary
         SequenceCount = sequences.Count;
         Geosets = geosets;
         GeosetCount = geosets.Count;
+        GeosetAnimations = geosetAnimations;
+        GeosetAnimationCount = geosetAnimations.Count;
+        Bones = bones;
+        BoneCount = bones.Count;
+        Helpers = helpers;
+        HelperCount = helpers.Count;
+        Attachments = attachments;
+        AttachmentCount = attachments.Count;
+        ParticleEmitters2 = particleEmitters2;
+        ParticleEmitter2Count = particleEmitters2.Count;
+        Ribbons = ribbons;
+        RibbonCount = ribbons.Count;
+        Cameras = cameras;
+        CameraCount = cameras.Count;
+        Events = events;
+        EventCount = events.Count;
         PivotPoints = pivotPoints;
         PivotPointCount = pivotPoints.Count;
         Textures = textures;
@@ -78,6 +110,38 @@ public sealed class MdxSummary
     public IReadOnlyList<MdxGeosetSummary> Geosets { get; }
 
     public int GeosetCount { get; }
+
+    public IReadOnlyList<MdxGeosetAnimationSummary> GeosetAnimations { get; }
+
+    public int GeosetAnimationCount { get; }
+
+    public IReadOnlyList<MdxBoneSummary> Bones { get; }
+
+    public int BoneCount { get; }
+
+    public IReadOnlyList<MdxHelperSummary> Helpers { get; }
+
+    public int HelperCount { get; }
+
+    public IReadOnlyList<MdxAttachmentSummary> Attachments { get; }
+
+    public int AttachmentCount { get; }
+
+    public IReadOnlyList<MdxParticleEmitter2Summary> ParticleEmitters2 { get; }
+
+    public int ParticleEmitter2Count { get; }
+
+    public IReadOnlyList<MdxRibbonEmitterSummary> Ribbons { get; }
+
+    public int RibbonCount { get; }
+
+    public IReadOnlyList<MdxCameraSummary> Cameras { get; }
+
+    public int CameraCount { get; }
+
+    public IReadOnlyList<MdxEventSummary> Events { get; }
+
+    public int EventCount { get; }
 
     public IReadOnlyList<MdxPivotPointSummary> PivotPoints { get; }
 

@@ -1,5 +1,98 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - Shared Classic `MDX` `EVTS` Summary Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains shared `MdxEventSummary` and `MdxEventTrackSummary` contracts for classic event nodes and optional `KEVT` key-time metadata
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Events` and `EventCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `EVTS` entries for `v1300` and `v1400`, including per-section sizing, inherited `MDLGENOBJECT` metadata, and optional `KEVT` key-time payloads
+  - `WowViewer.Tool.Inspect mdx inspect` now reports `events=` and prints `EVTS[n]` lines from the shared reader so the new seam is visible on real data
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+- notes:
+  - real fixed-signal `EVTS` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `events=3`, `CHUNK[15]: id=EVTS`, and stable `$CCH` or `$CHD` or `$DTH` node metadata, with only `$DTH` carrying `KEVT(keys=1 globalSeqId=-1 time=[1667, 1667])`
+  - this seam remains summary-only and does not claim runtime event dispatch behavior
+
+## Mar 28, 2026 - Shared Classic `MDX` `CAMS` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `RIBB` summary ownership into first classic camera-summary ownership for fixed camera metadata and summary-only camera-track metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxCameraSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Cameras` and `CameraCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `CAMS` entries for `v1300` and `v1400`, including per-camera section sizing, fixed pivot or clip payload fields, and optional `KCTR`, `KCRL`, `KVIS`, and `KTTR` metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `CAMS[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` camera-summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `CAMS` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `cameras=1`, `CHUNK[14]: id=CAMS`, and stable `Portrait` camera metadata through the inspect surface and tests
+  - not yet camera playback, target interpolation, viewer camera selection, or runtime portrait parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `PRE2` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `RIBB` summary ownership into first classic particle-emitter-v2 summary ownership for `MDLGENOBJECT`-derived effect metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxParticleEmitter2Summary`, while `MdxTrackSummary` is now shared across both `PRE2` and `RIBB` scalar-track families
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `ParticleEmitters2` and `ParticleEmitter2Count`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `PRE2` entries for `v1300` and `v1400`, including outer emitter sizing, inner node sizing, classic scalar payload fields, optional model-path presence, spline-block sizing, and optional `KVIS` or `KP2V` plus `KP2S`, `KP2R`, `KP2L`, `KPLN`, `KP2G`, `KLIF`, `KP2E`, `KP2W`, `KP2N`, and `KP2Z` metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `PRE2[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` particle-emitter-v2 summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `PRE2` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `particleEmitters2=11`, stable first-emitter metadata on `PRE2[0]`, and stable `KP2S` plus `KP2E` track metadata on `PRE2[5]` through the inspect surface and tests
+  - not yet particle simulation, spline playback, UV animation playback, or runtime render parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `ATCH` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `HELP` summary ownership into first classic attachment summary ownership for `MDLGENOBJECT`-derived metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxAttachmentSummary` and `MdxVisibilityTrackSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Attachments` and `AttachmentCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `ATCH` entries for `v1300` and `v1400`, including outer section sizing, inner node sizing, attachment-id or path fields, node transform metadata, and optional `KVIS` or `KATV` visibility metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `ATCH[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` attachment summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `ATCH` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `attachments=9` plus stable first-attachment metadata through the inspect surface and tests
+  - not yet path resolution, visibility evaluation, or runtime render parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `HELP` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `BONE` summary ownership into first classic helper-node summary ownership for `MDLGENOBJECT` metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxHelperSummary` and the generalized `MdxNodeTrackSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Helpers` and `HelperCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `HELP` entries for `v1300` and `v1400`, including node identity or hierarchy or flags plus summary-only `KGTR` or `KGRT` or `KGSC` track metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `HELP[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` helper summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `HELP` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `helpers=9` plus stable first-helper metadata through the inspect surface and tests
+  - not yet helper transform evaluation, attachment behavior, billboard handling, or render parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `BONE` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `GEOA` summary ownership into first classic bone summary ownership for render-facing skeleton metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxBoneSummary` and the generalized `MdxNodeTrackSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `Bones` and `BoneCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `BONE` entries for `v1300` and `v1400`, including node identity or hierarchy or flags, geoset linkage, and summary-only `KGTR` or `KGRT` or `KGSC` track metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `BONE[n]` lines from the shared reader so the new seam is visible on real data
+- Current proof level:
+  - shared classic `MDX` bone summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `BONE` validation currently belongs on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`, which now proves `bones=16` plus stable first-bone metadata through the inspect surface and tests
+  - not yet transform evaluation, runtime skeleton assembly, or render parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `GEOA` Summary Slice
+
+- The shared `MDX` seam in `wow-viewer` has moved one step deeper than classic `GEOS` structure ownership into first classic geoset-animation summary ownership for render-facing metadata.
+- Landed pieces:
+  - `WowViewer.Core.Mdx` now also includes `MdxGeosetAnimationSummary` and `MdxGeosetAnimationTrackSummary`
+  - `WowViewer.Core.Mdx.MdxSummary` now carries `GeosetAnimations` and `GeosetAnimationCount`
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now summarizes classic counted `GEOA` entries for `v1300` and `v1400`, including static alpha or color fields and summary-only `KGAO` or `KGAC` track metadata
+  - `WowViewer.Tool.Inspect mdx inspect` now prints `GEOA[n]` lines from the shared reader so the new seam is visible when real data eventually carries it
+- Current proof level:
+  - shared classic `MDX` geoset-animation summary ownership is now real at the synthetic and real Alpha `0.5.3` regression level
+  - real fixed-signal `GEOA` validation belongs on `wow-viewer/testdata/0.5.3/tree` assets such as `Creature/Wisp/Wisp.mdx`; the fixed `0.6.0` archive-backed probe set still does not provide a guaranteed positive `GEOA` asset
+  - not yet animated-value evaluation, geoset visibility playback, or runtime render parity
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Summary Slice
 
 - The shared `MDX` seam in `wow-viewer` has moved one step deeper than `SEQS` plus `PIVT` internal summary coverage into first classic geoset ownership for render-facing mesh structure.
@@ -350,7 +443,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared MD5 minimap translation and minimap tile path resolution are now real
 - shared standard-archive read and DBC or DB2 table probing boundaries are now real
 - shared `BLP` header-summary ownership is now real for `BLP1` and `BLP2`, including compression fields, pixel format, image dimensions, palette or JPEG-header presence, and per-mip offset or size coverage
-- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time fields, shared `SEQS` sequence summary coverage for name, time range, move speed, replay range, optional blend time, and optional bounds, shared classic `GEOS` geoset summary coverage for per-geoset counts, material linkage, selection or flag fields, and bounds signals, shared `PIVT` pivot-table summary coverage for indexed pivot positions, shared `TEXS` texture-table summary coverage for replaceable ids, paths, and flags, and narrow `MTLS` material-layer summary coverage for priority plane, blend mode, flags, texture id, transform id, coord id, and static alpha
+- shared `MDX` top-level summary ownership is now real for `MDLX` signature validation, top-level chunk order or count, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time fields, shared `SEQS` sequence summary coverage for name, time range, move speed, replay range, optional blend time, and optional bounds, shared classic `GEOS` geoset summary coverage for per-geoset counts, material linkage, selection or flag fields, and bounds signals, shared classic `GEOA` geoset-animation summary coverage for static alpha or color fields and `KGAO` or `KGAC` track metadata, shared `PIVT` pivot-table summary coverage for indexed pivot positions, shared `TEXS` texture-table summary coverage for replaceable ids, paths, and flags, and narrow `MTLS` material-layer summary coverage for priority plane, blend mode, flags, texture id, transform id, coord id, and static alpha
 - shared archive bootstrap or external listfile parsing and Alpha per-asset MPQ wrapper reading are now real
 - the concrete shared standard MPQ implementation used by the active `MdxViewer` path is now real
 - shared DBC-backed map-directory and ground-effect lookup helpers are now real
@@ -371,7 +464,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 1. deepen shared ADT root and split-file top-level summaries
 2. deepen shared ADT root and split-file summaries beyond the new semantic-summary layer into narrower chunk-internal signals only when a deep payload proof target is clear
 3. deepen shared WMO ownership from root, group, `MOGI`, `MOGN`, `MOSB`, `MOMT`, `MOTX`, `MODN`, `MODS`, `MODD`, `MOPV`, `MOPT`, `MOPR`, `MOLT`, `MFOG`, `MCVP`, plus the first linkage summaries for `MODD -> MODN`, `MOGI -> MOGN`, and `MODS -> MODD`, into the next narrow deep-payload seam only when a fixed validation target is available
-4. start the first shared `M2` seam or the next deeper but still narrow `MDX` chunk-internal seam such as `BONE`, `GEOA`, or helper/emitter linkage only when a fixed real-data target is clear
+4. start the first shared `M2` seam or the next deeper but still narrow `MDX` chunk-internal seam such as attachment or emitter or event summary only when a fixed real-data target is clear
   the current clean WMO continuation after the landed `MOLT` detail seam is wider real-data proof for standard `headerFlagsWord` variability across additional roots
 4. keep Alpha root-WMO `MOMO` support aligned with real 0.5.3 per-asset archive validation as additional root summaries land
 5. keep inspect and converter as thin consumers of shared seams instead of adding direct parsing in tool entrypoints

@@ -1,5 +1,120 @@
 # Active Context
 
+## Mar 28, 2026 - Shared Classic `MDX` `EVTS` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `CAMS` summary ownership into first shared classic `EVTS` event-summary ownership for counted `MDLGENOBJECT` event nodes and optional summary-only `KEVT` time-track metadata.
+- Shared boundary updates in this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx` now carries shared `MdxEventSummary` and `MdxEventTrackSummary` contracts so classic event nodes live beside the existing summary-only bone, helper, attachment, ribbon, camera, and particle seams
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now exposes `Events` and `EventCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `EVTS` entries for `v1300` and `v1400`, including per-section sizing, inherited node metadata, and optional `KEVT` key-time metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports `events=` in the header and prints `EVTS[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `EVTS` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` event regression
+- Validation completed on Mar 28, 2026:
+	- focused `WowViewer.Core.Tests` `MdxSummaryReaderTests` passed after the new synthetic and real Alpha `EVTS` coverage landed
+	- `WowViewer.Tool.Inspect mdx inspect` on Alpha `0.5.3` `Wisp.mdx` now reports `events=3`, `CHUNK[15]: id=EVTS`, and stable `EVTS[0..2]` node metadata with only the final `$DTH` event carrying `KEVT(keys=1 globalSeqId=-1 time=[1667, 1667])`
+- Scope guardrail:
+	- this is still classic `EVTS` summary ownership only; it does not evaluate event playback semantics, event lookup tables, particle or sound dispatch, or runtime trigger behavior
+
+## Mar 28, 2026 - Shared Classic `MDX` `CAMS` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `RIBB` summary ownership into first shared classic `CAMS` camera-summary ownership for fixed camera metadata and summary-only camera-track metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxCameraSummary.cs` now owns shared per-camera identity, pivot or target-pivot data, fixed clip values, and optional summary-only `KCTR` or `KCRL` or `KVIS` or `KTTR` metadata
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `Cameras` and `CameraCount` alongside the earlier `Ribbons` seam
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `CAMS` entries for `v1300` and `v1400`, including per-camera section sizing, fixed camera payload fields, and optional summary-only `KCTR` or `KCRL` or `KVIS` or `KTTR` metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `CAMS[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `CAMS` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` camera regression
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `24` passing tests after the new synthetic and real Alpha `CAMS` coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` passed on Mar 28, 2026 and reported `cameras=1`, `CHUNK[14]: id=CAMS`, and stable `CAMS[0]: name=Portrait ... positionTrack=none ... targetPositionTrack=none`
+- Important boundary:
+	- this is still classic `CAMS` summary ownership only; it does not evaluate camera playback, target interpolation, render-camera selection, or runtime portrait behavior
+	- it does not replace `MdxViewer` camera handling or claim Alpha runtime camera parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `PRE2` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `RIBB` summary ownership into first shared classic `PRE2` particle-emitter summary ownership for `MDLGENOBJECT`-derived effect metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxParticleEmitter2Summary.cs` now owns shared per-emitter identity, hierarchy, flags, classic scalar particle fields, color or alpha or scale signals, optional model-path presence, spline-count metadata, and summary-only track metadata
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxTrackSummary.cs` now owns shared summary-only metadata for classic non-node track families across both `PRE2` and `RIBB`, including `KP2S`, `KP2E`, `KP2L`, `KPLN`, `KP2G`, `KLIF`, `KP2W`, `KP2N`, `KP2Z`, `KRHA`, `KRHB`, `KRAL`, `KRCO`, and `KRTX`
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `ParticleEmitters2` and `ParticleEmitter2Count` alongside the earlier `Ribbons` seam
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `PRE2` entries for `v1300` and `v1400`, including outer emitter sizing, inner `MDLGENOBJECT` node sizing, classic scalar payload fields, spline-block sizing, and summary-only `KVIS` or `KP2V` plus `KP2S`, `KP2R`, `KP2L`, `KPLN`, `KP2G`, `KLIF`, `KP2E`, `KP2W`, `KP2N`, and `KP2Z` metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `PRE2[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `PRE2` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` particle-emitter regression
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `22` passing tests after the new synthetic and real Alpha `PRE2` coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` passed on Mar 28, 2026 and reported `particleEmitters2=11`, `CHUNK[12]: id=PRE2`, stable `PRE2[0]: name=BlizParticle01 ... visibilityTrack=KVIS(...)`, and `PRE2[5]: name=BlizParticleBlackDeath ... speedTrack=KP2S(...) emissionRateTrack=KP2E(...)`
+- Important boundary:
+	- this is still classic `PRE2` summary ownership only; it does not evaluate particle spawn/update behavior, billboarding, UV animation playback, spline motion, or runtime render parity
+	- it does not replace `MdxViewer` particle handling or claim Alpha runtime playback parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `ATCH` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `HELP` summary ownership into first shared attachment summary ownership for classic `MDLGENOBJECT`-derived attachment metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxAttachmentSummary.cs` now owns shared per-attachment identity, hierarchy, flags, attachment-id, optional path, and transform-track metadata contracts
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxVisibilityTrackSummary.cs` now owns the shared classic attachment-visibility track metadata contract for `KVIS` or `KATV`
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `Attachments` and `AttachmentCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `ATCH` entries for `v1300` and `v1400`, including outer attachment-section sizing, inner `MDLGENOBJECT` node sizing, summary-only `KGTR` or `KGRT` or `KGSC` transform metadata, attachment-id/path fields, and optional `KVIS` or `KATV` visibility metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `ATCH[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `ATCH` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` attachment regression
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `17` passing tests after the new synthetic and real Alpha `ATCH` coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` passed on Mar 28, 2026 and reported `attachments=9`, `CHUNK[10]: id=ATCH`, and real `ATCH[0]` through `ATCH[8]` lines
+- Important boundary:
+	- this is still classic `ATCH` summary ownership only; it does not resolve attachment paths into assets, evaluate visibility values, or claim attachment-driven runtime render parity
+	- it does not replace `MdxViewer` attachment handling or claim Alpha runtime playback parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `HELP` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `BONE` summary ownership into first shared helper-node summary ownership for classic `MDLGENOBJECT` metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxHelperSummary.cs` now owns shared per-helper identity, hierarchy, flag, and transform-track metadata contracts
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxNodeTrackSummary.cs` now owns the generalized shared node-track contract reused by classic `BONE` and `HELP`
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `Helpers` and `HelperCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `HELP` entries for `v1300` and `v1400`, including `MDLGENOBJECT` name or object-id or parent-id or flag fields plus summary-only `KGTR` or `KGRT` or `KGSC` key-count, interpolation, global-sequence, and time-range metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `HELP[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `HELP` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` helper regression
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `16` passing tests after the new synthetic and real Alpha `HELP` coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` passed on Mar 28, 2026 and reported `helpers=9`, `CHUNK[9]: id=HELP`, and real `HELP[0]` through `HELP[8]` lines
+- Important boundary:
+	- this is still classic `HELP` summary ownership only; it does not evaluate node transforms, helper-driven billboards, attachment behavior, or runtime animation playback parity
+	- it does not replace `MdxViewer` helper-node handling or claim Alpha runtime playback parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `BONE` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `GEOA` summary ownership into first classic bone/node summary ownership for render-facing skeleton metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxBoneSummary.cs` and `MdxNodeTrackSummary.cs` now own shared per-bone identity, hierarchy, flag, geoset-link, and transform-track metadata contracts
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `Bones` and `BoneCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `BONE` entries for `v1300` and `v1400`, including `MDLGENOBJECT` name or object-id or parent-id or flag fields plus summary-only `KGTR` or `KGRT` or `KGSC` key-count, interpolation, global-sequence, and time-range metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `BONE[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `BONE` fixture plus a fixed real Alpha `0.5.3` `Wisp.mdx` bone regression
+- Current verified validation for this landing:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxSummaryReaderTests` passed on Mar 28, 2026 with `14` passing tests after the new synthetic and real Alpha `BONE` coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx inspect i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx` passed on Mar 28, 2026 and reported `bones=16`, `CHUNK[8]: id=BONE`, and real `BONE[0]` through `BONE[15]` lines
+- Important boundary:
+	- this is still classic `BONE` summary ownership only; it does not evaluate node transforms, bind pivots to runtime skeleton state, or claim animation playback parity
+	- it does not replace `MdxViewer` model skeleton handling or claim Alpha runtime playback parity
+
+## Mar 28, 2026 - Shared Classic `MDX` `GEOA` Summary Slice Landed In `wow-viewer`
+
+- `wow-viewer` has moved one step past classic `GEOS` structure ownership into first classic geoset-animation summary ownership for render-facing animation metadata.
+- Landed pieces:
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxGeosetAnimationSummary.cs` and `MdxGeosetAnimationTrackSummary.cs` now own shared per-entry static color or alpha fields plus `KGAO` or `KGAC` track metadata contracts
+	- `wow-viewer/src/core/WowViewer.Core/Mdx/MdxSummary.cs` now carries `GeosetAnimations` and `GeosetAnimationCount`
+	- `wow-viewer/src/core/WowViewer.Core.IO/Mdx/MdxSummaryReader.cs` now reads classic counted `GEOA` entries for `v1300` and `v1400`, including static header fields and summary-only `KGAO` or `KGAC` key-count, interpolation, global-sequence, and time-range metadata
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now prints `GEOA[n]` lines during `mdx inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/MdxSummaryReaderTests.cs` now covers a synthetic classic `GEOA` fixture plus an optional real archive-backed `GEOA` probe path across fixed `0.6.0` effect assets
+- Current verified validation for this landing:
+	- synthetic and real-data `MdxSummaryReaderTests` coverage now includes `GEOA`
+	- real Alpha `0.5.3` `MDX` files under `wow-viewer/testdata/0.5.3/tree`, such as `Creature/Wisp/Wisp.mdx`, do carry positive `GEOA` data and are the correct fixed validation surface for this seam
+	- the fixed `0.6.0` archive probe set was widened across smoke or torch or brazier or vent assets, but no guaranteed positive `GEOA` carrier was found there
+- Important boundary:
+	- this is still classic `GEOA` summary ownership only; it does not evaluate animated values, build runtime geoset-visibility state, or claim viewer playback parity
+	- it does not replace `MdxViewer` model animation handling or claim Alpha runtime playback parity
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Summary Slice Landed In `wow-viewer`
 
 - `wow-viewer` has moved one step past `SEQS` plus `PIVT` internal `MDX` summary ownership: the shared `MDX` seam now also exposes first classic geoset coverage for render-facing mesh structure.

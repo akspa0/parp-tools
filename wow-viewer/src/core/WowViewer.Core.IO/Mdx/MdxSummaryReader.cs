@@ -19,6 +19,9 @@ public static class MdxSummaryReader
     private const int TexsEntrySizeExtended = 0x10C;
     private const int TexsPathSizeLegacy = 0x100;
     private const int TexsPathSizeExtended = 0x104;
+    private const int CamsNameSizeBytes = 0x50;
+    private const int Pre2ModelPathSizeBytes = 0x104;
+    private const int Pre2ClassicEmitterPayloadSizeMinBytes = 791;
 
     private static readonly uint[] LegacySeqsEntrySizes = [140u, 136u, 132u, 128u];
 
@@ -86,6 +89,14 @@ public static class MdxSummaryReader
             Vector3? boundsMax = null;
             List<MdxSequenceSummary> sequences = [];
             List<MdxGeosetSummary> geosets = [];
+            List<MdxGeosetAnimationSummary> geosetAnimations = [];
+            List<MdxBoneSummary> bones = [];
+            List<MdxHelperSummary> helpers = [];
+            List<MdxAttachmentSummary> attachments = [];
+            List<MdxParticleEmitter2Summary> particleEmitters2 = [];
+            List<MdxRibbonEmitterSummary> ribbons = [];
+            List<MdxCameraSummary> cameras = [];
+            List<MdxEventSummary> events = [];
             List<MdxPivotPointSummary> pivotPoints = [];
             List<MdxTextureSummary> textures = [];
             List<MdxMaterialSummary> materials = [];
@@ -129,6 +140,38 @@ public static class MdxSummaryReader
                 {
                     geosets = ReadGeosSummary(stream, dataOffset, header.Size, version);
                 }
+                else if (header.Id == MdxChunkIds.Geoa)
+                {
+                    geosetAnimations = ReadGeoaSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Bone)
+                {
+                    bones = ReadBoneSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Help)
+                {
+                    helpers = ReadHelpSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Atch)
+                {
+                    attachments = ReadAtchSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Pre2)
+                {
+                    particleEmitters2 = ReadPre2Summary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Ribb)
+                {
+                    ribbons = ReadRibbSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Cams)
+                {
+                    cameras = ReadCamsSummary(stream, dataOffset, header.Size, version);
+                }
+                else if (header.Id == MdxChunkIds.Evts)
+                {
+                    events = ReadEvtsSummary(stream, dataOffset, header.Size, version);
+                }
                 else if (header.Id == MdxChunkIds.Pivt)
                 {
                     pivotPoints = ReadPivtSummary(stream, dataOffset, header.Size);
@@ -145,7 +188,732 @@ public static class MdxSummaryReader
                 stream.Position = endOffset;
             }
 
-            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+            return new MdxSummary(sourcePath, signature, version, modelName, blendTime, boundsMin, boundsMax, sequences, geosets, geosetAnimations, bones, helpers, attachments, particleEmitters2, ribbons, cameras, events, pivotPoints, textures, materials, chunks, knownChunkCount, unknownChunkCount);
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxBoneSummary> ReadBoneSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("BONE(v1300): missing bone count.");
+
+            uint boneCount = ReadUInt32(stream);
+            if (boneCount > 100000)
+                throw new InvalidDataException($"BONE(v1300): invalid bone count {boneCount}.");
+
+            List<MdxBoneSummary> bones = new(checked((int)boneCount));
+            for (int index = 0; index < boneCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint))
+                    throw new InvalidDataException($"BONE(v1300): truncated node header at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > chunkEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"BONE(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "BONE(v1300)");
+
+                if (chunkEnd - stream.Position < 8)
+                    throw new InvalidDataException($"BONE(v1300): missing geoset fields at index {index}.");
+
+                uint geosetId = ReadUInt32(stream);
+                uint geosetAnimationId = ReadUInt32(stream);
+                bones.Add(new MdxBoneSummary(index, name, objectId, parentId, flags, geosetId, geosetAnimationId, translationTrack, rotationTrack, scalingTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return bones;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxHelperSummary> ReadHelpSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("HELP(v1300): missing helper count.");
+
+            uint helperCount = ReadUInt32(stream);
+            if (helperCount > 100000)
+                throw new InvalidDataException($"HELP(v1300): invalid helper count {helperCount}.");
+
+            List<MdxHelperSummary> helpers = new(checked((int)helperCount));
+            for (int index = 0; index < helperCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint))
+                    throw new InvalidDataException($"HELP(v1300): truncated node header at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > chunkEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"HELP(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "HELP(v1300)");
+
+                helpers.Add(new MdxHelperSummary(index, name, objectId, parentId, flags, translationTrack, rotationTrack, scalingTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return helpers;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxAttachmentSummary> ReadAtchSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < 8)
+                throw new InvalidDataException("ATCH(v1300): missing attachment count or unused field.");
+
+            uint attachmentCount = ReadUInt32(stream);
+            if (attachmentCount > 100000)
+                throw new InvalidDataException($"ATCH(v1300): invalid attachment count {attachmentCount}.");
+
+            _ = ReadUInt32(stream);
+
+            List<MdxAttachmentSummary> attachments = new(checked((int)attachmentCount));
+            for (int index = 0; index < attachmentCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"ATCH(v1300): truncated section header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"ATCH(v1300): invalid section size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"ATCH(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "ATCH(v1300)");
+
+                if (entryEnd - stream.Position < 4 + 1 + 0x104)
+                    throw new InvalidDataException($"ATCH(v1300): missing attachment fields at index {index}.");
+
+                uint attachmentId = ReadUInt32(stream);
+                _ = ReadBytes(stream, 1);
+                string? path = ReadNullTerminatedAscii(ReadBytes(stream, 0x104));
+
+                MdxVisibilityTrackSummary? visibilityTrack = null;
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KVIS":
+                        case "KATV":
+                            visibilityTrack = ReadVisibilityTrackSummary(stream, entryEnd, tag, $"ATCH(v1300): {tag} payload overran the section.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            goto AttachmentDone;
+                    }
+                }
+
+            AttachmentDone:
+                stream.Position = entryEnd;
+                attachments.Add(new MdxAttachmentSummary(index, name, objectId, parentId, flags, attachmentId, path, translationTrack, rotationTrack, scalingTrack, visibilityTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return attachments;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxRibbonEmitterSummary> ReadRibbSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("RIBB(v1300): missing ribbon emitter count.");
+
+            uint ribbonCount = ReadUInt32(stream);
+            if (ribbonCount > 100000)
+                throw new InvalidDataException($"RIBB(v1300): invalid ribbon emitter count {ribbonCount}.");
+
+            List<MdxRibbonEmitterSummary> ribbons = new(checked((int)ribbonCount));
+            for (int index = 0; index < ribbonCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"RIBB(v1300): truncated emitter header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"RIBB(v1300): invalid emitter size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"RIBB(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "RIBB(v1300)");
+
+                if (entryEnd - stream.Position < 56)
+                    throw new InvalidDataException($"RIBB(v1300): missing emitter fields at index {index}.");
+
+                uint emitterPayloadSize = ReadUInt32(stream);
+                if (emitterPayloadSize < 56)
+                    throw new InvalidDataException($"RIBB(v1300): invalid emitter payload size 0x{emitterPayloadSize:X} at index {index}.");
+
+                float staticHeightAbove = ReadSingle(stream);
+                float staticHeightBelow = ReadSingle(stream);
+                float staticAlpha = ReadSingle(stream);
+                Vector3 staticColor = ReadVector3(stream);
+                float edgeLifetime = ReadSingle(stream);
+                uint staticTextureSlot = ReadUInt32(stream);
+                uint edgesPerSecond = ReadUInt32(stream);
+                uint textureRows = ReadUInt32(stream);
+                uint textureColumns = ReadUInt32(stream);
+                uint materialId = ReadUInt32(stream);
+                float gravity = ReadSingle(stream);
+
+                MdxTrackSummary? heightAboveTrack = null;
+                MdxTrackSummary? heightBelowTrack = null;
+                MdxTrackSummary? alphaTrack = null;
+                MdxTrackSummary? colorTrack = null;
+                MdxTrackSummary? textureSlotTrack = null;
+                MdxVisibilityTrackSummary? visibilityTrack = null;
+
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KRHA":
+                        case "KRHB":
+                        case "KRAL":
+                            MdxTrackSummary scalarTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"RIBB(v1300): {tag} payload overran the emitter.");
+                            if (tag == "KRHA")
+                                heightAboveTrack = scalarTrack;
+                            else if (tag == "KRHB")
+                                heightBelowTrack = scalarTrack;
+                            else
+                                alphaTrack = scalarTrack;
+                            break;
+                        case "KRCO":
+                            colorTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float) * 3, $"RIBB(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KRTX":
+                            textureSlotTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(int), $"RIBB(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KVIS":
+                        case "KATV":
+                            visibilityTrack = ReadVisibilityTrackSummary(stream, entryEnd, tag, $"RIBB(v1300): {tag} payload overran the emitter.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            goto RibbonDone;
+                    }
+                }
+
+            RibbonDone:
+                stream.Position = entryEnd;
+                ribbons.Add(new MdxRibbonEmitterSummary(index, name, objectId, parentId, flags, staticHeightAbove, staticHeightBelow, staticAlpha, staticColor, edgeLifetime, staticTextureSlot, edgesPerSecond, textureRows, textureColumns, materialId, gravity, translationTrack, rotationTrack, scalingTrack, heightAboveTrack, heightBelowTrack, alphaTrack, colorTrack, textureSlotTrack, visibilityTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return ribbons;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxCameraSummary> ReadCamsSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("CAMS(v1300): missing camera count.");
+
+            uint cameraCount = ReadUInt32(stream);
+            if (cameraCount > 100000)
+                throw new InvalidDataException($"CAMS(v1300): invalid camera count {cameraCount}.");
+
+            List<MdxCameraSummary> cameras = new(checked((int)cameraCount));
+            for (int index = 0; index < cameraCount; index++)
+            {
+                long entryStart = stream.Position;
+                if (chunkEnd - entryStart < sizeof(uint))
+                    throw new InvalidDataException($"CAMS(v1300): truncated camera header at index {index}.");
+
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"CAMS(v1300): invalid camera size 0x{entrySize:X} at index {index}.");
+
+                if (entryEnd - stream.Position < CamsNameSizeBytes + 36)
+                    throw new InvalidDataException($"CAMS(v1300): truncated camera payload at index {index}.");
+
+                string name = ReadFixedAscii(stream, CamsNameSizeBytes);
+                Vector3 pivotPoint = ReadVector3(stream);
+                float fieldOfView = ReadSingle(stream);
+                float farClip = ReadSingle(stream);
+                float nearClip = ReadSingle(stream);
+                Vector3 targetPivotPoint = ReadVector3(stream);
+
+                MdxTrackSummary? positionTrack = null;
+                MdxTrackSummary? rollTrack = null;
+                MdxVisibilityTrackSummary? visibilityTrack = null;
+                MdxTrackSummary? targetPositionTrack = null;
+
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KCTR":
+                            positionTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float) * 3, $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        case "KCRL":
+                            rollTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        case "KVIS":
+                            visibilityTrack = ReadVisibilityTrackSummary(stream, entryEnd, tag, $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        case "KTTR":
+                            targetPositionTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float) * 3, $"CAMS(v1300): {tag} payload overran the camera.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            stream.Position = entryEnd;
+                            break;
+                    }
+                }
+
+                cameras.Add(new MdxCameraSummary(index, name, pivotPoint, fieldOfView, farClip, nearClip, targetPivotPoint, positionTrack, rollTrack, visibilityTrack, targetPositionTrack));
+                stream.Position = entryEnd;
+            }
+
+            stream.Position = chunkEnd;
+            return cameras;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxEventSummary> ReadEvtsSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("EVTS(v1300): missing event count.");
+
+            uint eventCount = ReadUInt32(stream);
+            if (eventCount > 100000)
+                throw new InvalidDataException($"EVTS(v1300): invalid event count {eventCount}.");
+
+            List<MdxEventSummary> events = new(checked((int)eventCount));
+            for (int index = 0; index < eventCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"EVTS(v1300): truncated section header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"EVTS(v1300): invalid section size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"EVTS(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "EVTS(v1300)");
+
+                MdxEventTrackSummary? eventTrack = null;
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KEVT":
+                            eventTrack = ReadEventTrackSummary(stream, entryEnd, tag, $"EVTS(v1300): {tag} payload overran the section.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            stream.Position = entryEnd;
+                            break;
+                    }
+                }
+
+                events.Add(new MdxEventSummary(index, name, objectId, parentId, flags, translationTrack, rotationTrack, scalingTrack, eventTrack));
+                stream.Position = entryEnd;
+            }
+
+            stream.Position = chunkEnd;
+            return events;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static List<MdxParticleEmitter2Summary> ReadPre2Summary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("PRE2(v1300): missing particle emitter count.");
+
+            uint emitterCount = ReadUInt32(stream);
+            if (emitterCount > 100000)
+                throw new InvalidDataException($"PRE2(v1300): invalid particle emitter count {emitterCount}.");
+
+            List<MdxParticleEmitter2Summary> particleEmitters2 = new(checked((int)emitterCount));
+            for (int index = 0; index < emitterCount; index++)
+            {
+                if (chunkEnd - stream.Position < sizeof(uint) * 2)
+                    throw new InvalidDataException($"PRE2(v1300): truncated emitter header at index {index}.");
+
+                long entryStart = stream.Position;
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"PRE2(v1300): invalid emitter size 0x{entrySize:X} at index {index}.");
+
+                long nodeStart = stream.Position;
+                uint nodeSize = ReadUInt32(stream);
+                long nodeEnd = checked(nodeStart + nodeSize);
+                if (nodeEnd > entryEnd || nodeEnd <= nodeStart)
+                    throw new InvalidDataException($"PRE2(v1300): invalid node size 0x{nodeSize:X} at index {index}.");
+
+                (string name, int objectId, int parentId, uint flags, MdxNodeTrackSummary? translationTrack, MdxNodeTrackSummary? rotationTrack, MdxNodeTrackSummary? scalingTrack) =
+                    ReadNodeTrackSummary(stream, nodeEnd, index, "PRE2(v1300)");
+
+                if (entryEnd - stream.Position < sizeof(uint))
+                    throw new InvalidDataException($"PRE2(v1300): missing emitter payload size at index {index}.");
+
+                uint emitterPayloadSize = ReadUInt32(stream);
+                if (emitterPayloadSize < Pre2ClassicEmitterPayloadSizeMinBytes)
+                    throw new InvalidDataException($"PRE2(v1300): invalid emitter payload size 0x{emitterPayloadSize:X} at index {index}.");
+
+                long emitterPayloadEnd = checked(stream.Position + emitterPayloadSize);
+                if (emitterPayloadEnd > entryEnd)
+                    throw new InvalidDataException($"PRE2(v1300): emitter payload size 0x{emitterPayloadSize:X} overran entry {index}.");
+
+                int emitterType = ReadInt32(stream);
+                float staticSpeed = ReadSingle(stream);
+                float staticVariation = ReadSingle(stream);
+                float staticLatitude = ReadSingle(stream);
+                float staticLongitude = ReadSingle(stream);
+                float staticGravity = ReadSingle(stream);
+                float staticZSource = ReadSingle(stream);
+                float staticLife = ReadSingle(stream);
+                float staticEmissionRate = ReadSingle(stream);
+                float staticLength = ReadSingle(stream);
+                float staticWidth = ReadSingle(stream);
+                uint rows = ReadUInt32(stream);
+                uint columns = ReadUInt32(stream);
+                uint particleType = ReadUInt32(stream);
+                float tailLength = ReadSingle(stream);
+                float middleTime = ReadSingle(stream);
+                Vector3 startColor = ReadVector3(stream);
+                Vector3 middleColor = ReadVector3(stream);
+                Vector3 endColor = ReadVector3(stream);
+                byte startAlpha = ReadByte(stream);
+                byte middleAlpha = ReadByte(stream);
+                byte endAlpha = ReadByte(stream);
+                float startScale = ReadSingle(stream);
+                float middleScale = ReadSingle(stream);
+                float endScale = ReadSingle(stream);
+
+                for (int intervalIndex = 0; intervalIndex < 12; intervalIndex++)
+                    _ = ReadUInt32(stream);
+
+                uint blendMode = ReadUInt32(stream);
+                int textureId = ReadInt32(stream);
+                int priorityPlane = ReadInt32(stream);
+                uint replaceableId = ReadUInt32(stream);
+                string? geometryModel = ReadNullTerminatedAscii(ReadBytes(stream, Pre2ModelPathSizeBytes));
+                string? recursionModel = ReadNullTerminatedAscii(ReadBytes(stream, Pre2ModelPathSizeBytes));
+
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+
+                for (int tumbleIndex = 0; tumbleIndex < 6; tumbleIndex++)
+                    _ = ReadSingle(stream);
+
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadVector3(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+
+                uint splineCount = ReadUInt32(stream);
+                if (splineCount > 100000)
+                    throw new InvalidDataException($"PRE2(v1300): invalid spline count {splineCount} at index {index}.");
+
+                SkipBytes(stream, checked((long)splineCount * sizeof(float) * 3), emitterPayloadEnd, $"PRE2(v1300): spline payload overran emitter {index}.");
+                int squirts = ReadInt32(stream);
+
+                if (stream.Position > emitterPayloadEnd)
+                    throw new InvalidDataException($"PRE2(v1300): static emitter payload overran entry {index}.");
+
+                stream.Position = emitterPayloadEnd;
+
+                MdxVisibilityTrackSummary? visibilityTrack = null;
+                MdxTrackSummary? speedTrack = null;
+                MdxTrackSummary? variationTrack = null;
+                MdxTrackSummary? latitudeTrack = null;
+                MdxTrackSummary? longitudeTrack = null;
+                MdxTrackSummary? gravityTrack = null;
+                MdxTrackSummary? lifeTrack = null;
+                MdxTrackSummary? emissionRateTrack = null;
+                MdxTrackSummary? widthTrack = null;
+                MdxTrackSummary? lengthTrack = null;
+                MdxTrackSummary? zSourceTrack = null;
+
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KVIS":
+                        case "KP2V":
+                            visibilityTrack = ReadVisibilityTrackSummary(stream, entryEnd, tag, $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2S":
+                            speedTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2R":
+                            variationTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2L":
+                            latitudeTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KPLN":
+                            longitudeTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2G":
+                            gravityTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KLIF":
+                            lifeTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2E":
+                            emissionRateTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2W":
+                            widthTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2N":
+                            lengthTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        case "KP2Z":
+                            zSourceTrack = ReadTrackSummary(stream, entryEnd, tag, sizeof(float), $"PRE2(v1300): {tag} payload overran the emitter.");
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            goto Pre2Done;
+                    }
+                }
+
+            Pre2Done:
+                stream.Position = entryEnd;
+                particleEmitters2.Add(new MdxParticleEmitter2Summary(index, name, objectId, parentId, flags, emitterType, staticSpeed, staticVariation, staticLatitude, staticLongitude, staticGravity, staticZSource, staticLife, staticEmissionRate, staticLength, staticWidth, rows, columns, particleType, tailLength, middleTime, startColor, middleColor, endColor, startAlpha, middleAlpha, endAlpha, startScale, middleScale, endScale, blendMode, textureId, priorityPlane, replaceableId, geometryModel, recursionModel, splineCount, squirts, translationTrack, rotationTrack, scalingTrack, visibilityTrack, speedTrack, variationTrack, latitudeTrack, longitudeTrack, gravityTrack, lifeTrack, emissionRateTrack, widthTrack, lengthTrack, zSourceTrack));
+            }
+
+            stream.Position = chunkEnd;
+            return particleEmitters2;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static (string Name, int ObjectId, int ParentId, uint Flags, MdxNodeTrackSummary? TranslationTrack, MdxNodeTrackSummary? RotationTrack, MdxNodeTrackSummary? ScalingTrack) ReadNodeTrackSummary(Stream stream, long nodeEnd, int index, string chunkLabel)
+    {
+        if (nodeEnd - stream.Position < 0x50 + 12)
+            throw new InvalidDataException($"{chunkLabel}: truncated node payload at index {index}.");
+
+        byte[] nameBytes = ReadBytes(stream, 0x50);
+        string name = ReadNullTerminatedAscii(nameBytes);
+        int objectId = ReadInt32(stream);
+        int parentId = ReadInt32(stream);
+        uint flags = ReadUInt32(stream);
+
+        MdxNodeTrackSummary? translationTrack = null;
+        MdxNodeTrackSummary? rotationTrack = null;
+        MdxNodeTrackSummary? scalingTrack = null;
+
+        while (stream.Position <= nodeEnd - 4)
+        {
+            string tag = ReadTag(stream);
+            switch (tag)
+            {
+                case "KGTR":
+                    translationTrack = ReadNodeVectorTrackSummary(stream, nodeEnd, tag, $"{chunkLabel}: KGTR payload overran the node.");
+                    break;
+                case "KGRT":
+                    rotationTrack = ReadNodeQuaternionTrackSummary(stream, nodeEnd, tag, $"{chunkLabel}: KGRT payload overran the node.");
+                    break;
+                case "KGSC":
+                    scalingTrack = ReadNodeVectorTrackSummary(stream, nodeEnd, tag, $"{chunkLabel}: KGSC payload overran the node.");
+                    break;
+                default:
+                    stream.Position -= 4;
+                    stream.Position = nodeEnd;
+                    break;
+            }
+        }
+
+        stream.Position = nodeEnd;
+        return (name, objectId, parentId, flags, translationTrack, rotationTrack, scalingTrack);
+    }
+
+    private static List<MdxGeosetAnimationSummary> ReadGeoaSummary(Stream stream, long dataOffset, uint size, uint? version)
+    {
+        if (version is not null and not 1300u and not 1400u)
+            return [];
+
+        long previousPosition = stream.Position;
+        try
+        {
+            long chunkEnd = checked(dataOffset + size);
+            stream.Position = dataOffset;
+            if (chunkEnd - stream.Position < sizeof(uint))
+                throw new InvalidDataException("GEOA(v1300): missing geoset animation count.");
+
+            uint animationCount = ReadUInt32(stream);
+            if (animationCount > 100000)
+                throw new InvalidDataException($"GEOA(v1300): invalid geoset animation count {animationCount}.");
+
+            List<MdxGeosetAnimationSummary> geosetAnimations = new(checked((int)animationCount));
+            for (int index = 0; index < animationCount; index++)
+            {
+                long entryStart = stream.Position;
+                if (chunkEnd - entryStart < sizeof(uint))
+                    throw new InvalidDataException($"GEOA(v1300): truncated entry header at index {index}.");
+
+                uint entrySize = ReadUInt32(stream);
+                long entryEnd = checked(entryStart + entrySize);
+                if (entryEnd > chunkEnd || entryEnd <= entryStart)
+                    throw new InvalidDataException($"GEOA(v1300): invalid entry size 0x{entrySize:X} at index {index}.");
+
+                if (entryEnd - stream.Position < 24)
+                    throw new InvalidDataException($"GEOA(v1300): truncated entry payload at index {index}.");
+
+                uint geosetId = ReadUInt32(stream);
+                float staticAlpha = ReadSingle(stream);
+                Vector3 staticColor = ReadVector3(stream);
+                uint flags = ReadUInt32(stream);
+
+                MdxGeosetAnimationTrackSummary? alphaTrack = null;
+                MdxGeosetAnimationTrackSummary? colorTrack = null;
+
+                while (stream.Position <= entryEnd - 4)
+                {
+                    string tag = ReadTag(stream);
+                    switch (tag)
+                    {
+                        case "KGAO":
+                            alphaTrack = ReadGeosetAnimationAlphaTrackSummary(stream, entryEnd);
+                            break;
+                        case "KGAC":
+                            colorTrack = ReadGeosetAnimationColorTrackSummary(stream, entryEnd);
+                            break;
+                        default:
+                            stream.Position -= 4;
+                            stream.Position = entryEnd;
+                            break;
+                    }
+                }
+
+                geosetAnimations.Add(new MdxGeosetAnimationSummary(index, geosetId, staticAlpha, staticColor, flags, alphaTrack, colorTrack));
+                stream.Position = entryEnd;
+            }
+
+            stream.Position = chunkEnd;
+            return geosetAnimations;
         }
         finally
         {
@@ -730,11 +1498,208 @@ public static class MdxSummaryReader
         }
     }
 
+    private static MdxGeosetAnimationTrackSummary ReadGeosetAnimationAlphaTrackSummary(Stream stream, long limit)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"GEOA(v1300): invalid KGAO key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+
+            _ = ReadSingle(stream);
+            if (TrackUsesTangents(interpolationType))
+            {
+                _ = ReadSingle(stream);
+                _ = ReadSingle(stream);
+            }
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException("GEOA(v1300): KGAO payload overran its subchunk.");
+
+        return new MdxGeosetAnimationTrackSummary("KGAO", checked((int)keyCount), interpolationType, globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
+    private static MdxGeosetAnimationTrackSummary ReadGeosetAnimationColorTrackSummary(Stream stream, long limit)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"GEOA(v1300): invalid KGAC key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+
+            _ = ReadVector3(stream);
+            if (TrackUsesTangents(interpolationType))
+            {
+                _ = ReadVector3(stream);
+                _ = ReadVector3(stream);
+            }
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException("GEOA(v1300): KGAC payload overran its subchunk.");
+
+        return new MdxGeosetAnimationTrackSummary("KGAC", checked((int)keyCount), interpolationType, globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
+    private static MdxEventTrackSummary ReadEventTrackSummary(Stream stream, long limit, string tag, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"EVTS(v1300): invalid {tag} key count {keyCount}.");
+
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxEventTrackSummary(tag, checked((int)keyCount), globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
+    private static MdxNodeTrackSummary ReadNodeVectorTrackSummary(Stream stream, long limit, string tag, string overrunMessage)
+    {
+        return ReadNodeTrackSummary(stream, limit, tag, sizeof(float) * 3, overrunMessage);
+    }
+
+    private static MdxNodeTrackSummary ReadNodeQuaternionTrackSummary(Stream stream, long limit, string tag, string overrunMessage)
+    {
+        return ReadNodeTrackSummary(stream, limit, tag, sizeof(uint) * 2, overrunMessage);
+    }
+
+    private static MdxNodeTrackSummary ReadNodeTrackSummary(Stream stream, long limit, string tag, int valueSizeBytes, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"MDLGENOBJECT(v1300): invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+
+            SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+            if (TrackUsesTangents(interpolationType))
+            {
+                SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+                SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+            }
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxNodeTrackSummary(tag, checked((int)keyCount), interpolationType, globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
+    private static MdxVisibilityTrackSummary ReadVisibilityTrackSummary(Stream stream, long limit, string tag, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"MDLVISIBILITY(v1300): invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+
+            SkipBytes(stream, sizeof(float), limit, overrunMessage);
+            if (TrackUsesTangents(interpolationType))
+            {
+                SkipBytes(stream, sizeof(float), limit, overrunMessage);
+                SkipBytes(stream, sizeof(float), limit, overrunMessage);
+            }
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxVisibilityTrackSummary(tag, checked((int)keyCount), interpolationType, globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
+    private static MdxTrackSummary ReadTrackSummary(Stream stream, long limit, string tag, int valueSizeBytes, string overrunMessage)
+    {
+        uint keyCount = ReadUInt32(stream);
+        if (keyCount > 100000)
+            throw new InvalidDataException($"MDLANIMATION(v1300): invalid {tag} key count {keyCount}.");
+
+        uint interpolationType = ReadUInt32(stream);
+        int globalSequenceId = ReadInt32(stream);
+        int? firstKeyTime = null;
+        int? lastKeyTime = null;
+
+        for (uint keyIndex = 0; keyIndex < keyCount; keyIndex++)
+        {
+            int keyTime = ReadInt32(stream);
+            firstKeyTime ??= keyTime;
+            lastKeyTime = keyTime;
+
+            SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+            if (TrackUsesTangents(interpolationType))
+            {
+                SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+                SkipBytes(stream, valueSizeBytes, limit, overrunMessage);
+            }
+        }
+
+        if (stream.Position > limit)
+            throw new InvalidDataException(overrunMessage);
+
+        return new MdxTrackSummary(tag, checked((int)keyCount), interpolationType, globalSequenceId, firstKeyTime, lastKeyTime);
+    }
+
     private static uint ReadUInt32(Stream stream)
     {
         Span<byte> bytes = stackalloc byte[sizeof(uint)];
         stream.ReadExactly(bytes);
         return BinaryPrimitives.ReadUInt32LittleEndian(bytes);
+    }
+
+    private static byte ReadByte(Stream stream)
+    {
+        int value = stream.ReadByte();
+        if (value < 0)
+            throw new EndOfStreamException();
+
+        return (byte)value;
     }
 
     private static int ReadInt32(Stream stream)
@@ -756,6 +1721,13 @@ public static class MdxSummaryReader
         Span<byte> bytes = stackalloc byte[4];
         stream.ReadExactly(bytes);
         return Encoding.ASCII.GetString(bytes);
+    }
+
+    private static byte[] ReadBytes(Stream stream, int byteCount)
+    {
+        byte[] bytes = new byte[byteCount];
+        stream.ReadExactly(bytes);
+        return bytes;
     }
 
     private static void ExpectTag(Stream stream, string expected, string message)
@@ -783,6 +1755,11 @@ public static class MdxSummaryReader
             throw new InvalidDataException(errorMessage);
 
         return count;
+    }
+
+    private static bool TrackUsesTangents(uint interpolationType)
+    {
+        return interpolationType >= 2u;
     }
 
     private static void SkipBytes(Stream stream, long byteCount, long limit, string errorMessage)
