@@ -97,8 +97,10 @@ Current status in the workspace:
   - corpus MSCN analyzer
   - unknowns report types
   - corpus unknowns analyzer
+  - hierarchy or object-hypothesis report types with shared placement comparison and dominant link-group ownership
   - `WowViewer.Tool.Inspect` verbs for `pm4 inspect` and `pm4 export-json`
   - `WowViewer.Tool.Inspect pm4 export-json --ck24 <decimal|0xHEX>` for research-only CK24 forensic JSON
+  - `WowViewer.Tool.Inspect` verb for `pm4 hierarchy`
   - `WowViewer.Tool.Inspect` verbs for `pm4 audit` and `pm4 audit-directory`
   - `WowViewer.Tool.Inspect` verb for `pm4 linkage`
   - `WowViewer.Tool.Inspect` verb for `pm4 mscn`

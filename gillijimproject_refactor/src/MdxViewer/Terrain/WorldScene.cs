@@ -7,7 +7,6 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Population;
 using MdxViewer.Rendering;
-using Pm4Research.Core;
 using Silk.NET.OpenGL;
 using CorePm4AxisConvention = WowViewer.Core.PM4.Models.Pm4AxisConvention;
 using CorePm4CorrelationCandidateScore = WowViewer.Core.PM4.Models.Pm4CorrelationCandidateScore;
@@ -33,11 +32,19 @@ using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
 using CorePm4PlacementContract = WowViewer.Core.PM4.Services.Pm4PlacementContract;
 using CorePm4PlacementMath = WowViewer.Core.PM4.Services.Pm4PlacementMath;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
+using CorePm4DecodeAuditReport = WowViewer.Core.PM4.Models.Pm4DecodeAuditReport;
+using CorePm4ExplorationSnapshot = WowViewer.Core.PM4.Models.Pm4ExplorationSnapshot;
 using Pm4CoordinateService = WowViewer.Core.PM4.Services.Pm4CoordinateService;
+using CorePm4ObjectHypothesis = WowViewer.Core.PM4.Models.Pm4ObjectHypothesis;
 using MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
 using MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
 using Pm4File = WowViewer.Core.PM4.Research.Pm4ResearchDocument;
+using CorePm4ReferenceAudit = WowViewer.Core.PM4.Models.Pm4ReferenceAudit;
+using CorePm4ResearchAuditAnalyzer = WowViewer.Core.PM4.Research.Pm4ResearchAuditAnalyzer;
+using CorePm4ResearchHierarchyAnalyzer = WowViewer.Core.PM4.Research.Pm4ResearchHierarchyAnalyzer;
+using CorePm4ResearchSnapshotBuilder = WowViewer.Core.PM4.Research.Pm4ResearchSnapshotBuilder;
+using CorePm4TileObjectHypothesisReport = WowViewer.Core.PM4.Models.Pm4TileObjectHypothesisReport;
 
 namespace MdxViewer.Terrain;
 
@@ -168,8 +175,15 @@ public readonly struct Pm4ResearchHypothesisMatch
         int totalIndexCount,
         int mdosCount,
         int groupKeyCount,
+        int linkGroupCount,
+        uint dominantLinkGroupObjectId,
         int linkedMprlRefCount,
         int linkedMprlInBoundsCount,
+        CorePm4CoordinateMode coordinateMode,
+        Pm4PlanarTransform planarTransform,
+        float frameYawDegrees,
+        float? mprlHeadingMeanDegrees,
+        float? headingDeltaDegrees,
         float similarityScore)
     {
         Family = family;
@@ -178,8 +192,15 @@ public readonly struct Pm4ResearchHypothesisMatch
         TotalIndexCount = totalIndexCount;
         MdosCount = mdosCount;
         GroupKeyCount = groupKeyCount;
+        LinkGroupCount = linkGroupCount;
+        DominantLinkGroupObjectId = dominantLinkGroupObjectId;
         LinkedMprlRefCount = linkedMprlRefCount;
         LinkedMprlInBoundsCount = linkedMprlInBoundsCount;
+        CoordinateMode = coordinateMode;
+        PlanarTransform = planarTransform;
+        FrameYawDegrees = frameYawDegrees;
+        MprlHeadingMeanDegrees = mprlHeadingMeanDegrees;
+        HeadingDeltaDegrees = headingDeltaDegrees;
         SimilarityScore = similarityScore;
     }
 
@@ -189,8 +210,15 @@ public readonly struct Pm4ResearchHypothesisMatch
     public int TotalIndexCount { get; }
     public int MdosCount { get; }
     public int GroupKeyCount { get; }
+    public int LinkGroupCount { get; }
+    public uint DominantLinkGroupObjectId { get; }
     public int LinkedMprlRefCount { get; }
     public int LinkedMprlInBoundsCount { get; }
+    public CorePm4CoordinateMode CoordinateMode { get; }
+    public Pm4PlanarTransform PlanarTransform { get; }
+    public float FrameYawDegrees { get; }
+    public float? MprlHeadingMeanDegrees { get; }
+    public float? HeadingDeltaDegrees { get; }
     public float SimilarityScore { get; }
 }
 
@@ -521,11 +549,13 @@ public class WorldScene : ISceneRenderer
     private const int Pm4MaxCameraTileRadius = 2;
     private const double Pm4ExpandWindowThresholdMs = 120.0;
     private const double Pm4ShrinkWindowThresholdMs = 300.0;
+    private const long Pm4ProgressStatusIntervalMs = 1000;
+    private const long Pm4ProgressLogIntervalMs = 5000;
     private bool _showPm4Overlay;
     private bool _showPm4SolidOverlay = true;
     private bool _showPm4ObjectBounds = true;
     private bool _pm4OverlayIgnoreDepth = true;
-    private bool _pm4FlipAllObjectsY = true;
+    private bool _pm4FlipAllObjectsY;
     private bool _showPm4PositionRefs;
     private bool _showPm4ObjectCentroids;
     private bool _pm4SplitCk24ByConnectivity;
@@ -1759,7 +1789,6 @@ public class WorldScene : ISceneRenderer
         ReleasePm4LoadCancellation(cancelPendingLoad: true);
 
         _pm4LoadAttempted = true;
-        _pm4LoadedCameraWindow = null;
         int requestId = ++_pm4LoadRequestId;
         var selectedObjectKey = _selectedPm4ObjectKey;
         var cancellation = new CancellationTokenSource();
@@ -1795,9 +1824,13 @@ public class WorldScene : ISceneRenderer
 
         if (result.CacheData != null)
         {
-            ClearPm4OverlayRuntimeState();
-            _pm4LoadedCameraWindow = result.LoadedCameraWindow;
-            RestorePm4OverlayFromCache(result.CacheData);
+            bool replaceExisting = !_pm4LoadedCameraWindow.HasValue || _pm4TileObjects.Count == 0;
+            if (replaceExisting)
+                ClearPm4OverlayRuntimeState();
+
+            MergePm4OverlayFromCache(result.CacheData);
+            if (result.LoadedCameraWindow.HasValue)
+                ExpandPm4LoadedCameraWindow(result.LoadedCameraWindow.Value);
             RestoreSelectedPm4Object(result.SelectedObjectKey);
             UpdatePm4AdaptiveWindowRadius(result.LoadElapsedMs);
         }
@@ -1817,6 +1850,35 @@ public class WorldScene : ISceneRenderer
             cancellation.Cancel();
 
         cancellation.Dispose();
+    }
+
+    private void ReportPm4LoadProgress(
+        int requestId,
+        string phase,
+        int processedFiles,
+        int totalFiles,
+        int loadedFiles,
+        int objectCount,
+        int lineCount,
+        int triangleCount,
+        int readFailed,
+        int decodeFailed,
+        int zeroObjectFiles,
+        string? currentPath,
+        bool emitLog)
+    {
+        if (requestId != _pm4LoadRequestId)
+            return;
+
+        string currentFileSuffix = string.IsNullOrWhiteSpace(currentPath)
+            ? string.Empty
+            : $", file={Path.GetFileName(currentPath)}";
+        string status =
+            $"PM4 loading: {phase} {processedFiles}/{totalFiles} files, loaded={loadedFiles}, objects={objectCount}, lines={lineCount}, tris={triangleCount}, readFail={readFailed}, decodeFail={decodeFailed}, zero={zeroObjectFiles}{currentFileSuffix}";
+        _pm4Status = status;
+
+        if (emitLog)
+            ViewerLog.Info(ViewerLog.Category.Terrain, "[PM4] " + status);
     }
 
     private Pm4OverlayAsyncLoadResult LoadPm4OverlayAsync(
@@ -1878,11 +1940,11 @@ public class WorldScene : ISceneRenderer
 
             Vector3 loadAnchorCameraPosition = GetPm4LoadAnchorCameraPosition();
             var cameraWindow = GetPm4CameraWindow(loadAnchorCameraPosition, _pm4CameraTileRadius);
-            List<(string path, int tileX, int tileY)> windowCandidates = pm4Candidates
+            List<(string path, int tileX, int tileY)> loadCandidates = pm4Candidates
                 .Where(candidate => IsPm4TileInsideCameraWindow(candidate.tileX, candidate.tileY, cameraWindow))
                 .ToList();
 
-            if (windowCandidates.Count == 0)
+            if (loadCandidates.Count == 0)
             {
                 return new Pm4OverlayAsyncLoadResult(
                     requestId,
@@ -1902,7 +1964,7 @@ public class WorldScene : ISceneRenderer
 
             string candidateSignature = Pm4OverlayCacheService.BuildCandidateSignature(
                 _dataSource,
-                windowCandidates.Select(static candidate => candidate.path).ToList(),
+                loadCandidates.Select(static candidate => candidate.path).ToList(),
                 _pm4SplitCk24ByMdos,
                 _pm4SplitCk24ByConnectivity);
             var loadStopwatch = Stopwatch.StartNew();
@@ -1926,6 +1988,8 @@ public class WorldScene : ISceneRenderer
             if (!string.IsNullOrWhiteSpace(cacheLoadError))
                 ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheLoadError}");
 
+            _pm4Status = $"PM4 loading: cache miss, decoding {loadCandidates.Count} camera-window files...";
+
             int remainingLineBudget = Pm4MaxLinesTotal;
             int remainingTriangleBudget = Pm4MaxTrianglesTotal;
             int remainingPositionRefBudget = Pm4MaxPositionRefsTotal;
@@ -1942,8 +2006,12 @@ public class WorldScene : ISceneRenderer
             float maxObjectZ = float.MinValue;
             var tileObjects = new Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>>();
             var tilePositionRefs = new Dictionary<(int tileX, int tileY), List<Vector3>>();
+            var progressStopwatch = Stopwatch.StartNew();
+            long lastStatusReportMs = -Pm4ProgressStatusIntervalMs;
+            long lastLogReportMs = -Pm4ProgressLogIntervalMs;
+            int processedFiles = 0;
 
-            foreach (var candidate in windowCandidates)
+            foreach (var candidate in loadCandidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (remainingLineBudget <= 0)
@@ -1952,11 +2020,21 @@ public class WorldScene : ISceneRenderer
                 string pm4Path = candidate.path;
                 int effectiveTileX = candidate.tileX;
                 int effectiveTileY = candidate.tileY;
+                processedFiles++;
 
                 byte[]? bytes = _dataSource.ReadFile(pm4Path);
                 if (bytes == null || bytes.Length == 0)
                 {
                     readFailed++;
+                    long readFailElapsedMs = progressStopwatch.ElapsedMilliseconds;
+                    if (readFailElapsedMs - lastStatusReportMs >= Pm4ProgressStatusIntervalMs)
+                    {
+                        bool emitLog = readFailElapsedMs - lastLogReportMs >= Pm4ProgressLogIntervalMs;
+                        ReportPm4LoadProgress(requestId, "reading", processedFiles, loadCandidates.Count, loadedFiles, objectCount, lineCount, triangleCount, readFailed, decodeFailed, zeroObjectFiles, pm4Path, emitLog);
+                        lastStatusReportMs = readFailElapsedMs;
+                        if (emitLog)
+                            lastLogReportMs = readFailElapsedMs;
+                    }
                     continue;
                 }
 
@@ -2029,6 +2107,16 @@ public class WorldScene : ISceneRenderer
                     decodeFailed++;
                     ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] Failed to decode '{pm4Path}': {ex.Message}");
                 }
+
+                long elapsedMs = progressStopwatch.ElapsedMilliseconds;
+                if (elapsedMs - lastStatusReportMs >= Pm4ProgressStatusIntervalMs || processedFiles == loadCandidates.Count)
+                {
+                    bool emitLog = elapsedMs - lastLogReportMs >= Pm4ProgressLogIntervalMs || processedFiles == loadCandidates.Count;
+                    ReportPm4LoadProgress(requestId, "decoding", processedFiles, loadCandidates.Count, loadedFiles, objectCount, lineCount, triangleCount, readFailed, decodeFailed, zeroObjectFiles, pm4Path, emitLog);
+                    lastStatusReportMs = elapsedMs;
+                    if (emitLog)
+                        lastLogReportMs = elapsedMs;
+                }
             }
 
             if (loadedFiles == 0)
@@ -2039,7 +2127,7 @@ public class WorldScene : ISceneRenderer
                     cameraWindow,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
-                    $"PM4: {windowCandidates.Count}/{totalFiles} camera-window files found, none decoded into overlay data for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
+                    $"PM4: {loadCandidates.Count}/{totalFiles} camera-window files found, none decoded into overlay data for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
                     cancelled: false);
             }
 
@@ -2076,7 +2164,7 @@ public class WorldScene : ISceneRenderer
                 cameraWindow,
                 selectedObjectKey,
                 loadStopwatch.Elapsed.TotalMilliseconds,
-                $"PM4 ready: {loadedFiles}/{windowCandidates.Count} camera-window files decoded and cached for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
+                $"PM4 ready: {loadedFiles}/{loadCandidates.Count} camera-window files decoded and cached for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
                 cancelled: false);
         }
         catch (OperationCanceledException)
@@ -2253,9 +2341,37 @@ public class WorldScene : ISceneRenderer
             return;
         }
 
-        GetPm4CameraTile(cameraPos, out int cameraTileX, out int cameraTileY);
-        if (!IsPm4TileInsideCameraWindow(cameraTileX, cameraTileY, _pm4LoadedCameraWindow.Value))
+        var desiredWindow = GetPm4CameraWindow(cameraPos, _pm4CameraTileRadius);
+        if (!IsPm4CameraWindowCovered(desiredWindow))
             BeginPm4OverlayLoad();
+    }
+
+    private bool IsPm4CameraWindowCovered((int minTileX, int minTileY, int maxTileX, int maxTileY) cameraWindow)
+    {
+        if (!_pm4LoadedCameraWindow.HasValue)
+            return false;
+
+        var loadedWindow = _pm4LoadedCameraWindow.Value;
+        return cameraWindow.minTileX >= loadedWindow.minTileX
+            && cameraWindow.minTileY >= loadedWindow.minTileY
+            && cameraWindow.maxTileX <= loadedWindow.maxTileX
+            && cameraWindow.maxTileY <= loadedWindow.maxTileY;
+    }
+
+    private void ExpandPm4LoadedCameraWindow((int minTileX, int minTileY, int maxTileX, int maxTileY) window)
+    {
+        if (!_pm4LoadedCameraWindow.HasValue)
+        {
+            _pm4LoadedCameraWindow = window;
+            return;
+        }
+
+        var existing = _pm4LoadedCameraWindow.Value;
+        _pm4LoadedCameraWindow = (
+            Math.Min(existing.minTileX, window.minTileX),
+            Math.Min(existing.minTileY, window.minTileY),
+            Math.Max(existing.maxTileX, window.maxTileX),
+            Math.Max(existing.maxTileY, window.maxTileY));
     }
 
     private void UpdatePm4AdaptiveWindowRadius(double loadElapsedMs)
@@ -2332,18 +2448,8 @@ public class WorldScene : ISceneRenderer
             tiles);
     }
 
-    private void RestorePm4OverlayFromCache(Pm4OverlayCacheData cacheData)
+    private void MergePm4OverlayFromCache(Pm4OverlayCacheData cacheData)
     {
-        _pm4TotalFiles = cacheData.TotalFiles;
-        _pm4LoadedFiles = cacheData.LoadedFiles;
-        _pm4ObjectCount = cacheData.ObjectCount;
-        _pm4LineCount = cacheData.LineCount;
-        _pm4TriangleCount = cacheData.TriangleCount;
-        _pm4PositionRefCount = cacheData.PositionRefCount;
-        _pm4RejectedLongEdges = cacheData.RejectedLongEdges;
-        _pm4MinObjectZ = cacheData.MinObjectZ;
-        _pm4MaxObjectZ = cacheData.MaxObjectZ;
-
         for (int tileIndex = 0; tileIndex < cacheData.Tiles.Count; tileIndex++)
         {
             Pm4OverlayCacheTile tile = cacheData.Tiles[tileIndex];
@@ -2397,9 +2503,47 @@ public class WorldScene : ISceneRenderer
             _pm4MaxObjectZ = 1f;
         }
 
+        _pm4TotalFiles = Math.Max(_pm4TotalFiles, cacheData.TotalFiles);
+        RecalculatePm4OverlayRuntimeTotals();
+
         RebuildPm4MergedObjectGroups();
         RebuildPm4ObjectGroupBounds();
         RebuildPm4TileCk24Bounds();
+    }
+
+    private void RecalculatePm4OverlayRuntimeTotals()
+    {
+        _pm4LoadedFiles = _pm4TileObjects.Count;
+        _pm4ObjectCount = 0;
+        _pm4LineCount = 0;
+        _pm4TriangleCount = 0;
+        _pm4PositionRefCount = 0;
+        _pm4RejectedLongEdges = 0;
+        _pm4MinObjectZ = float.MaxValue;
+        _pm4MaxObjectZ = float.MinValue;
+
+        foreach (var tileEntry in _pm4TileObjects)
+        {
+            List<Pm4OverlayObject> objects = tileEntry.Value;
+            _pm4ObjectCount += objects.Count;
+            _pm4LineCount += objects.Sum(static obj => obj.Lines.Count);
+            _pm4TriangleCount += objects.Sum(static obj => obj.Triangles.Count);
+
+            for (int i = 0; i < objects.Count; i++)
+            {
+                _pm4MinObjectZ = MathF.Min(_pm4MinObjectZ, objects[i].Center.Z);
+                _pm4MaxObjectZ = MathF.Max(_pm4MaxObjectZ, objects[i].Center.Z);
+            }
+        }
+
+        foreach (var refsEntry in _pm4TilePositionRefs)
+            _pm4PositionRefCount += refsEntry.Value.Count;
+
+        if (_pm4MinObjectZ > _pm4MaxObjectZ)
+        {
+            _pm4MinObjectZ = 0f;
+            _pm4MaxObjectZ = 1f;
+        }
     }
 
     private static bool IsMapPm4Path(string path, string mapName)
@@ -4232,8 +4376,8 @@ public class WorldScene : ISceneRenderer
 
     public void ReloadPm4Overlay()
     {
+        ClearPm4OverlayRuntimeState();
         _pm4LoadAttempted = false;
-        _pm4LoadedCameraWindow = null;
         BeginPm4OverlayLoad(ignoreCache: true);
     }
 
@@ -6247,13 +6391,25 @@ public class WorldScene : ISceneRenderer
                 hypothesis.TotalIndexCount,
                 hypothesis.MdosIndices.Count,
                 hypothesis.GroupKeys.Count,
+                hypothesis.MslkGroupObjectIds.Count,
+                hypothesis.DominantLinkGroupObjectId,
                 hypothesis.MprlFootprint.LinkedRefCount,
                 hypothesis.MprlFootprint.LinkedInBoundsCount,
+                hypothesis.PlacementComparison.CoordinateMode,
+                hypothesis.PlacementComparison.PlanarTransform,
+                hypothesis.PlacementComparison.FrameYawDegrees,
+                hypothesis.PlacementComparison.MprlHeadingMeanDegrees,
+                hypothesis.PlacementComparison.HeadingDeltaDegrees,
                 ComputePm4ResearchMatchScore(obj, hypothesis)))
             .OrderBy(match => match.SimilarityScore)
             .ThenBy(match => match.Family)
             .ThenBy(match => match.FamilyObjectIndex)
             .ToList();
+
+        int invalidRefIndexCount = context.DecodeAudit.ReferenceAudits
+            .Where(static audit => audit.Name == "MSLK.RefIndex->MSUR")
+            .Select(static audit => audit.InvalidCount)
+            .FirstOrDefault();
 
         info = new Pm4SelectedObjectResearchInfo(
             obj.SourcePath,
@@ -6262,7 +6418,7 @@ public class WorldScene : ISceneRenderer
             context.Snapshot.MsurCount,
             context.Snapshot.MscnCount,
             context.Snapshot.MprlCount,
-            context.RefIndexAudit.InvalidRefIndexCount,
+            invalidRefIndexCount,
             context.HypothesisReport.TotalHypothesisCount,
             allMatches.Count,
             context.Snapshot.Diagnostics.Count,
@@ -6293,12 +6449,12 @@ public class WorldScene : ISceneRenderer
 
         try
         {
-            Pm4ResearchFile researchFile = Pm4ResearchReader.Read(bytes, sourcePath);
+            Pm4File researchFile = CorePm4DocumentReader.Read(bytes, sourcePath);
             context = new Pm4ResearchContext(
                 sourcePath,
-                Pm4ResearchReader.CreateSnapshot(researchFile),
-                Pm4ResearchAuditAnalyzer.AnalyzeMslkRefIndexFile(researchFile),
-                Pm4ResearchObjectHypothesisGenerator.Analyze(researchFile));
+                CorePm4ResearchSnapshotBuilder.CreateSnapshot(researchFile),
+                CorePm4ResearchAuditAnalyzer.Analyze(researchFile),
+                CorePm4ResearchHierarchyAnalyzer.Analyze(researchFile));
             _pm4ResearchBySourcePath[sourcePath] = context;
             return true;
         }
@@ -6311,7 +6467,7 @@ public class WorldScene : ISceneRenderer
         }
     }
 
-    private static float ComputePm4ResearchMatchScore(Pm4OverlayObject obj, Pm4ObjectHypothesis hypothesis)
+    private static float ComputePm4ResearchMatchScore(Pm4OverlayObject obj, CorePm4ObjectHypothesis hypothesis)
     {
         float score = 0f;
         score += Math.Abs(hypothesis.SurfaceCount - obj.SurfaceCount) * 3f;
@@ -6322,6 +6478,8 @@ public class WorldScene : ISceneRenderer
         {
             bool hasExactGroupObjectId = hypothesis.MslkGroupObjectIds.Contains(obj.LinkGroupObjectId);
             score += hasExactGroupObjectId ? -8f : 8f;
+            if (hypothesis.DominantLinkGroupObjectId == obj.LinkGroupObjectId)
+                score -= 4f;
         }
 
         return Math.Max(0f, score);
@@ -7078,7 +7236,7 @@ public class WorldScene : ISceneRenderer
         bool hasLayerScale = _pm4TileCk24Scales.TryGetValue(tileCk24Key, out Vector3 layerScale)
             && !IsNearOneVector(layerScale);
 
-        bool hasGlobalFlip = _pm4FlipAllObjectsY && objectKey.ck24 != 0;
+        bool hasGlobalFlip = _pm4FlipAllObjectsY;
         bool hasObjectTranslation = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectTranslation)
             && !IsNearZeroVector(objectTranslation);
         bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)
@@ -7143,7 +7301,6 @@ public class WorldScene : ISceneRenderer
             Matrix4x4 rotationScale = Matrix4x4.Identity;
             if (hasGlobalFlip)
             {
-                // Mirror around the logical PM4 object group, not world origin.
                 rotationScale *= Matrix4x4.CreateScale(1f, -1f, 1f);
             }
 
@@ -7535,20 +7692,20 @@ internal sealed class Pm4ResearchContext
 {
     public Pm4ResearchContext(
         string sourcePath,
-        Pm4ExplorationSnapshot snapshot,
-        Pm4MslkRefIndexFileAudit refIndexAudit,
-        Pm4TileObjectHypothesisReport hypothesisReport)
+        CorePm4ExplorationSnapshot snapshot,
+        CorePm4DecodeAuditReport decodeAudit,
+        CorePm4TileObjectHypothesisReport hypothesisReport)
     {
         SourcePath = sourcePath;
         Snapshot = snapshot;
-        RefIndexAudit = refIndexAudit;
+        DecodeAudit = decodeAudit;
         HypothesisReport = hypothesisReport;
     }
 
     public string SourcePath { get; }
-    public Pm4ExplorationSnapshot Snapshot { get; }
-    public Pm4MslkRefIndexFileAudit RefIndexAudit { get; }
-    public Pm4TileObjectHypothesisReport HypothesisReport { get; }
+    public CorePm4ExplorationSnapshot Snapshot { get; }
+    public CorePm4DecodeAuditReport DecodeAudit { get; }
+    public CorePm4TileObjectHypothesisReport HypothesisReport { get; }
 }
 
 internal sealed record Pm4WmoCorrelationSummary(

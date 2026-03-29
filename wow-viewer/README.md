@@ -371,8 +371,10 @@ Current PM4 inspect slice:
 
 - `src/core/WowViewer.Core.PM4` now also contains the first single-file PM4 analyzer and report layer.
 - `src/core/WowViewer.Core.PM4` now also contains a research-only CK24 forensic report layer for targeted object-graph export, raw MSLK rows, raw linked MPRL rows, footprint counts, and placement-vs-heading comparison.
+- `src/core/WowViewer.Core.PM4` now also contains a research-only hierarchy analyzer that ports the old object-hypothesis family splits and enriches them with shared placement evidence plus dominant `MSLK.GroupObjectId` ownership.
 - `tools/inspect/WowViewer.Tool.Inspect` now supports:
 	- `pm4 inspect --input <file.pm4>`
+	- `pm4 hierarchy --input <file.pm4> [--output <report.json>]`
 	- `pm4 linkage --input <directory> [--output <report.json>]`
 	- `pm4 mscn --input <directory> [--output <report.json>]`
 	- `pm4 unknowns --input <directory> [--output <report.json>]`
@@ -381,6 +383,7 @@ Current PM4 inspect slice:
 	- `pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]`
 - Smoke-test command that passed on Mar 25, 2026:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 hierarchy --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 linkage --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 mscn --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 unknowns --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`

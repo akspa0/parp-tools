@@ -1,5 +1,49 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - PM4 Hierarchy Research Moved Into `wow-viewer` And Back Into `MdxViewer`
+
+- the active PM4 research path in `MdxViewer` is no longer anchored on `src/Pm4Research.Core`; `src/MdxViewer/Terrain/WorldScene.cs` now builds its cached PM4 research context from shared `wow-viewer/src/core/WowViewer.Core.PM4`
+- landed shared seam:
+   - `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4ResearchHierarchyAnalyzer.cs` now ports the old object-hypothesis split families into `Core.PM4`
+   - each hypothesis now also carries shared placement evidence through `Pm4ForensicsPlacementComparison` plus dominant `MSLK.GroupObjectId` / link-group ownership data
+   - `WowViewer.Tool.Inspect` now supports `pm4 hierarchy --input <file.pm4> [--output <report.json>]` for real-data scene-graph or placement research outside the viewer
+- landed active-viewer consumer update:
+   - `WorldScene` now uses shared `Pm4ResearchSnapshotBuilder`, shared decode-audit output, and shared hierarchy analysis instead of the old `Pm4ResearchObjectHypothesisGenerator`
+   - the `PM4 Research` section in `ViewerApp_Pm4Utilities.cs` now shows candidate link-group counts, dominant group ids, shared coordinate-mode decisions, planar transform flags, frame yaw, and heading deltas for the selected object
+- important boundary:
+   - this is a research and diagnostics slice, not a final runtime placement fix
+   - the new shared report explains more of the scene-graph evidence, but it does not by itself solve the remaining opposite-side or void-placement PM4 regressions
+
+## Mar 29, 2026 - PM4 Disappear-On-Approach Bug Traced To Additive Loader State Reset
+
+- latest viewer symptom tightened a separate PM4 runtime failure from the CK24 placement work:
+   - PM4 objects could disappear as the camera approached them
+   - pressing `Reload PM4` did not restore them reliably
+- landed root-cause fix in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - the additive PM4 loader was still resetting `_pm4LoadedCameraWindow = null` inside `BeginPm4OverlayLoad(...)` before the async load completed
+   - `TryFinalizePm4OverlayLoad()` uses `_pm4LoadedCameraWindow.HasValue` to decide whether to merge new tiles into the existing PM4 overlay or clear and replace it
+   - that meant every incremental camera-window load was effectively treated as a full replacement, which can drop previously loaded PM4 objects while moving around the map
+- current behavior after the fix:
+   - normal PM4 background loads keep the previous loaded-window state until finalize merges the new cache data
+   - `Reload PM4` now does a real explicit clear of PM4 runtime state first and then starts a cache-bypassing reload
+- important boundary:
+   - this is build-validated only in this session
+   - if PM4 still disappears after this patch, the next likely seam is render/cull gating rather than overlay residency bookkeeping
+
+## Mar 29, 2026 - Same-Tile PM4 Candidate Collisions No Longer Merge By Default
+
+- latest attached non-zero `CK24` graph exports still showed exact paired duplicate parts even when both split toggles were off, which pointed away from viewer-side fragmentation toggles and toward the PM4 file-selection path instead
+- landed correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - both PM4 runtime loading and offline PM4 OBJ export now group candidate `.pm4` files by effective tile first
+   - when more than one file maps to the same effective tile, the viewer keeps one preferred canonical candidate instead of rebasing object-part ids and merging the sets together
+   - preferred candidates are ranked toward the cleanest `.../World/Maps/<map>/...` path and collisions are logged for follow-up diagnosis
+- why this matters:
+   - the current best explanation for the `part=0` / `part=495` style duplicate pattern is that two different PM4 files were both being accepted as the same map tile and then merged before graph export or runtime rendering
+   - if that hypothesis is right, this should remove a whole class of fake PM4 placement regressions that were really duplicate-content collisions
+- important boundary:
+   - this is build-validated only in this session
+   - no live viewer signoff yet proves that the remaining opposite-corner objects were caused by same-tile candidate collisions rather than another transform seam
+
 ## Mar 29, 2026 - Zero-CK24 Objects Stop Inheriting The Global PM4 N/S Mirror
 
 - latest manual viewer evidence tightened the root cause for the remaining misplaced root-bucket PM4 overlays:

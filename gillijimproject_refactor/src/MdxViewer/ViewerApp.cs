@@ -170,6 +170,7 @@ public partial class ViewerApp : IDisposable
     private bool _useDockspaceUi = true;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
+    private bool _fallbackToFixedPanelsNextFrame;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
@@ -1038,6 +1039,13 @@ void main() {
 
     private void DrawUI()
     {
+        if (_fallbackToFixedPanelsNextFrame)
+        {
+            _fallbackToFixedPanelsNextFrame = false;
+            _useDockspaceUi = false;
+            _statusMessage = "Docked panel layout was invalid; reverted to fixed sidebars.";
+        }
+
         _navigatorDockState = default;
         _inspectorDockState = default;
         _minimapDockState = default;
@@ -1060,6 +1068,9 @@ void main() {
                 DrawLeftSidebar();
             if (_showRightSidebar)
                 DrawRightSidebar();
+
+            if (_useDockspaceUi)
+                ValidateDockspacePanels();
 
             DrawStatusBar();
 
@@ -1762,6 +1773,14 @@ void main() {
 
         ImGui.End();
         ImGui.PopStyleVar(3);
+    }
+
+    private void ValidateDockspacePanels()
+    {
+        bool leftBroken = _showLeftSidebar && _navigatorDockState.Visible && !_navigatorDockState.IsDocked;
+        bool rightBroken = _showRightSidebar && _inspectorDockState.Visible && !_inspectorDockState.IsDocked;
+        if (leftBroken || rightBroken)
+            _fallbackToFixedPanelsNextFrame = true;
     }
 
     private void RunMapGlbTilesExport()

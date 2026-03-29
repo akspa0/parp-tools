@@ -191,7 +191,10 @@ public partial class ViewerApp
                 for (int i = 0; i < researchInfo.TopMatches.Count; i++)
                 {
                     Pm4ResearchHypothesisMatch match = researchInfo.TopMatches[i];
-                    ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mdos={match.MdosCount} groups={match.GroupKeyCount} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
+                    string headingText = match.MprlHeadingMeanDegrees.HasValue
+                        ? $" heading={match.MprlHeadingMeanDegrees.Value:F1} delta={match.HeadingDeltaDegrees?.ToString("F1") ?? "n/a"}"
+                        : string.Empty;
+                    ImGui.BulletText($"{match.Family}#{match.FamilyObjectIndex} score={match.SimilarityScore:F2} surfaces={match.SurfaceCount} indices={match.TotalIndexCount} mdos={match.MdosCount} groups={match.GroupKeyCount} linkGroups={match.LinkGroupCount} dominant=0x{match.DominantLinkGroupObjectId:X} mode={match.CoordinateMode} planar=(swap={match.PlanarTransform.SwapPlanarAxes},u={match.PlanarTransform.InvertU},v={match.PlanarTransform.InvertV}) yaw={match.FrameYawDegrees:F1}{headingText} linkedMPRL={match.LinkedMprlRefCount}/{match.LinkedMprlInBoundsCount}");
                 }
             }
         }

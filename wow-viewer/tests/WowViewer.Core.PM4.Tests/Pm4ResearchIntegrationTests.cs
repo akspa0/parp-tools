@@ -82,6 +82,22 @@ public sealed class Pm4ResearchIntegrationTests
     }
 
     [Fact]
+    public void Hierarchy_DevelopmentTile_ExposesSharedPlacementAndLinkGroupEvidence()
+    {
+        Pm4TileObjectHypothesisReport report = Pm4ResearchHierarchyAnalyzer.Analyze(Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath));
+
+        Assert.NotEmpty(report.Objects);
+        Assert.Contains(report.Notes, note => note.Contains("scene-graph", StringComparison.OrdinalIgnoreCase));
+
+        Pm4ObjectHypothesis candidate = report.Objects.First(static hypothesis => hypothesis.Ck24 == 0x412CDC && hypothesis.Family == "ck24_mslk_refindex");
+        Assert.NotEmpty(candidate.MslkGroupObjectIds);
+        Assert.NotEqual(0u, candidate.DominantLinkGroupObjectId);
+        Assert.True(candidate.MprlFootprint.LinkedRefCount > 0);
+        Assert.True(float.IsFinite(candidate.PlacementComparison.FrameYawDegrees));
+        Assert.True(candidate.PlacementComparison.CoordinateMode is Pm4CoordinateMode.TileLocal or Pm4CoordinateMode.WorldSpace);
+    }
+
+    [Fact]
     public void PlacementMath_DevelopmentTile_PreservesCurrentRangeAndTileLocalHeuristics()
     {
         Pm4ResearchDocument document = Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath);

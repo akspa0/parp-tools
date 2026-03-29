@@ -481,6 +481,9 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
+			case "hierarchy":
+				RunPm4Hierarchy(tail);
+				break;
 			case "linkage":
 				RunPm4Linkage(tail);
 				break;
@@ -905,6 +908,33 @@ static void RunPm4Linkage(string[] args)
 	PrintPm4LinkageReport(report);
 }
 
+static void RunPm4Hierarchy(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4TileObjectHypothesisReport report = Pm4ResearchHierarchyAnalyzer.Analyze(Pm4ResearchReader.ReadFile(input));
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4HierarchyReport(report);
+}
+
 static void RunPm4Mscn(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -1327,6 +1357,42 @@ static void PrintPm4LinkageReport(Pm4LinkageReport report)
 		Console.WriteLine("Notes:");
 		foreach (string note in report.Notes)
 			Console.WriteLine($"  {note}");
+	}
+	}
+
+static void PrintPm4HierarchyReport(Pm4TileObjectHypothesisReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 hierarchy report");
+	Console.WriteLine($"Input: {report.SourcePath ?? "<memory>"}");
+	Console.WriteLine($"Version: {report.Version}");
+	Console.WriteLine($"Tile: {(report.TileX.HasValue && report.TileY.HasValue ? $"{report.TileX}_{report.TileY}" : "n/a")}");
+	Console.WriteLine($"Distinct CK24 groups: {report.Ck24GroupCount}");
+	Console.WriteLine($"Hypothesis objects: {report.TotalHypothesisCount}");
+	Console.WriteLine();
+	Console.WriteLine("Top hierarchy candidates:");
+	foreach (Pm4ObjectHypothesis hypothesis in report.Objects.Take(12))
+	{
+		Pm4ForensicsPlacementComparison placement = hypothesis.PlacementComparison;
+		string headingText = placement.MprlHeadingMeanDegrees.HasValue
+			? $" heading={placement.MprlHeadingMeanDegrees.Value:F2} delta={placement.HeadingDeltaDegrees?.ToString("F2") ?? "n/a"}"
+			: string.Empty;
+		Console.WriteLine($"  {hypothesis.Family}#{hypothesis.FamilyObjectIndex}: ck24=0x{hypothesis.Ck24:X6} surfaces={hypothesis.SurfaceCount} indices={hypothesis.TotalIndexCount} linkGroups={hypothesis.MslkGroupObjectIds.Count} dominantGroup=0x{hypothesis.DominantLinkGroupObjectId:X} linkedMPRL={hypothesis.MprlFootprint.LinkedRefCount}/{hypothesis.MprlFootprint.LinkedInBoundsCount} mode={placement.CoordinateMode} planar=(swap={placement.PlanarTransform.SwapPlanarAxes}, invertU={placement.PlanarTransform.InvertU}, invertV={placement.PlanarTransform.InvertV}) frameYaw={placement.FrameYawDegrees:F2}{headingText}");
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+
+	if (report.Diagnostics.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Diagnostics:");
+		foreach (string diagnostic in report.Diagnostics.Take(12))
+			Console.WriteLine($"  {diagnostic}");
 	}
 }
 
@@ -2158,6 +2224,7 @@ static void ShowPm4Usage()
 {
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 unknowns --input <directory> [--output <report.json>]");

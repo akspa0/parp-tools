@@ -32,7 +32,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MDX-L_Tool\MDX-L_Tool.csproj" />
-    <ProjectReference Include="..\Pm4Research.Core\Pm4Research.Core.csproj" />
     <ProjectReference Include="..\WoWMapConverter\WoWMapConverter.Core\WoWMapConverter.Core.csproj" />
     <ProjectReference Include="..\..\..\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\wow-viewer\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />

@@ -1,5 +1,48 @@
 # Progress
 
+### Mar 29, 2026 - Shared PM4 Hierarchy Research Slice Landed And `MdxViewer` Cut Over
+
+- moved the active viewer PM4 research path off legacy `src/Pm4Research.Core` and into shared `wow-viewer/src/core/WowViewer.Core.PM4`
+- landed `Research/Pm4ResearchHierarchyAnalyzer.cs` in `Core.PM4`, porting the old split-family object-hypothesis research and extending each candidate with:
+	- dominant `MSLK.GroupObjectId`
+	- shared placement comparison (`CoordinateMode`, planar transform, world pivot, frame yaw, heading delta)
+	- the existing MPRL footprint evidence
+- added `WowViewer.Tool.Inspect pm4 hierarchy --input <file.pm4> [--output <report.json>]`
+- rewired `src/MdxViewer/Terrain/WorldScene.cs` so selected-object PM4 research now uses shared snapshot, shared decode audit, and shared hierarchy analysis from `Core.PM4`
+- updated the `PM4 Research` viewer panel to show the new shared hierarchy and placement signals for top hypothesis matches
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 29, 2026 with existing environment warnings
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.PM4.Tests/WowViewer.Core.PM4.Tests.csproj -c Debug --filter "Hierarchy_DevelopmentTile_ExposesSharedPlacementAndLinkGroupEvidence|Pm4ResearchIntegrationTests"` passed on Mar 29, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- pm4 hierarchy --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4` produced a real hierarchy report on Mar 29, 2026
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this lands more grounded PM4 scene-graph evidence in shared code and in the viewer UI, but it does not claim the CK24 placement regression is solved yet
+
+### Mar 29, 2026 - PM4 Incremental Loads Stop Clearing Prior Residency
+
+- fixed a real PM4 runtime residency bug in `src/MdxViewer/Terrain/WorldScene.cs` that could make PM4 objects disappear permanently while moving around the viewer, especially when crossing into a new PM4 camera-window load
+- root cause:
+	- `BeginPm4OverlayLoad(...)` was resetting `_pm4LoadedCameraWindow` to `null` before the async load finished
+	- `TryFinalizePm4OverlayLoad()` uses `_pm4LoadedCameraWindow.HasValue` to decide whether a load should merge into existing PM4 state or replace it
+	- because the window had already been nulled, every incremental load finalized as a full replacement and cleared earlier PM4 tiles instead of preserving them
+- landed behavior:
+	- normal background PM4 loads now keep the previously loaded camera window intact until finalize decides whether to merge
+	- manual `Reload PM4` now explicitly clears PM4 runtime state first and then starts a fresh cache-bypassing load, so reload behaves like a real full reload instead of a partial merge with stale bookkeeping
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is build-validated only; the exact user repro of “PM4 disappears as I approach and reload does not bring it back” still needs manual viewer confirmation after this fix
+
+### Mar 29, 2026 - PM4 Same-Tile Candidate Collisions Now Keep One Canonical File
+
+- narrowed the PM4 file-selection path in `src/MdxViewer/Terrain/WorldScene.cs` so both runtime loading and offline PM4 OBJ export now keep only one preferred `.pm4` candidate per effective tile instead of blindly merging every file that parses to the same tile coordinate
+- reason: the latest non-zero `CK24` graph exports still showed exact paired duplicate parts like `part=0` and `part=495` even with `Split CK24 by MdosIndex` and `Split CK24 by Connectivity` disabled, which strongly fits same-tile candidate collisions rather than a pure transform-math bug
+- current selection policy prefers the most canonical `.../World/Maps/<map>/<map>_<x>_<y>.pm4` style path and logs dropped same-tile candidates for follow-up diagnosis
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is still build-validated only; manual viewer confirmation is still required to prove the paired duplicate-part pattern and opposite-corner PM4 placements actually disappear on the development map
+
 ### Mar 29, 2026 - Global PM4 Y Mirror No Longer Applies To Zero-CK24 Root Buckets
 
 - narrowed the PM4 object transform path in `src/MdxViewer/Terrain/WorldScene.cs` so the global `Mirror PM4 N/S` flip no longer applies to `CK24=0x000000` objects
