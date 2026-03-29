@@ -274,12 +274,17 @@ Current non-PM4 inspect slice:
 	- `blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
 	- `mdx inspect --input <file.mdx>`
 	- `mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
+	- `mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]`
+	- `mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]`
+	- `mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]`
+	- `mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]`
 	- `map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]`
 	- `wmo inspect --input <file.wmo> [--dump-lights]`
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
 	- it now also reports a first shared `BLP` header summary for format signature, version, compression fields, pixel format, image size, palette or JPEG-header presence, and per-mip offset or size coverage when a texture file is inspected
 	- it now also reports a first shared `MDX` top-level summary for `MDLX` signature, chunk order, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time signals, shared `GLBS` global-sequence signals, shared `SEQS` sequence signals, shared classic `GEOS` geoset signals, shared classic `GEOA` geoset-animation signals, shared classic `BONE` skeleton signals, shared classic `HELP` node signals, shared classic `ATCH` attachment signals, shared classic `PRE2` particle-emitter signals, shared classic `RIBB` ribbon-emitter signals, shared classic `CAMS` camera signals, shared classic `EVTS` event-node signals, shared classic `HTST` hit-test-shape signals, shared classic `CLID` collision-mesh signals, shared `PIVT` pivot-point signals, shared `TEXS` texture-table paths or flags, and narrow `MTLS` material-layer signals when a model file is inspected
+	- `mdx export-json` now remains a thin shared-reader export surface and can include the shared `GEOS` payload seam through `--include-geometry`, the shared `CLID` payload seam through `--include-collision`, the shared `HTST` payload seam through `--include-hit-test`, and the shared `TXAN` payload seam through `--include-texture-animations`
 	- it reads top-level chunk order, counts, version, and file-kind classification for WDT and ADT-family files
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
@@ -325,6 +330,13 @@ Current non-PM4 inspect slice:
 	- it is a shared `Core` + `Core.IO` consumer, not a tool-local parser
 - Smoke-test commands that should now work on the fixed development dataset:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- blp inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path interface/minimap/minimaparrow.blp`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --input .\testdata\0.5.3\tree\Creature\Wisp\Wisp.mdx --output .\output\mdx-wisp-summary.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --virtual-path world/generic/activedoodads/chest01/chest01.mdx --include-geometry --output .\output\mdx-chest-geometry.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --virtual-path character/dwarf/female/dwarffemale.mdx --include-collision --output .\output\mdx-dwarffemale-collision.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --virtual-path creature/anubisath/anubisath.mdx --include-hit-test --output .\output\mdx-anubisath-hit-test.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --virtual-path creature/airelemental/airelemental.mdx --include-texture-animations --output .\output\mdx-airelemental-texture-animations.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks LITE --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --path-filter braziers --limit 100`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks TXAN,PREM,CORN --input .\testdata\0.5.3\tree --limit 500`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0.adt`

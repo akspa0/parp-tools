@@ -1,5 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Default Next Non-MDX Continuation (Mar 28)
+
+- If the next chat is just "move on from MDX", the default target should be `wow-viewer` `Core.PM4` library completion, not another classic `MDX` seam.
+- Viewer-side PM4 work should stay narrow and consumer-focused; use the existing shared `Core.PM4` plan as the main continuation route.
+- Only fall back to non-`MDX` shared-I/O slices when there is a concrete ADT/WDT/WMO proof target and the slice stays tool-thin.
+
+## MDX Audit Against wow-viewer Shared Work (Mar 28)
+
+- Audit result: do not assume every recent `wow-viewer` classic `MDX` reader slice is direct `MdxViewer` parity.
+- Current classification:
+   - `GEOS` shared work is grounded in real legacy parser/runtime ownership and is the cleanest parity slice so far.
+   - `TXAN` shared payload ownership goes beyond the current classic `MdxFile` parser. The active renderer has texture-transform concepts and the M2 adapter populates them, but the classic MDX parser does not currently read `TXAN`.
+   - `HTST` shared payload ownership has no current active classic `MdxViewer` parser/runtime equivalent.
+   - `CLID` shared payload ownership also goes beyond the current classic parser; the active viewer currently uses only shared collision summary metadata in probe/model-info surfaces.
+- If future work returns to classic `MDX` parity, the hotter missed seam is the already-used `ATSQ` / geoset-animation and material-animation behavior in the active renderer, not more cold chunk-family expansion.
+
 ## Viewer UI Resize And Hit-Testing Regression Fixed (Mar 28)
 
 - The active viewer had a real UI-shell regression where panels stopped sizing correctly and buttons became effectively unclickable after resize or maximize.

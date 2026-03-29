@@ -1,5 +1,70 @@
 # Progress
 
+### Mar 28, 2026 - Post-MDX Default Continuation Reset
+
+- recorded that the default next implementation area after pausing `MDX` is `wow-viewer` `Core.PM4` library completion
+- preserved non-`MDX` shared-I/O as a secondary path only for narrow ADT/WDT/WMO slices with concrete proof targets
+
+### Mar 28, 2026 - MDX Audit Reclassified Recent Shared Readers
+
+- audited recent `wow-viewer` classic `MDX` work against active `MdxViewer` implementation instead of continuity claims alone
+- confirmed that `GEOS` is the clearest real classic-parser parity seam among the recent payload slices
+- reclassified `TXAN` payload ownership as a new shared-reader seam informed by legacy runtime concepts and M2-adapter usage, not a direct classic `MdxViewer` parser port
+- reclassified `HTST` payload ownership as a new shared-reader seam with no current active classic `MdxViewer` parser/runtime parity
+- reclassified `CLID` payload ownership as beyond active classic parser parity; active viewer currently uses only shared collision summary metadata in probe/model-info surfaces
+- identified the hotter missed legacy parity seam: classic `ATSQ` geoset-animation and related material animation behavior already used by the active renderer
+
+### Mar 28, 2026 - MDX Chunk Expansion Explicitly Paused
+
+- recorded user direction that further speculative `MDX` chunk implementation should stop
+- future continuation should not treat unresolved `MDX` families as the automatic next slice just because carrier discovery or inspect support exists
+- only resume new `MDX` chunk work if the user explicitly asks for a named seam or if a concrete active consumer requirement makes it necessary
+
+### Mar 29, 2026 - Shared Classic `MDX` `TXAN` Payload Slice Landed
+
+- advanced the shared classic `MDX` migration from unresolved `TXAN` discovery into first typed texture-animation payload ownership so actual `KTAT` or `KTAR` or `KTAS` keyframes no longer remain only as a top-level chunk id in inspect output
+- added shared `MdxTextureAnimationFile` and `MdxTextureAnimation` contracts for indexed classic texture-animation entries
+- added `WowViewer.Core.IO.Mdx.MdxTextureAnimationReader` for classic `TXAN` payload reads in `v1300` and `v1400`, including counted section framing and actual translation or rotation or scaling keyframe payload parsing
+- extracted the reusable vector3 and compressed-quaternion keyframe parsing into `WowViewer.Core.IO.Mdx.MdxTrackReader` and switched `MdxHitTestReader` to reuse it, so `HTST` and `TXAN` now share one track interpretation instead of drifting apart
+- extended `WowViewer.Tool.Inspect mdx export-json` with `--include-texture-animations` so the new library-owned payload seam is immediately reusable on filesystem or archive-backed inputs without adding a tool-local parser path
+- added `wow-viewer/tests/WowViewer.Core.Tests/MdxTextureAnimationReaderTests.cs` with a synthetic tracked texture-animation fixture, a real Alpha no-TXAN regression on `Wisp.mdx`, and a fixed real standard-era archive-backed AirElemental case
+- this landing proves payload ownership and JSON export only; it does not claim runtime texture-transform evaluation or viewer cutover
+- this should not be used as justification to continue automatic `MDX` chunk expansion work
+
+### Mar 29, 2026 - Shared Classic `MDX` `HTST` Payload Slice Landed
+
+- advanced the shared classic `MDX` migration from `HTST` summary-only ownership into first typed hit-test payload ownership so fixed shape payloads and actual `KGTR` or `KGRT` or `KGSC` keyframes no longer have to stay trapped behind summary-only metadata
+- added shared `MdxHitTestFile` and `MdxHitTestShape` contracts plus reusable typed node-track payload contracts for vector3 and compressed-quaternion keyframes with interpolation metadata
+- added `WowViewer.Core.IO.Mdx.MdxHitTestReader` for classic `HTST` payload reads in `v1300` and `v1400`, including fixed box or cylinder or sphere or plane payloads and actual transform keyframe payload parsing
+- extended `WowViewer.Tool.Inspect mdx export-json` with `--include-hit-test` so the new library-owned payload seam is immediately reusable on filesystem or archive-backed inputs without adding a tool-local parser path
+- added `wow-viewer/tests/WowViewer.Core.Tests/MdxHitTestReaderTests.cs` with a synthetic tracked hit-test fixture, a fixed real Alpha `Wisp.mdx` case, and a fixed real standard-era archive-backed `anubisath.mdx` case
+- this landing proves payload ownership and JSON export only; it does not claim runtime hit detection or viewer cutover
+
+### Mar 28, 2026 - Shared Classic `MDX` `CLID` Payload Slice Landed
+
+- advanced the shared classic `MDX` migration from `CLID` summary-only ownership into first typed collision-mesh payload ownership so full `VRTX` or `TRI ` or `NRMS` data no longer has to stay trapped behind inspect-only summaries
+- added shared `MdxCollisionFile` and `MdxCollisionMesh` contracts plus `WowViewer.Core.IO.Mdx.MdxCollisionReader` for classic `CLID` payload reads in `v1300` and `v1400`
+- extracted the chunk-level payload logic into a shared `MdxCollisionChunkReader` helper and switched `MdxSummaryReader` to reuse it, so summary and payload coverage now share one `CLID` interpretation instead of drifting apart
+- extended `WowViewer.Tool.Inspect mdx export-json` with `--include-collision` so the new library-owned payload seam is immediately reusable on filesystem or archive-backed inputs without adding a new tool-local parser path
+- added `wow-viewer/tests/WowViewer.Core.Tests/MdxCollisionReaderTests.cs` with a synthetic collision fixture, a fixed real Alpha `Wisp.mdx` case, and a fixed real standard-era archive-backed dwarf-character case
+- this landing proves payload ownership and JSON export only; it does not claim runtime collision behavior or viewer cutover
+
+### Mar 28, 2026 - `mdx export-json` Inspect Slice Landed
+
+- added `WowViewer.Tool.Inspect mdx export-json` as a thin JSON export surface over the shared `MdxSummaryReader`, with optional `--include-geometry` over the current shared `MdxGeometryReader` seam
+- kept the slice library-first: the new command reuses the shared readers for both filesystem and archive-backed inputs instead of adding any second `MDX` parser in the inspect tool
+- fixed the initial JSON serialization bug by enabling field serialization for `System.Numerics` payloads, so vectors and UV data now serialize as real coordinates instead of empty objects
+- validated the slice with real data on both the fixed Alpha `Wisp.mdx` summary surface and the fixed standard-era `chest01.mdx` summary-plus-geometry surface
+- this slice is still export of already-owned seams, not new chunk-family ownership or runtime `MDX` parity
+
+### Mar 28, 2026 - `mdx chunk-carriers` Inspect Workflow Landed
+
+- added `WowViewer.Tool.Inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]>` as a thin carrier-discovery surface over shared `MdxSummaryReader`
+- kept the slice tool-thin and library-first: the new command scans either a filesystem `MDX` file or directory or an archive-backed dataset via `MpqArchiveCatalog`, but it still uses the shared summary reader for chunk ownership instead of adding tool-local chunk parsing
+- added practical scan controls with `--path-filter <text>` and `--limit <n>` so standard archive scans can stay targeted when future sessions are looking for the next fixed positive carrier
+- validated the new workflow with a real positive archive-backed `LITE` scan over `braziers`, which found `dwarvenbrazier01.mdx` plus `3` more positive standard-era carriers, and with a real negative alpha-corpus scan proving the current unpacked `0.5.3` sample set still has no `TXAN`, `PREM`, or `CORN` carriers across `229` files
+- this slice does not add new `MDX` chunk-summary ownership by itself; it adds the discovery workflow needed to choose the next real-data-backed seam without guessing
+
 ### Mar 28, 2026 - Viewer UI Resize And Input Regression Fixed
 
 - fixed a real `MdxViewer` shell regression where panels drew at the wrong size and toolbar or sidebar buttons stopped responding after window resize or maximize

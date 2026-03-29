@@ -959,65 +959,18 @@ public static class MdxSummaryReader
 
     private static MdxCollisionSummary? ReadClidSummary(Stream stream, long dataOffset, uint size, uint? version)
     {
-        if (version is not null and not 1300u and not 1400u)
+        MdxCollisionMesh? collision = MdxCollisionChunkReader.ReadClassicCollisionMesh(stream, dataOffset, size, version);
+        if (collision is null)
             return null;
 
-        long previousPosition = stream.Position;
-        try
-        {
-            long chunkEnd = checked(dataOffset + size);
-            stream.Position = dataOffset;
-
-            ExpectTag(stream, "VRTX", "CLID(v1300): expected VRTX.");
-            int vertexCount = ReadNonNegativeCount(stream, "CLID(v1300): negative VRTX count.");
-
-            Vector3? boundsMin = null;
-            Vector3? boundsMax = null;
-            if (vertexCount > 0)
-            {
-                Vector3 firstVertex = ReadVector3(stream);
-                Vector3 min = firstVertex;
-                Vector3 max = firstVertex;
-                for (int index = 1; index < vertexCount; index++)
-                {
-                    Vector3 vertex = ReadVector3(stream);
-                    min = Vector3.Min(min, vertex);
-                    max = Vector3.Max(max, vertex);
-                }
-
-                boundsMin = min;
-                boundsMax = max;
-            }
-
-            ExpectTag(stream, "TRI ", "CLID(v1300): expected TRI .");
-            int triangleIndexCount = ReadNonNegativeCount(stream, "CLID(v1300): negative TRI count.");
-            if (triangleIndexCount % 3 != 0)
-                throw new InvalidDataException("CLID(v1300): TRI count must be divisible by 3.");
-
-            int maxTriangleIndex = 0;
-            for (int index = 0; index < triangleIndexCount; index++)
-            {
-                int triangleIndex = ReadUInt16(stream);
-
-                if (triangleIndex >= vertexCount)
-                    throw new InvalidDataException($"CLID(v1300): TRI index {triangleIndex} exceeded VRTX count {vertexCount}.");
-
-                maxTriangleIndex = Math.Max(maxTriangleIndex, triangleIndex);
-            }
-
-            ExpectTag(stream, "NRMS", "CLID(v1300): expected NRMS.");
-            int facetNormalCount = ReadNonNegativeCount(stream, "CLID(v1300): negative NRMS count.");
-            SkipBytes(stream, checked((long)facetNormalCount * sizeof(float) * 3), chunkEnd, "CLID(v1300): NRMS payload overran the chunk.");
-
-            if (stream.Position != chunkEnd)
-                throw new InvalidDataException("CLID(v1300): chunk contained unexpected trailing bytes.");
-
-            return new MdxCollisionSummary(vertexCount, triangleIndexCount, triangleIndexCount / 3, facetNormalCount, maxTriangleIndex, boundsMin, boundsMax);
-        }
-        finally
-        {
-            stream.Position = previousPosition;
-        }
+        return new MdxCollisionSummary(
+            collision.VertexCount,
+            collision.TriangleIndexCount,
+            collision.TriangleCount,
+            collision.FacetNormalCount,
+            collision.MaxTriangleIndex,
+            collision.BoundsMin,
+            collision.BoundsMax);
     }
 
     private static List<MdxHitTestShapeSummary> ReadHtstSummary(Stream stream, long dataOffset, uint size, uint? version)

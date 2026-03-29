@@ -1,5 +1,108 @@
 # wow-viewer Shared I/O Library Plan
 
+## Mar 28, 2026 - MDX Audit Classification Update
+
+- status: active audit note
+- classification:
+  - treat `GEOS` as the strongest recent classic `MdxViewer` parity seam
+  - treat `TXAN` payload ownership as a new shared-reader seam, not a direct classic `MdxViewer` parser port
+  - treat `HTST` payload ownership as a new shared-reader seam with no current active classic `MdxViewer` parser/runtime parity
+  - treat `CLID` payload ownership as broader than active classic parser parity; current viewer use is summary metadata only
+- if classic `MDX` work is reopened later:
+  - prioritize genuinely hot legacy seams already used by the active renderer, especially `ATSQ` geoset-animation/material-animation behavior, before adding more cold chunk-family readers
+
+## Mar 28, 2026 - MDX Continuation Guardrail Update
+
+- status: active guardrail
+- direction:
+  - do not use unresolved `MDX` chunk families as the default next slice anymore
+  - do not continue `MDX` summary or payload implementation just because archive-backed carrier scans found additional chunks
+  - only resume new `MDX` chunk work when the user explicitly requests a named seam or when an active `MdxViewer`/tool consumer need makes that seam necessary
+- implication:
+  - the previously remaining `MDX` families such as `PREM` and `CORN` are not current planned follow-up slices
+  - continuation should move to other `wow-viewer` or active-viewer priorities unless the user reopens `MDX`
+
+## Mar 29, 2026 - Shared Classic `MDX` `TXAN` Payload Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains `MdxTextureAnimationFile` and `MdxTextureAnimation` as the shared top-level contract and typed payload owner for classic indexed `TXAN` texture-animation entries
+  - `WowViewer.Core.IO.Mdx.MdxTextureAnimationReader` now reads classic `TXAN` payloads for `v1300` and `v1400`, including counted sections and actual `KTAT` or `KTAR` or `KTAS` keyframes
+  - `WowViewer.Core.IO.Mdx.MdxTrackReader` now centralizes shared vector3 and compressed-quaternion track parsing, and `MdxHitTestReader` now reuses it so `HTST` and `TXAN` stay aligned on keyframe interpretation
+  - `WowViewer.Tool.Inspect mdx export-json` now supports `--include-texture-animations`, so the new payload seam is exportable on real data without adding a second tool-local parser
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxTextureAnimationReaderTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- mdx export-json --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path creature/airelemental/airelemental.mdx --include-texture-animations --output i:/parp/parp-tools/wow-viewer/output/mdx-airelemental-texture-animations.json`
+- notes:
+  - the fixed real standard-era payload carrier now belongs on `creature/airelemental/airelemental.mdx`, which currently proves `12` texture-animation entries and a first `KTAT` track on global sequence `1` with key times `[0, 1245]`
+  - the current unpacked Alpha `0.5.3` corpus still has no fixed positive `TXAN` carrier in-tree, so the real Alpha coverage for this seam is a negative regression on `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+  - this seam remains payload-only and does not yet claim runtime texture-transform evaluation, material playback, or viewer integration ownership
+  - this seam is not a mandate for more `MDX` chunk continuation; further `MDX` work is paused unless explicitly requested
+
+## Mar 29, 2026 - Shared Classic `MDX` `HTST` Payload Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains `MdxHitTestFile` and `MdxHitTestShape` as the shared top-level contract and typed payload owner for classic `HTST` hit-test shapes, plus typed vector3 and quaternion node-track keyframe contracts with interpolation metadata
+  - `WowViewer.Core.IO.Mdx.MdxHitTestReader` now reads classic `HTST` payloads for `v1300` and `v1400`, including fixed box or cylinder or sphere or plane payloads and actual `KGTR` or `KGRT` or `KGSC` node-track keyframes
+  - `WowViewer.Tool.Inspect mdx export-json` now supports `--include-hit-test`, so the new payload seam is exportable on real data without adding a second tool-local parser
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter MdxHitTestReaderTests`
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug -- mdx export-json --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path creature/anubisath/anubisath.mdx --include-hit-test --output i:/parp/parp-tools/wow-viewer/output/mdx-anubisath-hit-test.json`
+- notes:
+  - the fixed real Alpha payload carrier remains `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+  - the local standard-era dataset now also has fixed real archive-backed `HTST` proof on `creature/anubisath/anubisath.mdx`, even though the currently checked carrier still exposes static hit-test shapes with no animated node tracks in practice
+  - this seam remains payload-only and does not yet claim runtime hit detection, transform evaluation, or viewer integration ownership
+
+## Mar 28, 2026 - Shared Classic `MDX` `CLID` Payload Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Mdx` now contains `MdxCollisionFile` and `MdxCollisionMesh` as the shared top-level contract and typed payload owner for classic `CLID` collision meshes
+  - `WowViewer.Core.IO.Mdx.MdxCollisionReader` now reads classic `CLID` payloads for `v1300` and `v1400`, including ordered `VRTX` or `TRI ` or `NRMS` data, derived bounds, and validated max-index coverage
+  - `WowViewer.Core.IO.Mdx.MdxSummaryReader` now reuses the same shared `MdxCollisionChunkReader` helper for summary-level `CLID` coverage, keeping summary and payload interpretation aligned
+  - `WowViewer.Tool.Inspect mdx export-json` now supports `--include-collision`, so the new payload seam is exportable on real data without adding a second tool-local parser
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "MdxCollisionReaderTests|MdxSummaryReaderTests"`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path "character/dwarf/female/dwarffemale.mdx" --include-collision --output i:/parp/parp-tools/wow-viewer/output/mdx-dwarffemale-collision.json`
+- notes:
+  - the fixed real Alpha payload carrier remains `wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx`
+  - the local standard-era dataset also provides positive archive-backed `CLID` carriers on dwarf-character models, so this seam now has two-era real-data proof instead of alpha-only summary proof
+  - this seam remains payload-only and does not yet claim collision queries, viewer collision rendering, or runtime physics ownership
+
+## Mar 28, 2026 - `mdx export-json` Inspect Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Tool.Inspect` now supports `mdx export-json` for filesystem or archive-backed `MDX` inputs with optional `--output <report.json>`
+  - `--include-geometry` now adds the current shared `MdxGeometryReader` output beside the shared summary output, making the first shared `GEOS` payload seam exportable as JSON without adding tool-local parser ownership
+  - the command reuses the same archive and Alpha fallback helpers already used by `mdx inspect`
+- validation:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx export-json --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/Creature/Wisp/Wisp.mdx --output i:/parp/parp-tools/wow-viewer/output/mdx-wisp-summary.json`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --virtual-path "world/generic/activedoodads/chest01/chest01.mdx" --include-geometry --output i:/parp/parp-tools/wow-viewer/output/mdx-chest-geometry.json`
+- notes:
+  - field serialization is enabled for this command so `Vector2` and `Vector3` values export as real coordinates instead of empty objects
+  - this is a thin export surface over already-owned summary and `GEOS` payload seams, not a new classic `MDX` chunk-summary slice
+
+## Mar 28, 2026 - `mdx chunk-carriers` Inspect Workflow Slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Tool.Inspect` now supports `mdx chunk-carriers --chunks <FOURCC[,FOURCC...]>` for filesystem `MDX` files or directories and archive-backed standard datasets via `--archive-root`
+  - the command remains a thin consumer of shared `WowViewer.Core.IO.Mdx.MdxSummaryReader` and shared archive-access seams; it does not add tool-local `MDX` parsing
+  - `--path-filter <text>` and `--limit <n>` now provide a narrow real-data workflow for carrier discovery when future classic `MDX` continuation slices need a fixed positive file before implementation
+- validation:
+  - `dotnet build i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -c Debug`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks LITE --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt" --path-filter braziers --limit 100`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks TXAN,PREM,CORN --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree --limit 500`
+- notes:
+  - the current standard-era `braziers` subset yields `4` positive `LITE` carriers, including `world/generic/dwarf/passive doodads/braziers/dwarvenbrazier01.mdx`
+  - the current unpacked alpha `0.5.3` corpus still yields no `TXAN` or `PREM` or `CORN` carriers across `229` scanned `MDX` files, so the next classic `MDX` summary slice still needs a fixed positive carrier search before implementation
+  - archive-backed scans can surface `readMisses` from listfile entries that are not actually present in the local dataset; those are now reported separately from real parse failures so future scans stay interpretable
+
 ## Mar 28, 2026 - Shared Classic `MDX` `GEOS` Payload Slice
 
 - status: landed

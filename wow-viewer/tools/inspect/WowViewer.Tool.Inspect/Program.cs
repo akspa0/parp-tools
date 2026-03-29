@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text.Json;
 using WowViewer.Core.Blp;
+using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
@@ -131,6 +132,12 @@ static void RunMdx(string[] args)
 
 	switch (command)
 	{
+		case "export-json":
+			RunMdxExportJson(tail);
+			break;
+		case "chunk-carriers":
+			RunMdxChunkCarriers(tail);
+			break;
 		case "inspect":
 			RunMdxInspect(tail);
 			break;
@@ -183,6 +190,238 @@ static void RunMdxInspect(string[] args)
 		summary = MdxSummaryReader.Read(stream, sourceLabel);
 
 	PrintMdxSummary(summary);
+}
+
+static void RunMdxExportJson(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? output = GetOption(args, "--output", "-o");
+	bool includeGeometry = HasOption(args, "--include-geometry");
+	bool includeCollision = HasOption(args, "--include-collision");
+	bool includeHitTest = HasOption(args, "--include-hit-test");
+	bool includeTextureAnimations = HasOption(args, "--include-texture-animations");
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <file.mdx> or --archive-root <dir> with --virtual-path <path/to/file.mdx>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	MdxSummary summary;
+	using (Stream stream = OpenInputStream())
+		summary = MdxSummaryReader.Read(stream, sourceLabel);
+
+	MdxGeometryFile? geometry = null;
+	if (includeGeometry)
+	{
+		using Stream stream = OpenInputStream();
+		geometry = MdxGeometryReader.Read(stream, sourceLabel);
+	}
+
+	MdxCollisionFile? collision = null;
+	if (includeCollision)
+	{
+		using Stream stream = OpenInputStream();
+		collision = MdxCollisionReader.Read(stream, sourceLabel);
+	}
+
+	MdxHitTestFile? hitTest = null;
+	if (includeHitTest)
+	{
+		using Stream stream = OpenInputStream();
+		hitTest = MdxHitTestReader.Read(stream, sourceLabel);
+	}
+
+	MdxTextureAnimationFile? textureAnimations = null;
+	if (includeTextureAnimations)
+	{
+		using Stream stream = OpenInputStream();
+		textureAnimations = MdxTextureAnimationReader.Read(stream, sourceLabel);
+	}
+
+	Dictionary<string, object?> payload = new(StringComparer.Ordinal)
+	{
+		["summary"] = summary,
+	};
+
+	if (geometry is not null)
+		payload["geometry"] = geometry;
+
+	if (collision is not null)
+		payload["collision"] = collision;
+
+	if (hitTest is not null)
+		payload["hitTest"] = hitTest;
+
+	if (textureAnimations is not null)
+		payload["textureAnimations"] = textureAnimations;
+
+	string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+	{
+		WriteIndented = true,
+		IncludeFields = true,
+	});
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, json);
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	Console.WriteLine(json);
+}
+
+static void RunMdxChunkCarriers(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? pathFilter = GetOption(args, "--path-filter", "-p");
+	string? chunkText = GetOption(args, "--chunks", "-c") ?? GetOption(args, "--chunk", "-c");
+	string? limitText = GetOption(args, "--limit", "-n");
+
+	if (string.IsNullOrWhiteSpace(chunkText))
+	{
+		Console.Error.WriteLine("Error: provide --chunks <FOURCC[,FOURCC...]>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input) && string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: provide --input <file|directory> or --archive-root <game|data dir>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(input) && !string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: choose either --input <file|directory> or --archive-root <game|data dir>, not both.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (!string.IsNullOrWhiteSpace(limitText) && (!int.TryParse(limitText, out int parsedLimit) || parsedLimit <= 0))
+	{
+		Console.Error.WriteLine($"Error: invalid --limit value '{limitText}'.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	int? limit = string.IsNullOrWhiteSpace(limitText) ? null : int.Parse(limitText);
+	IReadOnlyList<FourCC> targetChunks;
+	try
+	{
+		targetChunks = ParseMdxChunkIds(chunkText);
+	}
+	catch (ArgumentException ex)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	List<string> parseFailures = [];
+	List<string> readMisses = [];
+	int scanned = 0;
+	int matched = 0;
+
+	Console.WriteLine($"MDX chunk carrier scan: chunks={string.Join(',', targetChunks.Select(static chunk => chunk.ToString()))} source={(archiveRoot ?? input)!}");
+
+	if (!string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+		ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [archiveRoot], listfilePath);
+
+		IEnumerable<string> candidates = archiveCatalog
+			.GetAllKnownFiles()
+			.Where(static path => path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase));
+
+		if (!string.IsNullOrWhiteSpace(pathFilter))
+			candidates = candidates.Where(path => path.Contains(pathFilter, StringComparison.OrdinalIgnoreCase));
+
+		foreach (string path in candidates.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase))
+		{
+			if (limit.HasValue && scanned >= limit.Value)
+				break;
+
+			scanned++;
+			byte[]? bytes = archiveCatalog.ReadFile(path);
+			if (bytes is null)
+			{
+				TrackScanIssue(readMisses, $"{path}: archive read returned no bytes");
+				continue;
+			}
+
+			using MemoryStream stream = new(bytes, writable: false);
+			matched += PrintMdxCarrierMatch(path, stream, targetChunks, parseFailures);
+		}
+	}
+	else
+	{
+		IEnumerable<string> candidates = EnumerateMdxInputPaths(input!);
+		if (!string.IsNullOrWhiteSpace(pathFilter))
+			candidates = candidates.Where(path => path.Contains(pathFilter, StringComparison.OrdinalIgnoreCase));
+
+		foreach (string path in candidates.OrderBy(static path => path, StringComparer.OrdinalIgnoreCase))
+		{
+			if (limit.HasValue && scanned >= limit.Value)
+				break;
+
+			scanned++;
+			using FileStream stream = File.OpenRead(path);
+			matched += PrintMdxCarrierMatch(path, stream, targetChunks, parseFailures);
+		}
+	}
+
+	Console.WriteLine($"Scanned={scanned} matched={matched} readMisses={readMisses.Count} parseFailures={parseFailures.Count}");
+	if (matched == 0)
+		Console.WriteLine("No matching carriers found.");
+
+	if (readMisses.Count > 0)
+	{
+		Console.WriteLine("Read misses:");
+		foreach (string miss in readMisses)
+			Console.WriteLine($"  {miss}");
+	}
+
+	if (parseFailures.Count > 0)
+	{
+		Console.WriteLine("Parse failures:");
+		foreach (string failure in parseFailures)
+			Console.WriteLine($"  {failure}");
+	}
 }
 
 static void RunMap(string[] args)
@@ -761,6 +1000,102 @@ static string? GetOption(string[] args, string longName, string shortName)
 	}
 
 	return null;
+}
+
+static string? GetFirstPositionalArgument(string[] args)
+{
+	for (int index = 0; index < args.Length; index++)
+	{
+		string current = args[index];
+		if (current.StartsWith('-'))
+		{
+			index++;
+			continue;
+		}
+
+		return current;
+	}
+
+	return null;
+}
+
+static IReadOnlyList<FourCC> ParseMdxChunkIds(string chunkText)
+{
+	string[] tokens = chunkText
+		.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+	if (tokens.Length == 0)
+		throw new ArgumentException("--chunks requires at least one four-character chunk id.");
+
+	List<FourCC> chunks = [];
+	HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+	foreach (string token in tokens)
+	{
+		if (token.Length != 4)
+			throw new ArgumentException($"Chunk id '{token}' must be exactly 4 ASCII characters.");
+
+		if (!token.All(static ch => ch <= 0x7F && !char.IsWhiteSpace(ch)))
+			throw new ArgumentException($"Chunk id '{token}' must contain only non-whitespace ASCII characters.");
+
+		if (!seen.Add(token))
+			continue;
+
+		chunks.Add(FourCC.FromString(token.ToUpperInvariant()));
+	}
+
+	return chunks;
+}
+
+static IEnumerable<string> EnumerateMdxInputPaths(string input)
+{
+	if (File.Exists(input))
+	{
+		if (!input.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+			throw new FileNotFoundException($"Input file '{input}' is not an .mdx file.", input);
+
+		yield return Path.GetFullPath(input);
+		yield break;
+	}
+
+	if (!Directory.Exists(input))
+		throw new DirectoryNotFoundException($"Could not find input path '{input}'.");
+
+	foreach (string path in Directory.EnumerateFiles(input, "*.mdx", SearchOption.AllDirectories))
+		yield return path;
+}
+
+static int PrintMdxCarrierMatch(string sourcePath, Stream stream, IReadOnlyList<FourCC> targetChunks, List<string> parseFailures)
+{
+	try
+	{
+		MdxSummary summary = MdxSummaryReader.Read(stream, sourcePath);
+		List<string> matchedChunks = targetChunks
+			.Where(target => summary.Chunks.Any(chunk => chunk.Id == target))
+			.Select(static chunk => chunk.ToString())
+			.ToList();
+
+		if (matchedChunks.Count == 0)
+			return 0;
+
+		Console.WriteLine($"CARRIER: path={sourcePath} matchedChunks={string.Join(',', matchedChunks)} chunkCount={summary.ChunkCount} knownChunks={summary.KnownChunkCount} unknownChunks={summary.UnknownChunkCount}");
+		return 1;
+	}
+	catch (Exception ex) when (ex is InvalidDataException or IOException)
+	{
+		TrackParseFailure(parseFailures, $"{sourcePath}: {ex.Message}");
+		return 0;
+	}
+}
+
+static void TrackParseFailure(List<string> parseFailures, string message)
+{
+	TrackScanIssue(parseFailures, message);
+}
+
+static void TrackScanIssue(List<string> issues, string message)
+{
+	if (issues.Count < 10)
+		issues.Add(message);
 }
 
 static bool HasOption(string[] args, string name)
@@ -1742,6 +2077,10 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect mdx inspect --input <file.mdx>");
 	Console.WriteLine("  wowviewer-inspect mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wowviewer-inspect mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
+	Console.WriteLine("  wowviewer-inspect mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
+	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
+	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]");
 	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
@@ -1766,6 +2105,10 @@ static void ShowMdxUsage()
 	Console.WriteLine("MDX commands:");
 	Console.WriteLine("  mdx inspect --input <file.mdx>");
 	Console.WriteLine("  mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
+	Console.WriteLine("  mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
+	Console.WriteLine("  mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
+	Console.WriteLine("  mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
+	Console.WriteLine("  mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]");
 }
 
 static void ShowWmoUsage()
