@@ -1,5 +1,32 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - Zero-CK24 Objects Stop Inheriting The Global PM4 N/S Mirror
+
+- latest manual viewer evidence tightened the root cause for the remaining misplaced root-bucket PM4 overlays:
+   - with `Mirror PM4 N/S` enabled globally, the bad `CK24=0x000000` objects still sat in the wrong place
+   - manually pressing `Wind Obj Y` on the selected object corrected the placement
+   - that means the zero/root bucket still wanted the opposite Y-handedness from the current global PM4 mirror path
+- landed correction:
+   - `BuildPm4ObjectTransform(...)` now only applies the global `_pm4FlipAllObjectsY` mirror to non-zero `CK24` objects
+   - `CK24=0x000000` objects can still use explicit object-local scale or winding overrides, but they no longer inherit the global north/south mirror by default
+- important boundary:
+   - this is a narrow runtime-consumer fix for the zero/root bucket only
+   - it does not prove that all PM4 placement semantics are solved, and it still needs manual viewer confirmation on the development map
+
+## Mar 29, 2026 - Zero-CK24 Seed Groups Stop Re-Splitting After Their Mandatory Seed Split
+
+- latest PM4 graph/runtime evidence suggests the zero/root `CK24` path was still being fragmented again after the intended seed-level connectivity split
+- current viewer behavior before this change:
+   - `BuildPm4OverlaySeedGroups(...)` already forces zero-`CK24` surfaces into grouped seed buckets that must split by connectivity once
+   - later in `BuildPm4TileObjects(...)`, those same zero/root linked groups could still be re-split by the user-facing `Split CK24 by MdosIndex` or `Split CK24 by Connectivity` stages
+   - that made the runtime object list and PM4 graph look like paired or over-fragmented sub-parts even when the first seed-level split had already isolated the root components
+- landed correction:
+   - zero/root seed groups that already required the seed connectivity split now bypass the later MDOS/connectivity split toggles entirely
+   - non-zero `CK24` groups still keep the later toggle-controlled split path unchanged
+- important boundary:
+   - this only removes the redundant second split stage for zero/root buckets; it does not yet prove the remaining placement basis or frame-rotation semantics are final
+   - the fix is build-validated only in this session and still needs live viewer confirmation on the development map
+
 ## Mar 29, 2026 - Viewer Shell Resize/Input Sync Hardened Again
 
 - the latest recurrence of the broken shell symptom was not isolated to PM4 controls; the whole viewer UI fell back into bad resize or hit-testing behavior again, with toolbar/sidebar layout obviously wrong and buttons effectively unusable

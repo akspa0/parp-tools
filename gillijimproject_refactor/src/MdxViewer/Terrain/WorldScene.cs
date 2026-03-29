@@ -2736,13 +2736,14 @@ public class WorldScene : ISceneRenderer
                     linkedPlanarTransform,
                     linkedWorldPivot,
                     linkedWorldYawCorrection);
-                List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
+                bool allowNestedSeedSplits = !seedGroup.RequiresConnectivitySeedSplit;
+                List<List<MsurEntry>> anchorGroups = splitCk24ByMdos && allowNestedSeedSplits
                     ? SplitSurfaceGroupByMdos(linkedSurfaces)
                     : new List<List<MsurEntry>> { linkedSurfaces };
 
                 foreach (List<MsurEntry> anchorGroup in anchorGroups)
                 {
-                    List<List<MsurEntry>> components = splitCk24ByConnectivity
+                    List<List<MsurEntry>> components = splitCk24ByConnectivity && allowNestedSeedSplits
                         ? SplitSurfaceGroupByConnectivity(pm4, anchorGroup)
                         : new List<List<MsurEntry>> { anchorGroup };
 
@@ -7077,7 +7078,7 @@ public class WorldScene : ISceneRenderer
         bool hasLayerScale = _pm4TileCk24Scales.TryGetValue(tileCk24Key, out Vector3 layerScale)
             && !IsNearOneVector(layerScale);
 
-        bool hasGlobalFlip = _pm4FlipAllObjectsY;
+        bool hasGlobalFlip = _pm4FlipAllObjectsY && objectKey.ck24 != 0;
         bool hasObjectTranslation = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectTranslation)
             && !IsNearZeroVector(objectTranslation);
         bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)

@@ -1,5 +1,25 @@
 # Progress
 
+### Mar 29, 2026 - Global PM4 Y Mirror No Longer Applies To Zero-CK24 Root Buckets
+
+- narrowed the PM4 object transform path in `src/MdxViewer/Terrain/WorldScene.cs` so the global `Mirror PM4 N/S` flip no longer applies to `CK24=0x000000` objects
+- reason: current live viewer evidence showed the bad zero/root PM4 overlays snapping back into the correct placed-object location only after pressing `Wind Obj Y`, which is effectively cancelling the global Y mirror on that selected object
+- preserved the global Y mirror for non-zero `CK24` groups, since those were the original reason the default north/south mirror was enabled in the first place
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is still build-validated only; manual viewer confirmation is still required to prove the zero/root PM4 objects now overlap the placed objects again without using `Wind Obj Y`
+
+### Mar 29, 2026 - Zero-CK24 Seed Groups No Longer Re-Split After Seed Connectivity Split
+
+- narrowed the PM4 zero/root-bucket runtime path in `src/MdxViewer/Terrain/WorldScene.cs` so seed groups that already require the mandatory connectivity split no longer also honor the later viewer toggle stages for `Split CK24 by MdosIndex` or `Split CK24 by Connectivity`
+- reason: the current viewer evidence and graph exports point to zero/root `CK24` groups being fragmented twice, which can manufacture paired sub-parts after the first seed-level split and then make later frame or winding experiments look like rotation regressions instead of grouping regressions
+- preserved the later MDOS/connectivity toggle behavior for non-zero `CK24` groups; this change is only for the zero/root seed path that already split once at the seed stage
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is build-validated only; no live viewer signoff was completed after the regrouping change, so the development map still needs manual confirmation that the artificial paired-part split is actually gone
+
 ### Mar 29, 2026 - Viewer Shell Resize/Input Sync Hardened Again
 
 - fixed the recurring viewer-shell regression in `src/MdxViewer/ViewerApp.cs` where resize and mouse-hit behavior could break again even outside PM4-specific windows
