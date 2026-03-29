@@ -890,6 +890,40 @@ public sealed class Pm4ResearchIntegrationTests
         Assert.Equal(0, report.LinkIdPatterns.OtherCount);
         Assert.Contains(report.Unknowns, finding => finding.Name == "MSLK.RefIndex semantics");
     }
+
+    [Fact]
+    public void Ck24Forensics_DevelopmentTile_412CDC_PreservesComponentGroupingAndHeadingEvidence()
+    {
+        Pm4Ck24ForensicsReport report = Pm4Ck24ForensicsAnalyzer.Analyze(
+            Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath),
+            0x412CDCu);
+
+        Assert.Equal((ushort)11484, report.Ck24ObjectId);
+        Assert.Equal(72, report.SurfaceCount);
+        Assert.Equal(12, report.DistinctLinkGroupCount);
+        Assert.Equal(72, report.LinkGroups.Sum(static group => group.SurfaceCount));
+        Assert.Contains(report.LinkGroups, static group => group.LinkGroupObjectId == 0 && group.SurfaceCount == 9);
+        Assert.Contains(report.LinkGroups, static group => group.LinkGroupObjectId == 1779 && group.SurfaceCount == 34);
+        Assert.Equal(3.078537f, Assert.IsType<float>(report.PlacementComparison.MprlHeadingMeanDegrees), 3);
+        Assert.Contains(report.Notes, static note => note.Contains("terrain/object seam evidence", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Ck24Forensics_DevelopmentTile_41C0F5_PreservesSparseLinkageCase()
+    {
+        Pm4Ck24ForensicsReport report = Pm4Ck24ForensicsAnalyzer.Analyze(
+            Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath),
+            0x41C0F5u);
+
+        Assert.Equal((ushort)49397, report.Ck24ObjectId);
+        Assert.Equal(7, report.SurfaceCount);
+        Assert.Equal(1, report.DistinctLinkGroupCount);
+        Pm4ForensicsLinkGroupReport linkGroup = Assert.Single(report.LinkGroups);
+        Assert.Equal((uint)4704, linkGroup.LinkGroupObjectId);
+        Assert.Empty(linkGroup.ReferencedPositionRefIndices);
+        Assert.Empty(linkGroup.MprlRows);
+        Assert.Null(report.PlacementComparison.MprlHeadingMeanDegrees);
+    }
 }
 
 internal static class Pm4TestPaths

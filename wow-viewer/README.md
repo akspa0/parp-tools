@@ -370,6 +370,7 @@ Current first real code-port slice:
 Current PM4 inspect slice:
 
 - `src/core/WowViewer.Core.PM4` now also contains the first single-file PM4 analyzer and report layer.
+- `src/core/WowViewer.Core.PM4` now also contains a research-only CK24 forensic report layer for targeted object-graph export, raw MSLK rows, raw linked MPRL rows, footprint counts, and placement-vs-heading comparison.
 - `tools/inspect/WowViewer.Tool.Inspect` now supports:
 	- `pm4 inspect --input <file.pm4>`
 	- `pm4 linkage --input <directory> [--output <report.json>]`
@@ -377,7 +378,7 @@ Current PM4 inspect slice:
 	- `pm4 unknowns --input <directory> [--output <report.json>]`
 	- `pm4 audit --input <file.pm4>`
 	- `pm4 audit-directory --input <directory>`
-	- `pm4 export-json --input <file.pm4> [--output <report.json>]`
+	- `pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]`
 - Smoke-test command that passed on Mar 25, 2026:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 linkage --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
@@ -385,6 +386,7 @@ Current PM4 inspect slice:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 unknowns --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 audit --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 audit-directory --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 export-json --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4 --ck24 0x412CDC --output .\output\pm4_ck24_412CDC_forensics.json`
 
 Current PM4 runtime-contract slice:
 

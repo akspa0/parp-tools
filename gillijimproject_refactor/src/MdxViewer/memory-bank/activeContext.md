@@ -1,5 +1,61 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## PM4 CK24 Frame/Mesh Rotation Ownership Corrected (Mar 29)
+
+- The PM4 CK24 object-generation path in `src/MdxViewer/Terrain/WorldScene.cs` no longer applies the shared `worldYawCorrection` directly to the visible mesh lines and triangles during vertex conversion.
+- Reason:
+   - current runtime viewer evidence showed CK24 objects whose visible mesh was being rotated into the wrong orientation and side of the tile, while the correction appeared to belong to the object frame or anchor basis instead
+   - that indicated the PM4 object pipeline was treating frame yaw as mesh geometry rotation instead of as frame metadata
+- Landed behavior:
+   - `ComputeSurfaceRendererCentroid(...)` still uses the CK24 frame yaw path for placement-anchor/frame interpretation
+   - `BuildCk24ObjectLines(...)` and `BuildCk24ObjectTriangles(...)` now convert PM4 mesh vertices without the frame yaw correction, so the rendered CK24 mesh stays in raw converted orientation while the frame/anchor basis remains separate
+- Important boundary:
+   - this is compile-validated in `MdxViewer`, not runtime-signed-off on the development map yet
+   - if follow-up runtime testing shows the frame itself now needs explicit visualization, add that separately instead of re-baking frame yaw into mesh vertices
+
+## PM4 Raw CK24 Layer Alignment Added For Viewer Investigation (Mar 29)
+
+- The PM4 alignment window in `src/MdxViewer/ViewerApp_Pm4Utilities.cs` now exposes a second transform block for the selected raw `CK24` layer, separate from the existing per-object-group controls.
+- Reason:
+   - current PM4 selection splits `ck24 == 0x000000` into synthetic per-part groups for object transforms, which blocked the user from rotating the raw `0x000000` family as one exploratory layer
+   - the active investigation needs a way to test whether that raw family has a consistent per-tile or quadrant-like orientation rule across the map, not only per-part correction
+- Landed behavior:
+   - selecting any PM4 object now also exposes raw-`CK24` layer move or rotate or scale controls plus reset and print actions
+   - `WorldScene` now keeps raw-`CK24` bounds and transform dictionaries keyed by the original `ck24` value across all loaded tiles
+   - PM4 object rendering now applies raw-`CK24` layer transform first and then the existing object-group transform, so whole-layer experiments and per-part tweaks can be combined
+   - PM4 interchange JSON now reports the raw-layer transform state alongside the existing object-group transform state for each exported object
+- Important boundary:
+   - this is compile-validated in `MdxViewer`, not runtime-signed-off placement logic
+   - no UI runtime test was completed in this session yet, so the actual `0x000000` orientation hypothesis is still open
+
+## PM4 Graph JSON Export Made JSON-Safe (Mar 28)
+
+- The selected-object `PM4 Graph` export path in `src/MdxViewer/ViewerApp_Pm4Utilities.cs` no longer serializes the raw graph structs directly.
+- Root cause:
+   - `Pm4LinkedPositionRefSummary` can legitimately carry non-finite heading values when no normal headings exist, and raw `System.Text.Json` serialization rejects those values as invalid JSON
+   - that surfaced in the viewer status bar as PM4 graph export failures instead of writing a file
+- Landed fix:
+   - `ExportSelectedPm4GraphJson(...)` now projects the graph into a JSON-safe anonymous payload
+   - linked-position-ref heading values now serialize through a finite-or-null helper instead of emitting raw `NaN` or `Infinity`
+   - this keeps the output standards-compliant JSON instead of relying on named floating-point literals
+- Important boundary:
+   - this fix was compile-validated in `MdxViewer`
+   - the export button itself was not re-run through the UI in this session after the patch, so treat runtime confirmation as still pending
+
+## PM4 Overlay North/South Mirror Defaulted (Mar 28)
+
+- `WorldScene` now defaults the existing PM4 object-group mirror path on, so PM4 overlay objects are mirrored around their logical group pivot in renderer space by default.
+- Reason:
+   - current manual viewer feedback showed the PM4 reference geometry landing on the wrong north/south side of nearby placements, with handedness-related rotation mismatch against neighboring `M2` objects
+   - the existing `Pm4FlipAllObjectsY` path already applies the right class of correction for that symptom: renderer-space `scale(1, -1, 1)` around the PM4 object-group pivot, which corresponds to a north/south flip because WoW world `X` is north and renderer `Y` is derived from world `X`
+- Related narrow cleanup landed in the same pass:
+   - `WorldScene` no longer keeps its own duplicate `Pm4PlanarTransform` contract; it now uses the shared `WowViewer.Core.PM4` contract directly
+   - the CK24 coordinate-mode consumer path now keeps the richer shared `Pm4CoordinateModeResolution` result instead of collapsing it to a bool immediately
+   - default world-space planar-transform fallback in `WorldScene` now comes from shared `Pm4PlacementContract`
+- Important boundary:
+   - this is a viewer-behavior correction based on current manual runtime evidence, not a signed-off final PM4 placement solution
+   - the PM4 correlation-input builder still stays viewer-local for now; the active issue was overlay handedness/alignment, not downstream correlation state construction
+
 ## Default Next Non-MDX Continuation (Mar 28)
 
 - If the next chat is just "move on from MDX", the default target should be `wow-viewer` `Core.PM4` library completion, not another classic `MDX` seam.

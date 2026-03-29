@@ -4742,7 +4742,7 @@ void main() {
             _worldScene.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
         ImGui.SameLine();
         bool pm4FlipAllObjY = _worldScene.Pm4FlipAllObjectsY;
-        if (ImGui.Checkbox("Flip All Obj Y", ref pm4FlipAllObjY))
+        if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
             _worldScene.Pm4FlipAllObjectsY = pm4FlipAllObjY;
 
         bool showType40 = _worldScene.ShowPm4Type40;

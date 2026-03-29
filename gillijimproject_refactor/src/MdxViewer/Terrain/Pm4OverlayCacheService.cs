@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using MdxViewer.DataSources;
+using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
 
 namespace MdxViewer.Terrain;
 

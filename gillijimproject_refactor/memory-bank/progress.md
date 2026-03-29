@@ -1,5 +1,64 @@
 # Progress
 
+### Mar 29, 2026 - Shared CK24 PM4 Forensic Export Slice Landed
+
+- added `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4ForensicsModels.cs` and `Research/Pm4Ck24ForensicsAnalyzer.cs` so `Core.PM4` now owns a research-only CK24 forensic report instead of relying on viewer-only PM4 graph JSON
+- the new report exposes component-level link groups, raw MSLK rows, raw linked MPRL rows, footprint counts, and placement-vs-heading comparison for a target `CK24`
+- extended `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` so `pm4 export-json --ck24 <decimal|0xHEX>` emits the targeted CK24 forensic report while the original no-`--ck24` path still emits the coarse single-file PM4 analysis report
+- fixed PM4 inspect JSON serialization for vector payloads by enabling field serialization, so the new shared forensic JSON shows real `Vector3` coordinates instead of empty objects
+- added real-data PM4 regression coverage in `wow-viewer/tests/WowViewer.Core.PM4.Tests/Pm4ResearchIntegrationTests.cs` for a dense linked CK24 case (`0x412CDC`) and a sparse no-linked-MPRL case (`0x41C0F5`) on `development_00_00.pm4`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 29, 2026 after the slice landed
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter Pm4ResearchIntegrationTests` passed on Mar 29, 2026
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect -- pm4 export-json --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development_00_00.pm4 --ck24 0x412CDC --output i:/parp/parp-tools/wow-viewer/output/pm4_ck24_412CDC_forensics.json` wrote real-data shared forensic JSON
+- boundary:
+	- this slice proves shared export and regression behavior, not final PM4 runtime semantics or viewer signoff
+
+### Mar 29, 2026 - PM4 CK24 Frame Yaw No Longer Rotates Visible Mesh Geometry
+
+- changed the PM4 CK24 object-generation path in `src/MdxViewer/Terrain/WorldScene.cs` so `worldYawCorrection` stays on the object frame or anchor path instead of being baked directly into the generated mesh lines and triangles
+- root cause was viewer evidence that CK24 objects were being visually rotated and displaced as though frame correction had been applied to the mesh itself, which inverted the intended ownership between visible geometry and the object frame basis
+- `BuildCk24ObjectLines(...)` and `BuildCk24ObjectTriangles(...)` now convert PM4 mesh vertices without the CK24 frame yaw correction, while placement-anchor computation still retains the frame-yaw path
+- validation completed:
+	- editor/language-service checks passed for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this fix has not yet been re-checked in the live viewer during this session, so the exact effect on the opposite-side `CK24` placements still needs manual confirmation
+
+### Mar 29, 2026 - PM4 Raw CK24 Layer Alignment Added In MdxViewer
+
+- added a parallel PM4 raw-`CK24` layer transform path in `src/MdxViewer/Terrain/WorldScene.cs` so any selected PM4 object can now drive whole-layer translation or rotation or scale keyed by the original `ck24` value instead of only the resolved object-group key
+- this specifically unblocks exploratory work on `CK24=0x000000`, which had been structurally split into synthetic per-part groups for object transforms and therefore could not previously be rotated as one layer
+- `BuildPm4ObjectTransform(...)` now applies raw-`CK24` layer transform before the existing object-group transform, and the scene now tracks raw-layer pivots from combined bounds across all loaded tiles
+- extended `src/MdxViewer/ViewerApp_Pm4Utilities.cs` with `CK24 Layer` move or rotate or scale controls, reset actions, and a print action while preserving the existing per-object-group controls beneath them
+- extended PM4 interchange JSON reporting so each exported object also includes the raw-layer transform state currently affecting its `ck24`
+- validation completed:
+	- editor/language-service checks passed for `WorldScene.cs` and `ViewerApp_Pm4Utilities.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- the new `CK24 Layer` controls were not yet exercised in the live viewer during this session, so the `0x000000` per-tile or quadrant-orientation hypothesis remains unverified
+
+### Mar 28, 2026 - PM4 Graph JSON Export No Longer Fails On Non-Finite Heading Values
+
+- fixed the selected-object `PM4 Graph` JSON export in `src/MdxViewer/ViewerApp_Pm4Utilities.cs`
+- root cause was raw `System.Text.Json` serialization of `Pm4LinkedPositionRefSummary`, whose heading fields can be non-finite when a graph link group has no normal heading evidence
+- replaced raw struct serialization with a JSON-safe projected payload and finite-or-null handling for linked-position-ref heading values so the export stays valid standard JSON instead of throwing in the status bar
+- also repaired the remaining `Pm4OverlayCacheService` type reference so the earlier shared `Pm4PlanarTransform` cleanup still builds cleanly
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 28, 2026 after the fix
+- runtime boundary:
+	- the export button itself was not re-clicked in this session after the patch, so UI-level runtime confirmation is still pending
+
+### Mar 28, 2026 - PM4 Overlay North/South Mirror Defaulted In MdxViewer
+
+- removed the duplicate viewer-local `Pm4PlanarTransform` contract from `src/MdxViewer/Terrain/WorldScene.cs` so the active PM4 consumer now uses the shared `WowViewer.Core.PM4` placement contract directly
+- updated the CK24 coordinate-mode consumer path to keep the shared typed `Pm4CoordinateModeResolution` result instead of collapsing it to a bool immediately
+- switched viewer-side default world-space planar-transform fallback usage onto shared `Pm4PlacementContract`
+- enabled the existing PM4 object-group mirror path by default through `_pm4FlipAllObjectsY = true`, because current manual runtime evidence showed PM4 overlay geometry landing on the wrong north/south side of nearby `M2` placements with handedness-related rotation mismatch
+- kept the PM4 correlation-input builder viewer-local for now; the current correction is about overlay alignment, not correlation ownership
+- updated the PM4 UI toggle label in `src/MdxViewer/ViewerApp.cs` from `Flip All Obj Y` to `Mirror PM4 N/S` so the control matches the behavior it actually applies
+- validation so far is editor/language-service only; no build or new real-data runtime signoff was completed in this pass because the requested `MdxViewer` build was cancelled before completion
+
 ### Mar 28, 2026 - Post-MDX Default Continuation Reset
 
 - recorded that the default next implementation area after pausing `MDX` is `wow-viewer` `Core.PM4` library completion

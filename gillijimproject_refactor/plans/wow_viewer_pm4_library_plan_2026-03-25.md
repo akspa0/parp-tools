@@ -87,6 +87,8 @@ Current status in the workspace:
 - analyzer or inspect follow-up now also landed:
   - single-file PM4 analysis report types
   - single-file PM4 analyzer
+  - CK24-targeted PM4 forensic report types
+  - CK24-targeted PM4 forensic analyzer
   - decode audit report types
   - decode audit and corpus-audit analyzers
   - linkage report types
@@ -96,6 +98,7 @@ Current status in the workspace:
   - unknowns report types
   - corpus unknowns analyzer
   - `WowViewer.Tool.Inspect` verbs for `pm4 inspect` and `pm4 export-json`
+  - `WowViewer.Tool.Inspect pm4 export-json --ck24 <decimal|0xHEX>` for research-only CK24 forensic JSON
   - `WowViewer.Tool.Inspect` verbs for `pm4 audit` and `pm4 audit-directory`
   - `WowViewer.Tool.Inspect` verb for `pm4 linkage`
   - `WowViewer.Tool.Inspect` verb for `pm4 mscn`
@@ -134,6 +137,7 @@ Current status in the workspace:
   - synthetic PM4 geometry-input object-state assertion without viewer-specific world-point assembly
   - real-data MSCN assertions for the fixed development PM4 directory
   - real-data unknowns assertions for the fixed development PM4 directory
+  - real-data CK24 forensic assertions for `development_00_00.pm4`, covering both a dense linked case (`0x412CDC`) and a sparse no-linked-MPRL case (`0x41C0F5`)
 - first active viewer consumer slice now also landed:
   - `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` now references `wow-viewer/src/core/WowViewer.Core.PM4`
   - `WorldScene` now uses shared `Core.PM4` placement solutions instead of assembling planar transform, world pivot, and world yaw correction as separate consumer-owned steps

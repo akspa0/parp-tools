@@ -963,6 +963,7 @@ static void RunPm4ExportJson(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? output = GetOption(args, "--output", "-o");
+	string? ck24Text = GetOption(args, "--ck24", "-k");
 	if (string.IsNullOrWhiteSpace(input))
 	{
 		Console.Error.WriteLine("Error: input PM4 file is required.");
@@ -970,8 +971,29 @@ static void RunPm4ExportJson(string[] args)
 		return;
 	}
 
-	Pm4AnalysisReport report = Pm4ResearchAnalyzer.Analyze(Pm4ResearchReader.ReadFile(input));
-	string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+	Pm4ResearchDocument document = Pm4ResearchReader.ReadFile(input);
+	object report;
+	if (!string.IsNullOrWhiteSpace(ck24Text))
+	{
+		if (!TryParseUInt32Flexible(ck24Text, out uint ck24))
+		{
+			Console.Error.WriteLine($"Error: invalid --ck24 value '{ck24Text}'. Use decimal or 0x-prefixed hex.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		report = Pm4Ck24ForensicsAnalyzer.Analyze(document, ck24);
+	}
+	else
+	{
+		report = Pm4ResearchAnalyzer.Analyze(document);
+	}
+
+	string json = JsonSerializer.Serialize(report, new JsonSerializerOptions
+	{
+		WriteIndented = true,
+		IncludeFields = true,
+	});
 
 	if (!string.IsNullOrWhiteSpace(output))
 	{
@@ -986,6 +1008,14 @@ static void RunPm4ExportJson(string[] args)
 	}
 
 	Console.WriteLine(json);
+}
+
+static bool TryParseUInt32Flexible(string value, out uint parsed)
+{
+	if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+		return uint.TryParse(value[2..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out parsed);
+
+	return uint.TryParse(value, out parsed);
 }
 
 static string? GetOption(string[] args, string longName, string shortName)
@@ -2090,7 +2120,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
-	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 }
 
 static void ShowBlpUsage()
@@ -2133,5 +2163,5 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 unknowns --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 audit --input <file.pm4>");
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
-	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>]");
+	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
 }

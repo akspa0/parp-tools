@@ -126,12 +126,19 @@ public partial class ViewerApp
         }
 
         var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
+        uint? selectedLayerCk24 = _worldScene.SelectedPm4RawCk24;
         Vector3 selectedObjectTranslation = _worldScene.SelectedPm4ObjectTranslation;
         Vector3 selectedObjectRotation = _worldScene.SelectedPm4ObjectRotationDegrees;
         Vector3 selectedObjectScale = _worldScene.SelectedPm4ObjectScale;
+        Vector3 selectedLayerTranslation = _worldScene.SelectedPm4Ck24LayerTranslation;
+        Vector3 selectedLayerRotation = _worldScene.SelectedPm4Ck24LayerRotationDegrees;
+        Vector3 selectedLayerScale = _worldScene.SelectedPm4Ck24LayerScale;
         bool translationChanged = false;
         bool rotationChanged = false;
         bool scaleChanged = false;
+        bool layerTranslationChanged = false;
+        bool layerRotationChanged = false;
+        bool layerScaleChanged = false;
 
         ImGui.Text($"Selected: tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
         if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
@@ -157,6 +164,9 @@ public partial class ViewerApp
             }
             ImGui.TextDisabled($"Planar: swap={debugInfo.SwapPlanarAxes} invertU={debugInfo.InvertU} invertV={debugInfo.InvertV} windingFlip={debugInfo.InvertsWinding}");
         }
+
+        if (selectedLayerCk24.HasValue && _worldScene.TryGetSelectedPm4Ck24LayerStats(out int layerTileCount, out int layerObjectCount))
+            ImGui.TextDisabled($"CK24 Layer 0x{selectedLayerCk24.Value:X6}: {layerObjectCount} parts across {layerTileCount} tiles");
 
         if (_worldScene.TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo researchInfo)
             && ImGui.CollapsingHeader("PM4 Research", ImGuiTreeNodeFlags.DefaultOpen))
@@ -185,6 +195,161 @@ public partial class ViewerApp
                 }
             }
         }
+
+        ImGui.Separator();
+        ImGui.Text("CK24 Layer Translation:");
+
+        if (ImGui.Button("Layer X <<"))
+        {
+            selectedLayerTranslation.X -= _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer X >>"))
+        {
+            selectedLayerTranslation.X += _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+
+        if (ImGui.Button("Layer Y <<"))
+        {
+            selectedLayerTranslation.Y -= _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Y >>"))
+        {
+            selectedLayerTranslation.Y += _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+
+        if (ImGui.Button("Layer Z <<"))
+        {
+            selectedLayerTranslation.Z -= _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Z >>"))
+        {
+            selectedLayerTranslation.Z += _pm4TranslationStepUnits;
+            layerTranslationChanged = true;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("CK24 Layer Rotation:");
+
+        if (ImGui.Button("Layer Rot X -"))
+        {
+            selectedLayerRotation.X -= _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Rot X +"))
+        {
+            selectedLayerRotation.X += _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+
+        if (ImGui.Button("Layer Rot Y -"))
+        {
+            selectedLayerRotation.Y -= _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Rot Y +"))
+        {
+            selectedLayerRotation.Y += _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Rot Y +180"))
+        {
+            selectedLayerRotation.Y += 180f;
+            layerRotationChanged = true;
+        }
+
+        if (ImGui.Button("Layer Rot Z -"))
+        {
+            selectedLayerRotation.Z -= _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Rot Z +"))
+        {
+            selectedLayerRotation.Z += _pm4RotationStepDegrees;
+            layerRotationChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Rot Z +180"))
+        {
+            selectedLayerRotation.Z += 180f;
+            layerRotationChanged = true;
+        }
+
+        ImGui.Separator();
+        ImGui.Text("CK24 Layer Scale:");
+
+        if (ImGui.Button("Layer Sx -"))
+        {
+            selectedLayerScale.X -= _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Sx +"))
+        {
+            selectedLayerScale.X += _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+
+        if (ImGui.Button("Layer Sy -"))
+        {
+            selectedLayerScale.Y -= _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Sy +"))
+        {
+            selectedLayerScale.Y += _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+
+        if (ImGui.Button("Layer Sz -"))
+        {
+            selectedLayerScale.Z -= _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Layer Sz +"))
+        {
+            selectedLayerScale.Z += _pm4ScaleStepUnits;
+            layerScaleChanged = true;
+        }
+
+        ImGui.Text("Layer Axis Flips:");
+        if (ImGui.Button("Flip Layer X"))
+        {
+            selectedLayerScale.X = -selectedLayerScale.X;
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Layer Y"))
+        {
+            selectedLayerScale.Y = -selectedLayerScale.Y;
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Flip Layer Z"))
+        {
+            selectedLayerScale.Z = -selectedLayerScale.Z;
+            layerScaleChanged = true;
+        }
+
+        if (layerTranslationChanged)
+            _worldScene.SelectedPm4Ck24LayerTranslation = selectedLayerTranslation;
+        if (layerRotationChanged)
+            _worldScene.SelectedPm4Ck24LayerRotationDegrees = NormalizeRotationDegrees(selectedLayerRotation);
+        if (layerScaleChanged)
+            _worldScene.SelectedPm4Ck24LayerScale = selectedLayerScale;
 
         ImGui.Separator();
         ImGui.Text("Object Translation:");
@@ -340,6 +505,38 @@ public partial class ViewerApp
             _worldScene.SelectedPm4ObjectRotationDegrees = NormalizeRotationDegrees(selectedObjectRotation);
         if (scaleChanged)
             _worldScene.SelectedPm4ObjectScale = selectedObjectScale;
+
+        ImGui.Separator();
+
+        if (ImGui.Button("Reset Layer Move"))
+            _worldScene.SelectedPm4Ck24LayerTranslation = Vector3.Zero;
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Layer Rot"))
+            _worldScene.SelectedPm4Ck24LayerRotationDegrees = Vector3.Zero;
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Layer Scale"))
+            _worldScene.SelectedPm4Ck24LayerScale = Vector3.One;
+
+        if (ImGui.Button("Reset Layer 9DoF"))
+        {
+            _worldScene.SelectedPm4Ck24LayerTranslation = Vector3.Zero;
+            _worldScene.SelectedPm4Ck24LayerRotationDegrees = Vector3.Zero;
+            _worldScene.SelectedPm4Ck24LayerScale = Vector3.One;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Print Layer Alignment") && selectedLayerCk24.HasValue)
+        {
+            Vector3 t = _worldScene.SelectedPm4Ck24LayerTranslation;
+            Vector3 r = _worldScene.SelectedPm4Ck24LayerRotationDegrees;
+            Vector3 s = _worldScene.SelectedPm4Ck24LayerScale;
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                $"[PM4 CK24 Align] ck24=0x{selectedLayerCk24.Value:X6} T=({t.X:F3},{t.Y:F3},{t.Z:F3}) Rot=({r.X:F3},{r.Y:F3},{r.Z:F3}) Scale=({s.X:F4},{s.Y:F4},{s.Z:F4})");
+        }
+
+        ImGui.TextDisabled($"Layer Move: ({_worldScene.SelectedPm4Ck24LayerTranslation.X:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Y:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Z:F3})");
+        ImGui.TextDisabled($"Layer Rot: ({_worldScene.SelectedPm4Ck24LayerRotationDegrees.X:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Y:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Z:F3}) deg");
+        ImGui.TextDisabled($"Layer Scale: ({_worldScene.SelectedPm4Ck24LayerScale.X:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Y:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Z:F4})");
 
         ImGui.Separator();
 
@@ -995,7 +1192,7 @@ public partial class ViewerApp
 
         try
         {
-            string json = JsonSerializer.Serialize(graph, new JsonSerializerOptions
+            string json = JsonSerializer.Serialize(BuildJsonSafePm4Graph(graph), new JsonSerializerOptions
             {
                 WriteIndented = true
             });
@@ -1007,5 +1204,84 @@ public partial class ViewerApp
             _statusMessage = $"PM4 graph export failed: {ex.Message}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Graph] JSON export failed: {ex}");
         }
+    }
+
+    private static object BuildJsonSafePm4Graph(Pm4SelectedObjectGraphInfo graph)
+    {
+        return new
+        {
+            selectedTileX = graph.SelectedTileX,
+            selectedTileY = graph.SelectedTileY,
+            ck24 = graph.Ck24,
+            ck24Type = graph.Ck24Type,
+            ck24ObjectId = graph.Ck24ObjectId,
+            selectedObjectPartId = graph.SelectedObjectPartId,
+            splitByMdos = graph.SplitByMdos,
+            splitByConnectivity = graph.SplitByConnectivity,
+            tileCount = graph.TileCount,
+            linkGroupCount = graph.LinkGroupCount,
+            mdosGroupCount = graph.MdosGroupCount,
+            partCount = graph.PartCount,
+            surfaceCount = graph.SurfaceCount,
+            totalIndexCount = graph.TotalIndexCount,
+            attributeMaskCount = graph.AttributeMaskCount,
+            groupKeyCount = graph.GroupKeyCount,
+            linkGroups = graph.LinkGroups.Select(static linkGroup => new
+            {
+                linkGroupObjectId = linkGroup.LinkGroupObjectId,
+                partCount = linkGroup.PartCount,
+                surfaceCount = linkGroup.SurfaceCount,
+                totalIndexCount = linkGroup.TotalIndexCount,
+                linkedPositionRefCount = linkGroup.LinkedPositionRefCount,
+                linkedPositionRefSummary = BuildJsonSafeLinkedPositionRefSummary(linkGroup.LinkedPositionRefSummary),
+                mdosIndices = linkGroup.MdosIndices,
+                attributeMasks = linkGroup.AttributeMasks,
+                groupKeys = linkGroup.GroupKeys,
+                mdosGroups = linkGroup.MdosGroups.Select(static mdosGroup => new
+                {
+                    mdosIndex = mdosGroup.MdosIndex,
+                    partCount = mdosGroup.PartCount,
+                    surfaceCount = mdosGroup.SurfaceCount,
+                    totalIndexCount = mdosGroup.TotalIndexCount,
+                    attributeMasks = mdosGroup.AttributeMasks,
+                    groupKeys = mdosGroup.GroupKeys,
+                    parts = mdosGroup.Parts.Select(static part => new
+                    {
+                        tileX = part.TileX,
+                        tileY = part.TileY,
+                        objectPartId = part.ObjectPartId,
+                        surfaceCount = part.SurfaceCount,
+                        totalIndexCount = part.TotalIndexCount,
+                        lineCount = part.LineCount,
+                        triangleCount = part.TriangleCount,
+                        dominantGroupKey = part.DominantGroupKey,
+                        dominantAttributeMask = part.DominantAttributeMask,
+                        dominantMdosIndex = part.DominantMdosIndex,
+                        isSelected = part.IsSelected,
+                    }).ToList(),
+                }).ToList(),
+            }).ToList(),
+        };
+    }
+
+    private static object BuildJsonSafeLinkedPositionRefSummary(Pm4LinkedPositionRefSummary summary)
+    {
+        return new
+        {
+            totalCount = summary.TotalCount,
+            normalCount = summary.NormalCount,
+            terminatorCount = summary.TerminatorCount,
+            floorMin = summary.FloorMin,
+            floorMax = summary.FloorMax,
+            headingMinDegrees = JsonFiniteOrNull(summary.HeadingMinDegrees),
+            headingMaxDegrees = JsonFiniteOrNull(summary.HeadingMaxDegrees),
+            headingMeanDegrees = JsonFiniteOrNull(summary.HeadingMeanDegrees),
+            hasNormalHeadings = summary.HasNormalHeadings,
+        };
+    }
+
+    private static float? JsonFiniteOrNull(float value)
+    {
+        return float.IsFinite(value) ? value : null;
     }
 }

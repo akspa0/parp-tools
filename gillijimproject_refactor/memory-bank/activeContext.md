@@ -1,5 +1,20 @@
 # Active Context
 
+## Mar 29, 2026 - Shared CK24 PM4 Forensics Landed In `wow-viewer`
+
+- `wow-viewer` now has a research-only shared CK24 forensic export path in `Core.PM4` instead of leaving richer PM4 graph evidence trapped in `MdxViewer` JSON only.
+- Landed pieces in this slice:
+	- `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4ForensicsModels.cs` now carries shared CK24 forensic report contracts for per-component link groups, raw MSLK rows, raw linked MPRL rows, footprint counts, and placement comparison.
+	- `wow-viewer/src/core/WowViewer.Core.PM4/Research/Pm4Ck24ForensicsAnalyzer.cs` now builds component-level CK24 reports using the same current MSLK surface-link semantics as the viewer-side PM4 graph export, while keeping the report labeled as research-only.
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now supports `pm4 export-json --ck24 <decimal|0xHEX>` so the shared inspect surface can emit either the coarse single-file PM4 report or a targeted CK24 forensic JSON without adding another tool-local parser path.
+	- PM4 export JSON in inspect now enables field serialization so `System.Numerics` vectors serialize as real coordinates instead of empty objects.
+- Validation completed on Mar 29, 2026:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed after the new analyzer and inspect wiring landed.
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter Pm4ResearchIntegrationTests` passed with new real-data CK24 forensic assertions.
+	- `pm4 export-json --input .../development_00_00.pm4 --ck24 0x412CDC --output .../pm4_ck24_412CDC_forensics.json` wrote real shared CK24 forensic JSON against the fixed development dataset.
+- Important boundary:
+	- this is still research or export evidence only; it does not prove final PM4 object semantics or runtime viewer closure.
+
 ## Mar 28, 2026 - Default Post-MDX Continuation Target
 
 - With classic `MDX` expansion paused, the default next `wow-viewer` implementation track should move to `Core.PM4` library completion rather than another `MDX` seam.
