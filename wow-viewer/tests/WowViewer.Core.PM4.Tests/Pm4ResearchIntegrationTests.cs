@@ -27,11 +27,28 @@ public sealed class Pm4ResearchIntegrationTests
         Pm4AnalysisReport report = Pm4ResearchAnalyzer.Analyze(Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath));
 
         Assert.Empty(report.UnknownChunks);
+        Assert.Contains(report.Terminology, static entry => entry.RawField == "MSUR._0x02" && entry.LocalAlias == "AttributeMask");
         Assert.NotEmpty(report.TopCk24Groups);
         Assert.Equal((uint)4237834, report.TopCk24Groups[0].Ck24);
         Assert.Equal((ushort)43530, report.TopCk24Groups[0].Ck24ObjectId);
         Assert.Equal(896, report.TopCk24Groups[0].SurfaceCount);
         Assert.Contains(report.ResearchNotes, note => note.Contains("UniqueID", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ReadFile_DevelopmentTile_ExposesRawFieldAliasesWithoutBreakingExistingProperties()
+    {
+        Pm4ResearchDocument document = Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath);
+
+        Pm4MsurEntry surface = Assert.IsType<Pm4MsurEntry>(document.KnownChunks.Msur[0]);
+        Pm4MslkEntry link = Assert.IsType<Pm4MslkEntry>(document.KnownChunks.Mslk[0]);
+
+        Assert.Equal(surface.GroupKey, surface._0x00);
+        Assert.Equal(surface.AttributeMask, surface._0x02);
+        Assert.Equal(surface.MdosIndex, surface._0x18);
+        Assert.Equal(surface.PackedParams, surface._0x1C);
+        Assert.Equal(surface.Height, surface.PlaneDistance);
+        Assert.Equal(link.GroupObjectId, link._0x04);
     }
 
     [Fact]
@@ -914,6 +931,7 @@ public sealed class Pm4ResearchIntegrationTests
             Pm4ResearchReader.ReadFile(Pm4TestPaths.DevelopmentTilePath),
             0x412CDCu);
 
+        Assert.Contains(report.Terminology, static entry => entry.RawField == "MSUR._0x1C");
         Assert.Equal((ushort)11484, report.Ck24ObjectId);
         Assert.Equal(72, report.SurfaceCount);
         Assert.Equal(12, report.DistinctLinkGroupCount);

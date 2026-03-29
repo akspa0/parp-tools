@@ -1,5 +1,22 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - First Rendering Performance Slice Targets Duplicate MDX Scene Walks
+
+- user priority has shifted from more PM4 exploration to practical viewer rendering performance, with current map loads still reported around `1-5 FPS`
+- first chosen optimization stays in `src/MdxViewer/Terrain/WorldScene.cs` rather than jumping straight into shader/effect parity:
+   - collect visible MDX or taxi instances once per frame
+   - reuse that result for both opaque and transparent passes
+   - avoid duplicate frustum/AABB checks and duplicate `TryGetQueuedMdx(...)` calls inside the same frame
+- landed behavior:
+   - added a `VisibleMdxInstance` scratch contract plus `_visibleMdxInstances`
+   - added `CollectVisibleMdxInstances(...)` to precompute visible renderer references and fade values
+   - transparent sorting now works from the already-visible scratch list instead of re-walking `_mdxInstances` and `_taxiActorInstances`
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings only
+- important boundary:
+   - this reduces obvious per-frame CPU waste but does not yet prove acceptable runtime FPS on real map loads
+   - next likely slice should continue with scene culling or submission or batching cost before broader shader/lighting work
+
 ## Mar 29, 2026 - PM4 Hierarchy Research Moved Into `wow-viewer` And Back Into `MdxViewer`
 
 - the active PM4 research path in `MdxViewer` is no longer anchored on `src/Pm4Research.Core`; `src/MdxViewer/Terrain/WorldScene.cs` now builds its cached PM4 research context from shared `wow-viewer/src/core/WowViewer.Core.PM4`

@@ -1,5 +1,23 @@
 # Progress
 
+### Mar 29, 2026 - WorldScene MDX Render Passes Stop Repeating The Same Visibility Work
+
+- started the user-requested performance pivot away from PM4-first work by targeting the hottest obvious CPU path in `src/MdxViewer/Terrain/WorldScene.cs`
+- root cause for this first slice:
+	- the scene was re-walking `_mdxInstances` and `_taxiActorInstances` across separate animation/update, opaque, and transparent passes
+	- opaque and transparent passes were repeating frustum checks, AABB distance checks, and `TryGetQueuedMdx(...)` lookups for the same instances in the same frame
+- landed behavior:
+	- added a reusable visible-instance scratch list for loaded MDX/taxi instances
+	- `CollectVisibleMdxInstances(...)` now performs the cull and renderer-resolution pass once, computing reusable opaque/transparent fade factors at the same time
+	- opaque rendering now iterates the preclassified visible list
+	- transparent rendering now sorts only the already-visible list instead of re-culling the world again
+- validation completed:
+	- `get_errors` on `WorldScene.cs` returned clean
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings only
+- runtime boundary:
+	- this is compile-validated only in this session
+	- no measured frame-time comparison or manual viewer FPS confirmation has been captured yet
+
 ### Mar 29, 2026 - PM4 Terminology Guardrail Synced Across wow-viewer Continuity Files
 
 - reconciled current PM4 field names against wowdev `PM4` and `PD4` documentation plus the standalone corpus-backed confidence reports

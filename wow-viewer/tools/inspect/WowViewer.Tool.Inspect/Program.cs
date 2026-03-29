@@ -1198,8 +1198,19 @@ static void PrintPm4Report(Pm4AnalysisReport report)
 	Console.WriteLine($"MPRL total={report.Mprl.TotalCount}, normal={report.Mprl.NormalCount}, terminator={report.Mprl.TerminatorCount}");
 	Console.WriteLine($"MPRL floor range={report.Mprl.FloorMin?.ToString() ?? "n/a"}..{report.Mprl.FloorMax?.ToString() ?? "n/a"}");
 	Console.WriteLine($"MPRL rotation range={report.Mprl.RotationMinDegrees?.ToString("F2") ?? "n/a"}..{report.Mprl.RotationMaxDegrees?.ToString("F2") ?? "n/a"}");
+	if (report.Terminology.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Terminology:");
+		foreach (Pm4TerminologyEntry entry in report.Terminology)
+		{
+			string alias = string.IsNullOrWhiteSpace(entry.LocalAlias) ? "" : $" -> local alias {entry.LocalAlias}";
+			Console.WriteLine($"  {entry.RawField}{alias} ({entry.Confidence})");
+			Console.WriteLine($"    {entry.Notes}");
+		}
+	}
 	Console.WriteLine();
-	Console.WriteLine("Top CK24 groups:");
+	Console.WriteLine("Top MSUR._0x1c-derived key24 groups:");
 	if (report.TopCk24Groups.Count == 0)
 	{
 		Console.WriteLine("  none");
@@ -1208,7 +1219,7 @@ static void PrintPm4Report(Pm4AnalysisReport report)
 	{
 		foreach (Pm4Ck24Summary summary in report.TopCk24Groups.Take(10))
 		{
-			Console.WriteLine($"  ck24={summary.Ck24} type={summary.Ck24Type} object={summary.Ck24ObjectId} surfaces={summary.SurfaceCount} indices={summary.TotalIndexCount} mdos={summary.DistinctMdosCount}");
+			Console.WriteLine($"  key24=0x{summary.Ck24:X6} type=0x{summary.Ck24Type:X2} low16={summary.Ck24ObjectId} surfaces={summary.SurfaceCount} indices={summary.TotalIndexCount} mdos={summary.DistinctMdosCount}");
 		}
 	}
 

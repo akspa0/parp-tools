@@ -1,5 +1,22 @@
 # Active Context
 
+## Mar 29, 2026 - Viewer Performance Pivot Started With WorldScene MDX Classification Pass
+
+- user direction has shifted away from more PM4-first work and toward real viewer rendering performance or lighting or shader quality, because current map loads still feel unusable at roughly `1-5 FPS`
+- first chosen slice is deliberately CPU-side and narrow:
+	- reduce per-frame duplicate object work in `src/MdxViewer/Terrain/WorldScene.cs`
+	- do not start with shader-parity or sky or lighting refactors before the main scene loop is cheaper
+- landed optimization:
+	- `WorldScene` now classifies visible loaded `MDX` or taxi-actor instances once per frame into a reusable scratch list
+	- the opaque and transparent doodad passes now reuse that one visibility result instead of redoing AABB distance checks or frustum tests or `TryGetQueuedMdx(...)` lookups in separate passes
+	- shared per-instance fade values are also precomputed once and reused across both passes
+- validation completed:
+	- editor error check on `WorldScene.cs` passed
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing environment warnings only
+- important boundary:
+	- this is a first hot-path reduction only, not full FPS recovery
+	- no live viewer frame-time capture or runtime signoff was completed in this pass yet
+
 ## Mar 29, 2026 - PM4 Terminology Reconciliation Locked For `wow-viewer`
 
 - the current PM4 reader or analyzer stack is no longer allowed to blur wowdev field names with local research aliases

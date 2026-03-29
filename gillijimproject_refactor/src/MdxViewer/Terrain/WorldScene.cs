@@ -530,9 +530,28 @@ public class WorldScene : ISceneRenderer
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
 
+    private readonly struct VisibleMdxInstance
+    {
+        public VisibleMdxInstance(ObjectInstance instance, MdxRenderer renderer, float centerDistanceSq, float opaqueFade, float transparentFade)
+        {
+            Instance = instance;
+            Renderer = renderer;
+            CenterDistanceSq = centerDistanceSq;
+            OpaqueFade = opaqueFade;
+            TransparentFade = transparentFade;
+        }
+
+        public ObjectInstance Instance { get; }
+        public MdxRenderer Renderer { get; }
+        public float CenterDistanceSq { get; }
+        public float OpaqueFade { get; }
+        public float TransparentFade { get; }
+    }
+
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly HashSet<string> _updatedMdxRenderers = new();
-    private readonly List<(bool isTaxiActor, int idx, float distSq)> _transparentSortScratch = new();
+    private readonly List<VisibleMdxInstance> _visibleMdxInstances = new();
+    private readonly List<(int visibleIdx, float distSq)> _transparentSortScratch = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private bool _wireframeRevealEnabled;
@@ -585,6 +604,8 @@ public class WorldScene : ISceneRenderer
     private int _pm4CameraTileRadius = Pm4MinCameraTileRadius;
     private double _pm4AverageLoadMs = -1.0;
     private (int minTileX, int minTileY, int maxTileX, int maxTileY)? _pm4LoadedCameraWindow;
+    private readonly HashSet<(int tileX, int tileY)> _pm4KnownMapTiles = new();
+    private readonly HashSet<(int tileX, int tileY)> _pm4CoveredMapTiles = new();
     private Task<Pm4OverlayAsyncLoadResult>? _pm4LoadTask;
     private CancellationTokenSource? _pm4LoadCancellation;
     private int _pm4LoadRequestId;
@@ -1822,6 +1843,9 @@ public class WorldScene : ISceneRenderer
         if (result.RequestId != _pm4LoadRequestId || result.Cancelled)
             return;
 
+        if (result.KnownMapTiles.Count > 0)
+            _pm4KnownMapTiles.UnionWith(result.KnownMapTiles);
+
         if (result.CacheData != null)
         {
             bool replaceExisting = !_pm4LoadedCameraWindow.HasValue || _pm4TileObjects.Count == 0;
@@ -1829,6 +1853,8 @@ public class WorldScene : ISceneRenderer
                 ClearPm4OverlayRuntimeState();
 
             MergePm4OverlayFromCache(result.CacheData);
+            if (result.CoveredMapTiles.Count > 0)
+                _pm4CoveredMapTiles.UnionWith(result.CoveredMapTiles);
             if (result.LoadedCameraWindow.HasValue)
                 ExpandPm4LoadedCameraWindow(result.LoadedCameraWindow.Value);
             RestoreSelectedPm4Object(result.SelectedObjectKey);
@@ -1890,7 +1916,7 @@ public class WorldScene : ISceneRenderer
         try
         {
             if (_dataSource == null)
-                return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, "PM4 unavailable: no data source.", cancelled: false);
+                return new Pm4OverlayAsyncLoadResult(requestId, null, null, [], [], selectedObjectKey, 0.0, "PM4 unavailable: no data source.", cancelled: false);
 
             string mapName = _terrainManager.MapName;
             List<string> mapPm4Candidates = _dataSource
@@ -1901,7 +1927,7 @@ public class WorldScene : ISceneRenderer
 
             int mapPm4CandidateCount = mapPm4Candidates.Count;
             if (mapPm4CandidateCount == 0)
-                return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, $"PM4: no files found for map '{mapName}'.", cancelled: false);
+                return new Pm4OverlayAsyncLoadResult(requestId, null, null, [], [], selectedObjectKey, 0.0, $"PM4: no files found for map '{mapName}'.", cancelled: false);
 
             int tileParseRejected = 0;
             int tileRangeRejected = 0;
@@ -1925,6 +1951,10 @@ public class WorldScene : ISceneRenderer
                 pm4Candidates.Add((pm4Path, effectiveTileX, effectiveTileY));
             }
 
+            HashSet<(int tileX, int tileY)> knownMapTiles = pm4Candidates
+                .Select(static candidate => (candidate.tileX, candidate.tileY))
+                .ToHashSet();
+
             int totalFiles = pm4Candidates.Count;
             if (totalFiles == 0)
             {
@@ -1932,6 +1962,8 @@ public class WorldScene : ISceneRenderer
                     requestId,
                     null,
                     null,
+                    knownMapTiles,
+                    [],
                     selectedObjectKey,
                     0.0,
                     $"PM4: 0/{mapPm4CandidateCount} valid map files after tile mapping (tileParse={tileParseRejected}, tileRange={tileRangeRejected}).",
@@ -1950,11 +1982,17 @@ public class WorldScene : ISceneRenderer
                     requestId,
                     null,
                     cameraWindow,
+                    knownMapTiles,
+                    [],
                     selectedObjectKey,
                     0.0,
                     $"PM4: no files intersect camera window ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) out of {totalFiles} valid map files.",
                     cancelled: false);
             }
+
+            HashSet<(int tileX, int tileY)> loadCandidateTiles = loadCandidates
+                .Select(static candidate => (candidate.tileX, candidate.tileY))
+                .ToHashSet();
 
             if (ignoreCache && _pm4OverlayCacheService != null)
             {
@@ -1979,6 +2017,8 @@ public class WorldScene : ISceneRenderer
                     requestId,
                     cachedOverlay,
                     cameraWindow,
+                    knownMapTiles,
+                    loadCandidateTiles,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
                     $"PM4 ready: {cachedOverlay.LoadedFiles}/{cachedOverlay.TotalFiles} camera-window files restored from disk cache for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {cachedOverlay.ObjectCount} objects, {cachedOverlay.LineCount} lines, {cachedOverlay.TriangleCount} triangles, {cachedOverlay.PositionRefCount} refs, {cachedOverlay.RejectedLongEdges} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
@@ -2004,6 +2044,10 @@ public class WorldScene : ISceneRenderer
             int zeroObjectFiles = 0;
             float minObjectZ = float.MaxValue;
             float maxObjectZ = float.MinValue;
+            var tileCandidateCounts = loadCandidates
+                .GroupBy(static candidate => (candidate.tileX, candidate.tileY))
+                .ToDictionary(static group => group.Key, static group => group.Count());
+            var tileSatisfiedCounts = tileCandidateCounts.Keys.ToDictionary(static tile => tile, static _ => 0);
             var tileObjects = new Dictionary<(int tileX, int tileY), List<Pm4OverlayObject>>();
             var tilePositionRefs = new Dictionary<(int tileX, int tileY), List<Vector3>>();
             var progressStopwatch = Stopwatch.StartNew();
@@ -2054,6 +2098,7 @@ public class WorldScene : ISceneRenderer
                         ref rejectedLongEdges);
                     if (objects.Count == 0)
                     {
+                        tileSatisfiedCounts[(effectiveTileX, effectiveTileY)]++;
                         zeroObjectFiles++;
                         ViewerLog.Debug(ViewerLog.Category.Terrain,
                             $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.KnownChunks.Msur.Count}, meshVerts={pm4.KnownChunks.Msvt.Count}, meshIndices={pm4.KnownChunks.Msvi.Count}, links={pm4.KnownChunks.Mslk.Count}, refs={pm4.KnownChunks.Mprl.Count}) but produced 0 overlay objects.");
@@ -2096,6 +2141,7 @@ public class WorldScene : ISceneRenderer
                         }
                     }
 
+                    tileSatisfiedCounts[(effectiveTileX, effectiveTileY)]++;
                     loadedFiles++;
                     objectCount += objects.Count;
                     lineCount += objects.Sum(obj => obj.Lines.Count);
@@ -2125,6 +2171,8 @@ public class WorldScene : ISceneRenderer
                     requestId,
                     null,
                     cameraWindow,
+                    knownMapTiles,
+                    [],
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
                     $"PM4: {loadCandidates.Count}/{totalFiles} camera-window files found, none decoded into overlay data for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
@@ -2158,10 +2206,17 @@ public class WorldScene : ISceneRenderer
                     ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheSaveError}");
             }
 
+            HashSet<(int tileX, int tileY)> coveredMapTiles = tileCandidateCounts
+                .Where(entry => tileSatisfiedCounts[entry.Key] >= entry.Value)
+                .Select(static entry => entry.Key)
+                .ToHashSet();
+
             return new Pm4OverlayAsyncLoadResult(
                 requestId,
                 cacheData,
                 cameraWindow,
+                knownMapTiles,
+                coveredMapTiles,
                 selectedObjectKey,
                 loadStopwatch.Elapsed.TotalMilliseconds,
                 $"PM4 ready: {loadedFiles}/{loadCandidates.Count} camera-window files decoded and cached for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}), avg {_pm4AverageLoadMs:0} ms, next radius {_pm4CameraTileRadius}, from {mapPm4CandidateCount} map files, {objectCount} objects, {lineCount} lines, {triangleCount} triangles, {positionRefCount} refs, {rejectedLongEdgesTotal} long edges rejected, {loadStopwatch.ElapsedMilliseconds} ms.",
@@ -2169,17 +2224,19 @@ public class WorldScene : ISceneRenderer
         }
         catch (OperationCanceledException)
         {
-            return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, "PM4 load cancelled.", cancelled: true);
+            return new Pm4OverlayAsyncLoadResult(requestId, null, null, [], [], selectedObjectKey, 0.0, "PM4 load cancelled.", cancelled: true);
         }
         catch (Exception ex)
         {
-            return new Pm4OverlayAsyncLoadResult(requestId, null, null, selectedObjectKey, 0.0, $"PM4 load failed: {ex.Message}", cancelled: false);
+            return new Pm4OverlayAsyncLoadResult(requestId, null, null, [], [], selectedObjectKey, 0.0, $"PM4 load failed: {ex.Message}", cancelled: false);
         }
     }
 
     private void ClearPm4OverlayRuntimeState()
     {
         _pm4LoadedCameraWindow = null;
+        _pm4CoveredMapTiles.Clear();
+        _pm4KnownMapTiles.Clear();
         _pm4TileObjects.Clear();
         _pm4TileStats.Clear();
         _pm4TilePositionRefs.Clear();
@@ -2348,6 +2405,20 @@ public class WorldScene : ISceneRenderer
 
     private bool IsPm4CameraWindowCovered((int minTileX, int minTileY, int maxTileX, int maxTileY) cameraWindow)
     {
+        if (_pm4KnownMapTiles.Count > 0)
+        {
+            foreach ((int tileX, int tileY) in _pm4KnownMapTiles)
+            {
+                if (!IsPm4TileInsideCameraWindow(tileX, tileY, cameraWindow))
+                    continue;
+
+                if (!_pm4CoveredMapTiles.Contains((tileX, tileY)))
+                    return false;
+            }
+
+            return true;
+        }
+
         if (!_pm4LoadedCameraWindow.HasValue)
             return false;
 
@@ -5328,6 +5399,55 @@ public class WorldScene : ISceneRenderer
         return MathF.Max(WmoCullDistance, fogEnd + 1200f);
     }
 
+    private void CollectVisibleMdxInstances(
+        List<ObjectInstance> instances,
+        Vector3 cameraPos,
+        float mdxFadeStart,
+        float mdxFadeStartSq,
+        float mdxFadeRange,
+        bool cullSmallDoodadsOnly)
+    {
+        foreach (var inst in instances)
+        {
+            float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+            float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
+            if (boundsDistSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+            {
+                MdxCulledCount++;
+                continue;
+            }
+
+            float diag = (inst.BoundsMax - inst.BoundsMin).Length();
+            bool useSmallDoodadCull = cullSmallDoodadsOnly && diag < DoodadSmallThreshold;
+            if (useSmallDoodadCull && boundsDistSq > DoodadCullDistanceSq)
+            {
+                MdxCulledCount++;
+                continue;
+            }
+
+            var renderer = TryGetQueuedMdx(inst.ModelKey);
+            if (renderer == null)
+                continue;
+
+            float opaqueFade = 1.0f;
+            if ((!cullSmallDoodadsOnly || useSmallDoodadCull) && boundsDistSq > mdxFadeStartSq)
+            {
+                float boundsDist = MathF.Sqrt(boundsDistSq);
+                opaqueFade = MathF.Max(0f, 1.0f - (boundsDist - mdxFadeStart) / mdxFadeRange);
+            }
+
+            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
+            float transparentFade = 1.0f;
+            if ((!cullSmallDoodadsOnly || useSmallDoodadCull) && centerDistanceSq > mdxFadeStartSq)
+            {
+                float centerDistance = MathF.Sqrt(centerDistanceSq);
+                transparentFade = MathF.Max(0f, 1.0f - (centerDistance - mdxFadeStart) / mdxFadeRange);
+            }
+
+            _visibleMdxInstances.Add(new VisibleMdxInstance(inst, renderer, centerDistanceSq, opaqueFade, transparentFade));
+        }
+    }
+
     // ── ISceneRenderer ──────────────────────────────────────────────────
 
     private bool _renderDiagPrinted = false;
@@ -5507,88 +5627,36 @@ public class WorldScene : ISceneRenderer
             }
         }
 
+        _visibleMdxInstances.Clear();
         MdxRenderer? batchRenderer = null;
         if (_doodadsVisible)
         {
-            // Set up shared per-frame state once (shader, view/proj, fog, lighting).
-            // Safe because all MdxRenderers share a single static shader program.
-            foreach (var inst in _mdxInstances)
-            {
-                if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
-                    break;
-            }
-            if (batchRenderer == null)
-            {
-                foreach (var inst in _taxiActorInstances)
-                {
-                    if (_assets.TryGetLoadedMdx(inst.ModelKey, out batchRenderer) && batchRenderer != null)
-                        break;
-                }
-            }
-            batchRenderer?.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
-                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            CollectVisibleMdxInstances(_mdxInstances, cameraPos, mdxFadeStart, mdxFadeStartSq, mdxFadeRange, cullSmallDoodadsOnly: true);
+            CollectVisibleMdxInstances(_taxiActorInstances, cameraPos, mdxFadeStart, mdxFadeStartSq, mdxFadeRange, cullSmallDoodadsOnly: false);
 
-            foreach (var inst in _mdxInstances)
+            if (_visibleMdxInstances.Count > 0)
             {
-                float distSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-                // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (distSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
-                { MdxCulledCount++; continue; }
-                // Distance cull small doodads (with fade)
-                var diag = (inst.BoundsMax - inst.BoundsMin).Length();
-                if (diag < DoodadSmallThreshold && distSq > DoodadCullDistanceSq)
-                { MdxCulledCount++; continue; }
-                // Compute fade factor for objects near cull boundary
-                float fade = 1.0f;
-                if (diag < DoodadSmallThreshold && distSq > mdxFadeStartSq)
+                batchRenderer = _visibleMdxInstances[0].Renderer;
+                batchRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+            }
+
+            foreach (var visible in _visibleMdxInstances)
+            {
+                if (visible.Renderer.RequiresUnbatchedWorldRender)
                 {
-                    float dist = MathF.Sqrt(distSq);
-                    fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
-                }
-                var renderer = TryGetQueuedMdx(inst.ModelKey);
-                if (renderer == null) continue;
-                if (renderer.RequiresUnbatchedWorldRender)
-                {
-                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
+                    visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
                         fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
                 else
                 {
-                    renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
+                    visible.Renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
                 }
+
                 MdxRenderedCount++;
             }
 
-            foreach (var inst in _taxiActorInstances)
-            {
-                float distSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-                if (distSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
-                { MdxCulledCount++; continue; }
-
-                float fade = 1.0f;
-                if (distSq > mdxFadeStartSq)
-                {
-                    float dist = MathF.Sqrt(distSq);
-                    fade = MathF.Max(0f, 1.0f - (dist - mdxFadeStart) / mdxFadeRange);
-                }
-
-                var renderer = TryGetQueuedMdx(inst.ModelKey);
-                if (renderer == null) continue;
-                if (renderer.RequiresUnbatchedWorldRender)
-                {
-                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Opaque, fade,
-                        fogColor, objectFogStart, objectFogEnd, cameraPos,
-                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                }
-                else
-                {
-                    renderer.RenderInstance(inst.Transform, RenderPass.Opaque, fade);
-                }
-                MdxRenderedCount++;
-            }
             if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
         }
 
@@ -5614,53 +5682,27 @@ public class WorldScene : ISceneRenderer
             _gl.Enable(EnableCap.DepthTest);
             _gl.DepthFunc(DepthFunction.Lequal);
 
-            // Sort visible instances back-to-front by distance to camera
+            // Sort visible instances back-to-front by distance to camera.
             _transparentSortScratch.Clear();
-            for (int i = 0; i < _mdxInstances.Count; i++)
+            for (int i = 0; i < _visibleMdxInstances.Count; i++)
             {
-                var inst = _mdxInstances[i];
-                // Same frustum + distance cull as opaque pass (with NoCullRadius)
-                float distSqToBounds = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-                if (distSqToBounds > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
-                var diag = (inst.BoundsMax - inst.BoundsMin).Length();
-                if (diag < DoodadSmallThreshold && distSqToBounds > DoodadCullDistanceSq) continue;
-                float dist = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
-                if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
-                _transparentSortScratch.Add((false, i, dist));
+                _transparentSortScratch.Add((i, _visibleMdxInstances[i].CenterDistanceSq));
             }
-            for (int i = 0; i < _taxiActorInstances.Count; i++)
-            {
-                var inst = _taxiActorInstances[i];
-                float distSqToBounds = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-                float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-                if (distSqToBounds > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax)) continue;
-                float dist = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
-                if (TryGetQueuedMdx(inst.ModelKey) == null) continue;
-                _transparentSortScratch.Add((true, i, dist));
-            }
-            _transparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq)); // back-to-front
 
-            foreach (var (isTaxiActor, idx, distSq) in _transparentSortScratch)
+            _transparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
+
+            foreach (var (visibleIdx, _) in _transparentSortScratch)
             {
-                var inst = isTaxiActor ? _taxiActorInstances[idx] : _mdxInstances[idx];
-                // Compute fade for transparent pass (same as opaque)
-                float tDist = MathF.Sqrt(distSq);
-                var tDiag = (inst.BoundsMax - inst.BoundsMin).Length();
-                float tFade = 1.0f;
-                if (tDiag < DoodadSmallThreshold && tDist > mdxFadeStart)
-                    tFade = MathF.Max(0f, 1.0f - (tDist - mdxFadeStart) / mdxFadeRange);
-                var renderer = TryGetQueuedMdx(inst.ModelKey);
-                if (renderer == null) continue;
-                if (renderer.RequiresUnbatchedWorldRender)
+                var visible = _visibleMdxInstances[visibleIdx];
+                if (visible.Renderer.RequiresUnbatchedWorldRender)
                 {
-                    renderer.RenderWithTransform(inst.Transform, view, proj, RenderPass.Transparent, tFade,
+                    visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
                         fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
                 else
                 {
-                    renderer.RenderInstance(inst.Transform, RenderPass.Transparent, tFade);
+                    visible.Renderer.RenderInstance(visible.Instance.Transform, RenderPass.Transparent, visible.TransparentFade);
                 }
             }
             if (!_renderDiagPrinted) _renderDiagPrinted = true;
@@ -7404,6 +7446,8 @@ public class WorldScene : ISceneRenderer
             int requestId,
             Pm4OverlayCacheData? cacheData,
             (int minTileX, int minTileY, int maxTileX, int maxTileY)? loadedCameraWindow,
+            IReadOnlyCollection<(int tileX, int tileY)> knownMapTiles,
+            IReadOnlyCollection<(int tileX, int tileY)> coveredMapTiles,
             (int tileX, int tileY, uint ck24, int objectPart)? selectedObjectKey,
             double loadElapsedMs,
             string statusMessage,
@@ -7412,6 +7456,8 @@ public class WorldScene : ISceneRenderer
             RequestId = requestId;
             CacheData = cacheData;
             LoadedCameraWindow = loadedCameraWindow;
+            KnownMapTiles = knownMapTiles;
+            CoveredMapTiles = coveredMapTiles;
             SelectedObjectKey = selectedObjectKey;
             LoadElapsedMs = loadElapsedMs;
             StatusMessage = statusMessage;
@@ -7421,6 +7467,8 @@ public class WorldScene : ISceneRenderer
         public int RequestId { get; }
         public Pm4OverlayCacheData? CacheData { get; }
         public (int minTileX, int minTileY, int maxTileX, int maxTileY)? LoadedCameraWindow { get; }
+        public IReadOnlyCollection<(int tileX, int tileY)> KnownMapTiles { get; }
+        public IReadOnlyCollection<(int tileX, int tileY)> CoveredMapTiles { get; }
         public (int tileX, int tileY, uint ck24, int objectPart)? SelectedObjectKey { get; }
         public double LoadElapsedMs { get; }
         public string StatusMessage { get; }

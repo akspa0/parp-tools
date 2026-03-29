@@ -1079,13 +1079,13 @@ public partial class ViewerApp
     {
         return mode switch
         {
-            Pm4OverlayColorMode.Ck24Type => "CK24 Type",
-            Pm4OverlayColorMode.Ck24ObjectId => "CK24 Object Id",
-            Pm4OverlayColorMode.Ck24Key => "CK24 Full Key",
+            Pm4OverlayColorMode.Ck24Type => "MSUR._0x1C-derived type byte",
+            Pm4OverlayColorMode.Ck24ObjectId => "MSUR._0x1C-derived low16",
+            Pm4OverlayColorMode.Ck24Key => "MSUR._0x1C-derived key24",
             Pm4OverlayColorMode.Tile => "Tile",
-            Pm4OverlayColorMode.GroupKey => "MSUR GroupKey",
-            Pm4OverlayColorMode.AttributeMask => "MSUR Attr Mask",
-            Pm4OverlayColorMode.Height => "Height Gradient",
+            Pm4OverlayColorMode.GroupKey => "MSUR._0x00 (alias GroupKey)",
+            Pm4OverlayColorMode.AttributeMask => "MSUR._0x02 (alias AttributeMask)",
+            Pm4OverlayColorMode.Height => "MSUR._0x10 plane-distance gradient",
             _ => mode.ToString()
         };
     }
