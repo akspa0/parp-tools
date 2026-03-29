@@ -56,6 +56,7 @@ public partial class ViewerApp : IDisposable
     private Camera _camera = new();
     private ISceneRenderer? _renderer;
     private Vector2D<int> _lastSyncedImGuiWindowSize;
+    private Vector2D<int> _lastSyncedImGuiFramebufferSize;
 
     // Data source
     private IDataSource? _dataSource;
@@ -463,6 +464,7 @@ public partial class ViewerApp : IDisposable
         _window.Load += () => OnLoad(initialArgs);
         _window.Render += OnRender;
         _window.Update += OnUpdate;
+        _window.Resize += OnWindowResize;
         _window.FramebufferResize += OnResize;
         _window.Closing += OnClose;
 
@@ -474,7 +476,7 @@ public partial class ViewerApp : IDisposable
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
         _imGui = new ImGuiController(_gl, _window, _input);
-        SyncImGuiWindowSize(_window.Size);
+        SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
         _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
@@ -676,7 +678,7 @@ public partial class ViewerApp : IDisposable
 
     private void OnUpdate(double dt)
     {
-        SyncImGuiWindowSize(_window.Size);
+        SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         _imGui.Update((float)dt);
         HandleKeyboardInput((float)dt);
         UpdateSqlSpawnStreaming();
@@ -8664,18 +8666,38 @@ void main() {
         _camera.Pitch = -10f;
     }
 
+    private void OnWindowResize(Vector2D<int> size)
+    {
+        SyncImGuiWindowMetrics(size, _window.FramebufferSize);
+    }
+
     private void OnResize(Vector2D<int> size)
     {
         _gl.Viewport(size);
+        SyncImGuiWindowMetrics(_window.Size, size);
     }
 
-    private void SyncImGuiWindowSize(Vector2D<int> size)
+    private void SyncImGuiWindowMetrics(Vector2D<int> windowSize, Vector2D<int> framebufferSize)
     {
-        if (size.X <= 0 || size.Y <= 0 || size.Equals(_lastSyncedImGuiWindowSize))
+        if (windowSize.X <= 0 || windowSize.Y <= 0 || framebufferSize.X <= 0 || framebufferSize.Y <= 0)
             return;
 
-        ImGuiControllerWindowResizedMethod?.Invoke(_imGui, new object[] { size });
-        _lastSyncedImGuiWindowSize = size;
+        bool windowSizeChanged = !windowSize.Equals(_lastSyncedImGuiWindowSize);
+        bool framebufferSizeChanged = !framebufferSize.Equals(_lastSyncedImGuiFramebufferSize);
+        if (!windowSizeChanged && !framebufferSizeChanged)
+            return;
+
+        if (windowSizeChanged)
+            ImGuiControllerWindowResizedMethod?.Invoke(_imGui, new object[] { windowSize });
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        io.DisplaySize = new Vector2(windowSize.X, windowSize.Y);
+        io.DisplayFramebufferScale = new Vector2(
+            windowSize.X > 0 ? (float)framebufferSize.X / windowSize.X : 1f,
+            windowSize.Y > 0 ? (float)framebufferSize.Y / windowSize.Y : 1f);
+
+        _lastSyncedImGuiWindowSize = windowSize;
+        _lastSyncedImGuiFramebufferSize = framebufferSize;
     }
 
     private void LoadViewerSettings()

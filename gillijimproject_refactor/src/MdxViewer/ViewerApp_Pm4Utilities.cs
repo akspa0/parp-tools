@@ -50,7 +50,7 @@ public partial class ViewerApp
             return;
         }
 
-        ImGui.TextWrapped("Object-local PM4 alignment only. Select one PM4 object, then adjust translation, rotation, and scale (including axis flips) on that object only.");
+        ImGui.TextWrapped("PM4 alignment is now tile-local for the selected CK24 bucket plus object-local for the selected part. Select one PM4 object, then adjust the tile CK24 block or the object block.");
         ImGui.TextDisabled("Global PM4 overlay transforms are no longer edited in this window.");
         ImGui.TextDisabled("Use Overlay > Flip All Obj Y for map-wide Y mirror correction.");
 
@@ -166,7 +166,7 @@ public partial class ViewerApp
         }
 
         if (selectedLayerCk24.HasValue && _worldScene.TryGetSelectedPm4Ck24LayerStats(out int layerTileCount, out int layerObjectCount))
-            ImGui.TextDisabled($"CK24 Layer 0x{selectedLayerCk24.Value:X6}: {layerObjectCount} parts across {layerTileCount} tiles");
+            ImGui.TextDisabled($"Tile CK24 0x{selectedLayerCk24.Value:X6} on ({selectedPm4.tileX}, {selectedPm4.tileY}): {layerObjectCount} parts across {layerTileCount} tile");
 
         if (_worldScene.TryGetSelectedPm4ObjectResearchInfo(out Pm4SelectedObjectResearchInfo researchInfo)
             && ImGui.CollapsingHeader("PM4 Research", ImGuiTreeNodeFlags.DefaultOpen))
@@ -197,7 +197,7 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        ImGui.Text("CK24 Layer Translation:");
+        ImGui.Text("Tile CK24 Translation:");
 
         if (ImGui.Button("Layer X <<"))
         {
@@ -236,7 +236,7 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        ImGui.Text("CK24 Layer Rotation:");
+        ImGui.Text("Tile CK24 Rotation:");
 
         if (ImGui.Button("Layer Rot X -"))
         {
@@ -287,7 +287,7 @@ public partial class ViewerApp
         }
 
         ImGui.Separator();
-        ImGui.Text("CK24 Layer Scale:");
+        ImGui.Text("Tile CK24 Scale:");
 
         if (ImGui.Button("Layer Sx -"))
         {
@@ -325,7 +325,7 @@ public partial class ViewerApp
             layerScaleChanged = true;
         }
 
-        ImGui.Text("Layer Axis Flips:");
+        ImGui.Text("Tile CK24 Axis Flips:");
         if (ImGui.Button("Flip Layer X"))
         {
             selectedLayerScale.X = -selectedLayerScale.X;
@@ -341,6 +341,25 @@ public partial class ViewerApp
         if (ImGui.Button("Flip Layer Z"))
         {
             selectedLayerScale.Z = -selectedLayerScale.Z;
+            layerScaleChanged = true;
+        }
+
+        ImGui.Text("Tile CK24 Winding:");
+        if (ImGui.Button("Wind Tile X"))
+        {
+            selectedLayerScale.X = ToggleWindingComponent(selectedLayerScale.X);
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Wind Tile Y"))
+        {
+            selectedLayerScale.Y = ToggleWindingComponent(selectedLayerScale.Y);
+            layerScaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Wind Tile Z"))
+        {
+            selectedLayerScale.Z = ToggleWindingComponent(selectedLayerScale.Z);
             layerScaleChanged = true;
         }
 
@@ -480,7 +499,7 @@ public partial class ViewerApp
             scaleChanged = true;
         }
 
-        ImGui.Text("Axis Flips:");
+        ImGui.Text("Object Axis Flips:");
         if (ImGui.Button("Flip Obj X"))
         {
             selectedObjectScale.X = -selectedObjectScale.X;
@@ -496,6 +515,25 @@ public partial class ViewerApp
         if (ImGui.Button("Flip Obj Z"))
         {
             selectedObjectScale.Z = -selectedObjectScale.Z;
+            scaleChanged = true;
+        }
+
+        ImGui.Text("Object Winding:");
+        if (ImGui.Button("Wind Obj X"))
+        {
+            selectedObjectScale.X = ToggleWindingComponent(selectedObjectScale.X);
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Wind Obj Y"))
+        {
+            selectedObjectScale.Y = ToggleWindingComponent(selectedObjectScale.Y);
+            scaleChanged = true;
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Wind Obj Z"))
+        {
+            selectedObjectScale.Z = ToggleWindingComponent(selectedObjectScale.Z);
             scaleChanged = true;
         }
 
@@ -531,12 +569,12 @@ public partial class ViewerApp
             Vector3 r = _worldScene.SelectedPm4Ck24LayerRotationDegrees;
             Vector3 s = _worldScene.SelectedPm4Ck24LayerScale;
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"[PM4 CK24 Align] ck24=0x{selectedLayerCk24.Value:X6} T=({t.X:F3},{t.Y:F3},{t.Z:F3}) Rot=({r.X:F3},{r.Y:F3},{r.Z:F3}) Scale=({s.X:F4},{s.Y:F4},{s.Z:F4})");
+                $"[PM4 Tile CK24 Align] tile=({selectedPm4.tileX},{selectedPm4.tileY}) ck24=0x{selectedLayerCk24.Value:X6} T=({t.X:F3},{t.Y:F3},{t.Z:F3}) Rot=({r.X:F3},{r.Y:F3},{r.Z:F3}) Scale=({s.X:F4},{s.Y:F4},{s.Z:F4})");
         }
 
-        ImGui.TextDisabled($"Layer Move: ({_worldScene.SelectedPm4Ck24LayerTranslation.X:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Y:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Z:F3})");
-        ImGui.TextDisabled($"Layer Rot: ({_worldScene.SelectedPm4Ck24LayerRotationDegrees.X:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Y:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Z:F3}) deg");
-        ImGui.TextDisabled($"Layer Scale: ({_worldScene.SelectedPm4Ck24LayerScale.X:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Y:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Z:F4})");
+            ImGui.TextDisabled($"Tile Move: ({_worldScene.SelectedPm4Ck24LayerTranslation.X:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Y:F3}, {_worldScene.SelectedPm4Ck24LayerTranslation.Z:F3})");
+            ImGui.TextDisabled($"Tile Rot: ({_worldScene.SelectedPm4Ck24LayerRotationDegrees.X:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Y:F3}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Z:F3}) deg");
+            ImGui.TextDisabled($"Tile Scale: ({_worldScene.SelectedPm4Ck24LayerScale.X:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Y:F4}, {_worldScene.SelectedPm4Ck24LayerScale.Z:F4})");
 
         ImGui.Separator();
 
@@ -1023,6 +1061,15 @@ public partial class ViewerApp
         else if (wrapped > 180f)
             wrapped -= 360f;
         return wrapped;
+    }
+
+    private static float ToggleWindingComponent(float value)
+    {
+        float magnitude = MathF.Abs(value);
+        if (magnitude < 0.0001f)
+            magnitude = 1f;
+
+        return value < 0f ? magnitude : -magnitude;
     }
 
     private static string GetPm4ColorModeLabel(Pm4OverlayColorMode mode)

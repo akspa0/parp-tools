@@ -568,13 +568,13 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4OverlayObject> _pm4ObjectLookup = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (int tileX, int tileY, uint ck24)> _pm4MergedObjectGroupKeys = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4ObjectGroupBounds = new();
-    private readonly Dictionary<uint, (Vector3 min, Vector3 max)> _pm4RawCk24Bounds = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), (Vector3 min, Vector3 max)> _pm4TileCk24Bounds = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectTranslations = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectRotationsDegrees = new();
     private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4ObjectScales = new();
-    private readonly Dictionary<uint, Vector3> _pm4RawCk24Translations = new();
-    private readonly Dictionary<uint, Vector3> _pm4RawCk24RotationsDegrees = new();
-    private readonly Dictionary<uint, Vector3> _pm4RawCk24Scales = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4TileCk24Translations = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4TileCk24RotationsDegrees = new();
+    private readonly Dictionary<(int tileX, int tileY, uint ck24), Vector3> _pm4TileCk24Scales = new();
     private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectKey;
     private (int tileX, int tileY, uint ck24)? _selectedPm4ObjectGroupKey;
 
@@ -781,71 +781,75 @@ public class WorldScene : ISceneRenderer
         }
     }
     public uint? SelectedPm4RawCk24 => _selectedPm4ObjectKey?.ck24;
+    public (int tileX, int tileY, uint ck24)? SelectedPm4TileCk24Key
+        => _selectedPm4ObjectKey.HasValue
+            ? (_selectedPm4ObjectKey.Value.tileX, _selectedPm4ObjectKey.Value.tileY, _selectedPm4ObjectKey.Value.ck24)
+            : null;
     public Vector3 SelectedPm4Ck24LayerTranslation
     {
         get
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return Vector3.Zero;
 
-            return _pm4RawCk24Translations.TryGetValue(SelectedPm4RawCk24.Value, out Vector3 translation)
+            return _pm4TileCk24Translations.TryGetValue(SelectedPm4TileCk24Key.Value, out Vector3 translation)
                 ? translation
                 : Vector3.Zero;
         }
         set
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return;
 
             if (value.LengthSquared() < 0.0001f)
-                _pm4RawCk24Translations.Remove(SelectedPm4RawCk24.Value);
+                _pm4TileCk24Translations.Remove(SelectedPm4TileCk24Key.Value);
             else
-                _pm4RawCk24Translations[SelectedPm4RawCk24.Value] = value;
+                _pm4TileCk24Translations[SelectedPm4TileCk24Key.Value] = value;
         }
     }
     public Vector3 SelectedPm4Ck24LayerRotationDegrees
     {
         get
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return Vector3.Zero;
 
-            return _pm4RawCk24RotationsDegrees.TryGetValue(SelectedPm4RawCk24.Value, out Vector3 rotationDegrees)
+            return _pm4TileCk24RotationsDegrees.TryGetValue(SelectedPm4TileCk24Key.Value, out Vector3 rotationDegrees)
                 ? rotationDegrees
                 : Vector3.Zero;
         }
         set
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return;
 
             if (IsNearZeroVector(value))
-                _pm4RawCk24RotationsDegrees.Remove(SelectedPm4RawCk24.Value);
+                _pm4TileCk24RotationsDegrees.Remove(SelectedPm4TileCk24Key.Value);
             else
-                _pm4RawCk24RotationsDegrees[SelectedPm4RawCk24.Value] = value;
+                _pm4TileCk24RotationsDegrees[SelectedPm4TileCk24Key.Value] = value;
         }
     }
     public Vector3 SelectedPm4Ck24LayerScale
     {
         get
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return Vector3.One;
 
-            return _pm4RawCk24Scales.TryGetValue(SelectedPm4RawCk24.Value, out Vector3 scale)
+            return _pm4TileCk24Scales.TryGetValue(SelectedPm4TileCk24Key.Value, out Vector3 scale)
                 ? scale
                 : Vector3.One;
         }
         set
         {
-            if (!SelectedPm4RawCk24.HasValue)
+            if (!SelectedPm4TileCk24Key.HasValue)
                 return;
 
             Vector3 sanitized = SanitizeScale(value);
             if (IsNearOneVector(sanitized))
-                _pm4RawCk24Scales.Remove(SelectedPm4RawCk24.Value);
+                _pm4TileCk24Scales.Remove(SelectedPm4TileCk24Key.Value);
             else
-                _pm4RawCk24Scales[SelectedPm4RawCk24.Value] = sanitized;
+                _pm4TileCk24Scales[SelectedPm4TileCk24Key.Value] = sanitized;
         }
     }
     public float Pm4OverlayYawDegrees
@@ -863,18 +867,18 @@ public class WorldScene : ISceneRenderer
         if (!SelectedPm4RawCk24.HasValue)
             return false;
 
-        uint rawCk24 = SelectedPm4RawCk24.Value;
-        HashSet<(int tileX, int tileY)> tiles = new();
+        var tileCk24Key = SelectedPm4TileCk24Key.Value;
         foreach (var objectKey in _pm4ObjectLookup.Keys)
         {
-            if (objectKey.ck24 != rawCk24)
+            if (objectKey.tileX != tileCk24Key.tileX
+                || objectKey.tileY != tileCk24Key.tileY
+                || objectKey.ck24 != tileCk24Key.ck24)
                 continue;
 
             objectCount++;
-            tiles.Add((objectKey.tileX, objectKey.tileY));
         }
 
-        tileCount = tiles.Count;
+        tileCount = objectCount > 0 ? 1 : 0;
         return objectCount > 0;
     }
 
@@ -911,11 +915,12 @@ public class WorldScene : ISceneRenderer
                     {
                         var objectKey = (kvp.Key.tileX, kvp.Key.tileY, obj.Ck24, obj.ObjectPartId);
                         var objectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
-                        bool hasLayerOffset = _pm4RawCk24Translations.TryGetValue(obj.Ck24, out Vector3 layerOffset)
+                        var tileCk24Key = (kvp.Key.tileX, kvp.Key.tileY, obj.Ck24);
+                        bool hasLayerOffset = _pm4TileCk24Translations.TryGetValue(tileCk24Key, out Vector3 layerOffset)
                             && !IsNearZeroVector(layerOffset);
-                        bool hasLayerRotation = _pm4RawCk24RotationsDegrees.TryGetValue(obj.Ck24, out Vector3 layerRotationDegrees)
+                        bool hasLayerRotation = _pm4TileCk24RotationsDegrees.TryGetValue(tileCk24Key, out Vector3 layerRotationDegrees)
                             && !IsNearZeroVector(layerRotationDegrees);
-                        bool hasLayerScale = _pm4RawCk24Scales.TryGetValue(obj.Ck24, out Vector3 layerScale)
+                        bool hasLayerScale = _pm4TileCk24Scales.TryGetValue(tileCk24Key, out Vector3 layerScale)
                             && !IsNearOneVector(layerScale);
                         bool hasObjectOffset = _pm4ObjectTranslations.TryGetValue(objectGroupKey, out Vector3 objectOffset);
                         bool hasObjectRotation = _pm4ObjectRotationsDegrees.TryGetValue(objectGroupKey, out Vector3 objectRotationDegrees)
@@ -966,6 +971,8 @@ public class WorldScene : ISceneRenderer
                             },
                             rawCk24Layer = new
                             {
+                                tileX = kvp.Key.tileX,
+                                tileY = kvp.Key.tileY,
                                 ck24 = obj.Ck24,
                                 hasLayerOffset,
                                 layerOffset = hasLayerOffset ? VectorToArray(layerOffset) : VectorToArray(Vector3.Zero),
@@ -2392,7 +2399,7 @@ public class WorldScene : ISceneRenderer
 
         RebuildPm4MergedObjectGroups();
         RebuildPm4ObjectGroupBounds();
-        RebuildPm4RawCk24Bounds();
+        RebuildPm4TileCk24Bounds();
     }
 
     private static bool IsMapPm4Path(string path, string mapName)
@@ -2647,7 +2654,7 @@ public class WorldScene : ISceneRenderer
             Pm4AxisConvention ck24AxisConvention = fileAxisConvention;
             List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
             List<MprlEntry> ck24PositionRefs = CollectLinkedPositionRefs(pm4, surfaceGroup);
-            CorePm4CoordinateModeResolution coordinateModeResolution = ResolveCk24CoordinateModeResolution(
+            CorePm4CoordinateModeResolution seedCoordinateModeResolution = ResolveCk24CoordinateModeResolution(
                 pm4,
                 ck24Surfaces,
                 ck24PositionRefs,
@@ -2655,21 +2662,21 @@ public class WorldScene : ISceneRenderer
                 tileY,
                 ck24AxisConvention,
                 fallbackTileLocalCoordinates);
-            bool useTileLocalCoordinates = coordinateModeResolution.CoordinateMode == CorePm4CoordinateMode.TileLocal;
+            bool seedUseTileLocalCoordinates = seedCoordinateModeResolution.CoordinateMode == CorePm4CoordinateMode.TileLocal;
             // Keep one shared planar transform per CK24 so split linked/components stay on one coordinate plane.
-            CorePm4PlacementSolution ck24Placement = ResolvePlacementSolution(
+            CorePm4PlacementSolution seedPlacement = ResolvePlacementSolution(
                 pm4,
                 ck24Surfaces,
                 ck24PositionRefs,
                 tileX,
                 tileY,
-                useTileLocalCoordinates,
+                seedUseTileLocalCoordinates,
                 ck24AxisConvention);
-            Pm4PlanarTransform ck24PlanarTransform = coordinateModeResolution.PlanarTransform;
-            Vector3 ck24WorldPivot = ck24Placement.WorldPivot;
-            float ck24WorldYawCorrection = ck24Placement.WorldYawCorrectionRadians;
-            float ck24RendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(ck24WorldYawCorrection);
-            IReadOnlyList<Pm4ConnectorKey> ck24ConnectorKeys = BuildCk24ConnectorKeys(pm4, ck24Surfaces, ck24Placement);
+            Pm4PlanarTransform seedPlanarTransform = seedCoordinateModeResolution.PlanarTransform;
+            Vector3 seedWorldPivot = seedPlacement.WorldPivot;
+            float seedWorldYawCorrection = seedPlacement.WorldYawCorrectionRadians;
+            float seedRendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(seedWorldYawCorrection);
+            IReadOnlyList<Pm4ConnectorKey> seedConnectorKeys = BuildCk24ConnectorKeys(pm4, ck24Surfaces, seedPlacement);
             List<List<Pm4IndexedSurface>> linkedGroups = seedGroup.RequiresConnectivitySeedSplit
                 ? SplitIndexedSurfaceGroupByConnectivity(pm4, surfaceGroup)
                 : SplitSurfaceGroupByMslk(pm4, surfaceGroup);
@@ -2683,16 +2690,52 @@ public class WorldScene : ISceneRenderer
                 List<MsurEntry> linkedSurfaces = linkedGroup.Select(static entry => entry.Surface).ToList();
                 List<MprlEntry> linkedPositionRefs = CollectLinkedPositionRefs(pm4, linkedGroup);
                 Pm4LinkedPositionRefSummary linkedPositionRefSummary = SummarizeLinkedPositionRefs(linkedPositionRefs);
+
+                bool linkedUseTileLocalCoordinates = seedUseTileLocalCoordinates;
+                Pm4PlanarTransform linkedPlanarTransform = seedPlanarTransform;
+                Vector3 linkedWorldPivot = seedWorldPivot;
+                float linkedWorldYawCorrection = seedWorldYawCorrection;
+                float linkedRendererFrameRotationRadians = seedRendererFrameRotationRadians;
+                IReadOnlyList<Pm4ConnectorKey> linkedConnectorKeys = seedConnectorKeys;
+
+                if (seedGroup.RequiresConnectivitySeedSplit)
+                {
+                    CorePm4CoordinateModeResolution linkedCoordinateModeResolution = ResolveCk24CoordinateModeResolution(
+                        pm4,
+                        linkedSurfaces,
+                        linkedPositionRefs,
+                        tileX,
+                        tileY,
+                        ck24AxisConvention,
+                        fallbackTileLocalCoordinates);
+                    linkedUseTileLocalCoordinates = linkedCoordinateModeResolution.CoordinateMode == CorePm4CoordinateMode.TileLocal;
+
+                    CorePm4PlacementSolution linkedPlacement = ResolvePlacementSolution(
+                        pm4,
+                        linkedSurfaces,
+                        linkedPositionRefs,
+                        tileX,
+                        tileY,
+                        linkedUseTileLocalCoordinates,
+                        ck24AxisConvention);
+
+                    linkedPlanarTransform = linkedCoordinateModeResolution.PlanarTransform;
+                    linkedWorldPivot = linkedPlacement.WorldPivot;
+                    linkedWorldYawCorrection = linkedPlacement.WorldYawCorrectionRadians;
+                    linkedRendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(linkedWorldYawCorrection);
+                    linkedConnectorKeys = BuildCk24ConnectorKeys(pm4, linkedSurfaces, linkedPlacement);
+                }
+
                 Vector3 linkedPlacementAnchor = ComputeSurfaceRendererCentroid(
                     pm4,
                     linkedSurfaces,
                     tileX,
                     tileY,
-                    useTileLocalCoordinates,
+                    linkedUseTileLocalCoordinates,
                     ck24AxisConvention,
-                    ck24PlanarTransform,
-                    ck24WorldPivot,
-                    ck24WorldYawCorrection);
+                    linkedPlanarTransform,
+                    linkedWorldPivot,
+                    linkedWorldYawCorrection);
                 List<List<MsurEntry>> anchorGroups = splitCk24ByMdos
                     ? SplitSurfaceGroupByMdos(linkedSurfaces)
                     : new List<List<MsurEntry>> { linkedSurfaces };
@@ -2709,12 +2752,12 @@ public class WorldScene : ISceneRenderer
                             break;
 
                         // Keep split components under one shared CK24 frame basis.
-                        // The frame/anchor may carry a yaw correction, but the actual mesh geometry should
-                        // stay in its raw converted orientation so the visible CK24 shape is not re-oriented
-                        // by the frame metadata itself.
-                        List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, ck24WorldPivot, ck24WorldYawCorrection, tileLineBudget, ref rejectedLongEdges);
+                        // Non-zero CK24 groups keep one shared frame basis across their split parts.
+                        // Zero/root-style buckets are split first and then resolved per linked group so
+                        // unrelated doodad/root pieces do not inherit one mixed-bucket placement frame.
+                        List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, linkedUseTileLocalCoordinates, ck24AxisConvention, linkedPlanarTransform, linkedWorldPivot, linkedWorldYawCorrection, tileLineBudget, ref rejectedLongEdges);
                         List<Pm4Triangle> triangles = tileTriangleBudget > 0
-                            ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, useTileLocalCoordinates, ck24AxisConvention, ck24PlanarTransform, ck24WorldPivot, ck24WorldYawCorrection, tileTriangleBudget)
+                            ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, linkedUseTileLocalCoordinates, ck24AxisConvention, linkedPlanarTransform, linkedWorldPivot, linkedWorldYawCorrection, tileTriangleBudget)
                             : new List<Pm4Triangle>();
 
                         if (lines.Count == 0 && triangles.Count == 0)
@@ -2743,9 +2786,9 @@ public class WorldScene : ISceneRenderer
                             dominantMdosIndex,
                             averageSurfaceHeight,
                             linkedPlacementAnchor,
-                            ck24RendererFrameRotationRadians,
-                            ck24PlanarTransform,
-                            ck24ConnectorKeys));
+                            linkedRendererFrameRotationRadians,
+                            linkedPlanarTransform,
+                            linkedConnectorKeys));
 
                         tileLineBudget -= lines.Count;
                         tileTriangleBudget -= triangles.Count;
@@ -6955,21 +6998,22 @@ public class WorldScene : ISceneRenderer
         }
     }
 
-    private void RebuildPm4RawCk24Bounds()
+    private void RebuildPm4TileCk24Bounds()
     {
-        _pm4RawCk24Bounds.Clear();
+        _pm4TileCk24Bounds.Clear();
 
         foreach (var (objectKey, obj) in _pm4ObjectLookup)
         {
-            if (_pm4RawCk24Bounds.TryGetValue(objectKey.ck24, out var existingBounds))
+            var tileCk24Key = (objectKey.tileX, objectKey.tileY, objectKey.ck24);
+            if (_pm4TileCk24Bounds.TryGetValue(tileCk24Key, out var existingBounds))
             {
-                _pm4RawCk24Bounds[objectKey.ck24] = (
+                _pm4TileCk24Bounds[tileCk24Key] = (
                     Vector3.Min(existingBounds.min, obj.BoundsMin),
                     Vector3.Max(existingBounds.max, obj.BoundsMax));
             }
             else
             {
-                _pm4RawCk24Bounds[objectKey.ck24] = (obj.BoundsMin, obj.BoundsMax);
+                _pm4TileCk24Bounds[tileCk24Key] = (obj.BoundsMin, obj.BoundsMax);
             }
         }
     }
@@ -6992,13 +7036,13 @@ public class WorldScene : ISceneRenderer
         return false;
     }
 
-    private bool TryComputePm4RawCk24Pivot(
-        uint rawCk24,
+    private bool TryComputePm4TileCk24Pivot(
+        (int tileX, int tileY, uint ck24) tileCk24Key,
         bool applyPm4Transform,
         in Matrix4x4 pm4Transform,
         out Vector3 pivot)
     {
-        if (_pm4RawCk24Bounds.TryGetValue(rawCk24, out var rawBounds))
+        if (_pm4TileCk24Bounds.TryGetValue(tileCk24Key, out var rawBounds))
         {
             pivot = (rawBounds.min + rawBounds.max) * 0.5f;
             if (applyPm4Transform)
@@ -7025,11 +7069,12 @@ public class WorldScene : ISceneRenderer
         }
 
         var objectGroupKey = ResolvePm4ObjectGroupKey(objectKey);
-        bool hasLayerTranslation = _pm4RawCk24Translations.TryGetValue(objectKey.ck24, out Vector3 layerTranslation)
+        var tileCk24Key = (objectKey.tileX, objectKey.tileY, objectKey.ck24);
+        bool hasLayerTranslation = _pm4TileCk24Translations.TryGetValue(tileCk24Key, out Vector3 layerTranslation)
             && !IsNearZeroVector(layerTranslation);
-        bool hasLayerRotation = _pm4RawCk24RotationsDegrees.TryGetValue(objectKey.ck24, out Vector3 layerRotationDegrees)
+        bool hasLayerRotation = _pm4TileCk24RotationsDegrees.TryGetValue(tileCk24Key, out Vector3 layerRotationDegrees)
             && !IsNearZeroVector(layerRotationDegrees);
-        bool hasLayerScale = _pm4RawCk24Scales.TryGetValue(objectKey.ck24, out Vector3 layerScale)
+        bool hasLayerScale = _pm4TileCk24Scales.TryGetValue(tileCk24Key, out Vector3 layerScale)
             && !IsNearOneVector(layerScale);
 
         bool hasGlobalFlip = _pm4FlipAllObjectsY;
@@ -7043,7 +7088,7 @@ public class WorldScene : ISceneRenderer
         if (hasLayerRotation || hasLayerScale)
         {
             Vector3 pivot = Vector3.Zero;
-            if (!TryComputePm4RawCk24Pivot(objectKey.ck24, applyPm4Transform, pm4Transform, out pivot)
+            if (!TryComputePm4TileCk24Pivot(tileCk24Key, applyPm4Transform, pm4Transform, out pivot)
                 && _pm4ObjectLookup.TryGetValue(objectKey, out Pm4OverlayObject? objectInfo))
             {
                 pivot = objectInfo.Center;
@@ -7186,13 +7231,13 @@ public class WorldScene : ISceneRenderer
         _pm4ObjectLookup.Clear();
         _pm4MergedObjectGroupKeys.Clear();
         _pm4ObjectGroupBounds.Clear();
-        _pm4RawCk24Bounds.Clear();
+        _pm4TileCk24Bounds.Clear();
         _pm4ObjectTranslations.Clear();
         _pm4ObjectRotationsDegrees.Clear();
         _pm4ObjectScales.Clear();
-        _pm4RawCk24Translations.Clear();
-        _pm4RawCk24RotationsDegrees.Clear();
-        _pm4RawCk24Scales.Clear();
+        _pm4TileCk24Translations.Clear();
+        _pm4TileCk24RotationsDegrees.Clear();
+        _pm4TileCk24Scales.Clear();
     }
 
     private sealed class Pm4OverlayAsyncLoadResult

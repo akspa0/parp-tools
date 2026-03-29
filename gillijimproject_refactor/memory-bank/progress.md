@@ -1,5 +1,37 @@
 # Progress
 
+### Mar 29, 2026 - Viewer Shell Resize/Input Sync Hardened Again
+
+- fixed the recurring viewer-shell regression in `src/MdxViewer/ViewerApp.cs` where resize and mouse-hit behavior could break again even outside PM4-specific windows
+- the old bridge only partially synchronized Silk window metrics into ImGui: it used the private `ImGuiController.WindowResized(...)` hook against logical size, but did not explicitly keep `ImGuiIO.DisplaySize` and `DisplayFramebufferScale` synchronized from both logical and framebuffer sizes
+- `ViewerApp` now subscribes to both logical `Resize` and `FramebufferResize`, and `SyncImGuiWindowMetrics(...)` updates the private Silk hook plus explicit `ImGui` size/framebuffer-scale values before each `_imGui.Update(...)`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is build-validated only; no live shell resize or hit-testing signoff was completed after the patch
+
+### Mar 29, 2026 - Zero-CK24 PM4 Mixed-Bucket Placement Fix Landed In MdxViewer
+
+- fixed a PM4 runtime-consumer regression in `src/MdxViewer/Terrain/WorldScene.cs` where zero-`CK24` / root-style seed buckets were connectivity-split only after one shared placement basis had already been resolved for the whole mixed bucket
+- root cause fit the latest manual symptom: some `M2`-aligned PM4 data drifted while nearby WMO-aligned PM4 remained mostly stable, because non-zero `CK24` WMO-style groups still had coherent per-`CK24` placement while zero/root buckets could mix unrelated parts before placement resolution
+- the zero/root-style path now resolves coordinate mode or placement solution or connector keys per linked connectivity group instead of reusing one mixed-bucket planar transform or pivot or frame yaw across all zero-`CK24` parts in the seed bucket
+- preserved the existing non-zero `CK24` behavior: shared per-`CK24` frame basis is still reused across split parts for the WMO-style path
+- also recorded the user clarification that `CK24=0x000000` should not be treated as "just M2 data"; it is better treated as an unresolved root or umbrella bucket for now
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is compile-validated only; the development map still needs manual runtime confirmation to prove the M2/root-bucket drift is actually corrected
+
+### Mar 29, 2026 - PM4 CK24 Alignment Controls Narrowed To Tile-Local Buckets
+
+- replaced the earlier raw-`CK24` alignment state in `src/MdxViewer/Terrain/WorldScene.cs` so those transforms are now keyed by `(tileX, tileY, ck24)` instead of only `ck24`
+- this stops exploratory fixes for `CK24=0x000000` from rotating or mirroring every matching raw bucket across the loaded PM4 overlay when the actual issue appears tile-local
+- updated `src/MdxViewer/ViewerApp_Pm4Utilities.cs` so the PM4 alignment window now describes and edits tile-local `CK24` transforms, and added direct tile/object winding toggle buttons for faster handedness checks
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings
+- runtime boundary:
+	- this is build-validated only; no live viewer signoff was completed after the tile-local control change
+
 ### Mar 29, 2026 - Shared CK24 PM4 Forensic Export Slice Landed
 
 - added `wow-viewer/src/core/WowViewer.Core.PM4/Models/Pm4ForensicsModels.cs` and `Research/Pm4Ck24ForensicsAnalyzer.cs` so `Core.PM4` now owns a research-only CK24 forensic report instead of relying on viewer-only PM4 graph JSON

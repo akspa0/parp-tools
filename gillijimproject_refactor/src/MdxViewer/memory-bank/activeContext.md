@@ -1,5 +1,40 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - Viewer Shell Resize/Input Sync Hardened Again
+
+- the latest recurrence of the broken shell symptom was not isolated to PM4 controls; the whole viewer UI fell back into bad resize or hit-testing behavior again, with toolbar/sidebar layout obviously wrong and buttons effectively unusable
+- root cause was still in the Silk-to-ImGui window metrics bridge in `src/MdxViewer/ViewerApp.cs`:
+   - the viewer was invoking the private `ImGuiController.WindowResized(Vector2D<int>)` hook against logical window size only
+   - it was not also keeping `ImGui.GetIO().DisplaySize` and `DisplayFramebufferScale` explicitly synchronized from both logical size and framebuffer size
+   - it also relied on `FramebufferResize` alone instead of subscribing to the logical `Resize` event directly
+- landed hardening:
+   - `ViewerApp` now subscribes to both `Resize` and `FramebufferResize`
+   - `SyncImGuiWindowMetrics(...)` now updates the private Silk hook only when logical size changes, and also writes `ImGuiIO.DisplaySize` plus `DisplayFramebufferScale` from `window.Size` and `window.FramebufferSize`
+   - the per-frame update path now re-syncs both metrics before `_imGui.Update(...)`
+- important boundary:
+   - this is build-validated only in this session; manual runtime confirmation is still needed to prove the shell is stable again
+
+## Mar 29, 2026 - Zero-CK24 PM4 Root Bucket Placement No Longer Reuses One Mixed Frame
+
+- follow-up runtime evidence showed the latest PM4 changes had drifted some `M2`-aligned PM4 data while nearby WMO-aligned PM4 still looked correct
+- current best root cause was the zero-`CK24` / root-style bucket path in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - zero-`CK24` seed groups were first formed as mixed buckets by `GroupKey` or `AttributeMask`
+   - then connectivity split happened later, but all resulting linked groups still reused one shared placement basis from the whole mixed seed bucket
+   - that meant unrelated zero/root pieces could inherit the same planar transform or pivot or frame yaw or connector basis, which is consistent with M2/root-style drift while non-zero WMO-style `CK24` groups stay mostly stable
+- landed fix:
+   - zero/root-style seed groups that require connectivity splitting now resolve coordinate mode or placement solution or connector keys per linked group instead of inheriting the whole mixed-bucket frame
+   - non-zero `CK24` groups still keep the existing shared per-`CK24` frame basis across their split parts
+- important semantic note from user evidence:
+   - `CK24 = 0x000000` should not be treated as "just M2 data"
+   - current better framing is an unresolved root or bucket or umbrella group that can still contain structure relevant to placed-object alignment
+- follow-up alignment-control correction:
+   - the earlier raw-`CK24` alignment controls were too coarse because they keyed transforms only by `ck24` across all loaded tiles
+   - alignment state is now keyed by `(tileX, tileY, ck24)` so experiments on `CK24=0x000000` can rotate or mirror one tile-local bucket without dragging every matching raw `ck24` bucket elsewhere in the map
+   - the PM4 alignment window now also exposes explicit tile/object winding toggles that flip axis sign directly for faster handedness experiments
+- important boundary:
+   - this is compile-validated in `MdxViewer`, not manual runtime signoff yet
+   - if runtime testing still shows drift after this fix, the next likely seam is not mixed-bucket placement reuse anymore but base-frame rotation ownership for specific zero/root subfamilies
+
 ## PM4 CK24 Frame/Mesh Rotation Ownership Corrected (Mar 29)
 
 - The PM4 CK24 object-generation path in `src/MdxViewer/Terrain/WorldScene.cs` no longer applies the shared `worldYawCorrection` directly to the visible mesh lines and triangles during vertex conversion.
