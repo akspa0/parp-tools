@@ -27,6 +27,23 @@ Create one first-party PM4 library family in wow-viewer that:
 - exposes PM4 services to the viewer, inspect CLI, and converter CLI
 - keeps unstable research seams clearly marked instead of mixing them into stable contracts silently
 
+## Terminology Guardrail
+
+- The wowdev `PM4` and `PD4` pages remain the source of truth for raw chunk names, record layout, and any field names that are actually documented there.
+- When the docs expose only offset-style placeholders such as `MSUR._0x02` or `MSUR._0x1c`, prefer the raw offset-style label first and then show any local alias second.
+- Current PM4 local aliases that are useful but not documentation-backed include:
+  - `MSUR.GroupKey` for `MSUR._0x00`
+  - `MSUR.AttributeMask` for `MSUR._0x02`
+  - `MSUR.MdosIndex` for `MSUR._0x18`
+  - `MSUR.PackedParams` for `MSUR._0x1c`
+  - derived `CK24`, `Ck24Type`, and `Ck24ObjectId` sliced from `MSUR._0x1c`
+  - `MSLK.GroupObjectId` for `MSLK._0x04`
+- Current research-backed corrections that should survive even if local names change:
+  - `MSUR` bytes `0x04..0x0f` behave like real surface normals
+  - the current `MSUR.Height` property name is misleading because float `0x10` behaves like a signed plane-distance term
+  - `MSLK.RefIndex` should not be treated as a universally closed `MSUR` index across the current corpus
+- For future inspect output, docs, and prompts, use `raw/doc name -> local alias (confidence)` whenever semantics are not fully closed.
+
 ## Proposed Project Boundary
 
 ### Shipping project
@@ -200,6 +217,7 @@ Current status in the workspace:
 
 - if Core.PM4 changes the active runtime behavior, say so explicitly
 - if a PM4 interpretation is still exploratory, label it clearly as research or experimental
+- if a PM4 field name is a local alias rather than a wowdev term, say that explicitly
 - do not claim PM4 correctness based only on decoding or export success
 - keep using the fixed real datasets and runtime validation guidance already captured in pm4_support_plan.md and the memory bank
 

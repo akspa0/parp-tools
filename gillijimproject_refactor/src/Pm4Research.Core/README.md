@@ -34,6 +34,33 @@ Current typed coverage:
 
 Unknown or not-yet-re-decoded chunks remain available as raw payloads through `Pm4ChunkRecord`.
 
+## Terminology Status
+
+- Treat the wowdev PM4 or PD4 pages as the source of truth for chunk presence, byte layout, and any field names that are actually documented there.
+- When the wiki only gives offset-style placeholders, prefer `Chunk._0xNN` language first, then mention the local alias second.
+- Current local aliases that are not original wowdev names include:
+	- `MSUR.GroupKey` for `MSUR._0x00`
+	- `MSUR.AttributeMask` for `MSUR._0x02`
+	- `MSUR.MdosIndex` for `MSUR._0x18`
+	- `MSUR.PackedParams` for `MSUR._0x1c`
+	- derived `CK24`, `Ck24Type`, and `Ck24ObjectId` sliced from `MSUR._0x1c`
+	- `MSLK.GroupObjectId` for `MSLK._0x04`
+- Current local names that should be treated as research aliases rather than settled terminology:
+	- `MSUR.GroupKey`
+	- `MSUR.AttributeMask`
+	- `MSUR.MdosIndex`
+	- `MSUR.PackedParams`
+	- `CK24`, `Ck24Type`, `Ck24ObjectId`
+	- `MSLK.GroupObjectId`
+- Current stronger-than-wiki conclusions that still look worth keeping:
+	- `MSUR` bytes `0x04..0x0f` behave like real stored surface normals
+	- `MSUR` float `0x10` is misdescribed by the current local name `Height` and behaves more like a signed plane-distance term
+	- `MSLK.RefIndex` should not be treated as a universally closed `MSUR` index even though the wiki currently labels it that way
+- Reporting policy going forward:
+	- write uncertain fields as `raw/doc name -> local alias (confidence)`
+	- do not present `CK24` or `AttributeMask` or `GroupObjectId` as if Blizzard named them that
+	- do not describe derived bit-slices as format-native fields unless a stronger source than current corpus inference appears
+
 Current decode-confidence workflow:
 - use `inspect-audit` on a single PM4 to verify chunk size/stride consistency and cross-chunk references before making reconstruction claims
 - use `scan-audit` across the full PM4 corpus to distinguish recurring format structure from tile-specific payloads

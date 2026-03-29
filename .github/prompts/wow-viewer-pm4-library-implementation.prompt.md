@@ -28,6 +28,10 @@ Move one more reusable PM4 capability into `wow-viewer/src/core/WowViewer.Core.P
 - `MdxViewer` is a reference or compatibility input, not the default owner of PM4 behavior.
 - The default direction is direct library completion in `wow-viewer`, not broader active-viewer integration.
 - Shared consumer wiring into `MdxViewer` is allowed only when it is a narrow compatibility follow-up to an already extracted library seam or when the user explicitly asks for it.
+- Distinguish raw documentation names from local research aliases:
+	- use wowdev PM4 or PD4 names when the docs actually name a field
+	- when the docs only give placeholders, write the raw offset-style name first and any local alias second
+	- do not present `CK24`, `AttributeMask`, `PackedParams`, or `GroupObjectId` as if they were original format terminology
 
 ## Active Library Surface To Build On
 
@@ -43,6 +47,7 @@ Move one more reusable PM4 capability into `wow-viewer/src/core/WowViewer.Core.P
 - Do not claim viewer runtime PM4 signoff from library builds, tests, or active-viewer compile success.
 - Do not use `MdxViewer` as the design authority when completing a `Core.PM4` seam unless the user explicitly asks for consumer parity work.
 - Keep exploratory field semantics labeled as research.
+- Do not silently upgrade local field aliases into authoritative format names.
 - Prefer one concrete seam with proof over several half-validated abstractions.
 
 ## What The Work Must Produce
@@ -63,6 +68,7 @@ Return all items:
 4. exact validation to run
 5. what should stay out of scope for this slice
 6. which memory or prompt surfaces must be updated afterward
+7. which PM4 names in the slice are documentation-backed versus local aliases
 
 ## First Output
 

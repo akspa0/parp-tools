@@ -1,5 +1,26 @@
 # Active Context
 
+## Mar 29, 2026 - PM4 Terminology Reconciliation Locked For `wow-viewer`
+
+- the current PM4 reader or analyzer stack is no longer allowed to blur wowdev field names with local research aliases
+- current locked rule:
+	- use wowdev PM4 or PD4 names when the docs actually name a field
+	- use raw offset-style names first when the docs only expose placeholders
+	- mention local names second as explicit aliases with confidence level when semantics are still open
+- important current reconciliations:
+	- `MSUR.AttributeMask`, `MSUR.GroupKey`, `MSUR.MdosIndex`, `MSUR.PackedParams`, `CK24`, `Ck24Type`, `Ck24ObjectId`, and `MSLK.GroupObjectId` are local research aliases, not original wowdev terminology
+	- `CK24` remains a useful derived identity slice from `MSUR._0x1c`, but it should not be described as an official PM4 field name
+	- `MSUR.Height` is now known to be a bad name for the final float; current geometry evidence says it behaves like a signed plane-distance term
+	- `MSLK.RefIndex` should no longer be spoken about as if the wiki label `msur_index` were fully closed truth across the corpus
+- continuity updates landed in:
+	- `gillijimproject_refactor/src/Pm4Research.Core/README.md`
+	- `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`
+	- `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`
+	- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`
+	- `wow-viewer/README.md`
+- practical implication for future chats:
+	- PM4 work should now default to terminology like `MSUR._0x1c (local alias: PackedParams; derived alias: CK24)` instead of presenting `PackedParams` or `CK24` as if they came from the original documentation
+
 ## Mar 29, 2026 - Shared CK24 PM4 Forensics Landed In `wow-viewer`
 
 - `wow-viewer` now has a research-only shared CK24 forensic export path in `Core.PM4` instead of leaving richer PM4 graph evidence trapped in `MdxViewer` JSON only.

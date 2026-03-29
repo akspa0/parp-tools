@@ -29,6 +29,16 @@ Current implementation policy:
 - Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
 - The explicit long-range target is full first-party ownership of every active format family currently handled by `MdxViewer`; current detector and summary seams are stepping stones, not the final boundary.
 
+Current PM4 terminology policy:
+
+- Treat wowdev `PM4` and `PD4` docs as the source of truth for raw chunk and field names when they actually name a field.
+- When the docs only expose placeholders such as `MSUR._0x02` or `MSUR._0x1c`, use the raw offset-style name first and local aliases second.
+- Current local PM4 aliases such as `MSUR.AttributeMask`, `MSUR.GroupKey`, `MSUR.MdosIndex`, `MSUR.PackedParams`, derived `CK24`, and `MSLK.GroupObjectId` are research names, not original format terminology.
+- Current stronger-than-doc corrections still worth preserving are:
+	- `MSUR` bytes `0x04..0x0f` behave like real surface normals
+	- the current `MSUR.Height` property name is misleading because float `0x10` behaves like a signed plane-distance term
+	- `MSLK.RefIndex` is not closed as a universal `MSUR` index across the current corpus
+
 Bootstrap dependencies:
 
 - `scripts/bootstrap.ps1` now clones the baseline upstream repos described in the migration draft into `libs/`:

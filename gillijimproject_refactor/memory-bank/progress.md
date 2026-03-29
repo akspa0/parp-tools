@@ -1,5 +1,29 @@
 # Progress
 
+### Mar 29, 2026 - PM4 Terminology Guardrail Synced Across wow-viewer Continuity Files
+
+- reconciled current PM4 field names against wowdev `PM4` and `PD4` documentation plus the standalone corpus-backed confidence reports
+- recorded the hard boundary that several active names are local research aliases rather than documentation-backed field names:
+	- `MSUR.GroupKey`
+	- `MSUR.AttributeMask`
+	- `MSUR.MdosIndex`
+	- `MSUR.PackedParams`
+	- derived `CK24`, `Ck24Type`, `Ck24ObjectId`
+	- `MSLK.GroupObjectId`
+- also recorded the stronger current corrections that should survive even when names change:
+	- `MSUR` bytes `0x04..0x0f` are geometry-validated normals
+	- the current `MSUR.Height` name is misleading because the float behaves like a signed plane-distance term
+	- `MSLK.RefIndex` is not closed as a universal `MSUR` index across the corpus
+- continuity surfaces updated:
+	- `gillijimproject_refactor/src/Pm4Research.Core/README.md`
+	- `gillijimproject_refactor/memory-bank/activeContext.md`
+	- `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`
+	- `wow-viewer/README.md`
+	- `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`
+	- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`
+- validation boundary:
+	- this was a terminology and continuity correction only; no new PM4 code or runtime behavior changed in this pass
+
 ### Mar 29, 2026 - Shared PM4 Hierarchy Research Slice Landed And `MdxViewer` Cut Over
 
 - moved the active viewer PM4 research path off legacy `src/Pm4Research.Core` and into shared `wow-viewer/src/core/WowViewer.Core.PM4`
