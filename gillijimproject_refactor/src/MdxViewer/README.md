@@ -49,11 +49,13 @@ Optional launch flags:
 
 You can also pass a loose file path after the flags.
 
-## v0.4.5 release snapshot
+## v0.4.6 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.5` is the current release target in this tree.
+- `parp-tools WoW Viewer` `0.4.6` is the current release target in this tree.
 - The previously broken fullscreen minimap/top-right Designer Island case is now fixed in the active branch and has runtime user confirmation on the fixed development minimap dataset.
+- PM4 overlay decoding and placement are now much closer to correct on the development map after the latest runtime fixes.
 - Other recent viewer slices such as taxi override workflow, object-culling tuning, and WMO baked-light prototyping should still be treated as build-validated unless a narrower runtime note says otherwise.
+- Current render-performance work has started reducing duplicate scene walks and eager WMO doodad expansion, but a real render-layer/submission path is still the next major renderer seam.
 
 ## Current startup workflow
 

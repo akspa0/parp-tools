@@ -1,5 +1,21 @@
 # Progress
 
+### Mar 29, 2026 - v0.4.6 Release Prep Aligns PM4 Wins With The Next Renderer Seam
+
+- user runtime feedback after the latest PM4 runtime fixes is now strongly positive: PM4 objects are described as almost `100%` correct on the development map
+- release target is now being moved from `0.4.5` to `0.4.6`
+- release-facing notes that need to stay grouped for this build:
+	- PM4 overlay decoding and placement improved through the recent camera-window, tile-remap, empty-carrier, and linked-group placement fixes
+	- first rendering-performance slices landed by removing repeated MDX visibility work and deferring WMO doodad expansion
+- next renderer priority recorded for continuity:
+	- add real render layers / submission buckets instead of keeping all world-scene submission embedded directly in `WorldScene.Render(...)`
+	- focus the next performance slice on draw-call/state churn and layer ownership, not only on another isolated culling micro-fix
+- validation/build boundary for this continuity update:
+	- versioning and release-note surfaces were aligned in this pass
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Release` passed on Mar 29, 2026 with existing warnings only
+	- local self-contained publish for `0.4.6` completed successfully after updating the release workflow publish step to tolerate duplicate dependency-side publish outputs from `WoWRollback.PM4Module`
+	- local release archive `parp-tools-wow-viewer-v0.4.6-win-x64.zip` was produced on Mar 29, 2026 and the publish output still bundled `1315` WoWDBDefs `.dbd` files
+
 ### Mar 29, 2026 - WMO Doodads Stop Eagerly Expanding On The Render Thread And Object Fog Defaults Off
 
 - followed the first `WorldScene` render-pass optimization with a second narrower slice aimed at the remaining reported symptoms:

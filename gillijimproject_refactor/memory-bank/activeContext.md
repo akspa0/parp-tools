@@ -1,5 +1,29 @@
 # Active Context
 
+## Mar 29, 2026 - v0.4.6 Release Target And Renderer-Layer Pivot
+
+- user runtime feedback after the latest PM4 fixes is materially different from earlier sessions:
+	- PM4 objects are now described as almost `100%` correct on the active development-map workflow
+	- that makes the latest PM4 runtime changes a freeze-worthy release seam rather than another speculative experiment
+- `v0.4.6` should now be treated as the active viewer release target in this tree
+- the PM4 release-facing wins that need to stay called out together are:
+	- ADT-scale PM4 camera-window indexing instead of the earlier wrong WDL-scale indexing
+	- transposed PM4 filename tile remap into terrain tile space
+	- correct handling for zero-byte PM4 carriers and empty-known PM4 windows
+	- removal of terrain-AOI PM4 slicing for already loaded PM4 content
+	- linked-group placement resolution for non-zero `CK24` seed groups instead of one shared seed transform
+- next rendering/performance priority is no longer another narrow PM4 correctness pass by default
+- current renderer direction requested by user:
+	- move toward real render layers and explicit submission buckets instead of the current hard-coded `WorldScene` pass order with renderer-local immediate draw behavior
+	- reduce draw-call and state churn so debugging overlays and exploration surfaces stop fighting the main scene path
+- most likely first architecture seam:
+	- keep world visibility/culling collection in `WorldScene`, but build per-frame render-layer submission lists for terrain opaque, WMO opaque, MDX opaque, liquids, transparent world geometry, PM4 overlay solids, PM4 overlay lines, and debug/editor overlays
+	- route compatible items through a shared queue or batching surface instead of mixing cull, sort, GL-state changes, and direct draw calls inside one monolithic frame function
+- important boundary:
+	- `v0.4.6` still does not imply final renderer performance closure
+	- the current performance work is a first reduction in waste, while the render-layer/submission redesign is still ahead
+	- release packaging currently depends on a workflow-side publish mitigation because `WoWMapConverter.Core` still references `WoWRollback.PM4Module` as an `Exe` project, which causes duplicate dependency publish artifacts during viewer publish unless duplicate publish-output errors are relaxed
+
 ## Mar 29, 2026 - Second Viewer Performance Slice Defers WMO Doodads And Disables Object Fog By Default
 
 - follow-up to the first `WorldScene` MDX classification pass after the user reported the viewer was still hitching hard during tile or data loads and that world objects were appearing inside unwanted fog

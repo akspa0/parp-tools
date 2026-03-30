@@ -1,5 +1,28 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - v0.4.6 Target Freezes PM4 Runtime Wins And Points The Renderer At Real Layers
+
+- latest user runtime report says the recent PM4 runtime fixes were the right ones and that PM4 objects are now almost `100%` correct on the active development-map workflow
+- treat that as the current release freeze line for PM4 runtime behavior in `MdxViewer`, not as a signal to immediately reopen another broad PM4 rewrite
+- `v0.4.6` is now the active viewer release target
+- the PM4 fixes that define this target are:
+   - ADT-scale camera-window indexing for PM4 loads
+   - PM4 `XX_YY -> YY_XX` terrain tile remap
+   - empty-carrier and empty-known-window handling
+   - no terrain-AOI slicing of already loaded PM4 structures
+   - linked-group placement solving inside non-zero `CK24` families
+- next renderer/performance seam requested by user is more structural than the last two micro-optimizations:
+   - the viewer needs actual render layers / submission ownership instead of leaving terrain, WMO, MDX, liquids, PM4 overlays, and debug draws mixed inside one large world-scene render routine
+   - current `Rendering/RenderQueue.cs` exists but is not the active world-scene path; the next serious performance slice should either activate or replace that idea with layer-aware submission lists
+- likely first implementation target for that work:
+   - collect visibility once
+   - build explicit per-layer submission lists
+   - batch compatible opaque/transparent work by renderer/material/state where possible
+   - keep PM4/debug/editor overlays as separate late layers so exploration tooling stops polluting main world submission cost
+- important boundary:
+   - current performance improvements are real but partial
+   - the draw-call/state-churn problem is not closed until layer ownership and submission are explicit
+
 ## Mar 29, 2026 - Second Rendering Performance Slice Targets WMO Doodad Spikes And Object Fog
 
 - user feedback after the first `WorldScene` optimization was still negative on runtime feel:
@@ -156,6 +179,7 @@
 - Important boundary:
    - this is compile-validated in `MdxViewer`, not runtime-signed-off on the development map yet
    - if follow-up runtime testing shows the frame itself now needs explicit visualization, add that separately instead of re-baking frame yaw into mesh vertices
+   - release publish currently relies on a workflow-side mitigation for duplicate dependency publish outputs because `WoWMapConverter.Core` still reaches into `WoWRollback.PM4Module` as an executable project instead of a pure library seam
 
 ## PM4 Raw CK24 Layer Alignment Added For Viewer Investigation (Mar 29)
 

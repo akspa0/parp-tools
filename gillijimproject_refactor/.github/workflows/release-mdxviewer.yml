@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.5)'
+        description: 'Version tag (e.g. v0.4.6)'
         required: true
 
 permissions:
@@ -69,6 +69,7 @@ jobs:
             -r win-x64 `
             --self-contained true `
             -p:PublishSingleFile=false `
+            -p:ErrorOnDuplicatePublishOutputFiles=false `
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -o gillijimproject_refactor/publish/ParpToolsWoWViewer
 
@@ -95,13 +96,18 @@ jobs:
           body: |
             ## parp-tools WoW Viewer
 
-            Build `0.4.5` of the active WoW world/model viewer and debugging surface in this repo.
+            Build `${{ github.event.inputs.version || github.ref_name }}` of the active WoW world/model viewer and debugging surface in this repo.
 
             Author: `github.com/akspa0/parp-tools`
 
             Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!
 
             Current support target: WoW Alpha `0.5.3` through Cataclysm `4.0.0.11927`.
+
+            ### Release Notes
+            - PM4 overlay decoding and placement support is materially stronger on the development map, including better camera-window coverage, tile remap handling, empty-carrier handling, and linked-group placement resolution.
+            - Recent rendering work started reducing repeated world-scene submission cost by reusing MDX visibility results and deferring WMO doodad expansion instead of constructing everything on first sight.
+            - Performance work is still active. This release improves the current path, but it is not yet the final render-layer or draw-submission redesign.
 
             ### Quick Start
             1. Extract the ZIP
