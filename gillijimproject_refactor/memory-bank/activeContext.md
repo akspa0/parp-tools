@@ -23,6 +23,7 @@
 	- `v0.4.6` still does not imply final renderer performance closure
 	- the current performance work is a first reduction in waste, while the render-layer/submission redesign is still ahead
 	- release packaging currently depends on a workflow-side publish mitigation because `WoWMapConverter.Core` still references `WoWRollback.PM4Module` as an `Exe` project, which causes duplicate dependency publish artifacts during viewer publish unless duplicate publish-output errors are relaxed
+	- no bundled `area_crosswalk.csv` should be treated as a release requirement; the intended path is runtime `AreaTable` or `Map`-based mapping from user-provided archives or explicit DBC inputs, with CSV crosswalks remaining optional user-side inputs only
 
 ## Mar 29, 2026 - Second Viewer Performance Slice Defers WMO Doodads And Disables Object Fog By Default
 

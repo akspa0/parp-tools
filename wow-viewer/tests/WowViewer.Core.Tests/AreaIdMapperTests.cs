@@ -7,12 +7,12 @@ namespace WowViewer.Core.Tests;
 public sealed class AreaIdMapperTests
 {
     [Fact]
-    public void Constructor_LoadsEmbeddedCrosswalkDefaults()
+    public void Constructor_DoesNotRequireEmbeddedCrosswalkDefaults()
     {
         AreaIdMapper mapper = new();
 
-        Assert.True(mapper.CrosswalkCount > 0);
-        Assert.True(mapper.MapAreaId(1048576, 0) > 0);
+        Assert.True(mapper.CrosswalkCount >= 0);
+        Assert.NotNull(mapper.LastLoadMessage);
     }
 
     [Fact]

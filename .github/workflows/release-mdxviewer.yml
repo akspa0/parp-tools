@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.5)'
+        description: 'Version tag (e.g. v0.4.6)'
         required: true
 
 permissions:
@@ -124,17 +124,15 @@ jobs:
 
             .NET 10 / OpenGL 3.3 world viewer and debugging surface for WoW data from Alpha `0.5.3` through `4.0.0.11927`.
 
-            ### v0.4.5 Highlights
-            - **Fullscreen Minimap Repair** — fixed the previously broken docked/fullscreen marker alignment and top-right teleport behavior on the development minimap dataset.
-            - **Taxi Workflow Upgrade** — route picking, animated taxi actor controls, model override flow, return-to-world, and saved override persistence.
-            - **Render Quality Controls** — live texture filtering changes for already loaded world and standalone assets.
-            - **PM4 Inspection Utilities** — map-wide PM4 overlay loading, PM4/WMO correlation tools, and offline PM4 OBJ export.
-            - **Viewer Workflow Improvements** — minimap disk cache, safer triple-click teleport, improved tool-path seeding, and broader viewer-side debugging surfaces.
+            ### v0.4.6 Highlights
+            - **PM4 Runtime Decode And Placement Upgrade** — stronger development-map PM4 correctness through camera-window indexing fixes, transposed tile remap handling, empty-carrier coverage handling, and linked-group placement resolution.
+            - **First Rendering Performance Slice** — reduced repeated MDX visibility work and deferred WMO doodad expansion so the scene path does less redundant CPU-side work while data streams in.
+            - **Viewer Release Freeze On Current PM4 Wins** — this build intentionally freezes the current PM4 runtime gains instead of rolling straight into the larger render-layer rewrite.
 
             ### Other Included Fixes
-            - **Liquid Family Classification** — better `MH2O` liquid-type handling for later 3.3.5 and 4.0 data when DBC metadata is present.
-            - **Object Visibility Tuning** — reduced aggressive world-object pop-in and early object fogging.
-            - **Recovery-Branch Stabilization** — continued viewer recovery on the `v0.4.0` baseline without widening this release into `v0.5.0` renderer work.
+            - **Release Packaging Hardening** — release publish now tolerates duplicate dependency-side publish artifacts from the legacy `WoWRollback.PM4Module` executable reference chain.
+            - **Documentation And Continuity Sync** — versioning, README snapshots, and continuity notes now align on `v0.4.6` as the active release target.
+            - **Renderer Direction Locked** — the next major renderer step remains a real render-layer or submission-bucket redesign rather than another isolated micro-fix.
 
             ### Quick Start
             1. Extract the ZIP for your platform

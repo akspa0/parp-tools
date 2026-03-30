@@ -15,6 +15,14 @@
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Release` passed on Mar 29, 2026 with existing warnings only
 	- local self-contained publish for `0.4.6` completed successfully after updating the release workflow publish step to tolerate duplicate dependency-side publish outputs from `WoWRollback.PM4Module`
 	- local release archive `parp-tools-wow-viewer-v0.4.6-win-x64.zip` was produced on Mar 29, 2026 and the publish output still bundled `1315` WoWDBDefs `.dbd` files
+	- the first cloud `v0.4.6` Actions run failed for two real release-workflow reasons, not because of local environment dirt:
+		- the root release workflow, not the `gillijimproject_refactor` copy, was the workflow GitHub actually executed
+		- cross-platform publish was still assuming a bundled `WowViewer.Core.IO` `area_crosswalk.csv` resource that is not tracked and should not be shipped
+	- follow-up fix landed on Mar 29, 2026:
+		- `WowViewer.Core.IO` now treats the embedded area crosswalk as optional instead of required, keeping runtime mapping on archive-backed or explicit user data paths
+		- `MdxViewer.CrossPlatform.csproj` now carries the same `WowViewer.Core.IO` and `WowViewer.Core.PM4` references as the Windows project so Linux publish no longer fails on missing PM4 namespaces
+		- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter AreaIdMapperTests` passed on Mar 29, 2026
+		- `dotnet publish i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.CrossPlatform.csproj -c Release -f net10.0 -p:TargetFramework=net10.0 -r linux-x64 --self-contained true -p:PublishSingleFile=false -p:IncludeNativeLibrariesForSelfExtract=true -p:ErrorOnDuplicatePublishOutputFiles=false -p:TreatWarningsAsErrors=false -o i:/parp/parp-tools/output/MdxViewer-linux-x64-smoke` passed on Mar 29, 2026
 
 ### Mar 29, 2026 - WMO Doodads Stop Eagerly Expanding On The Render Thread And Object Fog Defaults Off
 

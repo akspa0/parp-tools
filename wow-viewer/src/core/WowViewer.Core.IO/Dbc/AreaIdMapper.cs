@@ -836,11 +836,13 @@ public sealed class AreaIdMapper
             using Stream? stream = typeof(AreaIdMapper).Assembly.GetManifestResourceStream(EmbeddedCrosswalkResourceName);
             if (stream == null)
             {
+                LastLoadMessage = "No embedded area crosswalk bundled; runtime mapping requires archive-backed AreaTable/Map data, explicit DBC inputs, or user-provided crosswalk CSV files.";
                 return;
             }
 
             using StreamReader reader = new(stream);
             LoadCrosswalk(reader);
+            LastLoadMessage = $"Loaded embedded crosswalk defaults: {_directAreaCrosswalk.Count} mappings";
         }
         catch (Exception ex)
         {

@@ -54,6 +54,7 @@ Bootstrap dependencies:
 - The active shared `AreaTable` and `Map` seam now uses the same vendored DBCD project the viewer already consumes from `gillijimproject_refactor/lib/wow.tools.local/DBCD`, and bundles `gillijimproject_refactor/lib/WoWDBDefs/definitions` into the `WowViewer.Core.IO` output.
 - The shared `AreaIdMapper` seam now also supports archive-backed `AreaTable` and `Map` loads through `IArchiveReader` plus `DbClientFileReader`, so consumers do not need fake extracted DBC trees just to get DBCD + WoWDBDefs-backed mapping.
 - Extracted fixed-data tables under `gillijimproject_refactor/test_data/0.5.3/tree/DBFilesClient` or `gillijimproject_refactor/test_data/3.3.5/tree/DBFilesClient` remain a narrow fallback or test path; when neither archive-backed nor explicit table inputs are provided, the current `AreaIdMapper` path warns explicitly and falls back to crosswalk-only behavior instead of silently pretending schema-backed loading happened.
+- `WowViewer.Core.IO` no longer requires a bundled `Resources/area_crosswalk.csv` payload to compile or ship. The intended production path is archive-backed or explicit DBC-driven mapping from user-supplied data, with user-provided CSV crosswalks staying optional rather than release payloads.
 
 Current shared-core foundation slice:
 

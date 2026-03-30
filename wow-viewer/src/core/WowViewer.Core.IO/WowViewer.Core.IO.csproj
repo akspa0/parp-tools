@@ -6,7 +6,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\area_crosswalk.csv" />
+    <EmbeddedResource Include="Resources\area_crosswalk.csv" Condition="Exists('Resources\area_crosswalk.csv')" />
   </ItemGroup>
 
   <ItemGroup>
