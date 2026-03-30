@@ -1,5 +1,62 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 30, 2026 - Inspector-First PM4 Workbench Replaces The Old Multi-Window Default
+
+- latest viewer-shell change is explicitly about workflow quality, not another PM4 decode theory pass:
+   - PM4 bounds now default off
+   - PM4 x-ray now default off
+   - fixed sidebars now start on by default so the right inspector remains anchored instead of drifting through docked-panel state unless the user opts back in
+   - the normal PM4 workflow now lives in the right sidebar `PM4 Workbench` rather than spreading match/correlation/settings across multiple PM4 floating windows
+   - hover cards now stay shorter and act more like loot-tooltips, while click selection owns the detailed PM4 graph or match or correlation workflow
+- important boundary:
+   - the old PM4 alignment micro-window is still available as an advanced fallback from the workbench because the per-axis transform controls are still too large to inline cleanly in one pass
+   - compile validation passed, but no manual runtime signoff has been captured yet for the new inspector-first PM4 shell
+
+## Mar 30, 2026 - PM4 Hover Tooltip Now Uses PM4-First Metadata And Hover-Time Match Cache
+
+- the generic asset hover card is no longer limited to WMO or MDX or WL metadata only
+- landed viewer correction:
+   - `WorldScene.UpdateHoveredAssetInfo(...)` now detects PM4 overlay objects while the PM4 overlay is visible and returns a hovered PM4 object key alongside the tooltip payload
+   - PM4 hover detection now wins first in that mode so the overlay can stay on PM4 geometry instead of falling through to nearby scene assets
+   - `ViewerApp.DrawSceneHoverAssetOverlay()` now uses a darker gold-bordered tooltip look with brighter title text and a compact PM4 top-candidate list
+   - hovered PM4 match suggestions use a dedicated cache and the existing PM4 match builder so mouse-over can show likely placement candidates without changing selected-object state
+- important research note worth preserving:
+   - current development-map evidence still points to derived `CK24` low-16 values separating many `WMO`-like PM4 meshes, while `CK24=0x000000` remains an unresolved umbrella bucket that still appears to contain many `M2`-like families
+   - the tooltip candidate list is diagnostic evidence only, not proof that PM4 subobject or ownership semantics are solved
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 after the hover-tooltip update
+- important boundary:
+   - this is compile validation only
+   - no development-map runtime signoff has been completed yet for the new PM4 hover tooltip behavior
+
+## Mar 30, 2026 - PM4 Additive Collection Click Path No Longer Yields To Normal Scene Picks
+
+- user runtime feedback on the new PM4 collection workflow showed the first additive click path was still not usable in dense scenes:
+   - `Shift + Left Click` could fail silently because PM4 collection still depended on normal scene hit priority
+   - collection removal could leave stale highlighted PM4 parts behind
+- landed viewer correction:
+   - `ViewerApp.PickObjectAtMouse(...)` now treats the `addPm4ToCollection` path as PM4-first and directly toggles collection membership when any PM4 hit exists, instead of letting WMO or MDX selection take the click first
+   - failed additive clicks now produce an explicit status message instead of looking like ignored input
+   - collection-item `Remove` now calls back into `SyncPm4CollectionHighlight()` immediately so highlight state tracks the list
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 after the click-path fix
+- important boundary:
+   - this is compile validation only
+   - no development-map runtime signoff was completed yet after this correction
+
+## Mar 30, 2026 - PM4 Selection Uses Merged Groups Again After Family-Split Regression
+
+- latest user runtime report on zero-`CK24` PM4 selection is that the temporary selection-family split was making things worse, including visibly splitting one object into partial pieces
+- active correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - removed the separate family-selection grouping path
+   - restored selected-object ownership, highlight color, and selected-object graph expansion to the existing merged-group key path
+   - left the selected-only PM4 match builder/cache changes in place because they are not tied to the half-object regression
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 after the rollback
+- important boundary:
+   - this is compile validation only
+   - the development-map runtime still needs manual confirmation that zero-`CK24` selection is back to the last non-regressed behavior
+
 ## Mar 30, 2026 - Zero-CK24 Seed Buckets Now Use MSLK Ownership Before Connectivity Fallback
 
 - latest PM4 regrouping investigation narrowed the remaining zero-`CK24` fragmentation to one runtime decision in `src/MdxViewer/Terrain/WorldScene.cs`:

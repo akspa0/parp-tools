@@ -177,6 +177,9 @@ Current status in the workspace:
   - WMO-facing report payloads stay in WMO or consumer space instead of being re-homed into PM4
 - current research note worth preserving:
   - CK24 low-16 object values, read as integers, appear to be plausible `UniqueID` candidates on the development map, but that remains a hypothesis until correlated against real placed-object data
+  - current viewer-side graph and hover-match evidence also suggests those low-16 object values separate many `WMO`-like PM4 meshes more cleanly than the unresolved `CK24=0x000000` umbrella bucket, where many `M2`-like families still appear to collapse together
+  - treat the current hover or graph candidate ranking as research instrumentation only; it is useful for narrowing likely asset matches, but it does not close missing subobject, flag, or ownership semantics yet
+  - if later corpus-scale ranking is needed, a feature-indexed asset database or ML-assisted clustering layer is a possible follow-up after parser and linkage semantics improve, not before
 - not ported yet:
   - broader analyzer and reporting families beyond decode audit, linkage, MSCN, unknowns, and single-file inspect
   - MdxViewer-facing reconstruction and transform solvers beyond the first placement-contract and placement-math seam, normal-based axis scoring, planar-transform resolution, world-yaw correction, world-space centroid computation, the world-space yaw helper layer, the new typed placement-solution layer, and the first narrow consumer hook-ups

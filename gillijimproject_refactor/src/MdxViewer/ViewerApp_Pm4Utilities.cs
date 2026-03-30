@@ -13,6 +13,366 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private void OpenPm4Workbench(Pm4WorkbenchTab tab)
+    {
+        _showRightSidebar = true;
+        _pm4WorkbenchTab = tab;
+    }
+
+    private void DrawPm4WorkbenchInspector()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextDisabled("PM4 workbench becomes available once a world scene is loaded.");
+            return;
+        }
+
+        ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect its matches, graph, and correlation here.");
+
+        if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
+            return;
+
+        bool overlayTabOpen = true;
+        if (ImGui.BeginTabItem("Overlay", ref overlayTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Overlay ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        {
+            _pm4WorkbenchTab = Pm4WorkbenchTab.Overlay;
+            DrawPm4OverlayWorkbenchContent();
+            ImGui.EndTabItem();
+        }
+
+        bool selectionTabOpen = true;
+        if (ImGui.BeginTabItem("Selection", ref selectionTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Selection ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        {
+            _pm4WorkbenchTab = Pm4WorkbenchTab.Selection;
+            DrawPm4SelectionWorkbenchContent();
+            ImGui.EndTabItem();
+        }
+
+        bool correlationTabOpen = true;
+        if (ImGui.BeginTabItem("Correlation", ref correlationTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Correlation ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        {
+            _pm4WorkbenchTab = Pm4WorkbenchTab.Correlation;
+            DrawPm4CorrelationInspectorContent();
+            ImGui.EndTabItem();
+        }
+
+        ImGui.EndTabBar();
+    }
+
+    private void DrawPm4OverlayWorkbenchContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        bool showPm4Overlay = _worldScene.ShowPm4Overlay;
+        if (ImGui.Checkbox("PM4 Overlay", ref showPm4Overlay))
+            _worldScene.ShowPm4Overlay = showPm4Overlay;
+
+        ImGui.SameLine();
+        if (ImGui.Button("Reload PM4"))
+            _worldScene.ReloadPm4Overlay();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Save Overlay Align"))
+            SaveCurrentPm4Alignment();
+
+        bool showPm4Solid = _worldScene.ShowPm4SolidOverlay;
+        if (ImGui.Checkbox("PM4 Solid Fill", ref showPm4Solid))
+            _worldScene.ShowPm4SolidOverlay = showPm4Solid;
+
+        ImGui.SameLine();
+        bool pm4IgnoreDepth = _worldScene.Pm4OverlayIgnoreDepth;
+        if (ImGui.Checkbox("PM4 X-Ray", ref pm4IgnoreDepth))
+            _worldScene.Pm4OverlayIgnoreDepth = pm4IgnoreDepth;
+
+        ImGui.SameLine();
+        bool showPm4Bounds = _worldScene.ShowPm4ObjectBounds;
+        if (ImGui.Checkbox("PM4 Bounds", ref showPm4Bounds))
+            _worldScene.ShowPm4ObjectBounds = showPm4Bounds;
+
+        bool showPm4Refs = _worldScene.ShowPm4PositionRefs;
+        if (ImGui.Checkbox("PM4 MPRL Refs", ref showPm4Refs))
+            _worldScene.ShowPm4PositionRefs = showPm4Refs;
+
+        ImGui.SameLine();
+        bool showPm4Centroids = _worldScene.ShowPm4ObjectCentroids;
+        if (ImGui.Checkbox("PM4 Centroids", ref showPm4Centroids))
+            _worldScene.ShowPm4ObjectCentroids = showPm4Centroids;
+
+        ImGui.SameLine();
+        bool pm4FlipAllObjY = _worldScene.Pm4FlipAllObjectsY;
+        if (ImGui.Checkbox("Mirror PM4 N/S", ref pm4FlipAllObjY))
+            _worldScene.Pm4FlipAllObjectsY = pm4FlipAllObjY;
+
+        bool showType40 = _worldScene.ShowPm4Type40;
+        if (ImGui.Checkbox("CK24 0x40", ref showType40))
+            _worldScene.ShowPm4Type40 = showType40;
+
+        ImGui.SameLine();
+        bool showType80 = _worldScene.ShowPm4Type80;
+        if (ImGui.Checkbox("CK24 0x80", ref showType80))
+            _worldScene.ShowPm4Type80 = showType80;
+
+        ImGui.SameLine();
+        bool showTypeOther = _worldScene.ShowPm4TypeOther;
+        if (ImGui.Checkbox("CK24 Other", ref showTypeOther))
+            _worldScene.ShowPm4TypeOther = showTypeOther;
+
+        Pm4OverlayColorMode colorMode = _worldScene.Pm4ColorMode;
+        if (ImGui.BeginCombo("PM4 Color", GetPm4ColorModeLabel(colorMode)))
+        {
+            foreach (Pm4OverlayColorMode mode in Enum.GetValues<Pm4OverlayColorMode>())
+            {
+                bool isSelected = mode == colorMode;
+                if (ImGui.Selectable(GetPm4ColorModeLabel(mode), isSelected))
+                    _worldScene.Pm4ColorMode = mode;
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        bool splitCk24Connectivity = _worldScene.Pm4SplitCk24ByConnectivity;
+        if (ImGui.Checkbox("Split CK24 by Connectivity", ref splitCk24Connectivity))
+        {
+            _worldScene.Pm4SplitCk24ByConnectivity = splitCk24Connectivity;
+            _worldScene.ReloadPm4Overlay();
+        }
+
+        bool splitCk24ByMdos = _worldScene.Pm4SplitCk24ByMdos;
+        if (ImGui.Checkbox("Split CK24 by MdosIndex", ref splitCk24ByMdos))
+        {
+            _worldScene.Pm4SplitCk24ByMdos = splitCk24ByMdos;
+            _worldScene.ReloadPm4Overlay();
+        }
+
+        if (_worldScene.IsPm4Loading)
+            ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Status}");
+        else if (_worldScene.Pm4LoadAttempted)
+            ImGui.TextDisabled($"PM4: {_worldScene.Pm4LoadedFiles}/{_worldScene.Pm4TotalFiles} files, {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} objects, {_worldScene.Pm4VisibleLineCount}/{_worldScene.Pm4LineCount} lines, {_worldScene.Pm4VisibleTriangleCount}/{_worldScene.Pm4TriangleCount} tris, {_worldScene.Pm4VisiblePositionRefCount}/{_worldScene.Pm4PositionRefCount} refs");
+        else
+            ImGui.TextDisabled("Toggle PM4 Overlay to lazy-load navmesh debug data.");
+
+        if (_worldScene.Pm4LoadAttempted)
+            ImGui.TextDisabled($"Status: {_worldScene.Pm4Status}");
+
+        ImGui.TextDisabled($"Overlay Align: T=({_worldScene.Pm4OverlayTranslation.X:F2}, {_worldScene.Pm4OverlayTranslation.Y:F2}, {_worldScene.Pm4OverlayTranslation.Z:F2}) Rot=({_worldScene.Pm4OverlayRotationDegrees.X:F2}, {_worldScene.Pm4OverlayRotationDegrees.Y:F2}, {_worldScene.Pm4OverlayRotationDegrees.Z:F2})° S=({_worldScene.Pm4OverlayScale.X:F3}, {_worldScene.Pm4OverlayScale.Y:F3}, {_worldScene.Pm4OverlayScale.Z:F3})");
+
+        DrawPm4ColorLegend("WorkbenchOverlay");
+    }
+
+    private void DrawPm4SelectionWorkbenchContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (!_worldScene.HasSelectedPm4Object || !_worldScene.SelectedPm4ObjectKey.HasValue)
+        {
+            ImGui.TextDisabled("No PM4 object selected. Left-click PM4 geometry to inspect one object at a time.");
+            DrawPm4ObjectCollectionSummary("WorkbenchSelection");
+            if (ImGui.Button("Dump PM4 Objects JSON"))
+                ExportPm4ObjectsJson();
+            ImGui.SameLine();
+            if (ImGui.Button("Export PM4 OBJ Set"))
+                ExportPm4ObjectsObjSet();
+            return;
+        }
+
+        int requestedMatches = _pm4ObjectMatchMaxMatchesPerObject;
+        ImGui.SetNextItemWidth(130f);
+        if (ImGui.SliderInt("Top Matches", ref requestedMatches, 3, 5))
+            _pm4ObjectMatchMaxMatchesPerObject = Math.Clamp(requestedMatches, 3, 5);
+
+        ImGui.SameLine();
+        if (ImGui.Button("Open Advanced Align"))
+            _showPm4AlignmentWindow = true;
+
+        ImGui.SameLine();
+        if (ImGui.Button("Save Overlay Align"))
+            SaveCurrentPm4Alignment();
+
+        if (ImGui.CollapsingHeader("Selected PM4", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
+            ImGui.Text($"tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
+
+            if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
+            {
+                ImGui.TextDisabled($"Type=0x{debugInfo.Ck24Type:X2} ObjId={debugInfo.Ck24ObjectId} Surfaces={debugInfo.SurfaceCount}");
+                ImGui.TextDisabled($"Group=0x{debugInfo.DominantGroupKey:X2} Attr=0x{debugInfo.DominantAttributeMask:X2} Mdos={debugInfo.DominantMdosIndex} AvgH={debugInfo.AverageSurfaceHeight:F2}");
+                ImGui.TextDisabled($"MSLKGroup=0x{debugInfo.LinkGroupObjectId:X8} Linked MPRL refs={debugInfo.LinkedPositionRefCount}");
+            }
+
+            ImGui.TextDisabled($"Tile layer align: T=({_worldScene.SelectedPm4Ck24LayerTranslation.X:F2}, {_worldScene.SelectedPm4Ck24LayerTranslation.Y:F2}, {_worldScene.SelectedPm4Ck24LayerTranslation.Z:F2}) Rot=({_worldScene.SelectedPm4Ck24LayerRotationDegrees.X:F2}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Y:F2}, {_worldScene.SelectedPm4Ck24LayerRotationDegrees.Z:F2})° S=({_worldScene.SelectedPm4Ck24LayerScale.X:F3}, {_worldScene.SelectedPm4Ck24LayerScale.Y:F3}, {_worldScene.SelectedPm4Ck24LayerScale.Z:F3})");
+            ImGui.TextDisabled($"Object align: T=({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2}) Rot=({_worldScene.SelectedPm4ObjectRotationDegrees.X:F2}, {_worldScene.SelectedPm4ObjectRotationDegrees.Y:F2}, {_worldScene.SelectedPm4ObjectRotationDegrees.Z:F2})° S=({_worldScene.SelectedPm4ObjectScale.X:F3}, {_worldScene.SelectedPm4ObjectScale.Y:F3}, {_worldScene.SelectedPm4ObjectScale.Z:F3})");
+
+            if (ImGui.Button("Clear PM4 Selection"))
+                _worldScene.ClearPm4ObjectSelection();
+            ImGui.SameLine();
+            if (ImGui.Button("Dump PM4 Objects JSON"))
+                ExportPm4ObjectsJson();
+            ImGui.SameLine();
+            if (ImGui.Button("Export PM4 OBJ Set"))
+                ExportPm4ObjectsObjSet();
+        }
+
+        if (ImGui.CollapsingHeader("Match Suggestions", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawPm4SelectedObjectMatchSuggestions("WorkbenchSelectedPm4", compact: false);
+
+        DrawSelectedPm4ObjectGraph("WorkbenchSelectedObject");
+    }
+
+    private void DrawPm4CorrelationInspectorContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        EnsurePm4WmoCorrelationReportLoaded();
+
+        int requestedMatches = _pm4WmoCorrelationMaxMatchesPerPlacement;
+        ImGui.SetNextItemWidth(90f);
+        if (ImGui.InputInt("Max Matches", ref requestedMatches))
+        {
+            _pm4WmoCorrelationMaxMatchesPerPlacement = Math.Clamp(requestedMatches, 1, 32);
+            RefreshPm4WmoCorrelationReport();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Refresh"))
+            RefreshPm4WmoCorrelationReport();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Dump JSON"))
+            ExportPm4WmoCorrelationJson();
+
+        ImGui.SameLine();
+        if (ImGui.Checkbox("Only Near", ref _pm4WmoCorrelationNearOnly))
+        {
+            if (_selectedPm4WmoCorrelationPlacementIndex >= 0)
+                _selectedPm4WmoCorrelationMatchIndex = 0;
+        }
+
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputTextWithHint("##Pm4WmoCorrelationFilterWorkbench", "Filter model name or path", ref _pm4WmoCorrelationModelFilter, 256);
+
+        if (_pm4WmoCorrelationReport == null)
+        {
+            ImGui.TextDisabled("No PM4/WMO correlation report is loaded.");
+            return;
+        }
+
+        Pm4WmoCorrelationReport report = _pm4WmoCorrelationReport;
+        ImGui.TextDisabled($"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | placements {report.Summary.WmoPlacementCount}, resolved WMO meshes {report.Summary.WmoMeshResolvedCount}, PM4 objects {report.Summary.Pm4ObjectCount}");
+        ImGui.TextDisabled($"Candidates {report.Summary.PlacementsWithCandidates}/{report.Summary.WmoPlacementCount}, near {report.Summary.PlacementsWithNearCandidates}, PM4 status: {report.Pm4Status}");
+
+        string filter = _pm4WmoCorrelationModelFilter.Trim();
+        var filteredPlacements = report.Placements
+            .Select((placement, index) => new { placement, index })
+            .Where(entry => !_pm4WmoCorrelationNearOnly || entry.placement.Pm4NearCandidateCount > 0)
+            .Where(entry => string.IsNullOrWhiteSpace(filter)
+                || entry.placement.ModelName.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || entry.placement.ModelPath.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || entry.placement.ModelKey.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(entry => entry.placement.Pm4Matches.Count > 0 ? entry.placement.Pm4Matches[0].FootprintOverlapRatio : 0f)
+            .ThenBy(entry => entry.placement.ModelName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (filteredPlacements.Count == 0)
+        {
+            ImGui.TextDisabled("No placements matched the current filter.");
+            return;
+        }
+
+        if (!filteredPlacements.Any(entry => entry.index == _selectedPm4WmoCorrelationPlacementIndex))
+        {
+            _selectedPm4WmoCorrelationPlacementIndex = filteredPlacements[0].index;
+            _selectedPm4WmoCorrelationMatchIndex = 0;
+        }
+
+        float leftWidth = MathF.Min(360f, ImGui.GetContentRegionAvail().X * 0.44f);
+        if (ImGui.BeginChild("##Pm4WmoPlacementListWorkbench", new Vector2(leftWidth, 360f), true))
+        {
+            for (int i = 0; i < filteredPlacements.Count; i++)
+            {
+                var entry = filteredPlacements[i];
+                Pm4WmoCorrelationPlacement placement = entry.placement;
+                bool selected = entry.index == _selectedPm4WmoCorrelationPlacementIndex;
+                string label = $"[{placement.TileX},{placement.TileY}] {placement.ModelName}##Pm4WmoPlacementWorkbench{entry.index}";
+                if (ImGui.Selectable(label, selected))
+                {
+                    _selectedPm4WmoCorrelationPlacementIndex = entry.index;
+                    _selectedPm4WmoCorrelationMatchIndex = 0;
+                }
+
+                if (placement.Pm4Matches.Count > 0)
+                {
+                    Pm4WmoCorrelationMatch best = placement.Pm4Matches[0];
+                    ImGui.TextDisabled($"best CK24=0x{best.Ck24:X6} part={best.ObjectPartId} overlap={best.FootprintOverlapRatio:F2} dist={best.FootprintDistance:F1}");
+                }
+                else
+                {
+                    ImGui.TextDisabled("No PM4 candidates in the current tile neighborhood.");
+                }
+
+                ImGui.Separator();
+            }
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        if (ImGui.BeginChild("##Pm4WmoPlacementDetailsWorkbench", Vector2.Zero, true))
+        {
+            Pm4WmoCorrelationPlacement placement = report.Placements[_selectedPm4WmoCorrelationPlacementIndex];
+            ImGui.TextWrapped($"{placement.ModelName} (tile {placement.TileX},{placement.TileY}, uid {placement.UniqueId})");
+            ImGui.TextDisabled(placement.ModelPath);
+
+            if (placement.Pm4Matches.Count > 0)
+            {
+                Pm4WmoCorrelationMatch selectedMatch = placement.Pm4Matches[Math.Clamp(_selectedPm4WmoCorrelationMatchIndex, 0, placement.Pm4Matches.Count - 1)];
+
+                if (ImGui.Button("Select PM4"))
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Frame PM4"))
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: true);
+
+                ImGui.SameLine();
+                if (ImGui.Button("Frame Pair"))
+                {
+                    Vector3 boundsMin = Vector3.Min(placement.WorldBoundsMin, selectedMatch.BoundsMin);
+                    Vector3 boundsMax = Vector3.Max(placement.WorldBoundsMax, selectedMatch.BoundsMax);
+                    SelectPm4CorrelationMatch(selectedMatch, frameCamera: false);
+                    FocusCameraOnBounds(boundsMin, boundsMax);
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled($"Placement pos: ({placement.PlacementPosition.X:F2}, {placement.PlacementPosition.Y:F2}, {placement.PlacementPosition.Z:F2})");
+            ImGui.TextDisabled($"World bounds min: ({placement.WorldBoundsMin.X:F2}, {placement.WorldBoundsMin.Y:F2}, {placement.WorldBoundsMin.Z:F2})");
+            ImGui.TextDisabled($"World bounds max: ({placement.WorldBoundsMax.X:F2}, {placement.WorldBoundsMax.Y:F2}, {placement.WorldBoundsMax.Z:F2})");
+
+            ImGui.Separator();
+            ImGui.Text($"PM4 matches ({placement.Pm4Matches.Count}/{placement.Pm4CandidateCount} shown, near={placement.Pm4NearCandidateCount})");
+
+            for (int matchIndex = 0; matchIndex < placement.Pm4Matches.Count; matchIndex++)
+            {
+                Pm4WmoCorrelationMatch match = placement.Pm4Matches[matchIndex];
+                bool selected = matchIndex == _selectedPm4WmoCorrelationMatchIndex;
+                string label = $"CK24 0x{match.Ck24:X6} part {match.ObjectPartId}##Pm4WmoMatchWorkbench{matchIndex}";
+                if (ImGui.Selectable(label, selected))
+                    _selectedPm4WmoCorrelationMatchIndex = matchIndex;
+
+                ImGui.TextDisabled($"footprint overlap={match.FootprintOverlapRatio:F3} area={match.FootprintAreaRatio:F3} dist={match.FootprintDistance:F2}");
+                ImGui.TextDisabled($"planar gap={match.PlanarGap:F2} vertical gap={match.VerticalGap:F2} center={match.CenterDistance:F2}");
+                ImGui.Separator();
+            }
+        }
+        ImGui.EndChild();
+    }
+
     private void DrawPerfWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(360, 0), ImGuiCond.FirstUseEver);
@@ -1002,6 +1362,12 @@ public partial class ViewerApp
     private void InvalidatePm4DerivedReports()
     {
         _pm4ObjectMatchReport = null;
+        _selectedPm4ObjectMatch = null;
+        _selectedPm4ObjectMatchKey = null;
+        _selectedPm4ObjectMatchCacheMaxMatches = -1;
+        _hoveredPm4ObjectMatch = null;
+        _hoveredPm4ObjectMatchKey = null;
+        _hoveredPm4ObjectMatchCacheMaxMatches = -1;
         _pm4WmoCorrelationReport = null;
     }
 
@@ -1118,7 +1484,7 @@ public partial class ViewerApp
             $"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | PM4 objects {report.Summary.Pm4ObjectCount}, WMO placements {report.Summary.WmoPlacementCount}, M2 placements {report.Summary.M2PlacementCount}");
         ImGui.TextDisabled(
             $"Objects with candidates {report.Summary.ObjectsWithCandidates}/{report.Summary.Pm4ObjectCount}, near {report.Summary.ObjectsWithNearCandidates}, status: {report.Pm4Status}");
-        ImGui.TextDisabled("Ranking is WMO-mesh evidence first, then same-tile and anchor/planar fit. Footprint is only a late tiebreaker now.");
+        ImGui.TextDisabled("Ranking keeps WMO-mesh priority for non-zero families, but zero/root PM4 objects with linked refs now prefer M2 anchors before the usual tile/anchor/planar fit checks.");
         ImGui.Separator();
 
         if (!_worldScene.HasSelectedPm4Object)
@@ -1147,11 +1513,27 @@ public partial class ViewerApp
         if (_worldScene == null || !_worldScene.SelectedPm4ObjectKey.HasValue)
             return false;
 
-        EnsurePm4ObjectMatchReportLoaded();
-        if (_pm4ObjectMatchReport == null)
+        var selectedKey = _worldScene.SelectedPm4ObjectKey.Value;
+        if (_selectedPm4ObjectMatch != null
+            && _selectedPm4ObjectMatchKey.HasValue
+            && _selectedPm4ObjectMatchKey.Value == selectedKey
+            && _selectedPm4ObjectMatchCacheMaxMatches == _pm4ObjectMatchMaxMatchesPerObject)
+        {
+            objectMatch = _selectedPm4ObjectMatch;
+            return true;
+        }
+
+        if (!_worldScene.TryBuildSelectedPm4ObjectMatch(_pm4ObjectMatchMaxMatchesPerObject, out Pm4ObjectMatchObject selectedMatch))
             return false;
 
-        var selectedKey = _worldScene.SelectedPm4ObjectKey.Value;
+        _selectedPm4ObjectMatch = selectedMatch;
+        _selectedPm4ObjectMatchKey = selectedKey;
+        _selectedPm4ObjectMatchCacheMaxMatches = _pm4ObjectMatchMaxMatchesPerObject;
+        objectMatch = selectedMatch;
+
+        if (_pm4ObjectMatchReport == null)
+            return true;
+
         for (int index = 0; index < _pm4ObjectMatchReport.Objects.Count; index++)
         {
             Pm4ObjectMatchObject candidate = _pm4ObjectMatchReport.Objects[index];
@@ -1166,13 +1548,11 @@ public partial class ViewerApp
             _selectedPm4ObjectMatchObjectIndex = index;
             if (_selectedPm4ObjectMatchCandidateIndex < 0 || _selectedPm4ObjectMatchCandidateIndex >= candidate.Candidates.Count)
                 _selectedPm4ObjectMatchCandidateIndex = 0;
-
-            objectMatch = candidate;
             return true;
         }
 
         _selectedPm4ObjectMatchObjectIndex = -1;
-        return false;
+        return true;
     }
 
     private void DrawPm4SelectedObjectMatchSuggestions(string idSuffix, bool compact)
@@ -1282,7 +1662,7 @@ public partial class ViewerApp
 
         if (_worldScene.SelectPm4Object((objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId)))
         {
-            _showPm4AlignmentWindow = true;
+            OpenPm4Workbench(Pm4WorkbenchTab.Selection);
             if (frameCamera)
                 FocusCameraOnBounds(objectMatch.BoundsMin, objectMatch.BoundsMax);
 
@@ -1361,7 +1741,7 @@ public partial class ViewerApp
 
         if (_worldScene.SelectPm4Object((match.TileX, match.TileY, match.Ck24, match.ObjectPartId)))
         {
-            _showPm4AlignmentWindow = true;
+            OpenPm4Workbench(Pm4WorkbenchTab.Selection);
             if (frameCamera)
                 FocusCameraOnBounds(match.BoundsMin, match.BoundsMax);
 
@@ -1521,9 +1901,24 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Tiles={graph.TileCount} LinkGroups={graph.LinkGroupCount} MdosGroups={graph.MdosGroupCount} Parts={graph.PartCount}");
         ImGui.TextDisabled($"Surfaces={graph.SurfaceCount} Indices={graph.TotalIndexCount} AttrMasks={graph.AttributeMaskCount} GroupKeys={graph.GroupKeyCount}");
         ImGui.TextDisabled("Click a part row to reselect it. Use Frame to move the camera to that exact part.");
+        ImGui.TextDisabled("Use the graph Collect buttons as the primary PM4 multi-select path; viewport PM4 picking is not reliable enough.");
 
         if (ImGui.Button($"Export Graph JSON##{idSuffix}"))
             ExportSelectedPm4GraphJson(graph);
+        ImGui.SameLine();
+        if (ImGui.Button($"Add Part##{idSuffix}"))
+            AddSelectedPm4ObjectToCollection();
+        ImGui.SameLine();
+        if (ImGui.Button($"Add Merged Group##{idSuffix}"))
+            AddSelectedPm4GraphGroupToCollection(graph);
+        ImGui.SameLine();
+        if (ImGui.Button($"Export Collection JSON##{idSuffix}"))
+            ExportPm4ObjectCollectionJson();
+        ImGui.SameLine();
+        if (ImGui.Button($"Clear Collection##{idSuffix}"))
+            ClearPm4ObjectCollection();
+
+        DrawPm4ObjectCollectionSummary(idSuffix);
 
         ImGuiTreeNodeFlags rootFlags = ImGuiTreeNodeFlags.DefaultOpen;
         if (ImGui.TreeNodeEx($"CK24 0x{graph.Ck24:X6} type=0x{graph.Ck24Type:X2} obj={graph.Ck24ObjectId}##Pm4GraphRoot{idSuffix}", rootFlags))
@@ -1534,6 +1929,9 @@ public partial class ViewerApp
                 string linkSummary = $"MSLK 0x{linkGroup.LinkGroupObjectId:X8} parts={linkGroup.PartCount} surfaces={linkGroup.SurfaceCount} indices={linkGroup.TotalIndexCount} linkedMPRL={linkGroup.LinkedPositionRefCount}";
                 if (ImGui.TreeNodeEx($"{linkSummary}##Pm4GraphLink{idSuffix}_{linkIndex}", ImGuiTreeNodeFlags.DefaultOpen))
                 {
+                    if (ImGui.SmallButton($"Collect Link##Pm4GraphCollectLink{idSuffix}_{linkIndex}"))
+                        AddPm4LinkGroupToCollection(graph, linkGroup);
+
                     if (linkGroup.LinkedPositionRefSummary.TotalCount > 0)
                     {
                         ImGui.TextDisabled(
@@ -1546,6 +1944,9 @@ public partial class ViewerApp
                         string mdosSummary = $"MDOS {mdosGroup.MdosIndex} parts={mdosGroup.PartCount} surfaces={mdosGroup.SurfaceCount} indices={mdosGroup.TotalIndexCount} attrs={FormatPm4ByteList(mdosGroup.AttributeMasks)} groups={FormatPm4ByteList(mdosGroup.GroupKeys)}";
                         if (ImGui.TreeNodeEx($"{mdosSummary}##Pm4GraphMdos{idSuffix}_{linkIndex}_{mdosIndex}", ImGuiTreeNodeFlags.DefaultOpen))
                         {
+                            if (ImGui.SmallButton($"Collect MDOS##Pm4GraphCollectMdos{idSuffix}_{linkIndex}_{mdosIndex}"))
+                                AddPm4MdosGroupToCollection(graph, mdosGroup);
+
                             for (int partIndex = 0; partIndex < mdosGroup.Parts.Count; partIndex++)
                             {
                                 Pm4SelectedObjectGraphPartNode part = mdosGroup.Parts[partIndex];
@@ -1560,6 +1961,9 @@ public partial class ViewerApp
                                 ImGui.SameLine();
                                 if (ImGui.SmallButton($"Frame##Pm4GraphPartFrame{idSuffix}_{linkIndex}_{mdosIndex}_{partIndex}"))
                                     SelectPm4GraphPart((part.TileX, part.TileY, graph.Ck24, part.ObjectPartId), frameCamera: true);
+                                ImGui.SameLine();
+                                if (ImGui.SmallButton($"Collect##Pm4GraphPartCollect{idSuffix}_{linkIndex}_{mdosIndex}_{partIndex}"))
+                                    TogglePm4ObjectCollectionMembership((part.TileX, part.TileY, graph.Ck24, part.ObjectPartId), reportStatus: true);
                             }
 
                             ImGui.TreePop();
@@ -1593,7 +1997,7 @@ public partial class ViewerApp
             return;
         }
 
-        _showPm4AlignmentWindow = true;
+        OpenPm4Workbench(Pm4WorkbenchTab.Selection);
 
         if (frameCamera)
         {
@@ -1633,6 +2037,478 @@ public partial class ViewerApp
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Graph] JSON export failed: {ex}");
         }
     }
+
+    private void AddSelectedPm4ObjectToCollection()
+    {
+        if (_worldScene == null || !_worldScene.SelectedPm4ObjectKey.HasValue)
+            return;
+
+        TogglePm4ObjectCollectionMembership(_worldScene.SelectedPm4ObjectKey.Value, reportStatus: true, removeIfPresent: false);
+    }
+
+    private void AddSelectedPm4GraphGroupToCollection(Pm4SelectedObjectGraphInfo graph)
+    {
+        var keys = graph.LinkGroups
+            .SelectMany(static linkGroup => linkGroup.MdosGroups)
+            .SelectMany(static mdosGroup => mdosGroup.Parts)
+            .Select(part => (part.TileX, part.TileY, graph.Ck24, part.ObjectPartId));
+
+        int added = AddPm4ObjectsToCollection(keys);
+        _statusMessage = added > 0
+            ? $"Added {added} PM4 parts from the merged group to the collection."
+            : "All parts in the merged group were already in the PM4 collection.";
+        SyncPm4CollectionHighlight();
+    }
+
+    private void AddPm4LinkGroupToCollection(Pm4SelectedObjectGraphInfo graph, Pm4SelectedObjectGraphLinkNode linkGroup)
+    {
+        var keys = linkGroup.MdosGroups
+            .SelectMany(static mdosGroup => mdosGroup.Parts)
+            .Select(part => (part.TileX, part.TileY, graph.Ck24, part.ObjectPartId));
+
+        int added = AddPm4ObjectsToCollection(keys);
+        _statusMessage = added > 0
+            ? $"Added {added} PM4 parts from MSLK 0x{linkGroup.LinkGroupObjectId:X8} to the collection."
+            : $"All PM4 parts from MSLK 0x{linkGroup.LinkGroupObjectId:X8} were already in the collection.";
+        SyncPm4CollectionHighlight();
+    }
+
+    private void AddPm4MdosGroupToCollection(Pm4SelectedObjectGraphInfo graph, Pm4SelectedObjectGraphMdosNode mdosGroup)
+    {
+        var keys = mdosGroup.Parts
+            .Select(part => (part.TileX, part.TileY, graph.Ck24, part.ObjectPartId));
+
+        int added = AddPm4ObjectsToCollection(keys);
+        _statusMessage = added > 0
+            ? $"Added {added} PM4 parts from MDOS {mdosGroup.MdosIndex} to the collection."
+            : $"All PM4 parts from MDOS {mdosGroup.MdosIndex} were already in the collection.";
+        SyncPm4CollectionHighlight();
+    }
+
+    private int AddPm4ObjectsToCollection(IEnumerable<(int tileX, int tileY, uint ck24, int objectPart)> keys)
+    {
+        int added = 0;
+        foreach (var key in keys)
+        {
+            if (_pm4ObjectCollection.Contains(key))
+                continue;
+
+            _pm4ObjectCollection.Add(key);
+            added++;
+        }
+
+        if (added > 0)
+            SyncPm4CollectionHighlight();
+
+        return added;
+    }
+
+    private bool TogglePm4ObjectCollectionMembership(
+        (int tileX, int tileY, uint ck24, int objectPart) key,
+        bool reportStatus,
+        bool removeIfPresent = true)
+    {
+        int existingIndex = _pm4ObjectCollection.IndexOf(key);
+        if (existingIndex >= 0)
+        {
+            if (removeIfPresent)
+            {
+                _pm4ObjectCollection.RemoveAt(existingIndex);
+                SyncPm4CollectionHighlight();
+                if (reportStatus)
+                    _statusMessage = $"Removed PM4 CK24=0x{key.ck24:X6} part={key.objectPart} from the collection.";
+                return false;
+            }
+
+            if (reportStatus)
+                _statusMessage = $"PM4 CK24=0x{key.ck24:X6} part={key.objectPart} is already in the collection.";
+            return false;
+        }
+
+        _pm4ObjectCollection.Add(key);
+        SyncPm4CollectionHighlight();
+        if (reportStatus)
+            _statusMessage = $"Added PM4 CK24=0x{key.ck24:X6} part={key.objectPart} to the collection.";
+        return true;
+    }
+
+    private void ClearPm4ObjectCollection()
+    {
+        _pm4ObjectCollection.Clear();
+        SyncPm4CollectionHighlight();
+        _statusMessage = "Cleared PM4 object collection.";
+    }
+
+    private void SyncPm4CollectionHighlight()
+    {
+        _worldScene?.SetHighlightedPm4Objects(_pm4ObjectCollection);
+    }
+
+    private void DrawPm4ObjectCollectionSummary(string idSuffix)
+    {
+        PruneMissingPm4CollectionObjects();
+
+        if (!ImGui.CollapsingHeader($"PM4 Collection##{idSuffix}", ImGuiTreeNodeFlags.DefaultOpen))
+            return;
+
+        ImGui.TextDisabled($"Parts in collection: {_pm4ObjectCollection.Count}");
+        ImGui.TextDisabled("Use this to compare one family against duplicated placements or overlapping copies.");
+        ImGui.TextDisabled("Shift+LMB PM4 add is best-effort only; use graph Collect buttons when scene overlap is ambiguous.");
+
+        if (_pm4ObjectCollection.Count == 0)
+        {
+            ImGui.TextDisabled("No PM4 parts collected yet.");
+            return;
+        }
+
+        if (ImGui.BeginChild($"Pm4CollectionList##{idSuffix}", new Vector2(0f, 140f), true))
+        {
+            for (int index = 0; index < _pm4ObjectCollection.Count; index++)
+            {
+                var key = _pm4ObjectCollection[index];
+                bool selected = _worldScene != null
+                    && _worldScene.SelectedPm4ObjectKey.HasValue
+                    && _worldScene.SelectedPm4ObjectKey.Value == key;
+
+                ImGui.PushID($"Pm4CollectionItem{idSuffix}_{index}");
+                if (selected)
+                    ImGui.TextColored(new Vector4(1f, 0.95f, 0.35f, 1f), $"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})");
+                else
+                    ImGui.TextUnformatted($"{index + 1}. CK24 0x{key.ck24:X6} part={key.objectPart} tile=({key.tileX},{key.tileY})");
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Select"))
+                    SelectPm4GraphPart(key, frameCamera: false);
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Frame"))
+                    SelectPm4GraphPart(key, frameCamera: true);
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Remove"))
+                {
+                    _pm4ObjectCollection.RemoveAt(index);
+                    SyncPm4CollectionHighlight();
+                    _statusMessage = $"Removed PM4 CK24=0x{key.ck24:X6} part={key.objectPart} from the collection.";
+                    ImGui.PopID();
+                    break;
+                }
+
+                ImGui.PopID();
+            }
+        }
+        ImGui.EndChild();
+    }
+
+    private void PruneMissingPm4CollectionObjects()
+    {
+        if (_worldScene == null)
+            return;
+
+        for (int index = _pm4ObjectCollection.Count - 1; index >= 0; index--)
+        {
+            if (!_worldScene.TryGetPm4ObjectDebugInfo(_pm4ObjectCollection[index], out _))
+                _pm4ObjectCollection.RemoveAt(index);
+        }
+
+        SyncPm4CollectionHighlight();
+    }
+
+    private void ExportPm4ObjectCollectionJson()
+    {
+        if (_worldScene == null)
+            return;
+
+        PruneMissingPm4CollectionObjects();
+        if (_pm4ObjectCollection.Count == 0)
+        {
+            _statusMessage = "PM4 collection export skipped: no collected parts.";
+            return;
+        }
+
+        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? "map";
+        string defaultName = $"pm4_collection_{mapName}_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+        string? picked = ShowSaveFileDialogSTA(
+            "Save PM4 Collection JSON",
+            "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+            ExportDir,
+            defaultName);
+
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        try
+        {
+            string json = JsonSerializer.Serialize(BuildJsonSafePm4Collection(), new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+            File.WriteAllText(picked, json, Encoding.UTF8);
+            _statusMessage = $"Exported PM4 collection JSON: {picked}";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"PM4 collection export failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Collection] JSON export failed: {ex}");
+        }
+    }
+
+    private object BuildJsonSafePm4Collection()
+    {
+        if (_worldScene == null)
+        {
+            return new
+            {
+                generatedAtUtc = DateTime.UtcNow,
+                objectCount = 0,
+                objects = Array.Empty<object>()
+            };
+        }
+
+        var entries = new List<Pm4CollectionExportEntry>(_pm4ObjectCollection.Count);
+        foreach (var key in _pm4ObjectCollection)
+        {
+            if (!_worldScene.TryGetPm4ObjectDebugInfo(key, out Pm4ObjectDebugInfo debugInfo))
+                continue;
+
+            _worldScene.TryGetPm4ObjectGroupKey(key, out var mergedGroupKey);
+            Vector3 size = debugInfo.BoundsMax - debugInfo.BoundsMin;
+            string signature = BuildPm4CollectionSignature(debugInfo, size);
+            entries.Add(new Pm4CollectionExportEntry(key, mergedGroupKey, debugInfo, size, signature));
+        }
+
+        var signatureGroups = entries
+            .GroupBy(static entry => entry.Signature)
+            .OrderByDescending(static group => group.Count())
+            .ThenBy(static group => group.Key, StringComparer.Ordinal)
+            .Select(group => new
+            {
+                signature = group.Key,
+                count = group.Count(),
+                ck24 = group.First().DebugInfo.Ck24,
+                linkGroupObjectId = group.First().DebugInfo.LinkGroupObjectId,
+                members = group.Select(static entry => new
+                {
+                    tileX = entry.Key.tileX,
+                    tileY = entry.Key.tileY,
+                    objectPartId = entry.Key.objectPart,
+                    center = VectorToArray(entry.DebugInfo.Center)
+                }).ToList()
+            })
+            .ToList();
+
+        Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CollectionDuplicateMetrics> duplicateMetrics = BuildPm4CollectionDuplicateMetrics(entries);
+        var stackClusters = BuildPm4CollectionStackClusters(entries, duplicateMetrics);
+        string mapName = _terrainManager?.MapName ?? _worldScene.Terrain.MapName ?? string.Empty;
+
+        return new
+        {
+            generatedAtUtc = DateTime.UtcNow,
+            mapName,
+            objectCount = entries.Count,
+            currentSelection = _worldScene.SelectedPm4ObjectKey.HasValue
+                ? new
+                {
+                    tileX = _worldScene.SelectedPm4ObjectKey.Value.tileX,
+                    tileY = _worldScene.SelectedPm4ObjectKey.Value.tileY,
+                    ck24 = _worldScene.SelectedPm4ObjectKey.Value.ck24,
+                    objectPartId = _worldScene.SelectedPm4ObjectKey.Value.objectPart,
+                }
+                : null,
+            signatureGroupCount = signatureGroups.Count,
+            stackClusterCount = stackClusters.Count,
+            signatureGroups,
+            stackClusters,
+            objects = entries.Select(entry => new
+            {
+                tileX = entry.Key.tileX,
+                tileY = entry.Key.tileY,
+                ck24 = entry.DebugInfo.Ck24,
+                ck24Type = entry.DebugInfo.Ck24Type,
+                ck24ObjectId = entry.DebugInfo.Ck24ObjectId,
+                objectPartId = entry.Key.objectPart,
+                mergedGroupKey = new
+                {
+                    tileX = entry.GroupKey.tileX,
+                    tileY = entry.GroupKey.tileY,
+                    ck24 = entry.GroupKey.ck24,
+                },
+                signature = entry.Signature,
+                sameSignatureCount = duplicateMetrics[entry.Key].SameSignatureCount,
+                overlapClusterSize = duplicateMetrics[entry.Key].OverlapClusterSize,
+                nearestSameSignatureDistance = JsonFiniteOrNull(duplicateMetrics[entry.Key].NearestSameSignatureDistance),
+                likelyDuplicateScore = duplicateMetrics[entry.Key].LikelyDuplicateScore,
+                linkGroupObjectId = entry.DebugInfo.LinkGroupObjectId,
+                linkedPositionRefCount = entry.DebugInfo.LinkedPositionRefCount,
+                linkedPositionRefSummary = new
+                {
+                    totalCount = entry.DebugInfo.LinkedPositionRefSummary.TotalCount,
+                    normalCount = entry.DebugInfo.LinkedPositionRefSummary.NormalCount,
+                    terminatorCount = entry.DebugInfo.LinkedPositionRefSummary.TerminatorCount,
+                    floorMin = entry.DebugInfo.LinkedPositionRefSummary.FloorMin,
+                    floorMax = entry.DebugInfo.LinkedPositionRefSummary.FloorMax,
+                    headingMinDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMinDegrees),
+                    headingMaxDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMaxDegrees),
+                    headingMeanDegrees = JsonFiniteOrNull(entry.DebugInfo.LinkedPositionRefSummary.HeadingMeanDegrees)
+                },
+                surfaceCount = entry.DebugInfo.SurfaceCount,
+                dominantGroupKey = entry.DebugInfo.DominantGroupKey,
+                dominantAttributeMask = entry.DebugInfo.DominantAttributeMask,
+                dominantMdosIndex = entry.DebugInfo.DominantMdosIndex,
+                averageSurfaceHeight = JsonFiniteOrNull(entry.DebugInfo.AverageSurfaceHeight),
+                boundsMin = VectorToArray(entry.DebugInfo.BoundsMin),
+                boundsMax = VectorToArray(entry.DebugInfo.BoundsMax),
+                boundsSize = VectorToArray(entry.BoundsSize),
+                center = VectorToArray(entry.DebugInfo.Center),
+                nearestPositionRefDistance = JsonFiniteOrNull(entry.DebugInfo.NearestPositionRefDistance),
+                planar = new
+                {
+                    swapAxes = entry.DebugInfo.SwapPlanarAxes,
+                    invertU = entry.DebugInfo.InvertU,
+                    invertV = entry.DebugInfo.InvertV,
+                    windingFlip = entry.DebugInfo.InvertsWinding
+                }
+            }).ToList()
+        };
+    }
+
+    private static Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CollectionDuplicateMetrics> BuildPm4CollectionDuplicateMetrics(IReadOnlyList<Pm4CollectionExportEntry> entries)
+    {
+        const float centerTolerance = 2f;
+        const float sizeTolerance = 0.5f;
+        var metrics = new Dictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CollectionDuplicateMetrics>(entries.Count);
+
+        foreach (var signatureGroup in entries.GroupBy(static entry => entry.Signature))
+        {
+            List<Pm4CollectionExportEntry> groupEntries = signatureGroup.ToList();
+            foreach (Pm4CollectionExportEntry entry in groupEntries)
+            {
+                float nearestSameSignatureDistance = float.PositiveInfinity;
+                int overlapClusterSize = 1;
+
+                for (int i = 0; i < groupEntries.Count; i++)
+                {
+                    Pm4CollectionExportEntry candidate = groupEntries[i];
+                    if (candidate.Key == entry.Key)
+                        continue;
+
+                    float distance = Vector3.Distance(entry.DebugInfo.Center, candidate.DebugInfo.Center);
+                    if (distance < nearestSameSignatureDistance)
+                        nearestSameSignatureDistance = distance;
+
+                    Vector3 sizeDelta = Vector3.Abs(entry.BoundsSize - candidate.BoundsSize);
+                    if (distance <= centerTolerance
+                        && sizeDelta.X <= sizeTolerance
+                        && sizeDelta.Y <= sizeTolerance
+                        && sizeDelta.Z <= sizeTolerance)
+                    {
+                        overlapClusterSize++;
+                    }
+                }
+
+                if (!float.IsFinite(nearestSameSignatureDistance))
+                    nearestSameSignatureDistance = float.NaN;
+
+                int sameSignatureCount = groupEntries.Count;
+                float score = sameSignatureCount <= 1
+                    ? 0f
+                    : MathF.Min(1f,
+                        (overlapClusterSize - 1) * 0.45f
+                        + (sameSignatureCount - 1) * 0.15f
+                        + (float.IsNaN(nearestSameSignatureDistance)
+                            ? 0f
+                            : MathF.Max(0f, 1f - MathF.Min(nearestSameSignatureDistance, 12f) / 12f) * 0.40f));
+
+                metrics[entry.Key] = new Pm4CollectionDuplicateMetrics(
+                    sameSignatureCount,
+                    overlapClusterSize,
+                    nearestSameSignatureDistance,
+                    MathF.Round(score, 3));
+            }
+        }
+
+        return metrics;
+    }
+
+    private static List<object> BuildPm4CollectionStackClusters(
+        IReadOnlyList<Pm4CollectionExportEntry> entries,
+        IReadOnlyDictionary<(int tileX, int tileY, uint ck24, int objectPart), Pm4CollectionDuplicateMetrics> duplicateMetrics)
+    {
+        const float centerTolerance = 2f;
+        const float sizeTolerance = 0.5f;
+        var clusters = new List<object>();
+
+        foreach (var signatureGroup in entries.GroupBy(static entry => entry.Signature))
+        {
+            List<Pm4CollectionExportEntry> remaining = signatureGroup.ToList();
+            while (remaining.Count > 0)
+            {
+                Pm4CollectionExportEntry seed = remaining[0];
+                remaining.RemoveAt(0);
+
+                var cluster = new List<Pm4CollectionExportEntry> { seed };
+                for (int index = remaining.Count - 1; index >= 0; index--)
+                {
+                    Pm4CollectionExportEntry candidate = remaining[index];
+                    if (Vector3.Distance(seed.DebugInfo.Center, candidate.DebugInfo.Center) > centerTolerance)
+                        continue;
+
+                    Vector3 sizeDelta = Vector3.Abs(seed.BoundsSize - candidate.BoundsSize);
+                    if (sizeDelta.X > sizeTolerance || sizeDelta.Y > sizeTolerance || sizeDelta.Z > sizeTolerance)
+                        continue;
+
+                    cluster.Add(candidate);
+                    remaining.RemoveAt(index);
+                }
+
+                if (cluster.Count < 2)
+                    continue;
+
+                Vector3 centroid = Vector3.Zero;
+                foreach (Pm4CollectionExportEntry entry in cluster)
+                    centroid += entry.DebugInfo.Center;
+                centroid /= cluster.Count;
+
+                clusters.Add(new
+                {
+                    signature = seed.Signature,
+                    count = cluster.Count,
+                    likelyDuplicateScore = cluster.Max(entry => duplicateMetrics[entry.Key].LikelyDuplicateScore),
+                    centroid = VectorToArray(centroid),
+                    members = cluster.Select(static entry => new
+                    {
+                        tileX = entry.Key.tileX,
+                        tileY = entry.Key.tileY,
+                        ck24 = entry.DebugInfo.Ck24,
+                        objectPartId = entry.Key.objectPart,
+                        center = VectorToArray(entry.DebugInfo.Center)
+                    }).ToList()
+                });
+            }
+        }
+
+        return clusters;
+    }
+
+    private static string BuildPm4CollectionSignature(Pm4ObjectDebugInfo debugInfo, Vector3 boundsSize)
+    {
+        return FormattableString.Invariant($"ck24=0x{debugInfo.Ck24:X6}|mslk=0x{debugInfo.LinkGroupObjectId:X8}|surf={debugInfo.SurfaceCount}|g=0x{debugInfo.DominantGroupKey:X2}|a=0x{debugInfo.DominantAttributeMask:X2}|mdos={debugInfo.DominantMdosIndex}|size=({boundsSize.X:F2},{boundsSize.Y:F2},{boundsSize.Z:F2})");
+    }
+
+    private static float[] VectorToArray(Vector3 value) => new[] { value.X, value.Y, value.Z };
+
+    private readonly record struct Pm4CollectionExportEntry(
+        (int tileX, int tileY, uint ck24, int objectPart) Key,
+        (int tileX, int tileY, uint ck24) GroupKey,
+        Pm4ObjectDebugInfo DebugInfo,
+        Vector3 BoundsSize,
+        string Signature);
+
+    private readonly record struct Pm4CollectionDuplicateMetrics(
+        int SameSignatureCount,
+        int OverlapClusterSize,
+        float NearestSameSignatureDistance,
+        float LikelyDuplicateScore);
 
     private static object BuildJsonSafePm4Graph(Pm4SelectedObjectGraphInfo graph)
     {

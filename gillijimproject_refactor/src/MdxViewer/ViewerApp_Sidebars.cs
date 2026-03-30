@@ -219,16 +219,66 @@ public partial class ViewerApp
             if (_useDockspaceUi)
                 CaptureDockPanelState(ref _navigatorDockState);
 
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+
+            if (hasWorldLoaded)
+            {
+                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+                    DrawWorldOverviewContent();
+            }
+
+            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
             if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
                 DrawFileBrowserContent();
 
-            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
             if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
                 DrawMapDiscoveryContent();
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawWorldOverviewContent()
+    {
+        string sceneLabel = _terrainManager?.MapName
+            ?? _vlmTerrainManager?.MapName
+            ?? _loadedFileName
+            ?? (!string.IsNullOrWhiteSpace(_loadedFilePath)
+                ? Path.GetFileName(_loadedFilePath)
+                : "World");
+
+        ImGui.Text(sceneLabel);
+
+        if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
+        {
+            int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+            int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+            ImGui.TextDisabled($"Camera tile: ({tileX}, {tileY})");
+        }
+
+        if (!string.IsNullOrWhiteSpace(_currentAreaName))
+            ImGui.TextDisabled($"Area: {_currentAreaName}");
+
+        if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
+            ImGui.TextDisabled($"PM4: {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} visible objects");
+
+        if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
+            _showMinimapWindow = !_showMinimapWindow;
+
+        ImGui.SameLine();
+        if (ImGui.Button(_fullscreenMinimap ? "Exit Full Minimap" : "Full Minimap"))
+        {
+            _fullscreenMinimap = !_fullscreenMinimap;
+            if (_fullscreenMinimap)
+                PrepareFullscreenMinimapState();
+            else
+                _minimapDragging = false;
+        }
+
+        if (_pendingMinimapTeleportTile.HasValue)
+            ImGui.TextDisabled($"Teleport armed: ({_pendingMinimapTeleportTile.Value.tileX}, {_pendingMinimapTeleportTile.Value.tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}");
     }
 
     private void DrawMapDiscoveryContent()
@@ -449,23 +499,24 @@ public partial class ViewerApp
             if (_useDockspaceUi)
                 CaptureDockPanelState(ref _inspectorDockState);
 
-            if (!string.IsNullOrEmpty(_selectedObjectInfo))
+            bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+
+            if (!string.IsNullOrEmpty(_selectedObjectInfo) && !hasSelectedPm4)
             {
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
                 ImGui.Separator();
                 ImGui.TextWrapped(_selectedObjectInfo);
-                if (_worldScene?.HasSelectedPm4Object == true)
-                {
-                    ImGui.Spacing();
-                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                    if (ImGui.CollapsingHeader("PM4 Matches"))
-                        DrawPm4SelectedObjectMatchSuggestions("SidebarSelectedPm4", compact: true);
-                }
                 DrawSelectedTaxiControls();
-                DrawSelectedPm4ObjectGraph("SidebarSelectedObject");
                 DrawSelectedWmoControls();
                 DrawSelectedSqlGameObjectAnimationControls();
                 ImGui.Spacing();
+            }
+
+            if (_worldScene != null && (_worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0))
+            {
+                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                if (ImGui.CollapsingHeader("PM4 Workbench", ImGuiTreeNodeFlags.DefaultOpen))
+                    DrawPm4WorkbenchInspector();
             }
 
             ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);

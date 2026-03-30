@@ -98,6 +98,41 @@ Use `File > Open File...` or pass a file path on launch.
 - PM4/WMO correlation JSON export
 - PM4 OBJ set export from the viewer
 
+### PM4 terminology and evidence level
+
+The PM4 data shown in the viewer is still partly reverse-engineered. Some labels are stable chunk names from wowdev. Some are local research aliases that are useful in the UI but are not proven original field names.
+
+- `MSHD`
+  - `MSHD` is the fixed-size PM4 or PD4 header chunk.
+  - In the current corpus it decodes cleanly as eight `uint32` fields at offsets `0x00..0x1C`.
+  - We have not closed the semantics of those fields yet.
+  - The active confidence report still treats `MSHD` semantic meaning as unresolved, and the active `MdxViewer` PM4 path does not currently use `MSHD` to drive overlay placement or match scoring.
+- `MSUR._0x1c` -> local alias: `CK24`
+  - `CK24` is a viewer or research alias for the packed `MSUR` field at offset `0x1c`.
+  - It is useful for grouping, coloring, and debugging PM4 objects.
+  - `Ck24Type` means the upper byte of that packed field.
+  - `Ck24ObjectId` means the low 16 bits of that packed field.
+  - These are practical research labels, not confirmed official names.
+- `MSLK._0x04` -> local alias: `LinkGroupObjectId`
+  - This is a strong current grouping signal for many PM4 object families.
+  - The viewer uses it as one clue when splitting or matching PM4 objects.
+- `MPRL`
+  - `MPRL` entries are linked position-reference records.
+  - In the viewer they are mainly used as placement evidence and anchor hints, not as final proof of object identity.
+- `MSUR.GroupKey`, `MSUR.AttributeMask`, `MSUR.MdosIndex`
+  - These are local aliases for raw `MSUR` fields.
+  - They are useful for debugging and grouping, but should be read as research shorthand rather than final format documentation.
+- `uid` in PM4 match or correlation UI
+  - `uid` is the matched world-placement unique id from `MODF` or `MDDF` candidates.
+  - It does not currently mean that PM4 itself stores that same object uid.
+  - The PM4 side gives us a PM4 object key like `CK24`, tile, part, and link evidence; the matched `uid` comes from nearby placed WMO or M2 records that the viewer ranks against that PM4 object.
+
+Practical rule:
+
+- Treat raw chunk names like `MSHD`, `MSLK`, `MSUR`, `MSCN`, and `MPRL` as stable.
+- Treat local aliases like `CK24`, `GroupKey`, `AttributeMask`, `MdosIndex`, and `LinkGroupObjectId` as useful research vocabulary.
+- Treat any undocumented PM4 field meaning as provisional unless a note here says the semantic confidence changed.
+
 ### Rendering and material handling
 
 - standalone MDX rendering with animation support
