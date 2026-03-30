@@ -2870,6 +2870,7 @@ public class WorldScene : ISceneRenderer
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
+        int nextObjectPartId = 0;
         foreach (Pm4OverlaySeedGroup seedGroup in seedGroups)
         {
             if (tileLineBudget <= 0)
@@ -2877,7 +2878,6 @@ public class WorldScene : ISceneRenderer
 
             uint ck24 = seedGroup.DisplayCk24;
             byte ck24Type = seedGroup.DisplayCk24Type;
-            int objectPartCounter = 0;
             List<Pm4IndexedSurface> surfaceGroup = seedGroup.Surfaces;
             Pm4AxisConvention ck24AxisConvention = fileAxisConvention;
             List<MsurEntry> ck24Surfaces = surfaceGroup.Select(static entry => entry.Surface).ToList();
@@ -2992,7 +2992,7 @@ public class WorldScene : ISceneRenderer
                             sourcePath,
                             ck24,
                             ck24Type,
-                            objectPartCounter++,
+                            nextObjectPartId++,
                             dominantLinkGroupObjectId,
                             linkedPositionRefs.Count,
                             linkedPositionRefSummary,

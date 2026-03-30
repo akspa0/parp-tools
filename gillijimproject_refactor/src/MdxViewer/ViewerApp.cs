@@ -1089,7 +1089,7 @@ void main() {
                 DrawWdlPreviewDialog();
 
             // Minimap panel
-            if (_showMinimapWindow)
+            if (_showMinimapWindow && !_fullscreenMinimap)
                 DrawMinimapWindow();
 
             // Perf (floating window)
