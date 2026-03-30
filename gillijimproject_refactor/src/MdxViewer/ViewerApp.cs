@@ -87,7 +87,7 @@ public partial class ViewerApp : IDisposable
     };
     private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
-    private string _statusMessage = "No data source loaded. Use File > Open Game Folder or Open File.";
+    private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
     private bool _openAboutPopup;
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
@@ -350,7 +350,8 @@ public partial class ViewerApp : IDisposable
     private bool _showPm4AlignmentWindow;
     private bool _showPm4ObjectMatchWindow;
     private bool _showPm4WmoCorrelationWindow;
-    private Pm4WorkbenchTab _pm4WorkbenchTab = Pm4WorkbenchTab.Overlay;
+    private bool _forceOpenPm4WorkbenchInspector;
+    private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
     private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
     private Pm4ObjectMatchObject? _selectedPm4ObjectMatch;
     private (int tileX, int tileY, uint ck24, int objectPart)? _selectedPm4ObjectMatchKey;
@@ -4170,7 +4171,7 @@ void main() {
         if (ImGui.Begin("Generate VLM Dataset", ref _showVlmExportDialog))
         {
             ImGui.TextWrapped("Export terrain data from a WoW client folder into a VLM dataset (JSON + PNG). " +
-                "Supports Alpha 0.5.3 through Cataclysm 4.0.1.");
+                "Supports Alpha 0.5.3 through Cataclysm 4.0.0.11927 (with additional later-era paths still under validation).");
             ImGui.Spacing();
 
             // Client Path
@@ -8401,16 +8402,18 @@ void main() {
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
         bool hasSceneHit = _worldScene.TryPickSceneObjectByRay(rayOrigin, rayDir, out Terrain.ObjectType sceneHitType, out int sceneHitIndex, out float sceneHitDistance);
         bool hasPm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out float pm4HitDistance);
+        var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
 
         if (addPm4ToCollection)
         {
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
 
-            if (hasPm4Hit && pm4HitKey.HasValue && _worldScene.SelectPm4Object(pm4HitKey.Value))
+            var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
+            if (collectionPm4Key.HasValue && _worldScene.SelectPm4Object(collectionPm4Key.Value))
             {
-                TogglePm4ObjectCollectionMembership(pm4HitKey.Value, reportStatus: true);
-                UpdateSelectedPm4ObjectInfo(pm4HitKey);
+                TogglePm4ObjectCollectionMembership(collectionPm4Key.Value, reportStatus: true);
+                UpdateSelectedPm4ObjectInfo(collectionPm4Key);
             }
             else
             {
@@ -8420,12 +8423,18 @@ void main() {
             return;
         }
 
-        if (hasPm4Hit && (!hasSceneHit || pm4HitDistance <= sceneHitDistance))
+        if (hoveredPm4Key.HasValue && _worldScene.SelectPm4Object(hoveredPm4Key.Value))
         {
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
-            _worldScene.SelectPm4ObjectByRay(rayOrigin, rayDir);
+            UpdateSelectedPm4ObjectInfo(hoveredPm4Key);
+            return;
+        }
 
+        if (hasPm4Hit && pm4HitKey.HasValue && (!hasSceneHit || pm4HitDistance <= sceneHitDistance) && _worldScene.SelectPm4Object(pm4HitKey.Value))
+        {
+            _worldScene.ClearTaxiSelection();
+            _worldScene.ClearSelection();
             UpdateSelectedPm4ObjectInfo(pm4HitKey);
             return;
         }

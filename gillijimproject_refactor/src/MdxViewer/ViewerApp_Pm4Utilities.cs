@@ -16,7 +16,8 @@ public partial class ViewerApp
     private void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
         _showRightSidebar = true;
-        _pm4WorkbenchTab = tab;
+        _forceOpenPm4WorkbenchInspector = true;
+        _pendingPm4WorkbenchTab = tab;
     }
 
     private void DrawPm4WorkbenchInspector()
@@ -32,30 +33,37 @@ public partial class ViewerApp
         if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
             return;
 
+        ImGuiTabItemFlags overlayFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Overlay
+            ? ImGuiTabItemFlags.SetSelected
+            : ImGuiTabItemFlags.None;
         bool overlayTabOpen = true;
-        if (ImGui.BeginTabItem("Overlay", ref overlayTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Overlay ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        if (ImGui.BeginTabItem("Overlay", ref overlayTabOpen, overlayFlags))
         {
-            _pm4WorkbenchTab = Pm4WorkbenchTab.Overlay;
             DrawPm4OverlayWorkbenchContent();
             ImGui.EndTabItem();
         }
 
+        ImGuiTabItemFlags selectionFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Selection
+            ? ImGuiTabItemFlags.SetSelected
+            : ImGuiTabItemFlags.None;
         bool selectionTabOpen = true;
-        if (ImGui.BeginTabItem("Selection", ref selectionTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Selection ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        if (ImGui.BeginTabItem("Selection", ref selectionTabOpen, selectionFlags))
         {
-            _pm4WorkbenchTab = Pm4WorkbenchTab.Selection;
             DrawPm4SelectionWorkbenchContent();
             ImGui.EndTabItem();
         }
 
+        ImGuiTabItemFlags correlationFlags = _pendingPm4WorkbenchTab == Pm4WorkbenchTab.Correlation
+            ? ImGuiTabItemFlags.SetSelected
+            : ImGuiTabItemFlags.None;
         bool correlationTabOpen = true;
-        if (ImGui.BeginTabItem("Correlation", ref correlationTabOpen, _pm4WorkbenchTab == Pm4WorkbenchTab.Correlation ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
+        if (ImGui.BeginTabItem("Correlation", ref correlationTabOpen, correlationFlags))
         {
-            _pm4WorkbenchTab = Pm4WorkbenchTab.Correlation;
             DrawPm4CorrelationInspectorContent();
             ImGui.EndTabItem();
         }
 
+        _pendingPm4WorkbenchTab = null;
         ImGui.EndTabBar();
     }
 

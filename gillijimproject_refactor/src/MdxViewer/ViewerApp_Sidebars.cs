@@ -147,7 +147,7 @@ public partial class ViewerApp
                 {
                     ImGui.TextDisabled("Welcome");
                     ImGui.SameLine();
-                    ImGui.Text("Open a game folder or standalone file to start exploring maps, models, and WMOs.");
+                    ImGui.Text("Start with File > Open Game Folder (MPQ). Standalone Open File is mainly for direct model/WMO inspection.");
                     ImGui.SameLine();
                 }
                 else
@@ -512,11 +512,18 @@ public partial class ViewerApp
                 ImGui.Spacing();
             }
 
-            if (_worldScene != null && (_worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0))
+            if (_worldScene != null)
             {
-                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("PM4 Workbench", ImGuiTreeNodeFlags.DefaultOpen))
+                bool defaultOpenPm4Workbench = _worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0;
+                if (_forceOpenPm4WorkbenchInspector)
+                    ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+                else
+                    ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
+
+                if (ImGui.CollapsingHeader("PM4 Workbench"))
                     DrawPm4WorkbenchInspector();
+
+                _forceOpenPm4WorkbenchInspector = false;
             }
 
             ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);

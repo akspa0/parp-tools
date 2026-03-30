@@ -528,6 +528,8 @@ public class WorldScene : ISceneRenderer
     private const float WmoFadeStartFraction = 0.85f;
     private const float NoCullRadius = 512f;         // Objects within this radius are never frustum-culled
     private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
+    private const float HoverInfoBrushPixels = 32f;
+    private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
 
@@ -3410,14 +3412,58 @@ public class WorldScene : ISceneRenderer
         if (surfaces.Count == 0)
             return groups;
 
-        IReadOnlyList<CorePm4MslkEntry> linkEntries = pm4.KnownChunks.Mslk;
-        int surfaceCount = pm4.KnownChunks.Msur.Count;
-
-        if (surfaces.Count == 1 || linkEntries.Count == 0)
+        if (!TryPartitionSurfaceGroupByMslk(pm4, surfaces, out List<List<Pm4IndexedSurface>> linkedComponents, out List<Pm4IndexedSurface> unlinked))
         {
             groups.Add(surfaces.ToList());
             return groups;
         }
+
+        if (linkedComponents.Count <= 1)
+        {
+            groups.Add(surfaces.ToList());
+            return groups;
+        }
+
+        foreach (List<Pm4IndexedSurface> component in linkedComponents.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
+            groups.Add(component);
+
+        if (unlinked.Count > 0)
+            groups.Add(unlinked);
+
+        return groups;
+    }
+
+    private static List<List<Pm4IndexedSurface>> SplitZeroCk24SeedGroup(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        if (!TryPartitionSurfaceGroupByMslk(pm4, surfaces, out List<List<Pm4IndexedSurface>> linkedComponents, out List<Pm4IndexedSurface> unlinked))
+            return SplitIndexedSurfaceGroupByConnectivity(pm4, surfaces);
+
+        if (linkedComponents.Count == 0)
+            return SplitIndexedSurfaceGroupByConnectivity(pm4, surfaces);
+
+        var groups = new List<List<Pm4IndexedSurface>>();
+        foreach (List<Pm4IndexedSurface> component in linkedComponents.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
+            groups.Add(component);
+
+        if (unlinked.Count > 0)
+            groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, unlinked));
+
+        return groups;
+    }
+
+    private static bool TryPartitionSurfaceGroupByMslk(
+        Pm4File pm4,
+        IReadOnlyList<Pm4IndexedSurface> surfaces,
+        out List<List<Pm4IndexedSurface>> linkedComponents,
+        out List<Pm4IndexedSurface> unlinked)
+    {
+        linkedComponents = new List<List<Pm4IndexedSurface>>();
+        unlinked = new List<Pm4IndexedSurface>();
+
+        IReadOnlyList<CorePm4MslkEntry> linkEntries = pm4.KnownChunks.Mslk;
+        int surfaceCount = pm4.KnownChunks.Msur.Count;
+        if (surfaces.Count <= 1 || linkEntries.Count == 0)
+            return false;
 
         var surfaceIndexToLocal = new Dictionary<int, int>(surfaces.Count);
         for (int i = 0; i < surfaces.Count; i++)
@@ -3443,10 +3489,7 @@ public class WorldScene : ISceneRenderer
         }
 
         if (groupToMembers.Count == 0)
-        {
-            groups.Add(surfaces.ToList());
-            return groups;
-        }
+            return false;
 
         int[] parent = new int[surfaces.Count];
         for (int i = 0; i < parent.Length; i++)
@@ -3487,74 +3530,32 @@ public class WorldScene : ISceneRenderer
         }
 
         if (linkedLocalIndices.Count < 2)
-        {
-            groups.Add(surfaces.ToList());
-            return groups;
-        }
+            return false;
 
-        var linkedComponents = new Dictionary<int, List<Pm4IndexedSurface>>();
+        var linkedByRoot = new Dictionary<int, List<Pm4IndexedSurface>>();
         for (int i = 0; i < surfaces.Count; i++)
         {
             if (!linkedLocalIndices.Contains(i))
+            {
+                unlinked.Add(surfaces[i]);
                 continue;
+            }
 
             int root = Find(parent, i);
-            if (!linkedComponents.TryGetValue(root, out List<Pm4IndexedSurface>? component))
+            if (!linkedByRoot.TryGetValue(root, out List<Pm4IndexedSurface>? component))
             {
                 component = new List<Pm4IndexedSurface>();
-                linkedComponents[root] = component;
+                linkedByRoot[root] = component;
             }
 
             component.Add(surfaces[i]);
         }
 
-        if (linkedComponents.Count <= 1)
-        {
-            groups.Add(surfaces.ToList());
-            return groups;
-        }
+        if (linkedByRoot.Count == 0)
+            return false;
 
-        foreach (List<Pm4IndexedSurface> component in linkedComponents.Values.OrderBy(component => component.Min(entry => entry.SurfaceIndex)))
-            groups.Add(component);
-
-        var unlinked = new List<Pm4IndexedSurface>();
-        for (int i = 0; i < surfaces.Count; i++)
-        {
-            if (!linkedLocalIndices.Contains(i))
-                unlinked.Add(surfaces[i]);
-        }
-
-        if (unlinked.Count > 0)
-            groups.Add(unlinked);
-
-        return groups;
-    }
-
-    private static List<List<Pm4IndexedSurface>> SplitZeroCk24SeedGroup(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
-    {
-        List<List<Pm4IndexedSurface>> mslkGroups = SplitSurfaceGroupByMslk(pm4, surfaces);
-        if (mslkGroups.Count == 0)
-            return mslkGroups;
-
-        var groups = new List<List<Pm4IndexedSurface>>();
-        foreach (List<Pm4IndexedSurface> group in mslkGroups)
-        {
-            if (group.Count <= 1)
-            {
-                groups.Add(group);
-                continue;
-            }
-
-            if (SelectDominantMslkGroupObjectId(pm4, group) != 0)
-            {
-                groups.Add(group);
-                continue;
-            }
-
-            groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, group));
-        }
-
-        return groups;
+        linkedComponents = linkedByRoot.Values.ToList();
+        return true;
     }
 
     private static List<List<Pm4IndexedSurface>> SplitIndexedSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
@@ -6635,7 +6636,7 @@ public class WorldScene : ISceneRenderer
         for (int i = 0; i < _wmoInstances.Count; i++)
         {
             ObjectInstance inst = _wmoInstances[i];
-            if (!TryMeasureHoverBrushHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+            if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                 continue;
 
             ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), distanceSq, depth);
@@ -6644,7 +6645,7 @@ public class WorldScene : ISceneRenderer
         for (int i = 0; i < _mdxInstances.Count; i++)
         {
             ObjectInstance inst = _mdxInstances[i];
-            if (!TryMeasureHoverBrushHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+            if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                 continue;
 
             ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), distanceSq, depth);
@@ -6655,7 +6656,7 @@ public class WorldScene : ISceneRenderer
             for (int i = 0; i < _wlLoader.Bodies.Count; i++)
             {
                 WlLiquidBody body = _wlLoader.Bodies[i];
-                if (!TryMeasureHoverBrushHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                if (!TryMeasureHoverInfoHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                     continue;
 
                 ConsiderCandidate(BuildHoveredWlLiquidInfo(body), distanceSq, depth);
@@ -7159,9 +7160,48 @@ public class WorldScene : ISceneRenderer
         return TryMeasureHoverBrushHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out _, out _);
     }
 
+    private static bool TryMeasureHoverInfoHit(Vector3 boundsMin, Vector3 boundsMax,
+        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
+        float viewportWidth, float viewportHeight, out float distanceSq, out float depth)
+    {
+        return TryMeasureScreenBrushHit(
+            boundsMin,
+            boundsMax,
+            view,
+            proj,
+            mouseViewportX,
+            mouseViewportY,
+            viewportWidth,
+            viewportHeight,
+            HoverInfoBrushPixels,
+            HoverInfoMaxScreenRadius,
+            out distanceSq,
+            out depth);
+    }
+
     private static bool TryMeasureHoverBrushHit(Vector3 boundsMin, Vector3 boundsMax,
         Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
         float viewportWidth, float viewportHeight, out float distanceSq, out float depth)
+    {
+        return TryMeasureScreenBrushHit(
+            boundsMin,
+            boundsMax,
+            view,
+            proj,
+            mouseViewportX,
+            mouseViewportY,
+            viewportWidth,
+            viewportHeight,
+            WireframeRevealBrushPixels,
+            WireframeRevealMaxScreenRadius,
+            out distanceSq,
+            out depth);
+    }
+
+    private static bool TryMeasureScreenBrushHit(Vector3 boundsMin, Vector3 boundsMax,
+        Matrix4x4 view, Matrix4x4 proj, float mouseViewportX, float mouseViewportY,
+        float viewportWidth, float viewportHeight, float brushPixels, float maxScreenRadius,
+        out float distanceSq, out float depth)
     {
         Vector3 center = (boundsMin + boundsMax) * 0.5f;
         if (!TryProjectToViewport(center, view, proj, viewportWidth, viewportHeight, out float sx, out float sy, out depth))
@@ -7176,7 +7216,7 @@ public class WorldScene : ISceneRenderer
 
         float worldRadius = MathF.Max((boundsMax - boundsMin).Length() * 0.5f, 4f);
         float projectedRadius = EstimateProjectedRadius(worldRadius, depth, proj, viewportHeight);
-        float revealRadius = MathF.Min(WireframeRevealBrushPixels + projectedRadius, WireframeRevealMaxScreenRadius);
+        float revealRadius = MathF.Min(brushPixels + projectedRadius, maxScreenRadius);
         return distanceSq <= revealRadius * revealRadius;
     }
 
@@ -7247,7 +7287,7 @@ public class WorldScene : ISceneRenderer
                     center = ApplyPm4OverlayTransform(obj.Center, objectTransform);
                 }
 
-                if (!TryMeasureHoverBrushHit(boundsMin, boundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                if (!TryMeasureHoverInfoHit(boundsMin, boundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                     continue;
 
                 hitCount++;

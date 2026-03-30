@@ -25,6 +25,8 @@ MdxViewer is the active viewer/debugging application in this repo. It is no long
 - Documented support range: `0.5.3` through `4.0.0.11927`
 - Additional support exists for later `4.0.x` ADTs
 - The terrain pipeline also contains untested later-era support paths through `4.3.4`
+- Some `5.x` data may already work in parts of the pipeline, but this is not a signed-off support tier yet.
+- `6.x+` compatibility is future work and should be treated as research/integration backlog for now.
 
 ## Build and run
 
@@ -49,13 +51,30 @@ Optional launch flags:
 
 You can also pass a loose file path after the flags.
 
-## v0.4.6 release snapshot
+## v0.4.6.1 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.6` is the current release target in this tree.
+- `parp-tools WoW Viewer` `0.4.6.1` is the current release target in this tree.
 - The previously broken fullscreen minimap/top-right Designer Island case is now fixed in the active branch and has runtime user confirmation on the fixed development minimap dataset.
 - PM4 overlay decoding and placement are now much closer to correct on the development map after the latest runtime fixes.
+- PM4 hover data display now uses a better WoW-styled info-tooltip path with clearer PM4 context for quick inspection.
 - Other recent viewer slices such as taxi override workflow, object-culling tuning, and WMO baked-light prototyping should still be treated as build-validated unless a narrower runtime note says otherwise.
 - Current render-performance work has started reducing duplicate scene walks and eager WMO doodad expansion, but a real render-layer/submission path is still the next major renderer seam.
+
+## New User Quick Start (UI)
+
+For first-time users, use this flow:
+
+1. Use `File > Open Game Folder (MPQ)...`.
+2. Choose your game folder root (the one containing `Data/`).
+3. Pick the explicit client build in the build-selection dialog.
+4. Load a world map from the left sidebar.
+5. Use the right sidebar inspector for PM4 workbench, world objects, and map/debug controls.
+
+Important:
+
+- `Open File...` is mainly for direct standalone asset inspection (`.wmo`, `.mdx`, `.m2`) and loose files.
+- For full world/map browsing, opening a base game folder first is the intended path.
+- Fixed left/right sidebars are the startup default. Dock panels are opt-in from `View > Dock Panels`.
 
 ## Current startup workflow
 
@@ -144,7 +163,8 @@ Practical rule:
 
 ### UI and inspection workflows
 
-- dockable navigator and inspector panels
+- fixed left/right sidebars are the startup default; dock panels are opt-in from the `View` menu
+- PM4 workbench tabs (`Overlay`, `Selection`, `Correlation`) now keep their selected state instead of snapping back during normal clicking
 - `Tab` hide-chrome mode
 - floating log viewer
 - floating perf window
@@ -183,6 +203,8 @@ Practical rule:
 The `View` menu is now part of normal use, not an afterthought. It exposes:
 
 - dock panels
+- left sidebar
+- right sidebar
 - file browser
 - model info
 - terrain controls
@@ -218,6 +240,7 @@ Current minimap behavior differs from older docs.
 ### Screenshot/export automation
 
 - asset-catalog export already supports automated multi-angle model screenshots
+- a dedicated screenshot guide for core viewer workflows now lives at [docs/ui-screenshot-guide.md](docs/ui-screenshot-guide.md)
 
 ### Terrain debugging
 

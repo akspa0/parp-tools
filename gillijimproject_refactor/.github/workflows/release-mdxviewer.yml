@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.6)'
+        description: 'Version tag (e.g. v0.4.6.1)'
         required: true
 
 permissions:
@@ -105,13 +105,16 @@ jobs:
             Current support target: WoW Alpha `0.5.3` through Cataclysm `4.0.0.11927`.
 
             ### Release Notes
-            - PM4 overlay decoding and placement support is materially stronger on the development map, including better camera-window coverage, tile remap handling, empty-carrier handling, and linked-group placement resolution.
-            - Recent rendering work started reducing repeated world-scene submission cost by reusing MDX visibility results and deferring WMO doodad expansion instead of constructing everything on first sight.
-            - Performance work is still active. This release improves the current path, but it is not yet the final render-layer or draw-submission redesign.
+            - Better PM4 data display in the WoW-styled info tooltip path for clearer quick inspection during world exploration.
+            - PM4 workbench tab behavior is more stable for `Overlay`, `Selection`, and `Correlation` flows.
+            - New user guidance now emphasizes opening a base game folder first (`File > Open Game Folder (MPQ)`) before relying on standalone file open.
+            - Support remains documented for `0.5.3` through `4.0.0.11927`, with additional later-era paths still under validation.
 
             ### Quick Start
             1. Extract the ZIP
-            2. Run `ParpToolsWoWViewer.exe path\to\game\directory`
+            2. Run `ParpToolsWoWViewer.exe`
+            3. In-app, use `File > Open Game Folder (MPQ)` and select your client path
+            4. Choose the build in the version dialog, then load maps from the left sidebar
 
             ### Requirements
             - Windows x64

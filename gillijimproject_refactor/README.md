@@ -14,15 +14,16 @@ This README is intentionally high level. The detailed viewer workflow lives in [
   - a WMO and MDX/M2 inspection/export tool
   - a front end for several converter and validation utilities already in this repo
 
-## v0.4.6 release snapshot
+## v0.4.6.1 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.6` is the current release target in this tree.
+- `parp-tools WoW Viewer` `0.4.6.1` is the current release target in this tree.
 - Recent viewer-facing changes that materially shape this release:
   - fullscreen and docked minimap interaction/camera-marker behavior was repaired and then runtime-confirmed by the user on the fixed development minimap dataset
   - taxi route inspection now has route picking, animated actor controls, asset override workflow, return-to-world flow, and saved override persistence
   - render-quality controls expose live texture filtering changes for already loaded assets
   - PM4 inspection/export workflows, minimap disk cache, and recent object-visibility tuning are all part of the active viewer path
   - PM4 overlay decoding and placement are now substantially closer to correct on the development map after the latest camera-window, tile-remap, empty-carrier, and linked-group placement fixes
+  - PM4 hover information now has better WoW-styled tooltip display with clearer PM4 context for quick object inspection
   - the first rendering-performance slices now remove duplicate MDX scene walks and defer WMO doodad expansion, while a deeper render-layer/submission refactor remains the next likely seam
 - Validation reality for the release target:
   - the minimap blocker now has targeted runtime user signoff on the real development minimap data
@@ -34,6 +35,8 @@ This README is intentionally high level. The detailed viewer workflow lives in [
 - Actively supported viewer range: `0.5.3` through `4.0.0.11927`.
 - Additional terrain support exists for later `4.0.x` ADTs.
 - The current codebase also includes untested support paths for later game data through `4.3.4`, especially in the split-ADT terrain pipeline.
+- Some `5.x` data may already work in parts of the active pipeline, but this is still exploratory and not a signed-off support tier.
+- `6.x+` support is future work; likely doable in phases via existing Warcraft.NET-era format coverage and map-upconversion paths, but still unresolved.
 - Practical rule: `0.5.3` through `4.0.0.11927` is the documented support range; later `4.0.x` and `4.3.4` era data should be treated as promising but not yet broadly signed off.
 
 ## Quick start
@@ -97,7 +100,7 @@ After a base client is open, you can:
 
 The active viewer now includes UI and workflows for:
 
-- dockable navigator/inspector panels
+- fixed left/right sidebars by default, with dockable navigator/inspector panels as an opt-in `View` mode
 - hideable chrome with `Tab`
 - minimap zoom, pan, cached tiles, and guarded teleport
 - repaired fullscreen minimap marker/click behavior on the development minimap dataset
@@ -153,6 +156,7 @@ The active viewer now includes UI and workflows for:
 ## Documentation gaps still worth closing
 
 - the READMEs now reflect the current viewer more accurately, but they still need a stronger visual walkthrough
+- a screenshot guide now exists at [src/MdxViewer/docs/ui-screenshot-guide.md](src/MdxViewer/docs/ui-screenshot-guide.md), with a drop-folder path for candidate gallery images
 - there is already automated screenshot capture infrastructure for asset-catalog exports; a separate automated pass for UI/menu showcase screenshots would be a reasonable follow-up if we want marketing-quality documentation assets
 
 ## Repository structure

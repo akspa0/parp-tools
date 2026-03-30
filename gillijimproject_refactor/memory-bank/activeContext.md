@@ -1,5 +1,117 @@
 # Active Context
 
+## Mar 30, 2026 - v0.4.6.1 Release Prep Tightened PM4 Tooltip Messaging And New-User Onboarding
+
+- user requested a small release bump and packaging focus for `v0.4.6.1` with clearer PM4 tooltip framing and less confusing first-run UI guidance.
+- landed release-prep changes across viewer UI text, docs, and release workflows:
+	- bumped `src/MdxViewer/MdxViewer.csproj` version metadata to `0.4.6.1`
+	- updated welcome/status onboarding copy so first-run guidance points users to `File > Open Game Folder (MPQ)` first, with standalone `Open File` as a secondary path
+	- aligned `src/MdxViewer/README.md` and top-level `gillijimproject_refactor/README.md` to the `0.4.6.1` release snapshot and added clearer beginner quick-start flow
+	- added `src/MdxViewer/docs/ui-screenshot-guide.md` plus `src/MdxViewer/docs/screenshots/README.md` so users can drop candidate images for README/release selection
+	- updated release workflow notes in both `.github/workflows/release-mdxviewer.yml` and `gillijimproject_refactor/.github/workflows/release-mdxviewer.yml` to foreground better PM4 WoW-styled tooltip display and in-app game-path-first onboarding
+- version-support messaging now remains explicit:
+	- documented support stays `0.5.3` through `4.0.0.11927`
+	- later `4.3.4`/some `5.x` paths are framed as promising/experimental
+	- `6.x+` remains future compatibility work, not current signoff
+- important boundary:
+	- this slice is release-prep/documentation/workflow wiring and build validation, not broad runtime signoff
+	- no new automated tests were added
+
+## Mar 30, 2026 - PM4 Workbench Tab Selection No Longer Snaps Back To Overlay
+
+- user runtime report after the earlier PM4 sidebar regression fix:
+	- `Selection` and `Correlation` tabs in the right-sidebar PM4 workbench were visible only briefly, then snapped back/disappeared
+	- the rest of the PM4 inspector workflow was acceptable, but this made the tabbed workflow unreliable
+- strongest code seam found in `src/MdxViewer/ViewerApp_Pm4Utilities.cs`:
+	- tab rendering used per-frame local `ref bool` tab-open state and always drove tab focus from shared tab state in a way that could fight normal ImGui tab persistence
+	- this made the workbench vulnerable to unintended tab reselection behavior during normal clicking
+- landed fix:
+	- added one-shot `_pendingPm4WorkbenchTab` state in `src/MdxViewer/ViewerApp.cs`
+	- `OpenPm4Workbench(...)` now requests tab focus through that one-shot state instead of continuously re-driving tab focus
+	- PM4 workbench tabs now use non-closable `BeginTabItem(...)` calls with one-shot `SetSelected` flags, then clear the pending request after the tab bar draw pass
+	- practical effect: manual tab clicks now persist on `Selection`/`Correlation` instead of snapping back
+- workflow and docs updates recorded in this slice:
+	- `src/MdxViewer/README.md` now calls out fixed sidebars as startup default, keeps dock panels opt-in, and records the missing screenshot-guide follow-up
+	- this follows the current packaging reality where no pre-baked `imgui.ini` should be assumed in release output
+- important boundary:
+	- this is still build/diagnostic validation only in this session
+	- no live viewer/runtime signoff has been completed yet for the tab-persistence fix on the development map
+
+## Mar 30, 2026 - PM4 Sidebar Workbench Visibility And Hover Targeting Regression Trimmed Back
+
+- user runtime report after the inspector-first PM4 shell change:
+	- the right-sidebar `PM4 Workbench` looked effectively dead because the `Overlay`, `Selection`, and `Correlation` tabs were no longer reachable in normal use
+	- saving PM4 match selections from the sidebar became impractical because PM4 click selection could still lose to nearby scene hits
+	- `WL*` hover info was hard to reach when PM4 data was nearby and the hover radius felt too large
+- strongest active seams found in `src/MdxViewer/ViewerApp_Sidebars.cs`, `ViewerApp_Pm4Utilities.cs`, `ViewerApp.cs`, and `src/MdxViewer/Terrain/WorldScene.cs`:
+	- the right sidebar only opened the `PM4 Workbench` by default when overlay or selection or collection state was already active, which made explicit workbench-open flows look broken
+	- `PickObjectAtMouse(...)` still let normal scene hits beat PM4 in cases where the hovered PM4 target was the user's obvious intent
+	- hover info for `WMO`, `MDX`, `WL*`, and PM4 used the large wireframe-reveal brush, so nearby PM4 content could crowd out narrower hover inspection
+- landed fix:
+	- `OpenPm4Workbench(...)` now forces the right inspector open for the PM4 workbench path instead of relying on the old default-open heuristic
+	- the right sidebar now always renders the `PM4 Workbench` when a world scene exists and honors the explicit forced-open flag
+	- normal click selection now prefers the actively hovered PM4 object key before broader scene-hit distance arbitration, and `Shift + Left Click` collection add uses the same hovered-PM4-first behavior
+	- `WorldScene` now keeps the large brush for wireframe reveal but uses a smaller dedicated hover-info brush for hover cards and WL/object hit testing
+- validation completed:
+	- file diagnostics were clean for `src/MdxViewer/ViewerApp.cs`, `ViewerApp_Pm4Utilities.cs`, `ViewerApp_Sidebars.cs`, and `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 with existing project and environment warnings only
+- important boundary:
+	- this is still build validation only
+	- no live viewer/runtime signoff has been completed yet to prove the PM4 sidebar tabs, saved-match workflow, and WL hover behavior now feel correct on the development map
+
+## Mar 30, 2026 - PM4 Camera-Window Load Regression Trimmed Back To One MSLK Partition Pass
+
+- user runtime report: PM4 overlay loads regressed badly again, stalling around statuses like `1/12` or `1/15` camera-window files and effectively never finishing.
+- strongest code-level regression seam found in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- the Mar 30 zero-`CK24` regrouping pass added `SplitZeroCk24SeedGroup(...)`
+	- that path first called `SplitSurfaceGroupByMslk(...)`, then re-scanned each returned group again via `SelectDominantMslkGroupObjectId(...)`, and only then optionally connectivity-split the leftover bucket
+	- on large zero-`CK24` seed groups this stacked another full `MSLK` walk on top of an already expensive PM4 object-assembly path and was the likeliest reason loads appeared stuck on one file
+- active fix in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- added one shared `TryPartitionSurfaceGroupByMslk(...)` helper that partitions linked-vs-unlinked surfaces in a single pass
+	- `SplitSurfaceGroupByMslk(...)` now uses that shared partition helper instead of rebuilding the same grouping state locally
+	- `SplitZeroCk24SeedGroup(...)` now reuses the same partition result and only connectivity-splits the genuinely unlinked remainder, preserving the newer semantics without the extra whole-group rescan
+- validation completed:
+	- file diagnostics were clean for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 with existing dependency/environment warnings only
+- important boundary:
+	- this is still build validation only
+	- no live viewer/runtime signoff has been completed yet to prove the camera-window PM4 load no longer stalls on the development map
+
+## Mar 30, 2026 - PM4 Unknowns Report Now Exposes Dominant MSLK And MSUR Families
+
+- extended the shared `wow-viewer` `pm4 unknowns` seam so it no longer stops at top-value histograms and edge-fit counts.
+- the report now also emits:
+	- dominant `MSLK` families grouped by `TypeFlags` or `Subtype` or `SystemFlag`
+	- dominant `MSUR` families grouped by `AttributeMask` or `GroupKey` or `IndexCount`
+	- for each family, measured linkage signals against direct `MSUR` fits, direct `MPRL` fits, `LinkId` patterns, `GroupObjectId -> MPRL.Unk04`, `CK24`, `MDOS`, and incoming-link fanout
+- current fixed-corpus evidence from `test_data/development/World/Maps/development`:
+	- the dominant `MSLK` families are heavily concentrated in sentinel-tile-link families such as `type=0x01 subtype=2 system=0x8000`, `type=0x01 subtype=1`, `type=0x01 subtype=0`, and the matching `0x02` families
+	- those top `MSLK` families are not fringe buckets; they account for the bulk of link rows and still keep `MSLK.RefIndex` mostly `MSUR`-fitting with smaller mismatch tails strongest toward `MPRR`, `MSPI`, `MSVI`, and `MSCN`
+	- the dominant `MSUR` families split sharply between large `CK24=0x000000` umbrella families like `attr=0x02 group=3 indices=3` and populated object-bearing families like `attr=0x02 group=18 indices=4` or `attr=0x03 group=18 indices=4`
+	- `group=3` families in the current corpus are overwhelmingly zero-`CK24` and still pull heavy incoming `MSLK` traffic, which strengthens the current umbrella/root-family reading without proving final semantics
+	- `group=18` and nearby non-zero-`CK24` families show large `CK24` or `MDOS` or incoming-link fanout, which makes them better candidates for object-facing attribution work than the old flat "all MSUR unknowns are equal" framing
+- important boundary:
+	- this is still research evidence, not a closed semantic decode of `MSLK.TypeFlags` or `Subtype` or `MSUR.AttributeMask` or `GroupKey`
+	- the next PM4 step should cluster mismatch-heavy outlier families, not just aggregate one more whole-corpus histogram
+	- `MCSH` shadow/object association remains a separate follow-up seam; current repo state has raw shadow extraction for VLM export, but not a shared object-association layer yet
+
+## Mar 30, 2026 - PM4 MSHD Correlation Pass Landed And Weakened The Root-Bucket Header Hypothesis
+
+- followed the user's request to stop hand-waving around `MSHD` and run a dedicated corpus-scale correlation pass in shared `wow-viewer` PM4 code instead.
+- landed shared-library and tool-surface support in `wow-viewer`:
+	- `Pm4ResearchMshdAnalyzer`
+	- `Pm4MshdReport` and related field or metric summary records
+	- `WowViewer.Tool.Inspect` verb `pm4 mshd --input <directory> [--output <report.json>]`
+- current fixed-corpus evidence from `test_data/development/World/Maps/development`:
+	- `616` files scanned and `502` files with `MSHD`
+	- `MSHD.Field0C` through `MSHD.Field1C` are zero in all `502` sampled `MSHD` headers
+	- `MSHD.Field00` and `MSHD.Field08` match each other in only `233/502` files, so they do not behave like one trivially duplicated slot across the corpus
+	- `MSHD.Field00`, `Field04`, and `Field08` did not show the strong exact-match or strong correlation signal that would be expected if they directly owned root-group or split-bucket counts for current `MSLK` or `MSUR` or `MPRL` families
+- important interpretation boundary:
+	- this does not prove `MSHD` is meaningless; it only weakens the current root-bucket-count hypothesis for this development corpus
+	- high-level coupling can still reflect scene density or file size rather than direct semantic ownership, so `MSHD` remains unresolved
+	- current best next step is targeted per-tile comparison against known oddballs instead of assigning bucket semantics prematurely
+
 ## Mar 30, 2026 - PM4 UI Defaults Hardened And Inspector Workbench Consolidated
 
 - followed the user's latest viewer-shell request to reduce PM4 clutter and make the UI act more like a click-to-inspect object workflow instead of a pile of drifting debug windows
