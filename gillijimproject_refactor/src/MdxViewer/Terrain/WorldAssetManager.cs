@@ -1010,7 +1010,7 @@ public class WorldAssetManager : IDisposable
                 return null;
 
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
-            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion);
+            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion, deferInitialDoodadLoads: true);
         }
         catch (Exception ex)
         {

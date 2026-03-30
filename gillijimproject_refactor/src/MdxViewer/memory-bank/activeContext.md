@@ -1,5 +1,26 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 29, 2026 - Second Rendering Performance Slice Targets WMO Doodad Spikes And Object Fog
+
+- user feedback after the first `WorldScene` optimization was still negative on runtime feel:
+   - the viewer could eventually climb toward roughly `30 FPS`, but only after long stabilization
+   - tile or data loads still produced hard hitches down to `0 FPS`
+   - world objects were visibly fogged in a way the user does not want
+- strongest newly confirmed cause for the load spikes:
+   - `src/MdxViewer/Rendering/WmoRenderer.cs` eagerly loaded the active doodad set in its constructor
+   - that means a newly visible WMO could recursively construct many doodad `MdxRenderer`s immediately on the render thread
+- landed behavior:
+   - `WmoRenderer` now supports deferred initial doodad loading for world-scene use and drains queued doodad model loads incrementally during render under a tight per-frame budget
+   - `src/MdxViewer/Terrain/WorldAssetManager.cs` now opts world-scene WMO loads into the deferred doodad path
+   - `src/MdxViewer/Terrain/WorldScene.cs` now lowers the render-thread deferred asset load budget from `24/20 ms` to `6/4 ms`
+   - world-scene object fog is now disabled by default through `ObjectFogEnabled`, while WMO cull distance still uses terrain fog end so disabling object fog does not accidentally shorten world draw distance
+   - `src/MdxViewer/ViewerApp.cs` now exposes a `Fog Objects` checkbox in the world-objects panel
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings only
+- important boundary:
+   - this still needs real viewer runtime validation on the fixed development data paths
+   - no measured hitch reduction or manual no-fog signoff has been captured yet in this session
+
 ## Mar 29, 2026 - First Rendering Performance Slice Targets Duplicate MDX Scene Walks
 
 - user priority has shifted from more PM4 exploration to practical viewer rendering performance, with current map loads still reported around `1-5 FPS`

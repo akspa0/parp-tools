@@ -1,5 +1,24 @@
 # Active Context
 
+## Mar 29, 2026 - Second Viewer Performance Slice Defers WMO Doodads And Disables Object Fog By Default
+
+- follow-up to the first `WorldScene` MDX classification pass after the user reported the viewer was still hitching hard during tile or data loads and that world objects were appearing inside unwanted fog
+- strongest newly confirmed hitch source in the active viewer path:
+	- `src/MdxViewer/Rendering/WmoRenderer.cs` was eagerly calling `LoadActiveDoodadSet()` in the constructor
+	- that constructor path could recursively build many doodad `MdxRenderer`s on the render thread as soon as a WMO shell became visible
+- landed behavior in this slice:
+	- `WmoRenderer` now supports deferred initial doodad loading for world-scene WMO usage and incrementally loads queued doodad models during render under a small per-frame budget instead of eagerly expanding the whole doodad set in the constructor
+	- `src/MdxViewer/Terrain/WorldAssetManager.cs` now opts world-scene WMO loads into that deferred doodad path
+	- `src/MdxViewer/Terrain/WorldScene.cs` now lowers render-thread deferred asset processing from `24 loads / 20 ms` to `6 loads / 4 ms` per frame
+	- `WorldScene` now disables object fog by default through a dedicated `ObjectFogEnabled` policy and still keeps WMO culling tied to real terrain fog distance instead of the disabled object-fog range
+	- `src/MdxViewer/ViewerApp.cs` now exposes a `Fog Objects` checkbox in the world-objects panel so the old behavior can still be re-enabled for comparison
+- validation completed:
+	- editor error checks were clean for `WorldScene.cs`, `ViewerApp.cs`, `WmoRenderer.cs`, and `WorldAssetManager.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing solution warnings only
+- important boundary:
+	- this is still compile validation only in this session
+	- no live viewer frame-time capture or real-data runtime signoff was completed yet for the deferred WMO doodad path or the new default no-object-fog policy
+
 ## Mar 29, 2026 - Viewer Performance Pivot Started With WorldScene MDX Classification Pass
 
 - user direction has shifted away from more PM4-first work and toward real viewer rendering performance or lighting or shader quality, because current map loads still feel unusable at roughly `1-5 FPS`

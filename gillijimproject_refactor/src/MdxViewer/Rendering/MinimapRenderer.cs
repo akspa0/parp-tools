@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Security.Cryptography;
 using MdxViewer.DataSources;
@@ -19,6 +20,11 @@ public class MinimapRenderer : IDisposable
     private readonly Md5TranslateIndex? _md5Index;
     private readonly string _cacheRoot;
     private readonly Dictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<MinimapTileRequest> _pendingRequests = new();
+    private readonly HashSet<string> _queuedCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private int _completedRequestCount;
+    private int _uploadedTileCount;
+    private int _failedTileCount;
 
     public MinimapRenderer(GL gl, IDataSource dataSource, Md5TranslateIndex? md5Index, string cacheRoot)
     {
@@ -27,6 +33,19 @@ public class MinimapRenderer : IDisposable
         _md5Index = md5Index;
         _cacheRoot = cacheRoot;
         Directory.CreateDirectory(_cacheRoot);
+    }
+
+    public int PendingTileCount => _pendingRequests.Count;
+    public int UploadedTileCount => _uploadedTileCount;
+    public int FailedTileCount => _failedTileCount;
+    public bool IsBusy => _pendingRequests.Count > 0;
+    public float LoadingProgress
+    {
+        get
+        {
+            int total = _completedRequestCount + _pendingRequests.Count;
+            return total > 0 ? _completedRequestCount / (float)total : 1f;
+        }
     }
 
     /// <summary>
@@ -40,9 +59,48 @@ public class MinimapRenderer : IDisposable
         if (_textureCache.TryGetValue(plainPath, out uint cached))
             return cached;
 
-        uint tex = LoadTile(mapName, tx, ty, plainPath);
-        _textureCache[plainPath] = tex;
-        return tex;
+        QueueTileLoad(mapName, tx, ty, plainPath);
+        return 0;
+    }
+
+    public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 5.0)
+    {
+        if (_pendingRequests.Count == 0 || maxLoads <= 0)
+            return 0;
+
+        int processed = 0;
+        var stopwatch = Stopwatch.StartNew();
+        while (processed < maxLoads
+            && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs
+            && _pendingRequests.Count > 0)
+        {
+            MinimapTileRequest request = _pendingRequests.Dequeue();
+            _queuedCacheKeys.Remove(request.CacheKey);
+
+            if (_textureCache.ContainsKey(request.CacheKey))
+                continue;
+
+            uint tex = LoadTile(request.MapName, request.Tx, request.Ty, request.CacheKey);
+            _textureCache[request.CacheKey] = tex;
+            _completedRequestCount++;
+
+            if (tex != 0)
+                _uploadedTileCount++;
+            else
+                _failedTileCount++;
+
+            processed++;
+        }
+
+        return processed;
+    }
+
+    private void QueueTileLoad(string mapName, int tx, int ty, string cacheKey)
+    {
+        if (_textureCache.ContainsKey(cacheKey) || !_queuedCacheKeys.Add(cacheKey))
+            return;
+
+        _pendingRequests.Enqueue(new MinimapTileRequest(mapName, tx, ty, cacheKey));
     }
 
     private unsafe uint LoadTile(string mapName, int tx, int ty, string cacheKey)
@@ -164,6 +222,7 @@ public class MinimapRenderer : IDisposable
     }
 
     private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels);
+    private readonly record struct MinimapTileRequest(string MapName, int Tx, int Ty, string CacheKey);
 
     private static DecodedMinimapTile ConvertBitmap(System.Drawing.Bitmap bmp)
     {
@@ -208,7 +267,8 @@ public class MinimapRenderer : IDisposable
             _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
                 (uint)tile.Width, (uint)tile.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        _gl.GenerateMipmap(TextureTarget.Texture2D);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);

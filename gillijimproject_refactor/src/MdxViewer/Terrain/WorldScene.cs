@@ -516,6 +516,7 @@ public class WorldScene : ISceneRenderer
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
+        private bool _objectFogEnabled = false;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -2067,7 +2068,7 @@ public class WorldScene : ISceneRenderer
                 processedFiles++;
 
                 byte[]? bytes = _dataSource.ReadFile(pm4Path);
-                if (bytes == null || bytes.Length == 0)
+                if (bytes == null)
                 {
                     readFailed++;
                     long readFailElapsedMs = progressStopwatch.ElapsedMilliseconds;
@@ -2079,6 +2080,15 @@ public class WorldScene : ISceneRenderer
                         if (emitLog)
                             lastLogReportMs = readFailElapsedMs;
                     }
+                    continue;
+                }
+
+                if (bytes.Length == 0)
+                {
+                    tileSatisfiedCounts[(effectiveTileX, effectiveTileY)]++;
+                    zeroObjectFiles++;
+                    ViewerLog.Debug(ViewerLog.Category.Terrain,
+                        $"[PM4] Skipping empty PM4 carrier '{pm4Path}' for tile ({effectiveTileX},{effectiveTileY}).");
                     continue;
                 }
 
@@ -2367,8 +2377,11 @@ public class WorldScene : ISceneRenderer
 
     private static void GetPm4CameraTile(Vector3 cameraPos, out int tileX, out int tileY)
     {
-        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.TileSize;
-        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.TileSize;
+        // PM4 filenames and terrain AOI both operate on ADT tile coordinates (64x64 grid).
+        // WoWConstants.TileSize is the larger WDL tile span, which collapses camera-window
+        // PM4 loads into a tiny corner of the map. Use the ADT tile span instead.
+        float camTileX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
+        float camTileY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
         tileX = Math.Clamp((int)MathF.Floor(camTileX), 0, 63);
         tileY = Math.Clamp((int)MathF.Floor(camTileY), 0, 63);
     }
@@ -2407,16 +2420,20 @@ public class WorldScene : ISceneRenderer
     {
         if (_pm4KnownMapTiles.Count > 0)
         {
+            bool hasKnownTileInWindow = false;
             foreach ((int tileX, int tileY) in _pm4KnownMapTiles)
             {
                 if (!IsPm4TileInsideCameraWindow(tileX, tileY, cameraWindow))
                     continue;
 
+                hasKnownTileInWindow = true;
+
                 if (!_pm4CoveredMapTiles.Contains((tileX, tileY)))
                     return false;
             }
 
-            return true;
+            if (hasKnownTileInWindow)
+                return true;
         }
 
         if (!_pm4LoadedCameraWindow.HasValue)
@@ -2708,10 +2725,11 @@ public class WorldScene : ISceneRenderer
 
     private static bool TryMapPm4FileTileToTerrainTile(int fileTileX, int fileTileY, out int terrainTileX, out int terrainTileY)
     {
-        // PM4 filename parsing and PM4 coordinate validation use direct x/y tile pairing.
-        // Keep tile reassignment deterministic from filename and avoid heuristic remapping.
-        terrainTileX = fileTileX;
-        terrainTileY = fileTileY;
+        // PM4 filename tiles are transposed relative to ADT terrain tile naming on the
+        // development corpus. Map PM4 file XX_YY onto terrain tile YY_XX so camera-window
+        // loads and tile-local placement land on the same ADT tile the user is viewing.
+        terrainTileX = fileTileY;
+        terrainTileY = fileTileX;
 
         return terrainTileX is >= 0 and <= 63
             && terrainTileY is >= 0 and <= 63;
@@ -2719,15 +2737,10 @@ public class WorldScene : ISceneRenderer
 
     private bool ShouldRenderPm4Tile(int tileX, int tileY)
     {
-        // PM4 can legitimately exist where no ADT tile exists (sparse development datasets).
-        // Only gate PM4 by AOI-loaded state when the tile is an actual terrain tile.
-        if (_terrainManager.LoadedTileCount <= 0)
-            return true;
-
-        if (!_terrainManager.Adapter.TileExists(tileX, tileY))
-            return true;
-
-        return _terrainManager.IsTileLoaded(tileX, tileY);
+        // PM4 overlay loading is already constrained by the PM4 camera window and object-level
+        // culling. Gating PM4 by terrain AOI slices large structures across adjacent tiles,
+        // which makes multi-tile WMO footprints like Stormwind Harbour disappear in pieces.
+        return true;
     }
 
     private static List<Pm4OverlayObject> RebasePm4ObjectParts(IReadOnlyList<Pm4OverlayObject> objects, int objectPartOffset)
@@ -2906,40 +2919,30 @@ public class WorldScene : ISceneRenderer
                 List<MprlEntry> linkedPositionRefs = CollectLinkedPositionRefs(pm4, linkedGroup);
                 Pm4LinkedPositionRefSummary linkedPositionRefSummary = SummarizeLinkedPositionRefs(linkedPositionRefs);
 
-                bool linkedUseTileLocalCoordinates = seedUseTileLocalCoordinates;
-                Pm4PlanarTransform linkedPlanarTransform = seedPlanarTransform;
-                Vector3 linkedWorldPivot = seedWorldPivot;
-                float linkedWorldYawCorrection = seedWorldYawCorrection;
-                float linkedRendererFrameRotationRadians = seedRendererFrameRotationRadians;
-                IReadOnlyList<Pm4ConnectorKey> linkedConnectorKeys = seedConnectorKeys;
+                CorePm4CoordinateModeResolution linkedCoordinateModeResolution = ResolveCk24CoordinateModeResolution(
+                    pm4,
+                    linkedSurfaces,
+                    linkedPositionRefs,
+                    tileX,
+                    tileY,
+                    ck24AxisConvention,
+                    fallbackTileLocalCoordinates);
+                bool linkedUseTileLocalCoordinates = linkedCoordinateModeResolution.CoordinateMode == CorePm4CoordinateMode.TileLocal;
 
-                if (seedGroup.RequiresConnectivitySeedSplit)
-                {
-                    CorePm4CoordinateModeResolution linkedCoordinateModeResolution = ResolveCk24CoordinateModeResolution(
-                        pm4,
-                        linkedSurfaces,
-                        linkedPositionRefs,
-                        tileX,
-                        tileY,
-                        ck24AxisConvention,
-                        fallbackTileLocalCoordinates);
-                    linkedUseTileLocalCoordinates = linkedCoordinateModeResolution.CoordinateMode == CorePm4CoordinateMode.TileLocal;
+                CorePm4PlacementSolution linkedPlacement = ResolvePlacementSolution(
+                    pm4,
+                    linkedSurfaces,
+                    linkedPositionRefs,
+                    tileX,
+                    tileY,
+                    linkedUseTileLocalCoordinates,
+                    ck24AxisConvention);
 
-                    CorePm4PlacementSolution linkedPlacement = ResolvePlacementSolution(
-                        pm4,
-                        linkedSurfaces,
-                        linkedPositionRefs,
-                        tileX,
-                        tileY,
-                        linkedUseTileLocalCoordinates,
-                        ck24AxisConvention);
-
-                    linkedPlanarTransform = linkedCoordinateModeResolution.PlanarTransform;
-                    linkedWorldPivot = linkedPlacement.WorldPivot;
-                    linkedWorldYawCorrection = linkedPlacement.WorldYawCorrectionRadians;
-                    linkedRendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(linkedWorldYawCorrection);
-                    linkedConnectorKeys = BuildCk24ConnectorKeys(pm4, linkedSurfaces, linkedPlacement);
-                }
+                Pm4PlanarTransform linkedPlanarTransform = linkedCoordinateModeResolution.PlanarTransform;
+                Vector3 linkedWorldPivot = linkedPlacement.WorldPivot;
+                float linkedWorldYawCorrection = linkedPlacement.WorldYawCorrectionRadians;
+                float linkedRendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(linkedWorldYawCorrection);
+                IReadOnlyList<Pm4ConnectorKey> linkedConnectorKeys = BuildCk24ConnectorKeys(pm4, linkedSurfaces, linkedPlacement);
 
                 Vector3 linkedPlacementAnchor = ComputeSurfaceRendererCentroid(
                     pm4,
@@ -2967,10 +2970,10 @@ public class WorldScene : ISceneRenderer
                         if (tileLineBudget <= 0)
                             break;
 
-                        // Keep split components under one shared CK24 frame basis.
-                        // Non-zero CK24 groups keep one shared frame basis across their split parts.
-                        // Zero/root-style buckets are split first and then resolved per linked group so
-                        // unrelated doodad/root pieces do not inherit one mixed-bucket placement frame.
+                        // Keep split components under one linked-group frame basis.
+                        // MSUR 0x1C / CK24 is not sufficient to guarantee one shared object rotation
+                        // across every linked sub-object in a seed group, especially on large WMO
+                        // interiors where repeated carriers can appear under the same CK24 value.
                         List<Pm4LineSegment> lines = BuildCk24ObjectLines(pm4, component, tileX, tileY, linkedUseTileLocalCoordinates, ck24AxisConvention, linkedPlanarTransform, linkedWorldPivot, linkedWorldYawCorrection, tileLineBudget, ref rejectedLongEdges);
                         List<Pm4Triangle> triangles = tileTriangleBudget > 0
                             ? BuildCk24ObjectTriangles(pm4, component, tileX, tileY, linkedUseTileLocalCoordinates, ck24AxisConvention, linkedPlanarTransform, linkedWorldPivot, linkedWorldYawCorrection, tileTriangleBudget)
@@ -5149,7 +5152,7 @@ public class WorldScene : ISceneRenderer
 
     private void ProcessDeferredAssetLoads()
     {
-        int processed = _assets.ProcessPendingLoads(maxLoads: 24, maxBudgetMs: 20.0);
+        int processed = _assets.ProcessPendingLoads(maxLoads: 6, maxBudgetMs: 4.0);
         if (processed <= 0)
             return;
 
@@ -5394,6 +5397,15 @@ public class WorldScene : ISceneRenderer
         return MathF.Min(fogEnd - 64f, MathF.Max(fogStart, delayedStart));
     }
 
+    private static (float start, float end) ComputeObjectFogRange(float fogStart, float fogEnd, bool enabled)
+    {
+        if (enabled)
+            return (ComputeObjectFogStart(fogStart, fogEnd), fogEnd);
+
+        float disabledStart = MathF.Max(fogEnd, fogStart) + 100000f;
+        return (disabledStart, disabledStart + 1f);
+    }
+
     private static float ComputeWmoCullDistance(float fogEnd)
     {
         return MathF.Max(WmoCullDistance, fogEnd + 1200f);
@@ -5492,8 +5504,7 @@ public class WorldScene : ISceneRenderer
         }
         _skyDome.Render(view, proj, camPos);
 
-        float objectFogStart = ComputeObjectFogStart(fogStart, fogEnd);
-        float objectFogEnd = fogEnd;
+        var (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
 
         // Also set clear color to horizon color so any gaps match the sky
         _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
@@ -5559,7 +5570,7 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         if (_wmosVisible)
         {
-            float wmoCullDistance = ComputeWmoCullDistance(objectFogEnd);
+            float wmoCullDistance = ComputeWmoCullDistance(fogEnd);
             float wmoCullDistanceSq = wmoCullDistance * wmoCullDistance;
             float wmoFadeStart = wmoCullDistance * WmoFadeStartFraction;
             float wmoFadeStartSq = wmoFadeStart * wmoFadeStart;
@@ -5637,7 +5648,7 @@ public class WorldScene : ISceneRenderer
             if (_visibleMdxInstances.Count > 0)
             {
                 batchRenderer = _visibleMdxInstances[0].Renderer;
-                batchRenderer.BeginBatch(view, proj, fogColor, fogStart, fogEnd, cameraPos,
+                batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                     lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
             }
 
@@ -6159,6 +6170,11 @@ public class WorldScene : ISceneRenderer
     public void ToggleObjects() => _objectsVisible = !_objectsVisible;
     public void ToggleWmos() => _wmosVisible = !_wmosVisible;
     public void ToggleDoodads() => _doodadsVisible = !_doodadsVisible;
+    public bool ObjectFogEnabled
+    {
+        get => _objectFogEnabled;
+        set => _objectFogEnabled = value;
+    }
 
     public int SubObjectCount => 3;
 

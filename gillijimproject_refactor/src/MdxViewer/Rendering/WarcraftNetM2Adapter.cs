@@ -816,7 +816,13 @@ internal static class WarcraftNetM2Adapter
 
         TrySupplementMetadataFromWarcraftNet(modelBytes, fileName, data);
         TrySupplementRawModelMetadata(modelBytes, fileName, data);
-        TryParseProfiledMaterialMetadata(modelBytes, fileName, data);
+
+        // The generic 2.x profiled MD20 path should keep Warcraft.NET's material tables.
+        // Broad raw table heuristics can misidentify render flags/texture lookups and hide
+        // individual M2 submeshes like tree trunks. The pre-release 3.0.1 profile still
+        // needs the direct profiled material fallback because its container layout is less stable.
+        if (string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            TryParseProfiledMaterialMetadata(modelBytes, fileName, data);
 
         ViewerLog.Info(ViewerLog.Category.Mdx,
             $"[M2] Using profiled MD20 parser for {fileName} (profile={profile.ProfileId}, build={buildVersion ?? "unknown"}, version=0x{version:X}, vertices={data.Vertices.Count}, textures={data.Textures.Count}, embeddedProfile={(data.EmbeddedSkin != null ? "yes" : "no")})");

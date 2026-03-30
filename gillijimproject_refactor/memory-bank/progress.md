@@ -1,5 +1,25 @@
 # Progress
 
+### Mar 29, 2026 - WMO Doodads Stop Eagerly Expanding On The Render Thread And Object Fog Defaults Off
+
+- followed the first `WorldScene` render-pass optimization with a second narrower slice aimed at the remaining reported symptoms:
+	- multi-second hitches while tiles or data stream in
+	- world objects appearing inside unwanted fog
+- root cause for the new hitch slice:
+	- `src/MdxViewer/Rendering/WmoRenderer.cs` constructor work still eagerly loaded the active doodad set, which recursively constructs doodad `MdxRenderer`s and can stall badly when new WMOs enter view
+- landed behavior:
+	- added deferred initial doodad loading state to `WmoRenderer` so world-scene WMO shells can appear first and doodad model loads are then drained incrementally under a small per-frame budget
+	- `src/MdxViewer/Terrain/WorldAssetManager.cs` now creates world-scene `WmoRenderer` instances with `deferInitialDoodadLoads: true`
+	- `src/MdxViewer/Terrain/WorldScene.cs` now reduces main-thread deferred asset processing to `6` loads with a `4 ms` budget per frame
+	- `WorldScene` now uses a dedicated object-fog policy that defaults off, while WMO cull distance still uses terrain fog end instead of the disabled object-fog range
+	- `src/MdxViewer/ViewerApp.cs` now exposes `Fog Objects` in the world-objects UI so the fogged-object path can be toggled back on when needed
+- validation completed:
+	- `get_errors` returned clean for the touched viewer files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 29, 2026 with existing warnings only
+- runtime boundary:
+	- this is compile-validated only in this session
+	- no manual viewer traversal or measured hitch reduction was captured yet after the deferred doodad change
+
 ### Mar 29, 2026 - WorldScene MDX Render Passes Stop Repeating The Same Visibility Work
 
 - started the user-requested performance pivot away from PM4-first work by targeting the hottest obvious CPU path in `src/MdxViewer/Terrain/WorldScene.cs`

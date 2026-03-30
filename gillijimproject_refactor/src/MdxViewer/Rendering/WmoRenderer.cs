@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using System.Text;
 using MdxLTool.Formats.Mdx;
@@ -22,6 +23,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _buildVersion;
+    private readonly bool _deferInitialDoodadLoads;
 
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
@@ -47,8 +49,14 @@ public class WmoRenderer : ISceneRenderer
     private readonly List<string> _doodadNames = new(); // resolved from MODN
     private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Queue<string> _pendingDoodadModelLoads = new();
+    private readonly HashSet<string> _queuedDoodadModelLoads = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<int>> _doodadInstanceIndicesByModel = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _doodadSourceModelPaths = new(StringComparer.OrdinalIgnoreCase);
     private int _activeDoodadSet = 0;
     private bool _doodadsVisible = true;
+    private const int DeferredDoodadLoadsPerFrame = 1;
+    private const double DeferredDoodadLoadBudgetMs = 2.0;
 
     // Doodad culling constants
     private const float DoodadCullDistance = 4000f;  // Minimum distance from camera to render WMO doodads; expanded further by fog range at runtime
@@ -82,7 +90,8 @@ public class WmoRenderer : ISceneRenderer
     }
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
-        IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null)
+        IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null,
+        bool deferInitialDoodadLoads = false)
     {
         _gl = gl;
         _wmo = wmo;
@@ -90,6 +99,7 @@ public class WmoRenderer : ISceneRenderer
         _dataSource = dataSource;
         _texResolver = texResolver;
         _buildVersion = buildVersion;
+        _deferInitialDoodadLoads = deferInitialDoodadLoads;
 
         InitShaders();
         InitLiquidShader();
@@ -254,6 +264,7 @@ public class WmoRenderer : ISceneRenderer
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
         EnsureLiquidMeshesUpToDate();
+        ProcessDeferredDoodadLoads();
 
         // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
         _gl.UseProgram(_shaderProgram);
@@ -1111,6 +1122,10 @@ void main() {
     private void LoadActiveDoodadSet()
     {
         _doodadInstances.Clear();
+        _pendingDoodadModelLoads.Clear();
+        _queuedDoodadModelLoads.Clear();
+        _doodadInstanceIndicesByModel.Clear();
+        _doodadSourceModelPaths.Clear();
 
         if (_wmo.DoodadSets.Count == 0 || _wmo.DoodadDefs.Count == 0)
             return;
@@ -1121,7 +1136,7 @@ void main() {
         var set = _wmo.DoodadSets[_activeDoodadSet];
         ViewerLog.Trace($"[WmoRenderer] Loading DoodadSet [{_activeDoodadSet}] \"{set.Name}\": {set.Count} doodads (start={set.StartIndex}), DoodadDefs.Count={_wmo.DoodadDefs.Count}, DoodadNamesRaw.Length={_wmo.DoodadNamesRaw.Length}");
 
-        int loaded = 0, failed = 0, emptyName = 0, notFound = 0, parseError = 0;
+        int loaded = 0, failed = 0, emptyName = 0, notFound = 0, parseError = 0, deferredUniqueModels = 0;
         for (uint i = set.StartIndex; i < set.StartIndex + set.Count && i < (uint)_wmo.DoodadDefs.Count; i++)
         {
             var def = _wmo.DoodadDefs[(int)i];
@@ -1139,18 +1154,42 @@ void main() {
                           * Matrix4x4.CreateFromQuaternion(def.Orientation)
                           * Matrix4x4.CreateTranslation(def.Position);
 
-            // Get or load the MDX renderer for this model
-            var renderer = GetOrLoadDoodadModel(modelPath);
+            string normalizedModelPath = NormalizeDoodadPath(modelPath).ToLowerInvariant();
+            _doodadSourceModelPaths[normalizedModelPath] = modelPath;
+            if (!_doodadInstanceIndicesByModel.TryGetValue(normalizedModelPath, out List<int>? instanceIndices))
+            {
+                instanceIndices = new List<int>();
+                _doodadInstanceIndicesByModel[normalizedModelPath] = instanceIndices;
+            }
+
+            MdxRenderer? renderer = null;
+            if (_deferInitialDoodadLoads)
+            {
+                if (_queuedDoodadModelLoads.Add(normalizedModelPath))
+                {
+                    _pendingDoodadModelLoads.Enqueue(normalizedModelPath);
+                    deferredUniqueModels++;
+                }
+            }
+            else
+            {
+                renderer = GetOrLoadDoodadModel(modelPath);
+            }
 
             _doodadInstances.Add(new DoodadInstance
             {
                 ModelPath = modelPath,
+                NormalizedModelPath = normalizedModelPath,
                 Renderer = renderer,
                 Transform = transform,
                 Visible = true,
                 DoodadDefIndex = (int)i,
                 LocalPosition = def.Position
             });
+            instanceIndices.Add(_doodadInstances.Count - 1);
+
+            if (_deferInitialDoodadLoads)
+                continue;
 
             if (renderer != null)
                 loaded++;
@@ -1162,7 +1201,40 @@ void main() {
             }
         }
 
-        ViewerLog.Trace($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
+        if (_deferInitialDoodadLoads)
+        {
+            ViewerLog.Trace($"[WmoRenderer] Doodads queued for deferred loading: {_doodadInstances.Count} instances, {deferredUniqueModels} unique models");
+        }
+        else
+        {
+            ViewerLog.Trace($"[WmoRenderer] Doodads: {loaded} loaded, {failed} failed ({emptyName} empty names, {notFound} not found, {parseError} parse errors), {_doodadModelCache.Count} unique models cached");
+        }
+    }
+
+    private void ProcessDeferredDoodadLoads()
+    {
+        if (!_deferInitialDoodadLoads || _pendingDoodadModelLoads.Count == 0)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        while (loadsCompleted < DeferredDoodadLoadsPerFrame
+            && stopwatch.Elapsed.TotalMilliseconds < DeferredDoodadLoadBudgetMs
+            && _pendingDoodadModelLoads.TryDequeue(out string? normalizedModelPath))
+        {
+            _queuedDoodadModelLoads.Remove(normalizedModelPath);
+            if (!_doodadInstanceIndicesByModel.TryGetValue(normalizedModelPath, out List<int>? indices) || indices.Count == 0)
+                continue;
+
+            string modelPath = _doodadSourceModelPaths.TryGetValue(normalizedModelPath, out string? sourceModelPath)
+                ? sourceModelPath
+                : _doodadInstances[indices[0]].ModelPath;
+            MdxRenderer? renderer = GetOrLoadDoodadModel(modelPath);
+            foreach (int idx in indices)
+                _doodadInstances[idx].Renderer = renderer;
+
+            loadsCompleted++;
+        }
     }
 
     private enum DoodadLoadResult { Loaded, NotFound, ParseError }
@@ -1871,6 +1943,7 @@ void main() {
     private class DoodadInstance
     {
         public string ModelPath = "";
+        public string NormalizedModelPath = "";
         public MdxRenderer? Renderer;
         public Matrix4x4 Transform;
         public bool Visible = true;

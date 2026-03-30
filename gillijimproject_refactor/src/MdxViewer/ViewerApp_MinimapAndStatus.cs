@@ -267,6 +267,17 @@ public partial class ViewerApp
         ImGui.SameLine();
         ImGui.TextDisabled($"Loaded {loadedTileCount}");
 
+        if (_minimapRenderer != null && (_minimapRenderer.IsBusy || _minimapRenderer.UploadedTileCount > 0 || _minimapRenderer.FailedTileCount > 0))
+        {
+            float progress = _minimapRenderer.LoadingProgress;
+            string overlay = _minimapRenderer.IsBusy
+                ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} queued"
+                : $"Minimap ready  {_minimapRenderer.UploadedTileCount} tiles";
+            ImGui.ProgressBar(progress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), overlay);
+            if (_minimapRenderer.FailedTileCount > 0)
+                ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
+        }
+
         float controlsHeight = ImGui.GetCursorPosY() + 8f;
         float mapAvailableWidth = ImGui.GetContentRegionAvail().X;
         float mapAvailableHeight = ImGui.GetContentRegionAvail().Y - 4f;
@@ -356,6 +367,14 @@ public partial class ViewerApp
             int ctX = (int)MathF.Floor(camTileX);
             int ctY = (int)MathF.Floor(camTileY);
             ImGui.TextColored(new Vector4(1, 1, 1, 1), $"Tile: ({ctX},{ctY})  Zoom: {_minimapZoom:F1}x  Loaded: {loadedTileCount}");
+            if (_minimapRenderer != null && (_minimapRenderer.IsBusy || _minimapRenderer.UploadedTileCount > 0))
+            {
+                float progress = _minimapRenderer.LoadingProgress;
+                ImGui.ProgressBar(progress, new Vector2(MathF.Min(260f, mapSize * 0.45f), 0f),
+                    _minimapRenderer.IsBusy
+                        ? $"Minimap {progress * 100f:F0}%"
+                        : "Minimap ready");
+            }
             ImGui.SameLine();
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), $"  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click same tile to teleport");
 

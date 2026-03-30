@@ -682,6 +682,9 @@ public partial class ViewerApp : IDisposable
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         _imGui.Update((float)dt);
         HandleKeyboardInput((float)dt);
+        _minimapRenderer?.ProcessPendingLoads(
+            maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
+            maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
         UpdateSqlSpawnStreaming();
     }
 
@@ -4985,6 +4988,10 @@ void main() {
                 ImGui.TreePop();
             }
         }
+
+        bool objectFogEnabled = _worldScene.ObjectFogEnabled;
+        if (ImGui.Checkbox("Fog Objects", ref objectFogEnabled))
+            _worldScene.ObjectFogEnabled = objectFogEnabled;
         else if (!_worldScene.WlLoadAttempted)
         {
             if (ImGui.Button("Load WL Liquids"))
