@@ -411,6 +411,8 @@ FodyWeavers.xsd
 # WoW Data Files
 *.adt
 *.pm4
+!wow-viewer/src/core/WowViewer.Core.PM4/
+!wow-viewer/src/core/WowViewer.Core.PM4/**
 *.wlw
 *.wlm
 *.wlq
