@@ -454,6 +454,13 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
                 ImGui.Separator();
                 ImGui.TextWrapped(_selectedObjectInfo);
+                if (_worldScene?.HasSelectedPm4Object == true)
+                {
+                    ImGui.Spacing();
+                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                    if (ImGui.CollapsingHeader("PM4 Matches"))
+                        DrawPm4SelectedObjectMatchSuggestions("SidebarSelectedPm4", compact: true);
+                }
                 DrawSelectedTaxiControls();
                 DrawSelectedPm4ObjectGraph("SidebarSelectedObject");
                 DrawSelectedWmoControls();

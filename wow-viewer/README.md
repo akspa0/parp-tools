@@ -383,8 +383,11 @@ Current PM4 inspect slice:
 - `src/core/WowViewer.Core.PM4` now also contains the first single-file PM4 analyzer and report layer.
 - `src/core/WowViewer.Core.PM4` now also contains a research-only CK24 forensic report layer for targeted object-graph export, raw MSLK rows, raw linked MPRL rows, footprint counts, and placement-vs-heading comparison.
 - `src/core/WowViewer.Core.PM4` now also contains a research-only hierarchy analyzer that ports the old object-hypothesis family splits and enriches them with shared placement evidence plus dominant `MSLK.GroupObjectId` ownership.
+- `pm4 match` currently uses shared PM4 footprint overlap scoring first, then linked MPRL anchor proximity when present, and prefers MDX collision bounds over generic model bounds when the asset exposes collision data.
+- `pm4 match --object-output-dir <directory>` writes one JSON file per PM4 object plus a tile manifest, including the selected MSUR surface slice and top placement candidates so later rebuild tooling can consume the artifacts directly.
 - `tools/inspect/WowViewer.Tool.Inspect` now supports:
 	- `pm4 inspect --input <file.pm4>`
+	- `pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]`
 	- `pm4 hierarchy --input <file.pm4> [--output <report.json>]`
 	- `pm4 linkage --input <directory> [--output <report.json>]`
 	- `pm4 mscn --input <directory> [--output <report.json>]`
@@ -394,6 +397,8 @@ Current PM4 inspect slice:
 	- `pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]`
 - Smoke-test command that passed on Mar 25, 2026:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 match --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4 --placements ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0_obj0.adt --archive-root <game data dir> --max-matches 8 --search-range 128 --output .\output\pm4-match-development-00-00.json`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 match --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4 --placements ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0_obj0.adt --archive-root <game data dir> --max-matches 3 --search-range 128 --object-output-dir .\output\pm4-match-development-00-00-objects`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 hierarchy --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_00_00.pm4`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 linkage --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- pm4 mscn --input ..\gillijimproject_refactor\test_data\development\World\Maps\development`

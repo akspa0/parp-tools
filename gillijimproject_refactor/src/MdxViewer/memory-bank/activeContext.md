@@ -1,5 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 30, 2026 - Zero-CK24 Seed Buckets Now Use MSLK Ownership Before Connectivity Fallback
+
+- latest PM4 regrouping investigation narrowed the remaining zero-`CK24` fragmentation to one runtime decision in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - zero/root seed buckets were still bypassing `SplitSurfaceGroupByMslk(...)`
+   - they went straight from `(GroupKey, AttributeMask)` seed grouping into connectivity splitting, which over-fragmented linked families whenever `MSLK.GroupObjectId` tied together disconnected or weakly connected pieces
+- landed correction:
+   - zero/root seed buckets now take an `MSLK`-first split path via `SplitZeroCk24SeedGroup(...)`
+   - subgroups that already resolve a non-zero dominant `MSLK.GroupObjectId` stay intact
+   - only the leftover subgroups with no `MSLK` ownership fall back to connectivity splitting
+- linked placement-ref collection was also tightened to match the research-side behavior more closely:
+   - when a PM4 subgroup already resolves one or more `MSLK.GroupObjectId` values, `CollectLinkedPositionRefs(...)` now gathers `MPRL` refs from all links in those ownership families before falling back to direct surface-linked `RefIndex` lookup
+- important boundary:
+   - this does not reopen the earlier fake-`MsurIndex` path; current evidence still says active `MSLK` layout is 20-byte and the old 24-byte `MsurIndex` interpretation is not the decoder we want to restore
+   - this is file-diagnostics clean, but not runtime-signed off yet on the development map
+   - solution build was attempted and failed only because `ParpToolsWoWViewer (16096)` still held the output DLLs open during copy
+
 ## Mar 29, 2026 - v0.4.6 Target Freezes PM4 Runtime Wins And Points The Renderer At Real Layers
 
 - latest user runtime report says the recent PM4 runtime fixes were the right ones and that PM4 objects are now almost `100%` correct on the active development-map workflow

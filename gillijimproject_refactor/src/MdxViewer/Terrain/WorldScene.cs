@@ -1608,6 +1608,310 @@ public class WorldScene : ISceneRenderer
         });
     }
 
+    internal Pm4ObjectMatchReport BuildPm4ObjectMatchReport(int maxMatchesPerObject = 8)
+    {
+        EnsurePm4OverlayMatchesCameraWindow(GetPm4LoadAnchorCameraPosition());
+
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        int resolvedMaxMatches = Math.Max(1, maxMatchesPerObject);
+        List<Pm4ObjectMatchState> pm4Objects = BuildPm4ObjectMatchStates();
+        List<Pm4PlacementMatchState> placements = BuildPm4PlacementMatchStates();
+
+        int objectsWithCandidates = 0;
+        int objectsWithNearCandidates = 0;
+        List<Pm4ObjectMatchObject> reports = new(pm4Objects.Count);
+
+        foreach (Pm4ObjectMatchState pm4Object in pm4Objects)
+        {
+            List<Pm4PlacementMatchEvaluation> rankedCandidates = placements
+                .Select(placement => new
+                {
+                    Placement = placement,
+                    Metrics = CorePm4CorrelationMath.EvaluateMetrics(
+                        pm4Object.BoundsMin,
+                        pm4Object.BoundsMax,
+                        pm4Object.Center,
+                        pm4Object.FootprintHull,
+                        pm4Object.FootprintArea,
+                        placement.WorldBoundsMin,
+                        placement.WorldBoundsMax,
+                        placement.Center,
+                        placement.FootprintHull,
+                        placement.FootprintArea),
+                    AnchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, placement.PlacementPosition),
+                })
+                .OrderBy(candidate => GetPm4ObjectMatchEvidenceRank(candidate.Placement))
+                .ThenByDescending(candidate => candidate.Placement.SameTile(pm4Object.TileX, pm4Object.TileY))
+                .ThenBy(candidate => pm4Object.Object.LinkedPositionRefCount > 0 ? candidate.AnchorPlanarGap : float.MaxValue)
+                .ThenByDescending(candidate => candidate.Metrics.PlanarOverlapRatio)
+                .ThenByDescending(candidate => candidate.Metrics.VolumeOverlapRatio)
+                .ThenBy(candidate => candidate.Metrics.PlanarGap)
+                .ThenBy(candidate => candidate.Metrics.VerticalGap)
+                .ThenBy(candidate => candidate.Metrics.CenterDistance)
+                .ThenByDescending(candidate => candidate.Metrics.FootprintOverlapRatio)
+                .ThenBy(candidate => candidate.Metrics.FootprintDistance)
+                .Select(candidate => new Pm4PlacementMatchEvaluation(
+                    candidate.Placement,
+                    candidate.AnchorPlanarGap,
+                    candidate.Metrics))
+                .ToList();
+
+            if (rankedCandidates.Count > 0)
+                objectsWithCandidates++;
+
+            int nearCandidateCount = rankedCandidates.Count(static candidate =>
+                candidate.Metrics.PlanarOverlapRatio > 0f
+                || candidate.Metrics.VolumeOverlapRatio > 0f
+                || candidate.AnchorPlanarGap <= 64f
+                || (candidate.Metrics.PlanarGap <= 32f && candidate.Metrics.VerticalGap <= 96f));
+            if (nearCandidateCount > 0)
+                objectsWithNearCandidates++;
+
+            List<Pm4ObjectMatchCandidate> candidates = rankedCandidates
+                .Take(resolvedMaxMatches)
+                .Select(candidate => new Pm4ObjectMatchCandidate(
+                    candidate.Placement.TileX,
+                    candidate.Placement.TileY,
+                    candidate.Placement.Kind,
+                    candidate.Placement.UniqueId,
+                    candidate.Placement.ModelName,
+                    candidate.Placement.ModelPath,
+                    candidate.Placement.ModelKey,
+                    candidate.Placement.SameTile(pm4Object.TileX, pm4Object.TileY),
+                    candidate.Placement.AssetResolved,
+                    candidate.Placement.EvidenceSource,
+                    candidate.Placement.PlacementFlags,
+                    candidate.Placement.PlacementPosition,
+                    candidate.Placement.PlacementRotation,
+                    candidate.Placement.PlacementScale,
+                    candidate.AnchorPlanarGap,
+                    candidate.Metrics.PlanarGap,
+                    candidate.Metrics.VerticalGap,
+                    candidate.Metrics.CenterDistance,
+                    candidate.Metrics.PlanarOverlapRatio,
+                    candidate.Metrics.VolumeOverlapRatio,
+                    candidate.Metrics.FootprintOverlapRatio,
+                    candidate.Metrics.FootprintAreaRatio,
+                    candidate.Metrics.FootprintDistance,
+                    candidate.Placement.WorldBoundsMin,
+                    candidate.Placement.WorldBoundsMax,
+                    candidate.Placement.Center,
+                    candidate.Placement.MeshGroupCount,
+                    candidate.Placement.MeshVertexCount,
+                    candidate.Placement.MeshTriangleCount,
+                    candidate.Placement.FootprintSampleCount,
+                    candidate.Placement.WorldFootprintArea))
+                .ToList();
+
+            reports.Add(new Pm4ObjectMatchObject(
+                pm4Object.TileX,
+                pm4Object.TileY,
+                pm4Object.Object.Ck24,
+                pm4Object.Object.Ck24Type,
+                pm4Object.Object.Ck24ObjectId,
+                pm4Object.Object.ObjectPartId,
+                pm4Object.Object.LinkGroupObjectId,
+                pm4Object.Object.SurfaceCount,
+                pm4Object.Object.LinkedPositionRefCount,
+                pm4Object.Object.DominantGroupKey,
+                pm4Object.Object.DominantAttributeMask,
+                pm4Object.Object.DominantMdosIndex,
+                pm4Object.Object.AverageSurfaceHeight,
+                pm4Object.Object.LinkedPositionRefSummary,
+                pm4Object.PlacementAnchor,
+                pm4Object.BoundsMin,
+                pm4Object.BoundsMax,
+                pm4Object.Center,
+                rankedCandidates.Count,
+                nearCandidateCount,
+                rankedCandidates.Count(candidate => candidate.Placement.Kind == "wmo"),
+                rankedCandidates.Count(candidate => candidate.Placement.Kind == "m2"),
+                candidates));
+        }
+
+        return new Pm4ObjectMatchReport(
+            DateTime.UtcNow,
+            _terrainManager.MapName,
+            _pm4Status,
+            new Pm4ObjectMatchSummary(
+                pm4Objects.Count,
+                placements.Count(static placement => placement.Kind == "wmo"),
+                placements.Count(static placement => placement.Kind == "m2"),
+                objectsWithCandidates,
+                objectsWithNearCandidates,
+                resolvedMaxMatches),
+            reports);
+    }
+
+    private List<Pm4ObjectMatchState> BuildPm4ObjectMatchStates()
+    {
+        bool applyPm4Transform = !IsNearZeroVector(_pm4OverlayTranslation)
+            || !IsNearZeroVector(_pm4OverlayRotationDegrees)
+            || !IsNearOneVector(_pm4OverlayScale);
+        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+        List<Pm4ObjectMatchState> states = new(_pm4ObjectLookup.Count);
+
+        foreach (var tileEntry in _pm4TileObjects)
+        {
+            foreach (Pm4OverlayObject obj in tileEntry.Value)
+            {
+                var objectKey = (tileEntry.Key.tileX, tileEntry.Key.tileY, obj.Ck24, obj.ObjectPartId);
+                Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                Vector3 boundsMin = obj.BoundsMin;
+                Vector3 boundsMax = obj.BoundsMax;
+                Vector3 center = obj.Center;
+                Vector3 placementAnchor = obj.PlacementAnchor;
+                if (applyObjectTransform)
+                {
+                    TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+                    center = ApplyPm4OverlayTransform(obj.Center, objectTransform);
+                    placementAnchor = ApplyPm4OverlayTransform(obj.PlacementAnchor, objectTransform);
+                }
+
+                Vector2[] footprintHull = BuildPm4BoundsFootprintHull(boundsMin, boundsMax);
+                float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                states.Add(new Pm4ObjectMatchState(tileEntry.Key.tileX, tileEntry.Key.tileY, objectKey, obj, placementAnchor, boundsMin, boundsMax, center, footprintHull, footprintArea));
+            }
+        }
+
+        return states;
+    }
+
+    private List<Pm4PlacementMatchState> BuildPm4PlacementMatchStates()
+    {
+        Dictionary<int, ModfPlacement> modfByUniqueId = _terrainManager.Adapter.ModfPlacements
+            .GroupBy(static placement => placement.UniqueId)
+            .ToDictionary(static group => group.Key, static group => group.First());
+        List<Pm4PlacementMatchState> states = new(_tileWmoInstances.Count * 4 + _tileMdxInstances.Count * 4);
+
+        foreach (var tileEntry in _tileWmoInstances)
+        {
+            foreach (ObjectInstance instance in tileEntry.Value)
+            {
+                bool hasMeshSummary = _assets.TryGetWmoMeshSummary(instance.ModelKey, out WmoMeshSummary meshSummary);
+                Vector3 worldBoundsMin = instance.BoundsMin;
+                Vector3 worldBoundsMax = instance.BoundsMax;
+                Vector2[] footprintHull = BuildPm4BoundsFootprintHull(worldBoundsMin, worldBoundsMax);
+                float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                int meshGroupCount = 0;
+                int meshVertexCount = 0;
+                int meshTriangleCount = 0;
+                int footprintSampleCount = 0;
+                float worldFootprintArea = footprintArea;
+                string evidenceSource = "modf-bounds";
+
+                if (hasMeshSummary)
+                {
+                    TransformBounds(meshSummary.BoundsMin, meshSummary.BoundsMax, instance.Transform, out worldBoundsMin, out worldBoundsMax);
+                    footprintHull = CorePm4CorrelationMath.BuildTransformedFootprintHull(meshSummary.FootprintSampleVertices, instance.Transform);
+                    footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                    meshGroupCount = meshSummary.GroupCount;
+                    meshVertexCount = meshSummary.VertexCount;
+                    meshTriangleCount = meshSummary.TriangleCount;
+                    footprintSampleCount = meshSummary.FootprintSampleCount;
+                    worldFootprintArea = footprintArea;
+                    evidenceSource = "wmo-mesh";
+                }
+
+                ushort flags = modfByUniqueId.TryGetValue(instance.UniqueId, out ModfPlacement rawPlacement)
+                    ? rawPlacement.Flags
+                    : (ushort)0;
+
+                states.Add(new Pm4PlacementMatchState(
+                    tileEntry.Key.Item1,
+                    tileEntry.Key.Item2,
+                    "wmo",
+                    instance.UniqueId,
+                    instance.ModelName,
+                    instance.ModelPath,
+                    instance.ModelKey,
+                    true,
+                    evidenceSource,
+                    flags,
+                    instance.PlacementPosition,
+                    instance.PlacementRotation,
+                    instance.PlacementScale,
+                    worldBoundsMin,
+                    worldBoundsMax,
+                    footprintHull,
+                    footprintArea,
+                    meshGroupCount,
+                    meshVertexCount,
+                    meshTriangleCount,
+                    footprintSampleCount,
+                    worldFootprintArea));
+            }
+        }
+
+        foreach (var tileEntry in _tileMdxInstances)
+        {
+            foreach (ObjectInstance instance in tileEntry.Value)
+            {
+                Vector3 worldBoundsMin = instance.BoundsMin;
+                Vector3 worldBoundsMax = instance.BoundsMax;
+                Vector2[] footprintHull = BuildPm4BoundsFootprintHull(worldBoundsMin, worldBoundsMax);
+                float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                states.Add(new Pm4PlacementMatchState(
+                    tileEntry.Key.Item1,
+                    tileEntry.Key.Item2,
+                    "m2",
+                    instance.UniqueId,
+                    instance.ModelName,
+                    instance.ModelPath,
+                    instance.ModelKey,
+                    true,
+                    "instance-bounds",
+                    0,
+                    instance.PlacementPosition,
+                    instance.PlacementRotation,
+                    instance.PlacementScale,
+                    worldBoundsMin,
+                    worldBoundsMax,
+                    footprintHull,
+                    footprintArea,
+                    0,
+                    0,
+                    0,
+                    0,
+                    footprintArea));
+            }
+        }
+
+        return states;
+    }
+
+    private static int GetPm4ObjectMatchEvidenceRank(Pm4PlacementMatchState placement)
+    {
+        if (placement.Kind == "wmo" && string.Equals(placement.EvidenceSource, "wmo-mesh", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        if (placement.Kind == "wmo")
+            return 1;
+
+        return 2;
+    }
+
+    private static float ComputePm4ObjectAnchorPlanarGap(Vector3 anchor, Vector3 placementPosition)
+    {
+        if (!float.IsFinite(anchor.X) || !float.IsFinite(anchor.Y) || !float.IsFinite(placementPosition.X) || !float.IsFinite(placementPosition.Y))
+            return float.MaxValue;
+
+        return Vector2.Distance(new Vector2(anchor.X, anchor.Y), new Vector2(placementPosition.X, placementPosition.Y));
+    }
+
+    private static Vector2[] BuildPm4BoundsFootprintHull(Vector3 boundsMin, Vector3 boundsMax)
+    {
+        return
+        [
+            new Vector2(boundsMin.X, boundsMin.Y),
+            new Vector2(boundsMax.X, boundsMin.Y),
+            new Vector2(boundsMax.X, boundsMax.Y),
+            new Vector2(boundsMin.X, boundsMax.Y),
+        ];
+    }
+
     /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
     public ObjectInstance? SelectedInstance => _selectedObjectType switch
     {
@@ -2906,7 +3210,7 @@ public class WorldScene : ISceneRenderer
             float seedRendererFrameRotationRadians = ConvertWorldYawCorrectionToRendererRotationRadians(seedWorldYawCorrection);
             IReadOnlyList<Pm4ConnectorKey> seedConnectorKeys = BuildCk24ConnectorKeys(pm4, ck24Surfaces, seedPlacement);
             List<List<Pm4IndexedSurface>> linkedGroups = seedGroup.RequiresConnectivitySeedSplit
-                ? SplitIndexedSurfaceGroupByConnectivity(pm4, surfaceGroup)
+                ? SplitZeroCk24SeedGroup(pm4, surfaceGroup)
                 : SplitSurfaceGroupByMslk(pm4, surfaceGroup);
 
             foreach (List<Pm4IndexedSurface> linkedGroup in linkedGroups)
@@ -3170,6 +3474,33 @@ public class WorldScene : ISceneRenderer
         return groups;
     }
 
+    private static List<List<Pm4IndexedSurface>> SplitZeroCk24SeedGroup(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
+    {
+        List<List<Pm4IndexedSurface>> mslkGroups = SplitSurfaceGroupByMslk(pm4, surfaces);
+        if (mslkGroups.Count == 0)
+            return mslkGroups;
+
+        var groups = new List<List<Pm4IndexedSurface>>();
+        foreach (List<Pm4IndexedSurface> group in mslkGroups)
+        {
+            if (group.Count <= 1)
+            {
+                groups.Add(group);
+                continue;
+            }
+
+            if (SelectDominantMslkGroupObjectId(pm4, group) != 0)
+            {
+                groups.Add(group);
+                continue;
+            }
+
+            groups.AddRange(SplitIndexedSurfaceGroupByConnectivity(pm4, group));
+        }
+
+        return groups;
+    }
+
     private static List<List<Pm4IndexedSurface>> SplitIndexedSurfaceGroupByConnectivity(Pm4File pm4, IReadOnlyList<Pm4IndexedSurface> surfaces)
     {
         IReadOnlyList<Vector3> meshVertices = pm4.KnownChunks.Msvt;
@@ -3306,6 +3637,26 @@ public class WorldScene : ISceneRenderer
         int surfaceCount = pm4.KnownChunks.Msur.Count;
         var surfaceIndices = new HashSet<int>(surfaces.Select(static surface => surface.SurfaceIndex));
         var seenRefIndices = new HashSet<int>();
+        HashSet<uint> groupObjectIds = CollectMslkGroupObjectIds(linkEntries, surfaceIndices, surfaceCount);
+
+        if (groupObjectIds.Count > 0)
+        {
+            for (int i = 0; i < linkEntries.Count; i++)
+            {
+                CorePm4MslkEntry link = linkEntries[i];
+                if (link.GroupObjectId == 0 || !groupObjectIds.Contains(link.GroupObjectId))
+                    continue;
+                if ((uint)link.RefIndex >= (uint)positionRefs.Count)
+                    continue;
+                if (!seenRefIndices.Add(link.RefIndex))
+                    continue;
+
+                refs.Add(positionRefs[link.RefIndex]);
+            }
+
+            if (refs.Count > 0)
+                return refs;
+        }
 
         for (int i = 0; i < linkEntries.Count; i++)
         {
@@ -3323,6 +3674,26 @@ public class WorldScene : ISceneRenderer
         }
 
         return refs;
+    }
+
+    private static HashSet<uint> CollectMslkGroupObjectIds(
+        IReadOnlyList<CorePm4MslkEntry> linkEntries,
+        HashSet<int> surfaceIndices,
+        int surfaceCount)
+    {
+        var groupObjectIds = new HashSet<uint>();
+        for (int i = 0; i < linkEntries.Count; i++)
+        {
+            CorePm4MslkEntry link = linkEntries[i];
+            if (link.GroupObjectId == 0)
+                continue;
+            if (!LinkReferencesSurface(link, surfaceIndices, surfaceCount))
+                continue;
+
+            groupObjectIds.Add(link.GroupObjectId);
+        }
+
+        return groupObjectIds;
     }
 
     private static bool LinkReferencesSurface(MslkEntry link, HashSet<int> surfaceIndices, int surfaceCount)
@@ -7850,6 +8221,125 @@ internal sealed record Pm4WmoCorrelationReport(
     string Pm4Status,
     Pm4WmoCorrelationSummary Summary,
     IReadOnlyList<Pm4WmoCorrelationPlacement> Placements);
+
+internal sealed record Pm4ObjectMatchSummary(
+    int Pm4ObjectCount,
+    int WmoPlacementCount,
+    int M2PlacementCount,
+    int ObjectsWithCandidates,
+    int ObjectsWithNearCandidates,
+    int MaxMatchesPerObject);
+
+internal sealed record Pm4ObjectMatchCandidate(
+    int TileX,
+    int TileY,
+    string Kind,
+    int UniqueId,
+    string ModelName,
+    string ModelPath,
+    string ModelKey,
+    bool SameTile,
+    bool AssetResolved,
+    string EvidenceSource,
+    ushort PlacementFlags,
+    Vector3 PlacementPosition,
+    Vector3 PlacementRotation,
+    float PlacementScale,
+    float AnchorPlanarGap,
+    float PlanarGap,
+    float VerticalGap,
+    float CenterDistance,
+    float PlanarOverlapRatio,
+    float VolumeOverlapRatio,
+    float FootprintOverlapRatio,
+    float FootprintAreaRatio,
+    float FootprintDistance,
+    Vector3 WorldBoundsMin,
+    Vector3 WorldBoundsMax,
+    Vector3 Center,
+    int MeshGroupCount,
+    int MeshVertexCount,
+    int MeshTriangleCount,
+    int FootprintSampleCount,
+    float WorldFootprintArea);
+
+internal sealed record Pm4ObjectMatchObject(
+    int TileX,
+    int TileY,
+    uint Ck24,
+    byte Ck24Type,
+    ushort Ck24ObjectId,
+    int ObjectPartId,
+    uint LinkGroupObjectId,
+    int SurfaceCount,
+    int LinkedPositionRefCount,
+    byte DominantGroupKey,
+    byte DominantAttributeMask,
+    uint DominantMdosIndex,
+    float AverageSurfaceHeight,
+    Pm4LinkedPositionRefSummary LinkedPositionRefSummary,
+    Vector3 PlacementAnchor,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3 Center,
+    int CandidateCount,
+    int NearCandidateCount,
+    int WmoCandidateCount,
+    int M2CandidateCount,
+    IReadOnlyList<Pm4ObjectMatchCandidate> Candidates);
+
+internal sealed record Pm4ObjectMatchReport(
+    DateTime GeneratedAtUtc,
+    string MapName,
+    string Pm4Status,
+    Pm4ObjectMatchSummary Summary,
+    IReadOnlyList<Pm4ObjectMatchObject> Objects);
+
+internal readonly record struct Pm4PlacementMatchState(
+    int TileX,
+    int TileY,
+    string Kind,
+    int UniqueId,
+    string ModelName,
+    string ModelPath,
+    string ModelKey,
+    bool AssetResolved,
+    string EvidenceSource,
+    ushort PlacementFlags,
+    Vector3 PlacementPosition,
+    Vector3 PlacementRotation,
+    float PlacementScale,
+    Vector3 WorldBoundsMin,
+    Vector3 WorldBoundsMax,
+    IReadOnlyList<Vector2> FootprintHull,
+    float FootprintArea,
+    int MeshGroupCount,
+    int MeshVertexCount,
+    int MeshTriangleCount,
+    int FootprintSampleCount,
+    float WorldFootprintArea)
+{
+    public Vector3 Center => (WorldBoundsMin + WorldBoundsMax) * 0.5f;
+
+    public bool SameTile(int tileX, int tileY) => TileX == tileX && TileY == tileY;
+}
+
+internal readonly record struct Pm4PlacementMatchEvaluation(
+    Pm4PlacementMatchState Placement,
+    float AnchorPlanarGap,
+    CorePm4CorrelationMetrics Metrics);
+
+internal readonly record struct Pm4ObjectMatchState(
+    int TileX,
+    int TileY,
+    (int tileX, int tileY, uint ck24, int objectPart) ObjectKey,
+    Pm4OverlayObject Object,
+    Vector3 PlacementAnchor,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3 Center,
+    IReadOnlyList<Vector2> FootprintHull,
+    float FootprintArea);
 
 public readonly record struct Pm4OfflineObjExportSummary(
     string OutputDirectory,

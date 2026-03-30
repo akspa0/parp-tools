@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using ImGuiNET;
 using MdxViewer.Logging;
 using MdxViewer.Terrain;
@@ -112,6 +113,12 @@ public partial class ViewerApp
             ImGui.SameLine();
             if (ImGui.Button("Export PM4 OBJ Set"))
                 ExportPm4ObjectsObjSet();
+            ImGui.SameLine();
+            if (ImGui.Button("PM4 Object Match"))
+            {
+                _showPm4ObjectMatchWindow = true;
+                EnsurePm4ObjectMatchReportLoaded();
+            }
             ImGui.SameLine();
             if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
                 ExportPm4WmoCorrelationJson();
@@ -366,12 +373,23 @@ public partial class ViewerApp
             layerScaleChanged = true;
         }
 
+        bool pm4TransformChanged = false;
+
         if (layerTranslationChanged)
+        {
             _worldScene.SelectedPm4Ck24LayerTranslation = selectedLayerTranslation;
+            pm4TransformChanged = true;
+        }
         if (layerRotationChanged)
+        {
             _worldScene.SelectedPm4Ck24LayerRotationDegrees = NormalizeRotationDegrees(selectedLayerRotation);
+            pm4TransformChanged = true;
+        }
         if (layerScaleChanged)
+        {
             _worldScene.SelectedPm4Ck24LayerScale = selectedLayerScale;
+            pm4TransformChanged = true;
+        }
 
         ImGui.Separator();
         ImGui.Text("Object Translation:");
@@ -541,28 +559,47 @@ public partial class ViewerApp
         }
 
         if (translationChanged)
+        {
             _worldScene.SelectedPm4ObjectTranslation = selectedObjectTranslation;
+            pm4TransformChanged = true;
+        }
         if (rotationChanged)
+        {
             _worldScene.SelectedPm4ObjectRotationDegrees = NormalizeRotationDegrees(selectedObjectRotation);
+            pm4TransformChanged = true;
+        }
         if (scaleChanged)
+        {
             _worldScene.SelectedPm4ObjectScale = selectedObjectScale;
+            pm4TransformChanged = true;
+        }
 
         ImGui.Separator();
 
         if (ImGui.Button("Reset Layer Move"))
+        {
             _worldScene.SelectedPm4Ck24LayerTranslation = Vector3.Zero;
+            pm4TransformChanged = true;
+        }
         ImGui.SameLine();
         if (ImGui.Button("Reset Layer Rot"))
+        {
             _worldScene.SelectedPm4Ck24LayerRotationDegrees = Vector3.Zero;
+            pm4TransformChanged = true;
+        }
         ImGui.SameLine();
         if (ImGui.Button("Reset Layer Scale"))
+        {
             _worldScene.SelectedPm4Ck24LayerScale = Vector3.One;
+            pm4TransformChanged = true;
+        }
 
         if (ImGui.Button("Reset Layer 9DoF"))
         {
             _worldScene.SelectedPm4Ck24LayerTranslation = Vector3.Zero;
             _worldScene.SelectedPm4Ck24LayerRotationDegrees = Vector3.Zero;
             _worldScene.SelectedPm4Ck24LayerScale = Vector3.One;
+            pm4TransformChanged = true;
         }
 
         ImGui.SameLine();
@@ -582,30 +619,49 @@ public partial class ViewerApp
         ImGui.Separator();
 
         if (ImGui.Button("Reset Obj Move"))
+        {
             _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
+            pm4TransformChanged = true;
+        }
         ImGui.SameLine();
         if (ImGui.Button("Reset Obj Rot"))
+        {
             _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
+            pm4TransformChanged = true;
+        }
         ImGui.SameLine();
         if (ImGui.Button("Reset Obj Scale"))
+        {
             _worldScene.SelectedPm4ObjectScale = Vector3.One;
+            pm4TransformChanged = true;
+        }
 
         if (ImGui.Button("Reset Obj 9DoF"))
         {
             _worldScene.SelectedPm4ObjectTranslation = Vector3.Zero;
             _worldScene.SelectedPm4ObjectRotationDegrees = Vector3.Zero;
             _worldScene.SelectedPm4ObjectScale = Vector3.One;
+            pm4TransformChanged = true;
         }
 
         ImGui.SameLine();
         if (ImGui.Button("Clear PM4 Selection"))
             _worldScene.ClearPm4ObjectSelection();
 
+        if (pm4TransformChanged)
+            InvalidatePm4DerivedReports();
+
         if (ImGui.Button("Dump PM4 Objects JSON"))
             ExportPm4ObjectsJson();
         ImGui.SameLine();
         if (ImGui.Button("Export PM4 OBJ Set"))
             ExportPm4ObjectsObjSet();
+        ImGui.SameLine();
+        if (ImGui.Button("PM4 Object Match"))
+        {
+            _showPm4ObjectMatchWindow = true;
+            EnsurePm4ObjectMatchReportLoaded();
+        }
         ImGui.SameLine();
         if (ImGui.Button("Dump PM4/WMO Correlation JSON"))
             ExportPm4WmoCorrelationJson();
@@ -943,6 +999,12 @@ public partial class ViewerApp
         }
     }
 
+    private void InvalidatePm4DerivedReports()
+    {
+        _pm4ObjectMatchReport = null;
+        _pm4WmoCorrelationReport = null;
+    }
+
     private void EnsurePm4WmoCorrelationReportLoaded()
     {
         if (_pm4WmoCorrelationReport == null)
@@ -976,6 +1038,320 @@ public partial class ViewerApp
             _statusMessage = $"PM4/WMO correlation refresh failed: {ex.Message}";
             ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Correlation] Report refresh failed: {ex}");
         }
+    }
+
+    private void EnsurePm4ObjectMatchReportLoaded()
+    {
+        if (_pm4ObjectMatchReport == null)
+            RefreshPm4ObjectMatchReport();
+    }
+
+    private void RefreshPm4ObjectMatchReport()
+    {
+        if (_worldScene == null)
+            return;
+
+        try
+        {
+            _pm4ObjectMatchReport = _worldScene.BuildPm4ObjectMatchReport(_pm4ObjectMatchMaxMatchesPerObject);
+            if (_pm4ObjectMatchReport.Objects.Count == 0)
+            {
+                _selectedPm4ObjectMatchObjectIndex = -1;
+                _selectedPm4ObjectMatchCandidateIndex = 0;
+            }
+            else if (!TryGetSelectedPm4ObjectMatch(out _)
+                && (_selectedPm4ObjectMatchObjectIndex < 0 || _selectedPm4ObjectMatchObjectIndex >= _pm4ObjectMatchReport.Objects.Count))
+            {
+                _selectedPm4ObjectMatchObjectIndex = 0;
+                _selectedPm4ObjectMatchCandidateIndex = 0;
+            }
+
+            _statusMessage = $"Refreshed PM4 object match report ({_pm4ObjectMatchReport.Summary.Pm4ObjectCount} PM4 objects).";
+        }
+        catch (Exception ex)
+        {
+            _pm4ObjectMatchReport = null;
+            _statusMessage = $"PM4 object match refresh failed: {ex.Message}";
+            ViewerLog.Error(ViewerLog.Category.Terrain, $"[PM4 Object Match] Report refresh failed: {ex}");
+        }
+    }
+
+    private void DrawPm4ObjectMatchWindow()
+    {
+        if (_worldScene == null)
+        {
+            _showPm4ObjectMatchWindow = false;
+            _pm4ObjectMatchReport = null;
+            return;
+        }
+
+        EnsurePm4ObjectMatchReportLoaded();
+
+        ImGui.SetNextWindowSize(new Vector2(1220, 760), ImGuiCond.FirstUseEver);
+        if (!ImGui.Begin("PM4 Object Match", ref _showPm4ObjectMatchWindow))
+        {
+            ImGui.End();
+            return;
+        }
+
+        int requestedMatches = _pm4ObjectMatchMaxMatchesPerObject;
+        ImGui.SetNextItemWidth(110f);
+        if (ImGui.SliderInt("Top Matches", ref requestedMatches, 3, 5))
+        {
+            _pm4ObjectMatchMaxMatchesPerObject = Math.Clamp(requestedMatches, 3, 5);
+            RefreshPm4ObjectMatchReport();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Refresh"))
+            RefreshPm4ObjectMatchReport();
+
+        if (_pm4ObjectMatchReport == null)
+        {
+            ImGui.TextDisabled("No PM4 object match report is loaded.");
+            ImGui.End();
+            return;
+        }
+
+        Pm4ObjectMatchReport report = _pm4ObjectMatchReport;
+        ImGui.TextDisabled(
+            $"Generated {report.GeneratedAtUtc:yyyy-MM-dd HH:mm:ss} UTC | PM4 objects {report.Summary.Pm4ObjectCount}, WMO placements {report.Summary.WmoPlacementCount}, M2 placements {report.Summary.M2PlacementCount}");
+        ImGui.TextDisabled(
+            $"Objects with candidates {report.Summary.ObjectsWithCandidates}/{report.Summary.Pm4ObjectCount}, near {report.Summary.ObjectsWithNearCandidates}, status: {report.Pm4Status}");
+        ImGui.TextDisabled("Ranking is WMO-mesh evidence first, then same-tile and anchor/planar fit. Footprint is only a late tiebreaker now.");
+        ImGui.Separator();
+
+        if (!_worldScene.HasSelectedPm4Object)
+        {
+            ImGui.TextDisabled("Select a PM4 object in the scene to see its top suggested matches.");
+            ImGui.End();
+            return;
+        }
+
+        if (!TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch))
+        {
+            ImGui.TextDisabled("The selected PM4 object is not present in the current match report. Refresh and try again.");
+            ImGui.End();
+            return;
+        }
+
+        DrawPm4SelectedObjectMatchSuggestions("WindowPm4Match", compact: false);
+
+        ImGui.End();
+    }
+
+    private bool TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch)
+    {
+        objectMatch = null!;
+
+        if (_worldScene == null || !_worldScene.SelectedPm4ObjectKey.HasValue)
+            return false;
+
+        EnsurePm4ObjectMatchReportLoaded();
+        if (_pm4ObjectMatchReport == null)
+            return false;
+
+        var selectedKey = _worldScene.SelectedPm4ObjectKey.Value;
+        for (int index = 0; index < _pm4ObjectMatchReport.Objects.Count; index++)
+        {
+            Pm4ObjectMatchObject candidate = _pm4ObjectMatchReport.Objects[index];
+            if (candidate.TileX != selectedKey.tileX
+                || candidate.TileY != selectedKey.tileY
+                || candidate.Ck24 != selectedKey.ck24
+                || candidate.ObjectPartId != selectedKey.objectPart)
+            {
+                continue;
+            }
+
+            _selectedPm4ObjectMatchObjectIndex = index;
+            if (_selectedPm4ObjectMatchCandidateIndex < 0 || _selectedPm4ObjectMatchCandidateIndex >= candidate.Candidates.Count)
+                _selectedPm4ObjectMatchCandidateIndex = 0;
+
+            objectMatch = candidate;
+            return true;
+        }
+
+        _selectedPm4ObjectMatchObjectIndex = -1;
+        return false;
+    }
+
+    private void DrawPm4SelectedObjectMatchSuggestions(string idSuffix, bool compact)
+    {
+        if (_worldScene == null || !_worldScene.HasSelectedPm4Object)
+        {
+            ImGui.TextDisabled("Select a PM4 object in the scene to see suggested matches.");
+            return;
+        }
+
+        if (!TryGetSelectedPm4ObjectMatch(out Pm4ObjectMatchObject objectMatch))
+        {
+            ImGui.TextDisabled("No PM4 match report entry is available for the current selection.");
+            return;
+        }
+
+        int shownCandidateCount = Math.Min(objectMatch.Candidates.Count, Math.Clamp(_pm4ObjectMatchMaxMatchesPerObject, 3, 5));
+        bool hasSaved = TryGetSavedPm4ObjectMatch(objectMatch, out SavedPm4ObjectMatchSelection? savedSelection);
+
+        ImGui.Text($"CK24 0x{objectMatch.Ck24:X6} part {objectMatch.ObjectPartId} (tile {objectMatch.TileX},{objectMatch.TileY})");
+        ImGui.TextDisabled($"wmo={objectMatch.WmoCandidateCount} m2={objectMatch.M2CandidateCount} near={objectMatch.NearCandidateCount} refs={objectMatch.LinkedPositionRefCount} mslk=0x{objectMatch.LinkGroupObjectId:X8}");
+
+        if (hasSaved && savedSelection != null)
+            ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"Saved: {savedSelection.PlacementKind} uid={savedSelection.PlacementUniqueId} {savedSelection.ModelName} [{savedSelection.EvidenceSource}]");
+        else
+            ImGui.TextDisabled("Saved: none");
+
+        if (!compact)
+        {
+            if (ImGui.Button($"Frame PM4##{idSuffix}"))
+                SelectPm4ObjectMatchObject(objectMatch, frameCamera: true);
+
+            ImGui.SameLine();
+            if (ImGui.Button($"Jump To Alignment##{idSuffix}"))
+                SelectPm4ObjectMatchObject(objectMatch, frameCamera: false);
+
+            ImGui.SameLine();
+            if (ImGui.Button($"Clear Saved Choice##{idSuffix}"))
+                ClearSavedPm4ObjectMatch(objectMatch);
+        }
+        else if (ImGui.SmallButton($"Clear Saved Choice##{idSuffix}"))
+        {
+            ClearSavedPm4ObjectMatch(objectMatch);
+        }
+
+        ImGui.Separator();
+        ImGui.Text($"Top matches ({shownCandidateCount}/{objectMatch.CandidateCount})");
+
+        if (shownCandidateCount == 0)
+        {
+            ImGui.TextDisabled("No placement candidates are available for this PM4 object.");
+            return;
+        }
+
+        for (int candidateIndex = 0; candidateIndex < shownCandidateCount; candidateIndex++)
+        {
+            Pm4ObjectMatchCandidate candidate = objectMatch.Candidates[candidateIndex];
+            bool isSaved = savedSelection != null
+                && string.Equals(savedSelection.PlacementKind, candidate.Kind, StringComparison.OrdinalIgnoreCase)
+                && savedSelection.PlacementUniqueId == candidate.UniqueId
+                && string.Equals(savedSelection.ModelPath, candidate.ModelPath, StringComparison.OrdinalIgnoreCase);
+
+            ImGui.PushID($"{idSuffix}_{candidateIndex}");
+            if (isSaved)
+                ImGui.TextColored(new Vector4(0.95f, 0.85f, 0.35f, 1f), $"{candidateIndex + 1}. {candidate.Kind.ToUpperInvariant()} {candidate.ModelName}  [saved]");
+            else
+                ImGui.TextWrapped($"{candidateIndex + 1}. {candidate.Kind.ToUpperInvariant()} {candidate.ModelName}");
+
+            ImGui.TextDisabled($"{candidate.EvidenceSource} | tile {candidate.TileX},{candidate.TileY} | anchor {candidate.AnchorPlanarGap:F1} | planar {candidate.PlanarGap:F1} | center {candidate.CenterDistance:F1}");
+            if (!compact)
+                ImGui.TextDisabled(candidate.ModelPath);
+
+            if (ImGui.SmallButton("Frame"))
+            {
+                _selectedPm4ObjectMatchCandidateIndex = candidateIndex;
+                FocusCameraOnBounds(candidate.WorldBoundsMin, candidate.WorldBoundsMax);
+            }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Save"))
+            {
+                _selectedPm4ObjectMatchCandidateIndex = candidateIndex;
+                SavePm4ObjectMatchSelection(objectMatch, candidate);
+            }
+
+            if (!compact)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Frame Pair"))
+                {
+                    _selectedPm4ObjectMatchCandidateIndex = candidateIndex;
+                    SelectPm4ObjectMatchObject(objectMatch, frameCamera: false);
+                    FocusCameraOnBounds(Vector3.Min(objectMatch.BoundsMin, candidate.WorldBoundsMin), Vector3.Max(objectMatch.BoundsMax, candidate.WorldBoundsMax));
+                }
+            }
+
+            ImGui.PopID();
+            if (candidateIndex + 1 < shownCandidateCount)
+                ImGui.Separator();
+        }
+    }
+
+    private void SelectPm4ObjectMatchObject(Pm4ObjectMatchObject objectMatch, bool frameCamera)
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_worldScene.SelectPm4Object((objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId)))
+        {
+            _showPm4AlignmentWindow = true;
+            if (frameCamera)
+                FocusCameraOnBounds(objectMatch.BoundsMin, objectMatch.BoundsMax);
+
+            _statusMessage = $"Selected PM4 object CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId}.";
+        }
+        else
+        {
+            _statusMessage = $"PM4 object CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId} is no longer available.";
+        }
+    }
+
+    private void SavePm4ObjectMatchSelection(Pm4ObjectMatchObject objectMatch, Pm4ObjectMatchCandidate candidate)
+    {
+        string mapName = _terrainManager?.MapName ?? _worldScene?.Terrain.MapName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(mapName))
+        {
+            _statusMessage = "Cannot save PM4 object match: map name is unavailable.";
+            return;
+        }
+
+        string key = BuildSavedPm4ObjectMatchKey(mapName, objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId);
+        _savedPm4ObjectMatches[key] = new SavedPm4ObjectMatchSelection
+        {
+            MapName = mapName,
+            TileX = objectMatch.TileX,
+            TileY = objectMatch.TileY,
+            Ck24 = objectMatch.Ck24,
+            ObjectPartId = objectMatch.ObjectPartId,
+            PlacementKind = candidate.Kind,
+            PlacementUniqueId = candidate.UniqueId,
+            PlacementTileX = candidate.TileX,
+            PlacementTileY = candidate.TileY,
+            ModelName = candidate.ModelName,
+            ModelPath = candidate.ModelPath,
+            EvidenceSource = candidate.EvidenceSource,
+        };
+
+        SaveViewerSettings();
+        _statusMessage = $"Saved PM4 object match: CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId} -> {candidate.Kind} uid={candidate.UniqueId}.";
+    }
+
+    private void ClearSavedPm4ObjectMatch(Pm4ObjectMatchObject objectMatch)
+    {
+        string mapName = _terrainManager?.MapName ?? _worldScene?.Terrain.MapName ?? string.Empty;
+        string key = BuildSavedPm4ObjectMatchKey(mapName, objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId);
+        if (_savedPm4ObjectMatches.Remove(key))
+        {
+            SaveViewerSettings();
+            _statusMessage = $"Cleared saved PM4 object match for CK24=0x{objectMatch.Ck24:X6} part={objectMatch.ObjectPartId}.";
+        }
+    }
+
+    private bool TryGetSavedPm4ObjectMatch(Pm4ObjectMatchObject objectMatch, out SavedPm4ObjectMatchSelection? selection)
+    {
+        string mapName = _terrainManager?.MapName ?? _worldScene?.Terrain.MapName ?? string.Empty;
+        string key = BuildSavedPm4ObjectMatchKey(mapName, objectMatch.TileX, objectMatch.TileY, objectMatch.Ck24, objectMatch.ObjectPartId);
+        if (_savedPm4ObjectMatches.TryGetValue(key, out SavedPm4ObjectMatchSelection? savedSelection))
+        {
+            selection = savedSelection;
+            return true;
+        }
+
+        selection = null;
+        return false;
+    }
+
+    private static string BuildSavedPm4ObjectMatchKey(string mapName, int tileX, int tileY, uint ck24, int objectPartId)
+    {
+        return $"{mapName.Trim().ToLowerInvariant()}|{tileX}|{tileY}|{ck24:X6}|{objectPartId}";
     }
 
     private void SelectPm4CorrelationMatch(Pm4WmoCorrelationMatch match, bool frameCamera)
@@ -1020,6 +1396,7 @@ public partial class ViewerApp
             delta.Z = 0f;
 
         _worldScene.SelectedPm4ObjectTranslation += delta;
+        InvalidatePm4DerivedReports();
         _showPm4AlignmentWindow = true;
 
         string axes = includeZ ? "XYZ" : "XY";
@@ -1046,6 +1423,7 @@ public partial class ViewerApp
         _worldScene.Pm4OverlayTranslation = _pm4SavedOverlayTranslation;
         _worldScene.Pm4OverlayRotationDegrees = _pm4SavedOverlayRotationDegrees;
         _worldScene.Pm4OverlayScale = _pm4SavedOverlayScale;
+        InvalidatePm4DerivedReports();
     }
 
     private static Vector3 NormalizeRotationDegrees(Vector3 rotation)

@@ -481,6 +481,9 @@ static void RunPm4(string[] args)
 		case "inspect":
 			RunPm4Inspect(tail);
 			break;
+		case "match":
+			RunPm4Match(tail);
+			break;
 			case "hierarchy":
 				RunPm4Hierarchy(tail);
 				break;
@@ -533,6 +536,95 @@ static void RunWmo(string[] args)
 			Environment.ExitCode = 1;
 			break;
 	}
+}
+
+static void RunPm4Match(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? output = GetOption(args, "--output", "-o");
+	string? objectOutputDirectory = GetOption(args, "--object-output-dir", "-d");
+	string? maxMatchesText = GetOption(args, "--max-matches", "-n");
+	string? searchRangeText = GetOption(args, "--search-range", "-s");
+	int maxMatches = 8;
+	float searchRange = 128f;
+	if (!string.IsNullOrWhiteSpace(maxMatchesText) && (!int.TryParse(maxMatchesText, out maxMatches) || maxMatches <= 0))
+	{
+		Console.Error.WriteLine("Error: --max-matches must be a positive integer.");
+		Environment.ExitCode = 1;
+		return;
+	}
+	if (!string.IsNullOrWhiteSpace(searchRangeText) && (!float.TryParse(searchRangeText, out searchRange) || searchRange <= 0f))
+	{
+		Console.Error.WriteLine("Error: --search-range must be a positive number.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 file is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required for pm4 match so WMO/M2 assets can be read from game archives.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(placements))
+	{
+		if (!Pm4CoordinateService.TryParseTileCoordinates(input, out int tileX, out int tileY))
+		{
+			Console.Error.WriteLine("Error: could not derive tile coordinates from the PM4 filename; provide --placements <tile_obj0.adt> explicitly.");
+			Environment.ExitCode = 1;
+			return;
+		}
+
+		string fileName = Path.GetFileNameWithoutExtension(input);
+		int lastUnderscore = fileName.LastIndexOf('_');
+		int previousUnderscore = lastUnderscore > 0 ? fileName.LastIndexOf('_', lastUnderscore - 1) : -1;
+		string mapName = previousUnderscore > 0 ? fileName[..previousUnderscore] : fileName;
+		placements = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(input)) ?? string.Empty, $"{mapName}_{tileX}_{tileY}_obj0.adt");
+	}
+
+	if (!File.Exists(placements))
+	{
+		Console.Error.WriteLine($"Error: placement source '{placements}' does not exist.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, listfilePath, maxMatches, searchRange);
+	bool wroteArtifact = false;
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, Pm4MatchSupport.ToJson(result));
+		Console.WriteLine($"Wrote {outputPath}");
+		wroteArtifact = true;
+	}
+
+	if (!string.IsNullOrWhiteSpace(objectOutputDirectory))
+	{
+		IReadOnlyList<string> writtenPaths = Pm4MatchSupport.WriteObjectArtifacts(result, objectOutputDirectory);
+		Console.WriteLine($"Wrote {writtenPaths.Count} PM4 match artifact files under {Path.GetFullPath(objectOutputDirectory)}");
+		wroteArtifact = true;
+	}
+
+	if (wroteArtifact)
+		return;
+
+	Pm4MatchSupport.Print(result);
 }
 
 static void RunWmoInspect(string[] args)
@@ -2235,6 +2327,7 @@ static void ShowPm4Usage()
 {
 	Console.WriteLine("PM4 commands:");
 	Console.WriteLine("  pm4 inspect --input <file.pm4>");
+	Console.WriteLine("  pm4 match --input <file.pm4> --archive-root <game|data dir> [--placements <tile_obj0.adt>] [--listfile <listfile.txt>] [--max-matches <n>] [--search-range <units>] [--output <report.json>] [--object-output-dir <directory>]");
 	Console.WriteLine("  pm4 hierarchy --input <file.pm4> [--output <report.json>]");
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 mscn --input <directory> [--output <report.json>]");

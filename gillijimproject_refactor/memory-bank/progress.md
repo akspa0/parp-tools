@@ -1,5 +1,23 @@
 # Progress
 
+### Mar 30, 2026 - Zero-CK24 Regrouping Stops Skipping MSLK Ownership In WorldScene
+
+- narrowed the remaining zero/root PM4 regrouping problem in `src/MdxViewer/Terrain/WorldScene.cs` to the first split step after `(GroupKey, AttributeMask)` seed buckets were formed
+- previous behavior:
+	- zero-`CK24` seed buckets always skipped `SplitSurfaceGroupByMslk(...)`
+	- they went directly into connectivity splitting, so disconnected but still `MSLK.GroupObjectId`-related pieces were split apart before placement or matching logic could treat them as one family
+- landed behavior:
+	- zero/root seed buckets now run through `SplitZeroCk24SeedGroup(...)`
+	- groups with a non-zero dominant `MSLK.GroupObjectId` stay intact
+	- only the remaining groups with no `MSLK` ownership evidence fall back to connectivity splitting
+	- linked `MPRL` collection now also follows `MSLK.GroupObjectId` families first when one of those groups is already established for the current PM4 subgroup
+- important semantic boundary:
+	- this does not restore the old fake `MSLK.MsurIndex` path; current repo evidence still supports the 20-byte active `MSLK` layout and keeps `RefIndex` semantics partially open
+- validation completed:
+	- editor/file diagnostics for `src/MdxViewer/Terrain/WorldScene.cs` were clean after the change
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` was attempted on Mar 30, 2026 but did not complete because `ParpToolsWoWViewer (16096)` held output DLL locks (`MSB3021` / `MSB3027` copy failures)
+	- no live viewer/runtime signoff was completed yet on the development map
+
 ### Mar 29, 2026 - v0.4.6 Release Prep Aligns PM4 Wins With The Next Renderer Seam
 
 - user runtime feedback after the latest PM4 runtime fixes is now strongly positive: PM4 objects are described as almost `100%` correct on the development map

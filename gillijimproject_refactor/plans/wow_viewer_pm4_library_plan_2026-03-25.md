@@ -122,6 +122,9 @@ Current status in the workspace:
   - `WowViewer.Tool.Inspect` verb for `pm4 linkage`
   - `WowViewer.Tool.Inspect` verb for `pm4 mscn`
   - `WowViewer.Tool.Inspect` verb for `pm4 unknowns`
+  - `WowViewer.Tool.Inspect` verb for `pm4 match`, framed as PM4-object-centered nearby real-placement candidate search instead of exact PM4-to-placement identity
+  - current `pm4 match` ranking now stays on shared `Pm4CorrelationMath` and `Pm4PlacementMath`, using linked MPRL anchor proximity as a secondary signal and MDX collision bounds when available instead of adding a tool-local legacy matcher fork
+  - `pm4 match` can now emit per-object artifact JSON plus a tile manifest, keeping the selected MSUR surface slice and top placement candidates for later ADT/object rebuild tooling
 - first library-owned runtime contract slice now also landed:
   - shared `Pm4AxisConvention`, `Pm4CoordinateMode`, and `Pm4PlanarTransform` contracts
   - shared `Pm4CoordinateService`

@@ -79,7 +79,12 @@ public static class MdxSummaryReader
 
             string signature = Encoding.ASCII.GetString(signatureBytes);
             if (!string.Equals(signature, "MDLX", StringComparison.Ordinal))
+            {
+                if (string.Equals(signature, "MD20", StringComparison.Ordinal) || string.Equals(signature, "MD21", StringComparison.Ordinal))
+                    return ReadMd2xSummary(stream, sourcePath, signature);
+
                 throw new InvalidDataException($"File '{sourcePath}' does not contain an MDLX signature. Found '{signature}'.");
+            }
 
             List<MdxChunkSummary> chunks = [];
             uint? version = null;
@@ -214,6 +219,110 @@ public static class MdxSummaryReader
         {
             stream.Position = previousPosition;
         }
+    }
+
+    private static MdxSummary ReadMd2xSummary(Stream stream, string sourcePath, string signature)
+    {
+        const int VersionOffset = 0x04;
+        const int NameCountOffset = 0x08;
+        const int NameOffsetOffset = 0x0C;
+        const int BoundingBoxOffset = 0xB4;
+        const int BoundingBoxSizeBytes = 0x18;
+
+        uint? version = stream.Length >= VersionOffset + sizeof(uint)
+            ? ReadUInt32At(stream, VersionOffset)
+            : null;
+        string? modelName = TryReadMd2xName(stream, NameCountOffset, NameOffsetOffset);
+        (Vector3 min, Vector3 max)? bounds = TryReadMd2xBounds(stream, BoundingBoxOffset, BoundingBoxSizeBytes);
+
+        return new MdxSummary(
+            sourcePath,
+            signature,
+            version,
+            modelName,
+            null,
+            bounds?.min,
+            bounds?.max,
+            Array.Empty<MdxGlobalSequenceSummary>(),
+            Array.Empty<MdxSequenceSummary>(),
+            Array.Empty<MdxGeosetSummary>(),
+            Array.Empty<MdxGeosetAnimationSummary>(),
+            Array.Empty<MdxBoneSummary>(),
+            Array.Empty<MdxLightSummary>(),
+            Array.Empty<MdxHelperSummary>(),
+            Array.Empty<MdxAttachmentSummary>(),
+            Array.Empty<MdxParticleEmitter2Summary>(),
+            Array.Empty<MdxRibbonEmitterSummary>(),
+            Array.Empty<MdxCameraSummary>(),
+            Array.Empty<MdxEventSummary>(),
+            Array.Empty<MdxHitTestShapeSummary>(),
+            null,
+            Array.Empty<MdxPivotPointSummary>(),
+            Array.Empty<MdxTextureSummary>(),
+            Array.Empty<MdxMaterialSummary>(),
+            Array.Empty<MdxChunkSummary>(),
+            0,
+            0);
+    }
+
+    private static string? TryReadMd2xName(Stream stream, int nameCountOffset, int nameOffsetOffset)
+    {
+        if (stream.Length < nameOffsetOffset + sizeof(uint))
+            return null;
+
+        uint nameLength = ReadUInt32At(stream, nameCountOffset);
+        uint nameOffset = ReadUInt32At(stream, nameOffsetOffset);
+        if (nameLength == 0 || nameOffset == 0 || nameOffset >= stream.Length)
+            return null;
+
+        int readableLength = checked((int)Math.Min(nameLength, stream.Length - nameOffset));
+        if (readableLength <= 0)
+            return null;
+
+        long previousPosition = stream.Position;
+        try
+        {
+            stream.Position = nameOffset;
+            byte[] bytes = new byte[readableLength];
+            stream.ReadExactly(bytes);
+            int terminator = Array.IndexOf(bytes, (byte)0);
+            int length = terminator >= 0 ? terminator : bytes.Length;
+            return length > 0 ? Encoding.UTF8.GetString(bytes, 0, length) : null;
+        }
+        finally
+        {
+            stream.Position = previousPosition;
+        }
+    }
+
+    private static (Vector3 min, Vector3 max)? TryReadMd2xBounds(Stream stream, int boundsOffset, int boundsSizeBytes)
+    {
+        if (stream.Length < boundsOffset + boundsSizeBytes)
+            return null;
+
+        Vector3 min = new(
+            ReadSingleAt(stream, boundsOffset + 0x00),
+            ReadSingleAt(stream, boundsOffset + 0x04),
+            ReadSingleAt(stream, boundsOffset + 0x08));
+        Vector3 max = new(
+            ReadSingleAt(stream, boundsOffset + 0x0C),
+            ReadSingleAt(stream, boundsOffset + 0x10),
+            ReadSingleAt(stream, boundsOffset + 0x14));
+
+        if (!IsFinite(min) || !IsFinite(max))
+            return null;
+
+        return (min, max);
+    }
+
+    private static bool IsFinite(Vector3 value)
+    {
+        return float.IsFinite(value.X) && float.IsFinite(value.Y) && float.IsFinite(value.Z);
+    }
+
+    private static float ReadSingleAt(Stream stream, long offset)
+    {
+        return BitConverter.Int32BitsToSingle(unchecked((int)ReadUInt32At(stream, offset)));
     }
 
     private static List<MdxGlobalSequenceSummary> ReadGlbsSummary(Stream stream, long dataOffset, uint size)

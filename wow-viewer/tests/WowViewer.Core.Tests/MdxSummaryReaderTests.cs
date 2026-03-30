@@ -99,6 +99,28 @@ public sealed class MdxSummaryReaderTests
     }
 
     [Fact]
+    public void Read_SyntheticMd20Header_ProducesExpectedBoundsOnlySummary()
+    {
+        byte[] bytes = CreateMd20Bytes(
+            version: 0x1080000,
+            modelName: "SyntheticTree",
+            boundsMin: new Vector3(-7.0f, -8.0f, -9.0f),
+            boundsMax: new Vector3(10.0f, 11.0f, 12.0f));
+
+        using MemoryStream stream = new(bytes);
+        MdxSummary summary = MdxSummaryReader.Read(stream, "synthetic_tree.m2");
+
+        Assert.Equal("MD20", summary.Signature);
+        Assert.Equal(0x1080000u, summary.Version);
+        Assert.Equal("SyntheticTree", summary.ModelName);
+        Assert.Equal(new Vector3(-7.0f, -8.0f, -9.0f), summary.BoundsMin);
+        Assert.Equal(new Vector3(10.0f, 11.0f, 12.0f), summary.BoundsMax);
+        Assert.Equal(0, summary.ChunkCount);
+        Assert.Equal(0, summary.TextureCount);
+        Assert.Equal(0, summary.MaterialCount);
+    }
+
+    [Fact]
     public void Read_SyntheticCountedNamed8CSeqs_ProducesExpectedSequenceSummary()
     {
         byte[] bytes = CreateMdxBytes(
@@ -2735,6 +2757,29 @@ public sealed class MdxSummaryReaderTests
     {
         bytes.AddRange(Encoding.ASCII.GetBytes(tag));
         bytes.AddRange(CreateInt32Payload(count));
+    }
+
+    private static byte[] CreateMd20Bytes(uint version, string modelName, Vector3 boundsMin, Vector3 boundsMax)
+    {
+        byte[] bytes = new byte[0xD0 + Encoding.ASCII.GetByteCount(modelName) + 1];
+        Encoding.ASCII.GetBytes("MD20", bytes.AsSpan(0, 4));
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x04, 4), version);
+
+        int nameOffset = 0xD0;
+        byte[] nameBytes = Encoding.ASCII.GetBytes(modelName);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x08, 4), (uint)(nameBytes.Length + 1));
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x0C, 4), (uint)nameOffset);
+        nameBytes.CopyTo(bytes.AsSpan(nameOffset));
+        bytes[nameOffset + nameBytes.Length] = 0;
+
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xB4, 4), BitConverter.SingleToInt32Bits(boundsMin.X));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xB8, 4), BitConverter.SingleToInt32Bits(boundsMin.Y));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xBC, 4), BitConverter.SingleToInt32Bits(boundsMin.Z));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xC0, 4), BitConverter.SingleToInt32Bits(boundsMax.X));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xC4, 4), BitConverter.SingleToInt32Bits(boundsMax.Y));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0xC8, 4), BitConverter.SingleToInt32Bits(boundsMax.Z));
+
+        return bytes;
     }
 }
 

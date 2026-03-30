@@ -341,7 +341,13 @@ public partial class ViewerApp : IDisposable
     private float _pm4RotationStepDegrees = 90f;
     private float _pm4ScaleStepUnits = 0.1f;
     private bool _showPm4AlignmentWindow;
+    private bool _showPm4ObjectMatchWindow;
     private bool _showPm4WmoCorrelationWindow;
+    private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
+    private int _pm4ObjectMatchMaxMatchesPerObject = 5;
+    private int _selectedPm4ObjectMatchObjectIndex = -1;
+    private int _selectedPm4ObjectMatchCandidateIndex;
+    private readonly Dictionary<string, SavedPm4ObjectMatchSelection> _savedPm4ObjectMatches = new(StringComparer.OrdinalIgnoreCase);
     private Pm4WmoCorrelationReport? _pm4WmoCorrelationReport;
     private int _pm4WmoCorrelationMaxMatchesPerPlacement = 8;
     private int _selectedPm4WmoCorrelationPlacementIndex = -1;
@@ -1108,6 +1114,9 @@ void main() {
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
 
+            if (_showPm4ObjectMatchWindow)
+                DrawPm4ObjectMatchWindow();
+
             if (_showPm4WmoCorrelationWindow)
                 DrawPm4WmoCorrelationWindow();
         }
@@ -1238,6 +1247,12 @@ void main() {
                 ImGui.MenuItem("Perf", "", ref _showPerfWindow);
                 ImGui.MenuItem("Render Quality", "", ref _showRenderQualityWindow);
                 ImGui.MenuItem("Chunk Clipboard", "", ref _showChunkClipboardWindow);
+                if (ImGui.MenuItem("PM4 Object Match", "", _showPm4ObjectMatchWindow))
+                {
+                    _showPm4ObjectMatchWindow = !_showPm4ObjectMatchWindow;
+                    if (_showPm4ObjectMatchWindow)
+                        EnsurePm4ObjectMatchReportLoaded();
+                }
                 if (ImGui.MenuItem("PM4/WMO Correlation", "", _showPm4WmoCorrelationWindow))
                 {
                     _showPm4WmoCorrelationWindow = !_showPm4WmoCorrelationWindow;
@@ -7849,6 +7864,7 @@ void main() {
     {
         _statusMessage = $"Loading world from {Path.GetFileName(wdtPath)}...";
 
+        InvalidatePm4DerivedReports();
         _worldScene?.Dispose();
         _worldScene = null;
         _terrainManager?.Dispose();
@@ -7984,6 +8000,7 @@ void main() {
             _worldScene?.Dispose();
             _worldScene = null;
             _terrainManager = null;
+            InvalidatePm4DerivedReports();
             _loadingScreen?.Disable();
         }
     }
@@ -8007,6 +8024,7 @@ void main() {
         _statusMessage = $"Loading VLM project from {projectRoot}...";
 
         // Clean up any existing scene
+        InvalidatePm4DerivedReports();
         _worldScene?.Dispose();
         _worldScene = null;
         _terrainManager?.Dispose();
@@ -8807,6 +8825,25 @@ void main() {
                             }
                         }
 
+                        _savedPm4ObjectMatches.Clear();
+                        if (settings.Pm4ObjectMatchSelections != null)
+                        {
+                            foreach (SavedPm4ObjectMatchSelection selection in settings.Pm4ObjectMatchSelections)
+                            {
+                                if (selection == null
+                                    || string.IsNullOrWhiteSpace(selection.MapName)
+                                    || string.IsNullOrWhiteSpace(selection.PlacementKind)
+                                    || string.IsNullOrWhiteSpace(selection.ModelPath)
+                                    || selection.ObjectPartId < 0)
+                                {
+                                    continue;
+                                }
+
+                                string key = BuildSavedPm4ObjectMatchKey(selection.MapName, selection.TileX, selection.TileY, selection.Ck24, selection.ObjectPartId);
+                                _savedPm4ObjectMatches[key] = selection;
+                            }
+                        }
+
             ApplySavedPm4AlignmentToScene();
         }
         catch (Exception ex)
@@ -8856,6 +8893,13 @@ void main() {
                             RouteId = routeEntry.Key,
                             ModelPath = routeEntry.Value
                         }))
+                    .ToList(),
+                Pm4ObjectMatchSelections = _savedPm4ObjectMatches.Values
+                    .OrderBy(selection => selection.MapName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(selection => selection.TileX)
+                    .ThenBy(selection => selection.TileY)
+                    .ThenBy(selection => selection.Ck24)
+                    .ThenBy(selection => selection.ObjectPartId)
                     .ToList()
             };
 
@@ -8992,6 +9036,7 @@ void main() {
         public float Pm4ScaleZ { get; set; } = 1f;
         public float Pm4YawDegrees { get; set; }
         public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
+        public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
     }
 
     private sealed class SavedTaxiActorOverride
@@ -8999,6 +9044,22 @@ void main() {
         public string MapName { get; set; } = "";
         public int RouteId { get; set; }
         public string ModelPath { get; set; } = "";
+    }
+
+    private sealed class SavedPm4ObjectMatchSelection
+    {
+        public string MapName { get; set; } = "";
+        public int TileX { get; set; }
+        public int TileY { get; set; }
+        public uint Ck24 { get; set; }
+        public int ObjectPartId { get; set; }
+        public string PlacementKind { get; set; } = "";
+        public int PlacementUniqueId { get; set; }
+        public int PlacementTileX { get; set; }
+        public int PlacementTileY { get; set; }
+        public string ModelName { get; set; } = "";
+        public string ModelPath { get; set; } = "";
+        public string EvidenceSource { get; set; } = "";
     }
 
     private sealed class KnownGoodClientPath
