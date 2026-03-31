@@ -830,6 +830,10 @@ public class WorldAssetManager : IDisposable
         try
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+            string? effectiveBuildVersion = BuildVersionCatalog.ResolvePreferredBuildVersion(
+                _buildVersion,
+                (_dataSource as MpqDataSource)?.GamePath,
+                resolvedModelPath);
             byte[]? data = ReadFileData(resolvedModelPath);
             if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
                 data = ReadFileData(normalizedKey);
@@ -848,7 +852,7 @@ public class WorldAssetManager : IDisposable
             // Keep byte-level conversion only as a fallback when the direct adapter path fails.
             if (isM2Family)
             {
-                WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, _buildVersion);
+                WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, effectiveBuildVersion);
 
                 var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
                 if (_dataSource != null)
@@ -873,11 +877,11 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
+                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, effectiveBuildVersion);
                         string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
                     }
                     catch (Exception ex)
                     {
@@ -889,15 +893,15 @@ public class WorldAssetManager : IDisposable
 
                 if (!anySkinFound)
                 {
-                    if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+                    if (string.Equals(FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
                     {
                         try
                         {
-                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, _buildVersion);
+                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, effectiveBuildVersion);
                             string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
-                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
                         }
                         catch (Exception ex)
                         {
@@ -912,7 +916,7 @@ public class WorldAssetManager : IDisposable
 
                 if (WarcraftNetM2Adapter.IsMd20(data))
                 {
-                    var convertedBytes = ConvertM2ToMdx(data, resolvedModelPath);
+                    var convertedBytes = ConvertM2ToMdx(data, resolvedModelPath, effectiveBuildVersion);
                     if (convertedBytes != null && convertedBytes.Length > 0)
                     {
                         try
@@ -924,7 +928,7 @@ public class WorldAssetManager : IDisposable
                                 string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
-                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
                             }
 
                             lastSkinError = new InvalidDataException(
@@ -960,7 +964,7 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey)
+    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey, string? buildVersionOverride)
     {
         try
         {
@@ -976,7 +980,7 @@ public class WorldAssetManager : IDisposable
             }
 
             var converter = new M2ToMdxConverter();
-            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, _buildVersion);
+            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, buildVersionOverride ?? _buildVersion);
             ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} -> {mdxBytes.Length} bytes");
             return mdxBytes;
         }

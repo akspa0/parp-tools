@@ -2,6 +2,76 @@
 
 # Active Context
 
+## Mar 31, 2026 - Remaining Giant-Root M2 Failures Now Point At The Shaded Draw Path, Not Placement
+
+- after the build-mismatch correction landed, live viewer feedback still showed more than half of the world M2 set missing, especially the giant root structures that should visibly cover the development terrain
+- the new screenshots narrowed the remaining seam further:
+	- tooltip selection still resolves the missing root models
+	- world bounding-box overlays still draw in the right places for those objects
+	- `WorldScene` currently draws those debug boxes directly from instance bounds, so this proves scene registration and placement metadata are present, but it does not prove that shaded geoset layers made it through the actual triangle pass
+- practical reading of the latest evidence:
+	- the earlier build-resolution fix was real and necessary, but it was not the last blocker
+	- the remaining failure class is now more honestly described as a world adapted-M2 shaded render-path failure rather than another asset lookup or placement failure
+- highest-probability next seams:
+	- `src/MdxViewer/Terrain/WorldScene.cs` opaque/transparent submission for `IsM2AdapterModel`
+	- `src/MdxViewer/Rendering/ModelRenderer.cs` layer/pass routing inside `RenderGeosets(...)`
+	- `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` blend/flag mapping for large world M2 materials
+- next honest diagnostic step:
+	- add targeted runtime diagnostics or a temporary solid-color/no-texture force-draw path for adapted M2s so the viewer can distinguish "triangle submission missing" from "material state/texturing makes submitted geometry invisible"
+- important boundary:
+	- no new code fix landed for this remaining seam yet in this chat
+	- runtime signoff is still open even though the stale-build correction remains valid
+
+## Mar 31, 2026 - M2 Runtime Loading Now Prefers The Actual Client Build Over A Stale Selected Build
+
+- follow-up investigation of the still-failing `World\Expansion02\Doodads\Azjol-Nerub\AzjolRoofGiant.m2` disproved the earlier guess that the remaining blocker was necessarily malformed adapter output
+- direct `AssetProbe` comparison on the same real 3.3.5 client root showed the actual seam:
+	- with build `3.3.5.12340`, `AzjolRoofGiant.m2` adapted cleanly with sane bounds and geometry (`574` verts / `1063` tris)
+	- with stale build `3.0.1.8303`, the same asset collapsed to degenerate geometry (`1` vert / `1` tri) with broken bounds even though the `.skin` and texture resolved from MPQ
+- landed a narrow runtime correction across `src/MdxViewer/Terrain/BuildVersionCatalog.cs`, `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/Terrain/WorldAssetManager.cs`, and `src/MdxViewer/Rendering/WmoRenderer.cs`:
+	- M2-family loaders now resolve an effective build from the actual client/game path and prefer that over a stale persisted selection when they disagree
+	- standalone M2 open, world M2 load, and WMO doodad M2 load now all use that effective build for profile validation, direct adaptation, and M2-to-MDX fallback conversion
+	- the shared build-path helper now lives in `BuildVersionCatalog` instead of keeping model-family build inference trapped inside `ViewerApp`
+- validation completed:
+	- `get_errors` returned clean for the edited files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is still build/probe validation, not viewer runtime signoff
+	- the next honest check is a real viewer reopen of the development map and the failing standalone asset under the saved 3.3.5 base client
+
+## Mar 31, 2026 - Active Viewer World M2s Now Bypass The Batched RenderInstance Path Again
+
+- followed direct runtime feedback after slice 01: repeated asset-miss churn improved somewhat, but many world M2s were still tooltip-visible / pickable while remaining visually absent in the scene
+- landed a narrow active-viewer correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- M2-adapted world doodads now route through `RenderWithTransform(...)` again for both opaque and transparent passes instead of the generic batched `RenderInstance(...)` path
+	- classic MDX world doodads stay on the lighter batched path
+	- world batch setup now selects the first renderer that will actually use the batched path instead of blindly seeding batch state from the first visible doodad
+- rationale:
+	- current live `ModelRenderer.RequiresUnbatchedWorldRender` only covered particles and ribbons, not `IsM2AdapterModel`
+	- that let Warcraft.NET-adapted world M2s drift back onto the generic instanced world path even though earlier continuity and user symptoms both pointed at that path as the likely invisibility seam
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is still compile validation only in this chat
+	- no real-data viewer flythrough or capture proof has been completed yet, so this should be treated as the next targeted runtime fix candidate, not final closure on the remaining WMO/M2 hiccups
+
+## Mar 31, 2026 - Adapted M2s No Longer Vanish Completely When Their Base Texture Lookup Fails
+
+- followed fresh runtime evidence after the world-path M2 submission fix: more objects rendered, but another class of MPQ-backed M2s still stayed invisible in both world rendering and standalone model viewing
+- landed a narrow renderer-side correction in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+	- adapted M2s now use the neutral white fallback texture even when the missing texture is the base layer with `Load` blending
+	- the renderer no longer suppresses the normal geoset fallback draw just because a pre-release M2 layer missed its texture lookup
+- rationale:
+	- current `RenderGeosets(...)` could still leave an adapted M2 with zero rendered layers when the primary texture lookup failed, which matches the symptom of “asset exists, tooltip/picking works, but nothing is visible” in both world and model viewer paths
+	- this keeps the fix at the shared renderer seam used by both world and standalone M2 viewing instead of adding another world-only workaround
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/ModelRenderer.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this proves compile integration only in this chat
+	- it does not prove that all adapted M2 material/skin semantics are now correct; if some MPQ models still render as partial strips or malformed shells, the next seam is likely in `WarcraftNetM2Adapter` submesh/material extraction rather than in `WorldScene`
+
 ## Mar 31, 2026 - Slice 01 Negative Asset Lookup Suppression Landed In The Active Viewer Path
 
 - implemented the first world-runtime stabilization slice in the active `MdxViewer` compatibility path instead of broadening the `WorldScene` split prematurely

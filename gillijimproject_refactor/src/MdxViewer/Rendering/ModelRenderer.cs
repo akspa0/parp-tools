@@ -573,7 +573,6 @@ public class MdxRenderer : ISceneRenderer
             bool anyLayerRendered = false;
             bool hasMaterialLayers = false;
             bool hasLayerCandidateForPass = false;
-            bool suppressedMissingTextureFallback = false;
             var geoset = _mdx.Geosets[gb.GeosetIndex];
             if (geoset.MaterialId >= 0 && geoset.MaterialId < _mdx.Materials.Count)
             {
@@ -722,12 +721,6 @@ public class MdxRenderer : ISceneRenderer
                     }
                     else
                     {
-                        if (_usesPreRelease301M2Profile)
-                        {
-                            suppressedMissingTextureFallback = true;
-                            continue;
-                        }
-
                         _gl.Uniform1(_uHasTexture, l == 0 ? 0 : 1);
                         if (l > 0) continue;
                     }
@@ -766,8 +759,7 @@ public class MdxRenderer : ISceneRenderer
             // draw magenta fallback geometry just because pass filtering skipped every layer.
             if (!anyLayerRendered
                 && (!hasMaterialLayers || hasLayerCandidateForPass)
-                && pass != RenderPass.Transparent
-                && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
+                && pass != RenderPass.Transparent)
             {
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
@@ -1777,8 +1769,11 @@ void main() {
         if (layerIndex != 0)
             return false;
 
+        // Keep adapted M2s visible even when the primary texture lookup fails.
+        // The alternative here is a fully invisible geoset, which is worse than a neutral fallback
+        // for world debugging and standalone model inspection.
         if (effectiveBlendMode == MdlTexOp.Load)
-            return false;
+            return true;
 
         return effectiveBlendMode is MdlTexOp.Add
             or MdlTexOp.AddAlpha

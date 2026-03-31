@@ -5,12 +5,15 @@ using System.Runtime.InteropServices;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Rendering;
+using MdxViewer.Terrain;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.Mdx;
+using WoWMapConverter.Core.Converters;
 using CoreBlpCompressionType = WowViewer.Core.Blp.BlpCompressionType;
 using CoreBlpPixelFormat = WowViewer.Core.Blp.BlpPixelFormat;
 using CoreMdxChunkSummary = WowViewer.Core.Mdx.MdxChunkSummary;
@@ -28,7 +31,7 @@ internal static class AssetProbe
 
         if (args.Length <= probeIndex + 2)
         {
-            Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>]");
+            Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>] [--build <version>]");
             Environment.ExitCode = 1;
             return true;
         }
@@ -36,13 +39,14 @@ internal static class AssetProbe
         string gamePath = args[probeIndex + 1];
         string modelVirtualPath = args[probeIndex + 2];
         string? listfilePath = TryGetOptionValue(args, "--listfile");
+        string? buildVersion = TryGetOptionValue(args, "--build");
 
         ViewerLog.Verbose = true;
         MdxFile.Verbose = true;
 
         try
         {
-            Run(gamePath, modelVirtualPath, listfilePath);
+            Run(gamePath, modelVirtualPath, listfilePath, buildVersion);
         }
         catch (Exception ex)
         {
@@ -53,17 +57,30 @@ internal static class AssetProbe
         return true;
     }
 
-    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath)
+    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath, string? buildVersion)
     {
         Console.WriteLine($"[AssetProbe] Game path: {gamePath}");
         Console.WriteLine($"[AssetProbe] Model path: {modelVirtualPath}");
         if (!string.IsNullOrWhiteSpace(listfilePath))
             Console.WriteLine($"[AssetProbe] Listfile: {listfilePath}");
+        if (!string.IsNullOrWhiteSpace(buildVersion))
+            Console.WriteLine($"[AssetProbe] Build: {buildVersion}");
 
         using var dataSource = new MpqDataSource(gamePath, listfilePath);
-        byte[]? modelBytes = dataSource.ReadFile(modelVirtualPath) ?? dataSource.ReadFile(modelVirtualPath.Replace('/', '\\'));
+        string resolvedModelPath = ResolveDataSourcePath(dataSource, modelVirtualPath) ?? modelVirtualPath.Replace('/', '\\');
+        byte[]? modelBytes = ReadDataSourceFile(dataSource, resolvedModelPath);
         if (modelBytes == null)
             throw new FileNotFoundException($"Model not found in data source: {modelVirtualPath}");
+
+        bool isM2Family = resolvedModelPath.EndsWith(".m2", StringComparison.OrdinalIgnoreCase)
+            || WarcraftNetM2Adapter.IsMd20(modelBytes)
+            || WarcraftNetM2Adapter.IsMd21(modelBytes);
+
+        if (isM2Family)
+        {
+            ProbeAdaptedM2(dataSource, resolvedModelPath, modelBytes, buildVersion);
+            return;
+        }
 
         using var ms = new MemoryStream(modelBytes);
         WowFileDetection modelDetection = WowFileDetector.Detect(ms, modelVirtualPath);
@@ -79,6 +96,121 @@ internal static class AssetProbe
         }
 
         var mdx = MdxFile.Load(ms);
+
+        PrintMdxProbeReport(dataSource, resolvedModelPath, modelDetection, mdx, sharedMdxSummary, sharedMdxGeometry, sharedMdxError, sharedMdxGeometryError, routeLabel: "direct-mdx", selectedSkinPath: null);
+    }
+
+    private static void ProbeAdaptedM2(IDataSource dataSource, string modelVirtualPath, byte[] modelBytes, string? buildVersion)
+    {
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, modelVirtualPath, buildVersion);
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(modelVirtualPath));
+        string? bestSkinPath = WarcraftNetM2Adapter.FindSkinInFileList(modelVirtualPath, dataSource.GetFileList(".skin"));
+        if (!string.IsNullOrWhiteSpace(bestSkinPath))
+            candidatePaths.Add(bestSkinPath);
+
+        Exception? lastSkinError = null;
+        bool anySkinFound = false;
+        string? selectedSkinPath = null;
+        MdxFile? adaptedModel = null;
+        string routeLabel = "adapter-skin";
+
+        foreach (string skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            byte[]? skinBytes = ReadDataSourceFile(dataSource, skinPath);
+            if (skinBytes == null || skinBytes.Length == 0)
+                continue;
+
+            anySkinFound = true;
+            try
+            {
+                adaptedModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, modelVirtualPath, buildVersion);
+                selectedSkinPath = ResolveDataSourcePath(dataSource, skinPath) ?? skinPath.Replace('/', '\\');
+                break;
+            }
+            catch (Exception ex)
+            {
+                lastSkinError = ex;
+                Console.WriteLine($"[AssetProbe] SkinCandidateFailed path={skinPath} error={ex.Message}");
+            }
+        }
+
+        if (adaptedModel == null
+            && !anySkinFound
+            && string.Equals(profile?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+        {
+            try
+            {
+                adaptedModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, null, modelVirtualPath, buildVersion);
+                routeLabel = "adapter-embedded";
+            }
+            catch (Exception ex)
+            {
+                lastSkinError = ex;
+                Console.WriteLine($"[AssetProbe] EmbeddedProfileFailed error={ex.Message}");
+            }
+        }
+
+        if (adaptedModel == null && WarcraftNetM2Adapter.IsMd20(modelBytes))
+        {
+            byte[]? converterSkinBytes = null;
+            if (selectedSkinPath != null)
+                converterSkinBytes = ReadDataSourceFile(dataSource, selectedSkinPath);
+
+            if (converterSkinBytes == null)
+            {
+                foreach (string skinPath in candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    converterSkinBytes = ReadDataSourceFile(dataSource, skinPath);
+                    if (converterSkinBytes != null && converterSkinBytes.Length > 0)
+                    {
+                        selectedSkinPath ??= ResolveDataSourcePath(dataSource, skinPath) ?? skinPath.Replace('/', '\\');
+                        break;
+                    }
+                }
+            }
+
+            try
+            {
+                var converter = new M2ToMdxConverter();
+                byte[] convertedBytes = converter.ConvertToBytes(modelBytes, converterSkinBytes, buildVersion);
+                using var convertedStream = new MemoryStream(convertedBytes, writable: false);
+                adaptedModel = MdxFile.Load(convertedStream);
+                routeLabel = "converter-fallback";
+            }
+            catch (Exception ex)
+            {
+                lastSkinError = ex;
+                Console.WriteLine($"[AssetProbe] ConverterFallbackFailed error={ex.Message}");
+            }
+        }
+
+        if (adaptedModel == null)
+            throw new InvalidDataException($"Failed to adapt M2 model '{Path.GetFileName(modelVirtualPath)}'.", lastSkinError);
+
+        WowFileDetection adaptedDetection = new(modelVirtualPath + ".adapted.mdx", WowFileKind.Mdx, (uint)adaptedModel.Version);
+        PrintMdxProbeReport(dataSource, modelVirtualPath, adaptedDetection, adaptedModel, null, null, null, null, routeLabel, selectedSkinPath);
+    }
+
+    private static void PrintMdxProbeReport(
+        IDataSource dataSource,
+        string modelVirtualPath,
+        WowFileDetection modelDetection,
+        MdxFile mdx,
+        MdxSharedProbeResult? sharedMdxSummary,
+        MdxGeometryProbeResult? sharedMdxGeometry,
+        string? sharedMdxError,
+        string? sharedMdxGeometryError,
+        string routeLabel,
+        string? selectedSkinPath)
+    {
+        Vector3 boundsMin = new(mdx.Model.Bounds.Extent.Min.X, mdx.Model.Bounds.Extent.Min.Y, mdx.Model.Bounds.Extent.Min.Z);
+        Vector3 boundsMax = new(mdx.Model.Bounds.Extent.Max.X, mdx.Model.Bounds.Extent.Max.Y, mdx.Model.Bounds.Extent.Max.Z);
+
+        Console.WriteLine($"[AssetProbe] Route={routeLabel}");
+        if (!string.IsNullOrWhiteSpace(selectedSkinPath))
+            Console.WriteLine($"[AssetProbe] SelectedSkin={selectedSkinPath}");
 
         Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
         if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
@@ -104,6 +236,7 @@ internal static class AssetProbe
 
         Console.WriteLine($"[AssetProbe] Version={mdx.Version} Name={mdx.Model.Name}");
         Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={(sharedMdxGeometry?.GeosetCount ?? mdx.Geosets.Count)}");
+        Console.WriteLine($"[AssetProbe] Bounds={FormatBounds(boundsMin, boundsMax)} Geometry={WarcraftNetM2Adapter.SummarizeGeometry(mdx)}");
         Console.WriteLine();
 
         for (int i = 0; i < mdx.Textures.Count; i++)
@@ -225,6 +358,21 @@ internal static class AssetProbe
         }
 
         return null;
+    }
+
+    private static byte[]? ReadDataSourceFile(IDataSource dataSource, string virtualPath)
+    {
+        string normalizedPath = virtualPath.Replace('/', '\\');
+        return dataSource.ReadFile(normalizedPath) ?? dataSource.ReadFile(normalizedPath.Replace('\\', '/'));
+    }
+
+    private static string? ResolveDataSourcePath(IDataSource dataSource, string virtualPath)
+    {
+        string normalizedPath = virtualPath.Replace('/', '\\');
+        if (dataSource is MpqDataSource mpqDataSource)
+            return mpqDataSource.FindInFileSet(normalizedPath) ?? normalizedPath;
+
+        return normalizedPath;
     }
 
     private static IEnumerable<string> EnumerateTextureCandidates(string modelVirtualPath, MdlTexture texture)

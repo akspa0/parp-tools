@@ -6487,14 +6487,21 @@ public class WorldScene : ISceneRenderer
             {
                 if (frame.VisibleMdxInstances.Count > 0)
                 {
-                    batchRenderer = frame.VisibleMdxInstances[0].Renderer;
-                    batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                    foreach (var visible in frame.VisibleMdxInstances)
+                    {
+                        if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
+                            continue;
+
+                        batchRenderer = visible.Renderer;
+                        batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                        break;
+                    }
                 }
 
                 foreach (var visible in frame.VisibleMdxInstances)
                 {
-                    if (visible.Renderer.RequiresUnbatchedWorldRender)
+                    if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
                     {
                         visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
                             fogColor, objectFogStart, objectFogEnd, cameraPos,
@@ -6551,7 +6558,7 @@ public class WorldScene : ISceneRenderer
                 foreach (var (visibleIdx, _) in frame.TransparentSortScratch)
                 {
                     var visible = frame.VisibleMdxInstances[visibleIdx];
-                    if (visible.Renderer.RequiresUnbatchedWorldRender)
+                    if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
                     {
                         visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
                             fogColor, objectFogStart, objectFogEnd, cameraPos,

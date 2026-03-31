@@ -1303,7 +1303,11 @@ void main() {
 
     private MdxRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
     {
-        WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, _buildVersion);
+        string? effectiveBuildVersion = BuildVersionCatalog.ResolvePreferredBuildVersion(
+            _buildVersion,
+            (_dataSource as MpqDataSource)?.GamePath,
+            resolvedModelPath);
+        WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, effectiveBuildVersion);
 
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
         string? bestSkinPath = ResolveBestSkinPath(resolvedModelPath);
@@ -1324,11 +1328,11 @@ void main() {
             try
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
+                var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, effectiveBuildVersion);
                 string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
             }
             catch (Exception ex)
             {
@@ -1340,15 +1344,15 @@ void main() {
 
         if (!anySkinFound)
         {
-            if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            if (string.Equals(FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
             {
                 try
                 {
-                    var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, _buildVersion);
+                    var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, null, resolvedModelPath, effectiveBuildVersion);
                     string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
-                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
                 }
                 catch (Exception ex)
                 {
@@ -1364,7 +1368,7 @@ void main() {
 
         if (WarcraftNetM2Adapter.IsMd20(modelData))
         {
-            byte[]? convertedBytes = ConvertM2ToMdx(modelData, resolvedModelPath);
+            byte[]? convertedBytes = ConvertM2ToMdx(modelData, resolvedModelPath, effectiveBuildVersion);
             if (convertedBytes != null && convertedBytes.Length > 0)
             {
                 try
@@ -1376,7 +1380,7 @@ void main() {
                         string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
-                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
                     }
 
                     lastSkinError = new InvalidDataException(
@@ -1399,7 +1403,7 @@ void main() {
         return null;
     }
 
-    private byte[]? ConvertM2ToMdx(byte[] modelData, string resolvedModelPath)
+    private byte[]? ConvertM2ToMdx(byte[] modelData, string resolvedModelPath, string? buildVersionOverride)
     {
         try
         {
@@ -1412,7 +1416,7 @@ void main() {
             }
 
             var converter = new M2ToMdxConverter();
-            return converter.ConvertToBytes(modelData, skinBytes, _buildVersion);
+            return converter.ConvertToBytes(modelData, skinBytes, buildVersionOverride ?? _buildVersion);
         }
         catch (Exception ex)
         {

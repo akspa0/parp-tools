@@ -14,6 +14,16 @@
 - the remaining `WorldScene` file is still too large and mixes asset churn, visible-set collection, pass sequencing, and overlay/debug work
 - repeated `.skin` miss churn and failed MDX retry spam are active performance noise and should be reduced before deeper renderer extraction so later measurements stay interpretable
 
+## Immediate Live Blocker
+
+- after the slice-01 miss-suppression work, the shared renderer fallback fix, and the stale-build correction, the live viewer still misses a large world-M2 set on the development map, especially giant root structures
+- latest screenshots show those objects still resolve in tooltip selection and still draw world bounding boxes, which means placement and instance metadata are present
+- that evidence does not prove shaded triangle submission succeeded; it only proves registration/bounds
+- before treating slice 01 as runtime-closed or pushing harder on extraction slices, the next active-viewer diagnostic step should isolate whether adapted M2s are:
+  - not reaching the opaque/transparent draw passes in `WorldScene`, or
+  - reaching `ModelRenderer.RenderGeosets(...)` but becoming invisible because of material-state / blend / alpha routing from `WarcraftNetM2Adapter`
+- this is still compatible with the longer-term `wow-viewer` extraction plan; it just means the active `MdxViewer` proof path still needs one more honest render-path investigation slice first
+
 ## Ordered Slices
 
 ### Slice 01 - Negative Asset Lookup Suppression

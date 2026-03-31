@@ -1,5 +1,72 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - Live Viewer Still Has A Remaining Adapted-M2 Shaded-Pass Failure After The Build Fix
+
+- latest live screenshots after the `AzjolRoofGiant.m2` build-resolution correction still show a large missing world-M2 set, especially the giant root structures expected to cover the development terrain
+- the new evidence is important because it narrows what is still broken:
+   - selected-object tooltip text still resolves those root models
+   - `Show Bounding Boxes` still draws their world-space bounds from `WorldScene` instance metadata
+   - those overlays prove placement and object registration, but they do not prove that the shaded triangle pass rendered successfully
+- current working interpretation:
+   - stale build selection was one real seam and is now corrected in code
+   - the remaining active seam is now inside the adapted-M2 render path itself, most likely around world-pass submission or per-layer material routing
+- immediate next files to inspect or instrument:
+   - `src/MdxViewer/Terrain/WorldScene.cs` at the adapted-M2 opaque/transparent `RenderWithTransform(...)` submission sites
+   - `src/MdxViewer/Rendering/ModelRenderer.cs` inside `RenderGeosets(...)`, especially pass filtering, alpha-cutout detection, and transparent fallback behavior
+   - `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` blend-mode / layer-flag mapping for world M2 materials
+- immediate next proof goal:
+   - add targeted viewer diagnostics or a temporary force-solid adapted-M2 path to determine whether the missing root models fail before draw submission or become invisible because of material-state classification once submitted
+- important boundary:
+   - no code change for this remaining seam has landed yet
+   - do not describe the runtime as fixed based only on the successful `AzjolRoofGiant.m2` probe and the stale-build override correction
+
+## Mar 31, 2026 - M2 Runtime Path Now Corrects Stale Build Selection From The Real Client Root
+
+- targeted follow-up on the remaining invisible standalone/world M2 report used a single concrete asset: `AzjolRoofGiant.m2`
+- direct probe evidence showed the active seam was build mismatch, not just renderer/material fallback:
+   - the same model + skin + client root adapted correctly under `3.3.5.12340`
+   - the same asset collapsed to degenerate geometry under stale `3.0.1.8303`
+- landed runtime correction in `src/MdxViewer/Terrain/BuildVersionCatalog.cs`, `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/Terrain/WorldAssetManager.cs`, and `src/MdxViewer/Rendering/WmoRenderer.cs`:
+   - M2-family load paths now infer an effective build from the actual client/game path and use that when it disagrees with the stale selected build
+   - this correction covers standalone M2 open, world M2 loads, and WMO doodad M2 loads
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this still needs real viewer runtime confirmation on the saved 3.3.5 client plus the development map overlay
+
+## Mar 31, 2026 - WorldScene Again Forces M2-Adapted World Doodads Through RenderWithTransform
+
+- latest live-user runtime signal after the negative-lookup suppression slice was specific: world M2s were still showing up in tooltips / picking but most remained invisible in-scene
+- landed a narrow follow-up in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - M2-adapted world doodads now bypass the generic batched `RenderInstance(...)` path again and use `RenderWithTransform(...)` for both opaque and transparent world passes
+   - classic MDX doodads stay on the batched path
+   - `BeginBatch(...)` now seeds from the first actually batched renderer instead of whichever visible doodad happens to appear first
+- concrete reason for the change:
+   - current `ModelRenderer.RequiresUnbatchedWorldRender` only flags particle/ribbon cases, not `IsM2AdapterModel`
+   - that left adapted world M2s on the shared instanced path even though the user symptom and older continuity both pointed at the world batch path as the likely invisible-model seam
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - no real-data viewer capture or flythrough was run in this chat
+   - WMO hiccups and any remaining invisible-model edge cases still need runtime confirmation on the development map
+
+## Mar 31, 2026 - Shared ModelRenderer Now Keeps Adapted M2s Visible On Base-Texture Misses
+
+- latest user report after the world-scene M2 submission fix was narrower and more useful:
+   - more objects now render
+   - the remaining invisible set also fails in standalone model viewing, which points at the shared M2 render/material path rather than another placement bug
+- landed renderer-side correction in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - adapted M2s now use the neutral white fallback texture even when the missing texture is the base `Load` layer
+   - fallback-geoset drawing is no longer suppressed just because an adapted/pre-release layer missed texture resolution
+- why this is the likely right seam:
+   - the previous logic could leave an adapted M2 with zero rendered layers when its primary texture lookup failed
+   - that exactly matches the current symptom: object exists in scene metadata and can be inspected, but the rendered model disappears in both world and standalone paths
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - runtime proof is still pending
+   - if some MPQ-backed M2s still show only partial strips or malformed geometry after this, the next investigation seam should move into `WarcraftNetM2Adapter` skin/submesh/material extraction
+
 ## Mar 31, 2026 - MdxViewer Now Consumes wow-viewer Core.Runtime For World Render Telemetry
 
 - after the initial in-app renderer stats slice landed, the first stable `WorldScene` seam was moved out into `wow-viewer`

@@ -1,5 +1,72 @@
 # Progress
 
+### Mar 31, 2026 - Remaining Invisible World M2 Set Is Now Scoped To The Shaded Pass, Not Placement
+
+- followed the first live viewer report after the build-mismatch correction: many MPQ-backed M2s are still missing, especially the giant root structures that should cover the development terrain
+- the newest runtime evidence changed the problem statement again:
+	- object tooltip selection still resolves those missing models
+	- world bounding-box overlays still show their placements and extents in the expected locations
+	- this means scene registration and bounds are alive, but does not yet prove the shaded geoset draw path is succeeding for those instances
+- current best reading:
+	- the stale-build fix remains valid because it explained and reproduced one real failure mode
+	- the remaining blocker is now a narrower render-path problem in the active viewer for adapted M2 shading/submission/material state
+- next investigation target is explicit:
+	- verify whether those root models reach `ModelRenderer.RenderGeosets(...)` in opaque and transparent passes
+	- if they do, compare their layer family / blend routing against visible adapted M2s
+	- if they do not, add temporary runtime diagnostics or forced solid-color rendering so the viewer can separate geometry submission failure from texture/material invisibility
+- validation boundary:
+	- no new fix landed for this remaining seam yet
+	- no runtime signoff should be claimed from the build-mismatch correction alone
+
+### Mar 31, 2026 - M2 Loads Now Override Stale Build Selection With The Real Client Build
+
+- followed the next concrete blocker after the shared renderer fixes: `AzjolRoofGiant.m2` still showed as invisible in the viewer, but a new headless probe proved the real issue was build mismatch rather than necessarily bad adapter extraction
+- captured hard evidence with the same asset on the same 3.3.5 client root:
+	- `--build 3.3.5.12340` produced sane adapted output (`574` verts / `1063` tris, valid bounds, resolved skin/texture)
+	- `--build 3.0.1.8303` produced degenerate output (`1` vert / `1` tri, broken bounds)
+- landed a narrow runtime correction in `src/MdxViewer/Terrain/BuildVersionCatalog.cs`, `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/Terrain/WorldAssetManager.cs`, and `src/MdxViewer/Rendering/WmoRenderer.cs`:
+	- M2-family loads now prefer the build inferred from the actual game/client path over a stale selected build when those disagree
+	- standalone M2 open, world M2 loading, and WMO doodad M2 loading all use that effective build for adapter and converter fallback paths
+- validation completed:
+	- `get_errors` returned clean for the edited files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed with existing warnings only
+- validation boundary:
+	- no real viewer runtime confirmation has been captured yet
+	- the next check is to reopen the failing standalone asset and the development map under the saved 3.3.5 client and confirm the previously invisible MPQ-backed M2s now render
+
+### Mar 31, 2026 - World M2 Doodads Now Use Per-Instance Rendering In WorldScene Again
+
+- followed the next active runtime blocker after slice 01: user reported fewer repeated asset hiccups, but many world M2s were still invisible even though hover/picking showed the objects existed
+- landed a narrow world render-path correction in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- M2-adapted world doodads now use `RenderWithTransform(...)` again in both opaque and transparent passes instead of the shared batched `RenderInstance(...)` path
+	- classic MDX doodads still stay batched
+	- batch initialization now comes from the first actually batched renderer rather than the first visible renderer overall
+- why this matters:
+	- the active batch/unbatch gate only covered particle/ribbon cases, so adapted world M2s were still falling onto the generic instanced path despite earlier continuity pointing at that path as the likely invisible-model seam
+	- this keeps the fix narrow in the active viewer without reopening the broader renderer split yet
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime confirmation has been captured yet, so remaining WMO/M2 hiccups are still open until the viewer is exercised on the development map
+
+### Mar 31, 2026 - Missing Base Textures No Longer Make Adapted M2s Fully Invisible
+
+- followed the next user-visible M2 blocker after the world-scene submission fix: more objects now appear, but another set of MPQ-backed M2s still stays invisible in both world view and standalone model view
+- landed a shared renderer-path correction in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+	- adapted M2s now treat a missing base-layer texture as a neutral fallback-texture case instead of letting the whole geoset render path disappear
+	- the renderer also no longer suppresses the normal fallback-geoset draw merely because an adapted/pre-release layer missed texture resolution
+- why this matters:
+	- the shared `ModelRenderer` path is used by both world placements and standalone model viewing, so this fix targets the common “loaded but fully invisible” symptom directly
+	- it keeps the next investigation honest: if some MPQ M2s are still malformed after this, the likely remaining bug is in adapter skin/submesh/material extraction rather than another world-scene visibility seam
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/ModelRenderer.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime confirmation has been captured yet, so any remaining partial or malformed MPQ M2s are still open
+
 ### Mar 31, 2026 - First Negative Asset Lookup Suppression Slice Landed In MdxViewer
 
 - implemented the ordered world-runtime slice 01 in the active viewer path instead of starting the broader service extraction early
