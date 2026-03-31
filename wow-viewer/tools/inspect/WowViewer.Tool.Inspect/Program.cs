@@ -1683,6 +1683,8 @@ static void PrintMapSummary(MapFileSummary summary, bool dumpTexChunks)
 		using FileStream stream = File.OpenRead(summary.SourcePath);
 		WdtSummary wdtSummary = WdtSummaryReader.Read(stream, summary);
 		Console.WriteLine($"WDT semantics: wmoBased={wdtSummary.IsWmoBased} tiles={wdtSummary.TilesWithData}/{wdtSummary.TotalTiles} mainCellBytes={wdtSummary.MainCellSizeBytes} doodadNames={wdtSummary.DoodadNameCount} wmoNames={wdtSummary.WorldModelNameCount} doodadPlacements={wdtSummary.DoodadPlacementCount} wmoPlacements={wdtSummary.WorldModelPlacementCount}");
+		if (wdtSummary.MainFlags is not null)
+			Console.WriteLine($"WDT MAIN flags: any={wdtSummary.MainFlags.CellsWithAnyFlags} hasAdt={wdtSummary.MainFlags.CellsWithHasAdt} allWater={wdtSummary.MainFlags.CellsWithAllWater} loaded={wdtSummary.MainFlags.CellsWithLoaded} unknown={wdtSummary.MainFlags.CellsWithUnknownFlags} asyncIds={wdtSummary.MainFlags.CellsWithAsyncId} distinct={FormatWdtMainFlags(wdtSummary.MainFlags)}");
 	}
 	else if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj or MapFileKind.AdtLod)
 	{
@@ -1690,6 +1692,14 @@ static void PrintMapSummary(MapFileSummary summary, bool dumpTexChunks)
 		Console.WriteLine($"ADT family: root={(family.HasRoot ? "present" : "missing")} tex0={(family.HasTex0 ? "present" : "missing")} obj0={(family.HasObj0 ? "present" : "missing")} lod={(family.HasLod ? "present" : "missing")} textureSource={FormatMapFileKind(family.TextureSourceKind)} placementSource={FormatMapFileKind(family.PlacementSourceKind)}");
 	}
 
+
+static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
+{
+	if (summary.DistinctNonZeroValues.Count == 0)
+		return "none";
+
+	return string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
+}
 	if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj)
 	{
 		using FileStream stream = File.OpenRead(summary.SourcePath);

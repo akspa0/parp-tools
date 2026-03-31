@@ -290,8 +290,13 @@ public class MdxAnimator
         // Initialize global sequence frames
         _globalSeqFrames = new float[mdx.GlobalSequences.Count];
 
-        // Check if any bones have animation tracks
-        HasAnimation = HasAnimationData(mdx);
+        // Only enable skeletal skinning when bones have actual transform keys.
+        // Material, geoset, and UV animation data still need an animator instance,
+        // but they must not switch the renderer into bone-matrix mode.
+        HasAnimation = mdx.Bones.Any(b =>
+            b.TranslationTrack?.Keys.Count > 0 ||
+            b.RotationTrack?.Keys.Count > 0 ||
+            b.ScalingTrack?.Keys.Count > 0);
 
         // Initialize to identity
         for (int i = 0; i < _boneMatrices.Length; i++)

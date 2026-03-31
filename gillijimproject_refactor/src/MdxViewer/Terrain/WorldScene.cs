@@ -5220,8 +5220,8 @@ public class WorldScene : ISceneRenderer
             float yawRadians = actorDirection.LengthSquared() > 0.0001f
                 ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
                 : 0f;
-            string modelPath = actorModelPath.Replace('/', '\\');
-            string key = WorldAssetManager.NormalizeKey(modelPath);
+            string modelPath = _assets.ResolveCanonicalAssetPath(actorModelPath.Replace('/', '\\'));
+            string key = _assets.ResolveCanonicalAssetKey(modelPath);
             _assets.QueueMdxLoad(key);
 
             var transform = Matrix4x4.CreateScale(scale)
@@ -5527,7 +5527,8 @@ public class WorldScene : ISceneRenderer
                 bbMin = p.Position - new Vector3(2f);
                 bbMax = p.Position + new Vector3(2f);
             }
-            string modelPath = mdxNames[p.NameIndex];
+            string modelPath = _assets.ResolveCanonicalAssetPath(mdxNames[p.NameIndex]);
+            key = _assets.ResolveCanonicalAssetKey(modelPath);
             var instance = new ObjectInstance
             {
                 ModelKey = key,
@@ -5587,7 +5588,8 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
-            string wmoPath = wmoNames[p.NameIndex];
+            string wmoPath = _assets.ResolveCanonicalAssetPath(wmoNames[p.NameIndex]);
+            key = _assets.ResolveCanonicalAssetKey(wmoPath);
             _wmoInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -5703,7 +5705,8 @@ public class WorldScene : ISceneRenderer
             }
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
-            string modelPath = mdxNames[p.NameIndex];
+            string modelPath = _assets.ResolveCanonicalAssetPath(mdxNames[p.NameIndex]);
+            key = _assets.ResolveCanonicalAssetKey(modelPath);
             var instance = new ObjectInstance
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
@@ -5754,7 +5757,8 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
-            string wmoPath = wmoNames[p.NameIndex];
+            string wmoPath = _assets.ResolveCanonicalAssetPath(wmoNames[p.NameIndex]);
+            key = _assets.ResolveCanonicalAssetKey(wmoPath);
             tileWmo.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -5934,10 +5938,10 @@ public class WorldScene : ISceneRenderer
             if (string.IsNullOrWhiteSpace(spawn.ModelPath))
                 continue;
 
-            string modelPath = spawn.ModelPath.Replace('/', '\\');
+            string modelPath = _assets.ResolveCanonicalAssetPath(spawn.ModelPath.Replace('/', '\\'));
             bool isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
 
-            string key = WorldAssetManager.NormalizeKey(modelPath);
+            string key = _assets.ResolveCanonicalAssetKey(modelPath);
             float orientationRadians = spawn.OrientationWowRadians;
             float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
             float finalYawRadians = orientationRadians + yawOffsetRadians;

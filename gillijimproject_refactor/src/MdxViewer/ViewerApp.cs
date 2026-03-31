@@ -308,8 +308,9 @@ public partial class ViewerApp : IDisposable
     private const float DefaultSidebarWidth = 320f;
     private const float SidebarMinWidth = 260f;
     private const float SidebarMaxWidth = 720f;
-        private const float SidebarSplitterWidth = 8f;
-        private const float SceneViewportPreferredMinWidth = 420f;
+    private const float SidebarSplitterWidth = 16f;
+    private const float SidebarSplitterVisualWidth = 4f;
+    private const float SceneViewportPreferredMinWidth = 420f;
     private float _leftSidebarWidth = DefaultSidebarWidth;
     private float _rightSidebarWidth = DefaultSidebarWidth;
     private const float MenuBarHeight = 22f;
@@ -5801,10 +5802,22 @@ void main() {
                 {
                     _dbdDir = dbdDir;
 
-                    string buildAlias = explicitBuildVersion ?? InferBuildFromPath(gamePath, dbdDir);
-                    ViewerLog.Trace(explicitBuildVersion == null
-                        ? $"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}"
-                        : $"[MdxViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
+                        string inferredBuildAlias = InferBuildFromPath(gamePath, dbdDir);
+                        string buildAlias = BuildVersionCatalog.ResolvePreferredBuildVersion(explicitBuildVersion, gamePath, dbdDefinitionsDir: dbdDir)
+                            ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(explicitBuildVersion))
+                        {
+                            ViewerLog.Trace($"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}");
+                        }
+                        else if (!string.IsNullOrWhiteSpace(inferredBuildAlias)
+                            && !string.Equals(explicitBuildVersion, buildAlias, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ViewerLog.Trace($"[MdxViewer] Overriding requested build '{explicitBuildVersion}' with '{buildAlias}' inferred from path: {gamePath}");
+                        }
+                        else
+                        {
+                            ViewerLog.Trace($"[MdxViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
+                        }
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
@@ -9003,6 +9016,19 @@ void main() {
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
             _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
+                if (!string.IsNullOrWhiteSpace(_lastGameFolderPath)
+                    && _clientBuildOptions.Count > 0
+                    && BuildVersionCatalog.TryInferBuildIndexFromPath(_clientBuildOptions, _lastGameFolderPath, out int inferredBuildIndex))
+                {
+                    int savedBuildIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
+                    string savedBuildVersion = _clientBuildOptions[savedBuildIndex].BuildVersion;
+                    string inferredBuildVersion = _clientBuildOptions[inferredBuildIndex].BuildVersion;
+                    if (!string.Equals(savedBuildVersion, inferredBuildVersion, StringComparison.OrdinalIgnoreCase))
+                    {
+                        ViewerLog.Trace($"[ViewerSettings] Overriding stale saved build '{savedBuildVersion}' with '{inferredBuildVersion}' inferred from client path '{_lastGameFolderPath}'.");
+                        _selectedBuildOptionIndex = inferredBuildIndex;
+                    }
+                }
             _textureFilteringMode = Enum.IsDefined(typeof(TextureFilteringMode), settings.TextureFilteringMode)
                 ? (TextureFilteringMode)settings.TextureFilteringMode
                 : TextureFilteringMode.Trilinear;

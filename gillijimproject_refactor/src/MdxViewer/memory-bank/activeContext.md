@@ -1,5 +1,29 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - Adapted M2 Layer Animation Metadata Was Hiding Static World Doodads
+
+- latest standalone viewer evidence for `AzjolRoofGiant.m2` was stronger than the earlier world screenshot evidence:
+   - the model loaded into the standalone scene as an adapted/runtime MDX entry
+   - the viewer still showed no visible pixels even outside `WorldScene`
+   - that narrowed the remaining seam away from world placement and toward the adapted M2 material path itself
+- current code archaeology identified a concrete regression:
+   - `WarcraftNetM2Adapter.BuildMaterialsFromBatches(...)` had drifted beyond the older conservative path and now injected transparency/color/UV animation metadata into adapted M2 layers through `ApplyLayerAnimationMetadata(...)`
+   - `ModelRenderer` multiplies those layer alpha/color tracks directly into final fragment alpha, so bad metadata can make a static doodad fully invisible while its bounds and instance metadata remain intact
+- landed a narrow rollback in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+   - adapted M2 materials no longer apply the newer layer animation metadata path for now
+   - the runtime path is back on the conservative stable behavior: one material layer per section, UV0, static alpha/color, no raw transparency/color/UV animation grafting
+- headless validation after the rollback is materially better and should not be described as speculative:
+   - `dotnet .\bin\Debug\net10.0-windows\ParpToolsWoWViewer.dll --probe-mdx ... AzjolRoofGiant.m2 --build 3.3.5.12340` now reports:
+   - route `adapter-skin`
+   - selected skin `World\Expansion02\Doodads\Azjol-Nerub\AzjolRoofGiant00.skin`
+   - bounds `(-696.566,-574.304,0.000)..(677.373,815.194,604.868)`
+   - geometry `574` verts / `1063` tris
+   - texture `AZULBLANKROCK.BLP` decoding opaque
+   - material layer `Blend=Load`, `StaticAlpha=1.000`, flags `0x00000000`
+- important boundary:
+   - this is strong headless/render-payload validation, not final live viewer runtime signoff yet
+   - the next honest check is to reopen `AzjolRoofGiant.m2` in the standalone viewer and the development world after this rebuild and confirm the object now visibly renders
+
 ## Mar 31, 2026 - Live Viewer Still Has A Remaining Adapted-M2 Shaded-Pass Failure After The Build Fix
 
 - latest live screenshots after the `AzjolRoofGiant.m2` build-resolution correction still show a large missing world-M2 set, especially the giant root structures expected to cover the development terrain

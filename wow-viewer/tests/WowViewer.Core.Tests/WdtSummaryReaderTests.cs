@@ -11,8 +11,9 @@ public sealed class WdtSummaryReaderTests
     {
         byte[] mainData = new byte[64 * 64 * 8];
         WriteUInt32(mainData, 0, 1);
-        WriteUInt32(mainData, 8, 1);
-        WriteUInt32(mainData, 16, 0);
+        WriteUInt32(mainData, 8, 2);
+        WriteUInt32(mainData, 16, 0x80000004);
+        WriteUInt32(mainData, 20, 7);
 
         byte[] mphdData = new byte[32];
         WriteUInt32(mphdData, 0, 1);
@@ -31,15 +32,39 @@ public sealed class WdtSummaryReaderTests
         using MemoryStream stream = new(bytes);
         MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "standard.wdt");
         WdtSummary summary = WdtSummaryReader.Read(stream, fileSummary);
+        WdtMainFlagsSummary mainFlags = Assert.IsType<WdtMainFlagsSummary>(summary.MainFlags);
 
         Assert.True(summary.IsWmoBased);
-        Assert.Equal(2, summary.TilesWithData);
+        Assert.Equal(3, summary.TilesWithData);
         Assert.Equal(4096, summary.TotalTiles);
         Assert.Equal(8, summary.MainCellSizeBytes);
         Assert.Equal(2, summary.DoodadNameCount);
         Assert.Equal(1, summary.WorldModelNameCount);
         Assert.Equal(2, summary.DoodadPlacementCount);
         Assert.Equal(1, summary.WorldModelPlacementCount);
+        Assert.Equal(3, mainFlags.CellsWithAnyFlags);
+        Assert.Equal(1, mainFlags.CellsWithHasAdt);
+        Assert.Equal(1, mainFlags.CellsWithAllWater);
+        Assert.Equal(1, mainFlags.CellsWithLoaded);
+        Assert.Equal(1, mainFlags.CellsWithUnknownFlags);
+        Assert.Equal(1, mainFlags.CellsWithAsyncId);
+        Assert.Collection(
+            mainFlags.DistinctNonZeroValues,
+            value =>
+            {
+                Assert.Equal(1u, value.Value);
+                Assert.Equal(1, value.TileCount);
+            },
+            value =>
+            {
+                Assert.Equal(2u, value.Value);
+                Assert.Equal(1, value.TileCount);
+            },
+            value =>
+            {
+                Assert.Equal(0x80000004u, value.Value);
+                Assert.Equal(1, value.TileCount);
+            });
     }
 
     [Fact]
@@ -73,12 +98,14 @@ public sealed class WdtSummaryReaderTests
         Assert.Equal(1, summary.WorldModelNameCount);
         Assert.Equal(0, summary.DoodadPlacementCount);
         Assert.Equal(2, summary.WorldModelPlacementCount);
+        Assert.Null(summary.MainFlags);
     }
 
     [Fact]
     public void Read_DevelopmentWdt_ProducesExpectedSemanticSummary()
     {
         WdtSummary summary = WdtSummaryReader.Read(MapTestPaths.DevelopmentWdtPath);
+        WdtMainFlagsSummary mainFlags = Assert.IsType<WdtMainFlagsSummary>(summary.MainFlags);
 
         Assert.False(summary.IsWmoBased);
         Assert.Equal(1496, summary.TilesWithData);
@@ -88,6 +115,19 @@ public sealed class WdtSummaryReaderTests
         Assert.Equal(0, summary.WorldModelNameCount);
         Assert.Equal(0, summary.DoodadPlacementCount);
         Assert.Equal(0, summary.WorldModelPlacementCount);
+        Assert.Equal(1496, mainFlags.CellsWithAnyFlags);
+        Assert.Equal(1496, mainFlags.CellsWithHasAdt);
+        Assert.Equal(0, mainFlags.CellsWithAllWater);
+        Assert.Equal(0, mainFlags.CellsWithLoaded);
+        Assert.Equal(0, mainFlags.CellsWithUnknownFlags);
+        Assert.Equal(0, mainFlags.CellsWithAsyncId);
+        Assert.Collection(
+            mainFlags.DistinctNonZeroValues,
+            value =>
+            {
+                Assert.Equal(1u, value.Value);
+                Assert.Equal(1496, value.TileCount);
+            });
     }
 
     private static byte[] CreateChunk(string id, byte[] payload)

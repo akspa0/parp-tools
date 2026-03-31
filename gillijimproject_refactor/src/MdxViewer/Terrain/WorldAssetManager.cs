@@ -537,6 +537,19 @@ public class WorldAssetManager : IDisposable
 
     public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
 
+    public string ResolveCanonicalAssetPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return path;
+
+        return ResolveCanonicalModelPath(NormalizeKey(path));
+    }
+
+    public string ResolveCanonicalAssetKey(string path)
+    {
+        return NormalizeKey(ResolveCanonicalAssetPath(path));
+    }
+
     private static string? SwapMdlMdxExtension(string path)
     {
         if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))

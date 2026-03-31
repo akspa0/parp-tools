@@ -624,6 +624,8 @@ public partial class ViewerApp
         bool active = ImGui.IsItemActive();
         if (hovered || active)
             ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+        if (hovered)
+            ImGui.SetTooltip("Drag to resize sidebar");
 
         if (active)
         {
@@ -633,16 +635,34 @@ public partial class ViewerApp
                 _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth + deltaWidth, isLeftSidebar: false, displayWidth);
         }
 
-        uint color = ImGui.GetColorU32(hovered || active
-            ? new Vector4(0.52f, 0.68f, 0.86f, 0.95f)
-            : new Vector4(0.24f, 0.28f, 0.34f, 0.75f));
         var drawList = ImGui.GetWindowDrawList();
         Vector2 windowPos = ImGui.GetWindowPos();
+        Vector2 windowSize = new Vector2(SidebarSplitterWidth, panelHeight);
+        uint trackColor = ImGui.GetColorU32(hovered || active
+            ? new Vector4(0.22f, 0.36f, 0.52f, 0.35f)
+            : new Vector4(0.10f, 0.12f, 0.15f, 0.18f));
         drawList.AddRectFilled(
             windowPos,
-            windowPos + new Vector2(SidebarSplitterWidth, panelHeight),
-            color,
-            2f);
+            windowPos + windowSize,
+            trackColor,
+            3f);
+
+        float visualOffsetX = (SidebarSplitterWidth - SidebarSplitterVisualWidth) * 0.5f;
+        Vector2 handleMin = windowPos + new Vector2(visualOffsetX, 0f);
+        Vector2 handleMax = handleMin + new Vector2(SidebarSplitterVisualWidth, panelHeight);
+        uint handleColor = ImGui.GetColorU32(hovered || active
+            ? new Vector4(0.56f, 0.76f, 0.94f, 0.98f)
+            : new Vector4(0.42f, 0.48f, 0.56f, 0.92f));
+        drawList.AddRectFilled(handleMin, handleMax, handleColor, 2f);
+
+        float gripCenterX = windowPos.X + SidebarSplitterWidth * 0.5f;
+        float gripCenterY = windowPos.Y + panelHeight * 0.5f;
+        float dotSpacing = 10f;
+        float dotRadius = hovered || active ? 2.4f : 1.8f;
+        uint dotColor = ImGui.GetColorU32(new Vector4(0.92f, 0.96f, 1.0f, hovered || active ? 0.95f : 0.75f));
+        drawList.AddCircleFilled(new Vector2(gripCenterX, gripCenterY - dotSpacing), dotRadius, dotColor);
+        drawList.AddCircleFilled(new Vector2(gripCenterX, gripCenterY), dotRadius, dotColor);
+        drawList.AddCircleFilled(new Vector2(gripCenterX, gripCenterY + dotSpacing), dotRadius, dotColor);
 
         ImGui.End();
     }

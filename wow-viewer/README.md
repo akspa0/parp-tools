@@ -26,10 +26,19 @@ Current plan-adherence reality:
 Current implementation policy:
 
 - `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` are the canonical implementation targets for new `wow-viewer` work.
+- M2 runtime, skin-profile ownership, model lighting, shader or effect routing, and model-render performance work should also be treated as canonical `wow-viewer` work even though a dedicated M2 library area has not been created yet.
 - `gillijimproject_refactor`, including `MdxViewer` and `WoWMapConverter`, is now a reference or compatibility input for `wow-viewer` work, not the default owner of the design.
 - Default validation for `wow-viewer` work is `dotnet build .\WowViewer.slnx -c Debug`, `dotnet test .\WowViewer.slnx -c Debug`, and the relevant inspect or converter command against the fixed development dataset.
 - Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
 - The explicit long-range target is full first-party ownership of every active format family currently handled by `MdxViewer`; current detector and summary seams are stepping stones, not the final boundary.
+
+Current M2-native continuity note:
+
+- Native 3.3.5 OS X and 3.3.5 PTR OS X PowerPC M2 findings now live in `docs/architecture/m2-native-client-research-2026-03-31.md`.
+- Treat that note as the active behavior-recovery handoff for future `wow-viewer` M2 parser, runtime, lighting, shader, and performance work.
+- Do not keep growing `MdxViewer` as the design owner for those M2 seams unless the task is explicitly compatibility-only.
+- The staged workflow surface for this work now lives in `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` and `.github/prompts/wow-viewer-m2-runtime/`.
+- The matching continuity plan lives in `../gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`.
 
 Current PM4 terminology policy:
 

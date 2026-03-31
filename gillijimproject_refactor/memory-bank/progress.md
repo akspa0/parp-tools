@@ -1,5 +1,39 @@
 # Progress
 
+### Mar 31, 2026 - Ordered wow-viewer M2 Runtime Prompt Set Landed
+
+- added the missing workflow surface for M2 runtime and renderer recovery so future chats stop mixing parser ownership, skin-state recovery, material routing, lighting, batching, and compatibility-only `MdxViewer` fixes in one prompt
+- landed assets:
+	- `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/01-md20-and-skin-runtime-foundation.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/02-section-classification-and-material-routing.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/03-animation-lighting-and-effect-runtime.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/04-scene-submission-and-batching.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/05-consumer-cutover-and-parity-harness.prompt.md`
+	- matching Codex prompt mirrors plus `gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`
+- routing effect:
+	- M2 runtime ownership, exact `%02d.skin` behavior, section/material routing, animation/lighting state, and scene batching now have a dedicated staged prompt set in the same style as PM4/shared-I/O/world-runtime work
+	- broader `WorldScene` extraction and repeated asset-miss suppression still belong to the separate world-runtime prompt family
+- validation boundary:
+	- this is workflow/continuity work only
+	- no new wow-viewer M2 library or renderer code landed in this slice
+
+### Mar 31, 2026 - Conservative Adapted-M2 Material Rollback Restored A Sane Giant-Root Payload
+
+- followed stronger runtime evidence from the standalone viewer: `AzjolRoofGiant.m2` still loaded as a selectable adapted/runtime model but rendered no visible geometry even outside the world-scene path
+- found a concrete regression seam in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+	- the current adapted M2 path was applying `ApplyLayerAnimationMetadata(...)` to each generated material layer
+	- that is newer behavior than the old conservative path and can zero final layer alpha through transparency/color animation tracks even for static doodads
+- landed a narrow rollback:
+	- adapted M2 materials now stay on the conservative path again and do not graft raw layer transparency/color/UV animation metadata into runtime layers
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+	- direct probe validation using the built viewer binary now reports `AzjolRoofGiant.m2` as a sane opaque adapted model with `574` vertices, `1063` triangles, `AZULBLANKROCK.BLP`, and `StaticAlpha=1.000`
+- validation boundary:
+	- no automated tests were added or run
+	- live viewer runtime signoff is still pending until the rebuilt app is reopened on the standalone giant-root asset and the development world
+
 ### Mar 31, 2026 - Remaining Invisible World M2 Set Is Now Scoped To The Shaded Pass, Not Placement
 
 - followed the first live viewer report after the build-mismatch correction: many MPQ-backed M2s are still missing, especially the giant root structures that should cover the development terrain
@@ -1725,13 +1759,16 @@
 - Landed pieces:
 	- added `WowViewer.Core.Maps.WdtSummary`
 	- added `WowViewer.Core.IO.Maps.WdtSummaryReader`
+	- extended the shared WDT seam with standard `MAIN` flag summary metadata instead of flattening every non-zero standard entry to occupancy only
+	- added `WowViewer.Core.Maps.WdtMainFlagsSummary` and `WdtMainFlagValueSummary` so standard `MAIN` readers can expose `hasAdt`, `allWater`, `loaded`, unknown-bit, async-id, and distinct-flag distribution signals without taking over tile discovery ownership
 	- expanded `MapChunkIds` with Alpha-only `MDNM` and `MONM`
-	- updated `WowViewer.Tool.Inspect map inspect` to print the shared WDT semantic summary
-	- added `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs` for synthetic standard WDT, synthetic Alpha WDT, and real-data `development.wdt`
+	- updated `WowViewer.Tool.Inspect map inspect` to print the shared WDT semantic summary plus a standard `MAIN` flag-distribution line when available
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs` coverage for synthetic standard WDT flags, synthetic Alpha WDT boundary behavior, and real-data `development.wdt`
 - Validation limits:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `71` passing tests
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and now prints the shared WDT semantic summary on real data
-	- this is still top-level semantic summary work, not deep WDT parsing or write support
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WdtSummaryReaderTests` passed on Mar 31, 2026 with `3` passing focused WDT-summary tests
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 31, 2026 and now prints `WDT MAIN flags: any=1496 hasAdt=1496 allWater=0 loaded=0 unknown=0 asyncIds=0 distinct=0x1:1496`
+	- this is still top-level semantic summary work, not deep WDT parsing, per-tile contract ownership, or write support
 
 ### Mar 27, 2026 - Shared AreaIdMapper Archive-Backed Loading Replaced Constructor-Time Extracted-Tree Probing
 

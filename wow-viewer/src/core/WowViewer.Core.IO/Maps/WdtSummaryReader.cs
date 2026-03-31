@@ -6,6 +6,10 @@ namespace WowViewer.Core.IO.Maps;
 public static class WdtSummaryReader
 {
     private const int WdtTileCount = 64 * 64;
+    private const uint MainFlagHasAdt = 0x1;
+    private const uint MainFlagAllWater = 0x2;
+    private const uint MainFlagLoaded = 0x4;
+    private const uint KnownMainFlagMask = MainFlagHasAdt | MainFlagAllWater | MainFlagLoaded;
     private const int StandardMainCellSize = 8;
     private const int AlphaMainCellSize = 16;
     private const int MddfEntrySize = 36;
@@ -30,17 +34,19 @@ public static class WdtSummaryReader
 
         byte[] mphdData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mphd) ?? [];
         byte[] mainData = MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Main) ?? [];
+        int mainCellSize = InferMainCellSize(mainData);
 
         return new WdtSummary(
             fileSummary.SourcePath,
             isWmoBased: IsWmoBased(mphdData),
             tilesWithData: CountTilesWithData(mainData),
             totalTiles: WdtTileCount,
-            mainCellSizeBytes: InferMainCellSize(mainData),
+            mainCellSizeBytes: mainCellSize,
             doodadNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Mdnm, MapChunkIds.Mmdx])),
             worldModelNameCount: MapSummaryReaderCommon.CountStringEntries(MapSummaryReaderCommon.ReadFirstAvailableChunkPayload(stream, fileSummary, [MapChunkIds.Monm, MapChunkIds.Mwmo])),
             doodadPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Mddf), MddfEntrySize),
-            worldModelPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf), ModfEntrySize));
+            worldModelPlacementCount: MapSummaryReaderCommon.CountPlacements(MapSummaryReaderCommon.ReadChunkPayload(stream, fileSummary, MapChunkIds.Modf), ModfEntrySize),
+            mainFlags: ReadMainFlagsSummary(mainData, mainCellSize));
     }
 
     private static bool IsWmoBased(byte[] mphdData)
@@ -86,5 +92,64 @@ public static class WdtSummaryReader
             return mainData.Length / WdtTileCount;
 
         return 0;
+    }
+
+    private static WdtMainFlagsSummary? ReadMainFlagsSummary(byte[] mainData, int mainCellSize)
+    {
+        if (mainCellSize != StandardMainCellSize || mainData.Length < mainCellSize)
+            return null;
+
+        int cellsWithAnyFlags = 0;
+        int cellsWithHasAdt = 0;
+        int cellsWithAllWater = 0;
+        int cellsWithLoaded = 0;
+        int cellsWithUnknownFlags = 0;
+        int cellsWithAsyncId = 0;
+        Dictionary<uint, int> distinctNonZeroValues = [];
+
+        for (int index = 0; index < WdtTileCount; index++)
+        {
+            int offset = index * mainCellSize;
+            if (offset + StandardMainCellSize > mainData.Length)
+                break;
+
+            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(mainData.AsSpan(offset, sizeof(uint)));
+            uint asyncId = BinaryPrimitives.ReadUInt32LittleEndian(mainData.AsSpan(offset + sizeof(uint), sizeof(uint)));
+
+            if (flags != 0)
+            {
+                cellsWithAnyFlags++;
+                distinctNonZeroValues.TryGetValue(flags, out int existingCount);
+                distinctNonZeroValues[flags] = existingCount + 1;
+            }
+
+            if ((flags & MainFlagHasAdt) != 0)
+                cellsWithHasAdt++;
+
+            if ((flags & MainFlagAllWater) != 0)
+                cellsWithAllWater++;
+
+            if ((flags & MainFlagLoaded) != 0)
+                cellsWithLoaded++;
+
+            if ((flags & ~KnownMainFlagMask) != 0)
+                cellsWithUnknownFlags++;
+
+            if (asyncId != 0)
+                cellsWithAsyncId++;
+        }
+
+        List<WdtMainFlagValueSummary> distinctValues = [];
+        foreach (KeyValuePair<uint, int> pair in distinctNonZeroValues.OrderBy(static pair => pair.Key))
+            distinctValues.Add(new WdtMainFlagValueSummary(pair.Key, pair.Value));
+
+        return new WdtMainFlagsSummary(
+            cellsWithAnyFlags,
+            cellsWithHasAdt,
+            cellsWithAllWater,
+            cellsWithLoaded,
+            cellsWithUnknownFlags,
+            cellsWithAsyncId,
+            distinctValues);
     }
 }

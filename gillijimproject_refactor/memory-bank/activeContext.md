@@ -2,6 +2,25 @@
 
 # Active Context
 
+## Mar 31, 2026 - Ordered M2 Runtime Prompt Set Landed For wow-viewer
+
+- the workspace now has a dedicated staged prompt surface for M2 runtime/rendering recovery instead of routing that work through only PM4/shared-I/O/world-runtime prompts
+- landed workflow assets:
+	- `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/01-md20-and-skin-runtime-foundation.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/02-section-classification-and-material-routing.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/03-animation-lighting-and-effect-runtime.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/04-scene-submission-and-batching.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime/05-consumer-cutover-and-parity-harness.prompt.md`
+	- Codex mirrors under `.codex/prompts/wow-viewer-m2-runtime*`
+	- continuity plan `gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`
+- routing decision locked:
+	- M2 parser/runtime/rendering work should now route through the dedicated M2 prompt set, not be forced into the broader world-runtime split prompt unless the real problem is still `WorldScene` ownership
+	- `MdxViewer` remains a compatibility/reference input for proof and diagnostics, not the design owner of future M2 seams
+- important boundary:
+	- this is workflow/continuity work only
+	- no new M2 library slice has landed in `wow-viewer` yet from this prompt set itself
+
 ## Mar 31, 2026 - Remaining Giant-Root M2 Failures Now Point At The Shaded Draw Path, Not Placement
 
 - after the build-mismatch correction landed, live viewer feedback still showed more than half of the world M2 set missing, especially the giant root structures that should visibly cover the development terrain
@@ -1730,16 +1749,17 @@
 
 - `wow-viewer` now has its first shared WDT semantic-summary seam beyond raw top-level chunk inventory.
 - Landed pieces:
-	- `wow-viewer/src/core/WowViewer.Core/Maps/WdtSummary.cs` now owns the typed WDT semantic-summary contract for MPHD WMO-based flags, MAIN occupancy, string-table counts, and top-level placement counts
-	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtSummaryReader.cs` now reads those signals from either Alpha-style or standard WDT top-level chunks without pretending to be a full payload parser
+	- `wow-viewer/src/core/WowViewer.Core/Maps/WdtSummary.cs` now owns the typed WDT semantic-summary contract for MPHD WMO-based flags, MAIN occupancy, standard `MAIN` flag distributions, string-table counts, and top-level placement counts
+	- `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtSummaryReader.cs` now reads those signals from either Alpha-style or standard WDT top-level chunks, including standard `MAIN` flag summary metadata for `hasAdt`, `allWater`, `loaded`, unknown bits, async-id presence, and distinct non-zero flag values, without pretending to be a full payload parser
 	- `wow-viewer/src/core/WowViewer.Core/Maps/MapChunkIds.cs` now includes `MDNM` and `MONM` so the shared reader can treat Alpha name tables as first-class chunk ids instead of tool-local literals
-	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports the shared WDT semantic summary for `map inspect`
-	- `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs` now covers synthetic standard WDT, synthetic Alpha WDT, and the fixed real-data `development.wdt` semantic signals
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now reports both the shared WDT semantic summary and the standard `MAIN` flag distribution line for `map inspect`
+	- `wow-viewer/tests/WowViewer.Core.Tests/WdtSummaryReaderTests.cs` now covers synthetic standard WDT flag distributions, synthetic Alpha WDT boundary behavior, and the fixed real-data `development.wdt` standard-flag distribution
 - Current verified validation for this slice:
 	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 27, 2026 with `71` passing tests
-	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 27, 2026 and reported `wmoBased=False tiles=1496/4096 mainCellBytes=8 doodadNames=0 wmoNames=0 doodadPlacements=0 wmoPlacements=0`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WdtSummaryReaderTests` passed on Mar 31, 2026 with `3` passing WDT-summary tests after adding standard `MAIN` flag metadata
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map inspect --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt` passed on Mar 31, 2026 and reported `WDT MAIN flags: any=1496 hasAdt=1496 allWater=0 loaded=0 unknown=0 asyncIds=0 distinct=0x1:1496`
 - Important boundary:
-	- this proves shared WDT semantic summary for top-level MPHD, MAIN, string-table, and placement-count signals
+	- this proves shared WDT semantic summary for top-level MPHD, MAIN occupancy, standard `MAIN` flag metadata, string-table, and placement-count signals
 	- this does not yet prove deep WDT payload parsing, WMO placement semantics beyond counts, or any write path
 
 ## Mar 27, 2026 - Shared AreaIdMapper Archive-Backed Loading Replaced Constructor-Time Extracted-Tree Probing

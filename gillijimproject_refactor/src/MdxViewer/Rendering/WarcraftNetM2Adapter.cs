@@ -439,7 +439,10 @@ internal static class WarcraftNetM2Adapter
                 Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
             });
 
-            ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
+            // Keep adapted M2 world/runtime materials on the old conservative path until
+            // raw transparency/color/UV animation tables are proven on real assets. The
+            // newer metadata path can zero the only renderable layer for static doodads,
+            // which matches the current "bounds yes, object no" regression class.
 
             int materialId = mdx.Materials.Count;
             mdx.Materials.Add(material);
@@ -639,8 +642,6 @@ internal static class WarcraftNetM2Adapter
 
     private static SkinData ParseSkinData(byte[] skinBytes, string modelPath, M2Profile? profile = null)
     {
-        _ = profile;
-
         try
         {
             var skin = new Skin(skinBytes);

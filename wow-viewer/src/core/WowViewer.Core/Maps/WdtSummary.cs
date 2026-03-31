@@ -11,7 +11,8 @@ public sealed class WdtSummary
         int doodadNameCount,
         int worldModelNameCount,
         int doodadPlacementCount,
-        int worldModelPlacementCount)
+        int worldModelPlacementCount,
+        WdtMainFlagsSummary? mainFlags)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentOutOfRangeException.ThrowIfNegative(tilesWithData);
@@ -31,6 +32,7 @@ public sealed class WdtSummary
         WorldModelNameCount = worldModelNameCount;
         DoodadPlacementCount = doodadPlacementCount;
         WorldModelPlacementCount = worldModelPlacementCount;
+        MainFlags = mainFlags;
     }
 
     public string SourcePath { get; }
@@ -50,4 +52,6 @@ public sealed class WdtSummary
     public int DoodadPlacementCount { get; }
 
     public int WorldModelPlacementCount { get; }
+
+    public WdtMainFlagsSummary? MainFlags { get; }
 }

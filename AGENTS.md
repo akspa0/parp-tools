@@ -13,7 +13,8 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md` when it exists.
 - Before changing `wow-viewer` PM4, shared I/O, or migration workflow, also read `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and `wow-viewer/README.md`.
-- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, and `.codex/prompts/wow-viewer-world-runtime-plan-set.md`.
+- Before changing `wow-viewer` M2 runtime ownership, model rendering, skin handling, model lighting, shader or effect routing, or M2 performance work, also read `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`.
+- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, `.codex/prompts/wow-viewer-world-runtime-plan-set.md`, and `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`.
 - If the task touches 3.3.5 terrain texturing or alpha blending, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## Memory Bank Rule
@@ -42,6 +43,15 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Use `.codex/prompts/wow-viewer-pm4-library-implementation.md` for the next narrow `Core.PM4` implementation slice.
 - Use `.codex/prompts/wow-viewer-shared-io-implementation.md` for the next narrow shared `Core` or `Core.IO` format slice.
 - Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
+- Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
+
+## wow-viewer M2 And Runtime Guardrails
+
+- Treat `wow-viewer` as the canonical implementation target for all new M2 runtime ownership, including skin-profile loading, section classification, render-pass routing, model lighting, shader or effect selection, and M2 performance work.
+- Treat `wow-viewer/src/core/WowViewer.Core.Runtime` and future `wow-viewer` M2-owned library areas as the default home for new M2 renderer code. Do not keep deepening `gillijimproject_refactor/src/MdxViewer` as the design owner for those seams.
+- Use `MdxViewer`, `WarcraftNetM2Adapter`, `noggit-red`, legacy tools, and native-client Ghidra work as extraction or reference inputs only unless the user explicitly asks for compatibility work in the old app.
+- When a task is primarily reverse engineering or behavior recovery for M2, record the findings in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` and keep the continuity files in sync instead of leaving the evidence only in chat.
+- If a change only proves library or build behavior in `wow-viewer`, say that explicitly. Do not imply active-viewer runtime signoff.
 
 ## Build And Validation
 
