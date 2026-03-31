@@ -1,5 +1,22 @@
 # Progress
 
+### Mar 31, 2026 - Renderer-First Performance Roadmap Recorded For The Active MdxViewer World Path
+
+- followed the direct reprioritization that camera-movement performance is now the biggest blocker, ahead of more shell tweaks or more isolated feature additions
+- recorded the active renderer roadmap in `gillijimproject_refactor/plans/mdxviewer_renderer_performance_plan_2026-03-31.md`
+- plan decisions locked for future slices:
+	- work the active `src/MdxViewer/Terrain/WorldScene.cs` path first instead of treating dormant `RenderQueue.cs` as if it already owned the frame
+	- start with per-frame instrumentation plus an explicit world render-frame contract
+	- then reduce MDX submission churn and batching waste
+	- then pull WMO shell/liquid/transparent ownership outward from renderer-local sequencing into clearer scene-level layers
+	- keep PM4/debug/editor overlays as explicit late layers instead of letting them stay mixed into the main world submission cost
+	- finish DBC lighting integration after render-layer ownership is explicit
+	- add graveyards from `WorldSafeLocs.dbc` only after the renderer frame is stabilized, reusing the Area POI / taxi lazy-load overlay model
+- validation boundary:
+	- this slice is planning only
+	- no automated tests were added or run
+	- no runtime performance measurements were captured yet from the new plan itself
+
 ### Mar 31, 2026 - Fixed Sidebar Shell Now Uses Draggable Split Panels
 
 - followed direct viewer-shell feedback that the current fixed sidebars were still not meaningfully resizable and felt like a broken layout mode

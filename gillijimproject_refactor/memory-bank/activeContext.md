@@ -2,6 +2,20 @@
 
 # Active Context
 
+## Mar 31, 2026 - Renderer-First Roadmap Now Prioritizes Explicit World Render Layers Before More Features
+
+- user reprioritized away from more local viewer fixes and toward the biggest blocker: camera-movement performance on real world maps is still unusable
+- planning outcome is now explicit and recorded in `plans/mdxviewer_renderer_performance_plan_2026-03-31.md`:
+	- the active bottleneck is the current `src/MdxViewer/Terrain/WorldScene.cs` world path, which still mixes lighting resolution, terrain/WDL, WMO visibility/submission, MDX animation/visibility/submission, liquids, and overlay/debug work in one large render routine
+	- `src/MdxViewer/Rendering/RenderQueue.cs` exists but is still not the active world-scene submission architecture
+	- the next serious renderer slice should start with per-frame measurement plus an explicit world render-frame contract, then move into MDX batching/state reduction, then WMO scene-level pass ownership
+	- `LightService` / `TerrainLighting` stay on the roadmap, but as a follow-up after render-layer ownership is explicit instead of as the first performance slice
+	- graveyards from `WorldSafeLocs.dbc` are intentionally deferred until after renderer cleanup and should land as a sibling overlay to the existing Area POI / taxi systems
+- important boundary:
+	- this is planning/continuity work only in this slice
+	- no renderer-performance code has been landed yet from this roadmap
+	- no runtime performance signoff has been captured yet beyond the already-known user report that movement is still too slow
+
 ## Mar 31, 2026 - Fixed Sidebar Shell Now Uses Draggable Split Panels
 
 - user reported that the current fixed-sidebar shell was still a mess because the left/right sidebars were not meaningfully resizable in practice

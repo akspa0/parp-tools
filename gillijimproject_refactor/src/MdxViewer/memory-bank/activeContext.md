@@ -1,5 +1,20 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - Renderer Performance Is The Next Mainline Slice, Not More Overlay Expansion
+
+- current user priority is now explicit: moving the camera on live world maps is still too slow, so renderer architecture comes before more feature work
+- roadmap recorded in `gillijimproject_refactor/plans/mdxviewer_renderer_performance_plan_2026-03-31.md`
+- concrete planning direction:
+   - the active bottleneck is the current monolithic `Terrain/WorldScene.cs` render path
+   - `Rendering/RenderQueue.cs` exists but is not yet the active owner of world-scene submission
+   - the first implementation slice should add frame timings/counters and an explicit world render-frame contract before deeper renderer rewrites
+   - MDX batching/state reduction should come before graveyard overlays or other new world markers
+   - `LightService` stays important, but lighting completion follows render-frame cleanup rather than leading it
+   - graveyards from `WorldSafeLocs.dbc` should be added later as a sibling lazy-loaded overlay to Area POIs and taxi paths
+- important boundary:
+   - this is planning/continuity only
+   - no renderer-performance code landed in this slice yet
+
 ## Mar 31, 2026 - Fixed Sidebar Mode Uses Splitter-Driven Panels Instead Of Pseudo-Resizable Windows
 
 - latest viewer-shell correction was not another PM4 or terrain slice; it was about making the default fixed sidebars actually usable
