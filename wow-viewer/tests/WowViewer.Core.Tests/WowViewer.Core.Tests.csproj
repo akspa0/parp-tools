@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\core\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
+    <ProjectReference Include="..\..\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
   </ItemGroup>
 
 </Project>

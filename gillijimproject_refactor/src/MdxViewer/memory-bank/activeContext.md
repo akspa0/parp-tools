@@ -1,5 +1,33 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - MdxViewer Now Consumes wow-viewer Core.Runtime For World Render Telemetry
+
+- after the initial in-app renderer stats slice landed, the first stable `WorldScene` seam was moved out into `wow-viewer`
+- landed consumer-side follow-up in `src/MdxViewer/Terrain/WorldScene.cs` plus both MdxViewer project files:
+   - `WorldScene` now uses `WowViewer.Core.Runtime.World.WorldRenderFrameStats` and `WorldRenderOptimizationAdvisor` instead of defining its public telemetry contracts inline
+   - `MdxViewer.csproj` and `MdxViewer.CrossPlatform.csproj` now reference `wow-viewer/src/core/WowViewer.Core.Runtime/WowViewer.Core.Runtime.csproj`
+- important boundary:
+   - this does not mean the world renderer has been migrated out of `MdxViewer`
+   - `WorldScene` still owns render orchestration, culling, submission, and overlay behavior; only the reusable telemetry contract and hint logic moved
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+
+## Mar 31, 2026 - WorldScene Now Emits A Real Renderer Stats Frame Instead Of Only Ad-Hoc Counters
+
+- first renderer-first implementation slice is now in the live viewer code, not just in the plan file
+- landed in `src/MdxViewer/Terrain/WorldScene.cs` and `ViewerApp_Sidebars.cs`:
+   - `WorldScene` now owns a reusable render-frame contract with stage timings and the visible WMO/MDX scratch lists
+   - the active world path records per-frame CPU timings for the current major passes plus MDX batched-vs-unbatched submission counts
+   - the terrain sidebar now exposes a `Renderer Stats` tree with the last captured world-frame timings and a heuristic `next win` hint
+- current purpose:
+   - this is the instrumentation and smallest frame-contract seam needed before deeper MDX batching or WMO pass extraction work
+   - it does not yet claim that explicit scene-layer ownership is finished
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no development-map runtime capture was performed yet for the new stats panel, so the live next-win hint still needs manual readback during real camera movement
+
 ## Mar 31, 2026 - Renderer Performance Is The Next Mainline Slice, Not More Overlay Expansion
 
 - current user priority is now explicit: moving the camera on live world maps is still too slow, so renderer architecture comes before more feature work

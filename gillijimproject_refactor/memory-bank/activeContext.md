@@ -2,6 +2,36 @@
 
 # Active Context
 
+## Mar 31, 2026 - First WorldScene Extraction Seam Now Lives In wow-viewer Core.Runtime
+
+- followed the explicit user direction to stop deepening `src/MdxViewer/Terrain/WorldScene.cs` as the long-term design owner and move the first stable seam into `wow-viewer`
+- landed a narrow cross-repo extraction around render-frame telemetry and optimization guidance:
+	- added `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldRenderFrameStats.cs` and `WorldRenderOptimizationAdvisor.cs` as the canonical runtime-owned contracts for world render stage/frame stats and the `next win` hint
+	- updated `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` to consume those `WowViewer.Core.Runtime.World` types instead of defining its own public telemetry contracts and hint logic inline
+	- added runtime coverage in `wow-viewer/tests/WowViewer.Core.Tests/WorldRenderOptimizationAdvisorTests.cs`
+	- wired both `MdxViewer.csproj` and `MdxViewer.CrossPlatform.csproj` to reference `WowViewer.Core.Runtime`
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed on Mar 31, 2026 with 226 tests passing; only existing environment `CS1668` LIB-path warnings remained
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is the first stable `WorldScene` extraction seam, not a full world renderer migration
+	- `WorldScene` still owns live render orchestration, visibility collection, and debug/overlay behavior; only the reusable telemetry contract and advisor logic moved into `wow-viewer`
+
+## Mar 31, 2026 - WorldScene Now Captures Per-Frame Renderer Timings And A Next-Win Hint
+
+- started the first implementation slice from the new renderer-first roadmap instead of adding another isolated feature overlay
+- landed a narrow frame-instrumentation and frame-contract seam in `src/MdxViewer/Terrain/WorldScene.cs` plus UI exposure in `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- `WorldScene` now owns a reusable per-frame render contract that carries the visible WMO/MDX scratch lists, transparent sort scratch, stage timings, and MDX batched-vs-unbatched submission counts
+	- the active world render path now records timings for deferred asset drain, taxi actor update, lighting, sky, skybox backdrop, WDL, terrain, WMO visibility, WMO submission, MDX animation, MDX visibility, MDX opaque submission, liquids, MDX transparent sort, MDX transparent submission, and the late overlay/debug block
+	- the terrain sidebar now exposes a compact `Renderer Stats` tree that reports the last captured world-frame CPU timings plus a heuristic `next win` hint derived from the latest measured layer costs
+	- this is intentionally phase-1 instrumentation plus the smallest phase-2 scaffolding; it does not yet rewrite MDX batching ownership or pull WMO shell/liquid/transparent sequencing fully out of renderer-local control
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only in this chat
+	- no live development-map runtime capture was performed yet, so the new next-win hint exists but has not been manually read against real flythrough numbers in this session
+
 ## Mar 31, 2026 - Renderer-First Roadmap Now Prioritizes Explicit World Render Layers Before More Features
 
 - user reprioritized away from more local viewer fixes and toward the biggest blocker: camera-movement performance on real world maps is still unusable

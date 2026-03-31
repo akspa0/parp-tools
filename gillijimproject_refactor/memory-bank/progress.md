@@ -1,5 +1,40 @@
 # Progress
 
+### Mar 31, 2026 - First WorldScene Seam Extracted Into wow-viewer Core.Runtime
+
+- followed the new architectural direction to split `WorldScene.cs` by moving the first stable slice into `wow-viewer` instead of performing another app-local refactor only
+- landed the first shared runtime seam across `wow-viewer` and `MdxViewer`:
+	- added `WowViewer.Core.Runtime.WorldRenderStageStats`, `WorldRenderFrameStats`, and `WorldRenderOptimizationAdvisor`
+	- moved `WorldScene` to consume those runtime-owned contracts instead of keeping the public telemetry surface embedded in the app project
+	- added xUnit coverage for empty-frame, MDX-dominant, and terrain-dominant optimization hints in `wow-viewer/tests/WowViewer.Core.Tests/WorldRenderOptimizationAdvisorTests.cs`
+	- added `WowViewer.Core.Runtime` project references to the active `MdxViewer` consumers so the extracted seam is compile-proven in the legacy app
+- why this matters:
+	- this establishes `wow-viewer` as the canonical owner of the first reusable world-render contract rather than leaving the seam trapped in `WorldScene`
+	- it creates a concrete next extraction path for visibility, pass ownership, and scene composition without overstating that the renderer itself has already moved
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` passed with 226 tests succeeding
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings only
+- validation boundary:
+	- no runtime viewer signoff was performed
+	- no render behavior changed intentionally in this slice beyond where the telemetry contract is owned
+
+### Mar 31, 2026 - First Renderer-Stats Slice Landed In WorldScene And The Sidebar
+
+- followed the renderer-first roadmap by implementing the first measurement slice instead of jumping straight into another broad renderer rewrite
+- landed the change in `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- added a reusable per-frame render contract in `WorldScene` that now owns visible WMO/MDX scratch lists, transparent-sort scratch, stage timings, and MDX batched-vs-unbatched counts
+	- the active world frame now records timings for deferred asset drain, taxi actor update, lighting, sky, skybox backdrop, WDL, terrain, WMO visibility, WMO submission, MDX animation, MDX visibility, MDX opaque submission, liquids, MDX transparent sort, MDX transparent submission, and the late overlay/debug block
+	- the terrain sidebar now exposes a `Renderer Stats` tree showing the last captured world-frame CPU timings and a heuristic `next win` hint based on those numbers
+- why this matters:
+	- this is the first active `WorldScene` seam that turns the renderer-performance roadmap into runtime data instead of only continuity notes
+	- it also establishes the smallest viable world render-frame contract needed for the next batching/culling slice without pretending the full render-layer refactor is already done
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime capture was performed yet in this chat, so the new stats panel and its next-win hint still need manual confirmation on the development map
+
 ### Mar 31, 2026 - Renderer-First Performance Roadmap Recorded For The Active MdxViewer World Path
 
 - followed the direct reprioritization that camera-movement performance is now the biggest blocker, ahead of more shell tweaks or more isolated feature additions

@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MDX-L_Tool\MDX-L_Tool.csproj" />
     <ProjectReference Include="..\WoWMapConverter\WoWMapConverter.Core\WoWMapConverter.Core.csproj" />
+    <ProjectReference Include="..\..\..\wow-viewer\src\core\WowViewer.Core.Runtime\WowViewer.Core.Runtime.csproj" />
     <ProjectReference Include="..\..\..\wow-viewer\src\core\WowViewer.Core.IO\WowViewer.Core.IO.csproj" />
     <ProjectReference Include="..\..\..\wow-viewer\src\core\WowViewer.Core.PM4\WowViewer.Core.PM4.csproj" />
     <ProjectReference Include="..\..\lib\SereniaBLPLib\SereniaBLPLib\SereniaBLPLib.csproj" />
