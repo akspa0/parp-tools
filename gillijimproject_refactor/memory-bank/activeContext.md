@@ -2,6 +2,22 @@
 
 # Active Context
 
+## Mar 31, 2026 - Slice 01 Negative Asset Lookup Suppression Landed In The Active Viewer Path
+
+- implemented the first world-runtime stabilization slice in the active `MdxViewer` compatibility path instead of broadening the `WorldScene` split prematurely
+- concrete changes landed across `src/MdxViewer/Terrain/WorldAssetManager.cs`, `src/MdxViewer/Rendering/WmoRenderer.cs`, `src/MdxViewer/ViewerApp.cs`, and `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- `WorldAssetManager` now treats cached failed MDX loads as terminal residency for the current session instead of retrying them through `EnsureMdxLoaded(...)`, deferred queueing, and deferred drain passes
+	- the world asset queue no longer re-enqueues or re-dequeues known-failed MDX paths, which removes the repeated `.skin` candidate walk and failed-load churn from the active world frame
+	- world-path missing external `.skin` results are now remembered so prefetch does not keep fanning out across the same companion-skin guesses after the miss is already known
+	- missing `.skin` logging is now once-per-path for the active world path, standalone M2 open path, and WMO doodad M2 path instead of repeating the same message every retry/reopen path
+	- the terrain sidebar now surfaces the new world-miss telemetry: suppressed failed-MDX retries, known missing M2-skin count, and suppressed duplicate skin-miss logs
+- validation completed:
+	- `get_errors` returned clean for the four edited `MdxViewer` files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- no new automated tests were added or run for this slice
+	- no real-data capture or runtime flythrough signoff has been performed yet, so this proves compile integration and retry suppression wiring only, not final frame-time improvement on the development map
+
 ## Mar 31, 2026 - World Runtime Prompt Set Added For The Ordered WorldScene Split
 
 - user chose the broader world-runtime decomposition path as the next planning surface: split `WorldScene` into explicit terrain/WMO/MDX/overlay runtime services in `wow-viewer`, then implement those slices in fresh chats

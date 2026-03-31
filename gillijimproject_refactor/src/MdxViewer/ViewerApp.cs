@@ -144,6 +144,7 @@ public partial class ViewerApp : IDisposable
     // Model info
     private string _modelInfo = "";
     private readonly Dictionary<string, string?> _standaloneSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loggedStandaloneMissingSkinPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _reportedAreaDiagnostics = new(StringComparer.Ordinal);
     
     // Stored loaded model data for export (avoids re-parsing from disk)
@@ -5773,6 +5774,7 @@ void main() {
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
             _lastGameFolderPath = Path.GetFullPath(gamePath);
             _standaloneSkinPathCache.Clear();
+            _loggedStandaloneMissingSkinPaths.Clear();
             _discoveredMaps.Clear();
             _areaTableService = null;
             ResetWdlPreviewSupport();
@@ -6186,6 +6188,7 @@ void main() {
 
         _lastLooseOverlayPath = selectedFullPath;
         _standaloneSkinPathCache.Clear();
+    _loggedStandaloneMissingSkinPaths.Clear();
         ResetWdlPreviewSupport();
         InitializeWdlPreviewSupport();
         RefreshDiscoveredMaps();
@@ -7011,8 +7014,12 @@ void main() {
                     $"No external .skin resolved for pre-release M2: {Path.GetFileName(originalPath)}. wow.exe 3.0.1.8303 traces root-contained profile tables for CM2Shared; MdxViewer root-profile geometry parsing is still incomplete.")
                 : new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
 
-            ViewerLog.Error(ViewerLog.Category.Mdx,
-                $"[M2] {missingSkinError.Message} (build={_dbcBuild ?? "unknown"}, resolved='{resolvedModelPath}', candidateCount={candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase).Count()})");
+            if (_loggedStandaloneMissingSkinPaths.Add(resolvedModelPath))
+            {
+                ViewerLog.Error(ViewerLog.Category.Mdx,
+                    $"[M2] {missingSkinError.Message} (build={_dbcBuild ?? "unknown"}, resolved='{resolvedModelPath}', candidateCount={candidatePaths.Distinct(StringComparer.OrdinalIgnoreCase).Count()})");
+            }
+
             throw missingSkinError;
         }
 

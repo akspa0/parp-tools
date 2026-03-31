@@ -49,6 +49,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly List<string> _doodadNames = new(); // resolved from MODN
     private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loggedMissingDoodadSkinPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> _pendingDoodadModelLoads = new();
     private readonly HashSet<string> _queuedDoodadModelLoads = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, List<int>> _doodadInstanceIndicesByModel = new(StringComparer.OrdinalIgnoreCase);
@@ -1357,7 +1358,8 @@ void main() {
                 }
             }
 
-            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
+            if (_loggedMissingDoodadSkinPaths.Add(resolvedModelPath))
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
         }
 
         if (WarcraftNetM2Adapter.IsMd20(modelData))
@@ -1913,6 +1915,7 @@ void main() {
             renderer?.Dispose();
         _doodadModelCache.Clear();
         _doodadInstances.Clear();
+        _loggedMissingDoodadSkinPaths.Clear();
 
         _shaderRefCount--;
         if (_shaderRefCount <= 0 && _shaderProgram != 0)

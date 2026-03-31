@@ -83,6 +83,8 @@ public class WorldAssetManager : IDisposable
     private readonly HashSet<string> _priorityQueuedWmoLoads = new(StringComparer.OrdinalIgnoreCase);
     private bool _preferWmoNext;
     private readonly Dictionary<string, string?> _bestSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _knownMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _loggedMissingM2SkinPaths = new(StringComparer.OrdinalIgnoreCase);
 
     // Stats
     public int MdxModelsLoaded => _mdxModels.Count(kv => kv.Value != null);
@@ -91,6 +93,9 @@ public class WorldAssetManager : IDisposable
     public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
     public int FileCacheCount => _fileDataCache.Count;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
+    public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
+    public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
+    public long SuppressedMissingM2SkinLogCount => _suppressedMissingM2SkinLogCount;
 
     private long _fileReadRequests;
     private long _fileReadCacheHits;
@@ -98,6 +103,8 @@ public class WorldAssetManager : IDisposable
     private long _pathProbeAttempts;
     private long _pathProbeResolutions;
     private long _pathProbeMisses;
+    private long _suppressedFailedMdxRetryCount;
+    private long _suppressedMissingM2SkinLogCount;
 
     public WorldAssetManager(GL gl, IDataSource? dataSource, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null)
     {
@@ -203,18 +210,20 @@ public class WorldAssetManager : IDisposable
     /// </summary>
     public void EnsureMdxLoaded(string normalizedKey)
     {
-        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
         {
-            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            if (cachedRenderer != null)
+                TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+            else
+                _suppressedFailedMdxRetryCount++;
+
             return;
         }
 
-        if (cachedRenderer == null && _mdxModels.ContainsKey(normalizedKey))
-            ViewerLog.Debug(ViewerLog.Category.Mdx, $"Retrying cached failed MDX load: \"{normalizedKey}\"");
-
         var renderer = LoadMdxModel(normalizedKey);
         _mdxModels[normalizedKey] = renderer;
-        TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
+        if (renderer != null)
+            TouchLru(_mdxLru, _mdxLruMap, normalizedKey);
         EvictMdxIfNeeded();
     }
 
@@ -365,8 +374,13 @@ public class WorldAssetManager : IDisposable
     {
         normalizedKey = NormalizeKey(normalizedKey);
 
-        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
+        {
+            if (cachedRenderer == null)
+                _suppressedFailedMdxRetryCount++;
+
             return;
+        }
 
         if (_queuedMdxLoads.Add(normalizedKey))
         {
@@ -379,8 +393,13 @@ public class WorldAssetManager : IDisposable
     {
         normalizedKey = NormalizeKey(normalizedKey);
 
-        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer) && cachedRenderer != null)
+        if (_mdxModels.TryGetValue(normalizedKey, out var cachedRenderer))
+        {
+            if (cachedRenderer == null)
+                _suppressedFailedMdxRetryCount++;
+
             return;
+        }
 
         if (_queuedMdxLoads.Add(normalizedKey))
         {
@@ -438,16 +457,20 @@ public class WorldAssetManager : IDisposable
 
             if (isMdx)
             {
-                if (!_mdxModels.TryGetValue(key, out var cachedRenderer) || cachedRenderer == null)
+                if (_mdxModels.TryGetValue(key, out var cachedRenderer))
                 {
                     if (cachedRenderer == null && _mdxModels.ContainsKey(key))
-                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Retrying deferred failed MDX load: \"{key}\"");
+                        _suppressedFailedMdxRetryCount++;
 
-                    var renderer = LoadMdxModel(key);
-                    _mdxModels[key] = renderer;
-                    TouchLru(_mdxLru, _mdxLruMap, key);
-                    EvictMdxIfNeeded();
+                    loadsCompleted++;
+                    continue;
                 }
+
+                var renderer = LoadMdxModel(key);
+                _mdxModels[key] = renderer;
+                if (renderer != null)
+                    TouchLru(_mdxLru, _mdxLruMap, key);
+                EvictMdxIfNeeded();
             }
             else
             {
@@ -733,8 +756,15 @@ public class WorldAssetManager : IDisposable
         {
             _priorityQueuedMdxLoads.Remove(key);
 
-            if (_mdxModels.TryGetValue(key, out var renderer) && renderer != null)
+            if (_mdxModels.TryGetValue(key, out var renderer))
+            {
+                _queuedMdxLoads.Remove(key);
+
+                if (renderer == null)
+                    _suppressedFailedMdxRetryCount++;
+
                 continue;
+            }
 
             _queuedMdxLoads.Remove(key);
             return true;
@@ -742,8 +772,15 @@ public class WorldAssetManager : IDisposable
 
         while (_pendingMdxLoads.TryDequeue(out key))
         {
-            if (_mdxModels.TryGetValue(key, out var renderer) && renderer != null)
+            if (_mdxModels.TryGetValue(key, out var renderer))
+            {
+                _queuedMdxLoads.Remove(key);
+
+                if (renderer == null)
+                    _suppressedFailedMdxRetryCount++;
+
                 continue;
+            }
 
             _queuedMdxLoads.Remove(key);
             return true;
@@ -760,7 +797,10 @@ public class WorldAssetManager : IDisposable
             _priorityQueuedWmoLoads.Remove(key);
 
             if (_wmoModels.TryGetValue(key, out var renderer) && renderer != null)
+            {
+                _queuedWmoLoads.Remove(key);
                 continue;
+            }
 
             _queuedWmoLoads.Remove(key);
             return true;
@@ -769,7 +809,10 @@ public class WorldAssetManager : IDisposable
         while (_pendingWmoLoads.TryDequeue(out key))
         {
             if (_wmoModels.TryGetValue(key, out var renderer) && renderer != null)
+            {
+                _queuedWmoLoads.Remove(key);
                 continue;
+            }
 
             _queuedWmoLoads.Remove(key);
             return true;
@@ -825,6 +868,7 @@ public class WorldAssetManager : IDisposable
                         continue;
 
                     anySkinFound = true;
+                    _knownMissingM2SkinPaths.Remove(resolvedModelPath);
 
                     try
                     {
@@ -863,7 +907,7 @@ public class WorldAssetManager : IDisposable
                         }
                     }
 
-                    ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
+                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey);
                 }
 
                 if (WarcraftNetM2Adapter.IsMd20(data))
@@ -994,6 +1038,9 @@ public class WorldAssetManager : IDisposable
             mpqDataSource.PrefetchFile(bestSkinPath);
             return;
         }
+
+        if (_knownMissingM2SkinPaths.Contains(canonicalModelPath))
+            return;
 
         foreach (string skinCandidate in WarcraftNetM2Adapter.BuildSkinCandidates(canonicalModelPath).Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -1201,6 +1248,19 @@ public class WorldAssetManager : IDisposable
         }
     }
 
+    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey)
+    {
+        _knownMissingM2SkinPaths.Add(resolvedModelPath);
+
+        if (_loggedMissingM2SkinPaths.Add(resolvedModelPath))
+        {
+            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
+            return;
+        }
+
+        _suppressedMissingM2SkinLogCount++;
+    }
+
     private void EvictMdxIfNeeded()
     {
         if (MaxMdxCached <= 0)
@@ -1274,6 +1334,8 @@ public class WorldAssetManager : IDisposable
         _queuedWmoLoads.Clear();
         _priorityQueuedWmoLoads.Clear();
         _bestSkinPathCache.Clear();
+        _knownMissingM2SkinPaths.Clear();
+        _loggedMissingM2SkinPaths.Clear();
         _priorityMdxLoads.Clear();
     }
 }

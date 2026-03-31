@@ -1,5 +1,23 @@
 # Progress
 
+### Mar 31, 2026 - First Negative Asset Lookup Suppression Slice Landed In MdxViewer
+
+- implemented the ordered world-runtime slice 01 in the active viewer path instead of starting the broader service extraction early
+- landed behavior in `src/MdxViewer/Terrain/WorldAssetManager.cs`, `src/MdxViewer/Rendering/WmoRenderer.cs`, `src/MdxViewer/ViewerApp.cs`, and `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- cached failed MDX world loads now stay failed for the current session rather than being retried through lazy load, queue, and deferred drain paths
+	- known-missing external `.skin` results now suppress repeated world-path prefetch fanout and repeated companion-skin miss logs
+	- standalone M2 open and WMO doodad M2 load paths now also log the same missing `.skin` problem once per resolved model path instead of flooding repeats
+	- the terrain sidebar now reports suppressed failed-MDX retries plus known/suppressed skin-miss telemetry so the miss path is visible without reading raw logs
+- why this matters:
+	- this removes one concrete source of repeated asset-miss noise before later visibility/pass extraction slices
+	- it keeps the slice narrow: no broad asset-service rewrite, no pass ownership move, and no new renderer abstraction was introduced here
+- validation completed:
+	- `get_errors` returned clean for the edited files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime capture or fixed-shot smoke was run in this slice, so measured log/frame improvement on the development map is still pending
+
 ### Mar 31, 2026 - Ordered wow-viewer World Runtime Prompt Set Landed
 
 - user selected the staged world-runtime decomposition path instead of a one-off next extraction only
