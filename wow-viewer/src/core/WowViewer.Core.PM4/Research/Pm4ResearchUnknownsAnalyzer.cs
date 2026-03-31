@@ -85,6 +85,8 @@ public static class Pm4ResearchUnknownsAnalyzer
         Dictionary<string, int> mprrValue2Counts = new(StringComparer.Ordinal);
         Dictionary<string, int> decodedTileCounts = new(StringComparer.Ordinal);
         Dictionary<string, int> otherLinkIdCounts = new(StringComparer.Ordinal);
+        Dictionary<string, MslkFamilyAccumulator> mslkFamilies = new(StringComparer.Ordinal);
+        Dictionary<string, MsurFamilyAccumulator> msurFamilies = new(StringComparer.Ordinal);
 
         short? mprlUnk14Min = null;
         short? mprlUnk14Max = null;
@@ -107,6 +109,10 @@ public static class Pm4ResearchUnknownsAnalyzer
             int mslkCount = file.KnownChunks.Mslk.Count;
             int mspvCount = file.KnownChunks.Mspv.Count;
             int mprrCount = file.KnownChunks.Mprr.Count;
+            int[] incomingLinkCounts = new int[msurCount];
+            HashSet<string>[] incomingLinkFamilies = new HashSet<string>[msurCount];
+            for (int index = 0; index < msurCount; index++)
+                incomingLinkFamilies[index] = new HashSet<string>(StringComparer.Ordinal);
 
             foreach (uint value in file.KnownChunks.Msvi)
             {
@@ -138,46 +144,60 @@ public static class Pm4ResearchUnknownsAnalyzer
 
             foreach (Pm4MslkEntry link in file.KnownChunks.Mslk)
             {
+                string familyKey = BuildMslkFamilyKey(link);
+                if (!mslkFamilies.TryGetValue(familyKey, out MslkFamilyAccumulator? mslkFamily))
+                {
+                    mslkFamily = new MslkFamilyAccumulator(familyKey);
+                    mslkFamilies.Add(familyKey, mslkFamily);
+                }
+
+                mslkFamily.EntryCount++;
+                mslkFamily.FilePaths.Add(file.SourcePath ?? string.Empty);
+                mslkFamily.RefIndices.Add(link.RefIndex);
+                mslkFamily.GroupObjectIds.Add(link.GroupObjectId);
+
                 AddCount(typeFlagsCounts, $"0x{link.TypeFlags:X2}");
                 AddCount(subtypeCounts, link.Subtype.ToString());
                 AddCount(systemFlagCounts, $"0x{link.SystemFlag:X4}");
 
                 if (link.RefIndex < msurCount)
+                {
                     mslkToMsurFits++;
+                    mslkFamily.DirectMsurFitCount++;
+                    incomingLinkCounts[link.RefIndex]++;
+                    incomingLinkFamilies[link.RefIndex].Add(familyKey);
+                }
                 else
                 {
                     mslkToMsurMisses++;
-                    if (link.RefIndex < mslkCount)
-                        mismatchDomainFits["MSLK"]++;
-                    if (link.RefIndex < mspiCount)
-                        mismatchDomainFits["MSPI"]++;
-                    if (link.RefIndex < file.KnownChunks.Msvi.Count)
-                        mismatchDomainFits["MSVI"]++;
-                    if (link.RefIndex < mscnCount)
-                        mismatchDomainFits["MSCN"]++;
-                    if (link.RefIndex < mprlCount)
-                        mismatchDomainFits["MPRL"]++;
-                    if (link.RefIndex < mspvCount)
-                        mismatchDomainFits["MSPV"]++;
-                    if (link.RefIndex < msvtCount)
-                        mismatchDomainFits["MSVT"]++;
-                    if (link.RefIndex < mprrCount)
-                        mismatchDomainFits["MPRR"]++;
+                    AddMismatchDomainFits(mismatchDomainFits, link.RefIndex, mslkCount, mspiCount, file.KnownChunks.Msvi.Count, mscnCount, mprlCount, mspvCount, msvtCount, mprrCount);
+                    AddMismatchDomainFits(mslkFamily.MismatchDomainCounts, link.RefIndex, mslkCount, mspiCount, file.KnownChunks.Msvi.Count, mscnCount, mprlCount, mspvCount, msvtCount, mprrCount);
                 }
 
                 if (link.RefIndex < mprlCount)
+                {
                     mslkToMprlFits++;
+                    mslkFamily.DirectMprlFitCount++;
+                }
                 else
                     mslkToMprlMisses++;
 
                 if (link.GroupObjectId != 0 && link.GroupObjectId <= ushort.MaxValue && mprlKeySet.Contains((ushort)link.GroupObjectId))
+                {
                     groupObjectToMprlFits++;
+                    mslkFamily.NonZeroGroupObjectIdCount++;
+                    mslkFamily.GroupObjectIdMatchesMprlKeyCount++;
+                }
                 else if (link.GroupObjectId != 0)
+                {
                     groupObjectToMprlMisses++;
+                    mslkFamily.NonZeroGroupObjectIdCount++;
+                }
 
                 if (link.MspiIndexCount > 0)
                 {
                     mspiActiveLinks++;
+                    mslkFamily.ActiveMspiWindowCount++;
                     bool indicesMode = link.MspiFirstIndex >= 0 && ((long)link.MspiFirstIndex + link.MspiIndexCount) <= mspiCount;
                     long trianglesEnd = ((long)link.MspiFirstIndex * 3) + (link.MspiIndexCount * 3L);
                     bool trianglesMode = link.MspiFirstIndex >= 0 && trianglesEnd <= mspiCount;
@@ -201,17 +221,49 @@ public static class Pm4ResearchUnknownsAnalyzer
                 if (link.LinkId == 0)
                 {
                     linkIdZero++;
+                    mslkFamily.ZeroLinkIdCount++;
                 }
                 else if (TryDecodeTileLink(link.LinkId, out string? tileKey))
                 {
                     linkIdSentinelTile++;
+                    mslkFamily.SentinelTileLinkCount++;
                     AddCount(decodedTileCounts, tileKey);
+                    AddCount(mslkFamily.DecodedTileCounts, tileKey);
                 }
                 else
                 {
                     linkIdOther++;
+                    mslkFamily.OtherLinkIdCount++;
                     AddCount(otherLinkIdCounts, $"0x{link.LinkId:X8}");
                 }
+            }
+
+            for (int surfaceIndex = 0; surfaceIndex < file.KnownChunks.Msur.Count; surfaceIndex++)
+            {
+                Pm4MsurEntry surface = file.KnownChunks.Msur[surfaceIndex];
+                string familyKey = BuildMsurFamilyKey(surface);
+                if (!msurFamilies.TryGetValue(familyKey, out MsurFamilyAccumulator? msurFamily))
+                {
+                    msurFamily = new MsurFamilyAccumulator(familyKey);
+                    msurFamilies.Add(familyKey, msurFamily);
+                }
+
+                msurFamily.SurfaceCount++;
+                msurFamily.FilePaths.Add(file.SourcePath ?? string.Empty);
+                msurFamily.Ck24Values.Add(surface.Ck24);
+                msurFamily.Ck24Types.Add(surface.Ck24Type);
+                msurFamily.Ck24ObjectIds.Add(surface.Ck24ObjectId);
+                msurFamily.MdosIndices.Add(surface.MdosIndex);
+                msurFamily.IndexCountSum += surface.IndexCount;
+                msurFamily.PlaneDistanceSum += surface.PlaneDistance;
+                msurFamily.NormalZSum += surface.Normal.Z;
+                msurFamily.IncomingMslkCount += incomingLinkCounts[surfaceIndex];
+
+                foreach (string incomingFamilyKey in incomingLinkFamilies[surfaceIndex])
+                    msurFamily.IncomingMslkFamilyKeys.Add(incomingFamilyKey);
+
+                AddCount(msurFamily.Ck24TypeCounts, $"0x{surface.Ck24Type:X2}");
+                AddCount(msurFamily.Ck24Counts, $"0x{surface.Ck24:X6}");
             }
 
             foreach (Pm4MprlEntry entry in file.KnownChunks.Mprl)
@@ -299,6 +351,22 @@ public static class Pm4ResearchUnknownsAnalyzer
             BuildDistribution("MPRR.Value2", mprrValue2Counts, null, "Secondary MPRR field still open.")
         ];
 
+        IReadOnlyList<Pm4MslkFamilySummary> topMslkFamilies = mslkFamilies.Values
+            .OrderByDescending(static family => family.EntryCount)
+            .ThenByDescending(static family => family.DirectMsurFitCount)
+            .ThenBy(static family => family.FamilyKey)
+            .Take(24)
+            .Select(static family => family.ToReport())
+            .ToList();
+
+        IReadOnlyList<Pm4MsurFamilySummary> topMsurFamilies = msurFamilies.Values
+            .OrderByDescending(static family => family.SurfaceCount)
+            .ThenByDescending(static family => family.IncomingMslkCount)
+            .ThenBy(static family => family.FamilyKey)
+            .Take(24)
+            .Select(static family => family.ToReport())
+            .ToList();
+
         Pm4LinkIdPatternSummary linkIdPatterns = new(
             linkIdTotal,
             linkIdSentinelTile,
@@ -331,6 +399,8 @@ public static class Pm4ResearchUnknownsAnalyzer
         [
             "00_00 remains the best destructible/reference tile but is not representative of the general MSLK.RefIndex mismatch population.",
             "Old rollback tooling previously split MSLK.RefIndex into MPRL-vs-MSVT buckets; the current corpus evidence keeps MPRL as a weak mismatch target.",
+            "MSLK family summaries group by TypeFlags/Subtype/SystemFlag and show how those repeated families line up with MSUR, MPRL, LinkId, and path-window usage.",
+            "MSUR family summaries group by AttributeMask/GroupKey/IndexCount and show how those repeated families line up with CK24, MDOS, and incoming MSLK link families.",
             "This report is decode-confidence evidence only; it does not prove final viewer reconstruction semantics by itself."
         ];
 
@@ -341,6 +411,8 @@ public static class Pm4ResearchUnknownsAnalyzer
             chunkPopulation.ChunkAudits,
             relationships,
             fieldDistributions,
+            topMslkFamilies,
+            topMsurFamilies,
             linkIdPatterns,
             mspiInterpretation,
             unknowns,
@@ -379,6 +451,151 @@ public static class Pm4ResearchUnknownsAnalyzer
     {
         counts.TryGetValue(key, out int existing);
         counts[key] = existing + 1;
+    }
+
+    private static void AddMismatchDomainFits(
+        Dictionary<string, int> counts,
+        int refIndex,
+        int mslkCount,
+        int mspiCount,
+        int msviCount,
+        int mscnCount,
+        int mprlCount,
+        int mspvCount,
+        int msvtCount,
+        int mprrCount)
+    {
+        if (refIndex < mslkCount)
+            counts["MSLK"]++;
+        if (refIndex < mspiCount)
+            counts["MSPI"]++;
+        if (refIndex < msviCount)
+            counts["MSVI"]++;
+        if (refIndex < mscnCount)
+            counts["MSCN"]++;
+        if (refIndex < mprlCount)
+            counts["MPRL"]++;
+        if (refIndex < mspvCount)
+            counts["MSPV"]++;
+        if (refIndex < msvtCount)
+            counts["MSVT"]++;
+        if (refIndex < mprrCount)
+            counts["MPRR"]++;
+    }
+
+    private static string BuildMslkFamilyKey(Pm4MslkEntry entry)
+        => $"type=0x{entry.TypeFlags:X2} subtype={entry.Subtype} system=0x{entry.SystemFlag:X4}";
+
+    private static string BuildMsurFamilyKey(Pm4MsurEntry entry)
+        => $"attr=0x{entry.AttributeMask:X2} group={entry.GroupKey} indices={entry.IndexCount}";
+
+    private sealed class MslkFamilyAccumulator
+    {
+        public MslkFamilyAccumulator(string familyKey)
+        {
+            FamilyKey = familyKey;
+        }
+
+        public string FamilyKey { get; }
+
+        public HashSet<string> FilePaths { get; } = new(StringComparer.Ordinal);
+
+        public int EntryCount { get; set; }
+
+        public int DirectMsurFitCount { get; set; }
+
+        public int DirectMprlFitCount { get; set; }
+
+        public int NonZeroGroupObjectIdCount { get; set; }
+
+        public int GroupObjectIdMatchesMprlKeyCount { get; set; }
+
+        public int ZeroLinkIdCount { get; set; }
+
+        public int SentinelTileLinkCount { get; set; }
+
+        public int OtherLinkIdCount { get; set; }
+
+        public int ActiveMspiWindowCount { get; set; }
+
+        public HashSet<ushort> RefIndices { get; } = new();
+
+        public HashSet<uint> GroupObjectIds { get; } = new();
+
+        public Dictionary<string, int> MismatchDomainCounts { get; } = MslkMismatchCandidateDomains.ToDictionary(static name => name, static _ => 0, StringComparer.Ordinal);
+
+        public Dictionary<string, int> DecodedTileCounts { get; } = new(StringComparer.Ordinal);
+
+        public Pm4MslkFamilySummary ToReport()
+            => new(
+                FamilyKey,
+                FilePaths.Count,
+                EntryCount,
+                DirectMsurFitCount,
+                DirectMprlFitCount,
+                NonZeroGroupObjectIdCount,
+                GroupObjectIdMatchesMprlKeyCount,
+                ZeroLinkIdCount,
+                SentinelTileLinkCount,
+                OtherLinkIdCount,
+                ActiveMspiWindowCount,
+                RefIndices.Count,
+                GroupObjectIds.Count,
+                ToTopFrequencies(MismatchDomainCounts),
+                ToTopFrequencies(DecodedTileCounts));
+    }
+
+    private sealed class MsurFamilyAccumulator
+    {
+        public MsurFamilyAccumulator(string familyKey)
+        {
+            FamilyKey = familyKey;
+        }
+
+        public string FamilyKey { get; }
+
+        public HashSet<string> FilePaths { get; } = new(StringComparer.Ordinal);
+
+        public int SurfaceCount { get; set; }
+
+        public HashSet<uint> Ck24Values { get; } = new();
+
+        public HashSet<byte> Ck24Types { get; } = new();
+
+        public HashSet<ushort> Ck24ObjectIds { get; } = new();
+
+        public HashSet<uint> MdosIndices { get; } = new();
+
+        public int IncomingMslkCount { get; set; }
+
+        public HashSet<string> IncomingMslkFamilyKeys { get; } = new(StringComparer.Ordinal);
+
+        public double IndexCountSum { get; set; }
+
+        public double PlaneDistanceSum { get; set; }
+
+        public double NormalZSum { get; set; }
+
+        public Dictionary<string, int> Ck24TypeCounts { get; } = new(StringComparer.Ordinal);
+
+        public Dictionary<string, int> Ck24Counts { get; } = new(StringComparer.Ordinal);
+
+        public Pm4MsurFamilySummary ToReport()
+            => new(
+                FamilyKey,
+                FilePaths.Count,
+                SurfaceCount,
+                Ck24Values.Count,
+                Ck24Types.Count,
+                Ck24ObjectIds.Count,
+                MdosIndices.Count,
+                IncomingMslkCount,
+                IncomingMslkFamilyKeys.Count,
+                SurfaceCount == 0 ? 0d : IndexCountSum / SurfaceCount,
+                SurfaceCount == 0 ? 0d : PlaneDistanceSum / SurfaceCount,
+                SurfaceCount == 0 ? 0d : NormalZSum / SurfaceCount,
+                ToTopFrequencies(Ck24TypeCounts),
+                ToTopFrequencies(Ck24Counts));
     }
 
     private static bool TryDecodeTileLink(uint linkId, out string tileKey)

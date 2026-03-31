@@ -64,7 +64,7 @@ internal sealed class Pm4OverlayCacheService
         data = null;
         error = null;
 
-        string cachePath = GetCachePath(mapName);
+        string cachePath = GetCachePath(mapName, candidateSignature);
         if (!File.Exists(cachePath))
             return false;
 
@@ -117,12 +117,14 @@ internal sealed class Pm4OverlayCacheService
     {
         error = null;
 
-        string cachePath = GetCachePath(data.MapName);
+        string cachePath = GetCachePath(data.MapName, data.CandidateSignature);
         string tempPath = cachePath + ".tmp";
 
         try
         {
-            Directory.CreateDirectory(_cacheRoot);
+            string? cacheDirectory = Path.GetDirectoryName(cachePath);
+            if (!string.IsNullOrWhiteSpace(cacheDirectory))
+                Directory.CreateDirectory(cacheDirectory);
 
             using (var fileStream = File.Create(tempPath))
             using (var gzipStream = new GZipStream(fileStream, CompressionLevel.Fastest, leaveOpen: false))
@@ -158,13 +160,16 @@ internal sealed class Pm4OverlayCacheService
     {
         error = null;
 
-        string cachePath = GetCachePath(mapName);
-        if (!File.Exists(cachePath))
-            return true;
-
         try
         {
-            File.Delete(cachePath);
+            string mapCacheDirectory = GetMapCacheDirectory(mapName);
+            if (Directory.Exists(mapCacheDirectory))
+                Directory.Delete(mapCacheDirectory, recursive: true);
+
+            string legacyCachePath = GetLegacyCachePath(mapName);
+            if (File.Exists(legacyCachePath))
+                File.Delete(legacyCachePath);
+
             return true;
         }
         catch (Exception ex)
@@ -174,13 +179,29 @@ internal sealed class Pm4OverlayCacheService
         }
     }
 
-    private string GetCachePath(string mapName)
+    private string GetCachePath(string mapName, string candidateSignature)
     {
-        string safeFileName = string.Concat(mapName.Select(static ch => char.IsLetterOrDigit(ch) ? ch : '_'));
-        if (string.IsNullOrWhiteSpace(safeFileName))
-            safeFileName = "default";
+        string mapCacheDirectory = GetMapCacheDirectory(mapName);
+        string safeSignature = GetSafeSegment(candidateSignature);
+        return Path.Combine(mapCacheDirectory, safeSignature.ToLowerInvariant() + ".bin");
+    }
 
+    private string GetMapCacheDirectory(string mapName)
+    {
+        string safeFileName = GetSafeSegment(mapName);
+        return Path.Combine(_cacheRoot, safeFileName.ToLowerInvariant());
+    }
+
+    private string GetLegacyCachePath(string mapName)
+    {
+        string safeFileName = GetSafeSegment(mapName);
         return Path.Combine(_cacheRoot, safeFileName.ToLowerInvariant() + ".bin");
+    }
+
+    private static string GetSafeSegment(string value)
+    {
+        string safeSegment = string.Concat(value.Select(static ch => char.IsLetterOrDigit(ch) ? ch : '_'));
+        return string.IsNullOrWhiteSpace(safeSegment) ? "default" : safeSegment;
     }
 
     private static string BuildDataSourceIdentity(IDataSource dataSource)

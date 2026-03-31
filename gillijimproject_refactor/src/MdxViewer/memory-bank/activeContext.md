@@ -1,5 +1,137 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - Fixed Sidebar Mode Uses Splitter-Driven Panels Instead Of Pseudo-Resizable Windows
+
+- latest viewer-shell correction was not another PM4 or terrain slice; it was about making the default fixed sidebars actually usable
+- landed viewer-shell changes in `src/MdxViewer/ViewerApp.cs` and `ViewerApp_Sidebars.cs`:
+   - fixed left/right sidebars now use explicit draggable splitter bars to control width
+   - the sidebars remain edge-anchored panels while the splitter updates the stored widths directly
+   - fixed sidebars now intentionally disable normal window resizing because the supported resize path is the splitter, not hidden border grabs
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - development-map runtime still needs manual confirmation that the splitter interaction feels correct across different window sizes
+
+## Mar 31, 2026 - Mouse-Look Regression Came From The Splitter Host Covering The Viewport
+
+- immediate follow-up after the new fixed-sidebar splitter shell was that mouse camera look stopped working
+- landed correction in `src/MdxViewer/ViewerApp_Sidebars.cs`:
+   - the old one-window splitter host was replaced with narrow splitter-only windows for each active sidebar handle
+   - only the actual splitter strip now captures mouse input, so the viewport is no longer treated like it sits under one giant UI window in fixed-sidebar mode
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the live viewer still needs manual confirmation that right-mouse camera drag is restored cleanly
+
+## Mar 31, 2026 - Viewer Can Now Silence Hover Cards And Hide Lower UniqueId Layers
+
+- latest runtime/exploration request was not another PM4 slice; it was about making object archaeology easier in the live world viewer:
+   - mouse-hover scene tooltips needed a direct off switch
+   - the viewer needed a `UniqueId` slider that can hide older/lower-id object layers either map-wide or only in the current camera tile
+- landed viewer changes in `src/MdxViewer/ViewerApp.cs` and `Terrain/WorldScene.cs`:
+   - `DrawSceneHoverAssetOverlay()` now exits early when `WorldScene.ShowHoveredAssetTooltips` is disabled
+   - the `World Objects` panel now exposes `Hover Tooltips`, `Hide UniqueId Layers`, `Per Map` vs `Camera Tile` scope, the current camera tile, explicit `Hide Range Min` / `Hide Range Max` controls, detected archaeology layers for the active scope, and a reset button
+   - `WorldScene` now carries a scoped unique-id range filter, gap-based archaeology layer detection, and tile ownership metadata on flattened object instances so per-tile filtering survives instance rebuilds
+   - hidden unique-id ranges are removed consistently from rendering, hover hit testing, scene picking, and debug bounds instead of only being visually mislabeled
+- validation completed:
+   - `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `Terrain/WorldScene.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the development map still needs manual runtime confirmation that the archaeology slider reveals the intended object layers cleanly and that disabling hover cards feels correct in practice
+
+## Mar 31, 2026 - Zone Lighting Keeps DBC Color But No Longer Owns Fog Distance
+
+- user runtime report after the shared `LightService` / `TerrainLighting` frame-state change was that fog could no longer be effectively removed and that farther world visibility regressed
+- root cause was concrete:
+   - `TerrainLighting.ApplyExternalLighting(...)` overwrote `FogStart` and `FogEnd` every frame
+   - terrain sidebar fog sliders therefore stopped controlling the live scene as soon as `LightService` found an active zone
+   - `WorldScene` then fed that shortened fog end into WMO and object far-visibility logic, so view distance shrank with it
+- landed correction in `src/MdxViewer/Terrain/TerrainLighting.cs` and `Terrain/WorldScene.cs`:
+   - zone lighting still drives directional or ambient or fog color and shared time-of-day lighting
+   - user-controlled fog start/end now remain authoritative for the live world scene
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - development-map runtime still needs manual confirmation that the older no-fog / farther-view behavior is effectively restored
+
+## Mar 31, 2026 - WDT Global WMO Terrain Path Fixed; M2 Detail UV Regression Reduced To Adapter Metadata
+
+- latest runtime regressions were not PM4-related; they were in the live world/object path:
+   - terrain-backed maps were dropping WDT-level global `MWMO` or `MODF` placements that should appear as over-terrain roof or shell geometry
+   - M2 material behavior regressed enough that some detail layers rendered as giant projected leaf-like sheets
+- landed terrain fix in `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`:
+   - WDT global WMO parsing now runs for terrain maps when `MPHD` indicates global map objects or when `MWMO` and `MODF` are both present
+   - terrain-map WDT `MODF` placements now convert from file-space into the same renderer-space convention as ADT placements
+- current M2 regression narrowing points at `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`, not `ModelRenderer`:
+   - the old adapter effectively forced UV0 for M2 layers
+   - the newer adapter resolved dynamic texture-coordinate ids and treated negative ids as reflective/env-mapped behavior
+   - active mitigation now clamps negative coord ids back to UV0 and removes the negative-id `SphereEnvMap` inference
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is still compile validation only
+   - the development map still needs manual runtime confirmation for both restored WDT global WMOs and the M2 oversized-detail regression
+
+## Mar 31, 2026 - Active M2 Runtime Path Is Back On The Conservative Per-Section UV0 Material Mode
+
+- latest M2 follow-up was not a new parser theory pass; it was another live regression report that some trees still rendered as leaves with no trunks
+- landed correction in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+   - the active runtime material path now keeps only the first batch per section again
+   - active runtime layers are forced back to `UV0` for that conservative path
+   - this is explicitly a rollback to the old known-good compatibility behavior, not proof that richer multi-layer M2 semantics are correct yet
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the live viewer still needs manual confirmation that affected tree trunks are visible again
+
+## Mar 30, 2026 - WorldScene Now Collects Visible WMO Instances Before Submission
+
+- renderer follow-up after the shared LightService or TerrainLighting frame-state fix stayed intentionally narrow instead of attempting a full render-graph rewrite in one pass
+- landed structural change in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - `WorldScene` now builds a reusable visible-WMO scratch bucket before the WMO draw phase instead of mixing frustum or distance culling and submission inline in the opaque pass
+   - this mirrors the existing visible-MDX scratch path more closely and gives the world renderer a real WMO visibility layer to build on for later opaque or liquid or transparent pass separation
+   - current WMO draw behavior is still the same consumer-wise because `WmoRenderer.RenderWithTransform(...)` remains the owner of WMO-local opaque or liquid or transparent sequencing for now
+- important boundary:
+   - this is groundwork for explicit layer ownership, not the final WMO pass split yet
+   - it should reduce repeated cull logic inside `Render(...)`, but it does not yet batch WMO materials across instances or move WMO liquids into a shared scene-wide liquid layer
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 with existing warnings only
+   - no development-map runtime signoff has been completed yet for this WMO visibility-bucket slice
+
+## Mar 30, 2026 - PM4 Workbench Glossary Now Explains Viewer-Derived Labels
+
+- user called out that PM4 UI labels were opaque enough that even the current maintainer could not reliably tell which terms were raw PM4 fields and which were viewer inventions
+- landed clarification in `src/MdxViewer/ViewerApp_Pm4Utilities.cs`, `ViewerApp.cs`, `Terrain/WorldScene.cs`, and `README.md`:
+   - the PM4 workbench now exposes a glossary/evidence block that separates raw chunk names, viewer aliases, and viewer-generated structure
+   - `part` / `ObjectPartId` is now explicitly documented as a viewer-generated split id assigned after `CK24` grouping, dominant `MSLK` grouping, optional `MDOS` split, and optional connectivity split
+   - selected-object text and graph text now repeat that `part` is not a raw PM4 field
+- important boundary:
+   - this is terminology/help clarification only
+   - no PM4 decode semantics or placement behavior changed in this slice
+
+## Mar 30, 2026 - World Lighting Now Uses One Shared Frame State When DBC Light Data Is Active
+
+- current renderer correctness problem was broader than fog alone:
+   - `WorldScene` could already pull sky or fog colors from `Light.dbc` / `LightData.dbc` through `LightService`
+   - terrain, WDL, liquids, skybox backdrops, WMOs, and MDXs were still primarily reading `TerrainLighting`, which meant one frame could mix DBC fog/sky with fallback ambient or direct light colors and even a mismatched sun time
+- landed correction in `src/MdxViewer/Terrain/TerrainLighting.cs` and `Terrain/WorldScene.cs`:
+   - `TerrainLighting` now accepts an external per-frame lighting override for direct color, ambient color, fog color, and fog range
+   - when `LightService` resolves an active zone, `WorldScene` now maps its current time of day into `TerrainLighting.GameTime`, applies the DBC-driven light/fog override, and updates that shared lighting state before rendering WDL, terrain, liquids, skybox backdrops, WMOs, or MDXs
+   - when no active DBC light zone exists, the renderer falls back to the existing procedural `TerrainLighting` path cleanly
+- important boundary:
+   - this is a lighting-consistency slice, not the full render-layer or shader-bucketing redesign yet
+   - it should improve correctness immediately, but it does not by itself remove the pass-order or state-churn costs still embedded in `WorldScene.Render(...)`
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 after the associated capture-automation compile blockers in `ViewerApp_CaptureAutomation.cs` were corrected
+- important validation boundary:
+   - this is compile validation only
+   - no development-map runtime signoff has been completed yet for the shared LightService or TerrainLighting frame-state path
+
 ## Mar 30, 2026 - Inspector-First PM4 Workbench Replaces The Old Multi-Window Default
 
 - latest viewer-shell change is explicitly about workflow quality, not another PM4 decode theory pass:

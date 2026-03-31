@@ -122,6 +122,7 @@ Current status in the workspace:
   - `WowViewer.Tool.Inspect` verb for `pm4 linkage`
   - `WowViewer.Tool.Inspect` verb for `pm4 mscn`
   - `WowViewer.Tool.Inspect` verb for `pm4 unknowns`
+  - expanded `pm4 unknowns` family summaries for dominant `MSLK` and `MSUR` attribution clusters
   - `WowViewer.Tool.Inspect` verb for `pm4 match`, framed as PM4-object-centered nearby real-placement candidate search instead of exact PM4-to-placement identity
   - current `pm4 match` ranking now stays on shared `Pm4CorrelationMath` and `Pm4PlacementMath`, using linked MPRL anchor proximity as a secondary signal and MDX collision bounds when available instead of adding a tool-local legacy matcher fork
   - `pm4 match` can now emit per-object artifact JSON plus a tile manifest, keeping the selected MSUR surface slice and top placement candidates for later ADT/object rebuild tooling
@@ -178,6 +179,8 @@ Current status in the workspace:
 - current research note worth preserving:
   - CK24 low-16 object values, read as integers, appear to be plausible `UniqueID` candidates on the development map, but that remains a hypothesis until correlated against real placed-object data
   - current viewer-side graph and hover-match evidence also suggests those low-16 object values separate many `WMO`-like PM4 meshes more cleanly than the unresolved `CK24=0x000000` umbrella bucket, where many `M2`-like families still appear to collapse together
+  - the expanded `pm4 unknowns` corpus pass now shows that dominant `MSUR` families are not all alike: several biggest `group=3` families are overwhelmingly zero-`CK24`, while major `group=18` families carry broad non-zero `CK24` and `MDOS` fanout and are better next targets for object-attribution research
+  - the same report now shows that dominant `MSLK` families are concentrated in a small repeated set of `TypeFlags` or `Subtype` combinations with sentinel-tile `LinkId` dominance, so the next semantics pass should focus on mismatch-heavy or outlier families instead of treating every link row as equally informative
   - treat the current hover or graph candidate ranking as research instrumentation only; it is useful for narrowing likely asset matches, but it does not close missing subobject, flag, or ownership semantics yet
   - if later corpus-scale ranking is needed, a feature-indexed asset database or ML-assisted clustering layer is a possible follow-up after parser and linkage semantics improve, not before
 - not ported yet:

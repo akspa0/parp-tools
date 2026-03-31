@@ -204,7 +204,7 @@ public partial class ViewerApp
 
         if (!_useDockspaceUi)
         {
-            float rightOffset = _showRightSidebar ? SidebarWidth + 20 : 20;
+            float rightOffset = _showRightSidebar ? _rightSidebarWidth + 20 : 20;
             ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
             ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
             ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
@@ -271,7 +271,7 @@ public partial class ViewerApp
         {
             float progress = _minimapRenderer.LoadingProgress;
             string overlay = _minimapRenderer.IsBusy
-                ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} queued"
+                ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} pending"
                 : $"Minimap ready  {_minimapRenderer.UploadedTileCount} tiles";
             ImGui.ProgressBar(progress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), overlay);
             if (_minimapRenderer.FailedTileCount > 0)

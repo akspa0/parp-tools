@@ -316,7 +316,26 @@ public sealed record Pm4LinkageMismatchFamily(
     int EntriesInFilesWithMscn,
     int EntriesInFilesWithBadMdos,
     IReadOnlyList<Pm4ValueFrequency> CandidateDomains,
-    IReadOnlyList<Pm4ValueFrequency> TopLow16ObjectIds);
+    IReadOnlyList<Pm4ValueFrequency> TopLow16ObjectIds,
+    IReadOnlyList<Pm4LinkageMismatchExample> TopExamples);
+
+public sealed record Pm4LinkageMismatchExample(
+    string? SourcePath,
+    int? TileX,
+    int? TileY,
+    ushort RefIndex,
+    uint GroupObjectId,
+    ushort GroupObjectLow16,
+    uint GroupObjectLow24,
+    uint LinkId,
+    byte TypeFlags,
+    byte Subtype,
+    ushort SystemFlag,
+    IReadOnlyList<string> CandidateDomains,
+    bool Low16MatchesCk24ObjectId,
+    bool Low24MatchesCk24,
+    bool FileHasMscn,
+    bool FileHasBadMdos);
 
 public sealed record Pm4BadMdosCluster(
     string? SourcePath,
@@ -406,6 +425,39 @@ public sealed record Pm4UnknownFinding(
     string Evidence,
     string NextStep);
 
+public sealed record Pm4MslkFamilySummary(
+    string FamilyKey,
+    int FileCount,
+    int EntryCount,
+    int DirectMsurFitCount,
+    int DirectMprlFitCount,
+    int NonZeroGroupObjectIdCount,
+    int GroupObjectIdMatchesMprlKeyCount,
+    int ZeroLinkIdCount,
+    int SentinelTileLinkCount,
+    int OtherLinkIdCount,
+    int ActiveMspiWindowCount,
+    int DistinctRefIndexCount,
+    int DistinctGroupObjectIdCount,
+    IReadOnlyList<Pm4ValueFrequency> TopMismatchDomains,
+    IReadOnlyList<Pm4ValueFrequency> TopDecodedTiles);
+
+public sealed record Pm4MsurFamilySummary(
+    string FamilyKey,
+    int FileCount,
+    int SurfaceCount,
+    int DistinctCk24Count,
+    int DistinctCk24TypeCount,
+    int DistinctCk24ObjectIdCount,
+    int DistinctMdosIndexCount,
+    int IncomingMslkCount,
+    int DistinctIncomingMslkFamilyCount,
+    double AverageIndexCount,
+    double AveragePlaneDistance,
+    double AverageNormalZ,
+    IReadOnlyList<Pm4ValueFrequency> TopCk24Types,
+    IReadOnlyList<Pm4ValueFrequency> TopCk24Values);
+
 public sealed record Pm4UnknownsReport(
     string InputDirectory,
     int FileCount,
@@ -413,7 +465,37 @@ public sealed record Pm4UnknownsReport(
     IReadOnlyList<Pm4CorpusChunkAudit> ChunkPopulation,
     IReadOnlyList<Pm4RelationshipEdgeSummary> Relationships,
     IReadOnlyList<Pm4FieldDistribution> FieldDistributions,
+    IReadOnlyList<Pm4MslkFamilySummary> TopMslkFamilies,
+    IReadOnlyList<Pm4MsurFamilySummary> TopMsurFamilies,
     Pm4LinkIdPatternSummary LinkIdPatterns,
     Pm4MspiInterpretationSummary MspiInterpretation,
     IReadOnlyList<Pm4UnknownFinding> Unknowns,
+    IReadOnlyList<string> Notes);
+
+public sealed record Pm4MshdMetricCorrelation(
+    string Metric,
+    int ExactMatchCount,
+    int WithinOneCount,
+    double PearsonCorrelation);
+
+public sealed record Pm4MshdFieldSummary(
+    string Field,
+    int DistinctCount,
+    int ZeroCount,
+    int NonZeroCount,
+    IReadOnlyList<Pm4ValueFrequency> TopValues,
+    IReadOnlyList<Pm4MshdMetricCorrelation> MetricCorrelations);
+
+public sealed record Pm4MshdRelationshipSummary(
+    string Relationship,
+    int MatchCount,
+    int FileCount,
+    string Notes);
+
+public sealed record Pm4MshdReport(
+    string InputDirectory,
+    int FileCount,
+    int FilesWithMshd,
+    IReadOnlyList<Pm4MshdFieldSummary> Fields,
+    IReadOnlyList<Pm4MshdRelationshipSummary> Relationships,
     IReadOnlyList<string> Notes);

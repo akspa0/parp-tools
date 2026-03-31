@@ -29,6 +29,8 @@ public partial class ViewerApp
         }
 
         ImGui.TextDisabled("Hover stays lightweight. Click a PM4 object to inspect its matches, graph, and correlation here.");
+        ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+        DrawPm4GlossarySummary();
 
         if (!ImGui.BeginTabBar("##Pm4WorkbenchTabs"))
             return;
@@ -65,6 +67,21 @@ public partial class ViewerApp
 
         _pendingPm4WorkbenchTab = null;
         ImGui.EndTabBar();
+    }
+
+    private void DrawPm4GlossarySummary()
+    {
+        if (!ImGui.CollapsingHeader("PM4 Glossary / Evidence"))
+            return;
+
+        ImGui.TextWrapped("The PM4 workbench mixes raw chunk names, viewer aliases, and viewer-generated structure. Not every label here is a proven native PM4 field name.");
+        ImGui.BulletText("CK24: viewer alias for the packed MSUR field at 0x1C. Type = high byte, ObjId = low 16 bits.");
+        ImGui.BulletText("part / ObjectPartId: viewer-generated split id. MdxViewer assigns it during the current overlay build after CK24 grouping, dominant MSLK grouping, optional MDOS split, then optional connectivity split. It is not a raw PM4 field.");
+        ImGui.BulletText("MSLK Group: dominant MSLK.GroupObjectId seen in the current viewer object. Strong grouping hint, not final proof of identity.");
+        ImGui.BulletText("Linked MPRL refs: position-reference rows attached to the current viewer object or its dominant link family. Used as placement evidence.");
+        ImGui.BulletText("Group / Attr / Mdos: dominant MSUR values across the currently selected viewer object. Useful for debugging, not guaranteed unique or authoritative.");
+        ImGui.BulletText("PM4 Graph: the viewer's current decomposition of the selected object, not a literal raw node graph stored in PM4.");
+        ImGui.BulletText("Match uid: nearby MODF/MDDF placement candidate id. It is not a PM4-native object id.");
     }
 
     private void DrawPm4OverlayWorkbenchContent()
@@ -204,6 +221,7 @@ public partial class ViewerApp
         {
             var selectedPm4 = _worldScene.SelectedPm4ObjectKey.Value;
             ImGui.Text($"tile ({selectedPm4.tileX}, {selectedPm4.tileY}) CK24=0x{selectedPm4.ck24:X6} part={selectedPm4.objectPart}");
+            ImGui.TextDisabled("part = viewer-generated split id from the current overlay build, not a raw PM4 field.");
 
             if (_worldScene.TryGetSelectedPm4ObjectDebugInfo(out Pm4ObjectDebugInfo debugInfo))
             {
@@ -1904,6 +1922,7 @@ public partial class ViewerApp
             return;
 
         ImGui.TextDisabled("Derived from the current overlay build: CK24 root, MSLK-linked groups, optional MDOS split, then connectivity parts.");
+        ImGui.TextDisabled("part/ObjectPartId is a viewer-generated split id from that build, not a raw PM4 field.");
         ImGui.TextDisabled("Treat this as viewer structure, not a claim that PM4 stores matching raw graph nodes.");
         ImGui.TextDisabled($"Split flags: MDOS={graph.SplitByMdos} Connectivity={graph.SplitByConnectivity}");
         ImGui.TextDisabled($"Tiles={graph.TileCount} LinkGroups={graph.LinkGroupCount} MdosGroups={graph.MdosGroupCount} Parts={graph.PartCount}");

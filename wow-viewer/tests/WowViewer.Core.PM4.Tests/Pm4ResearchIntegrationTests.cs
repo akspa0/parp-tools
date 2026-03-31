@@ -95,7 +95,37 @@ public sealed class Pm4ResearchIntegrationTests
         Assert.Equal(58, report.FilesWithBadMdos);
         Assert.Equal(4553, report.TotalRefIndexMismatchCount);
         Assert.True(report.IdentitySummary.ReusedObjectIdGroupCount > 0);
+        Assert.NotEmpty(report.TopMismatchFamilies);
+        Assert.All(report.TopMismatchFamilies.Take(5), static family => Assert.NotEmpty(family.TopExamples));
+        Assert.Contains(report.TopMismatchFamilies.SelectMany(static family => family.TopExamples), static example => example.CandidateDomains.Count > 0);
         Assert.Contains(report.Notes, note => note.Contains("UniqueID", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MshdDirectory_DevelopmentCorpus_PreservesCurrentTrailingZeroAndWeakBucketSignals()
+    {
+        Pm4MshdReport report = Pm4ResearchMshdAnalyzer.AnalyzeDirectory(Pm4TestPaths.DevelopmentDirectoryPath);
+
+        Assert.Equal(616, report.FileCount);
+        Assert.Equal(502, report.FilesWithMshd);
+
+        Pm4MshdFieldSummary field0C = Assert.Single(report.Fields, static field => field.Field == "MSHD.Field0C");
+        Pm4MshdFieldSummary field10 = Assert.Single(report.Fields, static field => field.Field == "MSHD.Field10");
+        Pm4MshdFieldSummary field14 = Assert.Single(report.Fields, static field => field.Field == "MSHD.Field14");
+        Pm4MshdFieldSummary field18 = Assert.Single(report.Fields, static field => field.Field == "MSHD.Field18");
+        Pm4MshdFieldSummary field1C = Assert.Single(report.Fields, static field => field.Field == "MSHD.Field1C");
+
+        Assert.Equal(report.FilesWithMshd, field0C.ZeroCount);
+        Assert.Equal(report.FilesWithMshd, field10.ZeroCount);
+        Assert.Equal(report.FilesWithMshd, field14.ZeroCount);
+        Assert.Equal(report.FilesWithMshd, field18.ZeroCount);
+        Assert.Equal(report.FilesWithMshd, field1C.ZeroCount);
+
+        Pm4MshdRelationshipSummary field00EqualsField08 = Assert.Single(report.Relationships, static relationship => relationship.Relationship == "Field00 == Field08");
+        Assert.InRange(field00EqualsField08.MatchCount, 200, 260);
+
+        Assert.Contains(report.Notes, static note => note.Contains("all zero", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(report.Notes, static note => note.Contains("strong exact-match or high-correlation signal", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -921,6 +951,19 @@ public sealed class Pm4ResearchIntegrationTests
         Assert.Equal(1273335, report.LinkIdPatterns.SentinelTileLinkCount);
         Assert.Equal(0, report.LinkIdPatterns.ZeroCount);
         Assert.Equal(0, report.LinkIdPatterns.OtherCount);
+        Assert.NotEmpty(report.TopMslkFamilies);
+        Pm4MslkFamilySummary topMslkFamily = report.TopMslkFamilies[0];
+        Assert.Equal("type=0x01 subtype=2 system=0x8000", topMslkFamily.FamilyKey);
+        Assert.InRange(topMslkFamily.EntryCount, 180000, 190000);
+        Assert.Equal(topMslkFamily.EntryCount, topMslkFamily.SentinelTileLinkCount);
+
+        Assert.NotEmpty(report.TopMsurFamilies);
+        Pm4MsurFamilySummary topMsurFamily = report.TopMsurFamilies[0];
+        Assert.Equal("attr=0x02 group=3 indices=3", topMsurFamily.FamilyKey);
+        Assert.InRange(topMsurFamily.SurfaceCount, 35000, 36000);
+        Assert.Equal(1, topMsurFamily.DistinctCk24Count);
+        Assert.NotEmpty(topMsurFamily.TopCk24Values);
+        Assert.Equal("0x000000", topMsurFamily.TopCk24Values[0].Value);
         Assert.Contains(report.Unknowns, finding => finding.Name == "MSLK.RefIndex semantics");
     }
 

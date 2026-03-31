@@ -9,6 +9,11 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class TerrainLighting
 {
+    private bool _hasExternalOverride;
+    private Vector3 _externalLightColor;
+    private Vector3 _externalAmbientColor;
+    private Vector3 _externalFogColor;
+
     /// <summary>Game time as fraction of day: 0.0 = midnight, 0.5 = noon, 1.0 = midnight.</summary>
     public float GameTime { get; set; } = 0.35f; // Default: morning
 
@@ -29,6 +34,19 @@ public class TerrainLighting
 
     /// <summary>Fog end distance.</summary>
     public float FogEnd { get; set; } = 1500f;
+
+    public void ApplyExternalLighting(Vector3 lightColor, Vector3 ambientColor, Vector3 fogColor)
+    {
+        _hasExternalOverride = true;
+        _externalLightColor = lightColor;
+        _externalAmbientColor = ambientColor;
+        _externalFogColor = fogColor;
+    }
+
+    public void ClearExternalLighting()
+    {
+        _hasExternalOverride = false;
+    }
 
     /// <summary>
     /// Update lighting parameters based on current game time.
@@ -66,5 +84,12 @@ public class TerrainLighting
             new Vector3(0.08f, 0.08f, 0.15f),  // night: dark blue
             new Vector3(0.6f, 0.7f, 0.85f),    // day: sky blue
             dayFactor);
+
+        if (_hasExternalOverride)
+        {
+            LightColor = _externalLightColor;
+            AmbientColor = _externalAmbientColor;
+            FogColor = _externalFogColor;
+        }
     }
 }

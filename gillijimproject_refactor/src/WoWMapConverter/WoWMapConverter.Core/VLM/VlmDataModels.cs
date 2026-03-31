@@ -32,6 +32,9 @@ public record VlmTerrainData(
     
     // Shadow Maps - raw bit data (64 bytes per chunk = 512 bits = 64x8 shadow map)
     [property: JsonPropertyName("shadow_bits")] VlmChunkShadowBits[]? ShadowBits,
+
+    // Derived shadow-region and object-candidate summaries per chunk
+    [property: JsonPropertyName("shadow_analysis")] VlmChunkShadowAnalysis[]? ShadowAnalysis,
     
     // Alpha Masks - paths to per-layer PNGs
     [property: JsonPropertyName("alpha_masks")] string[]? AlphaMasks,
@@ -88,6 +91,50 @@ public record VlmChunkHeights(
 public record VlmChunkShadowBits(
     [property: JsonPropertyName("idx")] int ChunkIndex,
     [property: JsonPropertyName("bits")] string BitsBase64  // 64 bytes -> Base64
+);
+
+/// <summary>
+/// Derived shadow-region summary for a single MCNK chunk.
+/// </summary>
+public record VlmChunkShadowAnalysis(
+    [property: JsonPropertyName("idx")] int ChunkIndex,
+    [property: JsonPropertyName("shadowed_pixels")] int ShadowedPixelCount,
+    [property: JsonPropertyName("coverage")] float Coverage,
+    [property: JsonPropertyName("region_count")] int RegionCount,
+    [property: JsonPropertyName("largest_region_pixels")] int LargestRegionPixelCount,
+    [property: JsonPropertyName("regions")] VlmShadowRegion[] Regions,
+    [property: JsonPropertyName("candidate_objects")] VlmShadowObjectCandidate[] CandidateObjects
+);
+
+/// <summary>
+/// Connected shadow region summary within one chunk.
+/// </summary>
+public record VlmShadowRegion(
+    [property: JsonPropertyName("region_id")] int RegionId,
+    [property: JsonPropertyName("pixel_count")] int PixelCount,
+    [property: JsonPropertyName("coverage")] float Coverage,
+    [property: JsonPropertyName("bbox_min_px")] int[] BoundingBoxMinPixels,
+    [property: JsonPropertyName("bbox_max_px")] int[] BoundingBoxMaxPixels,
+    [property: JsonPropertyName("centroid_px")] float[] CentroidPixels,
+    [property: JsonPropertyName("centroid_world")] float[] CentroidWorld,
+    [property: JsonPropertyName("world_rect_min")] float[] WorldRectMin,
+    [property: JsonPropertyName("world_rect_max")] float[] WorldRectMax,
+    [property: JsonPropertyName("candidate_object_ids")] uint[] CandidateObjectIds
+);
+
+/// <summary>
+/// Object placement projected into chunk-shadow space for candidate association work.
+/// </summary>
+public record VlmShadowObjectCandidate(
+    [property: JsonPropertyName("unique_id")] uint UniqueId,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("position_world")] float[] PositionWorld,
+    [property: JsonPropertyName("position_chunk_px")] float[] PositionChunkPixels,
+    [property: JsonPropertyName("nearest_region_id")] int? NearestRegionId,
+    [property: JsonPropertyName("pixel_distance_to_region")] float PixelDistanceToRegion,
+    [property: JsonPropertyName("inside_chunk")] bool InsideChunk,
+    [property: JsonPropertyName("inside_region_bounds")] bool InsideRegionBounds
 );
 
 /// <summary>

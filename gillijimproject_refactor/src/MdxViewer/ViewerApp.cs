@@ -304,7 +304,13 @@ public partial class ViewerApp : IDisposable
     // Sidebar layout
     private bool _showLeftSidebar = true;
     private bool _showRightSidebar = true;
-    private const float SidebarWidth = 320f;
+    private const float DefaultSidebarWidth = 320f;
+    private const float SidebarMinWidth = 260f;
+    private const float SidebarMaxWidth = 720f;
+        private const float SidebarSplitterWidth = 8f;
+        private const float SceneViewportPreferredMinWidth = 420f;
+    private float _leftSidebarWidth = DefaultSidebarWidth;
+    private float _rightSidebarWidth = DefaultSidebarWidth;
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
@@ -371,6 +377,7 @@ public partial class ViewerApp : IDisposable
     private bool _pm4WmoCorrelationNearOnly = true;
     private string _pm4WmoCorrelationModelFilter = string.Empty;
     private bool _showChunkClipboardWindow = false;
+    private bool _showCaptureAutomationWindow = false;
 
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
@@ -518,6 +525,7 @@ public partial class ViewerApp : IDisposable
 
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
+        LoadCameraShotPoints();
         DetectRenderQualityCapabilities();
         ApplyRenderQualitySettings(refreshTextures: false);
 
@@ -857,6 +865,8 @@ public partial class ViewerApp : IDisposable
 
     private unsafe void OnRender(double dt)
     {
+        PrepareNextCaptureRequest();
+
         // FPS tracking
         _frameCount++;
         _fpsTimer += dt;
@@ -981,9 +991,13 @@ public partial class ViewerApp : IDisposable
             }
         }
 
+        CompleteCaptureIfReady(includeUi: false);
+
         // Render ImGui overlay
         DrawUI();
         _imGui.Render();
+
+        CompleteCaptureIfReady(includeUi: true);
     }
 
     /// <summary>
@@ -1096,6 +1110,8 @@ void main() {
                 DrawLeftSidebar();
             if (_showRightSidebar)
                 DrawRightSidebar();
+            if (!_useDockspaceUi)
+                DrawFixedSidebarSplitters();
 
             if (_useDockspaceUi)
                 ValidateDockspacePanels();
@@ -1128,6 +1144,9 @@ void main() {
             // Chunk Clipboard (floating window)
             if (_showChunkClipboardWindow && (_terrainManager?.Renderer != null || _vlmTerrainManager?.Renderer != null))
                 DrawChunkClipboardWindow();
+
+            if (_showCaptureAutomationWindow)
+                DrawCaptureAutomationWindow();
 
             // PM4 alignment (advanced fallback)
             if (_showPm4AlignmentWindow)
@@ -1284,6 +1303,17 @@ void main() {
 
             if (ImGui.BeginMenu("Tools"))
             {
+                if (ImGui.MenuItem("Capture Current View (No UI)"))
+                    QueueCurrentCameraCapture(includeUi: false);
+
+                if (ImGui.MenuItem("Capture Current View (With UI)"))
+                    QueueCurrentCameraCapture(includeUi: true);
+
+                if (ImGui.MenuItem("Capture Automation..."))
+                    _showCaptureAutomationWindow = true;
+
+                ImGui.Separator();
+
                 if (ImGui.MenuItem("Generate VLM Dataset..."))
                 {
                     PrepareVlmExportDialogInputs();
@@ -4944,7 +4974,166 @@ void main() {
         bool objectFogEnabled = _worldScene.ObjectFogEnabled;
         if (ImGui.Checkbox("Fog Objects", ref objectFogEnabled))
             _worldScene.ObjectFogEnabled = objectFogEnabled;
-        else if (!_worldScene.WlLoadAttempted)
+
+        bool showHoverTooltips = _worldScene.ShowHoveredAssetTooltips;
+        if (ImGui.Checkbox("Hover Tooltips", ref showHoverTooltips))
+            _worldScene.ShowHoveredAssetTooltips = showHoverTooltips;
+
+        ImGui.Separator();
+        ImGui.Text("UniqueId Archaeology");
+
+        int cameraTileX = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.X) / WoWConstants.ChunkSize);
+        int cameraTileY = (int)MathF.Floor((WoWConstants.MapOrigin - _camera.Position.Y) / WoWConstants.ChunkSize);
+        _worldScene.SetUniqueIdFilterTile(cameraTileX, cameraTileY);
+
+        bool uniqueIdFilterChanged = false;
+        bool uniqueIdFilterEnabled = _worldScene.UniqueIdFilterEnabled;
+        if (ImGui.Checkbox("Hide UniqueId Layers", ref uniqueIdFilterEnabled))
+        {
+            _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
+            uniqueIdFilterChanged = true;
+        }
+
+        string[] uniqueIdScopeLabels = { "Per Map", "Camera Tile" };
+        int uniqueIdScopeIndex = _worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile ? 1 : 0;
+        if (ImGui.Combo("UniqueId Scope", ref uniqueIdScopeIndex, uniqueIdScopeLabels, uniqueIdScopeLabels.Length))
+        {
+            _worldScene.UniqueIdVisibilityScope = uniqueIdScopeIndex == 1
+                ? UniqueIdVisibilityScope.CameraTile
+                : UniqueIdVisibilityScope.PerMap;
+            uniqueIdFilterChanged = true;
+        }
+
+        if (_worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile)
+            ImGui.TextDisabled($"Camera tile: ({cameraTileX}, {cameraTileY})");
+
+        if (_worldScene.TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount))
+        {
+            int configuredMin = _worldScene.UniqueIdFilterMin;
+            int configuredMax = _worldScene.UniqueIdFilterMax;
+            bool hasConfiguredRange = configuredMin >= minUniqueId && configuredMax >= minUniqueId;
+            int hideMin = hasConfiguredRange
+                ? Math.Clamp(Math.Min(configuredMin, configuredMax), minUniqueId, maxUniqueId)
+                : minUniqueId;
+            int hideMax = hasConfiguredRange
+                ? Math.Clamp(Math.Max(configuredMin, configuredMax), minUniqueId, maxUniqueId)
+                : maxUniqueId;
+
+            if (ImGui.SliderInt("Hide Range Min", ref hideMin, minUniqueId, maxUniqueId))
+            {
+                if (!hasConfiguredRange)
+                {
+                    hideMax = hideMin;
+                }
+                else if (hideMin > hideMax)
+                {
+                    hideMax = hideMin;
+                }
+
+                _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                uniqueIdFilterChanged = true;
+                hasConfiguredRange = true;
+            }
+
+            if (ImGui.SliderInt("Hide Range Max", ref hideMax, minUniqueId, maxUniqueId))
+            {
+                if (!hasConfiguredRange)
+                {
+                    hideMin = hideMax;
+                }
+                else if (hideMax < hideMin)
+                {
+                    hideMin = hideMax;
+                }
+
+                _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                uniqueIdFilterChanged = true;
+                hasConfiguredRange = true;
+            }
+
+            if (!hasConfiguredRange)
+            {
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  No hide range selected.");
+            }
+            else if (!_worldScene.UniqueIdFilterEnabled)
+            {
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected hide range: {hideMin}..{hideMax}");
+            }
+            else
+            {
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Hidden range: {hideMin}..{hideMax}");
+            }
+
+            IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene.GetUniqueIdArchaeologyLayers();
+            if (detectedLayers.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.TextDisabled(_worldScene.UniqueIdVisibilityScope == UniqueIdVisibilityScope.CameraTile
+                    ? "Detected layers in current camera tile (gap > 100)"
+                    : "Detected layers in current map scope (gap > 100)");
+
+                if (_worldScene.UniqueIdVisibilityScope != UniqueIdVisibilityScope.CameraTile)
+                    ImGui.TextDisabled("Switch scope to Camera Tile to inspect one tile's layer stack directly.");
+
+                if (ImGui.BeginTable("UniqueIdArchaeologyLayers", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+                {
+                    ImGui.TableSetupColumn("Layer");
+                    ImGui.TableSetupColumn("Range");
+                    ImGui.TableSetupColumn("Count");
+                    ImGui.TableSetupColumn("Types");
+                    ImGui.TableSetupColumn("Action");
+                    ImGui.TableHeadersRow();
+
+                    for (int i = 0; i < detectedLayers.Count; i++)
+                    {
+                        UniqueIdArchaeologyLayer layer = detectedLayers[i];
+                        ImGui.TableNextRow();
+
+                        ImGui.TableSetColumnIndex(0);
+                        ImGui.TextUnformatted($"L{layer.LayerNumber}");
+
+                        ImGui.TableSetColumnIndex(1);
+                        ImGui.TextUnformatted($"{layer.MinUniqueId}..{layer.MaxUniqueId}");
+
+                        ImGui.TableSetColumnIndex(2);
+                        ImGui.TextUnformatted(layer.PlacementCount.ToString());
+
+                        ImGui.TableSetColumnIndex(3);
+                        ImGui.TextUnformatted($"WMO {layer.WmoCount} / M2 {layer.MdxCount}");
+
+                        ImGui.TableSetColumnIndex(4);
+                        if (ImGui.SmallButton($"Hide##UniqueIdLayer{layer.LayerNumber}"))
+                        {
+                            _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
+                            _worldScene.UniqueIdFilterEnabled = true;
+                            uniqueIdFilterChanged = true;
+                        }
+                    }
+
+                    ImGui.EndTable();
+                }
+            }
+
+            if (ImGui.SmallButton("Reset UniqueId Filter"))
+            {
+                _worldScene.ResetUniqueIdFilter();
+                uniqueIdFilterChanged = true;
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("No scoped placements with positive UniqueIds are currently available.");
+        }
+
+        if (uniqueIdFilterChanged)
+        {
+            _worldScene.ClearSelection();
+            _selectedObjectIndex = -1;
+            _selectedObjectType = "";
+            _selectedObjectInfo = "";
+        }
+
+        if (!_worldScene.WlLoadAttempted)
         {
             if (ImGui.Button("Load WL Liquids"))
                 _worldScene.ShowWlLiquids = true; // triggers lazy load
@@ -8511,7 +8700,8 @@ void main() {
             _selectedObjectInfo =
                 $"PM4 Object\n" +
                 $"Tile: ({debugInfo.TileX}, {debugInfo.TileY})\n" +
-                $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, part={debugInfo.ObjectPartId})\n" +
+                $"CK24: 0x{debugInfo.Ck24:X6} (type=0x{debugInfo.Ck24Type:X2}, obj={debugInfo.Ck24ObjectId}, viewerPart={debugInfo.ObjectPartId})\n" +
+                $"Viewer Part: assigned during the current overlay build after viewer-side splitting; not a raw PM4 field\n" +
                 $"MSLK Group: 0x{debugInfo.LinkGroupObjectId:X8}\n" +
                 $"Linked MPRL refs: {debugInfo.LinkedPositionRefCount}\n" +
                 $"Surfaces: {debugInfo.SurfaceCount}\n" +
@@ -8530,7 +8720,8 @@ void main() {
         _selectedObjectInfo =
             $"PM4 Object\n" +
             $"Tile: ({selectedPm4.tileX}, {selectedPm4.tileY})\n" +
-            $"CK24: 0x{selectedPm4.ck24:X6} (part={selectedPm4.objectPart})\n" +
+            $"CK24: 0x{selectedPm4.ck24:X6} (viewerPart={selectedPm4.objectPart})\n" +
+            $"Viewer Part: assigned during the current overlay build; not a raw PM4 field\n" +
             $"Offset: ({_worldScene.SelectedPm4ObjectTranslation.X:F2}, {_worldScene.SelectedPm4ObjectTranslation.Y:F2}, {_worldScene.SelectedPm4ObjectTranslation.Z:F2})";
     }
 
@@ -8580,6 +8771,9 @@ void main() {
 
     private void DrawSceneHoverAssetOverlay()
     {
+        if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
+            return;
+
         if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info)
             return;
 
@@ -8823,12 +9017,12 @@ void main() {
         {
             if (_showLeftSidebar)
             {
-                x += SidebarWidth;
-                width -= SidebarWidth;
+                x += _leftSidebarWidth;
+                width -= _leftSidebarWidth;
             }
 
             if (_showRightSidebar)
-                width -= SidebarWidth;
+                width -= _rightSidebarWidth;
         }
 
         width = MathF.Max(width, 0f);

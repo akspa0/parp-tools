@@ -135,16 +135,24 @@ The PM4 data shown in the viewer is still partly reverse-engineered. Some labels
 - `MSLK._0x04` -> local alias: `LinkGroupObjectId`
   - This is a strong current grouping signal for many PM4 object families.
   - The viewer uses it as one clue when splitting or matching PM4 objects.
+- `part` / `ObjectPartId`
+  - This is a viewer-generated split index, not a raw PM4 field.
+  - `MdxViewer` assigns it during the current overlay build after `CK24` grouping, dominant `MSLK` grouping, optional `MDOS` split, and optional connectivity split.
+  - It is only stable for the current overlay build and can renumber when split toggles, PM4 reloads, regrouping logic, or canonical same-tile file selection changes.
+  - Treat it as a viewer/runtime handle for one currently selected PM4 piece.
 - `MPRL`
   - `MPRL` entries are linked position-reference records.
   - In the viewer they are mainly used as placement evidence and anchor hints, not as final proof of object identity.
 - `MSUR.GroupKey`, `MSUR.AttributeMask`, `MSUR.MdosIndex`
   - These are local aliases for raw `MSUR` fields.
   - They are useful for debugging and grouping, but should be read as research shorthand rather than final format documentation.
+- `PM4 Graph`
+  - The graph tree in the inspector is the viewer's current decomposition of the selected PM4 object.
+  - It is useful for reselection, export, and debugging, but should not be read as proof that PM4 stores the same node hierarchy on disk.
 - `uid` in PM4 match or correlation UI
   - `uid` is the matched world-placement unique id from `MODF` or `MDDF` candidates.
   - It does not currently mean that PM4 itself stores that same object uid.
-  - The PM4 side gives us a PM4 object key like `CK24`, tile, part, and link evidence; the matched `uid` comes from nearby placed WMO or M2 records that the viewer ranks against that PM4 object.
+  - The PM4 side gives us a PM4 object key like `CK24`, tile, viewer part, and link evidence; the matched `uid` comes from nearby placed WMO or M2 records that the viewer ranks against that PM4 object.
 
 Practical rule:
 

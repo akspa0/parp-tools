@@ -1047,6 +1047,10 @@ public class VlmDatasetExporter
         if (heights.Count == 0)
             return null;
 
+        VlmChunkShadowAnalysis[]? shadowAnalysis = shadowBits.Count > 0
+            ? VlmShadowAssociationService.AnalyzeTile(shadowBits, chunkPositions, objects)
+            : null;
+
         var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir, isInterleaved: false);
         
         var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
@@ -1064,6 +1068,7 @@ public class VlmDatasetExporter
             mccvMapPath,
             shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
             shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
+            shadowAnalysis,
             alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
             null, // LiquidMaskPath
             null, // LiquidHeightPath
@@ -1375,6 +1380,10 @@ public class VlmDatasetExporter
                 }
             }
             
+            VlmChunkShadowAnalysis[]? shadowAnalysis = shadowBits.Count > 0
+                ? VlmShadowAssociationService.AnalyzeTile(shadowBits, chunkPositions, objectPlacements)
+                : null;
+
             var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir, isInterleaved: true);
             
             return new VlmTerrainData(
@@ -1389,6 +1398,7 @@ public class VlmDatasetExporter
                 MccvMapPath: null,
                 ShadowMaps: shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
                 ShadowBits: shadowBits.Count > 0 ? shadowBits.ToArray() : null,
+                ShadowAnalysis: shadowAnalysis,
                 AlphaMasks: null,
                 LiquidMaskPath: null,
                 LiquidHeightPath: null,

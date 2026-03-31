@@ -496,6 +496,9 @@ static void RunPm4(string[] args)
 			case "unknowns":
 				RunPm4Unknowns(tail);
 				break;
+			case "mshd":
+				RunPm4Mshd(tail);
+				break;
 		case "audit":
 			RunPm4Audit(tail);
 			break;
@@ -1081,6 +1084,33 @@ static void RunPm4Unknowns(string[] args)
 	PrintPm4UnknownsReport(report);
 }
 
+static void RunPm4Mshd(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? output = GetOption(args, "--output", "-o");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input PM4 directory is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	Pm4MshdReport report = Pm4ResearchMshdAnalyzer.AnalyzeDirectory(input);
+	if (!string.IsNullOrWhiteSpace(output))
+	{
+		string outputPath = Path.GetFullPath(output);
+		string? directory = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(directory))
+			Directory.CreateDirectory(directory);
+
+		File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
+		Console.WriteLine($"Wrote {outputPath}");
+		return;
+	}
+
+	PrintPm4MshdReport(report);
+}
+
 static void RunPm4ExportJson(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -1452,6 +1482,17 @@ static void PrintPm4LinkageReport(Pm4LinkageReport report)
 	foreach (Pm4LinkageMismatchFamily family in report.TopMismatchFamilies.Take(8))
 	{
 		Console.WriteLine($"  {family.FamilyKey}: files={family.FileCount} entries={family.EntryCount} low16Matches={family.MatchingCk24ObjectIdEntryCount} low24Matches={family.MatchingFullCk24EntryCount}");
+		Pm4LinkageMismatchExample? example = family.TopExamples.FirstOrDefault();
+		if (example is not null)
+		{
+			string tileText = example.TileX.HasValue && example.TileY.HasValue
+				? $"{example.TileX}_{example.TileY}"
+				: "n/a";
+			string domains = example.CandidateDomains.Count == 0
+				? "none"
+				: string.Join('/', example.CandidateDomains);
+			Console.WriteLine($"    example: tile={tileText} ref={example.RefIndex} group=0x{example.GroupObjectId:X8} domains={domains} low16Match={(example.Low16MatchesCk24ObjectId ? "yes" : "no")} low24Match={(example.Low24MatchesCk24 ? "yes" : "no")}");
+		}
 	}
 
 	if (report.Notes.Count > 0)
@@ -1570,6 +1611,57 @@ static void PrintPm4UnknownsReport(Pm4UnknownsReport report)
 		Console.WriteLine($"  [{finding.Status}] {finding.Name}");
 		Console.WriteLine($"    {finding.Evidence}");
 	}
+
+	if (report.TopMslkFamilies.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Top MSLK families:");
+		foreach (Pm4MslkFamilySummary family in report.TopMslkFamilies.Take(8))
+		{
+			Console.WriteLine($"  {family.FamilyKey}: entries={family.EntryCount} files={family.FileCount} msurFit={family.DirectMsurFitCount} mprlFit={family.DirectMprlFitCount} nonZeroGroup={family.NonZeroGroupObjectIdCount} mprlKeyFit={family.GroupObjectIdMatchesMprlKeyCount} sentinel={family.SentinelTileLinkCount} zeroLink={family.ZeroLinkIdCount} otherLink={family.OtherLinkIdCount}");
+		}
+	}
+
+	if (report.TopMsurFamilies.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Top MSUR families:");
+		foreach (Pm4MsurFamilySummary family in report.TopMsurFamilies.Take(8))
+		{
+			Console.WriteLine($"  {family.FamilyKey}: surfaces={family.SurfaceCount} files={family.FileCount} distinctCk24={family.DistinctCk24Count} distinctType={family.DistinctCk24TypeCount} distinctMdos={family.DistinctMdosIndexCount} incomingMslk={family.IncomingMslkCount} incomingFamilies={family.DistinctIncomingMslkFamilyCount} avgPlane={family.AveragePlaneDistance:F3}");
+		}
+	}
+
+	if (report.Notes.Count > 0)
+	{
+		Console.WriteLine();
+		Console.WriteLine("Notes:");
+		foreach (string note in report.Notes)
+			Console.WriteLine($"  {note}");
+	}
+}
+
+static void PrintPm4MshdReport(Pm4MshdReport report)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect PM4 MSHD report");
+	Console.WriteLine($"Input directory: {report.InputDirectory}");
+	Console.WriteLine($"Files: {report.FileCount} total, {report.FilesWithMshd} with MSHD");
+	Console.WriteLine();
+	Console.WriteLine("Field summaries:");
+	foreach (Pm4MshdFieldSummary field in report.Fields)
+	{
+		string topValues = field.TopValues.Count == 0
+			? "none"
+			: string.Join(", ", field.TopValues.Take(4).Select(static value => $"{value.Value}->{value.Count}"));
+		Console.WriteLine($"  {field.Field}: distinct={field.DistinctCount} zero={field.ZeroCount} nonZero={field.NonZeroCount} top={topValues}");
+		foreach (Pm4MshdMetricCorrelation metric in field.MetricCorrelations.Take(4))
+			Console.WriteLine($"    {metric.Metric}: exact={metric.ExactMatchCount} within1={metric.WithinOneCount} corr={metric.PearsonCorrelation:F3}");
+	}
+
+	Console.WriteLine();
+	Console.WriteLine("Relationships:");
+	foreach (Pm4MshdRelationshipSummary relationship in report.Relationships)
+		Console.WriteLine($"  {relationship.Relationship}: {relationship.MatchCount}/{relationship.FileCount} ({relationship.Notes})");
 
 	if (report.Notes.Count > 0)
 	{
@@ -2287,6 +2379,7 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 unknowns --input <directory> [--output <report.json>]");
+	Console.WriteLine("  wowviewer-inspect pm4 mshd --input <directory> [--output <report.json>]");
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
@@ -2332,6 +2425,7 @@ static void ShowPm4Usage()
 	Console.WriteLine("  pm4 linkage --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 mscn --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 unknowns --input <directory> [--output <report.json>]");
+	Console.WriteLine("  pm4 mshd --input <directory> [--output <report.json>]");
 	Console.WriteLine("  pm4 audit --input <file.pm4>");
 	Console.WriteLine("  pm4 audit-directory --input <directory>");
 	Console.WriteLine("  pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");

@@ -196,13 +196,16 @@ public static class Pm4ResearchLinkageAnalyzer
 
                 ushort low16 = (ushort)(link.GroupObjectId & 0xFFFF);
                 uint low24 = link.GroupObjectId & 0x00FF_FFFF;
+                bool low16MatchesCk24ObjectId = fileCk24ObjectIds.Contains(low16);
+                bool low24MatchesCk24 = fileCk24Set.Contains(low24);
+                IReadOnlyList<string> candidateDomains = GetCandidateDomains(link.RefIndex, file);
 
-                if (fileCk24ObjectIds.Contains(low16))
+                if (low16MatchesCk24ObjectId)
                     mismatchLow16Fits++;
                 else
                     mismatchLow16Misses++;
 
-                if (fileCk24Set.Contains(low24))
+                if (low24MatchesCk24)
                     mismatchLow24Fits++;
                 else
                     mismatchLow24Misses++;
@@ -219,16 +222,33 @@ public static class Pm4ResearchLinkageAnalyzer
                 family.GroupObjectIds.Add(link.GroupObjectId);
                 family.Low16ObjectIds.Add(low16);
                 family.RefIndices.Add(link.RefIndex);
-                if (fileCk24ObjectIds.Contains(low16))
+                if (low16MatchesCk24ObjectId)
                     family.MatchingCk24ObjectIdEntryCount++;
-                if (fileCk24Set.Contains(low24))
+                if (low24MatchesCk24)
                     family.MatchingFullCk24EntryCount++;
                 if (fileHasMscn)
                     family.EntriesInFilesWithMscn++;
                 if (fileHasBadMdos)
                     family.EntriesInFilesWithBadMdos++;
                 AddCount(family.Low16Counts, low16.ToString());
-                AddDomainFits(family.DomainCounts, link.RefIndex, file);
+                AddDomainFits(family.DomainCounts, candidateDomains);
+                family.Examples.Add(new Pm4LinkageMismatchExample(
+                    file.SourcePath,
+                    tileX,
+                    tileY,
+                    link.RefIndex,
+                    link.GroupObjectId,
+                    low16,
+                    low24,
+                    link.LinkId,
+                    link.TypeFlags,
+                    link.Subtype,
+                    link.SystemFlag,
+                    candidateDomains,
+                    low16MatchesCk24ObjectId,
+                    low24MatchesCk24,
+                    fileHasMscn,
+                    fileHasBadMdos));
             }
 
             if (fileHasMismatch)
@@ -304,24 +324,33 @@ public static class Pm4ResearchLinkageAnalyzer
             notes);
     }
 
-    private static void AddDomainFits(Dictionary<string, int> domainCounts, ushort refIndex, Pm4ResearchDocument file)
+    private static IReadOnlyList<string> GetCandidateDomains(ushort refIndex, Pm4ResearchDocument file)
     {
+        List<string> domains = [];
         if (refIndex < file.KnownChunks.Mslk.Count)
-            AddCount(domainCounts, "MSLK");
+            domains.Add("MSLK");
         if (refIndex < file.KnownChunks.Mspi.Count)
-            AddCount(domainCounts, "MSPI");
+            domains.Add("MSPI");
         if (refIndex < file.KnownChunks.Msvi.Count)
-            AddCount(domainCounts, "MSVI");
+            domains.Add("MSVI");
         if (refIndex < file.KnownChunks.Mscn.Count)
-            AddCount(domainCounts, "MSCN");
+            domains.Add("MSCN");
         if (refIndex < file.KnownChunks.Mprl.Count)
-            AddCount(domainCounts, "MPRL");
+            domains.Add("MPRL");
         if (refIndex < file.KnownChunks.Mspv.Count)
-            AddCount(domainCounts, "MSPV");
+            domains.Add("MSPV");
         if (refIndex < file.KnownChunks.Msvt.Count)
-            AddCount(domainCounts, "MSVT");
+            domains.Add("MSVT");
         if (refIndex < file.KnownChunks.Mprr.Count)
-            AddCount(domainCounts, "MPRR");
+            domains.Add("MPRR");
+
+        return domains;
+    }
+
+    private static void AddDomainFits(Dictionary<string, int> domainCounts, IReadOnlyList<string> domains)
+    {
+        foreach (string domain in domains)
+            AddCount(domainCounts, domain);
     }
 
     private static string BuildFamilyKey(Pm4MslkEntry link)
@@ -418,6 +447,7 @@ public static class Pm4ResearchLinkageAnalyzer
         public int EntriesInFilesWithBadMdos { get; set; }
         public Dictionary<string, int> DomainCounts { get; } = CandidateDomains.ToDictionary(static domain => domain, static _ => 0, StringComparer.Ordinal);
         public Dictionary<string, int> Low16Counts { get; } = new(StringComparer.Ordinal);
+        public List<Pm4LinkageMismatchExample> Examples { get; } = [];
 
         public Pm4LinkageMismatchFamily ToReport()
         {
@@ -444,6 +474,15 @@ public static class Pm4ResearchLinkageAnalyzer
                     .ThenBy(static kv => kv.Key)
                     .Take(8)
                     .Select(static kv => new Pm4ValueFrequency(kv.Key, kv.Value))
+                    .ToList(),
+                Examples
+                    .OrderBy(static example => example.CandidateDomains.Count)
+                    .ThenByDescending(static example => example.Low16MatchesCk24ObjectId)
+                    .ThenByDescending(static example => example.Low24MatchesCk24)
+                    .ThenByDescending(static example => example.FileHasMscn)
+                    .ThenBy(static example => example.RefIndex)
+                    .ThenBy(static example => example.SourcePath)
+                    .Take(5)
                     .ToList());
         }
     }

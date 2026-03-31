@@ -7,6 +7,8 @@ agent: "agent"
 
 Implement the next non-GUI `development` repair slice in `gillijimproject_refactor` using the original 4.x source dataset as the source of truth and the current repair plan/spec as the architecture contract.
 
+If the ask is primarily about VLM dataset generation, real-map curation, or model-oriented missing-layer reconstruction rather than repair-pipeline implementation, use `vlm-dataset-reconstruction-plan.prompt.md` instead of this repair-pipeline prompt.
+
 ## Read First
 
 1. `gillijimproject_refactor/plans/development_repair_plan.md`

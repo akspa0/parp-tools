@@ -419,37 +419,31 @@ internal static class WarcraftNetM2Adapter
                 ? model.Textures[textureId].Flags
                 : 0;
 
-            int materialId = sectionMaterialIds[batch.SkinSectionIndex];
-            MdlMaterial material;
-            if (materialId >= 0)
-            {
-                material = mdx.Materials[materialId];
-                if (batch.PriorityPlane > material.PriorityPlane)
-                    material.PriorityPlane = batch.PriorityPlane;
-            }
-            else
-            {
-                material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
-                materialId = mdx.Materials.Count;
-                mdx.Materials.Add(material);
-                sectionMaterialIds[batch.SkinSectionIndex] = materialId;
-            }
+            // Keep the active runtime path conservative until the newer batch/layer semantics
+            // are proven on real data. The old stable viewer behavior effectively used the
+            // first material batch per section on UV0, which avoided tree trunk regressions.
+            if (sectionMaterialIds[batch.SkinSectionIndex] >= 0)
+                continue;
 
-            int coordId = ResolveTextureCoordId(model, batch);
+            var material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
 
             material.Layers.Add(new MdlTexLayer
             {
                 BlendMode = MapBlendMode(blendMode),
                 TextureId = textureId,
-                CoordId = coordId,
+                CoordId = 0,
                 TransformId = -1,
                 StaticAlpha = 1.0f,
                 StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
                 StaticColorAlpha = 1.0f,
-                Flags = MapLayerFlags(renderFlagBits, textureFlags, coordId),
+                Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
             });
 
             ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
+
+            int materialId = mdx.Materials.Count;
+            mdx.Materials.Add(material);
+            sectionMaterialIds[batch.SkinSectionIndex] = materialId;
         }
 
         return sectionMaterialIds;
@@ -466,15 +460,6 @@ internal static class WarcraftNetM2Adapter
         }
 
         return model.Textures.Count > 0 ? 0 : -1;
-    }
-
-    private static int ResolveTextureCoordId(ParsedModelData model, SkinTextureUnitData batch)
-    {
-        int lookupIndex = batch.TextureCoordComboIndex;
-        if (lookupIndex >= 0 && lookupIndex < model.TextureCoordLookup.Count)
-            return model.TextureCoordLookup[lookupIndex].CoordId;
-
-        return 0;
     }
 
     private static void ApplyLayerAnimationMetadata(MdlTexLayer layer, MdxFile mdx, ParsedModelData model, SkinTextureUnitData batch)
@@ -2455,9 +2440,6 @@ internal static class WarcraftNetM2Adapter
         // Do not infer NoDepthTest / NoDepthSet from Warcraft.NET M2 render flags here.
         // The bit layout is not stable across client versions, and treating 0x8/0x10
         // as depth disables causes reflective or fog-like world models to render through terrain.
-
-        if (coordId < 0)
-            flags |= MdlGeoFlags.SphereEnvMap;
 
         if (textureFlags.HasFlag(TextureFlags.Flag_0x1_WrapX))
             flags |= MdlGeoFlags.WrapWidth;

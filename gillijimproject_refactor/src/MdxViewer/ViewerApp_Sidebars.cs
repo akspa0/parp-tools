@@ -203,17 +203,18 @@ public partial class ViewerApp
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(DefaultSidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         }
         else
         {
-            ImGui.SetNextWindowPos(new Vector2(0, topOffset));
-            ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+            _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
+            ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
         }
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         ImGuiWindowFlags flags = _useDockspaceUi
             ? ImGuiWindowFlags.None
-            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
+            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
         if (ImGui.Begin(_useDockspaceUi ? "Navigator" : "##LeftSidebar", flags))
         {
             if (_useDockspaceUi)
@@ -483,17 +484,18 @@ public partial class ViewerApp
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(DefaultSidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
         }
         else
         {
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - SidebarWidth, topOffset));
-            ImGui.SetNextWindowSize(new Vector2(SidebarWidth, sidebarHeight));
+            _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, io.DisplaySize.X);
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
         }
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         ImGuiWindowFlags flags = _useDockspaceUi
             ? ImGuiWindowFlags.None
-            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
+            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
         if (ImGui.Begin(_useDockspaceUi ? "Inspector" : "##RightSidebar", flags))
         {
             if (_useDockspaceUi)
@@ -554,6 +556,116 @@ public partial class ViewerApp
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawFixedSidebarSplitters()
+    {
+        if (!_showLeftSidebar && !_showRightSidebar)
+            return;
+
+        var io = ImGui.GetIO();
+        float topOffset = MenuBarHeight + ToolbarHeight;
+        float panelHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
+        if (panelHeight <= 0f)
+            return;
+
+        if (_showLeftSidebar)
+        {
+            float splitterX = _leftSidebarWidth - SidebarSplitterWidth * 0.5f;
+            DrawFixedSidebarSplitterWindow(
+                "##LeftSidebarSplitter",
+                splitterX,
+                topOffset,
+                panelHeight,
+                io.MouseDelta.X,
+                isLeftSidebar: true,
+                io.DisplaySize.X);
+        }
+
+        if (_showRightSidebar)
+        {
+            float splitterX = io.DisplaySize.X - _rightSidebarWidth - SidebarSplitterWidth * 0.5f;
+            DrawFixedSidebarSplitterWindow(
+                "##RightSidebarSplitter",
+                splitterX,
+                topOffset,
+                panelHeight,
+                -io.MouseDelta.X,
+                isLeftSidebar: false,
+                io.DisplaySize.X);
+        }
+    }
+
+    private void DrawFixedSidebarSplitterWindow(string id, float splitterX, float topOffset, float panelHeight, float deltaWidth, bool isLeftSidebar, float displayWidth)
+    {
+        ImGui.SetNextWindowPos(new Vector2(splitterX, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(SidebarSplitterWidth, panelHeight), ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0f);
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar
+            | ImGuiWindowFlags.NoResize
+            | ImGuiWindowFlags.NoMove
+            | ImGuiWindowFlags.NoCollapse
+            | ImGuiWindowFlags.NoSavedSettings
+            | ImGuiWindowFlags.NoScrollbar
+            | ImGuiWindowFlags.NoScrollWithMouse
+            | ImGuiWindowFlags.NoBackground
+            | ImGuiWindowFlags.NoBringToFrontOnFocus
+            | ImGuiWindowFlags.NoNavFocus;
+
+        if (!ImGui.Begin(id, flags))
+        {
+            ImGui.End();
+            return;
+        }
+
+        ImGui.InvisibleButton("##drag", new Vector2(SidebarSplitterWidth, panelHeight));
+        bool hovered = ImGui.IsItemHovered();
+        bool active = ImGui.IsItemActive();
+        if (hovered || active)
+            ImGui.SetMouseCursor(ImGuiMouseCursor.ResizeEW);
+
+        if (active)
+        {
+            if (isLeftSidebar)
+                _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth + deltaWidth, isLeftSidebar: true, displayWidth);
+            else
+                _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth + deltaWidth, isLeftSidebar: false, displayWidth);
+        }
+
+        uint color = ImGui.GetColorU32(hovered || active
+            ? new Vector4(0.52f, 0.68f, 0.86f, 0.95f)
+            : new Vector4(0.24f, 0.28f, 0.34f, 0.75f));
+        var drawList = ImGui.GetWindowDrawList();
+        Vector2 windowPos = ImGui.GetWindowPos();
+        drawList.AddRectFilled(
+            windowPos,
+            windowPos + new Vector2(SidebarSplitterWidth, panelHeight),
+            color,
+            2f);
+
+        ImGui.End();
+    }
+
+    private float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth)
+    {
+        float otherSidebarWidth = 0f;
+        if (isLeftSidebar)
+        {
+            if (_showRightSidebar)
+                otherSidebarWidth = _rightSidebarWidth;
+        }
+        else if (_showLeftSidebar)
+        {
+            otherSidebarWidth = _leftSidebarWidth;
+        }
+
+        float preferredMaxWidth = displayWidth - otherSidebarWidth - SceneViewportPreferredMinWidth;
+        float maxWidth = preferredMaxWidth >= SidebarMinWidth
+            ? MathF.Min(SidebarMaxWidth, preferredMaxWidth)
+            : SidebarMaxWidth;
+
+        return Math.Clamp(width, SidebarMinWidth, maxWidth);
     }
 
     private void DrawModelInfoContent()

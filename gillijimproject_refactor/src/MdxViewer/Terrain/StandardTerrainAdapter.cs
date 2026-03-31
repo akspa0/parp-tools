@@ -20,6 +20,8 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public class StandardTerrainAdapter : ITerrainAdapter
 {
+    private const uint WdtUsesGlobalMapObjFlag = 0x0001u;
+
     private readonly Mcnk.ParseOptions _mcnkParseOptions;
     private readonly IDataSource _dataSource;
     private readonly string _mapName;
@@ -88,12 +90,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
         if (dbcProvider != null && !string.IsNullOrWhiteSpace(dbdDir) && !string.IsNullOrWhiteSpace(buildVersion))
             LoadMh2oLiquidTypeLookup(dbcProvider, dbdDir, buildVersion);
 
-        // For WMO-only maps, parse MWMO + MODF from the WDT itself (same as Alpha WDT)
-        if (IsWmoBased)
+        bool shouldParseWdtGlobalWmoPlacements = IsWmoBased
+            || (_mphdFlags & WdtUsesGlobalMapObjFlag) != 0
+            || (FindChunk(wdtBytes, "MWMO") >= 0 && FindChunk(wdtBytes, "MODF") >= 0);
+
+        // WDTs can carry global MWMO/MODF placements both for pure WMO maps and for
+        // terrain maps that also use a global WMO shell.
+        if (shouldParseWdtGlobalWmoPlacements)
         {
-            ParseWdtWmoPlacement(wdtBytes);
+            ParseWdtWmoPlacement(wdtBytes, useRawWorldCoordinates: IsWmoBased);
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  WMO-only map: {_wmoNames.Count} WMO names, {ModfPlacements.Count} MODF placements");
+                IsWmoBased
+                    ? $"  WMO-only map: {_wmoNames.Count} WMO names, {ModfPlacements.Count} MODF placements"
+                    : $"  WDT global WMO placements: {_wmoNames.Count} WMO names, {ModfPlacements.Count} MODF placements");
         }
 
         // Diagnostic: dump first 5 tile indices and their decoded coordinates + filenames
@@ -2011,18 +2020,19 @@ public class StandardTerrainAdapter : ITerrainAdapter
     // ── WDT Parsing ──
 
     /// <summary>
-    /// Parse MWMO + MODF from the WDT for WMO-only maps.
+    /// Parse MWMO + MODF from the WDT for global WMO placements.
     /// 0.6.0 WDTs use the same layout as Alpha WDTs:
     ///   MWMO = null-terminated WMO filename string block
-    ///   MODF = 64-byte placement entries (nameIndex is byte offset into MWMO)
+    ///   MODF = 64-byte placement entries (nameIndex is a WDT-level WMO table index)
     /// </summary>
-    private void ParseWdtWmoPlacement(byte[] wdt)
+    private void ParseWdtWmoPlacement(byte[] wdt, bool useRawWorldCoordinates)
     {
         // Find MWMO chunk — WMO name string block
         int mwmoOff = FindChunk(wdt, "MWMO");
         if (mwmoOff < 0)
         {
-            ViewerLog.Important(ViewerLog.Category.Terrain, "  WMO-only: no MWMO chunk found in WDT");
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                useRawWorldCoordinates ? "  WMO-only: no MWMO chunk found in WDT" : "  WDT global WMO: no MWMO chunk found in WDT");
             return;
         }
         int mwmoSize = BitConverter.ToInt32(wdt, mwmoOff + 4);
@@ -2034,14 +2044,24 @@ public class StandardTerrainAdapter : ITerrainAdapter
         foreach (var name in wmoNames)
             GetOrAddWmoName(name);
 
+        if (_wmoNames.Count == 0)
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                useRawWorldCoordinates ? "  WMO-only: MWMO contained no names" : "  WDT global WMO: MWMO contained no names");
+            return;
+        }
+
         ViewerLog.Important(ViewerLog.Category.Terrain,
-            $"  WMO-only: MWMO has {wmoNames.Count} names: {string.Join(", ", wmoNames.Select(Path.GetFileName))}");
+            useRawWorldCoordinates
+                ? $"  WMO-only: MWMO has {wmoNames.Count} names: {string.Join(", ", wmoNames.Select(Path.GetFileName))}"
+                : $"  WDT global WMO: MWMO has {wmoNames.Count} names: {string.Join(", ", wmoNames.Select(Path.GetFileName))}");
 
         // Find MODF chunk — 64-byte placement entries
         int modfOff = FindChunk(wdt, "MODF");
         if (modfOff < 0)
         {
-            ViewerLog.Important(ViewerLog.Category.Terrain, "  WMO-only: no MODF chunk found in WDT");
+            ViewerLog.Important(ViewerLog.Category.Terrain,
+                useRawWorldCoordinates ? "  WMO-only: no MODF chunk found in WDT" : "  WDT global WMO: no MODF chunk found in WDT");
             return;
         }
         int modfSize = BitConverter.ToInt32(wdt, modfOff + 4);
@@ -2070,30 +2090,57 @@ public class StandardTerrainAdapter : ITerrainAdapter
             float bbMaxY = BitConverter.ToSingle(wdt, pos + 52);
             ushort flags = BitConverter.ToUInt16(wdt, pos + 56);
 
-            // For WDT-level MODF, nameId is an index (not a byte offset into MWMO via MWID).
-            // In WMO-only WDTs there's typically just one WMO at index 0.
+            // For WDT-level MODF, nameId is an index into the WDT MWMO table.
             int nameIdx = (int)nameId;
-            if (nameIdx >= _wmoNames.Count) nameIdx = 0;
+            if (nameIdx < 0 || nameIdx >= _wmoNames.Count)
+                nameIdx = 0;
 
-            // WMO-only maps: use raw WoW world coords (no MapOrigin conversion).
-            // MODF file layout: pos=(X, Z, Y), bb=(X, Z, Y) — middle component is height.
-            // Position = (rawX, rawY, rawZ=height), matching Alpha adapter's WMO-only path.
-            var placement = new ModfPlacement
+            ModfPlacement placement;
+            if (useRawWorldCoordinates)
             {
-                NameIndex = nameIdx,
-                UniqueId = (int)uniqueId,
-                Position = new Vector3(rawX, rawY, rawZ),
-                Rotation = new Vector3(rotX, rotY, rotZ),
-                BoundsMin = new Vector3(
-                    MathF.Min(bbMinX, bbMaxX), MathF.Min(bbMinY, bbMaxY), MathF.Min(bbMinZ, bbMaxZ)),
-                BoundsMax = new Vector3(
-                    MathF.Max(bbMinX, bbMaxX), MathF.Max(bbMinY, bbMaxY), MathF.Max(bbMinZ, bbMaxZ)),
-                Flags = flags
-            };
+                // WMO-only maps keep raw WoW world coordinates.
+                placement = new ModfPlacement
+                {
+                    NameIndex = nameIdx,
+                    UniqueId = (int)uniqueId,
+                    Position = new Vector3(rawX, rawY, rawZ),
+                    Rotation = new Vector3(rotX, rotY, rotZ),
+                    BoundsMin = new Vector3(
+                        MathF.Min(bbMinX, bbMaxX), MathF.Min(bbMinY, bbMaxY), MathF.Min(bbMinZ, bbMaxZ)),
+                    BoundsMax = new Vector3(
+                        MathF.Max(bbMinX, bbMaxX), MathF.Max(bbMinY, bbMaxY), MathF.Max(bbMinZ, bbMaxZ)),
+                    Flags = flags
+                };
+            }
+            else
+            {
+                // Terrain maps use the same renderer-space conversion as ADT MODF placements.
+                placement = new ModfPlacement
+                {
+                    NameIndex = nameIdx,
+                    UniqueId = (int)uniqueId,
+                    Position = new Vector3(
+                        WoWConstants.MapOrigin - rawY,
+                        WoWConstants.MapOrigin - rawX,
+                        rawZ),
+                    Rotation = new Vector3(rotX, rotY, rotZ),
+                    BoundsMin = new Vector3(
+                        WoWConstants.MapOrigin - bbMaxY,
+                        WoWConstants.MapOrigin - bbMaxX,
+                        bbMinZ),
+                    BoundsMax = new Vector3(
+                        WoWConstants.MapOrigin - bbMinY,
+                        WoWConstants.MapOrigin - bbMinX,
+                        bbMaxZ),
+                    Flags = flags
+                };
+            }
 
             ModfPlacements.Add(placement);
             ViewerLog.Important(ViewerLog.Category.Terrain,
-                $"  WMO-only MODF[{i}]: name={_wmoNames[nameIdx]} pos=({rawX:F1},{rawY:F1},{rawZ:F1}) rot=({rotX:F1},{rotY:F1},{rotZ:F1})");
+                useRawWorldCoordinates
+                    ? $"  WMO-only MODF[{i}]: name={_wmoNames[nameIdx]} pos=({rawX:F1},{rawY:F1},{rawZ:F1}) rot=({rotX:F1},{rotY:F1},{rotZ:F1})"
+                    : $"  WDT global MODF[{i}]: name={_wmoNames[nameIdx]} pos=({placement.Position.X:F1},{placement.Position.Y:F1},{placement.Position.Z:F1}) rot=({rotX:F1},{rotY:F1},{rotZ:F1}) flags=0x{flags:X4}");
         }
     }
 

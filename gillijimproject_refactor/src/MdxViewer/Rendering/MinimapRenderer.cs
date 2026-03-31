@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -15,16 +16,25 @@ namespace MdxViewer.Rendering;
 /// </summary>
 public class MinimapRenderer : IDisposable
 {
+    private const int BackgroundWorkerCount = 1;
+
     private readonly GL _gl;
     private readonly IDataSource _dataSource;
     private readonly Md5TranslateIndex? _md5Index;
     private readonly string _cacheRoot;
-    private readonly Dictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Queue<MinimapTileRequest> _pendingRequests = new();
-    private readonly HashSet<string> _queuedCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, uint> _textureCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentQueue<MinimapTileRequest> _pendingRequests = new();
+    private readonly ConcurrentQueue<DecodedMinimapTileUpload> _readyUploads = new();
+    private readonly ConcurrentDictionary<string, byte> _queuedCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SemaphoreSlim _requestSignal = new(0);
+    private readonly CancellationTokenSource _disposeCts = new();
+    private readonly Task[] _loaderTasks;
     private int _completedRequestCount;
     private int _uploadedTileCount;
     private int _failedTileCount;
+    private int _queuedRequestCount;
+    private int _readyUploadCount;
+    private int _inflightRequestCount;
 
     public MinimapRenderer(GL gl, IDataSource dataSource, Md5TranslateIndex? md5Index, string cacheRoot)
     {
@@ -33,17 +43,21 @@ public class MinimapRenderer : IDisposable
         _md5Index = md5Index;
         _cacheRoot = cacheRoot;
         Directory.CreateDirectory(_cacheRoot);
+
+        _loaderTasks = Enumerable.Range(0, BackgroundWorkerCount)
+            .Select(_ => Task.Run(() => BackgroundLoadLoop(_disposeCts.Token), _disposeCts.Token))
+            .ToArray();
     }
 
-    public int PendingTileCount => _pendingRequests.Count;
+    public int PendingTileCount => Math.Max(0, Volatile.Read(ref _queuedRequestCount) + Volatile.Read(ref _readyUploadCount) + Volatile.Read(ref _inflightRequestCount));
     public int UploadedTileCount => _uploadedTileCount;
     public int FailedTileCount => _failedTileCount;
-    public bool IsBusy => _pendingRequests.Count > 0;
+    public bool IsBusy => PendingTileCount > 0;
     public float LoadingProgress
     {
         get
         {
-            int total = _completedRequestCount + _pendingRequests.Count;
+            int total = _completedRequestCount + PendingTileCount;
             return total > 0 ? _completedRequestCount / (float)total : 1f;
         }
     }
@@ -65,23 +79,22 @@ public class MinimapRenderer : IDisposable
 
     public int ProcessPendingLoads(int maxLoads = 2, double maxBudgetMs = 5.0)
     {
-        if (_pendingRequests.Count == 0 || maxLoads <= 0)
+        if (Volatile.Read(ref _readyUploadCount) == 0 || maxLoads <= 0)
             return 0;
 
         int processed = 0;
         var stopwatch = Stopwatch.StartNew();
         while (processed < maxLoads
             && stopwatch.Elapsed.TotalMilliseconds < maxBudgetMs
-            && _pendingRequests.Count > 0)
+            && _readyUploads.TryDequeue(out DecodedMinimapTileUpload upload))
         {
-            MinimapTileRequest request = _pendingRequests.Dequeue();
-            _queuedCacheKeys.Remove(request.CacheKey);
+            Interlocked.Decrement(ref _readyUploadCount);
 
-            if (_textureCache.ContainsKey(request.CacheKey))
+            if (_textureCache.ContainsKey(upload.CacheKey))
                 continue;
 
-            uint tex = LoadTile(request.MapName, request.Tx, request.Ty, request.CacheKey);
-            _textureCache[request.CacheKey] = tex;
+            uint tex = upload.Tile != null ? UploadTexture(upload.Tile) : 0;
+            _textureCache[upload.CacheKey] = tex;
             _completedRequestCount++;
 
             if (tex != 0)
@@ -97,16 +110,57 @@ public class MinimapRenderer : IDisposable
 
     private void QueueTileLoad(string mapName, int tx, int ty, string cacheKey)
     {
-        if (_textureCache.ContainsKey(cacheKey) || !_queuedCacheKeys.Add(cacheKey))
+        if (_textureCache.ContainsKey(cacheKey) || !_queuedCacheKeys.TryAdd(cacheKey, 0))
             return;
 
         _pendingRequests.Enqueue(new MinimapTileRequest(mapName, tx, ty, cacheKey));
+        Interlocked.Increment(ref _queuedRequestCount);
+        _requestSignal.Release();
     }
 
-    private unsafe uint LoadTile(string mapName, int tx, int ty, string cacheKey)
+    private async Task BackgroundLoadLoop(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await _requestSignal.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+                while (_pendingRequests.TryDequeue(out MinimapTileRequest request))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Interlocked.Decrement(ref _queuedRequestCount);
+
+                    if (_textureCache.ContainsKey(request.CacheKey))
+                    {
+                        _queuedCacheKeys.TryRemove(request.CacheKey, out _);
+                        continue;
+                    }
+
+                    Interlocked.Increment(ref _inflightRequestCount);
+                    try
+                    {
+                        DecodedMinimapTile? tile = LoadTileData(request.MapName, request.Tx, request.Ty, request.CacheKey);
+                        _readyUploads.Enqueue(new DecodedMinimapTileUpload(request.CacheKey, tile));
+                        Interlocked.Increment(ref _readyUploadCount);
+                    }
+                    finally
+                    {
+                        _queuedCacheKeys.TryRemove(request.CacheKey, out _);
+                        Interlocked.Decrement(ref _inflightRequestCount);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private DecodedMinimapTile? LoadTileData(string mapName, int tx, int ty, string cacheKey)
     {
         if (TryLoadCachedBitmap(cacheKey, out DecodedMinimapTile? cachedTile) && cachedTile != null)
-            return UploadTexture(cachedTile);
+            return cachedTile;
 
         byte[]? data = null;
         foreach (string candidatePath in EnumerateTileCandidates(mapName, tx, ty))
@@ -117,7 +171,7 @@ public class MinimapRenderer : IDisposable
         }
 
         if (data == null || data.Length == 0)
-            return 0;
+            return null;
 
         try
         {
@@ -127,12 +181,12 @@ public class MinimapRenderer : IDisposable
             DecodedMinimapTile decoded = ConvertBitmap(bmp);
             TrySaveCachedBitmap(cacheKey, bmp);
             bmp.Dispose();
-            return UploadTexture(decoded);
+            return decoded;
         }
         catch (Exception ex)
         {
             ViewerLog.Trace($"[MinimapRenderer] Failed to load tile {cacheKey}: {ex.Message}");
-            return 0;
+            return null;
         }
     }
 
@@ -222,6 +276,7 @@ public class MinimapRenderer : IDisposable
     }
 
     private sealed record DecodedMinimapTile(int Width, int Height, byte[] Pixels);
+    private readonly record struct DecodedMinimapTileUpload(string CacheKey, DecodedMinimapTile? Tile);
     private readonly record struct MinimapTileRequest(string MapName, int Tx, int Ty, string CacheKey);
 
     private static DecodedMinimapTile ConvertBitmap(System.Drawing.Bitmap bmp)
@@ -326,10 +381,25 @@ public class MinimapRenderer : IDisposable
 
     public void Dispose()
     {
+        _disposeCts.Cancel();
+        for (int i = 0; i < _loaderTasks.Length; i++)
+            _requestSignal.Release();
+
+        try
+        {
+            Task.WaitAll(_loaderTasks, TimeSpan.FromSeconds(1));
+        }
+        catch (AggregateException)
+        {
+        }
+
         foreach (var tex in _textureCache.Values)
         {
             if (tex != 0) _gl.DeleteTexture(tex);
         }
         _textureCache.Clear();
+
+        _requestSignal.Dispose();
+        _disposeCts.Dispose();
     }
 }

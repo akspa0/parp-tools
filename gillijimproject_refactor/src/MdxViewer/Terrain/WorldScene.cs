@@ -525,13 +525,26 @@ public class WorldScene : ISceneRenderer
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
     private const float WmoCullDistance = 4000f;     // Minimum WMO instance cull distance; actual range expands with fog distance
-    private const float WmoFadeStartFraction = 0.85f;
     private const float NoCullRadius = 512f;         // Objects within this radius are never frustum-culled
     private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
     private const float HoverInfoBrushPixels = 32f;
     private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
+
+    private readonly struct VisibleWmoInstance
+    {
+        public VisibleWmoInstance(ObjectInstance instance, WmoRenderer renderer, float centerDistanceSq)
+        {
+            Instance = instance;
+            Renderer = renderer;
+            CenterDistanceSq = centerDistanceSq;
+        }
+
+        public ObjectInstance Instance { get; }
+        public WmoRenderer Renderer { get; }
+        public float CenterDistanceSq { get; }
+    }
 
     private readonly struct VisibleMdxInstance
     {
@@ -553,12 +566,20 @@ public class WorldScene : ISceneRenderer
 
     // Scratch collections reused every frame to avoid hot-path allocations.
     private readonly HashSet<string> _updatedMdxRenderers = new();
+    private readonly List<VisibleWmoInstance> _visibleWmoInstances = new();
     private readonly List<VisibleMdxInstance> _visibleMdxInstances = new();
     private readonly List<(int visibleIdx, float distSq)> _transparentSortScratch = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private HoveredAssetInfo? _hoveredAssetInfo;
     private bool _wireframeRevealEnabled;
+    private bool _showHoveredAssetTooltips = true;
+    private const int UniqueIdLayerGapThreshold = 100;
+    private bool _uniqueIdFilterEnabled;
+    private UniqueIdVisibilityScope _uniqueIdVisibilityScope = UniqueIdVisibilityScope.PerMap;
+    private int _uniqueIdFilterMin = -1;
+    private int _uniqueIdFilterMax = -1;
+    private (int tileX, int tileY)? _uniqueIdFilterTile;
 
     // PM4 debug overlay
     private const int Pm4MaxLinesTotal = int.MaxValue;
@@ -586,7 +607,7 @@ public class WorldScene : ISceneRenderer
     private bool _showPm4Type80 = true;
     private bool _showPm4TypeOther = true;
     private bool _pm4SplitCk24ByMdos;
-    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24Type;
+    private Pm4OverlayColorMode _pm4ColorMode = Pm4OverlayColorMode.Ck24ObjectId;
     private Vector3 _pm4OverlayTranslation = Vector3.Zero;
     private Vector3 _pm4OverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4OverlayScale = Vector3.One;
@@ -681,6 +702,12 @@ public class WorldScene : ISceneRenderer
     public int SelectedObjectIndex => _selectedObjectIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
     public HoveredAssetInfo? HoveredAssetInfo => _hoveredAssetInfo;
+    public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
+    public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
+    public UniqueIdVisibilityScope UniqueIdVisibilityScope { get => _uniqueIdVisibilityScope; set => _uniqueIdVisibilityScope = value; }
+    public int UniqueIdFilterMin { get => _uniqueIdFilterMin; set => _uniqueIdFilterMin = value; }
+    public int UniqueIdFilterMax { get => _uniqueIdFilterMax; set => _uniqueIdFilterMax = value; }
+    public (int tileX, int tileY)? UniqueIdFilterTile => _uniqueIdFilterTile;
     public bool ShowPm4Overlay
     {
         get => _showPm4Overlay;
@@ -701,6 +728,104 @@ public class WorldScene : ISceneRenderer
     public int Pm4TotalFiles => _pm4TotalFiles;
     public int Pm4LoadedFiles => _pm4LoadedFiles;
     public int Pm4ObjectCount => _pm4ObjectCount;
+
+    public void SetUniqueIdFilterTile(int tileX, int tileY)
+    {
+        _uniqueIdFilterTile = (tileX, tileY);
+    }
+
+    public void SetUniqueIdFilterRange(int minUniqueId, int maxUniqueId)
+    {
+        if (minUniqueId <= maxUniqueId)
+        {
+            _uniqueIdFilterMin = minUniqueId;
+            _uniqueIdFilterMax = maxUniqueId;
+            return;
+        }
+
+        _uniqueIdFilterMin = maxUniqueId;
+        _uniqueIdFilterMax = minUniqueId;
+    }
+
+    public void ResetUniqueIdFilter()
+    {
+        _uniqueIdFilterEnabled = false;
+        _uniqueIdFilterMin = -1;
+        _uniqueIdFilterMax = -1;
+    }
+
+    public bool TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        minUniqueId = int.MaxValue;
+        maxUniqueId = int.MinValue;
+        instanceCount = 0;
+
+        AccumulateUniqueIdFilterRange(_wmoInstances, ref minUniqueId, ref maxUniqueId, ref instanceCount);
+        AccumulateUniqueIdFilterRange(_mdxInstances, ref minUniqueId, ref maxUniqueId, ref instanceCount);
+
+        if (instanceCount <= 0)
+        {
+            minUniqueId = 0;
+            maxUniqueId = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    public IReadOnlyList<UniqueIdArchaeologyLayer> GetUniqueIdArchaeologyLayers()
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        var countsById = new SortedDictionary<int, (int wmoCount, int mdxCount)>();
+        AccumulateUniqueIdLayerCandidates(_wmoInstances, isWmo: true, countsById);
+        AccumulateUniqueIdLayerCandidates(_mdxInstances, isWmo: false, countsById);
+
+        if (countsById.Count == 0)
+            return Array.Empty<UniqueIdArchaeologyLayer>();
+
+        var layers = new List<UniqueIdArchaeologyLayer>();
+        int layerNumber = 1;
+        int layerStart = 0;
+        int layerEnd = 0;
+        int previousId = 0;
+        int placementCount = 0;
+        int wmoCount = 0;
+        int mdxCount = 0;
+        bool hasLayer = false;
+
+        foreach ((int uniqueId, (int layerWmoCount, int layerMdxCount) counts) in countsById)
+        {
+            if (!hasLayer)
+            {
+                layerStart = uniqueId;
+                hasLayer = true;
+            }
+            else if (uniqueId - previousId > UniqueIdLayerGapThreshold)
+            {
+                layers.Add(new UniqueIdArchaeologyLayer(layerNumber++, layerStart, layerEnd, placementCount, wmoCount, mdxCount));
+                layerStart = uniqueId;
+                placementCount = 0;
+                wmoCount = 0;
+                mdxCount = 0;
+            }
+
+            layerEnd = uniqueId;
+            previousId = uniqueId;
+            placementCount += counts.layerWmoCount + counts.layerMdxCount;
+            wmoCount += counts.layerWmoCount;
+            mdxCount += counts.layerMdxCount;
+        }
+
+        if (hasLayer)
+            layers.Add(new UniqueIdArchaeologyLayer(layerNumber, layerStart, layerEnd, placementCount, wmoCount, mdxCount));
+
+        return layers;
+    }
 
     public void ApplyTextureSamplingSettings()
     {
@@ -924,15 +1049,15 @@ public class WorldScene : ISceneRenderer
         tileCount = 0;
         objectCount = 0;
 
-        if (!SelectedPm4RawCk24.HasValue)
+        var tileCk24Key = SelectedPm4TileCk24Key;
+        if (!tileCk24Key.HasValue)
             return false;
 
-        var tileCk24Key = SelectedPm4TileCk24Key.Value;
         foreach (var objectKey in _pm4ObjectLookup.Keys)
         {
-            if (objectKey.tileX != tileCk24Key.tileX
-                || objectKey.tileY != tileCk24Key.tileY
-                || objectKey.ck24 != tileCk24Key.ck24)
+            if (objectKey.tileX != tileCk24Key.Value.tileX
+                || objectKey.tileY != tileCk24Key.Value.tileY
+                || objectKey.ck24 != tileCk24Key.Value.ck24)
                 continue;
 
             objectCount++;
@@ -2206,26 +2331,52 @@ public class WorldScene : ISceneRenderer
         if (result.RequestId != _pm4LoadRequestId || result.Cancelled)
             return;
 
+        bool replaceExisting = !_pm4LoadedCameraWindow.HasValue || _pm4TileObjects.Count == 0;
+
         if (result.KnownMapTiles.Count > 0)
             _pm4KnownMapTiles.UnionWith(result.KnownMapTiles);
 
         if (result.CacheData != null)
         {
-            bool replaceExisting = !_pm4LoadedCameraWindow.HasValue || _pm4TileObjects.Count == 0;
             if (replaceExisting)
                 ClearPm4OverlayRuntimeState();
 
             MergePm4OverlayFromCache(result.CacheData);
-            if (result.CoveredMapTiles.Count > 0)
-                _pm4CoveredMapTiles.UnionWith(result.CoveredMapTiles);
-            if (result.LoadedCameraWindow.HasValue)
-                ExpandPm4LoadedCameraWindow(result.LoadedCameraWindow.Value);
             RestoreSelectedPm4Object(result.SelectedObjectKey);
             UpdatePm4AdaptiveWindow(result.LoadElapsedMs);
         }
 
+        if (result.CoveredMapTiles.Count > 0)
+            _pm4CoveredMapTiles.UnionWith(result.CoveredMapTiles);
+
+        if (result.LoadedCameraWindow.HasValue)
+            ExpandPm4LoadedCameraWindow(result.LoadedCameraWindow.Value);
+
         _pm4Status = result.StatusMessage;
-        ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + _pm4Status);
+        LogPm4FinalStatus(_pm4Status);
+    }
+
+    private static bool ShouldSuppressPm4FinalStatusLog(string status)
+    {
+        return status.StartsWith("PM4: no files intersect camera window", StringComparison.Ordinal)
+            || status.StartsWith("PM4: 0/", StringComparison.Ordinal)
+            || status.Contains("none decoded into overlay data", StringComparison.Ordinal);
+    }
+
+    private void LogPm4FinalStatus(string status)
+    {
+        if (string.IsNullOrWhiteSpace(status) || ShouldSuppressPm4FinalStatusLog(status))
+            return;
+
+        if (status.StartsWith("PM4 ready:", StringComparison.Ordinal)
+            || status.StartsWith("PM4 load failed:", StringComparison.Ordinal)
+            || status.StartsWith("PM4 unavailable:", StringComparison.Ordinal))
+        {
+            ViewerLog.Important(ViewerLog.Category.Terrain, "[PM4] " + status);
+            return;
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Terrain, "[PM4] " + status);
     }
 
     private void ReleasePm4LoadCancellation(bool cancelPendingLoad)
@@ -2472,8 +2623,6 @@ public class WorldScene : ISceneRenderer
                     {
                         tileSatisfiedCounts[(effectiveTileX, effectiveTileY)]++;
                         zeroObjectFiles++;
-                        ViewerLog.Debug(ViewerLog.Category.Terrain,
-                            $"[PM4] Parsed '{pm4Path}' (version={pm4.Version}, surfaces={pm4.KnownChunks.Msur.Count}, meshVerts={pm4.KnownChunks.Msvt.Count}, meshIndices={pm4.KnownChunks.Msvi.Count}, links={pm4.KnownChunks.Mslk.Count}, refs={pm4.KnownChunks.Mprl.Count}) but produced 0 overlay objects.");
                         continue;
                     }
 
@@ -2537,6 +2686,11 @@ public class WorldScene : ISceneRenderer
                 }
             }
 
+            HashSet<(int tileX, int tileY)> coveredMapTiles = tileCandidateCounts
+                .Where(entry => tileSatisfiedCounts[entry.Key] >= entry.Value)
+                .Select(static entry => entry.Key)
+                .ToHashSet();
+
             if (loadedFiles == 0)
             {
                 return new Pm4OverlayAsyncLoadResult(
@@ -2544,7 +2698,7 @@ public class WorldScene : ISceneRenderer
                     null,
                     cameraWindow,
                     knownMapTiles,
-                    [],
+                    coveredMapTiles,
                     selectedObjectKey,
                     loadStopwatch.Elapsed.TotalMilliseconds,
                     $"PM4: {loadCandidates.Count}/{totalFiles} camera-window files found, none decoded into overlay data for ({cameraWindow.minTileX}..{cameraWindow.maxTileX}, {cameraWindow.minTileY}..{cameraWindow.maxTileY}) (tileParse={tileParseRejected}, tileRange={tileRangeRejected}, read={readFailed}, decode={decodeFailed}, zeroObjects={zeroObjectFiles}).",
@@ -2577,11 +2731,6 @@ public class WorldScene : ISceneRenderer
                 if (!_pm4OverlayCacheService.TrySave(cacheData, out string? cacheSaveError) && !string.IsNullOrWhiteSpace(cacheSaveError))
                     ViewerLog.Debug(ViewerLog.Category.Terrain, $"[PM4] {cacheSaveError}");
             }
-
-            HashSet<(int tileX, int tileY)> coveredMapTiles = tileCandidateCounts
-                .Where(entry => tileSatisfiedCounts[entry.Key] >= entry.Value)
-                .Select(static entry => entry.Key)
-                .ToHashSet();
 
             return new Pm4OverlayAsyncLoadResult(
                 requestId,
@@ -3232,6 +3381,8 @@ public class WorldScene : ISceneRenderer
         int tileLineBudget = Math.Min(Pm4MaxLinesPerTile, remainingLineBudget);
         int tileTriangleBudget = Math.Min(Pm4MaxTrianglesPerTile, remainingTriangleBudget);
 
+        // Viewer-generated split id used as a stable handle for this overlay build.
+        // This is not a raw PM4 field from disk.
         int nextObjectPartId = 0;
         foreach (Pm4OverlaySeedGroup seedGroup in seedGroups)
         {
@@ -5295,7 +5446,10 @@ public class WorldScene : ISceneRenderer
                 PlacementPosition = p.Position,
                 PlacementRotation = p.Rotation,
                 PlacementScale = scale,
-                UniqueId = p.UniqueId
+                UniqueId = p.UniqueId,
+                TileX = -1,
+                TileY = -1,
+                HasTileCoordinate = false
             };
 
             if (IsSkyboxModelPath(modelPath))
@@ -5352,7 +5506,10 @@ public class WorldScene : ISceneRenderer
                 PlacementPosition = p.Position,
                 PlacementRotation = p.Rotation,
                 PlacementScale = 1.0f,
-                UniqueId = p.UniqueId
+                UniqueId = p.UniqueId,
+                TileX = -1,
+                TileY = -1,
+                HasTileCoordinate = false
             });
         }
 
@@ -5457,7 +5614,10 @@ public class WorldScene : ISceneRenderer
                 LocalBoundsMin = localMin, LocalBoundsMax = localMax, BoundsResolved = boundsResolved,
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
-                UniqueId = p.UniqueId
+                UniqueId = p.UniqueId,
+                TileX = tileX,
+                TileY = tileY,
+                HasTileCoordinate = true
             };
 
             if (IsSkyboxModelPath(modelPath))
@@ -5510,7 +5670,10 @@ public class WorldScene : ISceneRenderer
                 BoundsResolved = localMin != Vector3.Zero || localMax != Vector3.Zero,
                 ModelName = Path.GetFileName(wmoPath), ModelPath = wmoPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f,
-                UniqueId = p.UniqueId
+                UniqueId = p.UniqueId,
+                TileX = tileX,
+                TileY = tileY,
+                HasTileCoordinate = true
             });
         }
 
@@ -5689,6 +5852,7 @@ public class WorldScene : ISceneRenderer
                 mdxScale *= SqlGameObjectMdxScaleMultiplier > 0 ? SqlGameObjectMdxScaleMultiplier : 1.0f;
 
             var pos = SqlSpawnCoordinateConverter.ToRendererPosition(spawn.PositionWow);
+            var (tileX, tileY) = ComputeTileCoordinates(pos);
 
             if (isWmo)
             {
@@ -5723,7 +5887,10 @@ public class WorldScene : ISceneRenderer
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = 1.0f,
-                    UniqueId = spawn.SpawnId
+                    UniqueId = spawn.SpawnId,
+                    TileX = tileX,
+                    TileY = tileY,
+                    HasTileCoordinate = true
                 });
             }
             else
@@ -5765,7 +5932,10 @@ public class WorldScene : ISceneRenderer
                     PlacementPosition = pos,
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = mdxScale,
-                    UniqueId = spawn.SpawnId
+                    UniqueId = spawn.SpawnId,
+                    TileX = tileX,
+                    TileY = tileY,
+                    HasTileCoordinate = true
                 };
 
                 if (IsSkyboxModelPath(modelPath))
@@ -5840,6 +6010,111 @@ public class WorldScene : ISceneRenderer
         return MathF.Max(WmoCullDistance, fogEnd + 1200f);
     }
 
+    private void AccumulateUniqueIdFilterRange(
+        IReadOnlyList<ObjectInstance> instances,
+        ref int minUniqueId,
+        ref int maxUniqueId,
+        ref int instanceCount)
+    {
+        for (int i = 0; i < instances.Count; i++)
+        {
+            ObjectInstance inst = instances[i];
+            if (inst.UniqueId <= 0 || !MatchesUniqueIdFilterScope(inst))
+                continue;
+
+            minUniqueId = Math.Min(minUniqueId, inst.UniqueId);
+            maxUniqueId = Math.Max(maxUniqueId, inst.UniqueId);
+            instanceCount++;
+        }
+    }
+
+    private void AccumulateUniqueIdLayerCandidates(
+        IReadOnlyList<ObjectInstance> instances,
+        bool isWmo,
+        SortedDictionary<int, (int wmoCount, int mdxCount)> countsById)
+    {
+        for (int i = 0; i < instances.Count; i++)
+        {
+            ObjectInstance inst = instances[i];
+            if (inst.UniqueId <= 0 || !MatchesUniqueIdFilterScope(inst))
+                continue;
+
+            countsById.TryGetValue(inst.UniqueId, out (int wmoCount, int mdxCount) counts);
+            counts = isWmo
+                ? (counts.wmoCount + 1, counts.mdxCount)
+                : (counts.wmoCount, counts.mdxCount + 1);
+            countsById[inst.UniqueId] = counts;
+        }
+    }
+
+    private bool MatchesUniqueIdFilterScope(in ObjectInstance inst)
+    {
+        if (_uniqueIdVisibilityScope != UniqueIdVisibilityScope.CameraTile)
+            return true;
+
+        if (!_uniqueIdFilterTile.HasValue || !inst.HasTileCoordinate)
+            return false;
+
+        return inst.TileX == _uniqueIdFilterTile.Value.tileX
+            && inst.TileY == _uniqueIdFilterTile.Value.tileY;
+    }
+
+    private bool ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst)
+    {
+        if (!_uniqueIdFilterEnabled
+            || _uniqueIdFilterMin < 0
+            || _uniqueIdFilterMax < 0
+            || inst.UniqueId <= 0
+            || !MatchesUniqueIdFilterScope(inst))
+        {
+            return false;
+        }
+
+        int minUniqueId = Math.Min(_uniqueIdFilterMin, _uniqueIdFilterMax);
+        int maxUniqueId = Math.Max(_uniqueIdFilterMin, _uniqueIdFilterMax);
+        return inst.UniqueId >= minUniqueId && inst.UniqueId <= maxUniqueId;
+    }
+
+    private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)
+    {
+        int tileX = (int)MathF.Floor((WoWConstants.MapOrigin - rendererPosition.X) / WoWConstants.ChunkSize);
+        int tileY = (int)MathF.Floor((WoWConstants.MapOrigin - rendererPosition.Y) / WoWConstants.ChunkSize);
+        return (tileX, tileY);
+    }
+
+    private void CollectVisibleWmoInstances(Vector3 cameraPos, float fogEnd)
+    {
+        float wmoCullDistance = ComputeWmoCullDistance(fogEnd);
+        float wmoCullDistanceSq = wmoCullDistance * wmoCullDistance;
+
+        foreach (var inst in _wmoInstances)
+        {
+            if (ShouldHideObjectInstanceByUniqueId(inst))
+                continue;
+
+            float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+            float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
+            if (boundsDistSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+            {
+                WmoCulledCount++;
+                continue;
+            }
+
+            if (boundsDistSq > wmoCullDistanceSq)
+            {
+                WmoCulledCount++;
+                continue;
+            }
+
+            var renderer = TryGetQueuedWmo(inst.ModelKey);
+            if (renderer == null)
+                continue;
+
+            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
+            _visibleWmoInstances.Add(new VisibleWmoInstance(inst, renderer, centerDistanceSq));
+        }
+    }
+
     private void CollectVisibleMdxInstances(
         List<ObjectInstance> instances,
         Vector3 cameraPos,
@@ -5850,6 +6125,9 @@ public class WorldScene : ISceneRenderer
     {
         foreach (var inst in instances)
         {
+            if (ShouldHideObjectInstanceByUniqueId(inst))
+                continue;
+
             float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
             if (boundsDistSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
@@ -5911,26 +6189,35 @@ public class WorldScene : ISceneRenderer
         float fogStart;
         float fogEnd;
 
-        // 0. Render sky dome (before terrain, no depth write)
-        // Update DBC lighting early so sky colors are available
+        // 0. Resolve frame lighting before any world pass so terrain, WDL, liquids,
+        // skybackdrops, WMOs, and MDXs all sample one lighting state.
         _lightService?.Update(camPos);
         if (_lightService != null && _lightService.ActiveLightId >= 0)
         {
-            // Override sky dome colors from DBC Light data
+            lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
+            lighting.ApplyExternalLighting(
+                _lightService.DirectColor,
+                _lightService.AmbientColor,
+                _lightService.FogColor);
+            lighting.Update();
+
             _skyDome.ZenithColor = _lightService.SkyTopColor;
-            _skyDome.HorizonColor = _lightService.FogColor;
-            _skyDome.SkyFogColor = _lightService.FogColor;
-            fogColor = _lightService.FogColor;
-            fogEnd = _lightService.FogEnd > 10f ? _lightService.FogEnd : lighting.FogEnd;
-            fogStart = fogEnd * 0.25f;
-        }
-        else
-        {
-            _skyDome.UpdateFromLighting(_terrainManager.Lighting.GameTime);
+            _skyDome.HorizonColor = lighting.FogColor;
+            _skyDome.SkyFogColor = lighting.FogColor;
             fogColor = lighting.FogColor;
             fogStart = lighting.FogStart;
             fogEnd = lighting.FogEnd;
         }
+        else
+        {
+            lighting.ClearExternalLighting();
+            lighting.Update();
+            _skyDome.UpdateFromLighting(lighting.GameTime);
+            fogColor = lighting.FogColor;
+            fogStart = lighting.FogStart;
+            fogEnd = lighting.FogEnd;
+        }
+
         _skyDome.Render(view, proj, camPos);
 
         var (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
@@ -5999,37 +6286,17 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         if (_wmosVisible)
         {
-            float wmoCullDistance = ComputeWmoCullDistance(fogEnd);
-            float wmoCullDistanceSq = wmoCullDistance * wmoCullDistance;
-            float wmoFadeStart = wmoCullDistance * WmoFadeStartFraction;
-            float wmoFadeStartSq = wmoFadeStart * wmoFadeStart;
-            float wmoFadeRange = wmoCullDistance - wmoFadeStart;
+            _visibleWmoInstances.Clear();
+            CollectVisibleWmoInstances(cameraPos, fogEnd);
 
-            // State is constant for this pass; set once to avoid per-instance churn.
+            // State is constant for this pass; set once to reduce per-instance churn and
+            // keep WMO submission running through one explicit visible-instance bucket.
             _gl.Disable(EnableCap.Blend);
             _gl.DepthMask(true);
 
-            foreach (var inst in _wmoInstances)
+            foreach (var visible in _visibleWmoInstances)
             {
-                float wmoDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-                float wmoNoCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-                // Skip frustum cull for nearby objects to prevent pop-in when turning
-                if (wmoDistSq > wmoNoCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
-                { WmoCulledCount++; continue; }
-                // Distance cull + fade for WMOs
-                if (wmoDistSq > wmoCullDistanceSq)
-                { WmoCulledCount++; continue; }
-
-                float wmoFade = 1.0f;
-                if (wmoDistSq > wmoFadeStartSq)
-                {
-                    float wmoDist = MathF.Sqrt(wmoDistSq);
-                    wmoFade = 1.0f - (wmoDist - wmoFadeStart) / wmoFadeRange;
-                }
-
-                var renderer = TryGetQueuedWmo(inst.ModelKey);
-                if (renderer == null) continue;
-                renderer.RenderWithTransform(inst.Transform, view, proj,
+                visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj,
                     fogColor, objectFogStart, objectFogEnd, cameraPos,
                     lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 WmoRenderedCount++;
@@ -6181,15 +6448,22 @@ public class WorldScene : ISceneRenderer
                 // Draw selected object highlight first (thicker visual via slightly larger box)
                 if (SelectedInstance is ObjectInstance sel)
                 {
-                    _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
+                    if (!ShouldHideObjectInstanceByUniqueId(sel))
+                        _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
                 }
 
                 // MDDF bounding boxes (magenta)
                 foreach (var inst in _mdxInstances)
-                    _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
+                {
+                    if (!ShouldHideObjectInstanceByUniqueId(inst))
+                        _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
+                }
                 // MODF bounding boxes (cyan)
                 foreach (var inst in _wmoInstances)
-                    _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+                {
+                    if (!ShouldHideObjectInstanceByUniqueId(inst))
+                        _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+                }
             }
 
             if (_showPm4ObjectBounds && _showPm4Overlay && _pm4TileObjects.Count > 0)
@@ -6597,83 +6871,77 @@ public class WorldScene : ISceneRenderer
     public void UpdateHoveredAssetInfo(Matrix4x4 view, Matrix4x4 proj,
         float mouseViewportX, float mouseViewportY, float viewportWidth, float viewportHeight)
     {
-        if (_showPm4Overlay)
+        float safeViewportWidth = Math.Max(viewportWidth, 1f);
+        float safeViewportHeight = Math.Max(viewportHeight, 1f);
+        float ndcX = (mouseViewportX / safeViewportWidth) * 2f - 1f;
+        float ndcY = 1f - (mouseViewportY / safeViewportHeight) * 2f;
+        var (rayOrigin, rayDir) = ScreenToRay(ndcX, ndcY, view, proj);
+
+        bool hasSceneRayHit = TryBuildHoveredSceneInfoByRay(rayOrigin, rayDir, out HoveredAssetInfo sceneRayInfo, out float sceneRayDistance);
+        HoveredAssetInfo pm4RayInfo = default;
+        float pm4RayDistance = float.MaxValue;
+        bool hasPm4RayHit = _showPm4Overlay
+            && TryBuildHoveredPm4InfoByRay(rayOrigin, rayDir, out pm4RayInfo, out pm4RayDistance);
+
+        if (hasSceneRayHit || hasPm4RayHit)
         {
-            if (TryBuildHoveredPm4Info(view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out HoveredAssetInfo hoveredPm4Info, out int hoveredPm4Count))
+            const float rayDistanceEpsilon = 0.01f;
+            if (hasPm4RayHit && (!hasSceneRayHit || _pm4OverlayIgnoreDepth || pm4RayDistance < sceneRayDistance - rayDistanceEpsilon))
             {
-                _hoveredAssetInfo = new HoveredAssetInfo(
-                    hoveredPm4Info.AssetKind,
-                    hoveredPm4Info.DisplayName,
-                    hoveredPm4Info.SourcePath,
-                    hoveredPm4Info.DetailLine,
-                    hoveredPm4Info.WorldPosition,
-                    Math.Max(0, hoveredPm4Count - 1),
-                    hoveredPm4Info.Pm4ObjectKey);
+                _hoveredAssetInfo = pm4RayInfo;
+                return;
+            }
+
+            if (hasSceneRayHit)
+            {
+                _hoveredAssetInfo = sceneRayInfo;
                 return;
             }
         }
 
-        HoveredAssetInfo? bestInfo = null;
-        float bestDistanceSq = float.MaxValue;
-        float bestDepth = float.MaxValue;
-        int hitCount = 0;
+        bool hasSceneBrushHit = TryBuildHoveredSceneInfo(
+            view,
+            proj,
+            mouseViewportX,
+            mouseViewportY,
+            viewportWidth,
+            viewportHeight,
+            out HoveredAssetInfo sceneBrushInfo,
+            out float sceneBrushDistanceSq,
+            out float sceneBrushDepth);
+        HoveredAssetInfo pm4BrushInfo = default;
+        int hoveredPm4Count = 0;
+        float pm4BrushDistanceSq = float.MaxValue;
+        float pm4BrushDepth = float.MaxValue;
+        bool hasPm4BrushHit = _showPm4Overlay
+            && TryBuildHoveredPm4Info(
+                view,
+                proj,
+                mouseViewportX,
+                mouseViewportY,
+                viewportWidth,
+                viewportHeight,
+                out pm4BrushInfo,
+                out hoveredPm4Count,
+                out pm4BrushDistanceSq,
+                out pm4BrushDepth);
 
-        void ConsiderCandidate(HoveredAssetInfo info, float distanceSq, float depth)
+        if (hasPm4BrushHit && (!hasSceneBrushHit || ShouldPreferPm4HoverBrush(pm4BrushDistanceSq, pm4BrushDepth, sceneBrushDistanceSq, sceneBrushDepth)))
         {
-            hitCount++;
-
-            const float distanceEpsilon = 0.01f;
-            if (!bestInfo.HasValue
-                || distanceSq < bestDistanceSq - distanceEpsilon
-                || (MathF.Abs(distanceSq - bestDistanceSq) <= distanceEpsilon && depth < bestDepth))
-            {
-                bestInfo = info;
-                bestDistanceSq = distanceSq;
-                bestDepth = depth;
-            }
-        }
-
-        for (int i = 0; i < _wmoInstances.Count; i++)
-        {
-            ObjectInstance inst = _wmoInstances[i];
-            if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                continue;
-
-            ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), distanceSq, depth);
-        }
-
-        for (int i = 0; i < _mdxInstances.Count; i++)
-        {
-            ObjectInstance inst = _mdxInstances[i];
-            if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                continue;
-
-            ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), distanceSq, depth);
-        }
-
-        if (_showWlLiquids && _wlLoader != null)
-        {
-            for (int i = 0; i < _wlLoader.Bodies.Count; i++)
-            {
-                WlLiquidBody body = _wlLoader.Bodies[i];
-                if (!TryMeasureHoverInfoHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
-                    continue;
-
-                ConsiderCandidate(BuildHoveredWlLiquidInfo(body), distanceSq, depth);
-            }
-        }
-
-        if (bestInfo.HasValue)
-        {
-            HoveredAssetInfo info = bestInfo.Value;
             _hoveredAssetInfo = new HoveredAssetInfo(
-                info.AssetKind,
-                info.DisplayName,
-                info.SourcePath,
-                info.DetailLine,
-                info.WorldPosition,
-                Math.Max(0, hitCount - 1),
-                info.Pm4ObjectKey);
+                pm4BrushInfo.AssetKind,
+                pm4BrushInfo.DisplayName,
+                pm4BrushInfo.SourcePath,
+                pm4BrushInfo.DetailLine,
+                pm4BrushInfo.WorldPosition,
+                Math.Max(0, hoveredPm4Count - 1),
+                pm4BrushInfo.Pm4ObjectKey);
+            return;
+        }
+
+        if (hasSceneBrushHit)
+        {
+            _hoveredAssetInfo = sceneBrushInfo;
             return;
         }
 
@@ -6689,6 +6957,219 @@ public class WorldScene : ISceneRenderer
     public void ClearHoveredAssetInfo()
     {
         _hoveredAssetInfo = null;
+    }
+
+    private bool TryBuildHoveredSceneInfo(
+        Matrix4x4 view,
+        Matrix4x4 proj,
+        float mouseViewportX,
+        float mouseViewportY,
+        float viewportWidth,
+        float viewportHeight,
+        out HoveredAssetInfo info,
+        out float bestDistanceSq,
+        out float bestDepth)
+    {
+        info = default;
+        float currentBestDistanceSq = float.MaxValue;
+        float currentBestDepth = float.MaxValue;
+        bestDistanceSq = float.MaxValue;
+        bestDepth = float.MaxValue;
+
+        HoveredAssetInfo? bestInfo = null;
+        int hitCount = 0;
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
+
+        void ConsiderCandidate(HoveredAssetInfo candidateInfo, float distanceSq, float depth)
+        {
+            hitCount++;
+
+            const float distanceEpsilon = 0.01f;
+            if (!bestInfo.HasValue
+                || distanceSq < currentBestDistanceSq - distanceEpsilon
+                || (MathF.Abs(distanceSq - currentBestDistanceSq) <= distanceEpsilon && depth < currentBestDepth))
+            {
+                bestInfo = candidateInfo;
+                currentBestDistanceSq = distanceSq;
+                currentBestDepth = depth;
+            }
+        }
+
+        if (_wmosVisible)
+        {
+            for (int i = 0; i < _wmoInstances.Count; i++)
+            {
+                ObjectInstance inst = _wmoInstances[i];
+                if (ShouldHideObjectInstanceByUniqueId(inst))
+                    continue;
+
+                if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                    continue;
+
+                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), distanceSq, depth);
+            }
+        }
+
+        if (_doodadsVisible)
+        {
+            for (int i = 0; i < _mdxInstances.Count; i++)
+            {
+                ObjectInstance inst = _mdxInstances[i];
+                if (ShouldHideObjectInstanceByUniqueId(inst))
+                    continue;
+
+                if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                    continue;
+
+                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), distanceSq, depth);
+            }
+        }
+
+        if (_showWlLiquids && _wlLoader != null)
+        {
+            for (int i = 0; i < _wlLoader.Bodies.Count; i++)
+            {
+                WlLiquidBody body = _wlLoader.Bodies[i];
+                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.SourcePath))
+                    continue;
+
+                if (!TryMeasureHoverInfoHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                    continue;
+
+                ConsiderCandidate(BuildHoveredWlLiquidInfo(body), distanceSq, depth);
+            }
+        }
+
+        if (!bestInfo.HasValue)
+            return false;
+
+        HoveredAssetInfo bestCandidate = bestInfo.Value;
+        bestDistanceSq = currentBestDistanceSq;
+        bestDepth = currentBestDepth;
+        info = new HoveredAssetInfo(
+            bestCandidate.AssetKind,
+            bestCandidate.DisplayName,
+            bestCandidate.SourcePath,
+            bestCandidate.DetailLine,
+            bestCandidate.WorldPosition,
+            Math.Max(0, hitCount - 1),
+            bestCandidate.Pm4ObjectKey);
+        return true;
+    }
+
+    private bool TryBuildHoveredSceneInfoByRay(Vector3 rayOrigin, Vector3 rayDir, out HoveredAssetInfo info, out float distance)
+    {
+        info = default;
+        float currentDistance = float.MaxValue;
+        distance = float.MaxValue;
+
+        HoveredAssetInfo? bestInfo = null;
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
+
+        void ConsiderCandidate(HoveredAssetInfo candidateInfo, float candidateDistance)
+        {
+            if (candidateDistance < currentDistance)
+            {
+                bestInfo = candidateInfo;
+                currentDistance = candidateDistance;
+            }
+        }
+
+        if (_wmosVisible)
+        {
+            Vector3 padding = new(2f, 2f, 2f);
+            for (int i = 0; i < _wmoInstances.Count; i++)
+            {
+                ObjectInstance inst = _wmoInstances[i];
+                if (ShouldHideObjectInstanceByUniqueId(inst))
+                    continue;
+
+                float t = RayAABBIntersect(rayOrigin, rayDir, inst.BoundsMin - padding, inst.BoundsMax + padding);
+                if (t < 0f)
+                    continue;
+
+                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), t);
+            }
+        }
+
+        if (_doodadsVisible)
+        {
+            Vector3 padding = new(1f, 1f, 1f);
+            for (int i = 0; i < _mdxInstances.Count; i++)
+            {
+                ObjectInstance inst = _mdxInstances[i];
+                if (ShouldHideObjectInstanceByUniqueId(inst))
+                    continue;
+
+                float t = RayAABBIntersect(rayOrigin, rayDir, inst.BoundsMin - padding, inst.BoundsMax + padding);
+                if (t < 0f)
+                    continue;
+
+                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), t);
+            }
+        }
+
+        if (_showWlLiquids && _wlLoader != null)
+        {
+            Vector3 padding = new(2f, 2f, 1f);
+            for (int i = 0; i < _wlLoader.Bodies.Count; i++)
+            {
+                WlLiquidBody body = _wlLoader.Bodies[i];
+                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.SourcePath))
+                    continue;
+
+                float t = RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding);
+                if (t < 0f)
+                    continue;
+
+                ConsiderCandidate(BuildHoveredWlLiquidInfo(body), t);
+            }
+        }
+
+        if (!bestInfo.HasValue)
+            return false;
+
+        info = bestInfo.Value;
+        distance = currentDistance;
+        return true;
+    }
+
+    private bool TryBuildHoveredPm4InfoByRay(Vector3 rayOrigin, Vector3 rayDir, out HoveredAssetInfo info, out float distance)
+    {
+        info = default;
+        distance = float.MaxValue;
+
+        if (!TryPickPm4ObjectByRay(rayOrigin, rayDir, out var objectKey, out _, out float hitDistance) || !objectKey.HasValue)
+            return false;
+
+        if (!_pm4ObjectLookup.TryGetValue(objectKey.Value, out Pm4OverlayObject? obj))
+            return false;
+
+        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+        bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+            || _pm4OverlayScale != Vector3.One;
+        Matrix4x4 objectTransform = BuildPm4ObjectTransform(objectKey.Value, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+        Vector3 center = applyObjectTransform ? ApplyPm4OverlayTransform(obj.Center, objectTransform) : obj.Center;
+
+        info = BuildHoveredPm4Info(obj, center, objectKey.Value);
+        distance = hitDistance;
+        return true;
+    }
+
+    private bool ShouldPreferPm4HoverBrush(float pm4DistanceSq, float pm4Depth, float sceneDistanceSq, float sceneDepth)
+    {
+        if (_pm4OverlayIgnoreDepth)
+            return true;
+
+        const float depthEpsilon = 0.0025f;
+        if (sceneDepth + depthEpsilon < pm4Depth)
+            return false;
+
+        if (pm4Depth + depthEpsilon < sceneDepth)
+            return true;
+
+        return pm4DistanceSq <= sceneDistanceSq;
     }
 
     public void ToggleObjects() => _objectsVisible = !_objectsVisible;
@@ -6758,6 +7239,9 @@ public class WorldScene : ISceneRenderer
         // Test WMO bounding boxes
         for (int i = 0; i < _wmoInstances.Count; i++)
         {
+            if (ShouldHideObjectInstanceByUniqueId(_wmoInstances[i]))
+                continue;
+
             // Slightly inflate AABBs to make selection more forgiving for thin geometry.
             Vector3 pad = new(2f, 2f, 2f);
             float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin - pad, _wmoInstances[i].BoundsMax + pad);
@@ -6771,6 +7255,9 @@ public class WorldScene : ISceneRenderer
         // Test MDX bounding boxes
         for (int i = 0; i < _mdxInstances.Count; i++)
         {
+            if (ShouldHideObjectInstanceByUniqueId(_mdxInstances[i]))
+                continue;
+
             Vector3 pad = new(1f, 1f, 1f);
             float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin - pad, _mdxInstances[i].BoundsMax + pad);
             if (t >= 0)
@@ -7245,6 +7732,18 @@ public class WorldScene : ISceneRenderer
             null);
     }
 
+    private static HoveredAssetInfo BuildHoveredPm4Info(Pm4OverlayObject obj, Vector3 worldPosition, (int tileX, int tileY, uint ck24, int objectPart) objectKey)
+    {
+        return new HoveredAssetInfo(
+            "PM4",
+            $"CK24 0x{obj.Ck24:X6} part={obj.ObjectPartId}",
+            obj.SourcePath,
+            $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
+            worldPosition,
+            0,
+            objectKey);
+    }
+
     private bool TryBuildHoveredPm4Info(
         Matrix4x4 view,
         Matrix4x4 proj,
@@ -7253,13 +7752,14 @@ public class WorldScene : ISceneRenderer
         float viewportWidth,
         float viewportHeight,
         out HoveredAssetInfo info,
-        out int hitCount)
+        out int hitCount,
+        out float bestDistanceSq,
+        out float bestDepth)
     {
         info = default;
         hitCount = 0;
-
-        float bestDistanceSq = float.MaxValue;
-        float bestDepth = float.MaxValue;
+        bestDistanceSq = float.MaxValue;
+        bestDepth = float.MaxValue;
         HoveredAssetInfo? bestInfo = null;
         Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
         bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
@@ -7298,14 +7798,7 @@ public class WorldScene : ISceneRenderer
                 {
                     bestDistanceSq = distanceSq;
                     bestDepth = depth;
-                    bestInfo = new HoveredAssetInfo(
-                        "PM4",
-                        $"CK24 0x{obj.Ck24:X6} part={obj.ObjectPartId}",
-                        obj.SourcePath,
-                        $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
-                        center,
-                        0,
-                        objectKey);
+                    bestInfo = BuildHoveredPm4Info(obj, center, objectKey);
                 }
             }
         }
@@ -8770,11 +9263,43 @@ public struct ObjectInstance
     public string ModelPath;
     /// <summary>UniqueId from MODF/MDDF placement (for dedup and display).</summary>
     public int UniqueId;
+    /// <summary>Owning terrain tile X when known.</summary>
+    public int TileX;
+    /// <summary>Owning terrain tile Y when known.</summary>
+    public int TileY;
+    /// <summary>True when TileX/TileY are meaningful for tile-scoped filtering.</summary>
+    public bool HasTileCoordinate;
     /// <summary>True once bounds were derived from the loaded model instead of a temporary placement fallback.</summary>
     public bool BoundsResolved;
 }
 
 public enum ObjectType { None, Wmo, Mdx }
+
+public enum UniqueIdVisibilityScope
+{
+    PerMap,
+    CameraTile
+}
+
+public readonly struct UniqueIdArchaeologyLayer
+{
+    public UniqueIdArchaeologyLayer(int layerNumber, int minUniqueId, int maxUniqueId, int placementCount, int wmoCount, int mdxCount)
+    {
+        LayerNumber = layerNumber;
+        MinUniqueId = minUniqueId;
+        MaxUniqueId = maxUniqueId;
+        PlacementCount = placementCount;
+        WmoCount = wmoCount;
+        MdxCount = mdxCount;
+    }
+
+    public int LayerNumber { get; }
+    public int MinUniqueId { get; }
+    public int MaxUniqueId { get; }
+    public int PlacementCount { get; }
+    public int WmoCount { get; }
+    public int MdxCount { get; }
+}
 
 public readonly struct HoveredAssetInfo
 {

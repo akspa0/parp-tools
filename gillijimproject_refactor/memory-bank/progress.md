@@ -1,5 +1,159 @@
 # Progress
 
+### Mar 31, 2026 - Fixed Sidebar Shell Now Uses Draggable Split Panels
+
+- followed direct viewer-shell feedback that the current fixed sidebars were still not meaningfully resizable and felt like a broken layout mode
+- landed shell changes in `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- fixed mode now renders explicit draggable left/right splitter bars instead of relying on hidden ImGui window-border resize behavior
+	- left and right panels stay edge-anchored while splitter drag updates the stored sidebar widths directly
+	- fixed panels now opt into `NoResize` because the supported resize path is the splitter itself, not window-border grabbing
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime signoff has been completed yet for the new fixed-panel splitter behavior
+
+### Mar 31, 2026 - Mouse Camera Input Restored After Narrowing The Fixed-Sidebar Splitter Windows
+
+- followed direct runtime feedback that mouse camera control stopped working after the fixed-sidebar splitter shell landed
+- root cause was the splitter host itself in `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- the first splitter implementation used one transparent full-width window over the whole viewport height
+	- that window could still cause ImGui mouse capture outside the actual splitter bars, which interfered with scene camera input
+- landed fix:
+	- replaced the full-width splitter host with narrow splitter-only windows for the left/right drag handles
+	- only the actual splitter strips now capture mouse input, leaving the rest of the viewport available to the normal camera path again
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime signoff has been completed yet for restored mouse-look behavior
+
+### Mar 31, 2026 - Hover Tooltip Toggle And UniqueId Archaeology Filter Landed In MdxViewer
+
+- followed the latest direct viewer workflow request to make scene exploration less noisy and more controllable:
+	- hover cards needed an explicit disable path
+	- object layers needed a `UniqueId`-based scrubber for digital archaeology across either the whole map or the current camera tile
+- landed behavior in `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/Terrain/WorldScene.cs`:
+	- added a `Hover Tooltips` checkbox that suppresses scene hover overlay rendering without removing the hover metadata pipeline itself
+	- replaced the first cutoff-only archaeology filter with explicit min/max range semantics so the viewer can hide placements within a chosen `UniqueId` span
+	- propagated tile coordinates onto flattened scene object instances so camera-tile filtering works for terrain-loaded and external spawn objects
+	- applied the hide filter to render submission, hover hit testing, scene picking, and bounding-box debug drawing so hidden ranges behave consistently
+	- added gap-based archaeology layer detection for the active scope plus a viewer table that lists detected layers with range, count, WMO/M2 breakdown, and one-click hide actions
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime signoff has been completed yet for the new archaeology controls on the development map
+
+### Mar 31, 2026 - User Fog Range Control Restored Over Zone Lighting
+
+- followed direct runtime feedback that fog could no longer be effectively removed and that the older farther-view behavior had regressed
+- root cause was the Mar 30 shared-lighting change letting `LightService` overwrite `TerrainLighting.FogStart` and `FogEnd` every frame while zone lighting was active
+- landed fix in `src/MdxViewer/Terrain/TerrainLighting.cs` and `src/MdxViewer/Terrain/WorldScene.cs`:
+	- external lighting override now applies only directional light, ambient light, and fog color
+	- live fog distance remains on the user-controlled `TerrainLighting` values, so terrain sidebar fog sliders and far visibility budget work again
+- also fixed compile blockers still present in the current `WorldScene` hover helpers so the viewer solution could be revalidated cleanly
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/TerrainLighting.cs` and `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime signoff has been completed yet for the restored no-fog / farther-view behavior
+
+### Mar 31, 2026 - VLM Dataset Reconstruction Planning Reset Landed
+
+- followed a direct request to stop treating VLM work as a vague training exercise and define how a v7-like missing-layer reconstruction model should be grounded in real map data
+- confirmed the current exporter boundary before planning:
+	- `WoWMapConverter.Core.VLM.VlmDatasetExporter` already exports chunk heights, local/global heightmaps, normals, MCCV, raw shadow bits, derived shadow analysis, alpha masks, liquids, objects, WDL data, and binary tile output
+	- the older docs under `docs/VLM_Training_Guide.md` and `docs/VLM_DATASET_EXPORTER.md` do not fully describe that active schema
+- landed new planning surfaces:
+	- `gillijimproject_refactor/plans/vlm_dataset_reconstruction_plan_2026-03-31.md`
+	- `.github/prompts/vlm-dataset-reconstruction-plan.prompt.md`
+	- updated `.github/prompts/development-repair-implementation-plan.prompt.md` so future chats route VLM dataset/model asks away from the repair-pipeline prompt
+- planning decision recorded in continuity:
+	- `development` is now explicitly the reconstruction target/evaluation corpus, not the only teacher corpus
+	- the next dataset slice should be manifest/provenance/completeness classification and curation across real exported maps before additional model work
+- validation boundary:
+	- no exporter code behavior changed in this slice
+	- no automated tests were added or run
+	- no real-data export, curation, or training command was executed in this slice
+
+### Mar 31, 2026 - Terrain WDT Global WMO Parsing Fixed For ADT Maps; M2 UV Regression First Mitigation Landed
+
+- followed direct runtime bug reports after the corrupted-chat continuity recovery:
+	- terrain maps were missing WDT-level global WMO placements that should render roof or shell geometry over ADT terrain
+	- M2s still had active material regressions, including oversized leaf-like detail doodads and inconsistent transparency behavior
+- landed terrain fix in `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`:
+	- WDT global `MWMO` or `MODF` parsing now triggers for terrain maps when the file carries the historical `MPHD` global-map-object flag or plainly contains both chunks, not only for `IsWmoBased` maps
+	- terrain-map WDT placements now convert into renderer coordinates like ADT `MODF` placements instead of staying in raw WMO-map coordinates
+- landed first M2 mitigation in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+	- negative resolved texture coord ids now fall back to UV0
+	- negative coord ids no longer imply `SphereEnvMap`
+	- this intentionally moves current behavior back toward the older known-good adapter path while preserving explicit positive UV-set selection
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run for these viewer regressions
+	- no development-map runtime signoff has been completed yet for either the restored WDT global WMO path or the current M2 adapter mitigation
+
+### Mar 31, 2026 - Active Tree-Trunk M2 Regression Trimmed Back By Restoring The Conservative Per-Section Material Path
+
+- followed direct runtime feedback that the remaining M2 regression still made some trees appear to be made of leaves with no trunks
+- landed a narrower compatibility fix in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+	- restored the old stable runtime behavior of taking the first batch/material per section
+	- forced the active runtime material path back to `UV0` for that conservative section material path
+	- this intentionally backs away from the newer richer batch/layer interpretation until it can be proven against real viewer output
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime signoff has been completed yet for restored tree-trunk rendering on the development map
+
+### Mar 30, 2026 - WorldScene WMO Submission Now Uses A Visible-Instance Bucket
+
+- followed the renderer-performance continuity work after the shared LightService or TerrainLighting lighting fix
+- landed a narrow structural slice in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- added a reusable visible-WMO scratch contract so world-scene WMO instances are culled once per frame before submission instead of recomputing cull decisions inline inside the WMO draw loop
+	- this brings the WMO path closer to the existing visible-MDX path and creates a cleaner seam for a future split between opaque shell, liquids, doodad transparent, and transparent shell passes
+	- current user-visible behavior should stay the same because `WmoRenderer.RenderWithTransform(...)` still owns the actual WMO-local pass order
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run for this renderer-structure slice
+	- no development-map runtime signoff has been completed yet for the visible-WMO submission path
+
+### Mar 30, 2026 - PM4 UI Glossary Clarified Viewer-Derived `part` Labels
+
+- followed direct user feedback that the PM4 inspector had become too opaque to trust for day-to-day use
+- landed clarification across `src/MdxViewer/ViewerApp_Pm4Utilities.cs`, `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/Terrain/WorldScene.cs`, and `src/MdxViewer/README.md`:
+	- the PM4 workbench now includes a glossary/evidence block explaining which labels are raw PM4 chunk names, viewer aliases, or viewer-generated structure
+	- `part` / `ObjectPartId` is now explicitly described as a viewer-generated split id from the current overlay build, not a raw PM4 field on disk
+	- selected-object and graph text now repeat that distinction where the user actually sees `part`
+- validation boundary:
+	- no automated tests were added or run
+	- no real-data runtime validation was performed for this terminology-only clarification slice
+
+### Mar 30, 2026 - DBC LightService Now Drives One Shared World Lighting State
+
+- followed user direction to stop deferring renderer correctness work while the world path is still slow and visually inconsistent
+- landed a first lighting-correctness slice in `src/MdxViewer/Terrain/TerrainLighting.cs` and `Terrain/WorldScene.cs`:
+	- `TerrainLighting` can now take an external per-frame lighting override for direct light, ambient light, fog color, and fog range
+	- when `LightService` has an active zone, `WorldScene.Render(...)` now maps `LightService.TimeOfDay` into the shared terrain lighting clock, applies the DBC-driven colors/fog override, and updates that shared state before rendering skybackdrops, WDL, terrain, liquids, WMOs, or MDXs
+	- when no zone is active, rendering falls back to the old procedural `TerrainLighting` path cleanly
+- why this matters:
+	- before this slice, one frame could mix `Light.dbc` sky/fog with fallback terrain/object light colors, so lighting parity was already broken even before the larger render-layer work
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Terrain/TerrainLighting.cs`, `src/MdxViewer/Terrain/WorldScene.cs`, and the associated capture-fix file `src/MdxViewer/ViewerApp_CaptureAutomation.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-bin/` passed on Mar 30, 2026 with existing warnings only
+- validation boundary:
+	- no automated tests were added or run for this viewer-side lighting correction
+	- no development-map runtime signoff has been completed yet for the shared LightService or TerrainLighting path
+
 ### Mar 30, 2026 - v0.4.6.1 Release Prep Added PM4 Tooltip-Focused Notes And Beginner UI Guidance
 
 - followed release request for `v0.4.6.1` with emphasis on clearer PM4 WoW-styled tooltip display messaging and reduced first-run confusion

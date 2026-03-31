@@ -43,6 +43,8 @@ Current PM4 research notes:
 
 - On the fixed development-map workflow, derived `CK24` low-16 object values continue to separate many `WMO`-like PM4 meshes into narrower object families; treat that as strong research evidence, not final format truth.
 - The recurrent `CK24=0x000000` bucket still behaves like an unresolved umbrella or root family rather than a clean single asset class. Current viewer evidence suggests many `M2`-like placements still live there.
+- The expanded shared `pm4 unknowns` report now also exposes dominant `MSLK` and `MSUR` families across the fixed corpus. Current evidence says the biggest `group=3` `MSUR` families are overwhelmingly zero-`CK24`, while several large `group=18` families carry broad non-zero `CK24` and `MDOS` fanout and are better candidates for object-facing attribution work.
+- The same report shows dominant `MSLK` families clustering in a small repeated set of `TypeFlags` or `Subtype` combinations with sentinel-tile `LinkId` dominance. That is useful prioritization evidence, not a final semantic decode of those fields.
 - Current `MdxViewer` graph and hover-match surfaces are evidence-gathering tools only. They help rank likely asset candidates, but they do not prove that current `CK24`, `MSLK.GroupObjectId`, or subobject ownership semantics are closed.
 - If later PM4 correlation work needs broader corpus support, a feature-indexed asset database or ML-assisted clustering pass may help rank candidates, but it should follow parser or linkage improvements instead of replacing them.
 

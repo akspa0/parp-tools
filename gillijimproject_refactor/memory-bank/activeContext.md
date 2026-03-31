@@ -1,5 +1,130 @@
 # Active Context
 
+# Active Context
+
+## Mar 31, 2026 - Fixed Sidebar Shell Now Uses Draggable Split Panels
+
+- user reported that the current fixed-sidebar shell was still a mess because the left/right sidebars were not meaningfully resizable in practice
+- root cause in `src/MdxViewer/ViewerApp_Sidebars.cs` was concrete:
+	- the fixed-shell path still treated the sidebars like anchored ImGui windows instead of real split panels
+	- panel width state existed, but the shell was still force-driving window placement/size in a way that left normal resizing unreliable and visually unclear
+- landed viewer-shell correction in `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- fixed sidebars now behave like anchored panels with explicit draggable vertical splitters instead of pseudo-resizable floating windows
+	- the shell now renders dedicated left/right splitter bars in fixed mode and updates `_leftSidebarWidth` / `_rightSidebarWidth` directly from splitter drag input
+	- fixed panels are now intentionally `NoResize` windows because the supported resize path is the explicit splitter, not hidden ImGui window borders
+	- left/right panels stay anchored to the screen edges while their widths persist and drive the scene viewport inset logic consistently
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only in this session
+	- no manual runtime signoff has been completed yet to confirm the new splitters feel correct on the development map across different window sizes
+
+## Mar 31, 2026 - Mouse Camera Regression Was Caused By The Splitter Overlay Capturing The Whole Viewport
+
+- immediate runtime fallout after the new fixed-sidebar splitter shell was that mouse-look camera control stopped working
+- root cause in `src/MdxViewer/ViewerApp_Sidebars.cs` was concrete:
+	- `DrawFixedSidebarSplitters()` used one transparent full-width window across the whole panel height
+	- even though only the splitter strips were interactive, that host window still let ImGui treat the viewport as UI-covered, so right-mouse camera drag could stop qualifying as scene input
+- landed correction:
+	- replaced the full-width splitter host with narrow splitter-only windows, one per active left/right splitter
+	- result: only the actual splitter strips capture mouse input; the rest of the viewport no longer sits under a UI window from the fixed-sidebar shell
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp_Sidebars.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only in this session
+	- no manual runtime signoff has been completed yet to confirm right-mouse camera look is restored in the live viewer
+
+## Mar 31, 2026 - Hover Tooltips Can Be Disabled And UniqueId Archaeology Filtering Landed
+
+- user shifted from the earlier WL liquid/FOV follow-up to exploration controls for the live viewer:
+	- mouse-hover scene tooltips needed a direct off switch
+	- world objects needed a `UniqueId` archaeology scrubber that can hide lower-id layers either across the whole map or within the current camera tile
+- landed viewer/runtime behavior across `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/Terrain/WorldScene.cs`:
+	- `DrawSceneHoverAssetOverlay()` now respects a scene-level `ShowHoveredAssetTooltips` toggle so hover cards can be silenced without removing the underlying hover metadata path
+	- `WorldScene` now owns a scoped unique-id range filter with `PerMap` and `CameraTile` modes so selective object hiding targets an inclusive `min..max` span instead of only a single cutoff
+	- object instances now preserve tile ownership metadata so the tile-scoped archaeology filter works after instance flattening
+	- the hide check now applies consistently to visible-instance collection, hover hit testing, scene picking, and debug bounding-box rendering so hidden ranges stop both rendering and interacting
+	- the `World Objects` UI now exposes `Hover Tooltips`, `Hide UniqueId Layers`, scope selection, current camera-tile reporting, explicit min/max range controls, detected archaeology layers for the active scope, one-click `Hide` actions per detected layer, and reset behavior
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only in this session
+	- no development-map runtime signoff has been completed yet for hover-tooltip suppression or the new per-map/per-tile unique-id archaeology workflow
+
+## Mar 31, 2026 - Zone Lighting No Longer Overrides User Fog Distance
+
+- user reported that fog could no longer be effectively removed and that far-view distance regressed after the shared `LightService` / `TerrainLighting` lighting pass.
+- root cause was in `src/MdxViewer/Terrain/TerrainLighting.cs` and `src/MdxViewer/Terrain/WorldScene.cs`:
+	- zone lighting color overrides were also overwriting `FogStart` and `FogEnd` every frame
+	- the terrain sidebar fog sliders were therefore no longer authoritative once `LightService` had an active zone
+	- WMO/object cull distance was indirectly shrinking too because `WorldScene` derives the far visibility budget from the active fog end
+- landed fix:
+	- `TerrainLighting.ApplyExternalLighting(...)` now only overrides light or ambient or fog color, not fog distance
+	- `WorldScene.Render(...)` still uses DBC-driven zone lighting colors and time-of-day, but keeps the live fog range on the user-controlled `TerrainLighting` values
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+	- this is compile validation only in this session
+	- no development-map runtime signoff has been completed yet for restored no-fog / farther-view behavior
+
+## Mar 31, 2026 - VLM Dataset Planning Reset For Real-Map Reconstruction
+
+- user asked to reset the VLM direction around a v7-like reconstruction model built from real map data, not generic training scaffolding.
+- current state was clarified before changing anything:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` already emits more than the old docs imply, including chunk heights, local/global heightmaps, normals, MCCV, raw shadow bits, shadow analysis, alpha masks, liquids, objects, WDL data, and binary tile output
+	- `docs/VLM_Training_Guide.md` and `docs/VLM_DATASET_EXPORTER.md` are stale relative to the active exporter surface and still read like an older v6/v30-era workflow
+	- there was no dedicated prompt or plan surface forcing future chats to keep dataset provenance and real-map curation ahead of generic finetuning advice
+- planning direction now locked:
+	- `test_data/development/World/Maps/development` is the reconstruction target and evaluation corpus, not the only teacher corpus
+	- future teacher corpora should come from real exported complete maps from matching client profiles, not synthetic data and not museum outputs treated as canonical truth
+	- the next production-worthy slice is dataset manifest/per-tile provenance/categorization work, not immediate model tuning
+- new continuity assets added:
+	- `plans/vlm_dataset_reconstruction_plan_2026-03-31.md`
+	- `.github/prompts/vlm-dataset-reconstruction-plan.prompt.md`
+- important boundary:
+	- this is planning/continuity/prompt work only in this slice
+	- no new VLM export run, curation run, or model-training run has been executed yet
+
+## Mar 31, 2026 - Terrain WDT Global WMO Placements Restored And M2 UV Regression Narrowed
+
+- user shifted from continuity recovery into active runtime regressions on the development map:
+	- terrain-backed maps were dropping WDT-level global `MWMO` or `MODF` placements that should behave like roof or shell geometry over ADT terrain
+	- M2 rendering regressed badly enough that some tree trunks showed leaf transparency behavior and some small detail doodads rendered like giant projected leaf sheets
+- landed terrain-side fix in `src/MdxViewer/Terrain/StandardTerrainAdapter.cs`:
+	- WDT global WMO parsing no longer depends only on `IsWmoBased`
+	- terrain maps now also parse WDT placements when `MPHD` carries the global-map-object bit (`0x0001`) or when `MWMO` and `MODF` are both present
+	- terrain-map WDT `MODF` coordinates are now converted into the same renderer-space convention used by ADT placements instead of being treated like raw WMO-map coordinates
+- current M2 regression work is narrowed to adapter-side material metadata in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`, not the main geoset draw loop:
+	- old known-good behavior always rendered M2 layers on UV0
+	- newer adapter behavior resolved dynamic texture coord ids and treated negative coord ids as special reflective/env-mapped layers
+	- active mitigation now clamps negative texture coord ids back to UV0 and removes the `coordId < 0 => SphereEnvMap` inference
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+	- the terrain WDT fix and the current M2 adapter fix are compile-validated only in this session
+	- no live viewer/runtime signoff has been completed yet on the development map for restored WDT global WMOs or the oversized-detail M2 regression
+
+## Mar 31, 2026 - Active M2 Tree Regression Trimmed Back By Restoring The Conservative Section Material Path
+
+- user reported the remaining M2 regression in live runtime terms: some trees were still effectively all leaves with no visible trunks
+- strongest seam stayed in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+	- the newer adapter path was still richer than the old stable behavior, including per-section multi-layer material assembly and dynamic texture-coordinate lookup
+	- the old stable runtime path was much narrower: effectively first batch per section on `UV0`
+	- given the visible regression and the existing adapter comments about misidentified material tables hiding tree trunks, the safer short-term fix was to restore the conservative compatibility path instead of guessing at partial modern semantics
+- landed correction:
+	- `BuildMaterialsFromBatches(...)` now keeps only the first batch/material per section again in the active runtime path
+	- active runtime M2 layers are forced back to `CoordId = 0` for that conservative path
+	- this is an intentional rollback-to-known-good compatibility behavior, not a claim that full modern multi-layer M2 batch semantics are now solved
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Mar 31, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only in this session
+	- no manual runtime signoff has been completed yet to confirm that affected trees now render trunks again on the development map
+
 ## Mar 30, 2026 - v0.4.6.1 Release Prep Tightened PM4 Tooltip Messaging And New-User Onboarding
 
 - user requested a small release bump and packaging focus for `v0.4.6.1` with clearer PM4 tooltip framing and less confusing first-run UI guidance.
