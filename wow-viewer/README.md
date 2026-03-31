@@ -20,6 +20,7 @@ Current plan-adherence reality:
 - `Core.PM4` is the only core library area with substantial implementation today.
 - `WowViewer.Core`, `WowViewer.Core.IO`, and `WowViewer.Core.Runtime` are still early and should not be described as complete library boundaries yet.
 - `WowViewer.Core.Runtime` now owns a first narrow world-render seam: shared render-frame telemetry contracts and optimization-hint logic extracted from `MdxViewer.WorldScene`.
+- staged `WorldScene` to `wow-viewer` runtime decomposition is now documented in `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` and `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`, with repeated `.skin` miss suppression called out as slice 01 before deeper pass extraction.
 - The repo is now starting to correct that with a real bootstrap script and a first non-PM4 chunk or FourCC foundation slice, but the broader shared I/O and runtime cutover is still missing.
 
 Current implementation policy:

@@ -1,5 +1,22 @@
 # Progress
 
+### Mar 31, 2026 - Ordered wow-viewer World Runtime Prompt Set Landed
+
+- user selected the staged world-runtime decomposition path instead of a one-off next extraction only
+- added a dedicated Copilot workflow surface for fresh implementation chats:
+	- `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-world-runtime/01-negative-asset-lookup-suppression.prompt.md`
+	- `.github/prompts/wow-viewer-world-runtime/02-visible-set-runtime-extraction.prompt.md`
+	- `.github/prompts/wow-viewer-world-runtime/03-world-pass-service-extraction.prompt.md`
+	- `.github/prompts/wow-viewer-world-runtime/04-world-scene-host-thinning.prompt.md`
+	- `.github/prompts/wow-viewer-world-runtime/05-wow-viewer-app-runtime-consumer.prompt.md`
+	- `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`
+- why this matters:
+	- the next chats now have one ordered path for the `WorldScene` split instead of rediscovering the sequence every time
+	- the first slice explicitly targets repeated `.skin` miss churn and failed MDX retry noise before deeper pass extraction, which should improve measurement quality and reduce obvious hidden runtime waste
+- validation boundary:
+	- this step only created workflow and continuity assets
+	- no code fix for the `.skin` retry issue landed yet in this step
 ### Mar 31, 2026 - First WorldScene Seam Extracted Into wow-viewer Core.Runtime
 
 - followed the new architectural direction to split `WorldScene.cs` by moving the first stable slice into `wow-viewer` instead of performing another app-local refactor only

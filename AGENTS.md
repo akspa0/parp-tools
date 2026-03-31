@@ -13,7 +13,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md` when it exists.
 - Before changing `wow-viewer` PM4, shared I/O, or migration workflow, also read `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and `wow-viewer/README.md`.
-- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, and `.codex/prompts/wow-viewer-shared-io-implementation.md`.
+- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, and `.codex/prompts/wow-viewer-world-runtime-plan-set.md`.
 - If the task touches 3.3.5 terrain texturing or alpha blending, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## Memory Bank Rule
@@ -41,6 +41,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Use `.codex/prompts/wow-viewer-tool-suite-plan-set.md` to route broader `wow-viewer` planning asks to the right focused prompt.
 - Use `.codex/prompts/wow-viewer-pm4-library-implementation.md` for the next narrow `Core.PM4` implementation slice.
 - Use `.codex/prompts/wow-viewer-shared-io-implementation.md` for the next narrow shared `Core` or `Core.IO` format slice.
+- Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
 
 ## Build And Validation
 

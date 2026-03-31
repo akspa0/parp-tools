@@ -2,6 +2,21 @@
 
 # Active Context
 
+## Mar 31, 2026 - World Runtime Prompt Set Added For The Ordered WorldScene Split
+
+- user chose the broader world-runtime decomposition path as the next planning surface: split `WorldScene` into explicit terrain/WMO/MDX/overlay runtime services in `wow-viewer`, then implement those slices in fresh chats
+- added a dedicated workflow surface:
+	- root router: `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`
+	- ordered prompt folder: `.github/prompts/wow-viewer-world-runtime/`
+	- continuity plan: `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`
+- key sequencing decision:
+	- slice 01 is not another abstract renderer rewrite; it is explicit suppression of repeated asset-miss churn, especially `.skin` lookup loops and failed MDX retry spam, because the current log indicates that this noise is already distorting runtime behavior and masking other degradations
+	- later slices then move visible-set collection, pass ownership, and final `WorldScene` host thinning into `wow-viewer`
+- current validation reality:
+	- this chat created planning assets only for the next fresh implementation chats
+	- no new runtime code changed in this step
+	- capture automation appears usable enough to be referenced as a smoke aid in the new prompt set, but it is still not treated as full runtime signoff
+
 ## Mar 31, 2026 - First WorldScene Extraction Seam Now Lives In wow-viewer Core.Runtime
 
 - followed the explicit user direction to stop deepening `src/MdxViewer/Terrain/WorldScene.cs` as the long-term design owner and move the first stable seam into `wow-viewer`

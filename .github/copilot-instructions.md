@@ -9,7 +9,7 @@
 ## First Reads
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md`.
 - Before changing `wow-viewer` PM4, shared I/O, or migration workflow, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and `wow-viewer/README.md`.
-- Before changing Copilot workflow assets for `wow-viewer`, also read `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`, `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`, and `.github/prompts/wow-viewer-shared-io-implementation.prompt.md`.
+- Before changing Copilot workflow assets for `wow-viewer`, also read `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`, `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`, `.github/prompts/wow-viewer-shared-io-implementation.prompt.md`, and `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`.
 - If the task touches 3.3.5 terrain texturing, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## wow-viewer Skill Registry
@@ -17,6 +17,9 @@
 - Use `.github/skills/wow-viewer-shared-io-library/SKILL.md` for `Core` or `Core.IO` non-PM4 slices such as ADT root, `_tex0.adt`, `_obj0.adt`, `_lod.adt`, WDT, WMO, BLP, DBC, or DB2 detection or summary work, chunk readers, `map inspect`, `converter detect`, or shared-format regression updates.
 - Use `.github/skills/wow-viewer-migration-continuation/SKILL.md` for continuation routing, next-slice selection, migration regrouping, or workflow-surface updates across chats.
 - Treat these skills as the first discovery surface for `wow-viewer` implementation work, with prompts as the more specific execution surface underneath them.
+
+## wow-viewer Prompt Registry
+- Use `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
 
 ## wow-viewer Workflow Maintenance Rule
 - Whenever a new `wow-viewer` skill, implementation prompt, or workflow asset is added, update `.github/copilot-instructions.md` so the new asset is named and routed here.

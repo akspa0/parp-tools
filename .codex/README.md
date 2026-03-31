@@ -26,3 +26,4 @@ This directory is a Codex-oriented conversion of the workspace's Cursor memory-b
 ## Working rule
 
 - Keep `.codex` docs, `AGENTS.md`, `wow-viewer/README.md`, the relevant memory-bank files, and the relevant plan files synchronized when the workflow materially changes.
+- For staged `WorldScene` split or world-runtime extraction work, keep `.codex/prompts/wow-viewer-world-runtime-plan-set.md` and `.codex/prompts/wow-viewer-world-runtime/*` synchronized with the GitHub-side prompt set.
