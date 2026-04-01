@@ -384,7 +384,7 @@ public partial class ViewerApp
         {
             (string value, string label)[] filters =
             {
-                (".mdx", ".mdx/.mdl"),
+                (".mdx", ".mdx/.mdl/.m2"),
                 (".wmo", ".wmo"),
                 (".m2", ".m2"),
                 (".blp", ".blp"),
@@ -473,7 +473,7 @@ public partial class ViewerApp
     private static string GetExtensionFilterLabel(string extensionFilter)
     {
         return extensionFilter.Equals(".mdx", StringComparison.OrdinalIgnoreCase)
-            ? ".mdx/.mdl"
+            ? ".mdx/.mdl/.m2"
             : extensionFilter;
     }
 

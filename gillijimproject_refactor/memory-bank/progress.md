@@ -1,5 +1,22 @@
 # Progress
 
+### Mar 31, 2026 - wow-viewer M2 Foundation Slice 01 Implemented
+
+- implemented the first narrow `wow-viewer`-owned M2 seam rather than leaving slice 01 as planning-only work
+- landed code:
+	- `WowViewer.Core/M2` model identity, model document, skin document, submesh, batch, and profile-selection contracts
+	- `WowViewer.Core.IO/M2` strict `MD20` and `SKIN` readers
+	- `WowViewer.Core.Runtime/M2` choose/load/initialize skin-profile state
+	- `WowViewer.Tool.Inspect` `m2 inspect` command for local-path or archive-backed model inspection
+	- `WowViewer.Core.Tests/M2FoundationTests` coverage for identity normalization, strict root checks, strict skin parsing, and runtime-stage transitions
+- validation:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- all `234` tests passed in the current wow-viewer solution run
+- boundary:
+	- this is not viewer-runtime parity or active `MdxViewer` signoff
+	- no in-repo extracted real `.m2` / `.skin` asset was available, so this landing proves library/build/test behavior plus inspect ownership only
+
 ### Mar 31, 2026 - Ordered wow-viewer M2 Runtime Prompt Set Landed
 
 - added the missing workflow surface for M2 runtime and renderer recovery so future chats stop mixing parser ownership, skin-state recovery, material routing, lighting, batching, and compatibility-only `MdxViewer` fixes in one prompt
@@ -15,8 +32,8 @@
 	- M2 runtime ownership, exact `%02d.skin` behavior, section/material routing, animation/lighting state, and scene batching now have a dedicated staged prompt set in the same style as PM4/shared-I/O/world-runtime work
 	- broader `WorldScene` extraction and repeated asset-miss suppression still belong to the separate world-runtime prompt family
 - validation boundary:
-	- this is workflow/continuity work only
-	- no new wow-viewer M2 library or renderer code landed in this slice
+	- this entry was workflow/continuity work only when it landed
+	- slice 01 has since landed as a separate implementation step; keep using this entry for prompt-routing history, not current implementation status
 
 ### Mar 31, 2026 - Conservative Adapted-M2 Material Rollback Restored A Sane Giant-Root Payload
 

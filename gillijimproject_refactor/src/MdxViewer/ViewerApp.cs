@@ -79,6 +79,7 @@ public partial class ViewerApp : IDisposable
         new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
         new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
         new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
+        new("Burning Crusade beta (2.0.0) - 2.0.0.5610", "2.0.0.5610"),
         new("Burning Crusade (2.x) - 2.4.3.8606", "2.4.3.8606"),
         new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
         new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340"),
@@ -136,7 +137,7 @@ public partial class ViewerApp : IDisposable
     private List<string> _filteredFiles = new();
     private string _searchFilter = "";
     private string _extensionFilter = ".mdx";
-    private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl" };
+    private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl", ".m2" };
     private int _selectedFileIndex = -1;
     private string? _loadedFilePath;
     private string? _loadedFileName;
@@ -6827,7 +6828,13 @@ void main() {
                 {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
                     var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, effectiveBuildVersion);
-                    LoadMdxModel(mdx, dir, resolvedModelPath, isM2AdapterModel: true, buildVersionOverride: effectiveBuildVersion);
+                    LoadMdxModel(
+                        mdx,
+                        dir,
+                        resolvedModelPath,
+                        isM2AdapterModel: true,
+                        buildVersionOverride: effectiveBuildVersion,
+                        m2RuntimeInfo: new M2RuntimeLoadInfo("adapter-skin", skinPath, effectiveBuildVersion));
                     CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
@@ -6853,12 +6860,20 @@ void main() {
             candidatePaths.Add(bestSkinPath);
         }
 
-        if (!anySkinFound && string.Equals(FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+        bool allowsEmbeddedSkinFallback = profile.AllowsEmbeddedSkinProfileFallback;
+
+        if (!anySkinFound && allowsEmbeddedSkinFallback)
         {
             try
             {
                 var embeddedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, null, resolvedModelPath, effectiveBuildVersion);
-                LoadMdxModel(embeddedMdx, dir, resolvedModelPath, isM2AdapterModel: true, buildVersionOverride: effectiveBuildVersion);
+                LoadMdxModel(
+                    embeddedMdx,
+                    dir,
+                    resolvedModelPath,
+                    isM2AdapterModel: true,
+                    buildVersionOverride: effectiveBuildVersion,
+                    m2RuntimeInfo: new M2RuntimeLoadInfo("adapter-embedded", null, effectiveBuildVersion));
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(originalPath)} after no external .skin resolved");
                 _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -6883,7 +6898,13 @@ void main() {
                     var convertedMdx = MdxFile.Load(convertedStream);
                     if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
                     {
-                        LoadMdxModel(convertedMdx, dir, resolvedModelPath, isM2AdapterModel: true, buildVersionOverride: effectiveBuildVersion);
+                        LoadMdxModel(
+                            convertedMdx,
+                            dir,
+                            resolvedModelPath,
+                            isM2AdapterModel: true,
+                            buildVersionOverride: effectiveBuildVersion,
+                            m2RuntimeInfo: new M2RuntimeLoadInfo("converter-fallback", null, effectiveBuildVersion));
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(originalPath)} after adapter failure");
                         _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -6906,14 +6927,9 @@ void main() {
 
         if (!anySkinFound)
         {
-            bool isTracedPreRelease301 = string.Equals(
-                FormatProfileRegistry.ResolveModelProfile(_dbcBuild)?.ProfileId,
-                FormatProfileRegistry.M2Profile3018303.ProfileId,
-                StringComparison.Ordinal);
-
-            InvalidDataException missingSkinError = isTracedPreRelease301
+            InvalidDataException missingSkinError = allowsEmbeddedSkinFallback
                 ? new InvalidDataException(
-                    $"No external .skin resolved for pre-release M2: {Path.GetFileName(originalPath)}. wow.exe 3.0.1.8303 traces root-contained profile tables for CM2Shared; MdxViewer root-profile geometry parsing is still incomplete.")
+                    $"No external .skin resolved and no usable embedded root profile was available for M2: {Path.GetFileName(originalPath)}")
                 : new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
 
             if (_loggedStandaloneMissingSkinPaths.Add(resolvedModelPath))
@@ -7716,7 +7732,7 @@ void main() {
         }
     }
 
-    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null, string? buildVersionOverride = null)
+    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null, string? buildVersionOverride = null, M2RuntimeLoadInfo? m2RuntimeInfo = null)
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
@@ -7759,21 +7775,46 @@ void main() {
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
 
-        _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +
-                     $"Version: {versionLabel}\n" +
-                     $"Name: {modelName}\n\n" +
-                     $"Geosets: {geosetCount} ({validGeosets} valid)\n" +
-                     $"Vertices: {totalVerts:N0}\n" +
-                     $"Triangles: {totalTris:N0}\n" +
-                     $"Pivot Points: {pivotPointCount}\n" +
-                     (collision != null
-                        ? $"Collision: {collision.VertexCount} verts, {collision.TriangleCount} tris\n"
-                        : string.Empty) +
-                     "\n" +
-                     $"Materials: {materialCount}\n" +
-                     $"Textures: {textureCount}\n" +
-                     $"Bones: {boneCount}\n" +
-                     $"Sequences: {sequenceCount}\n";
+        var modelInfo = new StringBuilder();
+        if (isM2AdapterModel)
+        {
+            modelInfo.AppendLine("Type: M2 (adapted runtime)");
+            modelInfo.AppendLine($"Version: {versionLabel}");
+            modelInfo.AppendLine($"Name: {modelName}");
+
+            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.Route))
+                modelInfo.AppendLine($"Route: {m2RuntimeInfo.Value.Route}");
+            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.BuildVersion))
+                modelInfo.AppendLine($"Build: {m2RuntimeInfo.Value.BuildVersion}");
+            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.SelectedSkinPath))
+                modelInfo.AppendLine($"Skin: {m2RuntimeInfo.Value.SelectedSkinPath}");
+            if (!string.IsNullOrWhiteSpace(virtualPath))
+                modelInfo.AppendLine($"Source: {virtualPath}");
+
+            modelInfo.AppendLine();
+        }
+        else
+        {
+            modelInfo.AppendLine("Type: MDX (Alpha 0.5.3)");
+            modelInfo.AppendLine($"Version: {versionLabel}");
+            modelInfo.AppendLine($"Name: {modelName}");
+            modelInfo.AppendLine();
+        }
+
+        modelInfo.AppendLine($"Geosets: {geosetCount} ({validGeosets} valid)");
+        modelInfo.AppendLine($"Vertices: {totalVerts:N0}");
+        modelInfo.AppendLine($"Triangles: {totalTris:N0}");
+        modelInfo.AppendLine($"Pivot Points: {pivotPointCount}");
+        if (collision != null)
+            modelInfo.AppendLine($"Collision: {collision.VertexCount} verts, {collision.TriangleCount} tris");
+
+        modelInfo.AppendLine();
+        modelInfo.AppendLine($"Materials: {materialCount}");
+        modelInfo.AppendLine($"Textures: {textureCount}");
+        modelInfo.AppendLine($"Bones: {boneCount}");
+        modelInfo.AppendLine($"Sequences: {sequenceCount}");
+
+        _modelInfo = modelInfo.ToString();
 
         if (mdx.Sequences.Count > 0)
         {
@@ -7792,7 +7833,8 @@ void main() {
             }
         }
 
-        _statusMessage = $"Loaded MDX: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
+        string loadedKind = isM2AdapterModel ? "M2" : "MDX";
+        _statusMessage = $"Loaded {loadedKind}: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
     }
 
     private MdxRuntimeSharedInfo? TryReadSharedMdxRuntimeInfo(string sourcePath, byte[] modelBytes)
@@ -7831,6 +7873,11 @@ void main() {
     private readonly record struct MdxRuntimeSharedInfo(
         CoreMdxSummary? Summary,
         CoreMdxGeometryFile? Geometry);
+
+    private readonly record struct M2RuntimeLoadInfo(
+        string Route,
+        string? SelectedSkinPath,
+        string? BuildVersion);
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {
@@ -8583,6 +8630,14 @@ void main() {
                 $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
                 $"Scale: {inst.PlacementScale:F3}\n" +
                 $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
+
+            if (_worldScene.SelectedObjectType == Terrain.ObjectType.Mdx
+                && _worldScene.Assets.TryGetLoadedMdx(inst.ModelKey, out var renderer)
+                && renderer != null)
+            {
+                _selectedObjectInfo += "\n" + renderer.GetSelectionDiagnostics();
+            }
+
             return;
         }
 

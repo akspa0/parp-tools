@@ -116,7 +116,11 @@ public class WorldAssetManager : IDisposable
 
     public void SetBuildVersion(string? buildVersion)
     {
+        if (string.Equals(_buildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
+            return;
+
         _buildVersion = buildVersion;
+        InvalidateRendererCaches();
     }
 
     public void ApplyTextureSamplingSettings()
@@ -904,9 +908,11 @@ public class WorldAssetManager : IDisposable
                     }
                 }
 
+                bool allowsEmbeddedSkinFallback = FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.AllowsEmbeddedSkinProfileFallback == true;
+
                 if (!anySkinFound)
                 {
-                    if (string.Equals(FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+                    if (allowsEmbeddedSkinFallback)
                     {
                         try
                         {
@@ -924,7 +930,7 @@ public class WorldAssetManager : IDisposable
                         }
                     }
 
-                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey);
+                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey, allowsEmbeddedSkinFallback);
                 }
 
                 if (WarcraftNetM2Adapter.IsMd20(data))
@@ -1265,13 +1271,16 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey)
+    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey, bool allowsEmbeddedSkinFallback)
     {
         _knownMissingM2SkinPaths.Add(resolvedModelPath);
 
         if (_loggedMissingM2SkinPaths.Add(resolvedModelPath))
         {
-            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
+            string message = allowsEmbeddedSkinFallback
+                ? $"[M2] No external .skin or usable embedded root-profile geometry for: {Path.GetFileName(normalizedKey)}"
+                : $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}";
+            ViewerLog.Important(ViewerLog.Category.Mdx, message);
             return;
         }
 
@@ -1325,35 +1334,43 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    public void Dispose()
+    private void InvalidateRendererCaches()
     {
-        foreach (var r in _mdxModels.Values)
-            r?.Dispose();
+        foreach (var renderer in _mdxModels.Values)
+            renderer?.Dispose();
         _mdxModels.Clear();
         _mdxLru.Clear();
         _mdxLruMap.Clear();
 
-        foreach (var r in _wmoModels.Values)
-            r?.Dispose();
+        foreach (var renderer in _wmoModels.Values)
+            renderer?.Dispose();
         _wmoModels.Clear();
         _wmoLru.Clear();
         _wmoLruMap.Clear();
+
+        _priorityMdxLoads.Clear();
+        _pendingMdxLoads.Clear();
+        _queuedMdxLoads.Clear();
+        _priorityQueuedMdxLoads.Clear();
+
+        _priorityWmoLoads.Clear();
+        _pendingWmoLoads.Clear();
+        _queuedWmoLoads.Clear();
+        _priorityQueuedWmoLoads.Clear();
+    }
+
+    public void Dispose()
+    {
+        InvalidateRendererCaches();
 
         _fileDataCache.Clear();
         _fileLru.Clear();
         _fileLruMap.Clear();
 
-        _pendingMdxLoads.Clear();
-        _queuedMdxLoads.Clear();
-        _priorityQueuedMdxLoads.Clear();
-        _priorityWmoLoads.Clear();
-        _pendingWmoLoads.Clear();
-        _queuedWmoLoads.Clear();
-        _priorityQueuedWmoLoads.Clear();
         _bestSkinPathCache.Clear();
         _knownMissingM2SkinPaths.Clear();
         _loggedMissingM2SkinPaths.Clear();
-        _priorityMdxLoads.Clear();
+        _resolvedReadPathCache.Clear();
     }
 }
 

@@ -4,16 +4,33 @@
 
 This note records native-client M2 findings gathered from Ghidra against the 3.3.5 OS X client and frames them as `wow-viewer` library work, not as more long-term ownership in `MdxViewer`.
 
-The current confirmed findings now come from two native passes completed on Mar 31, 2026:
+The current confirmed findings now come from three native/reverse-engineering passes completed on Mar 31, 2026:
 
 - the earlier 3.3.5 OS X native client pass
 - a follow-up pass against the 3.3.5 PTR OS X PowerPC raw binary, after reconnecting the Ghidra bridge
+- a focused Ghidra pass against the Win32 beta `2.0.0.5610` client to answer whether early `MD20 0x100` models really require external `.skin` companions
 
 ## Ownership Rule
 
 - Treat these findings as input for the future `wow-viewer` M2 library and renderer path.
 - Do not treat `MdxViewer` as the canonical implementation target for new M2 semantics.
 - Any future parser, skin, section, or render-state work derived from this note should land in `wow-viewer` first, with `MdxViewer` only as an optional compatibility consumer.
+
+## Early 2.0.0.5610 Boundary
+
+The later native-client `%02d.skin` findings in this note are not universal across every M2 era.
+
+Confirmed in the Win32 beta `2.0.0.5610` binary:
+
+- no `.skin` or `%02d.skin` string was present in the loaded `Model2` code path during this pass
+- `FUN_0072ee30` in `M2Shared.cpp` selects an active embedded profile from the root model table at `+0x4C` / `+0x50` and stores the chosen profile pointer at shared offset `+0x138`
+- `FUN_0072f220` then builds `CM2Shared_idx` directly from that selected embedded profile
+- `FUN_0072f3f0` builds `CM2Shared_vtx` directly from the same selected embedded profile
+
+Implication for `wow-viewer`:
+
+- the exact numbered `%02d.skin` ownership model remains correct for the confirmed later native passes in this note
+- early beta `MD20 0x100` clients need a separate embedded-root-profile path instead of inheriting the later `.skin` rule by default
 
 ## Confirmed Native Pipeline Findings
 
@@ -40,7 +57,7 @@ Implication for `wow-viewer`:
 
 - `wow-viewer` should keep build/profile-aware M2 parsing strict and explicit instead of relying on broad fallback parsing that hides format mismatches.
 
-### 3. The active skin file is an exact numbered companion, not a fuzzy fallback
+### 3. In the 3.3.5 native pass, the active skin file is an exact numbered companion, not a fuzzy fallback
 
 Confirmed in native function `FUN_00983970`.
 
@@ -116,7 +133,7 @@ Confirmed in `FUN_00a06a10` and `FUN_005cead8`.
 - `FUN_00a06a10` strips the current model extension, appends `%02d.skin`, opens the exact numbered skin file, allocates the async load job, and guards against reloading after `m_skinProfileLoaded`
 - `FUN_005cead8` is an auxiliary probe path that normalizes `.mdl` and `.mdx` to `.m2`, then checks for `%02d.skin` companions from `00` through `03`
 
-The important point is unchanged: the runtime still treats numbered skin ownership as explicit and structured, not as a loose best-effort search over arbitrary sidecar files.
+The important point is unchanged for this later native client: the runtime still treats numbered skin ownership as explicit and structured, not as a loose best-effort search over arbitrary sidecar files.
 
 ### 3. PowerPC preserves an explicit choose, load, and initialize split for skin profiles
 

@@ -1,5 +1,153 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Mar 31, 2026 - Ghidra Confirms 2.0.0.5610 Uses Embedded Root Profiles Instead Of Requiring External .skin
+
+- the latest beta `2.0.0.5610` failures on `DwarfMale.m2` and `NightElfMale.m2` finally produced a cleaner root-cause question than the earlier generic `.m2/.mdx` confusion:
+   - the active viewer still hard-failed on `Missing companion .skin for M2`
+   - but the new evidence was specifically early `MD20 version 0x100` character models, not later TBC-era `0x104..0x107` assets
+- Ghidra pass against the loaded Win32 beta `wow.exe` confirmed the early ownership seam is different from the later native `%02d.skin` rule:
+   - no `.skin` or `%02d.skin` string was present in the active `Model2` path during this pass
+   - `FUN_0072ee30` in `M2Shared.cpp` chooses an embedded root profile from the model table at `+0x4C` / `+0x50` and stores the selected profile pointer at shared offset `+0x138`
+   - `FUN_0072f220` builds `CM2Shared_idx` from that selected embedded profile
+   - `FUN_0072f3f0` builds `CM2Shared_vtx` from that same selected embedded profile
+- landed the active compatibility fix around that evidence:
+   - `src/MdxViewer/Terrain/FormatProfileRegistry.cs` now gives `M2Profile` an explicit `AllowsEmbeddedSkinProfileFallback` capability instead of hardcoding embedded fallback to `3.0.1.8303`
+   - enabled that capability for both `M2Profile_200_5610_Beta` and the earlier traced `M2Profile_301_8303`
+   - standalone load, world load, WMO doodad load, and `AssetProbe` now all attempt embedded root-profile geometry when no external `.skin` resolves for a profile that allows it
+   - missing-skin logging now stops claiming a plain companion-skin miss in those cases and instead reports when both external `.skin` resolution and embedded root-profile geometry are unavailable
+- validation completed:
+   - `get_errors` returned clean for the edited loader files
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is build validation plus reverse-engineering evidence, not runtime signoff that all beta `2.0.0.5610` character models now render correctly
+   - if `DwarfMale.m2` or `NightElfMale.m2` still fail after this gate removal, the next honest seam is early-2.0 embedded-profile decode quality or material/runtime behavior, not companion-skin naming
+
+## Mar 31, 2026 - Early 2.0.0.5610 M2 Routing Is Now Explicitly Split From Later 2.x/TBC
+
+- the latest real user failure on beta `2.0.0.5610` was a hard profile gate, not another vague `.m2` vs `.mdx` theory:
+   - `DeadMinesCaveRoof.m2` failed with `MD20 version 0x100 is outside supported range 0x104-0x107`
+   - world placements still existed, which meant the active blocker was parser/profile acceptance before any live render proof could even happen
+- landed a narrow compatibility split in `src/MdxViewer/Terrain/FormatProfileRegistry.cs`:
+   - exact build `2.0.0.5610` now routes to `M2Profile_200_5610_Beta`
+   - that profile accepts only `MD20` version `0x100`
+   - the existing `M2Profile_20x_Unknown` bucket remains the later `2.x` / TBC route for `0x104..0x107`
+- landed follow-up build/runtime selection support around that split:
+   - `src/MdxViewer/Terrain/BuildVersionCatalog.cs` now aliases short build `2.0.0` to `2.0.0.5610`
+   - `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now recognizes the same short alias
+   - `src/MdxViewer/ViewerApp.cs` fallback build options now include `Burning Crusade beta (2.0.0) - 2.0.0.5610`
+- landed a narrow browser clarity fix for the mixed listfile reality the user called out:
+   - the combined early-model browser family now groups `.mdx`, `.mdl`, and `.m2`
+   - this does not prove backend ownership is perfect, but it stops the UI from reinforcing the false idea that early `2.x` assets live in a clean extension split
+- validation completed:
+   - file diagnostics were clean on the edited viewer files
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is explicit early-2.0 profile-routing enablement, not runtime signoff for beta `2.0.0.5610` M2 rendering
+   - if those assets still fail live after the gate removal, the next honest seam is early-2.0 parser/skin/material/runtime behavior rather than more extension-blame
+
+## Mar 31, 2026 - Non-Skeletal M2 Animation Tracks No Longer Freeze At Frame Zero
+
+- the latest user symptom pattern finally pointed at a tighter animation/runtime seam instead of another generic load-path theory:
+   - some simple or mostly static M2s render
+   - some animated or effect-heavy M2s stay invisible or malformed
+   - some cases show particles while mesh geometry remains invisible
+- code archaeology in `src/MdxViewer/Rendering/MdxAnimator.cs` exposed a concrete mismatch:
+   - `ModelRenderer` instantiates `MdxAnimator` when an adapted model has any animation data, including geoset/material/texture-animation tracks
+   - but `MdxAnimator.Update(...)` still returned early unless the model had animated bones
+   - that left non-skeletal geoset alpha, layer alpha, color-alpha, UV, and global-sequence state frozen at the initial frame even though the renderer kept evaluating those tracks
+- landed a narrow root fix in `src/MdxViewer/Rendering/MdxAnimator.cs` and `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - `HasAnimation` now reflects any time-driven animation data, while `HasSkeletalAnimation` remains the explicit gate for bone-matrix skinning
+   - animator time/global-sequence advancement now continues for non-bone animation tracks instead of freezing them at frame zero
+   - bone-matrix upload and skeletal recomputation remain gated on actual skeletal animation only
+- why this is the current best root-cause candidate:
+   - a model whose mesh alpha starts at `0` and is supposed to animate visible will stay permanently invisible if its non-bone tracks never advance
+   - particle systems can still appear because they update on a separate path from geoset/layer alpha evaluation
+- validation completed:
+   - `get_errors` returned clean for `src/MdxViewer/Rendering/MdxAnimator.cs`, `src/MdxViewer/Rendering/ModelRenderer.cs`, and `src/MdxViewer/ViewerApp.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is still build validation, not live viewer signoff
+   - the next honest proof is to re-open known-bad standalone/world M2s such as `AzjolRoofGiant.m2` and `IronforgeCrystalRoof.m2` and confirm whether geometry now appears instead of remaining stuck at frame-zero visibility
+
+## Mar 31, 2026 - World Asset Build Changes Now Invalidate Cached M2 And WMO Renderers
+
+- the latest live `AzjolColumn05` contradiction finally pointed at a concrete cache seam instead of another speculative render-path issue:
+   - the selected-object diagnostics come directly from the cached `MdxRenderer` payload, not from transient draw state
+   - `WorldScene.SetDbcCredentials(...)` updates the asset manager build, but `WorldAssetManager.SetBuildVersion(...)` previously did not invalidate already loaded renderers
+   - that meant live world M2s and WMO-held doodad M2s could keep using stale adapted runtime payloads after the correct client build/version became known
+- landed a narrow fix in `src/MdxViewer/Terrain/WorldAssetManager.cs`:
+   - build-version changes now dispose and clear cached MDX/WMO renderers plus pending renderer-load queues
+   - raw file-byte caches remain intact, so only build-sensitive runtime model ownership is refreshed
+- validation completed:
+   - `get_errors` returned clean for `src/MdxViewer/Terrain/WorldAssetManager.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - this is the first concrete cache-fix candidate for the live probe-vs-renderer mismatch, not runtime signoff
+   - the next honest check is a real viewer reopen/reload of the world after the build version is established, then recheck whether `AzjolColumn05` still shows the smaller cached payload in selected-object diagnostics
+
+## Mar 31, 2026 - First Live Positive Azjol M2 Proof Narrows The Remaining Failure Class
+
+- the latest user screenshot is the first live in-view evidence that at least one real Azjol world M2 class is now surviving the full active viewer path instead of only headless probing
+- the selected live object was `World\Expansion02\Doodads\Azjol-Nerub\AzjolColumn05.m2`
+- follow-up headless validation against that exact asset matches the live selection instead of contradicting it:
+   - route `adapter-skin`
+   - skin `AzjolColumn0500.skin`
+   - `2` geosets, `282` verts, `426` tris
+   - `2` opaque `Load` layers and `2` resolved opaque textures
+- the honest state should now be described more narrowly:
+   - the active M2 problem is no longer a blanket "nothing renders" failure across Azjol assets
+   - some static world M2s are now making it through adaptation, load, and live world rendering end-to-end
+   - the remaining bug class is narrower and should be treated as asset-specific or section/material/transform-specific, especially around the still-missing larger/root assets
+- practical next debugging use of the new inspector:
+   - compare a still-invisible selected asset against this known-good `AzjolColumn05` baseline rather than changing the renderer blindly again
+
+## Mar 31, 2026 - Selected World M2 Diagnostics Now Expose Renderer State, And Adapted Normals Are Sanitized At Upload Time
+
+- fresh probe confirmation on the exact world asset the user selected, `World\Expansion02\Doodads\Azjol-Nerub\AzjolRoofGiant.m2`, shows the adapted payload is still simple and sane:
+   - route `adapter-skin`
+   - skin `AzjolRoofGiant00.skin`
+   - one opaque `Load` layer, one opaque `AZULBLANKROCK.BLP`, `574` verts / `1063` tris
+- that keeps the honest boundary the same:
+   - the remaining live failure is still downstream of adaptation, inside the active viewer render/runtime path
+- landed follow-up diagnostics in `src/MdxViewer/Rendering/ModelRenderer.cs` and `src/MdxViewer/ViewerApp.cs`:
+   - the selected-object panel now appends loaded renderer facts for world MDX/M2 entries, including adapted-M2 status, GPU-skinning state, invalid-normal count, layer/pass counts, and primary-texture fallback state
+   - this gives the next manual runtime validation a concrete readout instead of only placement metadata and bounds
+- landed a narrow robustness fix in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - uploaded normals are now sanitized and normalized before entering the shared shader path
+   - the fragment shader now guards normalization of normals, light direction, and view vectors with safe fallbacks instead of assuming the imported data is always usable
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Mar 31, 2026 with existing warnings only
+- important boundary:
+   - no live viewer proof exists yet that the normal-sanitization fix restores missing M2 pixels
+   - the next runtime check should read the selected-object diagnostics for a still-invisible asset before making another render-path change
+
+## Mar 31, 2026 - Real 3.3.5 Probes Confirm The Remaining M2 Failure Is Past Adaptation, And Viewer Metadata Now Reflects That
+
+- fresh real-data probes against the saved Wrath client root `H:\CLIENTS\WoW335\3.X_Retail_Windows_enUS_3.3.5.12340\World of Warcraft` were run for:
+   - `WORLD\AZEROTH\ELWYNN\PASSIVEDOODADS\TREES\CANOPYLESSTREE04.M2`
+   - `WORLD\GENERIC\UNDEAD\PASSIVE DOODADS\STATUES\LORDAERON_STATUE_02.M2`
+   - `World\Expansion02\Doodads\Azjol-Nerub\AzjolRoofGiant.m2`
+- all three adapt successfully through the runtime adapter path with numbered skin resolution, non-empty geometry, and decodable textures:
+   - `CanopylessTree04`: route `adapter-skin`, skin `CanopylessTree0400.skin`, `69` verts / `66` tris
+   - `Lordaeron_statue_02`: route `adapter-skin`, skin `Lordaeron_statue_0200.skin`, `380` verts / `431` tris
+   - `AzjolRoofGiant`: route `adapter-skin`, skin `AzjolRoofGiant00.skin`, `574` verts / `1063` tris
+- this narrows the honest remaining seam again:
+   - the current "most M2s render nothing" problem is not explained by missing `.skin` resolution or empty adapted payloads for these tested Wrath assets
+   - the live failure remains in the downstream render/material path
+- landed narrow viewer/debugging corrections in the active code:
+   - standalone adapted M2s no longer claim `Type: MDX (Alpha 0.5.3)` in the model info panel
+   - model info now reports adapted-M2 route, effective build, selected skin, and source path when available
+   - `ModelRenderer` now supports `PARP_M2_FORCE_OPAQUE=1` as an opt-in diagnostic seam that forces adapted M2 layers through the solid path to distinguish material classification failures from deeper submission/draw failures
+- follow-up code archaeology found a stronger renderer-side bug in the active compatibility path:
+   - the adapter currently builds adapted M2 geosets without explicit `MatrixGroups` / `MatrixIndices`
+   - `ModelRenderer` was still enabling GPU skinning whenever the adapted runtime model had animated bones, which meant those vertices could be driven by bogus fallback bone weights instead of rendering in bind pose
+- landed a narrow root fix in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - adapted M2s now only enable GPU skinning when the runtime MDX data actually contains explicit matrix-group skinning data
+   - otherwise they stay on bind-pose rendering while still keeping non-bone animation systems alive through `MdxAnimator`
+- important boundary:
+   - this is compile validation plus real probe validation only
+   - no new live viewer screenshot or flythrough proof was captured after landing the skinning guard
+
 ## Mar 31, 2026 - Adapted M2 Layer Animation Metadata Was Hiding Static World Doodads
 
 - latest standalone viewer evidence for `AzjolRoofGiant.m2` was stronger than the earlier world screenshot evidence:
@@ -1010,6 +1158,9 @@
 ## Later 2.x M2-Family Routing Follow-Up (Mar 24)
 
 - The active viewer no longer hard-rejects later `2.x` / TBC-era `MD20` models solely because there was no resolved model profile for that build family.
+- Historical boundary update from Mar 31, 2026:
+   - this note only describes the later `2.x` / TBC bucket.
+   - exact beta build `2.0.0.5610` is now handled separately by `M2Profile_200_5610_Beta` for `0x100` models and should not be described as part of this later bucket.
 - Current active-tree changes:
    - `Terrain/FormatProfileRegistry.cs` now exposes `M2Profile_20x_Unknown` for `2.x` builds.
    - the routed version window is `0x104..0x107`, which matches later TBC-era `MD20` versions and keeps the structural split threshold at `0x108`.

@@ -34,14 +34,19 @@
 
 ### Slice 01 - MD20 And Skin Runtime Foundation
 
+- status update:
+	- landed in `wow-viewer` as a library-first slice with `WowViewer.Core/M2`, `WowViewer.Core.IO/M2`, `WowViewer.Core.Runtime/M2`, `WowViewer.Core.Tests/M2FoundationTests`, and thin `WowViewer.Tool.Inspect` `m2 inspect` wiring
+	- validated with `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- current proof is build/test plus inspect ownership only; no real extracted asset signoff is claimed here
+
 - target problem:
-  - there is no library-owned M2 document/runtime seam for canonical `.m2` identity, strict `MD20` validation, exact numbered `%02d.skin` ownership, or choose/load/init skin-profile staging
+  - this seam existed as a gap when the plan was written; it is now covered by the landed slice-01 library/runtime foundation
 - likely destination:
   - `wow-viewer/src/core/WowViewer.Core/M2/*`
   - `wow-viewer/src/core/WowViewer.Core.IO/M2/*`
   - `wow-viewer/src/core/WowViewer.Core.Runtime/M2/*`
 - proof goal:
-  - one real asset can be opened through a shared wow-viewer-owned M2 seam that yields typed model metadata, exact numbered skin selection, and an active skin-profile result without relying on `WarcraftNetM2Adapter` as the design owner
+  - next stronger proof should be one real asset opened through the shared wow-viewer-owned M2 seam that yields typed model metadata, exact numbered skin selection, and an active skin-profile result without relying on `WarcraftNetM2Adapter` as the design owner
 
 ### Slice 02 - Section Classification And Material Routing
 

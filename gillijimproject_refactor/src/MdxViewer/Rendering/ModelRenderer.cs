@@ -89,6 +89,8 @@ public class MdxRenderer : ISceneRenderer
     private readonly bool _isM2AdapterModel;
     private readonly bool _usesPreRelease301M2Profile;
 
+    private static readonly bool ForceOpaqueAdaptedM2 = IsTruthyEnvironmentVariable("PARP_M2_FORCE_OPAQUE");
+
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
     private static int _uModel, _uView, _uProj, _uHasTexture, _uColor, _uAlphaTest, _uUseTextureAlpha, _uUnshaded, _uPremultiplyAlpha;
@@ -151,6 +153,79 @@ public class MdxRenderer : ISceneRenderer
     /// <summary>Animation controller (null if model has no bones)</summary>
     public MdxAnimator? Animator => _animator;
 
+    public string GetSelectionDiagnostics()
+    {
+        int totalVertices = 0;
+        int invalidNormalCount = 0;
+        int opaqueLayerCount = 0;
+        int transparentLayerCount = 0;
+        int opaqueVisibleLayerCount = 0;
+        int transparentVisibleLayerCount = 0;
+        int missingPrimaryTextureCount = 0;
+        int fallbackPrimaryTextureCount = 0;
+        bool forceSolidAdaptedM2 = ForceOpaqueAdaptedM2 && _isM2AdapterModel;
+
+        for (int geosetIndex = 0; geosetIndex < _mdx.Geosets.Count; geosetIndex++)
+        {
+            var geoset = _mdx.Geosets[geosetIndex];
+            totalVertices += geoset.Vertices.Count;
+
+            foreach (var normal in geoset.Normals)
+            {
+                if (!IsUsableNormal(normal.X, normal.Y, normal.Z))
+                    invalidNormalCount++;
+            }
+
+            if ((uint)geoset.MaterialId >= (uint)_mdx.Materials.Count)
+                continue;
+
+            var material = _mdx.Materials[geoset.MaterialId];
+            for (int layerIndex = 0; layerIndex < material.Layers.Count; layerIndex++)
+            {
+                var layer = material.Layers[layerIndex];
+                int textureId = layer.TextureId;
+                MdlTexOp effectiveBlendMode = GetEffectiveBlendMode(layerIndex, textureId, layer.BlendMode);
+                if (forceSolidAdaptedM2)
+                    effectiveBlendMode = MdlTexOp.Load;
+
+                bool isAlphaCutout = !forceSolidAdaptedM2 && ShouldUseAlphaCutout(layerIndex, textureId, layer.BlendMode, effectiveBlendMode);
+                bool needsBlend = !forceSolidAdaptedM2 && !isAlphaCutout && (layerIndex > 0 || effectiveBlendMode != MdlTexOp.Load);
+                float alpha = EvaluateLayerAlpha(layer);
+                if (_geosetAlphaOverrides.TryGetValue(geosetIndex, out float geosetAlpha))
+                    alpha *= geosetAlpha;
+
+                bool hasTexture = textureId >= 0 && _textures.ContainsKey(textureId);
+                bool usesFallbackTexture = !hasTexture && ShouldUseNeutralMissingTextureFallback(layerIndex, layer, effectiveBlendMode);
+
+                if (layerIndex == 0 && !hasTexture)
+                {
+                    missingPrimaryTextureCount++;
+                    if (usesFallbackTexture)
+                        fallbackPrimaryTextureCount++;
+                }
+
+                if (needsBlend)
+                {
+                    transparentLayerCount++;
+                    if (alpha > 0.01f)
+                        transparentVisibleLayerCount++;
+                }
+                else
+                {
+                    opaqueLayerCount++;
+                    if (alpha > 0.01f)
+                        opaqueVisibleLayerCount++;
+                }
+            }
+        }
+
+        return string.Join('\n',
+            $"Renderer: adaptedM2={_isM2AdapterModel} pre301={_usesPreRelease301M2Profile} debugFocus={_mdxDebugFocus}",
+            $"Geometry: geosets={_mdx.Geosets.Count} visibleGeosets={_geosets.Count(static buffers => buffers.Visible)} vertices={totalVertices} bones={_mdx.Bones.Count} invalidNormals={invalidNormalCount}",
+            $"Materials: opaqueLayers={opaqueLayerCount}/{opaqueVisibleLayerCount} transparentLayers={transparentLayerCount}/{transparentVisibleLayerCount} forceOpaque={forceSolidAdaptedM2}",
+            $"Textures: loaded={_textures.Count}/{_mdx.Textures.Count} missingPrimary={missingPrimaryTextureCount} fallbackPrimary={fallbackPrimaryTextureCount} rawFx={_mdx.RawParticleEmitterCount}/{_mdx.RawRibbonEmitterCount}");
+    }
+
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false,
         string? buildVersion = null)
@@ -165,7 +240,6 @@ public class MdxRenderer : ISceneRenderer
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
-        
         var mdxName = Path.GetFileNameWithoutExtension(modelDir);
         MdxTextureDiagnosticLogger.Initialize(mdxName);
         _texResolver = texResolver;
@@ -176,6 +250,13 @@ public class MdxRenderer : ISceneRenderer
             || (!string.IsNullOrWhiteSpace(debugFilter)
                 && modelDebugName.Contains(debugFilter, StringComparison.OrdinalIgnoreCase));
 
+        if (_isM2AdapterModel && ForceOpaqueAdaptedM2)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2] Force-opaque diagnostic enabled for {_modelVirtualPath ?? modelDir}. Adapted layers will render through the solid path.");
+        }
+
         InitShaders();
         InitBuffers();
         LoadTextures();
@@ -184,7 +265,7 @@ public class MdxRenderer : ISceneRenderer
         if (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx))
         {
             _animator = new MdxAnimator(mdx);
-            if (_animator.HasAnimation)
+            if (_animator.HasSkeletalAnimation)
                 ViewerLog.Info(ViewerLog.Category.Mdx, $"Animation: {mdx.Bones.Count} bones, {mdx.Sequences.Count} sequences");
         }
 
@@ -383,7 +464,7 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
 
         // Upload bone matrices if animated
-        if (_animator != null && _animator.HasAnimation)
+        if (_animator != null && _animator.HasSkeletalAnimation)
         {
             _gl.Uniform1(_uHasBones, 1);
             var matrices = _animator.BoneMatrices;
@@ -429,7 +510,7 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
 
         // Upload bone matrices if animated
-        if (_animator != null && _animator.HasAnimation)
+        if (_animator != null && _animator.HasSkeletalAnimation)
         {
             _gl.Uniform1(_uHasBones, 1);
             
@@ -501,7 +582,7 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
 
-        if (_animator != null && _animator.HasAnimation)
+        if (_animator != null && _animator.HasSkeletalAnimation)
         {
             _gl.Uniform1(_uHasBones, 1);
 
@@ -583,12 +664,15 @@ public class MdxRenderer : ISceneRenderer
                     var layer = material.Layers[l];
                     int texId = layer.TextureId;
                     MdlTexOp effectiveBlendMode = GetEffectiveBlendMode(l, texId, layer.BlendMode);
+                    bool forceSolidAdaptedM2 = ForceOpaqueAdaptedM2 && _isM2AdapterModel;
+                    if (forceSolidAdaptedM2)
+                        effectiveBlendMode = MdlTexOp.Load;
 
                     // Determine if this layer needs blending
                     // Layer 0 + Transparent blend = alpha-tested cutout (trees/foliage)
                     // Render in opaque pass with high alpha threshold, not as blended
-                    bool isAlphaCutout = ShouldUseAlphaCutout(l, texId, layer.BlendMode, effectiveBlendMode);
-                    bool needsBlend = !isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load);
+                    bool isAlphaCutout = !forceSolidAdaptedM2 && ShouldUseAlphaCutout(l, texId, layer.BlendMode, effectiveBlendMode);
+                    bool needsBlend = !forceSolidAdaptedM2 && !isAlphaCutout && (l > 0 || effectiveBlendMode != MdlTexOp.Load);
 
                     // Filter by render pass — alpha cutout renders in opaque pass
                     if (pass == RenderPass.Opaque && needsBlend) continue;
@@ -598,6 +682,8 @@ public class MdxRenderer : ISceneRenderer
                     // ── Per-layer geometry flags (Ghidra-verified MDLGEO) ──
                     var geoFlags = layer.Flags;
                     string materialFamily = DescribeMaterialFamily(isAlphaCutout, effectiveBlendMode, geoFlags);
+                    if (forceSolidAdaptedM2)
+                        materialFamily = $"{materialFamily}+ForceOpaque";
 
                     // TwoSided (0x10): culling handled globally
                     _gl.Disable(EnableCap.CullFace);
@@ -1030,9 +1116,14 @@ uniform vec3 uAmbientColor;
 
 out vec4 FragColor;
 
+vec3 safeNormalize(vec3 value, vec3 fallback) {
+    float lenSq = dot(value, value);
+    return lenSq > 1e-8 ? value * inversesqrt(lenSq) : fallback;
+}
+
 void main() {
-    vec3 norm = normalize(vNormal);
-    vec3 viewNorm = normalize(vViewNormal);
+    vec3 norm = safeNormalize(vNormal, vec3(0.0, 0.0, 1.0));
+    vec3 viewNorm = safeNormalize(vViewNormal, vec3(0.0, 0.0, 1.0));
     if (uSphereEnvMap == 1 && !gl_FrontFacing) {
         norm = -norm;
         viewNorm = -viewNorm;
@@ -1064,7 +1155,7 @@ void main() {
     // Lighting: skip if Unshaded flag (MDLGEO 0x1) is set
     vec3 litColor = texRgb;
     if (uUnshaded == 0) {
-        vec3 lightDir = normalize(uLightDir);
+        vec3 lightDir = safeNormalize(uLightDir, vec3(0.0, 0.0, 1.0));
         // Half-Lambert diffuse: wraps lighting around surfaces for softer shading
         // WoW models don't have harsh black shadows — this approximates that look
         float NdotL = dot(norm, lightDir);
@@ -1073,8 +1164,8 @@ void main() {
         vec3 diffuse = uLightColor * diff;
 
         // Blinn-Phong specular (subtle)
-        vec3 viewDir = normalize(uCameraPos - vFragPos);
-        vec3 halfDir = normalize(lightDir + viewDir);
+        vec3 viewDir = safeNormalize(uCameraPos - vFragPos, vec3(0.0, 0.0, 1.0));
+        vec3 halfDir = safeNormalize(lightDir + viewDir, lightDir);
         float spec = pow(max(dot(norm, halfDir), 0.0), 32.0);
         vec3 specular = uLightColor * spec * 0.15;
 
@@ -1308,19 +1399,12 @@ void main() {
                 vertexData[offset + 2] = pos.Z;
 
                 // Normal (3-5)
-                if (hasNormals)
-                {
-                    var n = geoset.Normals[v];
-                    vertexData[offset + 3] = n.X;
-                    vertexData[offset + 4] = n.Y;
-                    vertexData[offset + 5] = n.Z;
-                }
-                else
-                {
-                    vertexData[offset + 3] = 0f;
-                    vertexData[offset + 4] = 1f;
-                    vertexData[offset + 5] = 0f;
-                }
+                Vector3 normal = hasNormals
+                    ? SanitizeNormal(geoset.Normals[v])
+                    : Vector3.UnitY;
+                vertexData[offset + 3] = normal.X;
+                vertexData[offset + 4] = normal.Y;
+                vertexData[offset + 5] = normal.Z;
 
                 // TexCoord0 (6-7)
                 C2Vector uv0 = default;
@@ -1888,6 +1972,40 @@ void main() {
             return alphaKind;
 
         return TextureAlphaKind.Opaque;
+    }
+
+    private static bool IsTruthyEnvironmentVariable(string name)
+    {
+        string? value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        return value.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("on", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Vector3 SanitizeNormal(C3Vector rawNormal)
+    {
+        return SanitizeNormal(rawNormal.X, rawNormal.Y, rawNormal.Z);
+    }
+
+    private static Vector3 SanitizeNormal(float x, float y, float z)
+    {
+        if (!IsUsableNormal(x, y, z))
+            return Vector3.UnitY;
+
+        return Vector3.Normalize(new Vector3(x, y, z));
+    }
+
+    private static bool IsUsableNormal(float x, float y, float z)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(z))
+            return false;
+
+        float lengthSquared = (x * x) + (y * y) + (z * z);
+        return lengthSquared > 1e-8f;
     }
 
     private static string DescribeMaterialFamily(bool isAlphaCutout, MdlTexOp blendMode, MdlGeoFlags geoFlags)

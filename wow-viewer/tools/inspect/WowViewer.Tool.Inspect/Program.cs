@@ -5,9 +5,11 @@ using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.PM4;
@@ -15,6 +17,7 @@ using WowViewer.Core.PM4.Models;
 using WowViewer.Core.PM4.Research;
 using WowViewer.Core.PM4.Services;
 using WowViewer.Core.Runtime;
+using WowViewer.Core.Runtime.M2;
 using WowViewer.Core.Wmo;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -30,6 +33,9 @@ switch (area)
 {
 	case "blp":
 		RunBlp(tail);
+		break;
+	case "m2":
+		RunM2(tail);
 		break;
 	case "mdx":
 		RunMdx(tail);
@@ -118,6 +124,111 @@ static void RunBlpInspect(string[] args)
 	PrintBlpSummary(summary);
 }
 
+static void RunM2(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowM2Usage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunM2Inspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown m2 command '{command}'.");
+			ShowM2Usage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
+static void RunM2Inspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? profileIndexText = GetOption(args, "--profile-index", "-p");
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	int profileIndex = 0;
+	if (!string.IsNullOrWhiteSpace(profileIndexText)
+		&& (!int.TryParse(profileIndexText, out profileIndex) || profileIndex < 0 || profileIndex > 99))
+	{
+		Console.Error.WriteLine("Error: --profile-index must be an integer in the range 0..99.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <file.m2|file.mdx|file.mdl> or --archive-root <dir> with --virtual-path <path/to/file.m2|file.mdx|file.mdl>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	byte[]? TryReadExactSkinBytes(string companionPath)
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot))
+		{
+			try
+			{
+				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], listfilePath);
+			}
+			catch (FileNotFoundException)
+			{
+				return null;
+			}
+		}
+
+		return File.Exists(companionPath) ? File.ReadAllBytes(companionPath) : null;
+	}
+
+	M2ModelDocument model;
+	using (Stream stream = OpenInputStream())
+		model = M2ModelReader.Read(stream, sourceLabel);
+
+	M2SkinProfileRuntimeState state = M2SkinProfileRuntime.Choose(model, profileIndex);
+	byte[]? skinBytes = TryReadExactSkinBytes(state.Selection.CompanionPath);
+	if (skinBytes is not null)
+	{
+		using MemoryStream skinStream = new(skinBytes, writable: false);
+		M2SkinDocument skin = M2SkinReader.Read(skinStream, state.Selection.CompanionPath);
+		state = M2SkinProfileRuntime.Load(state, skin);
+		state = M2SkinProfileRuntime.Initialize(state);
+	}
+
+	PrintM2Summary(model, state);
+}
+
 static void RunMdx(string[] args)
 {
 	if (args.Length == 0)
@@ -192,6 +303,34 @@ static void RunMdxInspect(string[] args)
 	PrintMdxSummary(summary);
 }
 
+static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState state)
+{
+	string modelName = string.IsNullOrWhiteSpace(model.ModelName) ? "n/a" : model.ModelName;
+	Console.WriteLine($"M2: requestedPath={model.Identity.RequestedPath} canonicalPath={model.Identity.CanonicalModelPath} canonicalized={model.Identity.WasCanonicalized} signature={model.Signature} version=0x{model.Version:X} model={modelName} boundsMin={FormatVector(model.BoundsMin)} boundsMax={FormatVector(model.BoundsMax)} boundsRadius={model.BoundsRadius:F3} embeddedSkinProfiles={model.EmbeddedSkinProfileCount}");
+
+	if (state.LoadedSkin is null)
+	{
+		string compatibilityHint = model.HasEmbeddedSkinProfiles
+			? " compatibilityFallbackHint=embedded-root-profile-present"
+			: string.Empty;
+		Console.WriteLine($"SKIN: stage={state.Stage} profileIndex={state.Selection.ProfileIndex} exactPath={state.Selection.CompanionPath} loaded=false{compatibilityHint}");
+		return;
+	}
+
+	M2SkinDocument skin = state.LoadedSkin;
+	string compatibilityMode = state.ActiveSkinProfile?.UsesCompatibilityFallback == true ? " compatibilityMode=true" : string.Empty;
+	Console.WriteLine($"SKIN: stage={state.Stage} profileIndex={state.Selection.ProfileIndex} exactPath={state.Selection.CompanionPath} loaded=true vertexLookup={skin.VertexLookupCount} triangleIndices={skin.TriangleIndexCount} boneLookup={skin.BoneLookupCount} submeshes={skin.SubmeshCount} batches={skin.BatchCount} globalVertexOffset={skin.GlobalVertexOffset} shadowBatches={skin.ShadowBatchCount}{compatibilityMode}");
+	for (int index = 0; index < skin.Submeshes.Count; index++)
+	{
+		M2SkinSubmesh submesh = skin.Submeshes[index];
+		Console.WriteLine($"SKIN.SUBMESH[{index}]: sectionId={submesh.SkinSectionId} level={submesh.Level} vertexStart={submesh.VertexStart} vertexCount={submesh.VertexCount} indexStart={submesh.IndexStart} indexCount={submesh.IndexCount}");
+	}
+	for (int index = 0; index < skin.Batches.Count; index++)
+	{
+		M2SkinBatch batch = skin.Batches[index];
+		Console.WriteLine($"SKIN.BATCH[{index}]: flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} skinSectionIndex={batch.SkinSectionIndex} colorIndex={batch.ColorIndex} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+	}
+}
 static void RunMdxExportJson(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -2378,6 +2517,8 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect mdx inspect --input <file.mdx>");
 	Console.WriteLine("  wowviewer-inspect mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]");
+	Console.WriteLine("  wowviewer-inspect m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>]");
+	Console.WriteLine("  wowviewer-inspect m2 inspect --archive-root <game|data dir> --virtual-path <path/to/file.m2|file.mdx|file.mdl> [--listfile <listfile.txt>] [--profile-index <n>]");
 	Console.WriteLine("  wowviewer-inspect mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
 	Console.WriteLine("  wowviewer-inspect mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
 	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
@@ -2400,6 +2541,13 @@ static void ShowBlpUsage()
 	Console.WriteLine("BLP commands:");
 	Console.WriteLine("  blp inspect --input <file.blp>");
 	Console.WriteLine("  blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
+}
+
+static void ShowM2Usage()
+{
+	Console.WriteLine("M2 commands:");
+	Console.WriteLine("  m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>]");
+	Console.WriteLine("  m2 inspect --archive-root <game|data dir> --virtual-path <path/to/file.m2|file.mdx|file.mdl> [--listfile <listfile.txt>] [--profile-index <n>]");
 }
 
 static void ShowMdxUsage()

@@ -26,7 +26,7 @@ Current plan-adherence reality:
 Current implementation policy:
 
 - `WowViewer.Core.PM4`, `WowViewer.Core`, and `WowViewer.Core.IO` are the canonical implementation targets for new `wow-viewer` work.
-- M2 runtime, skin-profile ownership, model lighting, shader or effect routing, and model-render performance work should also be treated as canonical `wow-viewer` work even though a dedicated M2 library area has not been created yet.
+- M2 runtime, skin-profile ownership, model lighting, shader or effect routing, and model-render performance work are canonical `wow-viewer` work; the first dedicated M2 library/runtime foundation now lives under `src/core/WowViewer.Core/M2`, `src/core/WowViewer.Core.IO/M2`, and `src/core/WowViewer.Core.Runtime/M2`.
 - `gillijimproject_refactor`, including `MdxViewer` and `WoWMapConverter`, is now a reference or compatibility input for `wow-viewer` work, not the default owner of the design.
 - Default validation for `wow-viewer` work is `dotnet build .\WowViewer.slnx -c Debug`, `dotnet test .\WowViewer.slnx -c Debug`, and the relevant inspect or converter command against the fixed development dataset.
 - Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
@@ -303,6 +303,8 @@ Current non-PM4 inspect slice:
 - `tools/inspect/WowViewer.Tool.Inspect` now also supports:
 	- `blp inspect --input <file.blp>`
 	- `blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
+	- `m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>]`
+	- `m2 inspect --archive-root <game|data dir> --virtual-path <path/to/file.m2|file.mdx|file.mdl> [--listfile <listfile.txt>] [--profile-index <n>]`
 	- `mdx inspect --input <file.mdx>`
 	- `mdx inspect --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>]`
 	- `mdx export-json --input <file.mdx> [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]`
@@ -313,6 +315,7 @@ Current non-PM4 inspect slice:
 	- `wmo inspect --input <file.wmo> [--dump-lights]`
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
+	- it now also reports a first shared M2 foundation summary for canonicalized model identity, strict `MD20` root acceptance, typed bounds/name metadata, exact numbered `%02d.skin` profile selection, staged choose/load/initialize runtime state, and strict external `SKIN` table counts when a model and matching sidecar are available
 	- it now also reports a first shared `BLP` header summary for format signature, version, compression fields, pixel format, image size, palette or JPEG-header presence, and per-mip offset or size coverage when a texture file is inspected
 	- it now also reports a first shared `MDX` top-level summary for `MDLX` signature, chunk order, known-vs-unknown chunk coverage, `VERS`, narrow `MODL` name or bounds or blend-time signals, shared `GLBS` global-sequence signals, shared `SEQS` sequence signals, shared classic `GEOS` geoset signals, shared classic `GEOA` geoset-animation signals, shared classic `BONE` skeleton signals, shared classic `HELP` node signals, shared classic `ATCH` attachment signals, shared classic `PRE2` particle-emitter signals, shared classic `RIBB` ribbon-emitter signals, shared classic `CAMS` camera signals, shared classic `EVTS` event-node signals, shared classic `HTST` hit-test-shape signals, shared classic `CLID` collision-mesh signals, shared `PIVT` pivot-point signals, shared `TEXS` texture-table paths or flags, and narrow `MTLS` material-layer signals when a model file is inspected
 	- `mdx export-json` now remains a thin shared-reader export surface and can include the shared `GEOS` payload seam through `--include-geometry`, the shared `CLID` payload seam through `--include-collision`, the shared `HTST` payload seam through `--include-hit-test`, and the shared `TXAN` payload seam through `--include-texture-animations`

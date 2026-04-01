@@ -52,6 +52,7 @@ public sealed class M2Profile
     public required string ProfileId { get; init; }
     public required ModelRootMagic RequiredRootMagic { get; init; }
     public required bool AllowMd21Container { get; init; }
+    public required bool AllowsEmbeddedSkinProfileFallback { get; init; }
     public required int MinSupportedVersion { get; init; }
     public required int MaxSupportedVersion { get; init; }
     public required bool UseTypedOffsetCountTable { get; init; }
@@ -353,8 +354,26 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_301_8303",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = false,
+        AllowsEmbeddedSkinProfileFallback = true,
         MinSupportedVersion = 0x104,
         MaxSupportedVersion = 0x108,
+        UseTypedOffsetCountTable = true,
+        StrictSpanValidation = true,
+        VersionSplitThreshold = 0x108,
+        SkinLikeAStride = 0x70,
+        SkinLikeBStride = 0x2C,
+        EffectLikeAStride = 0xD4,
+        EffectLikeBStride = 0x7C
+    };
+
+    public static readonly M2Profile M2Profile2005610Beta = new()
+    {
+        ProfileId = "M2Profile_200_5610_Beta",
+        RequiredRootMagic = ModelRootMagic.MD20,
+        AllowMd21Container = false,
+        AllowsEmbeddedSkinProfileFallback = true,
+        MinSupportedVersion = 0x100,
+        MaxSupportedVersion = 0x100,
         UseTypedOffsetCountTable = true,
         StrictSpanValidation = true,
         VersionSplitThreshold = 0x108,
@@ -369,6 +388,7 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_20x_Unknown",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = false,
+        AllowsEmbeddedSkinProfileFallback = false,
         MinSupportedVersion = 0x104,
         MaxSupportedVersion = 0x107,
         UseTypedOffsetCountTable = true,
@@ -385,6 +405,7 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_335_12340",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = true,
+        AllowsEmbeddedSkinProfileFallback = false,
         MinSupportedVersion = 0x108,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -401,6 +422,7 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_30x_Unknown",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = false,
+        AllowsEmbeddedSkinProfileFallback = false,
         MinSupportedVersion = 0x104,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -417,6 +439,7 @@ public static class FormatProfileRegistry
         ProfileId = "M2Profile_40x_Unknown",
         RequiredRootMagic = ModelRootMagic.MD20,
         AllowMd21Container = true,
+        AllowsEmbeddedSkinProfileFallback = false,
         MinSupportedVersion = 0x108,
         MaxSupportedVersion = 0x108,
         UseTypedOffsetCountTable = true,
@@ -667,6 +690,9 @@ public static class FormatProfileRegistry
     {
         if (string.Equals(buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase))
             return M2Profile33512340;
+
+        if (string.Equals(buildVersion, "2.0.0.5610", StringComparison.OrdinalIgnoreCase))
+            return M2Profile2005610Beta;
 
         if (IsPreRelease301Build(buildVersion))
             return M2Profile3018303;

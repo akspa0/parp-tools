@@ -138,7 +138,7 @@ internal static class AssetProbe
 
         if (adaptedModel == null
             && !anySkinFound
-            && string.Equals(profile?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            && profile?.AllowsEmbeddedSkinProfileFallback == true)
         {
             try
             {

@@ -2,6 +2,26 @@
 
 # Active Context
 
+## Mar 31, 2026 - wow-viewer M2 Foundation Slice 01 Landed
+
+- `wow-viewer` now has its first dedicated M2 library/runtime seam for slice 01 instead of only prompt-routing coverage
+- landed code areas:
+	- `wow-viewer/src/core/WowViewer.Core/M2/*`
+	- `wow-viewer/src/core/WowViewer.Core.IO/M2/*`
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/M2/*`
+	- `wow-viewer/tests/WowViewer.Core.Tests/M2FoundationTests.cs`
+	- `wow-viewer/tools/inspect/WowViewer.Tool.Inspect/Program.cs` now exposes `m2 inspect`
+- landed behavior:
+	- canonical `.mdl` / `.mdx` / `.m2` identity normalization into `.m2`
+	- strict `MD20` root validation plus typed model metadata summary
+	- strict external `SKIN` parsing with exact numbered `%02d.skin` ownership
+	- explicit choose/load/initialize skin-profile staging in `WowViewer.Core.Runtime`
+	- compatibility-only embedded root-profile hints remain metadata, not the primary ownership model
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- proof level is library/build/test coverage plus thin inspect CLI ownership; no real extracted M2 asset was available in-repo for runtime signoff
+
 ## Mar 31, 2026 - Ordered M2 Runtime Prompt Set Landed For wow-viewer
 
 - the workspace now has a dedicated staged prompt surface for M2 runtime/rendering recovery instead of routing that work through only PM4/shared-I/O/world-runtime prompts
@@ -18,8 +38,8 @@
 	- M2 parser/runtime/rendering work should now route through the dedicated M2 prompt set, not be forced into the broader world-runtime split prompt unless the real problem is still `WorldScene` ownership
 	- `MdxViewer` remains a compatibility/reference input for proof and diagnostics, not the design owner of future M2 seams
 - important boundary:
-	- this is workflow/continuity work only
-	- no new M2 library slice has landed in `wow-viewer` yet from this prompt set itself
+	- this entry was workflow/continuity work only at the time it landed
+	- slice 01 has since landed separately in `wow-viewer`; use the newer Mar 31 foundation entry above as the current state
 
 ## Mar 31, 2026 - Remaining Giant-Root M2 Failures Now Point At The Shaded Draw Path, Not Placement
 

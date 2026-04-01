@@ -1342,9 +1342,11 @@ void main() {
             }
         }
 
+        bool allowsEmbeddedSkinFallback = FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.AllowsEmbeddedSkinProfileFallback == true;
+
         if (!anySkinFound)
         {
-            if (string.Equals(FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+            if (allowsEmbeddedSkinFallback)
             {
                 try
                 {
@@ -1363,7 +1365,12 @@ void main() {
             }
 
             if (_loggedMissingDoodadSkinPaths.Add(resolvedModelPath))
-                ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}");
+            {
+                string message = allowsEmbeddedSkinFallback
+                    ? $"[M2] No external .skin or usable embedded root-profile geometry for WMO doodad: {Path.GetFileName(originalModelPath)}"
+                    : $"[M2] Missing WMO doodad .skin for: {Path.GetFileName(originalModelPath)}";
+                ViewerLog.Important(ViewerLog.Category.Mdx, message);
+            }
         }
 
         if (WarcraftNetM2Adapter.IsMd20(modelData))
