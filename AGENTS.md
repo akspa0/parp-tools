@@ -44,6 +44,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Use `.codex/prompts/wow-viewer-shared-io-implementation.md` for the next narrow shared `Core` or `Core.IO` format slice.
 - Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
 - Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
+- Use `.github/prompts/m2-rendering-investigation.prompt.md` for diagnosing invisible M2 models, Ghidra-based native-client M2 render investigation on a live 3.3.5.12340 sandbox, adapter vertex/index validation against native ground truth, or renderer parity fixes for M2-family assets in `MdxViewer`.
 
 ## wow-viewer M2 And Runtime Guardrails
 

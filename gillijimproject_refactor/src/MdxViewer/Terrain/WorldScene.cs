@@ -5220,8 +5220,8 @@ public class WorldScene : ISceneRenderer
             float yawRadians = actorDirection.LengthSquared() > 0.0001f
                 ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
                 : 0f;
-            string modelPath = _assets.ResolveCanonicalAssetPath(actorModelPath.Replace('/', '\\'));
-            string key = _assets.ResolveCanonicalAssetKey(modelPath);
+            string modelPath = actorModelPath.Replace('/', '\\');
+            string key = WorldAssetManager.NormalizeKey(modelPath);
             _assets.QueueMdxLoad(key);
 
             var transform = Matrix4x4.CreateScale(scale)
@@ -5527,8 +5527,7 @@ public class WorldScene : ISceneRenderer
                 bbMin = p.Position - new Vector3(2f);
                 bbMax = p.Position + new Vector3(2f);
             }
-            string modelPath = _assets.ResolveCanonicalAssetPath(mdxNames[p.NameIndex]);
-            key = _assets.ResolveCanonicalAssetKey(modelPath);
+            string modelPath = mdxNames[p.NameIndex];
             var instance = new ObjectInstance
             {
                 ModelKey = key,
@@ -5588,8 +5587,7 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
-            string wmoPath = _assets.ResolveCanonicalAssetPath(wmoNames[p.NameIndex]);
-            key = _assets.ResolveCanonicalAssetKey(wmoPath);
+            string wmoPath = wmoNames[p.NameIndex];
             _wmoInstances.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -5705,8 +5703,7 @@ public class WorldScene : ISceneRenderer
             }
             else
             { bbMin = p.Position - new Vector3(2f); bbMax = p.Position + new Vector3(2f); }
-            string modelPath = _assets.ResolveCanonicalAssetPath(mdxNames[p.NameIndex]);
-            key = _assets.ResolveCanonicalAssetKey(modelPath);
+            string modelPath = mdxNames[p.NameIndex];
             var instance = new ObjectInstance
             {
                 ModelKey = key, Transform = transform, BoundsMin = bbMin, BoundsMax = bbMax,
@@ -5757,8 +5754,7 @@ public class WorldScene : ISceneRenderer
                 worldMax = p.BoundsMax;
             }
 
-            string wmoPath = _assets.ResolveCanonicalAssetPath(wmoNames[p.NameIndex]);
-            key = _assets.ResolveCanonicalAssetKey(wmoPath);
+            string wmoPath = wmoNames[p.NameIndex];
             tileWmo.Add(new ObjectInstance
             {
                 ModelKey = key,
@@ -5938,10 +5934,10 @@ public class WorldScene : ISceneRenderer
             if (string.IsNullOrWhiteSpace(spawn.ModelPath))
                 continue;
 
-            string modelPath = _assets.ResolveCanonicalAssetPath(spawn.ModelPath.Replace('/', '\\'));
+            string modelPath = spawn.ModelPath.Replace('/', '\\');
             bool isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
 
-            string key = _assets.ResolveCanonicalAssetKey(modelPath);
+            string key = WorldAssetManager.NormalizeKey(modelPath);
             float orientationRadians = spawn.OrientationWowRadians;
             float yawOffsetRadians = spawn.SpawnType == WorldSpawnType.Creature ? MathF.PI : 0f;
             float finalYawRadians = orientationRadians + yawOffsetRadians;
@@ -6491,21 +6487,14 @@ public class WorldScene : ISceneRenderer
             {
                 if (frame.VisibleMdxInstances.Count > 0)
                 {
-                    foreach (var visible in frame.VisibleMdxInstances)
-                    {
-                        if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
-                            continue;
-
-                        batchRenderer = visible.Renderer;
-                        batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                            lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                        break;
-                    }
+                    batchRenderer = frame.VisibleMdxInstances[0].Renderer;
+                    batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
 
                 foreach (var visible in frame.VisibleMdxInstances)
                 {
-                    if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
+                    if (visible.Renderer.RequiresUnbatchedWorldRender)
                     {
                         visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
                             fogColor, objectFogStart, objectFogEnd, cameraPos,
@@ -6562,7 +6551,7 @@ public class WorldScene : ISceneRenderer
                 foreach (var (visibleIdx, _) in frame.TransparentSortScratch)
                 {
                     var visible = frame.VisibleMdxInstances[visibleIdx];
-                    if (visible.Renderer.RequiresUnbatchedWorldRender || visible.Renderer.IsM2AdapterModel)
+                    if (visible.Renderer.RequiresUnbatchedWorldRender)
                     {
                         visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
                             fogColor, objectFogStart, objectFogEnd, cameraPos,

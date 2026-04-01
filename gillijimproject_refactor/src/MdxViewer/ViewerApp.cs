@@ -79,7 +79,6 @@ public partial class ViewerApp : IDisposable
         new("Alpha (0.x) - 0.9.0.3807", "0.9.0.3807"),
         new("Alpha (0.x) - 0.9.1.3810", "0.9.1.3810"),
         new("Alpha (0.x) - 0.10.3892", "0.10.3892"),
-        new("Burning Crusade beta (2.0.0) - 2.0.0.5610", "2.0.0.5610"),
         new("Burning Crusade (2.x) - 2.4.3.8606", "2.4.3.8606"),
         new("Wrath (3.x) - 3.0.1.8303", "3.0.1.8303"),
         new("Wrath (3.x) - 3.3.5.12340", "3.3.5.12340"),
@@ -137,7 +136,7 @@ public partial class ViewerApp : IDisposable
     private List<string> _filteredFiles = new();
     private string _searchFilter = "";
     private string _extensionFilter = ".mdx";
-    private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl", ".m2" };
+    private static readonly string[] EarlyModelBrowserExtensions = { ".mdx", ".mdl" };
     private int _selectedFileIndex = -1;
     private string? _loadedFilePath;
     private string? _loadedFileName;
@@ -309,9 +308,8 @@ public partial class ViewerApp : IDisposable
     private const float DefaultSidebarWidth = 320f;
     private const float SidebarMinWidth = 260f;
     private const float SidebarMaxWidth = 720f;
-    private const float SidebarSplitterWidth = 16f;
-    private const float SidebarSplitterVisualWidth = 4f;
-    private const float SceneViewportPreferredMinWidth = 420f;
+        private const float SidebarSplitterWidth = 8f;
+        private const float SceneViewportPreferredMinWidth = 420f;
     private float _leftSidebarWidth = DefaultSidebarWidth;
     private float _rightSidebarWidth = DefaultSidebarWidth;
     private const float MenuBarHeight = 22f;
@@ -5803,22 +5801,10 @@ void main() {
                 {
                     _dbdDir = dbdDir;
 
-                        string inferredBuildAlias = InferBuildFromPath(gamePath, dbdDir);
-                        string buildAlias = BuildVersionCatalog.ResolvePreferredBuildVersion(explicitBuildVersion, gamePath, dbdDefinitionsDir: dbdDir)
-                            ?? string.Empty;
-                        if (string.IsNullOrWhiteSpace(explicitBuildVersion))
-                        {
-                            ViewerLog.Trace($"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}");
-                        }
-                        else if (!string.IsNullOrWhiteSpace(inferredBuildAlias)
-                            && !string.Equals(explicitBuildVersion, buildAlias, StringComparison.OrdinalIgnoreCase))
-                        {
-                            ViewerLog.Trace($"[MdxViewer] Overriding requested build '{explicitBuildVersion}' with '{buildAlias}' inferred from path: {gamePath}");
-                        }
-                        else
-                        {
-                            ViewerLog.Trace($"[MdxViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
-                        }
+                    string buildAlias = explicitBuildVersion ?? InferBuildFromPath(gamePath, dbdDir);
+                    ViewerLog.Trace(explicitBuildVersion == null
+                        ? $"[MdxViewer] Inferred build: '{buildAlias}' from path: {gamePath}"
+                        : $"[MdxViewer] Using explicitly selected build: '{buildAlias}' for path: {gamePath}");
                     
                     if (!string.IsNullOrEmpty(buildAlias))
                     {
@@ -6662,7 +6648,126 @@ void main() {
     /// </summary>
     private static string InferBuildFromPath(string path, string? dbdDir)
     {
-        return BuildVersionCatalog.InferBuildVersionFromPath(path, dbdDir) ?? string.Empty;
+        // Collect all known builds from WoWDBDefs (cached per call)
+        HashSet<string> dbdBuilds = new(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(dbdDir) && Directory.Exists(dbdDir))
+        {
+            // Parse Map.dbd — it covers all versions and is always present
+            var mapDbd = Path.Combine(dbdDir, "Map.dbd");
+            if (File.Exists(mapDbd))
+            {
+                foreach (var line in File.ReadLines(mapDbd))
+                {
+                    var trimmed = line.Trim();
+                    if (!trimmed.StartsWith("BUILD ")) continue;
+                    // Parse "BUILD X.Y.Z.NNNN" or "BUILD X.Y.Z.NNNN-X.Y.Z.NNNN" or comma-separated
+                    var parts = trimmed[6..].Split(',', StringSplitOptions.TrimEntries);
+                    foreach (var part in parts)
+                    {
+                        // Handle ranges: "0.9.0.3807-0.12.0.3988"
+                        var rangeParts = part.Split('-', StringSplitOptions.TrimEntries);
+                        foreach (var rp in rangeParts)
+                            if (Regex.IsMatch(rp, @"^\d+\.\d+\.\d+\.\d+$"))
+                                dbdBuilds.Add(rp);
+                    }
+                }
+            }
+        }
+        ViewerLog.Trace($"[BuildDetect] Loaded {dbdBuilds.Count} known builds from WoWDBDefs");
+
+        // 1. Extract all X.Y.Z.NNNN candidates from the path
+        var fullMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+\.\d+)");
+        foreach (Match m in fullMatches)
+        {
+            string candidate = m.Groups[1].Value;
+            if (dbdBuilds.Contains(candidate))
+            {
+                ViewerLog.Trace($"[BuildDetect] Exact match from path: {candidate}");
+                return candidate;
+            }
+        }
+
+        // 2. Extract X.Y.Z short versions and find matching full build in DBD
+        var shortMatches = Regex.Matches(path, @"(\d+\.\d+\.\d+)");
+        foreach (Match m in shortMatches)
+        {
+            string shortVer = m.Groups[1].Value;
+            // Find any DBD build that starts with this short version
+            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(shortVer + "."));
+            if (!string.IsNullOrEmpty(match))
+            {
+                ViewerLog.Trace($"[BuildDetect] Short version '{shortVer}' resolved to: {match}");
+                return match;
+            }
+        }
+
+        // 3. Check for full build in path that might be in a BUILD range (not exact endpoint)
+        foreach (Match m in fullMatches)
+        {
+            string candidate = m.Groups[1].Value;
+            // Try to find it in DBD range lines
+            string? rangeMatch = FindBuildInDbdRanges(dbdDir, candidate);
+            if (!string.IsNullOrEmpty(rangeMatch))
+            {
+                ViewerLog.Trace($"[BuildDetect] Range match from path: {candidate}");
+                return candidate;
+            }
+        }
+
+        // 4. Fallback: MPQ heuristics
+        if (Directory.Exists(path))
+        {
+            try
+            {
+                var mpqs = Directory.GetFiles(path, "*.mpq", SearchOption.AllDirectories)
+                    .Select(f => Path.GetFileName(f).ToLowerInvariant()).ToArray();
+
+                // LK 3.3.5: has patch MPQs with "3" in name
+                if (mpqs.Any(m => m.Contains("patch") && m.Contains("3")))
+                {
+                    var lkBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("3.3.5."));
+                    return lkBuild ?? "3.3.5.12340";
+                }
+
+                // Alpha 0.5.3: dbc.mpq + model.mpq + texture.mpq, no common.mpq or patch-*.mpq
+                bool hasAlphaSignature = mpqs.Contains("dbc.mpq")
+                    && mpqs.Contains("model.mpq")
+                    && mpqs.Contains("texture.mpq")
+                    && !mpqs.Any(m => m.StartsWith("common"))
+                    && !mpqs.Any(m => m.StartsWith("patch-"));
+                if (hasAlphaSignature)
+                {
+                    // Check for patch.mpq → 0.7.0+, otherwise 0.5.3
+                    bool hasPatch = mpqs.Contains("patch.mpq");
+                    if (hasPatch)
+                    {
+                        // 0.6.0–0.8.0 range: try each in order
+                        foreach (var prefix in new[] { "0.8.0.", "0.7.0.", "0.6.0." })
+                        {
+                            var match = dbdBuilds.FirstOrDefault(b => b.StartsWith(prefix));
+                            if (!string.IsNullOrEmpty(match))
+                            {
+                                ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha+patch): {match}");
+                                return match;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var alphaBuild = dbdBuilds.FirstOrDefault(b => b.StartsWith("0.5.3."));
+                        if (!string.IsNullOrEmpty(alphaBuild))
+                        {
+                            ViewerLog.Trace($"[BuildDetect] MPQ heuristic (alpha): {alphaBuild}");
+                            return alphaBuild;
+                        }
+                        return "0.5.3.3368";
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return "";
     }
 
     /// <summary>
@@ -6791,23 +6896,15 @@ void main() {
     private void LoadM2FromBytes(byte[] m2Bytes, string originalPath, string dir)
     {
         string resolvedModelPath = ResolveStandaloneCanonicalModelPath(originalPath);
-        string? effectiveBuildVersion = BuildVersionCatalog.ResolvePreferredBuildVersion(_dbcBuild, GetActiveGamePath(), originalPath);
-        if (!string.Equals(effectiveBuildVersion, _dbcBuild, StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(effectiveBuildVersion))
-        {
-            ViewerLog.Info(ViewerLog.Category.Mdx,
-                $"[M2] Standalone load for {Path.GetFileName(originalPath)} overriding build {_dbcBuild ?? "unknown"} -> {effectiveBuildVersion} based on source path");
-        }
-
-        var profile = FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion);
+        var profile = FormatProfileRegistry.ResolveModelProfile(_dbcBuild);
         if (profile == null)
         {
-            string buildLabel = string.IsNullOrWhiteSpace(effectiveBuildVersion) ? "unknown" : effectiveBuildVersion;
+            string buildLabel = string.IsNullOrWhiteSpace(_dbcBuild) ? "unknown" : _dbcBuild;
             throw new InvalidDataException(
                 $"Standalone M2-family loading is not supported for build {buildLabel}. Early clients should be browsed through .mdx/.mdl assets instead.");
         }
 
-        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, effectiveBuildVersion);
+        WarcraftNetM2Adapter.ValidateModelProfile(m2Bytes, resolvedModelPath, profile, _dbcBuild);
         var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
 
         Exception? lastError = null;
@@ -6827,14 +6924,8 @@ void main() {
                 try
                 {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
-                    var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, effectiveBuildVersion);
-                    LoadMdxModel(
-                        mdx,
-                        dir,
-                        resolvedModelPath,
-                        isM2AdapterModel: true,
-                        buildVersionOverride: effectiveBuildVersion,
-                        m2RuntimeInfo: new M2RuntimeLoadInfo("adapter-skin", skinPath, effectiveBuildVersion));
+                    var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
+                    LoadMdxModel(mdx, dir, resolvedModelPath, isM2AdapterModel: true);
                     CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
@@ -6860,20 +6951,12 @@ void main() {
             candidatePaths.Add(bestSkinPath);
         }
 
-        bool allowsEmbeddedSkinFallback = profile.AllowsEmbeddedSkinProfileFallback;
-
-        if (!anySkinFound && allowsEmbeddedSkinFallback)
+        if (!anySkinFound && string.Equals(FormatProfileRegistry.ResolveModelProfile(_dbcBuild)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
         {
             try
             {
-                var embeddedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, null, resolvedModelPath, effectiveBuildVersion);
-                LoadMdxModel(
-                    embeddedMdx,
-                    dir,
-                    resolvedModelPath,
-                    isM2AdapterModel: true,
-                    buildVersionOverride: effectiveBuildVersion,
-                    m2RuntimeInfo: new M2RuntimeLoadInfo("adapter-embedded", null, effectiveBuildVersion));
+                var embeddedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, null, resolvedModelPath, _dbcBuild);
+                LoadMdxModel(embeddedMdx, dir, resolvedModelPath, isM2AdapterModel: true);
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(originalPath)} after no external .skin resolved");
                 _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -6889,7 +6972,7 @@ void main() {
 
         if (WarcraftNetM2Adapter.IsMd20(m2Bytes))
         {
-            byte[]? convertedBytes = ConvertStandaloneM2ToMdx(m2Bytes, resolvedModelPath, effectiveBuildVersion);
+            byte[]? convertedBytes = ConvertStandaloneM2ToMdx(m2Bytes, resolvedModelPath);
             if (convertedBytes != null && convertedBytes.Length > 0)
             {
                 try
@@ -6898,13 +6981,7 @@ void main() {
                     var convertedMdx = MdxFile.Load(convertedStream);
                     if (WarcraftNetM2Adapter.HasRenderableGeometry(convertedMdx))
                     {
-                        LoadMdxModel(
-                            convertedMdx,
-                            dir,
-                            resolvedModelPath,
-                            isM2AdapterModel: true,
-                            buildVersionOverride: effectiveBuildVersion,
-                            m2RuntimeInfo: new M2RuntimeLoadInfo("converter-fallback", null, effectiveBuildVersion));
+                        LoadMdxModel(convertedMdx, dir, resolvedModelPath, isM2AdapterModel: true);
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(originalPath)} after adapter failure");
                         _statusMessage = $"Loaded M2: {Path.GetFileName(originalPath)}";
@@ -6927,9 +7004,14 @@ void main() {
 
         if (!anySkinFound)
         {
-            InvalidDataException missingSkinError = allowsEmbeddedSkinFallback
+            bool isTracedPreRelease301 = string.Equals(
+                FormatProfileRegistry.ResolveModelProfile(_dbcBuild)?.ProfileId,
+                FormatProfileRegistry.M2Profile3018303.ProfileId,
+                StringComparison.Ordinal);
+
+            InvalidDataException missingSkinError = isTracedPreRelease301
                 ? new InvalidDataException(
-                    $"No external .skin resolved and no usable embedded root profile was available for M2: {Path.GetFileName(originalPath)}")
+                    $"No external .skin resolved for pre-release M2: {Path.GetFileName(originalPath)}. wow.exe 3.0.1.8303 traces root-contained profile tables for CM2Shared; MdxViewer root-profile geometry parsing is still incomplete.")
                 : new InvalidDataException($"Missing companion .skin for M2: {Path.GetFileName(originalPath)}");
 
             if (_loggedStandaloneMissingSkinPaths.Add(resolvedModelPath))
@@ -7402,7 +7484,7 @@ void main() {
         }
     }
 
-    private byte[]? ConvertStandaloneM2ToMdx(byte[] m2Bytes, string resolvedModelPath, string? buildVersionOverride = null)
+    private byte[]? ConvertStandaloneM2ToMdx(byte[] m2Bytes, string resolvedModelPath)
     {
         try
         {
@@ -7422,7 +7504,7 @@ void main() {
             }
 
             var converter = new M2ToMdxConverter();
-            return converter.ConvertToBytes(m2Bytes, skinBytes, buildVersionOverride ?? _dbcBuild);
+            return converter.ConvertToBytes(m2Bytes, skinBytes, _dbcBuild);
         }
         catch (Exception ex)
         {
@@ -7732,7 +7814,7 @@ void main() {
         }
     }
 
-    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null, string? buildVersionOverride = null, M2RuntimeLoadInfo? m2RuntimeInfo = null)
+    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null)
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
@@ -7763,8 +7845,7 @@ void main() {
         int pivotPointCount = sharedSummary?.PivotPointCount ?? mdx.PivotPoints.Count;
         CoreMdxCollisionSummary? collision = sharedSummary?.Collision;
 
-        string? rendererBuildVersion = buildVersionOverride ?? _dbcBuild;
-        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, rendererBuildVersion);
+        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild);
 
         if (sharedRuntimeInfo != null)
         {
@@ -7775,46 +7856,21 @@ void main() {
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
 
-        var modelInfo = new StringBuilder();
-        if (isM2AdapterModel)
-        {
-            modelInfo.AppendLine("Type: M2 (adapted runtime)");
-            modelInfo.AppendLine($"Version: {versionLabel}");
-            modelInfo.AppendLine($"Name: {modelName}");
-
-            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.Route))
-                modelInfo.AppendLine($"Route: {m2RuntimeInfo.Value.Route}");
-            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.BuildVersion))
-                modelInfo.AppendLine($"Build: {m2RuntimeInfo.Value.BuildVersion}");
-            if (!string.IsNullOrWhiteSpace(m2RuntimeInfo?.SelectedSkinPath))
-                modelInfo.AppendLine($"Skin: {m2RuntimeInfo.Value.SelectedSkinPath}");
-            if (!string.IsNullOrWhiteSpace(virtualPath))
-                modelInfo.AppendLine($"Source: {virtualPath}");
-
-            modelInfo.AppendLine();
-        }
-        else
-        {
-            modelInfo.AppendLine("Type: MDX (Alpha 0.5.3)");
-            modelInfo.AppendLine($"Version: {versionLabel}");
-            modelInfo.AppendLine($"Name: {modelName}");
-            modelInfo.AppendLine();
-        }
-
-        modelInfo.AppendLine($"Geosets: {geosetCount} ({validGeosets} valid)");
-        modelInfo.AppendLine($"Vertices: {totalVerts:N0}");
-        modelInfo.AppendLine($"Triangles: {totalTris:N0}");
-        modelInfo.AppendLine($"Pivot Points: {pivotPointCount}");
-        if (collision != null)
-            modelInfo.AppendLine($"Collision: {collision.VertexCount} verts, {collision.TriangleCount} tris");
-
-        modelInfo.AppendLine();
-        modelInfo.AppendLine($"Materials: {materialCount}");
-        modelInfo.AppendLine($"Textures: {textureCount}");
-        modelInfo.AppendLine($"Bones: {boneCount}");
-        modelInfo.AppendLine($"Sequences: {sequenceCount}");
-
-        _modelInfo = modelInfo.ToString();
+        _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +
+                     $"Version: {versionLabel}\n" +
+                     $"Name: {modelName}\n\n" +
+                     $"Geosets: {geosetCount} ({validGeosets} valid)\n" +
+                     $"Vertices: {totalVerts:N0}\n" +
+                     $"Triangles: {totalTris:N0}\n" +
+                     $"Pivot Points: {pivotPointCount}\n" +
+                     (collision != null
+                        ? $"Collision: {collision.VertexCount} verts, {collision.TriangleCount} tris\n"
+                        : string.Empty) +
+                     "\n" +
+                     $"Materials: {materialCount}\n" +
+                     $"Textures: {textureCount}\n" +
+                     $"Bones: {boneCount}\n" +
+                     $"Sequences: {sequenceCount}\n";
 
         if (mdx.Sequences.Count > 0)
         {
@@ -7833,8 +7889,7 @@ void main() {
             }
         }
 
-        string loadedKind = isM2AdapterModel ? "M2" : "MDX";
-        _statusMessage = $"Loaded {loadedKind}: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
+        _statusMessage = $"Loaded MDX: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
     }
 
     private MdxRuntimeSharedInfo? TryReadSharedMdxRuntimeInfo(string sourcePath, byte[] modelBytes)
@@ -7873,11 +7928,6 @@ void main() {
     private readonly record struct MdxRuntimeSharedInfo(
         CoreMdxSummary? Summary,
         CoreMdxGeometryFile? Geometry);
-
-    private readonly record struct M2RuntimeLoadInfo(
-        string Route,
-        string? SelectedSkinPath,
-        string? BuildVersion);
 
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {
@@ -8630,14 +8680,6 @@ void main() {
                 $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
                 $"Scale: {inst.PlacementScale:F3}\n" +
                 $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
-
-            if (_worldScene.SelectedObjectType == Terrain.ObjectType.Mdx
-                && _worldScene.Assets.TryGetLoadedMdx(inst.ModelKey, out var renderer)
-                && renderer != null)
-            {
-                _selectedObjectInfo += "\n" + renderer.GetSelectionDiagnostics();
-            }
-
             return;
         }
 
@@ -9071,19 +9113,6 @@ void main() {
             _lastLooseOverlayPath = settings.LastLooseOverlayPath ?? "";
             _knownGoodClientPaths = NormalizeKnownGoodClientPaths(settings.KnownGoodClientPaths);
             _selectedBuildOptionIndex = FindBuildOptionIndex(settings.LastSelectedBuildVersion);
-                if (!string.IsNullOrWhiteSpace(_lastGameFolderPath)
-                    && _clientBuildOptions.Count > 0
-                    && BuildVersionCatalog.TryInferBuildIndexFromPath(_clientBuildOptions, _lastGameFolderPath, out int inferredBuildIndex))
-                {
-                    int savedBuildIndex = Math.Clamp(_selectedBuildOptionIndex, 0, _clientBuildOptions.Count - 1);
-                    string savedBuildVersion = _clientBuildOptions[savedBuildIndex].BuildVersion;
-                    string inferredBuildVersion = _clientBuildOptions[inferredBuildIndex].BuildVersion;
-                    if (!string.Equals(savedBuildVersion, inferredBuildVersion, StringComparison.OrdinalIgnoreCase))
-                    {
-                        ViewerLog.Trace($"[ViewerSettings] Overriding stale saved build '{savedBuildVersion}' with '{inferredBuildVersion}' inferred from client path '{_lastGameFolderPath}'.");
-                        _selectedBuildOptionIndex = inferredBuildIndex;
-                    }
-                }
             _textureFilteringMode = Enum.IsDefined(typeof(TextureFilteringMode), settings.TextureFilteringMode)
                 ? (TextureFilteringMode)settings.TextureFilteringMode
                 : TextureFilteringMode.Trilinear;

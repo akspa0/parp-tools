@@ -116,11 +116,7 @@ public class WorldAssetManager : IDisposable
 
     public void SetBuildVersion(string? buildVersion)
     {
-        if (string.Equals(_buildVersion, buildVersion, StringComparison.OrdinalIgnoreCase))
-            return;
-
         _buildVersion = buildVersion;
-        InvalidateRendererCaches();
     }
 
     public void ApplyTextureSamplingSettings()
@@ -541,19 +537,6 @@ public class WorldAssetManager : IDisposable
 
     public static string NormalizeKey(string path) => path.Replace('/', '\\').ToLowerInvariant();
 
-    public string ResolveCanonicalAssetPath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return path;
-
-        return ResolveCanonicalModelPath(NormalizeKey(path));
-    }
-
-    public string ResolveCanonicalAssetKey(string path)
-    {
-        return NormalizeKey(ResolveCanonicalAssetPath(path));
-    }
-
     private static string? SwapMdlMdxExtension(string path)
     {
         if (path.EndsWith(".mdl", StringComparison.OrdinalIgnoreCase))
@@ -847,10 +830,6 @@ public class WorldAssetManager : IDisposable
         try
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
-            string? effectiveBuildVersion = BuildVersionCatalog.ResolvePreferredBuildVersion(
-                _buildVersion,
-                (_dataSource as MpqDataSource)?.GamePath,
-                resolvedModelPath);
             byte[]? data = ReadFileData(resolvedModelPath);
             if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
                 data = ReadFileData(normalizedKey);
@@ -869,7 +848,7 @@ public class WorldAssetManager : IDisposable
             // Keep byte-level conversion only as a fallback when the direct adapter path fails.
             if (isM2Family)
             {
-                WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, effectiveBuildVersion);
+                WarcraftNetM2Adapter.ValidateModelProfile(data, resolvedModelPath, _buildVersion);
 
                 var candidatePaths = new List<string>(WarcraftNetM2Adapter.BuildSkinCandidates(resolvedModelPath));
                 if (_dataSource != null)
@@ -894,11 +873,11 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, effectiveBuildVersion);
+                        var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
                         string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
+                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                     }
                     catch (Exception ex)
                     {
@@ -908,19 +887,17 @@ public class WorldAssetManager : IDisposable
                     }
                 }
 
-                bool allowsEmbeddedSkinFallback = FormatProfileRegistry.ResolveModelProfile(effectiveBuildVersion)?.AllowsEmbeddedSkinProfileFallback == true;
-
                 if (!anySkinFound)
                 {
-                    if (allowsEmbeddedSkinFallback)
+                    if (string.Equals(FormatProfileRegistry.ResolveModelProfile(_buildVersion)?.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
                     {
                         try
                         {
-                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, effectiveBuildVersion);
+                            var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, null, resolvedModelPath, _buildVersion);
                             string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
-                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
+                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                         }
                         catch (Exception ex)
                         {
@@ -930,12 +907,12 @@ public class WorldAssetManager : IDisposable
                         }
                     }
 
-                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey, allowsEmbeddedSkinFallback);
+                    RememberMissingM2SkinPath(resolvedModelPath, normalizedKey);
                 }
 
                 if (WarcraftNetM2Adapter.IsMd20(data))
                 {
-                    var convertedBytes = ConvertM2ToMdx(data, resolvedModelPath, effectiveBuildVersion);
+                    var convertedBytes = ConvertM2ToMdx(data, resolvedModelPath);
                     if (convertedBytes != null && convertedBytes.Length > 0)
                     {
                         try
@@ -947,7 +924,7 @@ public class WorldAssetManager : IDisposable
                                 string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
-                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, effectiveBuildVersion);
+                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
                             }
 
                             lastSkinError = new InvalidDataException(
@@ -977,13 +954,13 @@ public class WorldAssetManager : IDisposable
         }
         catch (Exception ex)
         {
-            if (_mdxLoadFailCount++ < 5)
-                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed: {Path.GetFileName(normalizedKey)}\n{ex}");
+            if (_mdxLoadFailCount++ < 20)
+                ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed [{_mdxLoadFailCount}]: {normalizedKey}\n{ex.Message}");
             return null;
         }
     }
 
-    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey, string? buildVersionOverride)
+    private byte[]? ConvertM2ToMdx(byte[] m2Bytes, string normalizedKey)
     {
         try
         {
@@ -999,7 +976,7 @@ public class WorldAssetManager : IDisposable
             }
 
             var converter = new M2ToMdxConverter();
-            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, buildVersionOverride ?? _buildVersion);
+            byte[] mdxBytes = converter.ConvertToBytes(m2Bytes, skinBytes, _buildVersion);
             ViewerLog.Trace($"[M2] Converted {Path.GetFileName(normalizedKey)}: {m2Bytes.Length} -> {mdxBytes.Length} bytes");
             return mdxBytes;
         }
@@ -1271,16 +1248,13 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey, bool allowsEmbeddedSkinFallback)
+    private void RememberMissingM2SkinPath(string resolvedModelPath, string normalizedKey)
     {
         _knownMissingM2SkinPaths.Add(resolvedModelPath);
 
         if (_loggedMissingM2SkinPaths.Add(resolvedModelPath))
         {
-            string message = allowsEmbeddedSkinFallback
-                ? $"[M2] No external .skin or usable embedded root-profile geometry for: {Path.GetFileName(normalizedKey)}"
-                : $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}";
-            ViewerLog.Important(ViewerLog.Category.Mdx, message);
+            ViewerLog.Important(ViewerLog.Category.Mdx, $"[M2] Missing companion .skin for: {Path.GetFileName(normalizedKey)}");
             return;
         }
 
@@ -1334,43 +1308,35 @@ public class WorldAssetManager : IDisposable
         }
     }
 
-    private void InvalidateRendererCaches()
+    public void Dispose()
     {
-        foreach (var renderer in _mdxModels.Values)
-            renderer?.Dispose();
+        foreach (var r in _mdxModels.Values)
+            r?.Dispose();
         _mdxModels.Clear();
         _mdxLru.Clear();
         _mdxLruMap.Clear();
 
-        foreach (var renderer in _wmoModels.Values)
-            renderer?.Dispose();
+        foreach (var r in _wmoModels.Values)
+            r?.Dispose();
         _wmoModels.Clear();
         _wmoLru.Clear();
         _wmoLruMap.Clear();
-
-        _priorityMdxLoads.Clear();
-        _pendingMdxLoads.Clear();
-        _queuedMdxLoads.Clear();
-        _priorityQueuedMdxLoads.Clear();
-
-        _priorityWmoLoads.Clear();
-        _pendingWmoLoads.Clear();
-        _queuedWmoLoads.Clear();
-        _priorityQueuedWmoLoads.Clear();
-    }
-
-    public void Dispose()
-    {
-        InvalidateRendererCaches();
 
         _fileDataCache.Clear();
         _fileLru.Clear();
         _fileLruMap.Clear();
 
+        _pendingMdxLoads.Clear();
+        _queuedMdxLoads.Clear();
+        _priorityQueuedMdxLoads.Clear();
+        _priorityWmoLoads.Clear();
+        _pendingWmoLoads.Clear();
+        _queuedWmoLoads.Clear();
+        _priorityQueuedWmoLoads.Clear();
         _bestSkinPathCache.Clear();
         _knownMissingM2SkinPaths.Clear();
         _loggedMissingM2SkinPaths.Clear();
-        _resolvedReadPathCache.Clear();
+        _priorityMdxLoads.Clear();
     }
 }
 

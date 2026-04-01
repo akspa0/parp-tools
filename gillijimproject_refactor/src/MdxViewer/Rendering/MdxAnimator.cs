@@ -37,11 +37,8 @@ public class MdxAnimator
     /// <summary>Number of bones in the skeleton</summary>
     public int BoneCount => _mdx.Bones.Count;
 
-    /// <summary>True if the model has any time-driven animation data.</summary>
+    /// <summary>True if the model has any bones with animation tracks</summary>
     public bool HasAnimation { get; }
-
-    /// <summary>True if the model has bone transform animation data that needs skinning matrices.</summary>
-    public bool HasSkeletalAnimation { get; }
 
     /// <summary>Current bone matrices (indexed by bone list position, not ObjectId)</summary>
     public Matrix4x4[] BoneMatrices => _boneMatrices;
@@ -293,13 +290,7 @@ public class MdxAnimator
         // Initialize global sequence frames
         _globalSeqFrames = new float[mdx.GlobalSequences.Count];
 
-        // Only enable skeletal skinning when bones have actual transform keys.
-        // Material, geoset, and UV animation data still need an animator instance,
-        // but they must not switch the renderer into bone-matrix mode.
-        HasSkeletalAnimation = mdx.Bones.Any(b =>
-            b.TranslationTrack?.Keys.Count > 0 ||
-            b.RotationTrack?.Keys.Count > 0 ||
-            b.ScalingTrack?.Keys.Count > 0);
+        // Check if any bones have animation tracks
         HasAnimation = HasAnimationData(mdx);
 
         // Initialize to identity
@@ -360,16 +351,13 @@ public class MdxAnimator
     /// <summary>Advance animation by deltaMs milliseconds and recompute bone matrices</summary>
     public void Update(float deltaMs)
     {
-        if (!HasAnimation && _globalSeqFrames.Length == 0) return;
+        if (!HasAnimation) return;
         
         // If paused, just recalculate bones at current frame without advancing time
         if (!IsPlaying)
         {
-            if (HasSkeletalAnimation)
-            {
-                foreach (int rootId in _rootBoneIds)
-                    UpdateBone(rootId, Matrix4x4.Identity);
-            }
+            foreach (int rootId in _rootBoneIds)
+                UpdateBone(rootId, Matrix4x4.Identity);
             return;
         }
 
@@ -399,11 +387,8 @@ public class MdxAnimator
         }
 
         // Traverse bone hierarchy from roots
-        if (HasSkeletalAnimation)
-        {
-            foreach (int rootId in _rootBoneIds)
-                UpdateBone(rootId, Matrix4x4.Identity);
-        }
+        foreach (int rootId in _rootBoneIds)
+            UpdateBone(rootId, Matrix4x4.Identity);
     }
 
     private void UpdateBone(int objectId, Matrix4x4 parentMatrix)

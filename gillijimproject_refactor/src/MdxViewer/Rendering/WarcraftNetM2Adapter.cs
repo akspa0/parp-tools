@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Numerics;
 using System.Reflection;
 using MdxLTool.Formats.Mdx;
@@ -189,6 +190,9 @@ internal static class WarcraftNetM2Adapter
         foreach (uint globalSequence in model.GlobalSequences)
             mdx.GlobalSequences.Add(globalSequence);
 
+        foreach (var bone in model.Bones)
+            mdx.Bones.Add(bone);
+
         foreach (var texture in model.Textures)
             mdx.Textures.Add(ToMdlTexture(texture));
 
@@ -345,6 +349,7 @@ internal static class WarcraftNetM2Adapter
             PopulateTransparencyMetadata(md21, modelBytes, data);
             PopulateColorMetadata(md21, modelBytes, data);
             PopulateUvAnimationMetadata(md21, modelBytes, data);
+            PopulateBoneMetadata(md21, modelBytes, data);
         }
         catch (Exception ex)
         {
@@ -439,10 +444,7 @@ internal static class WarcraftNetM2Adapter
                 Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
             });
 
-            // Keep adapted M2 world/runtime materials on the old conservative path until
-            // raw transparency/color/UV animation tables are proven on real assets. The
-            // newer metadata path can zero the only renderable layer for static doodads,
-            // which matches the current "bounds yes, object no" regression class.
+            ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
 
             int materialId = mdx.Materials.Count;
             mdx.Materials.Add(material);
@@ -530,6 +532,7 @@ internal static class WarcraftNetM2Adapter
     private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, int[] sectionMaterialIds, int materialCount)
     {
         var flatIndices = skin.TriangleIndices;
+        var boneLookup = model.BoneLookupTable.Count > 0 ? model.BoneLookupTable : null;
 
         for (int sectionIndex = 0; sectionIndex < skin.Submeshes.Count; sectionIndex++)
         {
@@ -564,7 +567,7 @@ internal static class WarcraftNetM2Adapter
                     mappedIndex = (ushort)geoset.Vertices.Count;
                     remap[localSkinVertexIndex] = mappedIndex;
 
-                    AddVertexToGeoset(geoset, vertex);
+                    AddVertexToGeoset(geoset, vertex, boneLookup, section.BoneComboIndex);
                 }
 
                 geoset.Indices.Add(mappedIndex);
@@ -586,6 +589,7 @@ internal static class WarcraftNetM2Adapter
 
         var geoset = new MdlGeoset { MaterialId = materialId };
         var remap = new Dictionary<ushort, ushort>();
+        var boneLookup = model.BoneLookupTable.Count > 0 ? model.BoneLookupTable : null;
 
         for (int indexPos = 0; indexPos < flatIndices.Count; indexPos++)
         {
@@ -598,7 +602,7 @@ internal static class WarcraftNetM2Adapter
                 mappedIndex = (ushort)geoset.Vertices.Count;
                 remap[localSkinVertexIndex] = mappedIndex;
 
-                AddVertexToGeoset(geoset, vertex);
+                AddVertexToGeoset(geoset, vertex, boneLookup);
             }
 
             geoset.Indices.Add(mappedIndex);
@@ -611,7 +615,7 @@ internal static class WarcraftNetM2Adapter
         return geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3 ? geoset : null;
     }
 
-    private static void AddVertexToGeoset(MdlGeoset geoset, ParsedVertexData vertex)
+    private static void AddVertexToGeoset(MdlGeoset geoset, ParsedVertexData vertex, IReadOnlyList<ushort>? boneLookup = null, int boneComboIndex = 0)
     {
         int vertexIndex = geoset.Vertices.Count;
         geoset.Vertices.Add(new C3Vector(vertex.Position.X, vertex.Position.Y, vertex.Position.Z));
@@ -620,6 +624,27 @@ internal static class WarcraftNetM2Adapter
         geoset.TexCoords.Insert(vertexIndex, new C2Vector(vertex.TextureCoord0X, vertex.TextureCoord0Y));
         geoset.TexCoords.Add(new C2Vector(vertex.TextureCoord1X, vertex.TextureCoord1Y));
         geoset.VertexGroups.Add(0);
+
+        geoset.M2BoneIndices.Add(new Vector4(
+            RemapBoneIndex(vertex.BoneIndex0, boneLookup, boneComboIndex),
+            RemapBoneIndex(vertex.BoneIndex1, boneLookup, boneComboIndex),
+            RemapBoneIndex(vertex.BoneIndex2, boneLookup, boneComboIndex),
+            RemapBoneIndex(vertex.BoneIndex3, boneLookup, boneComboIndex)));
+        geoset.M2BoneWeights.Add(new Vector4(
+            vertex.BoneWeight0 / 255f, vertex.BoneWeight1 / 255f,
+            vertex.BoneWeight2 / 255f, vertex.BoneWeight3 / 255f));
+    }
+
+    private static float RemapBoneIndex(byte rawIndex, IReadOnlyList<ushort>? boneLookup, int boneComboIndex)
+    {
+        if (boneLookup == null || boneLookup.Count == 0)
+            return rawIndex;
+
+        int lookupIndex = boneComboIndex + rawIndex;
+        if (lookupIndex >= 0 && lookupIndex < boneLookup.Count)
+            return boneLookup[lookupIndex];
+
+        return rawIndex;
     }
 
     private static bool TryGetVertex(ParsedModelData model, SkinData skin, ushort localSkinVertexIndex, out ParsedVertexData vertex)
@@ -642,6 +667,8 @@ internal static class WarcraftNetM2Adapter
 
     private static SkinData ParseSkinData(byte[] skinBytes, string modelPath, M2Profile? profile = null)
     {
+        _ = profile;
+
         try
         {
             var skin = new Skin(skinBytes);
@@ -1809,6 +1836,7 @@ internal static class WarcraftNetM2Adapter
                     VertexCount = s.VertexCount,
                     IndexStart = s.IndexStart,
                     IndexCount = s.IndexCount,
+                    BoneComboIndex = s.BoneComboIndex,
                 });
             }
 
@@ -1839,6 +1867,7 @@ internal static class WarcraftNetM2Adapter
         public int VertexCount { get; init; }
         public int IndexStart { get; init; }
         public int IndexCount { get; init; }
+        public int BoneComboIndex { get; init; }
     }
 
     private sealed class SkinTextureUnitData
@@ -1871,6 +1900,8 @@ internal static class WarcraftNetM2Adapter
         public List<ParsedColorData> Colors { get; } = new();
         public List<MdlTextureAnimation> TextureAnimations { get; } = new();
         public List<ParsedUvAnimationLookupData> UvAnimationLookup { get; } = new();
+        public List<MdlBone> Bones { get; } = new();
+        public List<ushort> BoneLookupTable { get; } = new();
         public int RawParticleEmitterCount { get; init; }
         public int RawRibbonEmitterCount { get; init; }
 
@@ -1893,6 +1924,14 @@ internal static class WarcraftNetM2Adapter
                     Normal = vertex.Normal,
                     TextureCoord0X = vertex.TextureCoordX,
                     TextureCoord0Y = vertex.TextureCoordY,
+                    BoneIndex0 = vertex.BoneIndices0,
+                    BoneIndex1 = vertex.BoneIndices1,
+                    BoneIndex2 = vertex.BoneIndices2,
+                    BoneIndex3 = vertex.BoneIndices3,
+                    BoneWeight0 = vertex.BoneWeight0,
+                    BoneWeight1 = vertex.BoneWeight1,
+                    BoneWeight2 = vertex.BoneWeight2,
+                    BoneWeight3 = vertex.BoneWeight3,
                 });
             }
 
@@ -1921,6 +1960,12 @@ internal static class WarcraftNetM2Adapter
                 {
                     TextureId = lookup.TextureID,
                 });
+            }
+
+            if (md21.BoneLookupTable != null)
+            {
+                foreach (var entry in md21.BoneLookupTable)
+                    data.BoneLookupTable.Add(entry.Bone);
             }
 
             return data;
@@ -2033,6 +2078,37 @@ internal static class WarcraftNetM2Adapter
             {
                 TextureAnimationId = NormalizeLookupIndex(ReadIntMember(lookup, "AnimatedTextureID")),
             });
+        }
+    }
+
+    private static void PopulateBoneMetadata(MD21 md21, byte[] rawBytes, ParsedModelData data)
+    {
+        data.Bones.Clear();
+
+        foreach (object bone in EnumerateMember(md21, "Bones"))
+        {
+            int boneId = data.Bones.Count;
+            short parentBone = (short)ReadIntMember(bone, "ParentBone");
+            object pivotObj = GetRequiredMemberValue(bone, "Pivot");
+            C3Vector pivot = ConvertVector(pivotObj);
+            uint flags = (uint)Convert.ToInt64(GetRequiredMemberValue(bone, "Flags"));
+
+            object translationBlock = GetRequiredMemberValue(bone, "Translation");
+            object rotationBlock = GetRequiredMemberValue(bone, "Rotation");
+            object scaleBlock = GetRequiredMemberValue(bone, "Scale");
+
+            var mdlBone = new MdlBone
+            {
+                ObjectId = boneId,
+                ParentId = parentBone,
+                Pivot = pivot,
+                Flags = flags,
+                TranslationTrack = ReadVectorTrack(translationBlock, rawBytes, data.Sequences),
+                RotationTrack = ReadQuaternionTrack(rotationBlock, rawBytes, data.Sequences),
+                ScalingTrack = ReadVectorTrack(scaleBlock, rawBytes, data.Sequences),
+            };
+
+            data.Bones.Add(mdlBone);
         }
     }
 
@@ -2176,7 +2252,16 @@ internal static class WarcraftNetM2Adapter
             throw new InvalidDataException($"Array reference type '{arrayReference.GetType().FullName}' did not expose GetElements(BinaryReader).");
 
         object? elements = getElements.Invoke(arrayReference, new object[] { br });
-        return elements as Array ?? Array.Empty<object>();
+
+        if (elements is Array arr)
+            return arr;
+
+        // ArrayReference<T>.GetElements returns IEnumerable<T> (yield-based iterator),
+        // which does not cast to Array. Materialize it so downstream code can index elements.
+        if (elements is System.Collections.IEnumerable enumerable)
+            return enumerable.Cast<object>().ToArray();
+
+        return Array.Empty<object>();
     }
 
     private static object? TryGetTrackSubValue(object instance, string memberName)
@@ -2330,6 +2415,8 @@ internal static class WarcraftNetM2Adapter
         public float TextureCoord0Y;
         public float TextureCoord1X;
         public float TextureCoord1Y;
+        public byte BoneIndex0, BoneIndex1, BoneIndex2, BoneIndex3;
+        public byte BoneWeight0, BoneWeight1, BoneWeight2, BoneWeight3;
     }
 
     private sealed class ParsedTextureData

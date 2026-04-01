@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace MdxLTool.Formats.Mdx;
 
 /// <summary>
@@ -79,6 +81,10 @@ public class MdlGeoset
     public int MaterialId { get; set; }
     public uint SelectionGroup { get; set; }
     public uint Flags { get; set; }
+
+    // Per-vertex bone data for M2-adapted models (bypass MDX group system)
+    public List<Vector4> M2BoneIndices { get; } = new();
+    public List<Vector4> M2BoneWeights { get; } = new();
 
     // Extent per animation
     public List<CMdlBounds> AnimExtents { get; } = new();
