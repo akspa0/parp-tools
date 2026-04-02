@@ -412,6 +412,188 @@ These are the key native functions identified and commented in Ghidra across the
 | `0x009d9128` | `FUN_009d9128` | shared M2 runtime-flag setter for `DAT_010a3b2c` |
 | `0x009d90a4` | `FUN_009d90a4` | helper that ORs `0xe000`-class scene-optimization bits into the shared M2 runtime flag word |
 
+## Win32 3.3.5.12340 x64dbg Breakpoint Anchors (Apr 01, 2026)
+
+These anchors were confirmed from offline Ghidra string xrefs in the loaded Win32 `WoW.exe` (`3.3.5.12340`) and are intended for live runtime validation through `x64dbg-mcp`.
+
+| Address | Current Label | Confirmed role |
+| --- | --- | --- |
+| `0x00835a80` | `M2_FormatSkinFilename_02d` | builds exact `%02d.skin` companion path from model basename |
+| `0x0083cc80` | `M2_ChooseAndLoadSkinProfile` | selects skin profile, loads skin payload, allocates texture array; emits `Failed to choose/load skin profile` diagnostics |
+| `0x00838490` | `M2_InitializeSkinProfileAndRebuildInstances` | validates skin payload blocks, initializes active skin profile, emits `Corrupt skin profile data` and `Failed to initialize model skin profile`, rebuilds live instances |
+| `0x00835a20` | `M2_FormatAnimFilename_04d_02d` | builds external animation filename `%04d-%02d.anim` |
+| `0x00836600` | `M2_BuildCombinerEffectName` | maps blend/flags into `Diffuse_*` + `Combiners_*` effect families |
+| `0x00402760` | `M2_RegisterRuntimeFlags` | registers `M2UseZFill`, `M2UseClipPlanes`, `M2UseThreads`, `M2BatchDoodads`, `M2BatchParticles`, `M2ForceAdditiveParticleSort`, `M2Faster`, `M2FasterDebug` and folds enabled state into a runtime bitfield |
+| `0x0053c430` | `M2_NormalizeModelPathAndProbeSkins` | normalizes `.mdl`/`.mdx` to `.m2` and probes `00.skin` through `03.skin` companions |
+
+Practical debugging order for runtime capture:
+
+1. `0x0083cc80` (choose/load skin)
+2. `0x00838490` (skin init/rebuild)
+3. `0x00836600` (combiner/effect routing)
+4. `0x00835a80` and `0x00835a20` (path formatting confirmation)
+
+This gives one contiguous evidence chain from skin ownership to draw-state family routing without requiring live Ghidra process attach.
+
+### Win32 live deep-capture update (Apr 01, 2026)
+
+Live x64dbg captures now confirm the expected choose/load/init/rebuild/effect chain on the Win32 `3.3.5.12340` process:
+
+- at `0x0083cd2a`, profile index `1` was selected with active threshold path `0x40`
+- at `0x0083cb60`, the formatter output was exact numbered skin ownership:
+	- `interface\\glues\\models\\ui_mainmenu_northrend\\ui_mainmenu_northrend01.skin`
+- at `0x0083cd32`, the post-load path reported success (`EAX=1`)
+- at `0x00838490` and `0x00838561`, skin-init completion set the loaded state bit (`...01` -> `...03`)
+- callback rebuild loop executed in the same chain with hits at `0x00824510` and `0x00832ea0`
+- combiner path returned a live effect handle from `M2_BuildCombinerEffectName` (`0x00836dab`, non-null `EAX`)
+
+Current boundary on that live pass:
+
+- captures were still in UI-model context, not world-path doodad context
+- world-path capture is still required for final renderer-parity decisions
+
+### Win32 hidden option and likely-dead branch notes (Apr 01, 2026)
+
+The Win32 pass now also recovered additional runtime-flag behavior and hidden-path seams:
+
+- shared runtime flag word: `DAT_00d3fcf4`
+	- getter `FUN_0081c0b0`
+	- setter `FUN_0081c0c0`
+	- high-bit OR helper `FUN_0081c060`
+- callback-owned low-bit toggles are explicit in Win32:
+	- `FUN_00402410` (`M2BatchDoodads`) -> bit `0x20`
+	- `FUN_00402470` (`M2BatchParticles`) -> bit `0x80`
+	- `FUN_004024d0` (`M2ForceAdditiveParticleSort`) -> bit `0x100`
+- registration nuance in `M2_RegisterRuntimeFlags` disassembly:
+	- `M2UseZFill`, `M2UseClipPlanes`, and `M2UseThreads` are registered with null callbacks
+	- batching/sort/faster controls register non-null callbacks
+	- implication: some controls may be startup-applied state rather than full runtime hot-toggle state unless another path re-applies them
+- `M2Faster` and `M2FasterDebug` callbacks (`FUN_004021c0`, `FUN_00402210`) route through `FUN_00402100` and can drive `0x2000`, `0x6000`, and `0xe000` optimization masks
+- likely dead startup fallback branch:
+	- `FUN_0081c0d0` only sets fallback bit `0x40` when `(flags & 0x8) == 0`
+	- `M2_RegisterRuntimeFlags` returns `uVar1 | 8`, and startup calls it directly before `FUN_0081c6e0`
+	- implication: this fallback branch is likely unreachable in normal startup-driven init unless flags are injected by a different path
+	- downstream note: `FUN_00824550` consults bit `0x40` in combinable-doodad gating, so an unreachable `0x40` setter changes effective runtime branch behavior
+- non-primary prewarm chain discovered:
+	- `M2_NormalizeModelPathAndProbeSkins` is called repeatedly from `FUN_0053c520`, `FUN_0053e810`, `FUN_0053e930`, and `FUN_0053eaa0`
+	- `FUN_006e7d60` and `FUN_006e7e00` feed this chain through `FUN_0053eaa0` during player-object update flows
+	- this appears to be an aggressive probe or warm-up path distinct from the strict choose/load/init runtime ownership path
+- secondary portrait-only render path observed:
+	- `FUN_00619580` performs dedicated portrait texture rendering using M2 cache/runtime state but a separate submission path and callback setup
+	- parity work should treat portrait and world paths as related but not equivalent rendering pipelines
+- strict load rejection path confirmed in Win32 cache-open routine (`FUN_0081c390`):
+	- logs `Model2: Invalid file extension: %s` on unsupported extensions
+	- logs `Model2: File not found: %s` on open failure
+	- still normalizes `.mdl`/`.mdx` to `.m2` before open
+	- includes additional cache behavior switches via loader flags (`0x10`, `0x8`, `0x40`) that can change keying/linkage/state behavior
+
+### Win32 subsystem sweep: rendering, shaders, liquids, particles, lighting, LIT status (Apr 02, 2026)
+
+This pass was a static/decompilation expansion in the same Win32 `3.3.5.12340` binary context, focused on subsystem ownership boundaries that should shape `wow-viewer` runtime design.
+
+#### Rendering and shader pipeline anchors
+
+- `FUN_00780f50` (world render init) explicitly reloads effect packs:
+	- `MapObj.wfx`
+	- `MapObjU.wfx`
+	- `Model2.wfx`
+	- `Particle.wfx`
+	- `ShadowMap.wfx`
+- `FUN_00876d90` loads `Shaders\Effects\%s` and routes through `ShaderEffectManager.cpp`-owned parse/bind setup.
+- `FUN_00876be0` creates or reuses effect objects keyed by effect name hash.
+- `FUN_00872d30` and `FUN_008728c0` bind explicit vertex/pixel shader names and combiner argument tables into effect objects.
+- `M2_BuildCombinerEffectName` (`0x00836600`) and `FUN_00836c90` remain the decisive M2 combiner-family selection seam.
+
+#### Shader-capability and feature gating anchors
+
+- `FUN_0068a9a0` and `FUN_00684c40` enumerate and log pixel/vertex shader capability and selected targets (`pixelShaderTarget`, `vertexShaderTarget`, shader constants).
+- `FUN_0078de60` (`specular`) hard-gates specular enablement on pixel shader capability (`Specular not enabled.  Requires pixel shaders.`).
+- `FUN_00787780` (`MapWeather.cpp`) registers `useWeatherShaders` and weather-density controls; weather rendering is shader-gated rather than fixed-function only.
+
+#### Liquid system anchors
+
+- Liquid shader/material constructors are explicit and split by family:
+	- `FUN_008a3e00` -> `vsLiquidProcWater%s` + `psLiquidProcWater%s`
+	- `FUN_008a3f70` -> `vsLiquidWater` + `psLiquidWater`
+	- `FUN_008a4070` -> `vsLiquidWaterNoSpec` + `psLiquidWaterNoSpec`
+	- `FUN_008a4190` -> `vsLiquidMagma` + `psLiquidMagma`
+- `FUN_008a1fa0` (`Material Bank`) and `FUN_008a28f0` (`Settings Bank`) resolve liquid type from DBC-backed banks and fall back to water when missing.
+- `FUN_00793d20` builds runtime liquid instances, resolves liquid type/material/settings, and logs missing-type fallback in WMO contexts.
+- `FUN_007cefd0` and `FUN_007cf790` show dedicated `MapChunkLiquid.cpp` buffer/object ownership (`CChunkBuf_Vertex`, `CChunkBuf_Index`, map chunk liquid object lifecycle).
+- `FUN_0079e1a0` loads water ripple shaders (`WaterRipples` vertex/pixel) and textures; `FUN_0079d460` gates ripple emission via runtime toggle state (`DAT_00adf7f0`) and water LOD state.
+
+#### Particle system anchors
+
+- `FUN_00821100` is the particle emitter merge path (`ParticleBatch`) with strict compatibility checks and vertex/index capacity limits.
+- `FUN_008214e0` dispatches either batched or direct particle submission depending on emitter flags; direct path logs `Particle: model=%s` and binds particle render state.
+- `FUN_0081f330` initializes particle effect-handle set (`Particle`, `Particle_Unlit`, `Projected_ModMod`, `Projected_ModMod_Unlit`, `Projected_ModAdd`, `Projected_ModAdd_Unlit`).
+- `FUN_00979170` allocates and manages `CParticleEmitter2_idx` pools.
+- `FUN_0078e400` and `FUN_0078d860` confirm live `particleDensity` cvar registration and range checking (`0.1..1.0`).
+
+#### Lighting anchors
+
+- Map/world lighting DB ownership is explicit through Light-family DBC seams:
+	- `FUN_008bdfc0` -> `DBFilesClient\\LightSkybox.dbc`
+	- `FUN_008bdfd0` -> `DBFilesClient\\LightParams.dbc`
+	- `FUN_008bdfe0` -> `DBFilesClient\\Light.dbc`
+	- `FUN_008be100` -> `DBFilesClient\\LightIntBand.dbc`
+	- `FUN_008be1a0` -> `DBFilesClient\\LightFloatBand.dbc`
+- `FUN_0079e7c0` allocates map lighting runtime classes (`WLIGHT`, `WCACHELIGHT`) during world/map system init.
+- Debug/script lighting command table is still live:
+	- `FUN_004e6c60` (`AddLight`)
+	- `FUN_004e6d60` (`AddCharacterLight`)
+	- `FUN_004e6e60` (`AddPetLight`)
+	- `FUN_004e6be0` (`ResetLights`)
+	- `FUN_00960d20` (`SetLight`)
+	- `FUN_00960dd0` (`GetLight`)
+- `FUN_0078ded0` enforces `mapObjLightLOD` range (`0..2`).
+
+#### LIT support status in this pass
+
+Current Win32 evidence says:
+
+- no discovered string/path references to standalone `.lit` or `.LIT` files
+- no discovered `%s.lit` formatter seam
+- only discovered `*Unlit*` usage is effect-mode naming (`Particle_Unlit`, `Projected_*_Unlit`), not a file-family loader
+- discovered lighting ownership is DBC-driven (`Light*.dbc`) plus shader/effect selection, not an obvious external `*.lit` asset seam
+
+Current classification for this binary pass:
+
+- no positive evidence of direct standalone `.lit` asset-file loading in the recovered Win32 renderer/runtime path
+- this is still an evidence-bounded statement, not a proof that no hidden path exists under all startup permutations
+
+#### Live open-path trace update (Apr 02, 2026)
+
+After restarting x64dbg and reattaching to the same Win32 process, a targeted live trace sampled the Storm open wrapper path at `FUN_004609b0`:
+
+- sampled open path: `sound\\emitters\\Emitter_Stormwind_BehindtheGate_03.wav`
+- sampled open path: `Shaders\\Pixel\\ps_3_0\\Desaturate.bls`
+
+These live samples add positive evidence that active runtime open traffic is currently hitting expected audio/shader assets in this scene.
+
+Static loader-gate corroboration in the same binary:
+
+- `FUN_0081c390` is a strict extension gate for the `Model2` cache path and emits:
+	- `Model2: Invalid file extension: %s`
+	- `Model2: File not found: %s`
+- recovered compare logic in `FUN_0081c390` and `M2_NormalizeModelPathAndProbeSkins` currently matches:
+	- `.m2` accepted directly
+	- `.mdl`/`.mdx` normalized to `.m2`
+	- no positive `.lit` branch recovered in this path
+
+Evidence boundary note:
+
+- this does not prove no `.lit` loader exists anywhere in the client
+- it does tighten the current conclusion for the recovered `Model2` load path and observed open traffic in this runtime window
+
+#### wow-viewer implementation implications by subsystem
+
+1. Rendering/shader ownership should keep a first-class effect registry seam (name-keyed cache plus explicit vertex/pixel binding), not ad hoc per-renderer string dispatch.
+2. Liquid runtime should stay a dedicated service with DBC-driven type->material/settings resolution and explicit shader-family routing (water, no-spec, magma, procedural water).
+3. Particle runtime should preserve dual paths (direct and merged-batch) with explicit compatibility/capacity gates instead of forcing unconditional merging.
+4. Lighting runtime should separate world/map lighting tables from model-material/effect lighting and keep map-object light LOD policy explicit.
+5. LIT handling should remain marked as unresolved or absent-until-proven; do not invent a `*.lit` loader seam in `wow-viewer` without native-positive evidence.
+
 ## Option Descriptor Anchors
 
 The exact unlabeled function boundaries are still open, but the current M2 option region and its handle writes are now concrete.
@@ -463,6 +645,7 @@ The completed pass did not yet close these items.
 - the exact runtime switch points for z-fill, clip-plane use, threads, and additive particle sorting
 - the precise mapping from section or material flags into the native combiner/effect families
 - how transparent or additive submission policy interacts with the recovered scene batching comparator and the lower state-split batch helpers
+- world-path Win32 live capture under the same choose/load/init/effect chain is still pending after the latest x64dbg control-session interruption
 
 ## Remaining PowerPC Follow-up
 

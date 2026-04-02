@@ -2,6 +2,14 @@
 
 # Active Context
 
+## Apr 02, 2026 - Workflow asset location correction for prompt continuity
+
+- canonical workspace workflow assets for this repo remain under `.github/` with Codex mirrors under `.codex/`
+- do not route these workflow prompts to a `.copilot/` folder for this repo
+- current cross-build native M2 investigation asset location is:
+	- `.github/prompts/m2-cross-build-native-investigation.prompt.md`
+	- `.codex/prompts/m2-cross-build-native-investigation.md`
+
 ## Mar 31, 2026 - wow-viewer M2 Foundation Slice 01 Landed
 
 - `wow-viewer` now has its first dedicated M2 library/runtime seam for slice 01 instead of only prompt-routing coverage

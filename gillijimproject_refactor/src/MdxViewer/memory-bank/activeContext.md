@@ -1,5 +1,56 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 01, 2026 - Adapted M2 Skeletal Animation Re-enabled In Staged Mode
+
+- landed a staged animation recovery in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - adapted M2 path now enables `MdxAnimator` and GPU bone-matrix upload by default
+   - optional override `PARP_M2_ENABLE_ANIMATION=0` disables this path if debugging regressions
+   - vertex shader skinning now clamps bone indices to `0..127` and normalizes total bone weights before applying blended transforms
+- intentional guardrails kept for the same path:
+   - material alpha/color animation tracks are still bypassed for adapted M2
+   - geoset animation alpha overrides are still bypassed for adapted M2
+   - UV animation transforms are still bypassed for adapted M2
+- purpose:
+   - restore skeletal motion while avoiding immediate reintroduction of transparency/visibility regressions from unvalidated material track semantics
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing warnings only
+- important boundary:
+   - no runtime signoff captured yet in this slice for world-path M2 animation parity
+   - this is staged motion recovery, not final animation/material parity
+
+## Apr 01, 2026 - M2 Visibility Hotfix Now Bypasses StaticColorAlpha When Animator Is Disabled
+
+- landed a narrow renderer-side fix in `src/MdxViewer/Rendering/ModelRenderer.cs` for adapted M2 visibility:
+   - `EvaluateLayerAlpha(...)` no longer multiplies by `StaticColorAlpha` when `_isM2AdapterModel` is true and animator is disabled
+   - this keeps `uColor.a` from collapsing to zero on frame-0 static draws for M2-adapted models while animation semantics remain gated off
+   - added `PARP_M2_FORCE_SOLID=1` diagnostics to force adapted M2 geosets through solid untextured shading in opaque pass, making geometry submission visible even if material/texture alpha logic is still wrong
+- why this seam was targeted:
+   - current M2 path intentionally suppresses animator/bone skinning for safety
+   - but static color-alpha metadata from adapted layers can still be zero, which made submitted geometry fully transparent in shader output despite valid geometry buffers
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing warnings only
+- important boundary:
+   - this is a visibility-first hotfix, not full M2 material/animation parity
+   - no runtime signoff captured in this slice yet
+
+## Apr 01, 2026 - Headless M2 Adapter Probe Added For Phase 1 Visibility Triage
+
+- added a new non-UI diagnostics path in `src/MdxViewer/AssetProbe.cs`:
+   - `--probe-m2-adapter <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]`
+   - alias: `--probe-m2`
+- this path now runs the same adapter seam used by world and standalone M2 loading, then prints renderer-equivalent geoset acceptance counters without requiring interactive `ModelRenderer` execution:
+   - total geosets
+   - valid geosets
+   - index-rejected geosets (same `maxIndex >= vertCount` rule as `ModelRenderer.InitBuffers`)
+   - empty-skipped geosets
+- it keeps existing adapter per-geoset logging (`[M2-ADAPT]`) and adds CPU-side summary output (`[M2-DIAG-CPU]`) so phase-1 failures can be triaged from command-line runs.
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing warnings only
+   - probe command wiring executed successfully in this workspace
+- important boundary:
+   - no successful 3.3.5 runtime-model probe output was captured in this slice because the attempted in-repo 0.6.0 archive run did not contain the selected 3.3.5 UI model path
+   - this is tooling/diagnostic readiness, not M2 visibility signoff
+
 ## Mar 31, 2026 - MdxViewer Now Consumes wow-viewer Core.Runtime For World Render Telemetry
 
 - after the initial in-app renderer stats slice landed, the first stable `WorldScene` seam was moved out into `wow-viewer`

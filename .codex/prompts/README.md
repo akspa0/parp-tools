@@ -22,6 +22,7 @@ Codex-oriented prompt docs live here. They are converted from `.github/prompts/*
 - `lighting-dbc-expansion-implementation-plan.md`
 - `sky-environment-parity-implementation-plan.md`
 - `m2-material-parity-implementation-plan.md`
+- `m2-cross-build-native-investigation.md`
 - `wow-400-terrain-blend-recovery.md`
 
 ## PM4 and repair prompts

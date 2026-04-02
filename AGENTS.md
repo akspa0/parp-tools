@@ -14,7 +14,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md` when it exists.
 - Before changing `wow-viewer` PM4, shared I/O, or migration workflow, also read `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and `wow-viewer/README.md`.
 - Before changing `wow-viewer` M2 runtime ownership, model rendering, skin handling, model lighting, shader or effect routing, or M2 performance work, also read `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`.
-- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, `.codex/prompts/wow-viewer-world-runtime-plan-set.md`, and `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`.
+- Before changing workflow assets, read `.codex/README.md`, `.codex/prompts/wow-viewer-tool-suite-plan-set.md`, `.codex/prompts/wow-viewer-pm4-library-implementation.md`, `.codex/prompts/wow-viewer-shared-io-implementation.md`, `.codex/prompts/wow-viewer-world-runtime-plan-set.md`, `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`, and `.codex/prompts/m2-cross-build-native-investigation.md`.
 - If the task touches 3.3.5 terrain texturing or alpha blending, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## Memory Bank Rule
@@ -45,6 +45,7 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 - Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
 - Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
 - Use `.github/prompts/m2-rendering-investigation.prompt.md` for diagnosing invisible M2 models, Ghidra-based native-client M2 render investigation on a live 3.3.5.12340 sandbox, adapter vertex/index validation against native ground truth, or renderer parity fixes for M2-family assets in `MdxViewer`.
+- Use `.codex/prompts/m2-cross-build-native-investigation.md` for cross-build native M2 behavior recovery across multiple client branches (for example 3.3.5 through 6.x), including per-build anchor mapping, runtime breakpoint validation, and compatibility-matrix output before implementation.
 
 ## wow-viewer M2 And Runtime Guardrails
 

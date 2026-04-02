@@ -38,6 +38,7 @@ Current M2-native continuity note:
 - Treat that note as the active behavior-recovery handoff for future `wow-viewer` M2 parser, runtime, lighting, shader, and performance work.
 - Do not keep growing `MdxViewer` as the design owner for those M2 seams unless the task is explicitly compatibility-only.
 - The staged workflow surface for this work now lives in `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` and `.github/prompts/wow-viewer-m2-runtime/`.
+- Cross-build recovery from Wrath through 6.x now routes through `.github/prompts/m2-cross-build-native-investigation.prompt.md`.
 - The matching continuity plan lives in `../gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md`.
 
 Current PM4 terminology policy:

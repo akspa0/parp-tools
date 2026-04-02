@@ -88,6 +88,8 @@ public class MdxRenderer : ISceneRenderer
     private readonly bool _mdxDebugFocus;
     private readonly bool _isM2AdapterModel;
     private readonly bool _usesPreRelease301M2Profile;
+    private readonly bool _enableM2Animation;
+    private readonly bool _forceM2SolidDebug;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -137,6 +139,12 @@ public class MdxRenderer : ISceneRenderer
     // ── Geoset animation alpha cache (evaluated per-frame) ──
     private readonly Dictionary<int, float> _geosetAlphaOverrides = new();
 
+    // ── M2 InitBuffers diagnostics ──
+    private int _bufferDiagTotalGeosets;
+    private int _bufferDiagValidVaos;
+    private int _bufferDiagIndexRejected;
+    private int _bufferDiagEmptySkipped;
+
     // ── Cached view/proj for particle rendering after batch ──
     private Matrix4x4 _cachedView, _cachedProj;
     private Vector3 _cachedCameraPos;
@@ -165,6 +173,17 @@ public class MdxRenderer : ISceneRenderer
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
+        string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
+        bool m2AnimationDisabled = !string.IsNullOrWhiteSpace(m2AnimationSetting)
+            && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "false", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "no", StringComparison.OrdinalIgnoreCase));
+        _enableM2Animation = !_isM2AdapterModel || !m2AnimationDisabled;
+        string? forceSolidSetting = Environment.GetEnvironmentVariable("PARP_M2_FORCE_SOLID");
+        _forceM2SolidDebug = _isM2AdapterModel
+            && !string.IsNullOrWhiteSpace(forceSolidSetting)
+            && (string.Equals(forceSolidSetting, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(forceSolidSetting, "true", StringComparison.OrdinalIgnoreCase));
         
         var mdxName = Path.GetFileNameWithoutExtension(modelDir);
         MdxTextureDiagnosticLogger.Initialize(mdxName);
@@ -178,17 +197,39 @@ public class MdxRenderer : ISceneRenderer
 
         InitShaders();
         InitBuffers();
+
+        if (_isM2AdapterModel)
+        {
+            string modelPath = _modelVirtualPath ?? _modelDir;
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2-DIAG] {modelPath}: {_bufferDiagTotalGeosets} geosets, {_bufferDiagValidVaos} valid, {_bufferDiagIndexRejected} index-rejected, {_bufferDiagEmptySkipped} empty-skipped");
+
+            if (_forceM2SolidDebug)
+            {
+                ViewerLog.Important(
+                    ViewerLog.Category.Mdx,
+                    $"[M2-DIAG] Solid debug shading enabled for adapted model: {modelPath}");
+            }
+        }
+
         LoadTextures();
 
-        // Initialize animation system
-        // M2 adapter models: bone data and animation tracks are extracted but not yet validated.
-        // Skip animator creation so alpha/color/UV animation evaluation falls back to static
-        // defaults, matching recovery-baseline behavior. Enable once M2 animation is validated.
-        if (!isM2AdapterModel && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
+        // Initialize animation system.
+        // Adapted M2 models can now run skeletal animation, while material/geoset animation
+        // tracks remain deliberately suppressed in evaluation paths below.
+        if (_enableM2Animation && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
         {
             _animator = new MdxAnimator(mdx);
             if (_animator.HasAnimation)
                 ViewerLog.Info(ViewerLog.Category.Mdx, $"Animation: {mdx.Bones.Count} bones, {mdx.Sequences.Count} sequences");
+
+            if (_isM2AdapterModel)
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Mdx,
+                    $"[M2-DIAG] Skeletal animation enabled for adapted model: {_modelVirtualPath ?? modelDir}");
+            }
         }
 
         // Initialize particle emitters from PRE2 chunk data
@@ -385,13 +426,11 @@ public class MdxRenderer : ISceneRenderer
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
 
-        // Upload bone matrices if animated
-        // M2 adapter models: bone extraction exists but skinning is not yet validated;
-        // skip GPU bone upload to avoid collapsing geometry through unvalidated matrices.
-        if (!_isM2AdapterModel && _animator != null && _animator.HasAnimation)
+        // Upload bone matrices if animated.
+        if (ShouldUploadBoneMatrices())
         {
             _gl.Uniform1(_uHasBones, 1);
-            var matrices = _animator.BoneMatrices;
+            var matrices = _animator!.BoneMatrices;
             int boneCount = Math.Min(matrices.Length, 128);
             fixed (Matrix4x4* ptr = matrices)
             {
@@ -433,14 +472,12 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
 
-        // Upload bone matrices if animated
-        // M2 adapter models: bone extraction exists but skinning is not yet validated;
-        // skip GPU bone upload to avoid collapsing geometry through unvalidated matrices.
-        if (!_isM2AdapterModel && _animator != null && _animator.HasAnimation)
+        // Upload bone matrices if animated.
+        if (ShouldUploadBoneMatrices())
         {
             _gl.Uniform1(_uHasBones, 1);
             
-            var matrices = _animator.BoneMatrices;
+            var matrices = _animator!.BoneMatrices;
             int boneCount = Math.Min(matrices.Length, 128);
             
             // Batch upload all bone matrices in a single GL call
@@ -508,13 +545,11 @@ public class MdxRenderer : ISceneRenderer
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
         _gl.UniformMatrix4(_uProj, 1, false, (float*)&proj);
 
-        // M2 adapter models: bone extraction exists but skinning is not yet validated;
-        // skip GPU bone upload to avoid collapsing geometry through unvalidated matrices.
-        if (!_isM2AdapterModel && _animator != null && _animator.HasAnimation)
+        if (ShouldUploadBoneMatrices())
         {
             _gl.Uniform1(_uHasBones, 1);
 
-            var matrices = _animator.BoneMatrices;
+            var matrices = _animator!.BoneMatrices;
             int boneCount = Math.Min(matrices.Length, 128);
             fixed (Matrix4x4* ptr = matrices)
             {
@@ -573,6 +608,15 @@ public class MdxRenderer : ISceneRenderer
             int geosetBufferIndex = geosetOrder?[orderIndex] ?? orderIndex;
             var gb = _geosets[geosetBufferIndex];
             if (!gb.Visible) continue;
+
+            if (_forceM2SolidDebug)
+            {
+                if (pass == RenderPass.Transparent)
+                    continue;
+
+                DrawForcedM2SolidGeoset(gb, forceBackdropState);
+                continue;
+            }
 
             // Skip geosets hidden by geoset animation (alpha ≈ 0)
             if (_geosetAlphaOverrides.TryGetValue(gb.GeosetIndex, out float gaAlpha) && gaAlpha < 0.01f)
@@ -791,6 +835,42 @@ public class MdxRenderer : ISceneRenderer
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 
+    private unsafe void DrawForcedM2SolidGeoset(GeosetBuffers gb, bool forceBackdropState)
+    {
+        _gl.Disable(EnableCap.CullFace);
+        if (forceBackdropState)
+        {
+            _gl.Disable(EnableCap.DepthTest);
+            _gl.DepthMask(false);
+        }
+        else
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
+        }
+
+        _gl.Disable(EnableCap.Blend);
+        _gl.Uniform1(_uHasTexture, 0);
+        _gl.Uniform1(_uAlphaTest, 0);
+        _gl.Uniform1(_uUseTextureAlpha, 0);
+        _gl.Uniform1(_uPremultiplyAlpha, 0);
+        _gl.Uniform1(_uUnshaded, 1);
+        _gl.Uniform1(_uSphereEnvMap, 0);
+        _gl.Uniform1(_uUvSet, 0);
+        ResetLayerUvTransform();
+        _gl.Uniform4(_uColor, 1.0f, 0.2f, 0.2f, 1.0f);
+
+        _gl.BindVertexArray(gb.Vao);
+        _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
+        _gl.BindVertexArray(0);
+
+        if (!forceBackdropState)
+        {
+            _gl.Enable(EnableCap.DepthTest);
+            _gl.DepthMask(true);
+        }
+    }
+
     private int GetGeosetPriorityPlane(int geosetIndex)
     {
         if ((uint)geosetIndex >= (uint)_mdx.Geosets.Count)
@@ -811,6 +891,11 @@ public class MdxRenderer : ISceneRenderer
     {
         _geosetAlphaOverrides.Clear();
         if (_mdx.GeosetAnimations.Count == 0) return;
+
+        // Keep adapted M2 geoset visibility stable while visibility-track semantics are
+        // still being validated against native behavior.
+        if (_isM2AdapterModel)
+            return;
 
         float frame = _animator?.CurrentFrame ?? 0f;
         int seqIdx = _animator?.CurrentSequence ?? 0;
@@ -837,6 +922,11 @@ public class MdxRenderer : ISceneRenderer
 
     private float EvaluateLayerAlpha(MdlTexLayer layer)
     {
+        // Keep adapted M2 material alpha stable while material animation tracks are
+        // being validated. Skeletal animation can still run.
+        if (_isM2AdapterModel)
+            return Math.Clamp(layer.StaticAlpha, 0.0f, 1.0f);
+
         float alpha = layer.StaticAlpha;
 
         if (_animator != null)
@@ -854,7 +944,7 @@ public class MdxRenderer : ISceneRenderer
 
     private C3Color EvaluateLayerColor(MdlTexLayer layer)
     {
-        if (_animator == null)
+        if (_isM2AdapterModel || _animator == null)
             return layer.StaticColor;
 
         C3Color color = _animator.EvaluateColorTrack(layer.ColorKeys, layer.ColorInterpolation, layer.ColorGlobalSeqId, layer.StaticColor);
@@ -866,6 +956,12 @@ public class MdxRenderer : ISceneRenderer
 
     private unsafe void ApplyLayerUvTransform(MdlTexLayer layer)
     {
+        if (_isM2AdapterModel)
+        {
+            ResetLayerUvTransform();
+            return;
+        }
+
         if (layer.TransformId < 0 || layer.TransformId >= _mdx.TextureAnimations.Count)
         {
             ResetLayerUvTransform();
@@ -890,6 +986,17 @@ public class MdxRenderer : ISceneRenderer
         _gl.Uniform2(_uUvScale, scale.X, scale.Y);
         _gl.Uniform2(_uUvRotationRow0, rotationMatrix.M11, rotationMatrix.M12);
         _gl.Uniform2(_uUvRotationRow1, rotationMatrix.M21, rotationMatrix.M22);
+    }
+
+    private bool ShouldUploadBoneMatrices()
+    {
+        if (_animator == null || !_animator.HasAnimation)
+            return false;
+
+        if (_isM2AdapterModel)
+            return _enableM2Animation;
+
+        return true;
     }
 
     private void ResetLayerUvTransform()
@@ -994,14 +1101,23 @@ void main() {
     
     // Apply bone skinning if enabled
     if (uHasBones > 0) {
-        mat4 boneTransform = mat4(0.0);
-        boneTransform += uBones[int(aBoneIndices.x)] * aBoneWeights.x;
-        boneTransform += uBones[int(aBoneIndices.y)] * aBoneWeights.y;
-        boneTransform += uBones[int(aBoneIndices.z)] * aBoneWeights.z;
-        boneTransform += uBones[int(aBoneIndices.w)] * aBoneWeights.w;
-        
-        position = boneTransform * position;
-        normal = mat3(boneTransform) * normal;
+        float totalWeight = aBoneWeights.x + aBoneWeights.y + aBoneWeights.z + aBoneWeights.w;
+        if (totalWeight > 0.0001) {
+            vec4 normWeights = aBoneWeights / totalWeight;
+            int b0 = int(clamp(aBoneIndices.x, 0.0, 127.0));
+            int b1 = int(clamp(aBoneIndices.y, 0.0, 127.0));
+            int b2 = int(clamp(aBoneIndices.z, 0.0, 127.0));
+            int b3 = int(clamp(aBoneIndices.w, 0.0, 127.0));
+
+            mat4 boneTransform = mat4(0.0);
+            boneTransform += uBones[b0] * normWeights.x;
+            boneTransform += uBones[b1] * normWeights.y;
+            boneTransform += uBones[b2] * normWeights.z;
+            boneTransform += uBones[b3] * normWeights.w;
+
+            position = boneTransform * position;
+            normal = mat3(boneTransform) * normal;
+        }
     }
     
     vec4 worldPos = uModel * position;
@@ -1279,11 +1395,19 @@ void main() {
 
     private unsafe void InitBuffers()
     {
+        _bufferDiagTotalGeosets = _mdx.Geosets.Count;
+        _bufferDiagValidVaos = 0;
+        _bufferDiagIndexRejected = 0;
+        _bufferDiagEmptySkipped = 0;
+
         for (int i = 0; i < _mdx.Geosets.Count; i++)
         {
             var geoset = _mdx.Geosets[i];
             if (geoset.Vertices.Count == 0 || geoset.Indices.Count == 0)
+            {
+                _bufferDiagEmptySkipped++;
                 continue;
+            }
 
             var gb = new GeosetBuffers { GeosetIndex = i };
 
@@ -1403,6 +1527,7 @@ void main() {
                 int maxIndex = indices.Max(idx => (int)idx);
                 if (maxIndex >= vertCount)
                 {
+                    _bufferDiagIndexRejected++;
                     ViewerLog.Error(ViewerLog.Category.Mdx,
                         $"[ModelRenderer] Geoset {i} skipped: index out of range (maxIndex={maxIndex}, vertCount={vertCount}, indexCount={indices.Length})");
                     if (_mdxDebugFocus)
@@ -1447,6 +1572,7 @@ void main() {
 
             gb.IndexCount = (uint)indices.Length;
             _geosets.Add(gb);
+            _bufferDiagValidVaos++;
         }
     }
 

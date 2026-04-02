@@ -207,7 +207,7 @@ internal static class WarcraftNetM2Adapter
         if (mdx.Materials.Count == 0)
             mdx.Materials.Add(CreateFallbackMaterial());
 
-        foreach (var geoset in BuildGeosets(model, skin, sectionMaterialIds, mdx.Materials.Count))
+        foreach (var geoset in BuildGeosets(model, skin, sectionMaterialIds, mdx.Materials.Count, modelPath))
             mdx.Geosets.Add(geoset);
 
         if (mdx.Geosets.Count == 0)
@@ -529,7 +529,7 @@ internal static class WarcraftNetM2Adapter
         return material;
     }
 
-    private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, int[] sectionMaterialIds, int materialCount)
+    private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, int[] sectionMaterialIds, int materialCount, string modelPath)
     {
         var flatIndices = skin.TriangleIndices;
         var boneLookup = model.BoneLookupTable.Count > 0 ? model.BoneLookupTable : null;
@@ -552,15 +552,23 @@ internal static class WarcraftNetM2Adapter
             };
 
             var remap = new Dictionary<ushort, ushort>();
+            int vertexFailures = 0;
+            int indexSkips = 0;
 
             for (int indexPos = start; indexPos < endExclusive; indexPos++)
             {
                 ushort localSkinVertexIndex = flatIndices[indexPos];
                 if (localSkinVertexIndex >= skin.Vertices.Count)
+                {
+                    indexSkips++;
                     continue;
+                }
 
                 if (!TryGetVertex(model, skin, localSkinVertexIndex, out var vertex))
+                {
+                    vertexFailures++;
                     continue;
+                }
 
                 if (!remap.TryGetValue(localSkinVertexIndex, out ushort mappedIndex))
                 {
@@ -570,12 +578,22 @@ internal static class WarcraftNetM2Adapter
                     AddVertexToGeoset(geoset, vertex, boneLookup, section.BoneComboIndex);
                 }
 
+                if (mappedIndex >= geoset.Vertices.Count)
+                {
+                    indexSkips++;
+                    continue;
+                }
+
                 geoset.Indices.Add(mappedIndex);
             }
 
             int trimmed = geoset.Indices.Count - (geoset.Indices.Count % 3);
             if (trimmed != geoset.Indices.Count)
                 geoset.Indices.RemoveRange(trimmed, geoset.Indices.Count - trimmed);
+
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2-ADAPT] {modelPath} geoset {sectionIndex}: {geoset.Vertices.Count} verts, {geoset.Indices.Count} indices, {vertexFailures} vert-fails, {indexSkips} index-skips");
 
             if (geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3)
                 yield return geoset;

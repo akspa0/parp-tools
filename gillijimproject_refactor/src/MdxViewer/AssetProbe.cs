@@ -5,6 +5,8 @@ using System.Runtime.InteropServices;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
+using MdxViewer.Rendering;
+using MdxViewer.Terrain;
 using WowViewer.Core.Blp;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Mdx;
@@ -23,18 +25,52 @@ internal static class AssetProbe
     public static bool TryRun(string[] args)
     {
         int probeIndex = Array.FindIndex(args, arg => arg.Equals("--probe-mdx", StringComparison.OrdinalIgnoreCase));
-        if (probeIndex < 0)
+        if (probeIndex >= 0)
+        {
+            if (args.Length <= probeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string mdxGamePath = args[probeIndex + 1];
+            string mdxModelVirtualPath = args[probeIndex + 2];
+            string? mdxListfilePath = TryGetOptionValue(args, "--listfile");
+
+            ViewerLog.Verbose = true;
+            MdxFile.Verbose = true;
+
+            try
+            {
+                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
+
+        int m2ProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-adapter", StringComparison.OrdinalIgnoreCase)
+                || arg.Equals("--probe-m2", StringComparison.OrdinalIgnoreCase));
+        if (m2ProbeIndex < 0)
             return false;
 
-        if (args.Length <= probeIndex + 2)
+        if (args.Length <= m2ProbeIndex + 2)
         {
-            Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>]");
+            Console.Error.WriteLine("Usage: MdxViewer --probe-m2-adapter <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]");
             Environment.ExitCode = 1;
             return true;
         }
 
-        string gamePath = args[probeIndex + 1];
-        string modelVirtualPath = args[probeIndex + 2];
+        string gamePath = args[m2ProbeIndex + 1];
+        string modelVirtualPath = args[m2ProbeIndex + 2];
+        string? buildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+        string? skinOverride = TryGetOptionValue(args, "--skin");
         string? listfilePath = TryGetOptionValue(args, "--listfile");
 
         ViewerLog.Verbose = true;
@@ -42,15 +78,125 @@ internal static class AssetProbe
 
         try
         {
-            Run(gamePath, modelVirtualPath, listfilePath);
+            RunM2AdapterProbe(gamePath, modelVirtualPath, listfilePath, buildVersion, skinOverride);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[AssetProbe] Failed: {ex}");
+            Console.Error.WriteLine($"[AssetProbe:M2] Failed: {ex}");
             Environment.ExitCode = 1;
         }
 
         return true;
+    }
+
+    private static void RunM2AdapterProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-ADAPT-PROBE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-ADAPT-PROBE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-ADAPT-PROBE] Build: {buildVersion}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-ADAPT-PROBE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-ADAPT-PROBE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[]? modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'));
+        if (modelBytes == null)
+            throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        if (!WarcraftNetM2Adapter.IsMd20(modelBytes) && !WarcraftNetM2Adapter.IsMd21(modelBytes))
+            throw new InvalidDataException($"Model '{Path.GetFileName(normalizedModelPath)}' is not an M2-family container (MD20/MD21).");
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null)
+            throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        List<string> skinCandidates = string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(normalizedModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : new List<string> { skinOverride.Replace('/', '\\').TrimStart('\\') };
+
+        int missingSkinCount = 0;
+        int failedSkinCount = 0;
+        Exception? lastSkinFailure = null;
+
+        foreach (string skinPath in skinCandidates)
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null)
+            {
+                missingSkinCount++;
+                continue;
+            }
+
+            Console.WriteLine($"[M2-ADAPT-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+            try
+            {
+                var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, skinBytes, normalizedModelPath, buildVersion);
+                Console.WriteLine($"[M2-ADAPT-PROBE] Selected skin: {skinPath}");
+                PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, skinPath);
+                return;
+            }
+            catch (Exception ex)
+            {
+                failedSkinCount++;
+                lastSkinFailure = ex;
+                Console.WriteLine($"[M2-ADAPT-PROBE] Skin candidate failed: {skinPath} ({ex.Message})");
+            }
+        }
+
+        if (string.Equals(profile.ProfileId, FormatProfileRegistry.M2Profile3018303.ProfileId, StringComparison.Ordinal))
+        {
+            Console.WriteLine("[M2-ADAPT-PROBE] No external .skin resolved; trying embedded root-profile fallback.");
+            var runtimeModel = WarcraftNetM2Adapter.BuildRuntimeModel(modelBytes, null, normalizedModelPath, buildVersion);
+            PrintRendererEquivalentDiagnostics(runtimeModel, normalizedModelPath, "<embedded-root-profile>");
+            return;
+        }
+
+        throw new InvalidDataException(
+            $"No usable .skin for {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
+            lastSkinFailure);
+    }
+
+    private static void PrintRendererEquivalentDiagnostics(MdxFile runtimeModel, string modelPath, string selectedSkinPath)
+    {
+        int totalGeosets = runtimeModel.Geosets.Count;
+        int validGeosets = 0;
+        int indexRejected = 0;
+        int emptySkipped = 0;
+
+        for (int i = 0; i < runtimeModel.Geosets.Count; i++)
+        {
+            var geoset = runtimeModel.Geosets[i];
+            int vertCount = geoset.Vertices.Count;
+            int indexCount = geoset.Indices.Count;
+
+            if (vertCount == 0 || indexCount == 0)
+            {
+                emptySkipped++;
+                continue;
+            }
+
+            int maxIndex = geoset.Indices.Max(static idx => (int)idx);
+            if (maxIndex >= vertCount)
+            {
+                indexRejected++;
+                Console.WriteLine(
+                    $"[M2-DIAG-CPU] Geoset {i} would be rejected by renderer index validation (maxIndex={maxIndex}, vertCount={vertCount}, indexCount={indexCount})");
+                continue;
+            }
+
+            validGeosets++;
+        }
+
+        Console.WriteLine(
+            $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
+        Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
     }
 
     private static void Run(string gamePath, string modelVirtualPath, string? listfilePath)

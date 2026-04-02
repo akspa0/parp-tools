@@ -28,6 +28,10 @@ Route the current request to the correct ordered prompt in `.codex/prompts/wow-v
 - `wow-viewer-m2-runtime/04-scene-submission-and-batching.md`
 - `wow-viewer-m2-runtime/05-consumer-cutover-and-parity-harness.md`
 
+## Companion Prompt
+
+- `m2-cross-build-native-investigation.md`
+
 ## Routing Rules
 
 - Use `01-md20-and-skin-runtime-foundation.md` when the problem is canonical `.m2` identity, strict `MD20` validation, exact numbered `%02d.skin` ownership, skin-profile choose/load/init behavior, or the first wow-viewer-owned M2 runtime contract.
@@ -35,6 +39,7 @@ Route the current request to the correct ordered prompt in `.codex/prompts/wow-v
 - Use `03-animation-lighting-and-effect-runtime.md` when the problem is external `%04d-%02d.anim` loading, alias chains, animated material/texture state, model-local diffuse/emissive evaluation, or explicit combiner/effect runtime state.
 - Use `04-scene-submission-and-batching.md` when the problem is render-entry family classification, doodad/particle/ribbon submission differences, batching rules, state-sort behavior, clip-plane/z-fill/additive-sort policy, or a narrow M2 runtime coordinator.
 - Use `05-consumer-cutover-and-parity-harness.md` when the problem is making a real consumer exercise the extracted wow-viewer M2 seam, adding an inspect/diagnostic harness, or wiring a narrow compatibility-only `MdxViewer` bridge after the earlier slices are already real.
+- Use `m2-cross-build-native-investigation.md` when the task is to recover and compare native M2 behavior across multiple client versions (for example 3.3.5 through 6.x) before committing implementation changes.
 
 ## Deliverables
 

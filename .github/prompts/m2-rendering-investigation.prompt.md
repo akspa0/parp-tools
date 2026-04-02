@@ -1,11 +1,10 @@
----
-description: "Systematic investigation to fix M2 model rendering in MdxViewer. Combines live Ghidra reverse-engineering of a running 3.3.5.12340 client with adapter-level validation and renderer parity work to make M2 doodads and game objects visible in the world scene."
-name: "M2 Rendering Investigation — Ghidra + Adapter + Renderer"
+description: "Systematic investigation to fix M2 model rendering in MdxViewer. Combines offline Ghidra reverse-engineering of WoW.exe 3.3.5.12340 with x64dbg-mcp runtime debugging, adapter-level validation, and renderer parity work to make M2 doodads and game objects visible in the world scene."
+name: "M2 Rendering Investigation — Ghidra Offline + x64dbg-mcp + Adapter + Renderer"
 argument-hint: "Optional: specific model path, symptom, or investigation phase to start from"
 agent: "agent"
 ---
 
-Fix invisible M2 models in `gillijimproject_refactor/src/MdxViewer` through a three-phase investigation: diagnostic triage, native-client reverse-engineering via Ghidra on a live 3.3.5.12340 sandbox, and targeted renderer fixes.
+Fix invisible M2 models in `gillijimproject_refactor/src/MdxViewer` through a multi-phase investigation: diagnostic triage, native-client reverse-engineering via offline Ghidra analysis plus x64dbg-mcp runtime debugging, and targeted renderer fixes.
 
 ## Read First
 
@@ -96,16 +95,24 @@ These mismatches could cause the adapter to produce structurally valid but seman
 
 **Deliverables**: Exact counts showing where M2 geometry is being lost.
 
-### Phase 2: Ghidra Native-Client Investigation
+### Phase 2: Native-Client Investigation (Offline Ghidra + x64dbg-mcp Runtime Debugging)
 
-**Goal**: Understand exactly how the native 3.3.5.12340 client renders M2 models, using a live sandbox server with the development map loaded.
+**Goal**: Understand exactly how the native 3.3.5.12340 client renders M2 models using offline static decompilation plus live runtime validation.
+
+#### Tooling Boundary (non-negotiable)
+
+- Do not require or request attaching Ghidra to a running process.
+- Use Ghidra for offline static analysis of `WoW.exe` (3.3.5.12340).
+- Use x64dbg (through `x64dbg-mcp`) for live process breakpoints, register inspection, memory checks, and call-path confirmation.
 
 #### Setup
 
 - Run a 3.3.5.12340 sandbox server with the target map
 - Launch the 3.3.5.12340 game client connected to the sandbox
 - Navigate to an area with visible M2 doodads/game objects
-- Attach Ghidra to the running client process
+- Load `WoW.exe` (3.3.5.12340) in Ghidra for offline analysis and function annotation
+- Attach x64dbg to the running client locally through `x64dbg-mcp`
+- Set breakpoints/watchpoints from Ghidra-mapped targets and capture runtime evidence (arguments, state transitions, buffer pointers)
 
 #### Investigation Targets
 
@@ -151,7 +158,7 @@ These mismatches could cause the adapter to produce structurally valid but seman
 - Document: what determines whether a geoset is drawn at frame 0 with no animation running
 - Key question: do M2 geosets at animation frame 0 default to visible or to invisible in the native client? (Our suppressed animator was producing alpha=0, suggesting the keyframe data starts at transparent)
 
-#### Ghidra Entry Points
+#### Ghidra Entry Points + x64dbg Mapping
 
 The existing research in `m2-native-client-research-2026-03-31.md` provides these confirmed native functions as starting points:
 
@@ -171,6 +178,7 @@ For the Win32 3.3.5.12340 binary specifically, the OS X and PPC function address
 - String references: `%02d.skin`, `MD20`, `CM2Model`, `CM2Shared`, `M2UseZFill`, `Diffuse_T1`, `Combiners_Opaque`
 - The model cache hash function pattern from FUN_00957ca0
 - The vertex upload path near the GX/D3D buffer creation calls
+- After mapping candidate Win32 functions in Ghidra, use x64dbg-mcp breakpoints to confirm live call order, argument shapes, and state changes in the running client
 
 ### Phase 3: Adapter Truthing
 
@@ -269,7 +277,7 @@ The goal is not to replace Warcraft.NET but to understand exactly where its 3.3.
 - Do not claim a fix based on build success. The fix is confirmed only when M2 models render visible geometry in the world scene.
 - Do not suppress rendering failures with broader fallbacks. Find and fix the actual data or pipeline issue.
 - Do not treat Warcraft.NET's parse output as ground truth for 3.3.5 semantics. Treat it as one input to be validated against native behavior.
-- Record all Ghidra findings in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` so they survive across sessions.
+- Record all Ghidra and x64dbg findings in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` so they survive across sessions.
 - Keep the investigation focused on visibility first. Material fidelity, animation, and performance are follow-up work.
 
 ## Success Criteria
@@ -281,6 +289,6 @@ M2 doodads and game objects render visible, textured geometry in the MdxViewer w
 Start with:
 
 1. Which investigation phase you are executing
-2. What specific diagnostic or Ghidra target you are attacking first
+2. What specific diagnostic, offline Ghidra target, or x64dbg runtime target you are attacking first
 3. What you expect to find based on the known candidate blockers
 4. What you are explicitly not claiming yet

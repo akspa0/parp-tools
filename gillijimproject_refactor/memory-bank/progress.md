@@ -1,5 +1,193 @@
 # Progress
 
+### Apr 02, 2026 - Prompt location correction: use .github, not .copilot, in this repo
+
+- corrected continuity guidance for workflow asset placement:
+	- workspace prompt and agent workflow assets for this repo stay in `.github/` (with `.codex/` mirrors)
+	- `.copilot/` is not the canonical location for these repo-scoped workflow assets here
+- cross-build M2 investigation prompt remains correctly located at:
+	- `.github/prompts/m2-cross-build-native-investigation.prompt.md`
+	- `.codex/prompts/m2-cross-build-native-investigation.md`
+- boundary:
+	- this is a continuity correction only
+	- no runtime, parser, or renderer code behavior changed
+
+### Apr 02, 2026 - Cross-build M2 native investigation prompt added for 3.3.5 through 6.x
+
+- added a dedicated cross-build workflow asset for native M2 behavior recovery across expansion branches where current library support is partial:
+	- `.github/prompts/m2-cross-build-native-investigation.prompt.md`
+	- `.codex/prompts/m2-cross-build-native-investigation.md`
+- routing and discoverability updates landed so this prompt is reachable from existing wow-viewer prompt sets and instruction registries:
+	- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`
+	- `.codex/prompts/wow-viewer-tool-suite-plan-set.md`
+	- `.codex/prompts/wow-viewer-m2-runtime-plan-set.md`
+	- `.github/copilot-instructions.md`
+	- `AGENTS.md`
+	- `.codex/prompts/README.md`
+	- `wow-viewer/README.md`
+- continuity boundary:
+	- this slice adds workflow and investigation guidance only
+	- no parser, renderer, or runtime behavior change was implemented in code in this slice
+
+### Apr 02, 2026 - Restarted x64dbg live-open sampling added to native notes
+
+- after restarting x64dbg and reattaching to Win32 WoW, a targeted live sample at `FUN_004609b0` captured active open paths including:
+	- `sound\\emitters\\Emitter_Stormwind_BehindtheGate_03.wav`
+	- `Shaders\\Pixel\\ps_3_0\\Desaturate.bls`
+- canonical and Session A docs now include a tighter LIT-status boundary that combines:
+	- strict `Model2` extension-gate logic from `FUN_0081c390` / `M2_NormalizeModelPathAndProbeSkins`
+	- restarted live open-traffic samples
+- current blocker captured in continuity:
+	- repeated `DebugRun` pauses in system DLL frames are still disrupting efficient world-path M2 chain harvest, so debugger run-state stabilization remains the immediate prerequisite for full live world-path closure
+- validation boundary:
+	- documentation/reverse-engineering continuity only
+	- no renderer code changes landed in this slice
+
+### Apr 02, 2026 - Win32 subsystem deep-dive notes added for shaders, liquids, particles, lighting, and LIT status
+
+- expanded native Win32 documentation packet and canonical handoff with subsystem-specific anchors:
+	- `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/01-runtime-log.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/02-win32-m2-anchor-map.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/03-console-and-render-controls.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/04-next-steps.md`
+- new evidence now explicitly maps:
+	- rendering/effect ownership (`*.wfx` reload path, shader effect load/cache/bind seams)
+	- liquid shader families and DBC-backed material/settings fallback behavior
+	- particle dual-path submission (direct vs merged batch) and batch-compatibility constraints
+	- world/map lighting seams (`Light*.dbc`, `WLIGHT`, `WCACHELIGHT`) plus debug script-light command path
+- LIT status boundary in current Win32 pass:
+	- no positive `.lit` or `.LIT` loader/path formatter anchor recovered
+	- recovered `Unlit` labels are effect-mode names, not standalone file-family ownership
+	- classification remains evidence-bounded and is recorded as unconfirmed/unsupported until positive anchors are found
+- validation boundary:
+	- documentation and reverse-engineering continuity updates only
+	- no renderer code changes landed in this slice
+
+### Apr 01, 2026 - Session A Deep-Capture and Hidden-Path Native Notes Landed
+
+- expanded the Session A packet and canonical native research docs with second-pass Win32 evidence:
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/01-runtime-log.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/02-win32-m2-anchor-map.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/03-console-and-render-controls.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/04-next-steps.md`
+	- `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
+- new confirmed runtime chain evidence now includes profile select, exact `%02d.skin` path output, init-state transition, callback rebuild hits, and combiner return-handle capture (all currently in UI-model context)
+- new hidden-path notes now include:
+	- shared Win32 M2 runtime flag-word helpers (`DAT_00d3fcf4` + getter/setter/OR helper)
+	- callback-owned bit toggles for doodad batching, particle batching, and additive particle sorting
+	- `M2Faster`/`M2FasterDebug` high-bit mode routing and parser caveats
+	- likely-dead startup fallback branch (`0x40`) under the normal `M2_RegisterRuntimeFlags` init flow
+	- repeated `M2_NormalizeModelPathAndProbeSkins` prewarm chain callsites
+- validation boundary:
+	- this was documentation and reverse-engineering continuity work only
+	- no renderer code changes landed in this slice
+	- x64dbg control session timed out and ended (`is_debugging=false`), so world-path runtime captures remain pending until reattach
+
+### Apr 01, 2026 - Adapted M2 Skeletal Animation Re-enabled With Material-Track Guardrails
+
+- landed a renderer-side animation recovery in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+	- adapted M2 models now create/use `MdxAnimator` again by default (gateable with `PARP_M2_ENABLE_ANIMATION=0`)
+	- GPU bone upload now runs for adapted M2 when enabled
+	- vertex shader skinning now clamps bone indices to `0..127` and normalizes weight sums before matrix blend
+- intentionally kept high-risk animation channels suppressed for adapted M2 while visibility recovery continues:
+	- material alpha/color tracks remain static for M2 path
+	- geoset animation alpha overrides remain disabled for M2 path
+	- UV animation transforms remain disabled for M2 path
+- this keeps skeleton motion online without reopening the known transparency-driven invisibility seam.
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing warnings only
+- validation boundary:
+	- no runtime manual signoff captured yet in this slice for world doodad animation parity
+	- this is a staged motion-recovery pass, not full M2 animation/material parity
+
+### Apr 01, 2026 - M2 Visibility Hotfix Targets Shader Alpha Path With Animator Disabled
+
+- landed a narrow renderer change in `src/MdxViewer/Rendering/ModelRenderer.cs` focused on the active M2 invisible-geometry seam:
+	- when `_isM2AdapterModel` is true and animator is disabled, `EvaluateLayerAlpha(...)` now uses `StaticAlpha` only and does not multiply by `StaticColorAlpha`
+	- added `PARP_M2_FORCE_SOLID=1` diagnostic mode to force adapted M2 geosets through an untextured solid-color shader path (opaque pass) for hard geometry-vs-material isolation
+- rationale:
+	- adapted M2 layers can carry static color-alpha metadata that evaluates to zero at frame 0
+	- with animator suppressed, that value was still reaching shader uniform `uColor.a`, making all submitted geometry fully transparent even when vertices/indices were valid
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing workspace warnings only
+- validation boundary:
+	- no manual world-scene runtime signoff captured in this slice yet
+	- this is a targeted visibility hotfix and not full M2 material/animation parity closure
+
+### Apr 01, 2026 - Added Headless `--probe-m2-adapter` Triage Mode For Phase 1 M2 Visibility Diagnostics
+
+- landed a new non-UI probe entrypoint in `src/MdxViewer/AssetProbe.cs`:
+	- `--probe-m2-adapter <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]`
+	- alias: `--probe-m2`
+- probe behavior now explicitly targets Phase 1 investigation evidence without requiring interactive viewer rendering:
+	- loads model bytes from MPQ/loose game roots
+	- validates build/profile compatibility through `FormatProfileRegistry` and `WarcraftNetM2Adapter.ValidateModelProfile(...)`
+	- tries companion skin candidates (or forced `--skin`) through `WarcraftNetM2Adapter.BuildRuntimeModel(...)`
+	- prints renderer-equivalent geoset outcomes as `[M2-DIAG-CPU]`: total geosets, valid, index-rejected, empty-skipped
+	- preserves adapter per-geoset logs already emitted as `[M2-ADAPT]`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 01, 2026 with existing workspace warnings only
+	- command wiring was exercised through `dotnet run ... -- --probe-m2-adapter ...`
+- validation boundary:
+	- no successful real 3.3.5 M2+skin probe was captured in this slice because the attempted in-repo `0.6.0` testdata run did not contain the chosen 3.3.5 UI-model path
+	- this slice proves command availability and compile integration, not M2 visibility closure
+
+### Apr 01, 2026 - Fresh A/B Session A Investigation Packet Started (Stormwind Runtime)
+
+- created a new clean-room documentation packet for A/B analysis under:
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/README.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/01-runtime-log.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/02-win32-m2-anchor-map.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/03-console-and-render-controls.md`
+	- `wow-viewer/docs/architecture/ab-session-a-2026-04-01/04-next-steps.md`
+- this packet is intentionally framed as a fresh-session baseline for later A/B comparison and does not rely on prior-session conclusions as the primary evidence source
+- static/decompilation outputs captured in this slice:
+	- confirmed Win32 M2 anchors for skin/profile choose-load-init and combiner family selection
+	- recovered world/terrain render command registration and high-value console toggles (`showCull`, `showLowDetail`, `showSimpleDoodads`, `detailDoodadAlpha`, `terrainAlphaBitDepth`, plus M2 runtime flags)
+- runtime status in this slice:
+	- x64dbg breakpoints were set on the M2 anchors
+	- confirmed live anchor hits captured after restart:
+		- `0x0083cc80` (`M2_ChooseAndLoadSkinProfile`)
+		- `0x00835a80` (`M2_FormatSkinFilename_02d`)
+		- `0x00838490` (`M2_InitializeSkinProfileAndRebuildInstances`)
+		- `0x00836600` (`M2_BuildCombinerEffectName`)
+	- captured model path in those first hits is a UI model (`interface\\glues\\models\\ui_mainmenu_northrend\\ui_mainmenu_northrend.m2`), so world-path capture is still pending
+- validation boundary:
+	- this slice delivered documentation and anchor setup only
+	- no renderer or adapter parity fix is claimed yet
+
+### Apr 01, 2026 - M2 Investigation Tooling Boundary Updated To Offline Ghidra + x64dbg-mcp
+
+- updated `.github/prompts/m2-rendering-investigation.prompt.md` to remove the old live-Ghidra requirement
+- Phase 2 now explicitly uses:
+	- offline static analysis in Ghidra against `WoW.exe` (3.3.5.12340)
+	- live runtime debugging in x64dbg through `x64dbg-mcp`
+- the prompt now requires Ghidra-mapped Win32 targets to be validated dynamically with x64dbg breakpoints/watchpoints before claiming parity conclusions
+- continuity intent:
+	- keep native reverse-engineering evidence grounded in an executable workflow that is actually available in this environment
+	- continue recording both static and runtime findings in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
+- validation boundary:
+	- this slice updates workflow guidance only
+	- no new renderer/adapter runtime fix was claimed from this change
+
+### Apr 01, 2026 - Win32 3.3.5.12340 M2 Runtime Anchors Mapped For x64dbg
+
+- mapped and renamed concrete Win32 M2 functions in the loaded `WoW.exe` for immediate `x64dbg-mcp` breakpoint usage:
+	- `0x0083cc80` `M2_ChooseAndLoadSkinProfile`
+	- `0x00838490` `M2_InitializeSkinProfileAndRebuildInstances`
+	- `0x00836600` `M2_BuildCombinerEffectName`
+	- `0x00835a80` `M2_FormatSkinFilename_02d`
+	- `0x00835a20` `M2_FormatAnimFilename_04d_02d`
+	- `0x00402760` `M2_RegisterRuntimeFlags`
+	- `0x0053c430` `M2_NormalizeModelPathAndProbeSkins`
+- source evidence came from direct string-xref anchors in offline Ghidra (`%02d.skin`, `%04d-%02d.anim`, `Combiners_Opaque`, `Diffuse_T1`, `M2UseZFill`, `CM2Model`)
+- recorded these anchors in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` under a dedicated Win32 breakpoint section
+- validation boundary:
+	- this slice establishes native-analysis anchors only
+	- no runtime breakpoint-hit capture or renderer-fix claim yet
+
 ### Mar 31, 2026 - wow-viewer M2 Foundation Slice 01 Implemented
 
 - implemented the first narrow `wow-viewer`-owned M2 seam rather than leaving slice 01 as planning-only work
