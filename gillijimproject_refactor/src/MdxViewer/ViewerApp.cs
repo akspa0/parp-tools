@@ -385,7 +385,7 @@ public partial class ViewerApp : IDisposable
     // Camera speed (adjustable via UI)
     private float _cameraSpeed = 50f;
     // Field of view in degrees (adjustable via UI)
-    private float _fovDegrees = 45f;
+    private float _fovDegrees = 60f;
 
     private bool _autoFrameModelOnLoad = true;
     private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
@@ -4993,10 +4993,10 @@ void main() {
                 _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
 
             float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
-            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 25f, 500f, "%.0f yd"))
+            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, 2000f, "%.2f yd"))
                 _worldScene.HoveredAssetMaxDistance = hoverPickRange;
 
-            ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F0} yd");
+            ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F2} yd");
         }
 
         bool showSelectedObjectBounds = _worldScene.ShowSelectedObjectBounds;

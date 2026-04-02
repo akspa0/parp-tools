@@ -250,6 +250,8 @@ public class ScreenshotRenderer : IDisposable
                             _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
                     }
 
+                    ForceOpaqueAlpha(pixels);
+
                     _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
                     // Convert to image (OpenGL reads bottom-up, flip)
@@ -300,6 +302,12 @@ public class ScreenshotRenderer : IDisposable
         // Nameplate text is embedded in the PNG filename and JSON metadata.
         // Full text rendering requires SixLabors.Fonts + SixLabors.ImageSharp.Drawing
         // packages which can be added later for richer overlays.
+    }
+
+    private static void ForceOpaqueAlpha(byte[] rgbaPixels)
+    {
+        for (int index = 3; index < rgbaPixels.Length; index += 4)
+            rgbaPixels[index] = 255;
     }
 
     private static (Vector3 min, Vector3 max) ComputeBounds(MdxFile mdx)

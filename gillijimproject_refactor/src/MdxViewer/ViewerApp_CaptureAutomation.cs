@@ -309,6 +309,8 @@ public partial class ViewerApp
                 _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
             }
 
+            ForceOpaqueAlpha(pixels);
+
             string? outputDirectory = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrWhiteSpace(outputDirectory))
                 Directory.CreateDirectory(outputDirectory);
@@ -323,6 +325,12 @@ public partial class ViewerApp
             _statusMessage = $"Capture failed: {ex.Message}";
             return false;
         }
+    }
+
+    private static void ForceOpaqueAlpha(byte[] rgbaPixels)
+    {
+        for (int index = 3; index < rgbaPixels.Length; index += 4)
+            rgbaPixels[index] = 255;
     }
 
     private void LoadCameraShotPoints()

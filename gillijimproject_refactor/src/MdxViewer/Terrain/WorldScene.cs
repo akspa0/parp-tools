@@ -521,7 +521,7 @@ public class WorldScene : ISceneRenderer
     private bool _limitHoveredAssetRange = true;
     private bool _useDynamicHoveredAssetRange = false;
     private bool _showSelectedObjectBounds = true;
-    private float _hoveredAssetMaxDistance = 150f;
+    private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
 
     // Frustum culling
@@ -7578,7 +7578,7 @@ public class WorldScene : ISceneRenderer
         if (!_useDynamicHoveredAssetRange)
             return _hoveredAssetMaxDistance;
 
-        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.1f, 75f, 300f);
+        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, 2000f);
         return Math.Min(_hoveredAssetMaxDistance, fogDrivenDistance);
     }
 

@@ -403,11 +403,14 @@ internal static class WarcraftNetM2Adapter
     private static MaterialAssignmentMap BuildMaterialsFromBatches(MdxFile mdx, ParsedModelData model, SkinData skin)
     {
         var sectionMaterialIds = Enumerable.Repeat(-1, skin.Submeshes.Count).ToArray();
-        Dictionary<int, List<int>> batchMaterialIdsBySection = new();
+        var batchMaterialIdsBySection = new Dictionary<int, List<int>>();
+        string modelName = string.IsNullOrWhiteSpace(model.Name) ? "<unnamed>" : model.Name;
 
-        for (int batchIndex = 0; batchIndex < skin.TextureUnits.Count; batchIndex++)
+        foreach (SkinTextureUnitData batch in skin.TextureUnits
+            .OrderBy(static textureUnit => textureUnit.SkinSectionIndex)
+            .ThenBy(static textureUnit => textureUnit.MaterialLayer)
+            .ThenBy(static textureUnit => textureUnit.PriorityPlane))
         {
-            var batch = skin.TextureUnits[batchIndex];
             if (batch.SkinSectionIndex < 0 || batch.SkinSectionIndex >= sectionMaterialIds.Length)
                 continue;
 
@@ -424,15 +427,36 @@ internal static class WarcraftNetM2Adapter
             var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
                 ? model.Textures[textureId].Flags
                 : 0;
-
-            // Keep the active runtime path conservative until the newer batch/layer semantics
-            // are proven on real data. The old stable viewer behavior effectively used the
-            // first material batch per section on UV0, which avoided tree trunk regressions.
-            if (sectionMaterialIds[batch.SkinSectionIndex] >= 0)
-                continue;
-
-            var material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
+            string texturePath = (textureId >= 0 && textureId < model.Textures.Count)
+                ? model.Textures[textureId].Filename
+                : string.Empty;
             int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex);
+
+            if (!batchMaterialIdsBySection.TryGetValue(batch.SkinSectionIndex, out List<int>? materialIdsForSection))
+            {
+                materialIdsForSection = new List<int>();
+                batchMaterialIdsBySection[batch.SkinSectionIndex] = materialIdsForSection;
+            }
+
+            bool shouldStartNewMaterial = materialIdsForSection.Count == 0 || batch.MaterialLayer <= 0;
+
+            int materialId;
+            MdlMaterial material;
+            if (!shouldStartNewMaterial)
+            {
+                materialId = materialIdsForSection[^1];
+                material = mdx.Materials[materialId];
+            }
+            else
+            {
+                material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
+                materialId = mdx.Materials.Count;
+                mdx.Materials.Add(material);
+                materialIdsForSection.Add(materialId);
+
+                if (sectionMaterialIds[batch.SkinSectionIndex] < 0)
+                    sectionMaterialIds[batch.SkinSectionIndex] = materialId;
+            }
 
             material.Layers.Add(new MdlTexLayer
             {
@@ -448,19 +472,9 @@ internal static class WarcraftNetM2Adapter
 
             ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
 
-            int materialId = mdx.Materials.Count;
-            mdx.Materials.Add(material);
-
-            if (!batchMaterialIdsBySection.TryGetValue(batch.SkinSectionIndex, out List<int>? materialIds))
-            {
-                materialIds = [];
-                batchMaterialIdsBySection.Add(batch.SkinSectionIndex, materialIds);
-            }
-
-            materialIds.Add(materialId);
-
-            if (sectionMaterialIds[batch.SkinSectionIndex] < 0)
-                sectionMaterialIds[batch.SkinSectionIndex] = materialId;
+            ViewerLog.Debug(
+                ViewerLog.Category.Mdx,
+                $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} layerCount={material.Layers.Count}");
         }
 
         return new MaterialAssignmentMap(sectionMaterialIds, batchMaterialIdsBySection);
@@ -749,6 +763,11 @@ internal static class WarcraftNetM2Adapter
             int mergeCount = Math.Min(parsedSkin.TextureUnits.Count, supplement.TextureUnits.Count);
             for (int i = 0; i < mergeCount; i++)
             {
+                parsedSkin.TextureUnits[i].PriorityPlane = supplement.TextureUnits[i].PriorityPlane;
+                parsedSkin.TextureUnits[i].MaterialIndex = supplement.TextureUnits[i].MaterialIndex;
+                parsedSkin.TextureUnits[i].MaterialLayer = supplement.TextureUnits[i].MaterialLayer;
+                parsedSkin.TextureUnits[i].TextureComboIndex = supplement.TextureUnits[i].TextureComboIndex;
+                parsedSkin.TextureUnits[i].SkinSectionIndex = supplement.TextureUnits[i].SkinSectionIndex;
                 parsedSkin.TextureUnits[i].ColorIndex = supplement.TextureUnits[i].ColorIndex;
                 parsedSkin.TextureUnits[i].TextureCoordComboIndex = supplement.TextureUnits[i].TextureCoordComboIndex;
                 parsedSkin.TextureUnits[i].TransparencyComboIndex = supplement.TextureUnits[i].TransparencyComboIndex;
@@ -1413,6 +1432,7 @@ internal static class WarcraftNetM2Adapter
                 int batchOffset = checked((int)(selected.Value.BatchOffset + (i * 0x18u)));
                 short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x06);
                 ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x08);
+                ushort materialLayer = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0A);
                 ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
                 ushort textureCoordComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x10);
                 ushort transparencyComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x12);
@@ -1423,6 +1443,7 @@ internal static class WarcraftNetM2Adapter
                     skin.TextureUnits.Add(new SkinTextureUnitData
                     {
                         PriorityPlane = modelBytes[batchOffset + 0x01],
+                        MaterialLayer = materialLayer,
                         SkinSectionIndex = submeshIndex,
                         ColorIndex = colorIndex,
                         MaterialIndex = materialIndex,
@@ -1451,6 +1472,7 @@ internal static class WarcraftNetM2Adapter
                 skin.TextureUnits.Add(new SkinTextureUnitData
                 {
                     PriorityPlane = 0,
+                    MaterialLayer = 0,
                     SkinSectionIndex = i,
                     MaterialIndex = 0,
                     TextureComboIndex = 0,
@@ -1641,7 +1663,7 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort materialLayer = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = profile.SkinLikeBStride >= 20 && entryPos + 20 <= skinBytes.Length
@@ -1659,6 +1681,7 @@ internal static class WarcraftNetM2Adapter
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
                     PriorityPlane = priority,
+                    MaterialLayer = materialLayer,
                     SkinSectionIndex = submeshIndex,
                     ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
@@ -1684,6 +1707,7 @@ internal static class WarcraftNetM2Adapter
             data.TextureUnits.Add(new SkinTextureUnitData
             {
                 PriorityPlane = 0,
+                MaterialLayer = 0,
                 SkinSectionIndex = 0,
                 MaterialIndex = 0,
                 TextureComboIndex = 0,
@@ -1777,7 +1801,7 @@ internal static class WarcraftNetM2Adapter
                 _ = br.ReadUInt16();
                 short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort materialLayer = br.ReadUInt16();
                 _ = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = textureUnitStride >= 20 && entryPos + 20 <= skinBytes.Length
@@ -1795,6 +1819,7 @@ internal static class WarcraftNetM2Adapter
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
                     PriorityPlane = priority,
+                    MaterialLayer = materialLayer,
                     SkinSectionIndex = submeshIndex,
                     ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
@@ -1820,6 +1845,7 @@ internal static class WarcraftNetM2Adapter
             data.TextureUnits.Add(new SkinTextureUnitData
             {
                 PriorityPlane = 0,
+                MaterialLayer = 0,
                 SkinSectionIndex = 0,
                 MaterialIndex = 0,
                 TextureComboIndex = 0,
@@ -1889,6 +1915,7 @@ internal static class WarcraftNetM2Adapter
                 data.TextureUnits.Add(new SkinTextureUnitData
                 {
                     PriorityPlane = tu.PriorityPlane < 0 ? (ushort)0 : (ushort)tu.PriorityPlane,
+                    MaterialLayer = tu.MaterialLayer,
                     SkinSectionIndex = tu.SkinSectionIndex,
                     MaterialIndex = tu.MaterialIndex,
                     TextureComboIndex = tu.TextureComboIndex,
@@ -1918,6 +1945,7 @@ internal static class WarcraftNetM2Adapter
     {
         public int ColorIndex { get; set; } = -1;
         public int MaterialIndex { get; set; }
+        public int MaterialLayer { get; set; }
         public int TextureComboIndex { get; set; }
         public int TextureCoordComboIndex { get; set; }
         public int TransparencyComboIndex { get; set; } = -1;

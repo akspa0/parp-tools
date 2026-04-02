@@ -127,13 +127,13 @@ public sealed class M2Renderer : IModelRenderer
     public string GetSubObjectName(int index)
     {
         if (_runtimeModel != null && index >= 0 && index < _runtimeModel.Sections.Count)
-            return $"Section {_runtimeModel.Sections[index].SkinSectionId}";
+            return $"Geoset {_runtimeModel.Sections[index].SkinSectionId}";
 
         if (_legacyRenderer != null)
             return _legacyRenderer.GetSubObjectName(index);
 
         return index >= 0 && index < _sections.Count
-            ? $"Section {_sections[index].SkinSectionId}"
+            ? $"Geoset {_sections[index].SkinSectionId}"
             : string.Empty;
     }
 

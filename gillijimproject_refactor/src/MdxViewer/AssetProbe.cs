@@ -296,6 +296,34 @@ internal static class AssetProbe
         Console.WriteLine(
             $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
         Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
+
+        int maxGeosetSummaries = Math.Min(runtimeModel.Geosets.Count, 12);
+        for (int geosetIndex = 0; geosetIndex < maxGeosetSummaries; geosetIndex++)
+        {
+            var geoset = runtimeModel.Geosets[geosetIndex];
+            string materialSummary = DescribeProbeMaterial(runtimeModel, geoset.MaterialId);
+            Console.WriteLine(
+                $"[M2-DIAG-MAT] geoset={geosetIndex} material={geoset.MaterialId} verts={geoset.Vertices.Count} tris={geoset.Indices.Count / 3} layers={materialSummary}");
+        }
+    }
+
+    private static string DescribeProbeMaterial(MdxFile runtimeModel, int materialId)
+    {
+        if (materialId < 0 || materialId >= runtimeModel.Materials.Count)
+            return "<invalid-material>";
+
+        var material = runtimeModel.Materials[materialId];
+        if (material.Layers.Count == 0)
+            return "<no-layers>";
+
+        return string.Join(", ",
+            material.Layers.Select((layer, index) =>
+            {
+                string texturePath = layer.TextureId >= 0 && layer.TextureId < runtimeModel.Textures.Count
+                    ? runtimeModel.Textures[layer.TextureId].Path
+                    : "<missing>";
+                return $"[{index}]tex={layer.TextureId}:{texturePath} blend={layer.BlendMode} coord={layer.CoordId} flags={layer.Flags}";
+            }));
     }
 
     private static void Run(string gamePath, string modelVirtualPath, string? listfilePath)
