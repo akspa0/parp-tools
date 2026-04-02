@@ -1,5 +1,9 @@
 # Native M2 Client Research - Mar 31, 2026
 
+Implementation-facing readers should start with `docs/architecture/m2/`.
+
+This file remains the raw native evidence log and build-by-build behavior notebook behind that consolidated doc set.
+
 ## Scope
 
 This note records native-client M2 findings gathered from Ghidra against the 3.3.5 OS X client and frames them as `wow-viewer` library work, not as more long-term ownership in `MdxViewer`.
@@ -106,11 +110,20 @@ Confirmed in native function `FUN_00984b00`.
 
 - after model parse and skin initialization, the client allocates a compact runtime list only for shared records where a flag `0x20` is not set
 
+Later Win32 `3.3.5.12340` decompilation tightened that boundary further:
+
+- the same `0x20` bit repeatedly gates nested pointer or track relocation in helper families whose record sizes line up with track-bearing root-model blocks, not `.skin` texture-unit flags
+- exact size matches now confirmed from the in-repo wowdev docs:
+	- `0x14` -> single `M2Track` payloads such as `M2TextureWeight`
+	- `0x3c` -> exact `M2TextureTransform`
+	- `0x9c` -> exact `M2Light`
+- this makes the best current reading: `0x20` marks a shared-record class with attached animated payloads or nested track state that stays out of the compact renderable section list and receives special relocation handling during bootstrap
+
 Implication for `wow-viewer`:
 
-- there is a real native distinction between generic render-list entries and a special-case class of records
+- there is a real native distinction between compact render-list entries and a special shared-record class that owns richer animated payloads
 - treating every submesh or batch as one uniform geoset path is likely wrong
-- `0x20` needs to stay visible as an unresolved but important semantic flag during the first library-owned implementation
+- the exact user-facing name of that class is still open, but `0x20` is no longer just an unknown batch flag and should stay explicit in the first library-owned implementation
 
 ## PowerPC 3.3.5 PTR Confirmation Pass
 
@@ -435,6 +448,294 @@ Practical debugging order for runtime capture:
 
 This gives one contiguous evidence chain from skin ownership to draw-state family routing without requiring live Ghidra process attach.
 
+### Win32 first world-path choose-load capture (Apr 02, 2026)
+
+Live x64dbg sampling in an in-world client state now confirms the choose/load side of the chain for a real world doodad path on Win32 `3.3.5.12340`:
+
+- model object path at formatter entry:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_mirror_01.m2`
+- exact numbered skin formatter output from the stack-local destination buffer:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_mirror_0100.skin`
+- formatter call-frame evidence:
+	- source path pointer was the world-model basename
+	- skin profile argument was `0`
+- post-load result at `0x0083cd32` remained success (`EAX=1`) for the same world-model chain
+- callback rebuild activity surfaced immediately after successful world-path load with repeated hits at `0x00832ea0`
+
+Current boundary on this first world-path pass:
+
+- this proves real world-path numbered skin ownership and successful load on Win32 Wrath, not just UI or portrait traffic
+- the explicit `0x00838490` skin-init entry did not surface cleanly in this noisy in-world run even though downstream callback-rebuild hits did
+- `0x00836600` combiner-family capture is still only confirmed from the earlier UI-path chain; a world-path effect-family sample is still pending
+
+### Win32 follow-up world-path capture and init reachability (Apr 02, 2026)
+
+The same in-world session produced a second confirmed world-path choose-load chain and also proved that the explicit init path is reachable once noisy choose/load breakpoints are removed:
+
+- second confirmed world-path model:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_shavecup.m2`
+- exact numbered companion output from the formatter destination buffer:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_shavecup00.skin`
+- post-load result again remained success (`EAX=1` at `0x0083cd32`)
+- downstream callback rebuild again surfaced immediately after successful world-path load at `0x00832ea0`
+- after deleting the noisy choose/load breakpoints and leaving downstream stops armed, execution reached:
+	- `0x00838490` (`M2_InitializeSkinProfileAndRebuildInstances`)
+	- `0x00838561` (loaded-state write inside the same init path)
+
+Current boundary on this follow-up pass:
+
+- the explicit init path is now proven reachable in the active in-world session, but the isolated init samples captured after breakpoint cleanup were still dominated by UI-model callers such as `ui_nightelf.m2` and `ui-autocastbutton.m2`
+- `0x00836600` combiner-family routing was also re-hit after cleanup, but the sampled caller remained UI-path in this pass rather than one of the confirmed world doodads
+- the x64dbg MCP session timed out and dropped before a clean world-attributed `0x00838490` or world-attributed `0x00836600` sample could be harvested
+
+### Win32 reattach pass: first world-attributed combiner and init-completion samples (Apr 02, 2026)
+
+After restarting x64dbg and reattaching with only narrow downstream breakpoints, the next pass finally produced clean world-attributed samples for both effect routing and init completion.
+
+- world-attributed combiner caller object:
+	- `world\generic\human\passive doodads\beds\duskwoodbed.m2`
+- combiner callsite:
+	- `0x00836600` (`M2_BuildCombinerEffectName`)
+- resolved world-path selection inside that call:
+	- texture-side selection set `[ebp+0x0C] = 0x00A45854` -> `Diffuse_T2`
+	- combiner-family dispatch selected `0x00A45838` -> `Combiners_Mod2x`
+- this gives the first clean world-path effect-family sample in the Win32 Wrath session instead of only UI-path effect routing
+
+- world-attributed init-completion sample:
+	- the same `duskwoodbed.m2` object was later observed at `0x00838561` (`or dword ptr ds:[edi+0x08], 0x02`), the loaded-state write inside `M2_InitializeSkinProfileAndRebuildInstances`
+	- `EDI` at that stop pointed back to the same world model object that carried the `duskwoodbed.m2` path
+
+Current boundary after the reattach pass:
+
+- world-path choose/load is now confirmed on multiple doodads
+- world-path effect routing is now confirmed with one concrete sample: `Diffuse_T2` + `Combiners_Mod2x`
+- world-path init completion is now confirmed at the loaded-state write inside the init routine
+- a clean world-attributed stop at the entry of `0x00838490` itself is still optional follow-up, but the stronger practical boundary is now closed because the init routine and its loaded-state write have been observed on a world object
+
+### Win32 static contract consolidation from decompilation (Apr 02, 2026)
+
+The Wrath Win32 M2 runtime contract is now backed by direct decompilation for the main choose/load/init/effect seams, not just string-xref and runtime sampling.
+
+#### 1. Skin-profile choose logic uses a real threshold ladder
+
+`M2_ChooseAndLoadSkinProfile` (`0x0083cc80`) selects the active profile by comparing the current runtime threshold against the model-side table under `+0x44`.
+
+The live data table at `0x00A45644` is:
+
+- `0x100`
+- `0x40`
+- `0x35`
+- `0x15`
+
+This matches the earlier runtime observations where live world and UI samples repeatedly showed the active threshold path `0x40`.
+
+#### 2. Skin load is staged and asynchronous before init
+
+`FUN_0083cb40` is the exact numbered-skin load wrapper:
+
+- builds `%02d.skin` through `M2_FormatSkinFilename_02d`
+- opens the file through the model file-open path
+- allocates the skin payload block into `+0x170`
+- allocates an async job record at `+0x0c`
+- sets completion callback `FUN_0083cb10`
+
+`FUN_0083cb10` then calls `M2_InitializeSkinProfileAndRebuildInstances` on completion and frees the async job state.
+
+#### 3. Init path is strict relocation plus rebuild
+
+`M2_InitializeSkinProfileAndRebuildInstances` (`0x00838490`) performs a strict block-relocation and validation chain before the runtime accepts the skin profile.
+
+The decompiled order is:
+
+- `FUN_00835df0`
+- `FUN_00835df0`
+- `FUN_00835c20`
+- `FUN_00835ae0`
+- `FUN_00835b30`
+- `FUN_00837a40`
+
+If any stage fails, the client logs either:
+
+- `Corrupt skin profile data: %s`
+- `Failed to initialize model skin profile: %s`
+
+On success it:
+
+- sets the loaded bit at `param_1 + 8 |= 2`
+- drains the live callback list through `FUN_00824510` and `FUN_00832ea0`
+
+#### 4. `FUN_00837a40` is the real section or batch materialization seam
+
+`FUN_00837a40` is not a trivial helper. It materializes the active skin-driven runtime state by:
+
+- allocating the active copied section block at `+0x18c`
+- calling `FUN_00836980` and `FUN_00837680` to classify and merge section-state flags
+- building effect handles into `+0x188` by iterating skin records through `FUN_00836c90` and `M2_BuildCombinerEffectName`
+- copying and remapping section records into the shared runtime table at the model-side `+0x40`
+- propagating `0x40` relationship bits across dependent entries
+- replacing the shared table pointer when the active section count exceeds capacity, otherwise copying into the existing table
+
+This directly reinforces the earlier conclusion that `.skin` ownership is structural runtime state, not just an index-buffer sidecar.
+
+#### 5. `M2_BuildCombinerEffectName` now has a decompiled decision tree
+
+For `param_2 == 1`, the function chooses one of:
+
+- `Diffuse_T1`
+- `Diffuse_T2`
+- `Diffuse_Env`
+
+paired with one of:
+
+- `Combiners_Opaque`
+- `Combiners_Mod`
+- `Combiners_Decal`
+- `Combiners_Add`
+- `Combiners_Mod2x`
+- `Combiners_Fade`
+
+For the two-layer route it chooses:
+
+- `Diffuse_T1_T2`
+- `Diffuse_T1_Env`
+- `Diffuse_Env_T2`
+- `Diffuse_Env_Env`
+
+paired with families including:
+
+- `Combiners_Opaque_Opaque`
+- `Combiners_Opaque_Mod`
+- `Combiners_Opaque_Add`
+- `Combiners_Opaque_Mod2x`
+- `Combiners_Opaque_Mod2xNA`
+- `Combiners_Opaque_AddNA`
+- `Combiners_Mod_Opaque`
+- `Combiners_Mod_Mod`
+- `Combiners_Mod_Add`
+- `Combiners_Mod_Mod2x`
+- `Combiners_Mod_Mod2xNA`
+- `Combiners_Mod_AddNA`
+- `Combiners_Add_Mod`
+- `Combiners_Mod2x_Mod2x`
+
+The world-attributed `duskwoodbed.m2` runtime sample matches this tree exactly and resolved to:
+
+- `Diffuse_T2`
+- `Combiners_Mod2x`
+
+#### 6. Special-case wrapper above the normal combiner path
+
+`FUN_00836c90` wraps `M2_BuildCombinerEffectName` and adds a special high-bit route when the batch flags carry `0x8000`.
+
+Recovered explicit special families include:
+
+- `Combiners_Opaque_Mod2xNA_Alpha`
+- `Combiners_Opaque_AddAlpha`
+- `Combiners_Opaque_AddAlpha_Alpha`
+
+with `Diffuse_T1_Env` on that special route before the function falls back to a normal `M2_BuildCombinerEffectName(..., 0x11, ...)` call when the first effect lookup fails.
+
+#### 7. Runtime flag word semantics are now decompiled, not inferred
+
+`M2_RegisterRuntimeFlags` (`0x00402760`) registers:
+
+- `M2UseZFill` -> bit `0x1`
+- `M2UseClipPlanes` -> bit `0x2`
+- `M2UseThreads` -> bit `0x4`
+- always returns with startup bit `0x8` set
+- `M2BatchDoodads` callback -> bit `0x20`
+- `M2BatchParticles` callback -> bit `0x80`
+- `M2ForceAdditiveParticleSort` callback -> bit `0x100`
+
+`M2Faster` and `M2FasterDebug` do not directly replace the low bits; they OR optimization masks through `FUN_0081c060`, which only preserves high bits `0x2000`, `0x6000`, or `0xe000`.
+
+The callback bodies now confirm the user-facing semantics too:
+
+- doodad batching enabled or disabled
+- particle batching enabled or disabled
+- additive-particle forced-sort enabled or disabled
+
+#### 8. The fallback `0x40` path is real and still tied to batching eligibility
+
+`FUN_0081c0d0` sets fallback bit `0x40` only when startup bit `0x8` is not active and the host capability flags also permit it.
+
+`FUN_00824550` still consults that same `0x40` bit inside combinable-doodad eligibility:
+
+- batching requires global `0x20`
+- doodad flag `0x10`
+- either more than one shared record or fallback `0x40`
+- candidate flag `0x10`
+- no blocking runtime owner state at `+0x2a8`
+
+This keeps the previously suspected `0x40` relationship grounded in real batching control flow rather than only speculative flag archaeology.
+
+#### 9. The Win32 cache-open path is now decompiled and confirms the strict extension gate
+
+`FUN_0081c390` is the real Win32 model cache-open path behind the earlier `Model2` string evidence.
+
+Recovered behavior:
+
+- copies and normalizes the incoming path to lowercase
+- accepts `.mdl`, `.mdx`, and `.m2`
+- rewrites `.mdl` and `.mdx` to `.m2`
+- rejects missing or unsupported extensions with:
+	- `Model2: Invalid file extension: %s`
+- opens the normalized `.m2` path and rejects missing payloads with:
+	- `Model2: File not found: %s`
+- hashes the basename into the cache bucket and either reuses the existing entry or creates a new cache object
+- preserves loader flags such as `0x10`, `0x40`, and the non-linking `0x8` path that had already shown up in earlier runtime notes
+
+This is no longer just a string-xref conclusion; the Win32 decompilation now confirms the canonical `.m2` identity rule directly.
+
+#### 10. External animation naming is fully explicit on Win32
+
+`M2_FormatAnimFilename_04d_02d` (`0x00835a20`) is now decompiled and does exactly what the earlier runtime sampling implied:
+
+- copies the current model basename into the destination buffer
+- strips the extension
+- appends `%04d-%02d.anim`
+
+So the external animation filename contract is directly confirmed on Win32 as:
+
+- `basename + "%04d-%02d.anim"`
+
+#### 11. Animation-track relocation is also first-class in the model bootstrap
+
+`FUN_00837ee0` is one of the larger animation-track relocation seams called during the main `FUN_0083cf00` model bootstrap.
+
+Important behavior from the decompilation:
+
+- validates and relocates multiple per-sequence pointer families in `0x28`-byte records
+- handles inline and out-of-line forms, including the `-1` sentinel cases seen in native structures
+- applies per-record pointer fixups against the loaded model base
+- respects section records carrying flag `0x20` when walking associated animation or track payloads
+
+This strengthens the earlier architectural boundary: animation ownership is part of the main strict model bootstrap, not a late optional post-process bolted on after the root model is already considered fully initialized.
+
+#### 12. The `0x20` shared-record flag is now partially resolved by exact record-size matches
+
+The follow-up Win32 decompilation pass against `FUN_00838b10`, `FUN_00839080`, and `FUN_00839270` materially improved the meaning of `0x20`.
+
+Recovered pattern:
+
+- each helper repeatedly performs nested pointer or track fixups only when `(*(byte *)(... + 0xc + iVar4) & 0x20) != 0`
+- the helper record widths line up with real root-model track-bearing structures from the in-repo wowdev docs:
+	- `0x14` -> `M2Track<T>`
+	- `0x28` -> `M2Color`
+	- `0x3c` -> `M2TextureTransform`
+	- `0x9c` -> `M2Light`
+- this means the flag is showing up on shared record families that own nested animation payloads, not on the compact renderable section path itself
+
+Current best reading:
+
+- `0x20` marks a shared-record class whose associated track-bearing substructures require special relocation and are excluded from the compact runtime render list
+- it should not currently be named as a skin texture-unit `0x20` meaning or any other `.skin`-local material flag; the native bootstrap evidence is pointing at root-model shared blocks instead
+
+What is still open:
+
+- the exact user-facing label for that class in `wow-viewer` terms
+- whether every `0x20`-bearing family is purely non-renderable support state or whether some participate indirectly in section/material evaluation later in the pipeline
+
 ### Win32 live deep-capture update (Apr 01, 2026)
 
 Live x64dbg captures now confirm the expected choose/load/init/rebuild/effect chain on the Win32 `3.3.5.12340` process:
@@ -562,6 +863,151 @@ Current classification for this binary pass:
 - no positive evidence of direct standalone `.lit` asset-file loading in the recovered Win32 renderer/runtime path
 - this is still an evidence-bounded statement, not a proof that no hidden path exists under all startup permutations
 
+### Cataclysm next-build setup status: substitute `4.0.0.11927`, but static-only for now (Apr 02, 2026)
+
+The next cross-build slot after the Win32 Wrath baseline should be the first Cataclysm-era build.
+
+The default ladder names `4.0.6a.13623`, but the nearest actually documented Cataclysm-era native evidence already present in this repo is Win32 `4.0.0.11927`.
+
+Current confirmed static-only evidence for `4.0.0.11927` from the existing repo notes and prompts:
+
+- Win32 x86 `WoW.exe` build `4.0.0.11927` was previously loaded in Ghidra for terrain and engine work
+- the build is documented as keeping `MD20` / `MD21` M2-family continuity with `3.3.5`-style on-disk M2 expectations
+- archived Cataclysm notes explicitly mark M2 as active in this build (`InvisibleStalker.m2`) while MDX is legacy
+- the engine/performance guide already recovers Cataclysm-native effect-stack evidence including:
+	- `./ShaderEffectManager.cpp`
+	- `%s\%s\%s.bls`
+	- `Shaders\Vertex`, `Shaders\Pixel`, and related shader directories
+	- `A.\M2Cache.cpp`
+
+Current blocker for a reproducible next-build pass in this session:
+
+- a direct filesystem search under `I:\parp` only surfaced local testdata executables for `0.5.5` and `0.6.0`
+- no Cataclysm or later `WoW.exe` path is currently available in the visible environment for live x64dbg attach or fresh offline anchor recovery
+
+What this does and does not close:
+
+- it is enough to justify substituting `4.0.0.11927` for the next Cataclysm slot when the exact `4.0.6a.13623` client is unavailable
+- it is not enough to claim Cataclysm M2 choose/load/init/effect parity with the Wrath baseline yet
+- no Cataclysm `%02d.skin`, `%04d-%02d.anim`, `Combiners_*`, or runtime world-path chain has been freshly confirmed in this session
+
+### Cataclysm `4.0.0.11927` static M2 anchor recovery (Apr 02, 2026)
+
+With the Cataclysm binary loaded in Ghidra, the first dedicated `4.0.0.11927` M2 anchor pass is now strong enough to treat this build as a real next-step baseline for static comparison.
+
+#### 1. Exact numbered skin and anim filename builders are still explicit
+
+Recovered string/xref anchors:
+
+- `0x00a2cd9c` -> `%02d.skin`
+- `0x00a2cd8c` -> `%04d-%02d.anim`
+
+Recovered functions:
+
+- `FUN_007242d0` copies the current model basename, strips the extension, and appends `%02d.skin`
+- `FUN_00724270` copies the current model basename, strips the extension, and appends `%04d-%02d.anim`
+
+This closes the first Cataclysm-era identity question cleanly: `4.0.0.11927` still owns exact numbered skin files and exact external anim filenames through dedicated formatter seams.
+
+#### 2. Skin choose, exact load, completion callback, and strict init are all still staged
+
+Recovered choose/load/init chain:
+
+- `FUN_0072a740`
+	- chooses the active skin profile
+	- emits `Failed to choose skin profile: %s` on failure
+	- allocates the texture array at `+0x174`
+	- still carries the same runtime-facing texture flag setup and section-count walk shape seen in later Wrath notes
+- `FUN_0072a620`
+	- calls `FUN_007242d0` to build the exact numbered `%02d.skin` path
+	- opens that path through the model/file open path
+	- allocates the loaded skin payload at `+0x170`
+	- allocates async job state at `+0x0c`
+	- installs completion callback `FUN_0072a5f0` and failure cleanup `FUN_00724250`
+- `FUN_0072a5f0`
+	- calls `FUN_0072a4e0`
+	- then clears the async job state
+- `FUN_0072a4e0`
+	- validates or relocates multiple payload blocks through `FUN_007245d0`, `FUN_00724620`, `FUN_00724670`, and `FUN_007246c0`
+	- emits `Corrupt skin profile data: %s` or `Failed to initialize model skin profile: %s` on failure
+	- calls `FUN_00725e00` as the main active-skin materialization seam
+	- sets the loaded bit with `*(uint *)(param_1 + 8) |= 2`
+	- drains the callback list through `FUN_007122c0` and `FUN_007223c0`
+
+This is no longer just a generic “Cataclysm probably still has skins” statement. The static chain confirms that early Cataclysm still preserves explicit choose -> exact `%02d.skin` load -> completion callback -> strict init -> callback rebuild ownership.
+
+#### 3. Active section/effect materialization still routes through a dedicated effect builder
+
+Recovered functions:
+
+- `FUN_00725e00`
+	- allocates the active copied section block at `+0x18c`
+	- copies `0x30`-byte section records from the loaded skin payload
+	- allocates or zeros the effect-handle array at `+0x188`
+	- iterates the skin-side effect records and calls `FUN_00724320` for each one
+	- keeps the same broad ownership boundary as Wrath: the skin initializer is structurally building active runtime section/effect state, not passively loading sidecar data
+- `FUN_00724850`
+	- refreshes those effect handles again by re-running `FUN_00724320` across the active effect list when needed
+
+Recovered effect builder:
+
+- `FUN_00724320`
+	- references `Combiners_*` and `Diffuse_*` string families directly
+	- builds effect/material names like `Model2_%s`, `Model2Displ_%s`, or explicit `M2Effect %d`
+	- falls back to `Diffuse_T1Combiners_Opaque` when the requested effect is missing
+
+This is strong evidence that `4.0.0.11927` still has an explicit M2 effect-family layer and does not flatten M2 materials down to one generic renderer mode.
+
+#### 4. External animation loads are still explicit runtime-owned assets
+
+Recovered external-animation loader:
+
+- `FUN_0072b3f0`
+	- walks the model-side animation block for the requested sequence
+	- follows alias chaining through the referenced sequence records
+	- calls `FUN_00724270` to build the exact `%04d-%02d.anim` path
+	- opens the external animation file and allocates async job state for it
+	- marks related sequence records with runtime-ready bits during successful setup
+
+So early Cataclysm still treats external animation files as a first-class runtime seam, not a dead legacy path.
+
+#### 5. Runtime option registration survives, but the default mask differs from Wrath
+
+Recovered function:
+
+- `FUN_00402390`
+	- registers `M2UseZFill`, `M2UseClipPlanes`, `M2UseThreads`, `M2BatchDoodads`, `M2BatchParticles`, `M2ForceAdditiveParticleSort`, `M2Faster`, and `M2FasterDebug`
+	- maps the same low bits previously seen in Wrath:
+		- `0x1` ZFill
+		- `0x2` ClipPlanes
+		- `0x4` Threads
+		- `0x20` doodad batching
+		- `0x80` particle batching
+		- `0x100` additive particle sort
+	- returns those flags ORed with `0x2008`
+
+Current reading:
+
+- the user-facing M2 runtime option surface is still recognizably the same in early Cataclysm
+- unlike the Wrath note's current `0x8` startup default, this build appears to force `0x2008`, which is a real cross-build difference worth keeping visible until the corresponding optimization-mask path is traced more completely
+
+#### 6. Auxiliary skin probe path is still present
+
+Recovered helper:
+
+- `FUN_007ed840`
+	- normalizes `.mdl` and `.mdx` requests to `.m2`
+	- probes `%02d.skin` companions from `00` through `03`
+	- returns early when one exists
+
+This mirrors the later native probe/warm-up pattern closely enough that the Cataclysm slot should not be treated as a fundamentally different skin-discovery era without stronger contradictory evidence.
+
+#### Current Cataclysm boundary after this pass
+
+- static anchor recovery for `4.0.0.11927` is now real for identity, exact `%02d.skin`, exact `%04d-%02d.anim`, choose/load/init, section/effect materialization, external anim ownership, and runtime flags
+- what is still missing is live runtime confirmation in x64dbg for at least one contiguous choose/load/init/effect chain and at least one world-path sample
+- the attempted x64dbg continuation in this session failed when the debug session dropped while trying to recover the live module base for rebased breakpoints
+
 #### Live open-path trace update (Apr 02, 2026)
 
 After restarting x64dbg and reattaching to the same Win32 process, a targeted live trace sampled the Storm open wrapper path at `FUN_004609b0`:
@@ -638,14 +1084,16 @@ The future `wow-viewer` M2 source of truth should be built around native ownersh
 
 The completed pass did not yet close these items.
 
-- exact semantic meaning of section flag `0x20`
+- reproducible access to a Cataclysm-or-later Win32 client binary in the current environment; the `I:\parp` search only surfaced local `0.5.5` and `0.6.0` testdata executables
+- the final user-facing name for the `0x20` shared-record class; current evidence only closes that it gates track-bearing shared blocks such as exact-size `M2TextureTransform` and `M2Light` families during relocation and compact-list exclusion
 - exact semantic meaning of the propagated section dependency flag `0x40`
 - the exact final draw submission path for the compact runtime section list after scene classification
 - the exact unlabeled function boundaries for the recovered M2 option-registration and option-application blocks
 - the exact runtime switch points for z-fill, clip-plane use, threads, and additive particle sorting
 - the precise mapping from section or material flags into the native combiner/effect families
 - how transparent or additive submission policy interacts with the recovered scene batching comparator and the lower state-split batch helpers
-- world-path Win32 live capture under the same choose/load/init/effect chain is still pending after the latest x64dbg control-session interruption
+- broader world-path Win32 combiner coverage beyond the confirmed `duskwoodbed.m2` sample is still pending; choose/load/init/effect closure itself is now proven on Wrath
+- Cataclysm `4.0.0.11927` still lacks fresh runtime x64dbg confirmation for rebased breakpoints and world-path choose/load/init/effect capture even though the static anchors are now recovered
 
 ## Remaining PowerPC Follow-up
 
@@ -654,7 +1102,7 @@ The main PowerPC confirmation pass is now complete enough to support library des
 Next PowerPC follow-up targets:
 
 1. recover the final draw-submission path that consumes the compact runtime section list
-2. determine whether the PowerPC build exposes clearer semantics for the unresolved `0x20` section class
+2. determine whether the PowerPC build exposes a cleaner semantic label for the now-partially-resolved `0x20` shared-record class
 3. determine whether the PowerPC build exposes a clearer semantic name for the propagated `0x40` dependency flag
 4. recover the missing function boundaries around the M2 option-registration and option-application blocks near `0x00a1a5ec` and `0x00a1850c`
 5. trace the shared M2 runtime flag bits from `DAT_010a3b2c` into the remaining live transparent, clip-plane, z-fill, and particle-ordering paths

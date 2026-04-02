@@ -2,6 +2,111 @@
 
 # Active Context
 
+## Apr 02, 2026 - M2 docs are now consolidated into one canonical wow-viewer doc set
+
+- the implementation-facing M2 documentation surface now lives under:
+	- `wow-viewer/docs/architecture/m2/README.md`
+	- `wow-viewer/docs/architecture/m2/implementation-contract.md`
+	- `wow-viewer/docs/architecture/m2/native-build-matrix.md`
+	- `wow-viewer/docs/architecture/m2/consumer-cutover.md`
+- practical routing change:
+	- start new M2 implementation work from that folder first
+	- treat `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md` as the raw evidence log underneath it
+	- treat `gillijimproject_refactor/plans/wow_viewer_m2_runtime_plan_2026-03-31.md` as migration history and staged prompt context rather than the primary handoff
+- `wow-viewer/README.md` now points at the consolidated M2 doc set instead of only the raw native note
+
+## Apr 02, 2026 - Next cross-build slot is Cataclysm `4.0.0.11927`, but only static evidence is reproducible here
+
+- for the post-Wrath step, the nearest actually documented Cataclysm-era build in this repo is Win32 `4.0.0.11927`, so that is the honest substitution for the default ladder's `4.0.6a.13623` until the exact client is available
+- repo-local Cataclysm evidence already exists for:
+	- `MD20` / `MD21` M2-family continuity
+	- M2 still active in the client
+	- explicit shader/effect stack strings (`ShaderEffectManager`, `.bls`, shader directories, `M2Cache.cpp`)
+- the current chat materially improved that Cataclysm slot with a real static M2 anchor set:
+	- `FUN_007242d0` exact `%02d.skin`
+	- `FUN_00724270` exact `%04d-%02d.anim`
+	- `FUN_0072a740` choose skin profile
+	- `FUN_0072a620` exact skin load + async job setup
+	- `FUN_0072a4e0` strict init + callback rebuild drain
+	- `FUN_00725e00` active section/effect materialization
+	- `FUN_00724320` `Diffuse_*` + `Combiners_*` effect builder
+	- `FUN_00402390` runtime option registration with Cataclysm default mask `0x2008`
+- current blocker:
+	- a direct filesystem search under `I:\parp` only found `WoW.exe` under `wow-viewer/testdata/0.5.5/World of Warcraft/` and `wow-viewer/testdata/0.6.0/World of Warcraft/`
+	- despite the user's manual loaded-session handoff, the x64dbg session dropped during the first rebasing attempt before a live Cataclysm breakpoint chain could be captured
+- practical reading:
+	- Cataclysm is no longer just a placeholder substitution; the static anchor map is now real
+	- do not claim live Cataclysm `%02d.skin`, `%04d-%02d.anim`, `Combiners_*`, or world-path runtime proof until the debugger session is stable again
+
+## Apr 02, 2026 - Win32 `0x20` shared-record semantics are now partially closed by exact size matches
+
+- follow-up decompilation against the Wrath Win32 bootstrap helpers now ties the repeated `0x20`-guarded relocation pattern to real track-bearing root-model record families rather than leaving it as a generic unknown section bit
+- exact size matches recovered from the in-repo wowdev M2 docs:
+	- `0x14` -> `M2Track<T>` / single-track families such as `M2TextureWeight`
+	- `0x28` -> `M2Color`
+	- `0x3c` -> `M2TextureTransform`
+	- `0x9c` -> `M2Light`
+- practical reading for future `wow-viewer` work:
+	- `0x20` marks a shared-record class with nested animated payloads that gets special relocation handling and stays out of the compact runtime render list
+	- the exact user-facing label is still open, but it should no longer be treated as an entirely opaque section flag or conflated with `.skin` texture-unit flag notes
+
+## Apr 02, 2026 - First Win32 world-path M2 choose-load capture landed in native notes
+
+- live x64dbg sampling against Win32 `3.3.5.12340` now includes a real in-world doodad choose-load chain instead of only UI-model traffic
+- confirmed world-path model:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_mirror_01.m2`
+- confirmed exact numbered companion skin output:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_mirror_0100.skin`
+- confirmed runtime outcome:
+	- post-load success at `0x0083cd32` with `EAX=1`
+	- downstream callback rebuild hits at `0x00832ea0`
+- remaining boundary:
+	- explicit `0x00838490` skin-init stop did not surface cleanly in the noisy in-world pass
+	- world-path combiner/effect-family capture is still pending
+
+## Apr 02, 2026 - Second world-path M2 skin capture plus init-path reachability recorded
+
+- a second in-world doodad chain is now confirmed in the Win32 notes:
+	- `world\expansion02\doodads\generic\barbershop\barbershop_shavecup.m2`
+	- exact skin output `world\expansion02\doodads\generic\barbershop\barbershop_shavecup00.skin`
+- after deleting noisy choose/load breakpoints, the active in-world session also re-hit:
+	- `0x00838490`
+	- `0x00838561`
+	- `0x00836600`
+- remaining boundary tightened but is still open:
+	- sampled downstream init and combiner callers after cleanup were still UI-heavy rather than cleanly attributed to one of the confirmed world doodads
+	- x64dbg MCP timed out and the debug session dropped before a world-attributed init or combiner sample was harvested
+
+## Apr 02, 2026 - Reattach pass closed world-path combiner and init-completion gaps
+
+- after restarting x64dbg and reattaching with only narrow downstream stops, the Win32 `3.3.5.12340` session produced the first clean world-attributed downstream samples:
+	- world model `world\generic\human\passive doodads\beds\duskwoodbed.m2`
+	- world combiner sample at `0x00836600`
+	- resolved effect recipe for that sample: `Diffuse_T2` + `Combiners_Mod2x`
+	- world init-completion sample at `0x00838561` on the same object
+- practical result:
+	- world-path choose/load, effect routing, and init completion are now all grounded in direct Win32 runtime evidence for Wrath
+
+## Apr 02, 2026 - Wrath static M2 contract now decompiled, not just sampled
+
+- `M2_ChooseAndLoadSkinProfile`, `M2_InitializeSkinProfileAndRebuildInstances`, `M2_BuildCombinerEffectName`, `FUN_00836c90`, `FUN_00837a40`, `M2_RegisterRuntimeFlags`, and `M2_NormalizeModelPathAndProbeSkins` are now backed by direct Ghidra decompilation in the canonical note
+- recovered concrete choose thresholds from live data at `0x00A45644`:
+	- `0x100`
+	- `0x40`
+	- `0x35`
+	- `0x15`
+- recovered the actual combiner decision tree and special alpha-route wrapper, not just individual strings
+- recovered the exact flag-word bit model for startup, batching, additive sort, and `M2Faster` high-bit optimization masks
+
+## Apr 02, 2026 - Extension gate and external anim contract now decompiled on Win32
+
+- `FUN_0081c390` now directly confirms the strict Win32 cache-open behavior:
+	- accepts `.mdl`, `.mdx`, `.m2`
+	- rewrites legacy extensions to `.m2`
+	- rejects unsupported extensions with the `Model2: Invalid file extension` path
+- `M2_FormatAnimFilename_04d_02d` now directly confirms external animation naming as `basename + %04d-%02d.anim`
+- `FUN_00837ee0` confirms that animation-track relocation is part of the strict root-model bootstrap, not a separate late pass
+
 ## Apr 02, 2026 - Workflow asset location correction for prompt continuity
 
 - canonical workspace workflow assets for this repo remain under `.github/` with Codex mirrors under `.codex/`

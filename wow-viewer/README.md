@@ -34,8 +34,11 @@ Current implementation policy:
 
 Current M2-native continuity note:
 
-- Native 3.3.5 OS X and 3.3.5 PTR OS X PowerPC M2 findings now live in `docs/architecture/m2-native-client-research-2026-03-31.md`.
-- Treat that note as the active behavior-recovery handoff for future `wow-viewer` M2 parser, runtime, lighting, shader, and performance work.
+- The canonical implementation-facing M2 documentation set now lives under `docs/architecture/m2/`.
+	- start with `docs/architecture/m2/README.md`
+	- then use `implementation-contract.md`, `native-build-matrix.md`, and `consumer-cutover.md`
+- Raw native evidence still lives in `docs/architecture/m2-native-client-research-2026-03-31.md`.
+- Treat the consolidated `docs/architecture/m2/` folder as the first handoff for future `wow-viewer` M2 parser, runtime, lighting, shader, and performance work.
 - Do not keep growing `MdxViewer` as the design owner for those M2 seams unless the task is explicitly compatibility-only.
 - The staged workflow surface for this work now lives in `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` and `.github/prompts/wow-viewer-m2-runtime/`.
 - Cross-build recovery from Wrath through 6.x now routes through `.github/prompts/m2-cross-build-native-investigation.prompt.md`.

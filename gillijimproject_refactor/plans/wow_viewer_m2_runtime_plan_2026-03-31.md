@@ -1,5 +1,11 @@
 # wow-viewer M2 Runtime And Renderer Plan
 
+## Canonical Doc Surface
+
+- The implementation-facing M2 doc set now lives under `wow-viewer/docs/architecture/m2/`.
+- Use that folder as the first read for active implementation work.
+- Keep this plan as staged migration history and prompt-routing context, not as the only day-to-day implementation handoff.
+
 ## Status
 
 - status: active
