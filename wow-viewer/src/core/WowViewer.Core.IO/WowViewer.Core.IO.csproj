@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WowViewer.Core\WowViewer.Core.csproj" />
     <ProjectReference Include="..\..\..\..\gillijimproject_refactor\lib\wow.tools.local\DBCD\DBCD\DBCD.csproj" />
+    <ProjectReference Include="..\..\..\..\gillijimproject_refactor\lib\Warcraft.NET\Warcraft.NET\Warcraft.NET.csproj" />
   </ItemGroup>
 
   <ItemGroup>

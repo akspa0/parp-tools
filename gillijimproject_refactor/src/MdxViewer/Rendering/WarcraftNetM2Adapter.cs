@@ -202,12 +202,12 @@ internal static class WarcraftNetM2Adapter
         if (mdx.Textures.Count == 0)
             mdx.Textures.Add(new MdlTexture { Path = string.Empty, ReplaceableId = 0, Flags = 0 });
 
-        var sectionMaterialIds = BuildMaterialsFromBatches(mdx, model, skin);
+        MaterialAssignmentMap materialAssignments = BuildMaterialsFromBatches(mdx, model, skin);
 
         if (mdx.Materials.Count == 0)
             mdx.Materials.Add(CreateFallbackMaterial());
 
-        foreach (var geoset in BuildGeosets(model, skin, sectionMaterialIds, mdx.Materials.Count, modelPath))
+        foreach (var geoset in BuildGeosets(model, skin, materialAssignments, mdx.Materials.Count, modelPath))
             mdx.Geosets.Add(geoset);
 
         if (mdx.Geosets.Count == 0)
@@ -400,9 +400,10 @@ internal static class WarcraftNetM2Adapter
         return flags;
     }
 
-    private static int[] BuildMaterialsFromBatches(MdxFile mdx, ParsedModelData model, SkinData skin)
+    private static MaterialAssignmentMap BuildMaterialsFromBatches(MdxFile mdx, ParsedModelData model, SkinData skin)
     {
         var sectionMaterialIds = Enumerable.Repeat(-1, skin.Submeshes.Count).ToArray();
+        Dictionary<int, List<int>> batchMaterialIdsBySection = new();
 
         for (int batchIndex = 0; batchIndex < skin.TextureUnits.Count; batchIndex++)
         {
@@ -431,12 +432,13 @@ internal static class WarcraftNetM2Adapter
                 continue;
 
             var material = new MdlMaterial { PriorityPlane = batch.PriorityPlane };
+            int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex);
 
             material.Layers.Add(new MdlTexLayer
             {
                 BlendMode = MapBlendMode(blendMode),
                 TextureId = textureId,
-                CoordId = 0,
+                CoordId = coordId,
                 TransformId = -1,
                 StaticAlpha = 1.0f,
                 StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
@@ -448,10 +450,20 @@ internal static class WarcraftNetM2Adapter
 
             int materialId = mdx.Materials.Count;
             mdx.Materials.Add(material);
-            sectionMaterialIds[batch.SkinSectionIndex] = materialId;
+
+            if (!batchMaterialIdsBySection.TryGetValue(batch.SkinSectionIndex, out List<int>? materialIds))
+            {
+                materialIds = [];
+                batchMaterialIdsBySection.Add(batch.SkinSectionIndex, materialIds);
+            }
+
+            materialIds.Add(materialId);
+
+            if (sectionMaterialIds[batch.SkinSectionIndex] < 0)
+                sectionMaterialIds[batch.SkinSectionIndex] = materialId;
         }
 
-        return sectionMaterialIds;
+        return new MaterialAssignmentMap(sectionMaterialIds, batchMaterialIdsBySection);
     }
 
     private static int ResolveTextureId(ParsedModelData model, SkinTextureUnitData batch)
@@ -465,6 +477,18 @@ internal static class WarcraftNetM2Adapter
         }
 
         return model.Textures.Count > 0 ? 0 : -1;
+    }
+
+    private static int ResolveTextureCoordId(ParsedModelData model, int lookupIndex)
+    {
+        if (lookupIndex >= 0 && lookupIndex < model.TextureCoordLookup.Count)
+        {
+            int coordId = model.TextureCoordLookup[lookupIndex].CoordId;
+            if (coordId >= 0)
+                return coordId;
+        }
+
+        return 0;
     }
 
     private static void ApplyLayerAnimationMetadata(MdlTexLayer layer, MdxFile mdx, ParsedModelData model, SkinTextureUnitData batch)
@@ -529,7 +553,7 @@ internal static class WarcraftNetM2Adapter
         return material;
     }
 
-    private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, int[] sectionMaterialIds, int materialCount, string modelPath)
+    private static IEnumerable<MdlGeoset> BuildGeosets(ParsedModelData model, SkinData skin, MaterialAssignmentMap materialAssignments, int materialCount, string modelPath)
     {
         var flatIndices = skin.TriangleIndices;
         var boneLookup = model.BoneLookupTable.Count > 0 ? model.BoneLookupTable : null;
@@ -544,59 +568,61 @@ internal static class WarcraftNetM2Adapter
             int endExclusive = Math.Min(flatIndices.Count, start + indexCount);
             if (start < 0 || start >= endExclusive) continue;
 
-            var geoset = new MdlGeoset
+            IReadOnlyList<int> materialIds = materialAssignments.GetMaterialIdsForSection(sectionIndex, materialCount);
+            for (int materialSlot = 0; materialSlot < materialIds.Count; materialSlot++)
             {
-                MaterialId = (sectionIndex < sectionMaterialIds.Length && sectionMaterialIds[sectionIndex] >= 0)
-                    ? sectionMaterialIds[sectionIndex]
-                    : Math.Min(0, materialCount - 1),
-            };
-
-            var remap = new Dictionary<ushort, ushort>();
-            int vertexFailures = 0;
-            int indexSkips = 0;
-
-            for (int indexPos = start; indexPos < endExclusive; indexPos++)
-            {
-                ushort localSkinVertexIndex = flatIndices[indexPos];
-                if (localSkinVertexIndex >= skin.Vertices.Count)
+                var geoset = new MdlGeoset
                 {
-                    indexSkips++;
-                    continue;
+                    MaterialId = materialIds[materialSlot],
+                };
+
+                var remap = new Dictionary<ushort, ushort>();
+                int vertexFailures = 0;
+                int indexSkips = 0;
+
+                for (int indexPos = start; indexPos < endExclusive; indexPos++)
+                {
+                    ushort localSkinVertexIndex = flatIndices[indexPos];
+                    if (localSkinVertexIndex >= skin.Vertices.Count)
+                    {
+                        indexSkips++;
+                        continue;
+                    }
+
+                    if (!TryGetVertex(model, skin, localSkinVertexIndex, out var vertex))
+                    {
+                        vertexFailures++;
+                        continue;
+                    }
+
+                    if (!remap.TryGetValue(localSkinVertexIndex, out ushort mappedIndex))
+                    {
+                        mappedIndex = (ushort)geoset.Vertices.Count;
+                        remap[localSkinVertexIndex] = mappedIndex;
+
+                        AddVertexToGeoset(geoset, vertex, boneLookup, section.BoneComboIndex);
+                    }
+
+                    if (mappedIndex >= geoset.Vertices.Count)
+                    {
+                        indexSkips++;
+                        continue;
+                    }
+
+                    geoset.Indices.Add(mappedIndex);
                 }
 
-                if (!TryGetVertex(model, skin, localSkinVertexIndex, out var vertex))
-                {
-                    vertexFailures++;
-                    continue;
-                }
+                int trimmed = geoset.Indices.Count - (geoset.Indices.Count % 3);
+                if (trimmed != geoset.Indices.Count)
+                    geoset.Indices.RemoveRange(trimmed, geoset.Indices.Count - trimmed);
 
-                if (!remap.TryGetValue(localSkinVertexIndex, out ushort mappedIndex))
-                {
-                    mappedIndex = (ushort)geoset.Vertices.Count;
-                    remap[localSkinVertexIndex] = mappedIndex;
+                ViewerLog.Info(
+                    ViewerLog.Category.Mdx,
+                    $"[M2-ADAPT] {modelPath} geoset {sectionIndex}/{materialSlot}: {geoset.Vertices.Count} verts, {geoset.Indices.Count} indices, {vertexFailures} vert-fails, {indexSkips} index-skips, material={geoset.MaterialId}");
 
-                    AddVertexToGeoset(geoset, vertex, boneLookup, section.BoneComboIndex);
-                }
-
-                if (mappedIndex >= geoset.Vertices.Count)
-                {
-                    indexSkips++;
-                    continue;
-                }
-
-                geoset.Indices.Add(mappedIndex);
+                if (geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3)
+                    yield return geoset;
             }
-
-            int trimmed = geoset.Indices.Count - (geoset.Indices.Count % 3);
-            if (trimmed != geoset.Indices.Count)
-                geoset.Indices.RemoveRange(trimmed, geoset.Indices.Count - trimmed);
-
-            ViewerLog.Info(
-                ViewerLog.Category.Mdx,
-                $"[M2-ADAPT] {modelPath} geoset {sectionIndex}: {geoset.Vertices.Count} verts, {geoset.Indices.Count} indices, {vertexFailures} vert-fails, {indexSkips} index-skips");
-
-            if (geoset.Vertices.Count > 0 && geoset.Indices.Count >= 3)
-                yield return geoset;
         }
     }
 
@@ -1898,6 +1924,29 @@ internal static class WarcraftNetM2Adapter
         public int TextureAnimationLookupIndex { get; set; } = -1;
         public int SkinSectionIndex { get; set; }
         public ushort PriorityPlane { get; set; }
+    }
+
+    private sealed class MaterialAssignmentMap
+    {
+        private readonly int[] _firstMaterialIdsBySection;
+        private readonly Dictionary<int, List<int>> _batchMaterialIdsBySection;
+
+        public MaterialAssignmentMap(int[] firstMaterialIdsBySection, Dictionary<int, List<int>> batchMaterialIdsBySection)
+        {
+            _firstMaterialIdsBySection = firstMaterialIdsBySection;
+            _batchMaterialIdsBySection = batchMaterialIdsBySection;
+        }
+
+        public IReadOnlyList<int> GetMaterialIdsForSection(int sectionIndex, int materialCount)
+        {
+            if (_batchMaterialIdsBySection.TryGetValue(sectionIndex, out List<int>? materialIds) && materialIds.Count > 0)
+                return materialIds.Distinct().ToArray();
+
+            if (sectionIndex >= 0 && sectionIndex < _firstMaterialIdsBySection.Length && _firstMaterialIdsBySection[sectionIndex] >= 0)
+                return [_firstMaterialIdsBySection[sectionIndex]];
+
+            return [Math.Min(0, materialCount - 1)];
+        }
     }
 
     private sealed class ParsedModelData

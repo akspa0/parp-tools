@@ -517,7 +517,12 @@ public class WorldScene : ISceneRenderer
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
-        private bool _objectFogEnabled = false;
+    private bool _objectFogEnabled = false;
+    private bool _limitHoveredAssetRange = true;
+    private bool _useDynamicHoveredAssetRange = false;
+    private bool _showSelectedObjectBounds = true;
+    private float _hoveredAssetMaxDistance = 150f;
+    private float _lastHoverPickFogEnd = 1500f;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -549,7 +554,7 @@ public class WorldScene : ISceneRenderer
 
     private readonly struct VisibleMdxInstance
     {
-        public VisibleMdxInstance(ObjectInstance instance, MdxRenderer renderer, float centerDistanceSq, float opaqueFade, float transparentFade)
+        public VisibleMdxInstance(ObjectInstance instance, IModelRenderer renderer, float centerDistanceSq, float opaqueFade, float transparentFade)
         {
             Instance = instance;
             Renderer = renderer;
@@ -559,7 +564,7 @@ public class WorldScene : ISceneRenderer
         }
 
         public ObjectInstance Instance { get; }
-        public MdxRenderer Renderer { get; }
+        public IModelRenderer Renderer { get; }
         public float CenterDistanceSq { get; }
         public float OpaqueFade { get; }
         public float TransparentFade { get; }
@@ -799,6 +804,15 @@ public class WorldScene : ISceneRenderer
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
     public HoveredAssetInfo? HoveredAssetInfo => _hoveredAssetInfo;
     public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
+    public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
+    public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
+    public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
+    public float HoveredAssetMaxDistance
+    {
+        get => _hoveredAssetMaxDistance;
+        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, 5000f);
+    }
+    public float EffectiveHoveredAssetMaxDistance => ComputeEffectiveHoveredAssetMaxDistance();
     public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
     public UniqueIdVisibilityScope UniqueIdVisibilityScope { get => _uniqueIdVisibilityScope; set => _uniqueIdVisibilityScope = value; }
     public int UniqueIdFilterMin { get => _uniqueIdFilterMin; set => _uniqueIdFilterMin = value; }
@@ -5820,7 +5834,7 @@ public class WorldScene : ISceneRenderer
         _instancesDirty = false;
     }
 
-    private MdxRenderer? TryGetQueuedMdx(string modelKey)
+    private IModelRenderer? TryGetQueuedMdx(string modelKey)
     {
         if (_assets.TryGetLoadedMdx(modelKey, out var renderer))
             return renderer;
@@ -6346,6 +6360,8 @@ public class WorldScene : ISceneRenderer
             }
         });
 
+        _lastHoverPickFogEnd = fogEnd;
+
         frame.SkyMs = MeasureDurationMs(() => _skyDome.Render(view, proj, camPos));
 
         var (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
@@ -6474,7 +6490,7 @@ public class WorldScene : ISceneRenderer
             });
         }
 
-        MdxRenderer? batchRenderer = null;
+        IModelRenderer? batchRenderer = null;
         if (_doodadsVisible)
         {
             frame.MdxVisibilityMs = MeasureDurationMs(() =>
@@ -6487,8 +6503,10 @@ public class WorldScene : ISceneRenderer
             {
                 if (frame.VisibleMdxInstances.Count > 0)
                 {
-                    batchRenderer = frame.VisibleMdxInstances[0].Renderer;
-                    batchRenderer.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
+                    batchRenderer = frame.VisibleMdxInstances
+                        .Select(static visible => visible.Renderer)
+                        .FirstOrDefault(static renderer => !renderer.RequiresUnbatchedWorldRender);
+                    batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                         lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
                 }
 
@@ -6586,7 +6604,7 @@ public class WorldScene : ISceneRenderer
             _gl.BindVertexArray(0);
 
             // 4. Debug bounding boxes for all placements
-            if ((_showBoundingBoxes || _showPm4ObjectBounds) && _bbRenderer != null)
+            if ((_showSelectedObjectBounds || _showBoundingBoxes || _showPm4ObjectBounds) && _bbRenderer != null)
             {
                 // Depth test ON so boxes behind terrain/objects are hidden,
                 // depth write OFF so box lines don't occlude models
@@ -6594,18 +6612,34 @@ public class WorldScene : ISceneRenderer
                 _gl.DepthFunc(DepthFunction.Lequal);
                 _gl.DepthMask(false);
 
+                if (_showSelectedObjectBounds)
+                {
+                    if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
+                        _bbRenderer.DrawBoxMinMax(selectedInstance.BoundsMin, selectedInstance.BoundsMax, view, proj, new Vector3(1f, 1f, 1f));
+
+                    if (_showPm4Overlay
+                        && _selectedPm4ObjectKey.HasValue
+                        && _pm4ObjectLookup.TryGetValue(_selectedPm4ObjectKey.Value, out Pm4OverlayObject? selectedPm4Object))
+                    {
+                        Matrix4x4 pm4Transform = BuildPm4OverlayTransformMatrix();
+                        bool applyPm4Transform = _pm4OverlayTranslation != Vector3.Zero
+                            || _pm4OverlayRotationDegrees.LengthSquared() > 0.0001f
+                            || _pm4OverlayScale != Vector3.One;
+                        Matrix4x4 objectTransform = BuildPm4ObjectTransform(_selectedPm4ObjectKey.Value, applyPm4Transform, pm4Transform, out bool applyObjectTransform);
+                        Vector3 boundsMin = selectedPm4Object.BoundsMin;
+                        Vector3 boundsMax = selectedPm4Object.BoundsMax;
+                        if (applyObjectTransform)
+                            TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
+
+                        _bbRenderer.DrawBoxMinMax(boundsMin, boundsMax, view, proj, new Vector3(1f, 1f, 1f));
+                    }
+                }
+
                 if (_showBoundingBoxes)
                 {
                     var adapter = _terrainManager.Adapter;
                     if (!_renderDiagPrinted)
                     ViewerLog.Debug(ViewerLog.Category.Terrain, $"BB render: {adapter.MddfPlacements.Count} MDDF + {adapter.ModfPlacements.Count} MODF markers");
-
-                    // Draw selected object highlight first (thicker visual via slightly larger box)
-                    if (SelectedInstance is ObjectInstance sel)
-                    {
-                        if (!ShouldHideObjectInstanceByUniqueId(sel))
-                            _bbRenderer.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(1f, 1f, 1f)); // white highlight
-                    }
 
                     // MDDF bounding boxes (magenta)
                     foreach (var inst in _mdxInstances)
@@ -7140,6 +7174,9 @@ public class WorldScene : ISceneRenderer
 
         void ConsiderCandidate(HoveredAssetInfo candidateInfo, float distanceSq, float depth)
         {
+            if (!IsHoverPickPositionAllowed(candidateInfo.WorldPosition))
+                return;
+
             hitCount++;
 
             const float distanceEpsilon = 0.01f;
@@ -7226,6 +7263,9 @@ public class WorldScene : ISceneRenderer
 
         void ConsiderCandidate(HoveredAssetInfo candidateInfo, float candidateDistance)
         {
+            if (!IsHoverPickDistanceAllowed(candidateDistance))
+                return;
+
             if (candidateDistance < currentDistance)
             {
                 bestInfo = candidateInfo;
@@ -7298,6 +7338,9 @@ public class WorldScene : ISceneRenderer
         distance = float.MaxValue;
 
         if (!TryPickPm4ObjectByRay(rayOrigin, rayDir, out var objectKey, out _, out float hitDistance) || !objectKey.HasValue)
+            return false;
+
+        if (!IsHoverPickDistanceAllowed(hitDistance))
             return false;
 
         if (!_pm4ObjectLookup.TryGetValue(objectKey.Value, out Pm4OverlayObject? obj))
@@ -7403,7 +7446,7 @@ public class WorldScene : ISceneRenderer
             // Slightly inflate AABBs to make selection more forgiving for thin geometry.
             Vector3 pad = new(2f, 2f, 2f);
             float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin - pad, _wmoInstances[i].BoundsMax + pad);
-            if (t >= 0)
+            if (t >= 0f && IsHoverPickDistanceAllowed(t))
             {
                 hits.Add(("WMO", i, t, _wmoInstances[i].ModelName));
                 if (t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
@@ -7418,7 +7461,7 @@ public class WorldScene : ISceneRenderer
 
             Vector3 pad = new(1f, 1f, 1f);
             float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin - pad, _mdxInstances[i].BoundsMax + pad);
-            if (t >= 0)
+            if (t >= 0f && IsHoverPickDistanceAllowed(t))
             {
                 hits.Add(("MDX", i, t, _mdxInstances[i].ModelName));
                 if (t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
@@ -7500,7 +7543,7 @@ public class WorldScene : ISceneRenderer
 
                 Vector3 padding = new(2f, 2f, 2f);
                 float t = RayAABBIntersect(rayOrigin, rayDir, boundsMin - padding, boundsMax + padding);
-                if (t >= 0f && t < bestT)
+                if (t >= 0f && t < bestT && IsHoverPickDistanceAllowed(t))
                 {
                     bestT = t;
                     bestKey = candidateKey;
@@ -7525,6 +7568,35 @@ public class WorldScene : ISceneRenderer
     {
         _selectedPm4ObjectKey = null;
         _selectedPm4ObjectGroupKey = null;
+    }
+
+    private float ComputeEffectiveHoveredAssetMaxDistance()
+    {
+        if (!_limitHoveredAssetRange)
+            return float.MaxValue;
+
+        if (!_useDynamicHoveredAssetRange)
+            return _hoveredAssetMaxDistance;
+
+        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.1f, 75f, 300f);
+        return Math.Min(_hoveredAssetMaxDistance, fogDrivenDistance);
+    }
+
+    private bool IsHoverPickDistanceAllowed(float distance)
+    {
+        if (!_limitHoveredAssetRange)
+            return true;
+
+        return distance <= ComputeEffectiveHoveredAssetMaxDistance();
+    }
+
+    private bool IsHoverPickPositionAllowed(Vector3 worldPosition)
+    {
+        if (!_limitHoveredAssetRange)
+            return true;
+
+        Vector3 cameraPosition = GetPm4LoadAnchorCameraPosition();
+        return Vector3.Distance(cameraPosition, worldPosition) <= ComputeEffectiveHoveredAssetMaxDistance();
     }
 
     public bool SelectPm4Object((int tileX, int tileY, uint ck24, int objectPart) objectKey)
@@ -7946,6 +8018,9 @@ public class WorldScene : ISceneRenderer
                 }
 
                 if (!TryMeasureHoverInfoHit(boundsMin, boundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
+                    continue;
+
+                if (!IsHoverPickPositionAllowed(center))
                     continue;
 
                 hitCount++;

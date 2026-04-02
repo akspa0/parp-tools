@@ -39,8 +39,8 @@ public partial class ViewerApp
             return;
         }
 
-        if (_renderer is MdxRenderer mdxRenderer)
-            mdxRenderer.ApplyTextureSamplingSettings();
+        if (_renderer is IModelRenderer modelRenderer)
+            modelRenderer.ApplyTextureSamplingSettings();
 
         if (_renderer is WmoRenderer wmoRenderer)
             wmoRenderer.ApplyTextureSamplingSettings();

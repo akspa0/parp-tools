@@ -6,6 +6,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Terrain;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.M2;
 using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Rendering;
@@ -44,7 +45,7 @@ public class WmoRenderer : ISceneRenderer
     private const int MaxMaterialFallbackLogs = 200;
 
     // Doodad support
-    private readonly Dictionary<string, MdxRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IModelRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DoodadInstance> _doodadInstances = new();
     private readonly List<string> _doodadNames = new(); // resolved from MODN
     private readonly Dictionary<string, string> _canonicalDoodadPathCache = new(StringComparer.OrdinalIgnoreCase);
@@ -1163,7 +1164,7 @@ void main() {
                 _doodadInstanceIndicesByModel[normalizedModelPath] = instanceIndices;
             }
 
-            MdxRenderer? renderer = null;
+            IModelRenderer? renderer = null;
             if (_deferInitialDoodadLoads)
             {
                 if (_queuedDoodadModelLoads.Add(normalizedModelPath))
@@ -1230,7 +1231,7 @@ void main() {
             string modelPath = _doodadSourceModelPaths.TryGetValue(normalizedModelPath, out string? sourceModelPath)
                 ? sourceModelPath
                 : _doodadInstances[indices[0]].ModelPath;
-            MdxRenderer? renderer = GetOrLoadDoodadModel(modelPath);
+            IModelRenderer? renderer = GetOrLoadDoodadModel(modelPath);
             foreach (int idx in indices)
                 _doodadInstances[idx].Renderer = renderer;
 
@@ -1241,7 +1242,7 @@ void main() {
     private enum DoodadLoadResult { Loaded, NotFound, ParseError }
     private DoodadLoadResult _lastLoadResult;
 
-    private MdxRenderer? GetOrLoadDoodadModel(string modelPath)
+    private IModelRenderer? GetOrLoadDoodadModel(string modelPath)
     {
         string normalized = NormalizeDoodadPath(modelPath).ToLowerInvariant();
 
@@ -1251,7 +1252,7 @@ void main() {
             return cached;
         }
 
-        MdxRenderer? renderer = null;
+        IModelRenderer? renderer = null;
         _lastLoadResult = DoodadLoadResult.NotFound;
         try
         {
@@ -1301,7 +1302,7 @@ void main() {
         return renderer;
     }
 
-    private MdxRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
+    private IModelRenderer? LoadM2DoodadRenderer(string originalModelPath, string resolvedModelPath, byte[] modelData)
     {
         WarcraftNetM2Adapter.ValidateModelProfile(modelData, resolvedModelPath, _buildVersion);
 
@@ -1324,11 +1325,15 @@ void main() {
             try
             {
                 ViewerLog.Trace($"[M2] Trying WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
+                M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelData, skinBytes, resolvedModelPath, skinPath);
                 var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(modelData, skinBytes, resolvedModelPath, _buildVersion);
                 string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                 ViewerLog.Info(ViewerLog.Category.Mdx,
                     $"[M2] Selected WMO doodad skin for {Path.GetFileName(originalModelPath)}: {skinPath} ({skinBytes.Length} bytes)");
-                return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                return new M2Renderer(
+                    new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                    runtimeModel,
+                    resolvedModelPath);
             }
             catch (Exception ex)
             {
@@ -1348,7 +1353,9 @@ void main() {
                     string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Loaded embedded root-profile geometry for WMO doodad {Path.GetFileName(originalModelPath)} after no external .skin resolved");
-                    return new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                    return new M2Renderer(
+                        new MdxRenderer(_gl, adapted, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                        resolvedModelPath);
                 }
                 catch (Exception ex)
                 {
@@ -1376,7 +1383,9 @@ void main() {
                         string modelDir = Path.GetDirectoryName(resolvedModelPath)?.Replace('/', '\\') ?? _modelDir;
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Falling back to M2->MDX conversion for WMO doodad {Path.GetFileName(originalModelPath)} after adapter failure");
-                        return new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                        return new M2Renderer(
+                            new MdxRenderer(_gl, convertedMdx, modelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                            resolvedModelPath);
                     }
 
                     lastSkinError = new InvalidDataException(
@@ -1947,7 +1956,7 @@ void main() {
     {
         public string ModelPath = "";
         public string NormalizedModelPath = "";
-        public MdxRenderer? Renderer;
+        public IModelRenderer? Renderer;
         public Matrix4x4 Transform;
         public bool Visible = true;
         public int DoodadDefIndex;

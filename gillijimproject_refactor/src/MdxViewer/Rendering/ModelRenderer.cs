@@ -77,7 +77,7 @@ public enum RenderPass
 /// Renders an MDX model using OpenGL.
 /// Handles per-geoset VAO/VBO setup, shader management, BLP2 textured rendering.
 /// </summary>
-public class MdxRenderer : ISceneRenderer
+public class MdxRenderer : IModelRenderer
 {
     private readonly GL _gl;
     private readonly MdxFile _mdx;
@@ -154,7 +154,7 @@ public class MdxRenderer : ISceneRenderer
     /// <summary>Model-space bounding box max corner.</summary>
     public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
     public bool IsM2AdapterModel => _isM2AdapterModel;
-    public bool RequiresUnbatchedWorldRender => _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
+    public bool RequiresUnbatchedWorldRender => _isM2AdapterModel || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
     public MdxAnimator? Animator => _animator;
@@ -174,11 +174,11 @@ public class MdxRenderer : ISceneRenderer
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
-        bool m2AnimationDisabled = !string.IsNullOrWhiteSpace(m2AnimationSetting)
-            && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "false", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "no", StringComparison.OrdinalIgnoreCase));
-        _enableM2Animation = !_isM2AdapterModel || !m2AnimationDisabled;
+        bool m2AnimationEnabled = !string.IsNullOrWhiteSpace(m2AnimationSetting)
+            && (string.Equals(m2AnimationSetting, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "yes", StringComparison.OrdinalIgnoreCase));
+        _enableM2Animation = !_isM2AdapterModel || m2AnimationEnabled;
         string? forceSolidSetting = Environment.GetEnvironmentVariable("PARP_M2_FORCE_SOLID");
         _forceM2SolidDebug = _isM2AdapterModel
             && !string.IsNullOrWhiteSpace(forceSolidSetting)
@@ -216,8 +216,9 @@ public class MdxRenderer : ISceneRenderer
         LoadTextures();
 
         // Initialize animation system.
-        // Adapted M2 models can now run skeletal animation, while material/geoset animation
-        // tracks remain deliberately suppressed in evaluation paths below.
+        // Adapted M2 models stay static by default because the current compatibility path
+        // still translates M2 into MdxFile/MdxRenderer state and animated assets are not
+        // behaving correctly there. Opt in with PARP_M2_ENABLE_ANIMATION=1 when probing.
         if (_enableM2Animation && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
         {
             _animator = new MdxAnimator(mdx);
@@ -230,6 +231,12 @@ public class MdxRenderer : ISceneRenderer
                     ViewerLog.Category.Mdx,
                     $"[M2-DIAG] Skeletal animation enabled for adapted model: {_modelVirtualPath ?? modelDir}");
             }
+        }
+        else if (_isM2AdapterModel && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[M2-DIAG] Skeletal animation disabled by default for adapted model: {_modelVirtualPath ?? modelDir} (set PARP_M2_ENABLE_ANIMATION=1 to probe the old compatibility path)");
         }
 
         // Initialize particle emitters from PRE2 chunk data

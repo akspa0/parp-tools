@@ -20,6 +20,7 @@ using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.Runtime.M2;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
@@ -159,6 +160,7 @@ public partial class ViewerApp : IDisposable
                ?? "unknown";
     }
     private MdxFile? _loadedMdx;
+    private M2StaticRenderModel? _loadedM2Runtime;
 
     // Mouse state
     private float _lastMouseX, _lastMouseY;
@@ -805,9 +807,9 @@ public partial class ViewerApp : IDisposable
         _mKeyWasPressed = mPressed;
 
         // Arrow keys and spacebar for MDX animation control
-        if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
+        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
         {
-            var animator = mdxR.Animator;
+            var animator = modelRenderer.Animator;
             int currentSeq = animator.CurrentSequence;
             
             if (currentSeq >= 0 && currentSeq < animator.Sequences.Count)
@@ -951,7 +953,7 @@ public partial class ViewerApp : IDisposable
             }
 
             // Render the scene
-            if (_renderer is MdxRenderer mdxR)
+            if (_renderer is IModelRenderer modelRenderer)
             {
                 // Standalone MDX: render with proper lighting matching terrain viewer
                 RenderSkyGradient();
@@ -962,13 +964,13 @@ public partial class ViewerApp : IDisposable
                 float fogStart = farPlane * 0.5f;
                 float fogEnd = farPlane;
                 var scale = Matrix4x4.CreateScale(-1f, 1f, 1f); // MirrorX for standalone
-                mdxR.UpdateAnimation(); // Advance skeletal animation before rendering
+                modelRenderer.UpdateAnimation(); // Advance skeletal animation before rendering
                 _gl.Disable(EnableCap.Blend);
-                mdxR.RenderWithTransform(scale, view, proj, RenderPass.Opaque, 1.0f,
+                modelRenderer.RenderWithTransform(scale, view, proj, RenderPass.Opaque, 1.0f,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
                 _gl.Enable(EnableCap.DepthTest);
                 _gl.DepthFunc(DepthFunction.Lequal);
-                mdxR.RenderWithTransform(scale, view, proj, RenderPass.Transparent, 1.0f,
+                modelRenderer.RenderWithTransform(scale, view, proj, RenderPass.Transparent, 1.0f,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
             }
             else if (_renderer is WmoRenderer wmoR)
@@ -4980,6 +4982,27 @@ void main() {
         if (ImGui.Checkbox("Hover Tooltips", ref showHoverTooltips))
             _worldScene.ShowHoveredAssetTooltips = showHoverTooltips;
 
+        bool limitHoverPickRange = _worldScene.LimitHoveredAssetRange;
+        if (ImGui.Checkbox("Limit Hover/Pick Range", ref limitHoverPickRange))
+            _worldScene.LimitHoveredAssetRange = limitHoverPickRange;
+
+        if (_worldScene.LimitHoveredAssetRange)
+        {
+            bool useDynamicHoverRange = _worldScene.UseDynamicHoveredAssetRange;
+            if (ImGui.Checkbox("Dynamic Hover Range", ref useDynamicHoverRange))
+                _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
+
+            float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
+            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 25f, 500f, "%.0f yd"))
+                _worldScene.HoveredAssetMaxDistance = hoverPickRange;
+
+            ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F0} yd");
+        }
+
+        bool showSelectedObjectBounds = _worldScene.ShowSelectedObjectBounds;
+        if (ImGui.Checkbox("Show Selected Object Bounds", ref showSelectedObjectBounds))
+            _worldScene.ShowSelectedObjectBounds = showSelectedObjectBounds;
+
         ImGui.Separator();
         ImGui.Text("UniqueId Archaeology");
 
@@ -6924,8 +6947,9 @@ void main() {
                 try
                 {
                     ViewerLog.Trace($"[M2] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
-                    var mdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
-                    LoadMdxModel(mdx, dir, resolvedModelPath, isM2AdapterModel: true);
+                    M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(m2Bytes, skinBytes, resolvedModelPath, skinPath);
+                    var adaptedMdx = WarcraftNetM2Adapter.BuildRuntimeModel(m2Bytes, skinBytes, resolvedModelPath, _dbcBuild);
+                    LoadM2RuntimeModel(runtimeModel, adaptedMdx, dir, resolvedModelPath);
                     CaptureWorldReturnState();
                     ViewerLog.Info(ViewerLog.Category.Mdx,
                         $"[M2] Selected skin for {Path.GetFileName(originalPath)}: {skinPath} ({skinBytes.Length} bytes)");
@@ -7818,6 +7842,7 @@ void main() {
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
+        _loadedM2Runtime = null;
 
         CoreMdxSummary? sharedSummary = sharedRuntimeInfo?.Summary;
         CoreMdxGeometryFile? sharedGeometry = sharedRuntimeInfo?.Geometry;
@@ -7856,7 +7881,12 @@ void main() {
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
 
-        _modelInfo = $"Type: MDX (Alpha 0.5.3)\n" +
+        string typeLabel = isM2AdapterModel
+            ? "M2 (compatibility runtime via MDX renderer)"
+            : "MDX (Alpha 0.5.3)";
+        string statusTypeLabel = isM2AdapterModel ? "M2" : "MDX";
+
+        _modelInfo = $"Type: {typeLabel}\n" +
                      $"Version: {versionLabel}\n" +
                      $"Name: {modelName}\n\n" +
                      $"Geosets: {geosetCount} ({validGeosets} valid)\n" +
@@ -7889,7 +7919,74 @@ void main() {
             }
         }
 
-        _statusMessage = $"Loaded MDX: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
+        if (isM2AdapterModel)
+        {
+            _modelInfo += "\nCompatibility Notes:\n" +
+                          "  Source asset is M2, but the current viewer path still adapts it into MdxFile/MdxRenderer state.\n" +
+                          "  Animated M2 compatibility is currently disabled by default because that path is not reliable.\n";
+        }
+
+        _statusMessage = $"Loaded {statusTypeLabel}: {_loadedFileName} ({validGeosets} geosets, {totalVerts:N0} verts)";
+    }
+
+    private void LoadM2RuntimeModel(M2StaticRenderModel runtimeModel, MdxFile? adaptedMdx = null, string? modelDir = null, string? virtualPath = null)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeModel);
+
+        _loadedWmo = null;
+        _loadedMdx = null;
+        _loadedM2Runtime = runtimeModel;
+        if (adaptedMdx != null)
+        {
+            string resolvedModelDir = modelDir ?? Path.GetDirectoryName(virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath) ?? string.Empty;
+            _renderer = new M2Renderer(
+                new MdxRenderer(_gl, adaptedMdx, resolvedModelDir, _dataSource, _texResolver, virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath, true, _dbcBuild),
+                runtimeModel,
+                virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath);
+        }
+        else
+        {
+            _renderer = new M2Renderer(_gl, runtimeModel, virtualPath ?? runtimeModel.Model.Identity.CanonicalModelPath);
+        }
+
+        if (_autoFrameModelOnLoad)
+            FrameCurrentModel();
+
+        int sectionCount = runtimeModel.Sections.Count;
+        int vertexCount = runtimeModel.Sections.Sum(static section => section.Vertices.Count);
+        int triangleCount = runtimeModel.Sections.Sum(static section => section.Indices.Count / 3);
+        int transparentSectionCount = runtimeModel.Sections.Count(static section => section.Material.IsTransparent);
+        List<string> textureNames = runtimeModel.Sections
+            .Select(static section => section.Material.TexturePath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList()!;
+
+        string runtimeTypeLabel = adaptedMdx != null
+            ? "M2 (wow-viewer runtime + legacy draw backend)"
+            : "M2 (wow-viewer static runtime)";
+
+        _modelInfo = $"Type: {runtimeTypeLabel}\n" +
+                     $"Version: {runtimeModel.Model.Version}\n" +
+                     $"Name: {runtimeModel.Model.ModelName ?? Path.GetFileNameWithoutExtension(runtimeModel.Model.Identity.CanonicalModelPath)}\n\n" +
+                     $"Sections: {sectionCount}\n" +
+                     $"Transparent Sections: {transparentSectionCount}\n" +
+                     $"Vertices: {vertexCount:N0}\n" +
+                     $"Triangles: {triangleCount:N0}\n" +
+                     $"Bounds Radius: {runtimeModel.Model.BoundsRadius:F3}\n";
+
+        if (textureNames.Count > 0)
+        {
+            _modelInfo += "\nTextures:\n";
+            foreach (string textureName in textureNames)
+                _modelInfo += $"  {textureName}\n";
+        }
+
+        _modelInfo += "\nRuntime Notes:\n" +
+                      "  Geometry is submitted from wow-viewer active skin sections.\n" +
+                      "  This slice is static-only; animation and full material parity are still pending.\n";
+
+        _statusMessage = $"Loaded M2: {_loadedFileName} ({sectionCount} sections, {vertexCount:N0} verts, {triangleCount:N0} tris)";
     }
 
     private MdxRuntimeSharedInfo? TryReadSharedMdxRuntimeInfo(string sourcePath, byte[] modelBytes)
@@ -7932,6 +8029,7 @@ void main() {
     private void LoadWmoModel(WmoV14ToV17Converter.WmoV14Data wmo, string dir)
     {
         _loadedMdx = null;
+        _loadedM2Runtime = null;
         _loadedWmo = wmo;
         
         int totalVerts = wmo.Groups.Sum(g => g.Vertices.Count);

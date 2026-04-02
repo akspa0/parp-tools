@@ -57,6 +57,39 @@ internal static class AssetProbe
         int m2ProbeIndex = Array.FindIndex(args,
             arg => arg.Equals("--probe-m2-adapter", StringComparison.OrdinalIgnoreCase)
                 || arg.Equals("--probe-m2", StringComparison.OrdinalIgnoreCase));
+        int m2RuntimeProbeIndex = Array.FindIndex(args,
+            arg => arg.Equals("--probe-m2-runtime", StringComparison.OrdinalIgnoreCase));
+
+        if (m2RuntimeProbeIndex >= 0)
+        {
+            if (args.Length <= m2RuntimeProbeIndex + 2)
+            {
+                Console.Error.WriteLine("Usage: MdxViewer --probe-m2-runtime <gamePath> <modelVirtualPath> [--build <version>] [--skin <virtualPath>] [--listfile <path>]");
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            string runtimeGamePath = args[m2RuntimeProbeIndex + 1];
+            string runtimeModelVirtualPath = args[m2RuntimeProbeIndex + 2];
+            string? runtimeBuildVersion = TryGetOptionValue(args, "--build") ?? "3.3.5.12340";
+            string? runtimeSkinOverride = TryGetOptionValue(args, "--skin");
+            string? runtimeListfilePath = TryGetOptionValue(args, "--listfile");
+
+            ViewerLog.Verbose = true;
+
+            try
+            {
+                RunM2RuntimeProbe(runtimeGamePath, runtimeModelVirtualPath, runtimeListfilePath, runtimeBuildVersion, runtimeSkinOverride);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[AssetProbe:M2Runtime] Failed: {ex}");
+                Environment.ExitCode = 1;
+            }
+
+            return true;
+        }
+
         if (m2ProbeIndex < 0)
             return false;
 
@@ -160,6 +193,72 @@ internal static class AssetProbe
 
         throw new InvalidDataException(
             $"No usable .skin for {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
+            lastSkinFailure);
+    }
+
+    private static void RunM2RuntimeProbe(string gamePath, string modelVirtualPath, string? listfilePath, string buildVersion, string? skinOverride)
+    {
+        string normalizedModelPath = modelVirtualPath.Replace('/', '\\').TrimStart('\\');
+
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Game path: {gamePath}");
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Model path: {normalizedModelPath}");
+        Console.WriteLine($"[M2-RUNTIME-PROBE] Build: {buildVersion}");
+        if (!string.IsNullOrWhiteSpace(skinOverride))
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Skin override: {skinOverride}");
+        if (!string.IsNullOrWhiteSpace(listfilePath))
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Listfile: {listfilePath}");
+
+        using var dataSource = new MpqDataSource(gamePath, listfilePath);
+        byte[]? modelBytes = dataSource.ReadFile(normalizedModelPath)
+            ?? dataSource.ReadFile(normalizedModelPath.Replace('\\', '/'));
+        if (modelBytes == null)
+            throw new FileNotFoundException($"Model not found in data source: {normalizedModelPath}");
+
+        M2Profile? profile = FormatProfileRegistry.ResolveModelProfile(buildVersion);
+        if (profile == null)
+            throw new InvalidOperationException($"No M2 profile is registered for build '{buildVersion}'.");
+
+        WarcraftNetM2Adapter.ValidateModelProfile(modelBytes, normalizedModelPath, profile, buildVersion);
+
+        List<string> skinCandidates = string.IsNullOrWhiteSpace(skinOverride)
+            ? WarcraftNetM2Adapter.BuildSkinCandidates(normalizedModelPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+            : new List<string> { skinOverride.Replace('/', '\\').TrimStart('\\') };
+
+        int missingSkinCount = 0;
+        int failedSkinCount = 0;
+        Exception? lastSkinFailure = null;
+
+        foreach (string skinPath in skinCandidates)
+        {
+            byte[]? skinBytes = dataSource.ReadFile(skinPath)
+                ?? dataSource.ReadFile(skinPath.Replace('\\', '/'));
+            if (skinBytes == null)
+            {
+                missingSkinCount++;
+                continue;
+            }
+
+            Console.WriteLine($"[M2-RUNTIME-PROBE] Trying skin: {skinPath} ({skinBytes.Length} bytes)");
+            try
+            {
+                var runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(modelBytes, skinBytes, normalizedModelPath, skinPath);
+                int vertexCount = runtimeModel.Sections.Sum(static section => section.Vertices.Count);
+                int triangleCount = runtimeModel.Sections.Sum(static section => section.Indices.Count / 3);
+                int transparentSectionCount = runtimeModel.Sections.Count(static section => section.Material.IsTransparent);
+                Console.WriteLine($"[M2-RUNTIME-PROBE] Selected skin: {skinPath}");
+                Console.WriteLine($"[M2-RUNTIME-PROBE] sections={runtimeModel.Sections.Count} transparentSections={transparentSectionCount} vertices={vertexCount} triangles={triangleCount} boundsMin={runtimeModel.BoundsMin} boundsMax={runtimeModel.BoundsMax}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                failedSkinCount++;
+                lastSkinFailure = ex;
+                Console.WriteLine($"[M2-RUNTIME-PROBE] Skin candidate failed: {skinPath} ({ex.Message})");
+            }
+        }
+
+        throw new InvalidDataException(
+            $"No usable .skin for runtime probe {Path.GetFileName(normalizedModelPath)}. candidates={skinCandidates.Count}, missing={missingSkinCount}, failed={failedSkinCount}.",
             lastSkinFailure);
     }
 

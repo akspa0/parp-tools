@@ -320,6 +320,21 @@ static void PrintM2Summary(M2ModelDocument model, M2SkinProfileRuntimeState stat
 	M2SkinDocument skin = state.LoadedSkin;
 	string compatibilityMode = state.ActiveSkinProfile?.UsesCompatibilityFallback == true ? " compatibilityMode=true" : string.Empty;
 	Console.WriteLine($"SKIN: stage={state.Stage} profileIndex={state.Selection.ProfileIndex} exactPath={state.Selection.CompanionPath} loaded=true vertexLookup={skin.VertexLookupCount} triangleIndices={skin.TriangleIndexCount} boneLookup={skin.BoneLookupCount} submeshes={skin.SubmeshCount} batches={skin.BatchCount} globalVertexOffset={skin.GlobalVertexOffset} shadowBatches={skin.ShadowBatchCount}{compatibilityMode}");
+	if (state.ActiveSkinProfile is not null)
+	{
+		M2ActiveSkinProfile active = state.ActiveSkinProfile;
+		Console.WriteLine($"ACTIVE.SKIN: sections={active.ActiveSectionCount} sectionsWithBatches={active.SectionsWithBatchesCount} unmatchedBatches={active.UnmatchedBatchCount}");
+		for (int index = 0; index < active.ActiveSections.Count; index++)
+		{
+			M2ActiveSkinSection section = active.ActiveSections[index];
+			Console.WriteLine($"ACTIVE.SECTION[{index}]: skinSectionId={section.SkinSectionId} level={section.Level} vertexStart={section.VertexStart} vertexCount={section.VertexCount} indexStart={section.IndexStart} indexCount={section.IndexCount} batches={section.ActiveBatchCount}");
+			for (int batchIndex = 0; batchIndex < section.Batches.Count; batchIndex++)
+			{
+				M2ActiveSkinBatch batch = section.Batches[batchIndex];
+				Console.WriteLine($"ACTIVE.SECTION[{index}].BATCH[{batchIndex}]: batchIndex={batch.BatchIndex} flags=0x{batch.Flags:X2} priorityPlane={batch.PriorityPlane} colorIndex={batch.ColorIndex} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} textureCoordComboIndex={batch.TextureCoordComboIndex} transparencyComboIndex={batch.TransparencyComboIndex} textureAnimationLookupIndex={batch.TextureAnimationLookupIndex}");
+			}
+		}
+	}
 	for (int index = 0; index < skin.Submeshes.Count; index++)
 	{
 		M2SkinSubmesh submesh = skin.Submeshes[index];

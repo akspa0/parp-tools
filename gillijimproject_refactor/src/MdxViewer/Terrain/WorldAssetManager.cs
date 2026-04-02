@@ -5,6 +5,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
+using WowViewer.Core.Runtime.M2;
 using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Terrain;
@@ -50,7 +51,7 @@ public class WorldAssetManager : IDisposable
     // ── Shared caches ──────────────────────────────────────────────────
 
     // Model path (normalized) → loaded renderer (null = load attempted but failed)
-    private readonly Dictionary<string, MdxRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, IModelRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoMeshSummary> _wmoMeshSummaries = new(StringComparer.OrdinalIgnoreCase);
 
@@ -250,7 +251,7 @@ public class WorldAssetManager : IDisposable
     /// <summary>
     /// Get a loaded MDX renderer by normalized key. Returns null if not loaded or failed.
     /// </summary>
-    public MdxRenderer? GetMdx(string normalizedKey)
+    public IModelRenderer? GetMdx(string normalizedKey)
     {
         if (_mdxModels.TryGetValue(normalizedKey, out var r))
         {
@@ -346,7 +347,7 @@ public class WorldAssetManager : IDisposable
         return _wmoModels.TryGetValue(normalizedKey, out r) ? r : null;
     }
 
-    public bool TryGetLoadedMdx(string normalizedKey, out MdxRenderer? renderer)
+    public bool TryGetLoadedMdx(string normalizedKey, out IModelRenderer? renderer)
     {
         if (_mdxModels.TryGetValue(normalizedKey, out renderer) && renderer != null)
         {
@@ -825,7 +826,7 @@ public class WorldAssetManager : IDisposable
     // ── Private loading ────────────────────────────────────────────────
 
     private int _mdxLoadFailCount = 0;
-    private MdxRenderer? LoadMdxModel(string normalizedKey)
+    private IModelRenderer? LoadMdxModel(string normalizedKey)
     {
         try
         {
@@ -873,11 +874,15 @@ public class WorldAssetManager : IDisposable
                     try
                     {
                         ViewerLog.Trace($"[M2] Trying skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
+                        M2StaticRenderModel runtimeModel = WowViewerM2RuntimeBridge.BuildStaticRenderModel(data, skinBytes, resolvedModelPath, skinPath);
                         var adapted = WarcraftNetM2Adapter.BuildRuntimeModel(data, skinBytes, resolvedModelPath, _buildVersion);
                         string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
-                        return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                        return new M2Renderer(
+                            new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                            runtimeModel,
+                            resolvedModelPath);
                     }
                     catch (Exception ex)
                     {
@@ -897,7 +902,9 @@ public class WorldAssetManager : IDisposable
                             string adaptedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
-                            return new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                            return new M2Renderer(
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                                resolvedModelPath);
                         }
                         catch (Exception ex)
                         {
@@ -924,7 +931,9 @@ public class WorldAssetManager : IDisposable
                                 string convertedModelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
-                                return new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion);
+                                return new M2Renderer(
+                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                                    resolvedModelPath);
                             }
 
                             lastSkinError = new InvalidDataException(

@@ -678,7 +678,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(_modelInfo);
 
-        if (_renderer is MdxRenderer || _renderer is WmoRenderer)
+        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
         {
             ImGui.Separator();
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
@@ -711,12 +711,12 @@ public partial class ViewerApp
             DrawWmoLiquidRotationControls("standalone");
         }
 
-        if (_renderer is MdxRenderer mdxR && mdxR.Animator != null && mdxR.Animator.Sequences.Count > 0)
+        if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
         {
             ImGui.Separator();
             ImGui.Text("Animation:");
 
-            var animator = mdxR.Animator;
+            var animator = modelRenderer.Animator;
             int currentSeq = animator.CurrentSequence;
             string currentSeqName = currentSeq >= 0 && currentSeq < animator.Sequences.Count
                 ? animator.Sequences[currentSeq].Name
@@ -1038,10 +1038,10 @@ public partial class ViewerApp
 
     private void FrameCurrentModel()
     {
-        if (_renderer is MdxRenderer mdxR)
+        if (_renderer is IModelRenderer modelRenderer)
         {
-            var bmin = mdxR.BoundsMin;
-            var bmax = mdxR.BoundsMax;
+            var bmin = modelRenderer.BoundsMin;
+            var bmax = modelRenderer.BoundsMax;
             FrameBounds(bmin, bmax, mdxMirrorX: true);
         }
         else if (_renderer is WmoRenderer wmoR)

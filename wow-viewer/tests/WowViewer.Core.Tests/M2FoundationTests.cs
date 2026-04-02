@@ -115,7 +115,15 @@ public sealed class M2FoundationTests
         Assert.Equal(M2SkinProfileStage.Initialized, initialized.Stage);
         Assert.NotNull(initialized.ActiveSkinProfile);
         Assert.Equal(1, initialized.ActiveSkinProfile!.ActiveSubmeshCount);
+        Assert.Equal(1, initialized.ActiveSkinProfile.ActiveSectionCount);
+        Assert.Equal(1, initialized.ActiveSkinProfile.SectionsWithBatchesCount);
         Assert.Equal(1, initialized.ActiveSkinProfile.ActiveBatchCount);
+        Assert.Equal(0, initialized.ActiveSkinProfile.UnmatchedBatchCount);
+        Assert.Equal((ushort)7, initialized.ActiveSkinProfile.ActiveSections[0].SkinSectionId);
+        Assert.Equal(1, initialized.ActiveSkinProfile.ActiveSections[0].ActiveBatchCount);
+        Assert.Equal(0, initialized.ActiveSkinProfile.ActiveSections[0].Batches[0].BatchIndex);
+        Assert.Equal((ushort)5, initialized.ActiveSkinProfile.ActiveSections[0].Batches[0].MaterialIndex);
+        Assert.Equal((ushort)6, initialized.ActiveSkinProfile.ActiveSections[0].Batches[0].TextureAnimationLookupIndex);
         Assert.False(initialized.ActiveSkinProfile.UsesCompatibilityFallback);
     }
 
@@ -136,6 +144,64 @@ public sealed class M2FoundationTests
         InvalidDataException ex = Assert.Throws<InvalidDataException>(() => M2SkinProfileRuntime.Load(chosen, skin));
 
         Assert.Contains("exact selected companion", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StaticRenderModelBuilder_BuildsSectionGeometryFromActiveSkin()
+    {
+        M2ModelDocument model = M2ModelReader.Read(new MemoryStream(CreateMd20Bytes(
+            version: 0x108u,
+            modelName: "SyntheticRuntime",
+            boundsMin: new Vector3(-2.0f, -2.0f, -2.0f),
+            boundsMax: new Vector3(2.0f, 2.0f, 2.0f),
+            boundsRadius: 4.0f,
+            embeddedSkinProfileCount: 0,
+            embeddedSkinProfileOffset: 0)), "Creature\\SyntheticRuntime\\SyntheticRuntime.m2");
+
+        M2GeometryDocument geometry = new(
+            model,
+            [
+                new M2GeometryVertex(new Vector3(0f, 0f, 0f), Vector3.UnitZ, new Vector2(0f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 0f, 0f), Vector3.UnitZ, new Vector2(1f, 0f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(1f, 1f, 0f), Vector3.UnitZ, new Vector2(1f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+                new M2GeometryVertex(new Vector3(0f, 1f, 0f), Vector3.UnitZ, new Vector2(0f, 1f), Vector2.Zero, Vector4.Zero, Vector4.Zero),
+            ],
+            [new M2GeometryTexture("Creature\\SyntheticRuntime\\synthetic.blp", 0, 0)],
+            [new M2GeometryRenderFlag(flags: 0x4, rawBlendMode: 2)],
+            [new M2GeometryTextureLookup(textureId: 0)]);
+
+        M2SkinDocument skin = new(
+            sourcePath: "Creature\\SyntheticRuntime\\SyntheticRuntime00.skin",
+            signature: "SKIN",
+            vertexLookup: [0, 1, 2, 3],
+            vertexLookupOffset: 0,
+            triangleIndices: [0, 1, 2, 2, 3, 0],
+            triangleIndexOffset: 0,
+            boneLookup: [],
+            boneLookupOffset: 0,
+            submeshes: [new M2SkinSubmesh(skinSectionId: 7, level: 0, vertexStart: 0, vertexCount: 4, indexStart: 0, indexCount: 6)],
+            submeshOffset: 0,
+            batches: [new M2SkinBatch(flags: 0x2, priorityPlane: 3, skinSectionIndex: 0, colorIndex: -1, materialIndex: 0, textureComboIndex: 0, textureCoordComboIndex: 0, transparencyComboIndex: 0, textureAnimationLookupIndex: 0)],
+            batchOffset: 0,
+            globalVertexOffset: 0,
+            shadowBatchCount: 0,
+            shadowBatchOffset: 0);
+
+        M2SkinProfileSelection selection = new(0, skin.SourcePath);
+        M2SkinProfileRuntimeState chosen = new(model, selection, M2SkinProfileStage.Chosen, loadedSkin: null, activeSkinProfile: null);
+        M2SkinProfileRuntimeState loaded = M2SkinProfileRuntime.Load(chosen, skin);
+        M2SkinProfileRuntimeState initialized = M2SkinProfileRuntime.Initialize(loaded);
+
+        M2StaticRenderModel runtimeModel = M2StaticRenderModelBuilder.Build(geometry, initialized);
+
+        Assert.Single(runtimeModel.Sections);
+        Assert.Equal((ushort)7, runtimeModel.Sections[0].SkinSectionId);
+        Assert.Equal(4, runtimeModel.Sections[0].Vertices.Count);
+        Assert.Equal(6, runtimeModel.Sections[0].Indices.Count);
+        Assert.Equal(M2BlendMode.AlphaBlend, runtimeModel.Sections[0].Material.BlendMode);
+        Assert.True(runtimeModel.Sections[0].Material.IsTransparent);
+        Assert.True(runtimeModel.Sections[0].Material.IsTwoSided);
+        Assert.Equal("Creature\\SyntheticRuntime\\synthetic.blp", runtimeModel.Sections[0].Material.TexturePath);
     }
 
     private static byte[] CreateMd20Bytes(
