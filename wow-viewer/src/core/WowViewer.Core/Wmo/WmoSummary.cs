@@ -20,6 +20,7 @@ public sealed class WmoSummary
         int doodadPlacementEntryCount,
         int reportedDoodadSetCount,
         int doodadSetEntryCount,
+        bool hasSkybox,
         uint flags,
         Vector3 boundsMin,
         Vector3 boundsMax)
@@ -54,6 +55,7 @@ public sealed class WmoSummary
         DoodadPlacementEntryCount = doodadPlacementEntryCount;
         ReportedDoodadSetCount = reportedDoodadSetCount;
         DoodadSetEntryCount = doodadSetEntryCount;
+        HasSkybox = hasSkybox;
         Flags = flags;
         BoundsMin = boundsMin;
         BoundsMax = boundsMax;
@@ -88,6 +90,8 @@ public sealed class WmoSummary
     public int ReportedDoodadSetCount { get; }
 
     public int DoodadSetEntryCount { get; }
+
+    public bool HasSkybox { get; }
 
     public uint Flags { get; }
 

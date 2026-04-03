@@ -94,6 +94,8 @@ public sealed class WmoGroupSummary
 
     public uint Flags { get; }
 
+    public WmoGroupFlags KnownFlags => (WmoGroupFlags)(Flags & (uint)WmoGroupFlags.AllKnown);
+
     public Vector3 BoundsMin { get; }
 
     public Vector3 BoundsMax { get; }

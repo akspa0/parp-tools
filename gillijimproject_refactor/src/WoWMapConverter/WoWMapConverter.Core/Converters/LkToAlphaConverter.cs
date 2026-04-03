@@ -147,7 +147,14 @@ public class LkToAlphaConverter
             }
 
             result.TilesConverted = tilesConverted;
-            result.Success = true;
+            result.Success = tilesConverted > 0;
+
+            if (!result.Success)
+            {
+                result.Error = rootAdts.Count == 0
+                    ? "No root ADTs were discovered for the input map"
+                    : "No LK tiles converted successfully; see warnings for the failing tile diagnostics";
+            }
 
             if (_options.Verbose)
                 Console.WriteLine($"[lk2alpha] Complete: {tilesConverted}/{rootAdts.Count} tiles");
@@ -253,11 +260,9 @@ public class LkToAlphaConverter
         if (mhdrOffset < 0)
             throw new InvalidDataException("MHDR not found");
 
-        var scannedRootOffsets = ReadTopLevelMcnkOffsets(bytes, minimumChunkSize: 128);
-        if (scannedRootOffsets.Count == 0)
-            throw new InvalidDataException("No root MCNK chunks found");
-
         var mcnkOffsets = ResolveMcnkOffsets(bytes, minimumChunkSize: 128);
+        if (!mcnkOffsets.Any(offset => offset > 0))
+            throw new InvalidDataException("No root MCNK chunks found");
 
         // Load optional split texture data. Some 4.x _tex0 files do not contain LK-style MCNK payloads,
         // so only adopt per-chunk offsets when the file exposes valid MCNK-sized chunks.
@@ -603,11 +608,13 @@ public class LkToAlphaConverter
         {
             string fcc = Encoding.ASCII.GetString(bytes, i, 4);
             int size = BitConverter.ToInt32(bytes, i + 4);
+            if (size < 0)
+                break;
             
             if (fcc == reversed)
                 return i;
 
-            int next = i + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            int next = AdvanceChunkPosition(bytes, i, size);
             if (next <= i) break;
             i = next;
         }
@@ -643,7 +650,9 @@ public class LkToAlphaConverter
             if (mcinRelOffset > 0)
             {
                 int mcinOffset = mhdrDataStart + mcinRelOffset;
-                return ReadMcinOffsets(bytes, mcinOffset);
+                var mcinOffsets = NormalizeMcnkOffsets(bytes, ReadMcinOffsets(bytes, mcinOffset), minimumChunkSize);
+                if (mcinOffsets.Any(offset => offset > 0))
+                    return mcinOffsets;
             }
         }
 
@@ -662,10 +671,10 @@ public class LkToAlphaConverter
             if (size < 0)
                 break;
 
-            if (signature == "KNCM" && size >= minimumChunkSize && position + 8 + size <= bytes.Length)
+            if ((signature == "KNCM" || signature == "MCNK") && size >= minimumChunkSize && position + 8 + size <= bytes.Length)
                 offsets.Add(position);
 
-            int next = position + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            int next = AdvanceChunkPosition(bytes, position, size);
             if (next <= position)
                 break;
 
@@ -673,6 +682,77 @@ public class LkToAlphaConverter
         }
 
         return offsets;
+    }
+
+    private static List<int> NormalizeMcnkOffsets(byte[] bytes, List<int> offsets, int minimumChunkSize)
+    {
+        var normalized = new List<int>(256);
+        for (int i = 0; i < 256; i++)
+        {
+            int offset = i < offsets.Count ? offsets[i] : 0;
+            normalized.Add(IsValidMcnkOffset(bytes, offset, minimumChunkSize) ? offset : 0);
+        }
+
+        return normalized;
+    }
+
+    private static bool IsValidMcnkOffset(byte[] bytes, int offset, int minimumChunkSize)
+    {
+        if (offset <= 0 || offset + 8 > bytes.Length)
+            return false;
+
+        string signature = Encoding.ASCII.GetString(bytes, offset, 4);
+        if (signature != "KNCM" && signature != "MCNK")
+            return false;
+
+        int size = BitConverter.ToInt32(bytes, offset + 4);
+        return size >= minimumChunkSize && offset + 8 + size <= bytes.Length;
+    }
+
+    private static int AdvanceChunkPosition(byte[] bytes, int position, int size)
+    {
+        int unpadded = position + 8 + size;
+        if (unpadded <= position)
+            return -1;
+
+        if ((size & 1) == 0)
+            return unpadded;
+
+        int padded = unpadded + 1;
+        bool unpaddedLooksValid = LooksLikeChunkHeader(bytes, unpadded);
+        bool paddedLooksValid = LooksLikeChunkHeader(bytes, padded);
+
+        if (unpaddedLooksValid && !paddedLooksValid)
+            return unpadded;
+
+        if (paddedLooksValid && !unpaddedLooksValid)
+            return padded;
+
+        if (unpaddedLooksValid)
+            return unpadded;
+
+        if (padded <= bytes.Length)
+            return padded;
+
+        return unpadded <= bytes.Length ? unpadded : -1;
+    }
+
+    private static bool LooksLikeChunkHeader(byte[] bytes, int position)
+    {
+        if (position < 0 || position + 8 > bytes.Length)
+            return false;
+
+        for (int i = 0; i < 4; i++)
+        {
+            byte value = bytes[position + i];
+            bool isUppercase = value >= (byte)'A' && value <= (byte)'Z';
+            bool isDigit = value >= (byte)'0' && value <= (byte)'9';
+            if (!isUppercase && !isDigit && value != (byte)'_')
+                return false;
+        }
+
+        int size = BitConverter.ToInt32(bytes, position + 4);
+        return size >= 0;
     }
 
     private static List<int> PadMcnkOffsets(List<int> offsets)
@@ -734,13 +814,22 @@ public class LkToAlphaConverter
         if (offset < 0) yield break;
 
         int size = BitConverter.ToInt32(bytes, offset + 4);
+        if (size <= 0) yield break;
+
         int dataStart = offset + 8;
-        int end = dataStart + size;
+        if (dataStart > bytes.Length) yield break;
+
+        int end = Math.Min(dataStart + size, bytes.Length);
+        if (end <= dataStart) yield break;
 
         int pos = dataStart;
         while (pos < end)
         {
-            int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos);
+            int remaining = end - pos;
+            if (remaining <= 0)
+                yield break;
+
+            int nul = Array.IndexOf(bytes, (byte)0, pos, remaining);
             if (nul == -1) nul = end;
             int len = nul - pos;
             if (len > 0)
@@ -755,13 +844,22 @@ public class LkToAlphaConverter
         if (offset < 0) yield break;
 
         int size = BitConverter.ToInt32(bytes, offset + 4);
+        if (size <= 0) yield break;
+
         int dataStart = offset + 8;
-        int end = dataStart + size;
+        if (dataStart > bytes.Length) yield break;
+
+        int end = Math.Min(dataStart + size, bytes.Length);
+        if (end <= dataStart) yield break;
 
         int pos = dataStart;
         while (pos < end)
         {
-            int nul = Array.IndexOf(bytes, (byte)0, pos, end - pos);
+            int remaining = end - pos;
+            if (remaining <= 0)
+                yield break;
+
+            int nul = Array.IndexOf(bytes, (byte)0, pos, remaining);
             if (nul == -1) nul = end;
             int len = nul - pos;
             if (len > 0)

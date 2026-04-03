@@ -15,7 +15,7 @@ public sealed class WmoGroupSummaryReaderTests
             .. CreateChunk("MVER", CreateUInt32Payload(17)),
             .. CreateChunk("MOGP", CreateMogpPayload(
                 headerSize: 0x80,
-                flags: 0x2009,
+                flags: 0x1A05,
                 boundsMin: new Vector3(-2f, -3f, -4f),
                 boundsMax: new Vector3(5f, 6f, 7f),
                 portalStart: 11,
@@ -51,7 +51,14 @@ public sealed class WmoGroupSummaryReaderTests
         Assert.Equal(0x80, summary.HeaderSizeBytes);
         Assert.Equal((uint)123, summary.NameOffset);
         Assert.Equal((uint)456, summary.DescriptiveNameOffset);
-        Assert.Equal(0x2009u, summary.Flags);
+        Assert.Equal(0x1A05u, summary.Flags);
+        Assert.Equal(
+            WmoGroupFlags.HasBspChunks
+            | WmoGroupFlags.HasVertexColorChunk
+            | WmoGroupFlags.HasLightRefChunk
+            | WmoGroupFlags.HasDoodadRefChunk
+            | WmoGroupFlags.HasLiquidChunk,
+            summary.KnownFlags);
         Assert.Equal(new Vector3(-2f, -3f, -4f), summary.BoundsMin);
         Assert.Equal(new Vector3(5f, 6f, 7f), summary.BoundsMax);
         Assert.Equal(11, summary.PortalStart);
@@ -110,6 +117,42 @@ public sealed class WmoGroupSummaryReaderTests
         Assert.Equal(3, summary.FaceMaterialCount);
         Assert.Equal(3, summary.IndexCount);
         Assert.Equal(2, summary.VertexCount);
+        Assert.Equal(WmoGroupFlags.IsExterior, summary.KnownFlags);
+        Assert.False(summary.HasLiquid);
+    }
+
+    [Fact]
+    public void Read_WmoGroupBufferWithExteriorLighting_ProducesKnownExteriorFlags()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("MOGP", CreateMogpPayload(
+                headerSize: 0x44,
+                flags: 0x48,
+                boundsMin: Vector3.Zero,
+                boundsMax: Vector3.One,
+                portalStart: 0,
+                portalCount: 0,
+                transBatchCount: 0,
+                intBatchCount: 0,
+                extBatchCount: 1,
+                groupLiquid: 0,
+                nameOffset: 7,
+                descriptiveNameOffset: 8,
+                subchunks:
+                [
+                    ("MOPY", new byte[12]),
+                    ("MOIN", new byte[6]),
+                    ("MOVT", new byte[24]),
+                ])),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WmoGroupSummary summary = WmoGroupSummaryReader.Read(stream, "synthetic_exterior_lighting_000.wmo");
+
+        Assert.Equal(
+            WmoGroupFlags.IsExterior | WmoGroupFlags.UsesExteriorLighting,
+            summary.KnownFlags);
         Assert.False(summary.HasLiquid);
     }
 

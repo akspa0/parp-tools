@@ -1,5 +1,70 @@
 # Progress
 
+### Apr 03, 2026 - wow-viewer now emits per-build ADT UniqueId manifests for later timeline diffs
+
+- landed `map uniqueid-report` in `WowViewer.Tool.Inspect` as the first build-manifest workflow over the shared `AdtPlacementReader` seam
+- the command now persists raw `MDDF` and `MODF` `UniqueId` evidence with model paths, placement metadata, duplicate-id summaries, per-source counts, and explicit failure rows instead of only printing placement counts
+- current proof:
+	- focused validation passed with `ArchiveVirtualFileReaderTests`, `ArchiveCatalogBootstrapperTests`, and `AdtPlacementReaderTests`
+	- real development-map output now exists at `wow-viewer/output/reports/map-uniqueids/development.json`
+	- that report currently records `64435` placements, `62490` distinct `UniqueId` values, `1701` reused IDs, and `114` explicit `Unknown`-kind file failures
+- proof boundary:
+	- this is a per-build report artifact, not yet a cross-build added/removed-object timeline engine
+
+### Apr 03, 2026 - wow-viewer now caches trusted MPQ-era known-file universes per client/build
+
+- landed the first shared archive listfile-cache seam in `wow-viewer`:
+	- `ArchiveListfileCache` / `ArchiveListfileCacheManifest`
+	- direct `IArchiveCatalog.LoadListfileEntries(...)` seeding
+	- `ArchiveCatalogBootstrapOptions`-driven cache load/persist behavior
+	- `archive build-listfile-cache` in `WowViewer.Tool.Inspect`
+- trust model now matches the current MPQ-era rule:
+	- internal MPQ listfiles from the client are primary
+	- the vendored/community listfile is supplemental only
+- current proof:
+	- focused archive bootstrap tests passed after the compatibility fix that restored external-listfile path forwarding
+	- real `0.6.0` archive data produced `wow-viewer/output/cache/archive-listfiles/0.6.0.3592.json` with `56742` trusted internal entries, `1291033` supplemental entries, and `1347773` merged known files
+- consumer boundary:
+	- archive-backed `mdx chunk-carriers` now benefits from the merged bootstrap file universe, but this is still discovery infrastructure rather than deeper parser/runtime closure
+
+### Apr 03, 2026 - wow-viewer WMO flag typing now names exterior and exterior-lighting, but not `0x2`
+
+- broadened the real-data WMO audit from Castle into Alpha Ironforge with `wmo inspect --flag-correlation`
+- result:
+	- the larger corpus kept the already-typed chunk-gating reads stable for BSP, lights, doodads, and liquid
+	- `0x00000008` and `0x00000040` are no longer left anonymous in the shared layer; they are now typed as exterior and exterior-lighting based on the repo-local WMO notes plus the in-repo `Warcraft.NET` names
+	- `0x00000002` remains intentionally unnamed because the current corpus still does not separate it into a clean shared behavior signal
+- proof boundary:
+	- this is still inspect/shared-summary progress in `wow-viewer`, not runtime culling or lighting signoff
+
+### Apr 03, 2026 - wow-viewer WMO summary now carries root skybox presence and a real-data flag-correlation report
+
+- extended the shared `wow-viewer` WMO seam one step past raw `MOSB` and `MOGP` readers:
+	- `WmoSummary` now exposes root skybox presence directly as `HasSkybox`
+	- `wmo inspect` now supports `--flag-correlation` to correlate `MOGP` bits against actual group chunk signals within a real root WMO
+- real-data validation on `castle01.wmo.MPQ` now gives an explicit per-file evidence readout instead of only raw flag words:
+	- `0x00000001` cleanly aligns with BSP presence in both groups
+	- `0x00000800` aligns with doodad refs on the flagged group
+	- `0x00000002` remains intentionally unknown
+- proof boundary:
+	- this is shared summary/reporting progress in `wow-viewer`, not runtime collision closure
+
+### Apr 03, 2026 - LK to Alpha converter recovered from false-success and chunk-walker regressions
+
+- fixed the active `WoWMapConverter.Core` LK→Alpha path so it no longer reports success when zero tiles convert and no longer dies behind the recent Alpha write regressions
+- concrete root causes fixed in the active converter path:
+	- `AlphaMcnkBuilder` had an impossible header contract: `McnkHeaderSize` was `0x88` while the writer immediately required a 128-byte Alpha header layout
+	- `LkToAlphaConverter` rejected tiles too early before MCIN/top-level MCNK fallback completed
+	- MCIN offsets were trusted without validating that they actually point at `MCNK` chunks
+	- the top-level ADT chunk walker hard-coded odd-size padding and drifted one byte after real chunks like `MTEX` size `187`, which broke later chunk discovery on tiles such as `development_0_0.adt`
+	- `MMDX` / `MWMO` extraction trusted chunk bounds too aggressively and could surface `startIndex` range failures on malformed scans
+- real-data validation completed against the fixed museum path:
+	- command: `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- convert-lk-to-alpha i:/parp/parp-tools/gillijimproject_refactor/test_data/WoWMuseum/335-dev/World/Maps/development/development.wdt --map-dir i:/parp/parp-tools/gillijimproject_refactor/test_data/WoWMuseum/335-dev/World/Maps/development -o i:/parp/parp-tools/output/tmp/lk-to-alpha-dev/development.wdt --verbose`
+	- result after the first repair pass: `1358/2303` tiles
+	- result after the chunk-walker/MCIN repair: `2303/2303` tiles
+- proof boundary:
+	- this is real-data CLI conversion proof for the old compatibility path, not active viewer runtime signoff and not yet a `wow-viewer` library migration
+
 ### Apr 02, 2026 - Canonical M2 documentation set landed under wow-viewer/docs/architecture/m2
 
 - consolidated the active M2 implementation surface into one canonical doc set:

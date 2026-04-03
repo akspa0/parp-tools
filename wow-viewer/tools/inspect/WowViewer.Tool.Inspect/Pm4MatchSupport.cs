@@ -138,7 +138,7 @@ internal static class Pm4MatchSupport
         string pm4Path,
         string placementPath,
         string archiveRoot,
-        string? listfilePath,
+        ArchiveCatalogBootstrapOptions archiveBootstrapOptions,
         int maxMatchesPerPlacement,
         float searchRange)
     {
@@ -162,11 +162,11 @@ internal static class Pm4MatchSupport
 
         List<Pm4PlacementMatchPlacement> wmoPlacements = new(placements.WorldModelPlacements.Count);
         for (int index = 0; index < placements.WorldModelPlacements.Count; index++)
-            wmoPlacements.Add(BuildWmoPlacementMatch(placements.WorldModelPlacements[index], archiveRoot, listfilePath, pm4Objects, resolvedMaxMatches));
+            wmoPlacements.Add(BuildWmoPlacementMatch(placements.WorldModelPlacements[index], archiveRoot, archiveBootstrapOptions, pm4Objects, resolvedMaxMatches));
 
         List<Pm4PlacementMatchPlacement> m2Placements = new(placements.ModelPlacements.Count);
         for (int index = 0; index < placements.ModelPlacements.Count; index++)
-            m2Placements.Add(BuildM2PlacementMatch(placements.ModelPlacements[index], archiveRoot, listfilePath, pm4Objects, resolvedMaxMatches));
+            m2Placements.Add(BuildM2PlacementMatch(placements.ModelPlacements[index], archiveRoot, archiveBootstrapOptions, pm4Objects, resolvedMaxMatches));
 
         List<Pm4PlacementMatchPlacement> allPlacements = new(wmoPlacements.Count + m2Placements.Count);
         allPlacements.AddRange(wmoPlacements);
@@ -311,7 +311,7 @@ internal static class Pm4MatchSupport
         }
     }
 
-    private static Pm4PlacementMatchPlacement BuildWmoPlacementMatch(AdtWorldModelPlacement placement, string archiveRoot, string? listfilePath, IReadOnlyList<Pm4InspectObjectState> pm4Objects, int maxMatches)
+    private static Pm4PlacementMatchPlacement BuildWmoPlacementMatch(AdtWorldModelPlacement placement, string archiveRoot, ArchiveCatalogBootstrapOptions archiveBootstrapOptions, IReadOnlyList<Pm4InspectObjectState> pm4Objects, int maxMatches)
     {
         bool assetResolved = false;
         string? assetSource = null;
@@ -322,7 +322,7 @@ internal static class Pm4MatchSupport
 
         try
         {
-            byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(NormalizeVirtualPath(placement.ModelPath), [archiveRoot], listfilePath);
+            byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(NormalizeVirtualPath(placement.ModelPath), [archiveRoot], archiveBootstrapOptions);
             using MemoryStream stream = new(bytes, writable: false);
             WmoSummary summary = WmoSummaryReader.Read(stream, placement.ModelPath);
             Matrix4x4 transform = BuildWmoTransform(placement.Position, placement.Rotation);
@@ -341,7 +341,7 @@ internal static class Pm4MatchSupport
         return new Pm4PlacementMatchPlacement("wmo", placement.UniqueId, placement.ModelPath, placement.Position, placement.Rotation, 1f, worldBoundsMin, worldBoundsMax, assetResolved, assetSource, matches.Count, matches);
     }
 
-    private static Pm4PlacementMatchPlacement BuildM2PlacementMatch(AdtModelPlacement placement, string archiveRoot, string? listfilePath, IReadOnlyList<Pm4InspectObjectState> pm4Objects, int maxMatches)
+    private static Pm4PlacementMatchPlacement BuildM2PlacementMatch(AdtModelPlacement placement, string archiveRoot, ArchiveCatalogBootstrapOptions archiveBootstrapOptions, IReadOnlyList<Pm4InspectObjectState> pm4Objects, int maxMatches)
     {
         bool assetResolved = false;
         string? assetSource = null;
@@ -352,7 +352,7 @@ internal static class Pm4MatchSupport
 
         try
         {
-            byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(NormalizeVirtualPath(placement.ModelPath), [archiveRoot], listfilePath);
+            byte[] bytes = ArchiveVirtualFileReader.ReadVirtualFile(NormalizeVirtualPath(placement.ModelPath), [archiveRoot], archiveBootstrapOptions);
             using MemoryStream stream = new(bytes, writable: false);
             MdxSummary summary = MdxSummaryReader.Read(stream, placement.ModelPath);
             Vector3? localBoundsMin = summary.Collision?.BoundsMin ?? summary.BoundsMin;

@@ -51,6 +51,7 @@ public static class WmoSummaryReader
         byte[]? modd = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Modd);
         byte[]? momt = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Momt);
         byte[]? mogi = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Mogi);
+        byte[]? mosb = WmoRootReaderCommon.TryReadChunkPayload(stream, chunks, WmoChunkIds.Mosb);
 
         return new WmoSummary(
             sourcePath,
@@ -68,6 +69,7 @@ public static class WmoSummaryReader
             doodadPlacementEntryCount: CountEntries(modd, ModdEntrySize),
             reportedDoodadSetCount,
             doodadSetEntryCount: CountEntries(moms, ModsEntrySize),
+                hasSkybox: mosb is { Length: > 0 },
             flags,
             boundsMin,
             boundsMax);

@@ -26,6 +26,7 @@ public sealed class WmoSummaryReaderTests
             .. CreateChunk("MOTX", CreateStringBlock("a.blp", "b.blp")),
             .. CreateChunk("MOMT", new byte[2 * 64]),
             .. CreateChunk("MOGI", new byte[4 * 32]),
+            .. CreateChunk("MOSB", CreateStringBlock("world\\sky\\test.sky")),
             .. CreateChunk("MODS", new byte[2 * 32]),
             .. CreateChunk("MODN", CreateStringBlock("a.mdx", "b.mdx", "c.mdx", "d.mdx", "e.mdx")),
             .. CreateChunk("MODD", new byte[6 * 40]),
@@ -48,6 +49,7 @@ public sealed class WmoSummaryReaderTests
         Assert.Equal(6, summary.DoodadPlacementEntryCount);
         Assert.Equal(2, summary.ReportedDoodadSetCount);
         Assert.Equal(2, summary.DoodadSetEntryCount);
+        Assert.True(summary.HasSkybox);
         Assert.Equal(0x1234u, summary.Flags);
         Assert.Equal(new Vector3(-1f, -2f, -3f), summary.BoundsMin);
         Assert.Equal(new Vector3(4f, 5f, 6f), summary.BoundsMax);

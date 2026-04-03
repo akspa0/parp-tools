@@ -11,7 +11,7 @@ namespace WoWMapConverter.Core.Builders;
 /// </summary>
 public static class AlphaMcnkBuilder
 {
-    private const int McnkHeaderSize = 0x88; // 136 bytes Fixed Alpha Header
+    private const int McnkHeaderSize = 0x80; // 128 bytes fixed Alpha header; MCVT begins at absolute offset 0x88 including chunk letters+size
     private const int ChunkHeaderSize = 8;   // FourCC + size
     private const int MaxChunkSize = 15000;  // Hard limit 15KB
 

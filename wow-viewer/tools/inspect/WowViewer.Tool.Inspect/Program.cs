@@ -31,6 +31,9 @@ string[] tail = args.Skip(1).ToArray();
 
 switch (area)
 {
+	case "archive":
+		RunArchive(tail);
+		break;
 	case "blp":
 		RunBlp(tail);
 		break;
@@ -54,6 +57,31 @@ switch (area)
 		ShowUsage();
 		Environment.ExitCode = 1;
 		break;
+}
+
+static void RunArchive(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowArchiveUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "build-listfile-cache":
+			RunArchiveBuildListfileCache(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown archive command '{command}'.");
+			ShowArchiveUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
 }
 
 static void RunBlp(string[] args)
@@ -86,7 +114,8 @@ static void RunBlpInspect(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
@@ -105,7 +134,7 @@ static void RunBlpInspect(string[] args)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
 		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 			return new MemoryStream(archivedBytes, writable: false);
 		}
 
@@ -154,7 +183,8 @@ static void RunM2Inspect(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	string? profileIndexText = GetOption(args, "--profile-index", "-p");
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
@@ -183,7 +213,7 @@ static void RunM2Inspect(string[] args)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
 		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 			return new MemoryStream(archivedBytes, writable: false);
 		}
 
@@ -201,7 +231,7 @@ static void RunM2Inspect(string[] args)
 		{
 			try
 			{
-				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], listfilePath);
+				return ArchiveVirtualFileReader.ReadVirtualFile(companionPath, [archiveRoot], archiveBootstrapOptions);
 			}
 			catch (FileNotFoundException)
 			{
@@ -265,7 +295,8 @@ static void RunMdxInspect(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
@@ -284,7 +315,7 @@ static void RunMdxInspect(string[] args)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
 		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 			return new MemoryStream(archivedBytes, writable: false);
 		}
 
@@ -351,7 +382,8 @@ static void RunMdxExportJson(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	string? output = GetOption(args, "--output", "-o");
 	bool includeGeometry = HasOption(args, "--include-geometry");
 	bool includeCollision = HasOption(args, "--include-collision");
@@ -375,7 +407,7 @@ static void RunMdxExportJson(string[] args)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
 		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 			return new MemoryStream(archivedBytes, writable: false);
 		}
 
@@ -460,7 +492,8 @@ static void RunMdxChunkCarriers(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	string? pathFilter = GetOption(args, "--path-filter", "-p");
 	string? chunkText = GetOption(args, "--chunks", "-c") ?? GetOption(args, "--chunk", "-c");
 	string? limitText = GetOption(args, "--limit", "-n");
@@ -516,10 +549,10 @@ static void RunMdxChunkCarriers(string[] args)
 	if (!string.IsNullOrWhiteSpace(archiveRoot))
 	{
 		using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
-		ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [archiveRoot], listfilePath);
+		ArchiveCatalogBootstrapResult bootstrap = ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, [archiveRoot], archiveBootstrapOptions);
 
-		IEnumerable<string> candidates = archiveCatalog
-			.GetAllKnownFiles()
+		IEnumerable<string> candidates = bootstrap
+			.AllFiles
 			.Where(static path => path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase));
 
 		if (!string.IsNullOrWhiteSpace(pathFilter))
@@ -578,6 +611,52 @@ static void RunMdxChunkCarriers(string[] args)
 	}
 }
 
+static void RunArchiveBuildListfileCache(string[] args)
+{
+	string? archiveRoot = GetOption(args, "--archive-root", "-r") ?? GetFirstPositionalArgument(args);
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? cacheKey = GetOption(args, "--cache-key", "-k");
+	string? cacheDirectory = GetOption(args, "--cache-dir", "-d") ?? TryFindDefaultArchiveListfileCacheDirectory();
+
+	if (string.IsNullOrWhiteSpace(archiveRoot))
+	{
+		Console.Error.WriteLine("Error: --archive-root is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(cacheKey))
+	{
+		Console.Error.WriteLine("Error: --cache-key is required so the manifest is explicitly tied to one MPQ-era client build.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	if (string.IsNullOrWhiteSpace(cacheDirectory))
+	{
+		Console.Error.WriteLine("Error: could not resolve a cache directory; provide --cache-dir explicitly.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
+	ArchiveCatalogBootstrapResult result = ArchiveCatalogBootstrapper.Bootstrap(
+		archiveCatalog,
+		[archiveRoot],
+		new ArchiveCatalogBootstrapOptions(
+			ExternalListfilePath: listfilePath,
+			ListfileCacheKey: cacheKey,
+			ListfileCacheDirectoryPath: cacheDirectory));
+
+	Console.WriteLine("Archive listfile cache built");
+	Console.WriteLine($"Archive root: {archiveRoot}");
+	Console.WriteLine($"Cache key: {cacheKey}");
+	Console.WriteLine($"Cache path: {result.ListfileCachePath ?? "n/a"}");
+	Console.WriteLine($"Trusted internal entries: {result.InternalFiles.Count}");
+	Console.WriteLine($"Supplemental external entries: {result.ExternalListfileEntries.Count}");
+	Console.WriteLine($"Known file universe: {result.AllFiles.Count}");
+}
+
 static void RunMap(string[] args)
 {
 	if (args.Length == 0)
@@ -594,6 +673,9 @@ static void RunMap(string[] args)
 	{
 		case "inspect":
 			RunMapInspect(tail);
+			break;
+		case "uniqueid-report":
+			RunMapUniqueIdReport(tail);
 			break;
 		default:
 			Console.Error.WriteLine($"Unknown map command '{command}'.");
@@ -616,6 +698,31 @@ static void RunMapInspect(string[] args)
 
 	MapFileSummary summary = MapFileSummaryReader.Read(input);
 	PrintMapSummary(summary, dumpTexChunks);
+}
+
+static void RunMapUniqueIdReport(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
+	string? output = GetOption(args, "--output", "-o");
+	string? build = GetOption(args, "--build", "-b");
+	if (string.IsNullOrWhiteSpace(input))
+	{
+		Console.Error.WriteLine("Error: input map source is required.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	try
+	{
+		MapUniqueIdReport report = MapUniqueIdReportSupport.Build(input, build);
+		string outputPath = MapUniqueIdReportSupport.Write(report, output);
+		MapUniqueIdReportSupport.PrintSummary(report, outputPath);
+	}
+	catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+	{
+		Console.Error.WriteLine($"Error: {ex.Message}");
+		Environment.ExitCode = 1;
+	}
 }
 
 static void RunPm4(string[] args)
@@ -700,7 +807,8 @@ static void RunPm4Match(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? GetFirstPositionalArgument(args);
 	string? placements = GetOption(args, "--placements", "-p") ?? GetOption(args, "--adt-obj", "-a");
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	string? output = GetOption(args, "--output", "-o");
 	string? objectOutputDirectory = GetOption(args, "--object-output-dir", "-d");
 	string? maxMatchesText = GetOption(args, "--max-matches", "-n");
@@ -757,7 +865,7 @@ static void RunPm4Match(string[] args)
 		return;
 	}
 
-	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, listfilePath, maxMatches, searchRange);
+	Pm4MatchResult result = Pm4MatchSupport.Run(input, placements, archiveRoot, archiveBootstrapOptions, maxMatches, searchRange);
 	bool wroteArtifact = false;
 	if (!string.IsNullOrWhiteSpace(output))
 	{
@@ -789,8 +897,10 @@ static void RunWmoInspect(string[] args)
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
 	string? archiveRoot = GetOption(args, "--archive-root", "-r");
 	string? virtualPath = GetOption(args, "--virtual-path", "-v");
-	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
 	bool dumpLights = HasOption(args, "--dump-lights");
+	bool flagCorrelation = HasOption(args, "--flag-correlation");
 	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
 		virtualPath = input;
 
@@ -809,7 +919,7 @@ static void RunWmoInspect(string[] args)
 	{
 		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
 		{
-			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], listfilePath);
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
 			return new MemoryStream(archivedBytes, writable: false);
 		}
 
@@ -1005,6 +1115,8 @@ static void RunWmoInspect(string[] args)
 		{
 			IReadOnlyList<WmoEmbeddedGroupDetail> embeddedGroupDetails = ReadInput(WmoEmbeddedGroupDetailReader.Read);
 			PrintWmoEmbeddedGroupDetails(embeddedGroupDetails);
+			if (flagCorrelation)
+				PrintWmoGroupFlagCorrelationReport(embeddedGroupDetails);
 		}
 		catch (InvalidDataException)
 		{
@@ -1439,6 +1551,31 @@ static bool HasOption(string[] args, string name)
 	return args.Any(arg => string.Equals(arg, name, StringComparison.OrdinalIgnoreCase));
 }
 
+static bool TryBuildArchiveBootstrapOptions(string[] args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions)
+{
+	string? listfilePath = GetOption(args, "--listfile", "-l") ?? TryFindDefaultListfilePath();
+	string? cacheKey = GetOption(args, "--cache-key", "-k");
+	string? cacheDirectory = null;
+
+	if (!string.IsNullOrWhiteSpace(cacheKey))
+	{
+		cacheDirectory = GetOption(args, "--cache-dir", "-d") ?? TryFindDefaultArchiveListfileCacheDirectory();
+		if (string.IsNullOrWhiteSpace(cacheDirectory))
+		{
+			Console.Error.WriteLine("Error: --cache-key was provided but no cache directory could be resolved; provide --cache-dir explicitly.");
+			Environment.ExitCode = 1;
+			archiveBootstrapOptions = new ArchiveCatalogBootstrapOptions(ExternalListfilePath: listfilePath);
+			return false;
+		}
+	}
+
+	archiveBootstrapOptions = new ArchiveCatalogBootstrapOptions(
+		ExternalListfilePath: listfilePath,
+		ListfileCacheKey: cacheKey,
+		ListfileCacheDirectoryPath: cacheDirectory);
+	return true;
+}
+
 static string? TryFindDefaultListfilePath()
 {
 	DirectoryInfo? current = new(AppContext.BaseDirectory);
@@ -1451,6 +1588,18 @@ static string? TryFindDefaultListfilePath()
 		}
 
 		current = current.Parent;
+	}
+
+	return null;
+}
+
+static string? TryFindDefaultArchiveListfileCacheDirectory()
+{
+	DirectoryInfo? current = new(AppContext.BaseDirectory);
+	for (int depth = 0; depth < 8 && current is not null; depth++, current = current.Parent)
+	{
+		if (File.Exists(Path.Combine(current.FullName, "WowViewer.slnx")))
+			return Path.Combine(current.FullName, "output", "cache", "archive-listfiles");
 	}
 
 	return null;
@@ -1534,6 +1683,43 @@ static string FormatVector(System.Numerics.Vector3 value)
 static string FormatQuaternion(System.Numerics.Quaternion value)
 {
 	return $"({value.X:F3}, {value.Y:F3}, {value.Z:F3}, {value.W:F3})";
+}
+
+static string FormatWmoGroupFlags(WmoGroupSummary summary)
+{
+	WmoGroupFlags knownFlags = summary.KnownFlags;
+	List<string> labels = [];
+
+	if ((knownFlags & WmoGroupFlags.HasBspChunks) != 0)
+		labels.Add("bsp-chunks");
+	if ((knownFlags & WmoGroupFlags.IsExterior) != 0)
+		labels.Add("exterior");
+	if ((knownFlags & WmoGroupFlags.HasVertexColorChunk) != 0)
+		labels.Add("vertex-colors");
+	if ((knownFlags & WmoGroupFlags.UsesExteriorLighting) != 0)
+		labels.Add("exterior-lighting");
+	if ((knownFlags & WmoGroupFlags.HasLightRefChunk) != 0)
+		labels.Add("light-refs");
+	if ((knownFlags & WmoGroupFlags.HasMpbChunks) != 0)
+		labels.Add("mpb-chunks");
+	if ((knownFlags & WmoGroupFlags.HasDoodadRefChunk) != 0)
+		labels.Add("doodad-refs");
+	if ((knownFlags & WmoGroupFlags.HasLiquidChunk) != 0)
+		labels.Add("liquid");
+	if ((knownFlags & WmoGroupFlags.HasMoriMorbChunks) != 0)
+		labels.Add("mori-morb");
+	if ((knownFlags & WmoGroupFlags.HasSecondaryVertexColorChunk) != 0)
+		labels.Add("secondary-vertex-colors");
+	if ((knownFlags & WmoGroupFlags.HasSecondaryUvSet) != 0)
+		labels.Add("secondary-uv");
+	if ((knownFlags & WmoGroupFlags.HasTertiaryUvSet) != 0)
+		labels.Add("tertiary-uv");
+
+	uint unknownMask = summary.Flags & ~(uint)WmoGroupFlags.AllKnown;
+	if (unknownMask != 0)
+		labels.Add($"unknown:0x{unknownMask:X8}");
+
+	return labels.Count == 0 ? "none" : string.Join(',', labels);
 }
 
 static void PrintPm4AuditReport(Pm4DecodeAuditReport report)
@@ -1901,8 +2087,58 @@ static void PrintWmoSummary(WmoSummary summary)
 	Console.WriteLine("WowViewer.Tool.Inspect WMO report");
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
-	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} flags=0x{summary.Flags:X8}");
+	Console.WriteLine($"WMO semantics: materials={summary.MaterialEntryCount}/{summary.ReportedMaterialCount} groups={summary.GroupInfoCount}/{summary.ReportedGroupCount} portals={summary.ReportedPortalCount} lights={summary.ReportedLightCount} textures={summary.TextureNameCount} doodadNames={summary.DoodadNameTableCount}/{summary.ReportedDoodadNameCount} doodadPlacements={summary.DoodadPlacementEntryCount}/{summary.ReportedDoodadPlacementCount} doodadSets={summary.DoodadSetEntryCount}/{summary.ReportedDoodadSetCount} skybox={(summary.HasSkybox ? "yes" : "no")} flags=0x{summary.Flags:X8}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
+}
+
+static void PrintWmoGroupFlagCorrelationReport(IReadOnlyList<WmoEmbeddedGroupDetail> details)
+{
+	if (details.Count == 0)
+		return;
+
+	List<uint> bits = [];
+	for (int bitIndex = 0; bitIndex < 32; bitIndex++)
+	{
+		uint bit = 1u << bitIndex;
+		if (details.Any(detail => (detail.GroupSummary.Flags & bit) != 0))
+			bits.Add(bit);
+	}
+
+	if (bits.Count == 0)
+		return;
+
+	Console.WriteLine($"MOGP flag correlation: groups={details.Count}");
+	foreach (uint bit in bits)
+	{
+		int setCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0);
+		int bspCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.BspNodeCount > 0 && detail.GroupSummary.BspFaceRefCount > 0);
+		int lightRefCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.LightRefCount > 0);
+		int doodadRefCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.DoodadRefCount > 0);
+		int liquidCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.HasLiquid);
+		int vertexColorCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.VertexColorCount > 0);
+		int extraUvCount = details.Count(detail => (detail.GroupSummary.Flags & bit) != 0 && detail.GroupSummary.AdditionalUvSetCount > 0);
+		Console.WriteLine($"MOGP.FLAG[0x{bit:X8}]: label={DescribeWmoGroupFlagBit(bit)} set={setCount}/{details.Count} bsp={bspCount}/{setCount} lightRefs={lightRefCount}/{setCount} doodadRefs={doodadRefCount}/{setCount} liquid={liquidCount}/{setCount} vertexColors={vertexColorCount}/{setCount} extraUv={extraUvCount}/{setCount}");
+	}
+}
+
+static string DescribeWmoGroupFlagBit(uint bit)
+{
+	return bit switch
+	{
+		(uint)WmoGroupFlags.HasBspChunks => "bsp-chunks",
+		(uint)WmoGroupFlags.IsExterior => "exterior",
+		(uint)WmoGroupFlags.HasVertexColorChunk => "vertex-colors",
+		(uint)WmoGroupFlags.UsesExteriorLighting => "exterior-lighting",
+		(uint)WmoGroupFlags.HasLightRefChunk => "light-refs",
+		(uint)WmoGroupFlags.HasMpbChunks => "mpb-chunks",
+		(uint)WmoGroupFlags.HasDoodadRefChunk => "doodad-refs",
+		(uint)WmoGroupFlags.HasLiquidChunk => "liquid",
+		(uint)WmoGroupFlags.HasMoriMorbChunks => "mori-morb",
+		(uint)WmoGroupFlags.HasSecondaryVertexColorChunk => "secondary-vertex-colors",
+		(uint)WmoGroupFlags.HasSecondaryUvSet => "secondary-uv",
+		(uint)WmoGroupFlags.HasTertiaryUvSet => "tertiary-uv",
+		_ => "unknown",
+	};
 }
 
 static string FormatMapFileKind(MapFileKind? kind)
@@ -1979,7 +2215,7 @@ static void PrintWmoLightDetail(WmoLightDetail detail)
 static void PrintWmoEmbeddedGroupDetail(WmoEmbeddedGroupDetail detail)
 {
 	WmoGroupSummary summary = detail.GroupSummary;
-	Console.WriteLine($"MOGP(root)[{detail.GroupIndex}]: offset={detail.GroupHeaderOffset} flags=0x{summary.Flags:X8} portals={summary.PortalCount}@{summary.PortalStart} faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} doodadRefs={summary.DoodadRefCount} lightRefs={summary.LightRefCount} bspNodes={summary.BspNodeCount} bspFaceRefs={summary.BspFaceRefCount} hasLiquid={summary.HasLiquid} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
+	Console.WriteLine($"MOGP(root)[{detail.GroupIndex}]: offset={detail.GroupHeaderOffset} flags=0x{summary.Flags:X8} ({FormatWmoGroupFlags(summary)}) portals={summary.PortalCount}@{summary.PortalStart} faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} doodadRefs={summary.DoodadRefCount} lightRefs={summary.LightRefCount} bspNodes={summary.BspNodeCount} bspFaceRefs={summary.BspFaceRefCount} hasLiquid={summary.HasLiquid} boundsMin={FormatVector(summary.BoundsMin)} boundsMax={FormatVector(summary.BoundsMax)}");
 
 	if (detail.NormalSummary is not null)
 		Console.WriteLine($"MONR(root)[{detail.GroupIndex}]: payloadBytes={detail.NormalSummary.PayloadSizeBytes} normals={detail.NormalSummary.NormalCount} rangeX=[{detail.NormalSummary.MinX:F3}, {detail.NormalSummary.MaxX:F3}] rangeY=[{detail.NormalSummary.MinY:F3}, {detail.NormalSummary.MaxY:F3}] rangeZ=[{detail.NormalSummary.MinZ:F3}, {detail.NormalSummary.MaxZ:F3}] lengthRange=[{detail.NormalSummary.MinLength:F3}, {detail.NormalSummary.MaxLength:F3}] avgLength={detail.NormalSummary.AverageLength:F3} nearUnit={detail.NormalSummary.NearUnitCount}");
@@ -2053,7 +2289,7 @@ static void PrintWmoGroupNameTableSummary(WmoGroupNameTableSummary summary)
 
 static void PrintWmoSkyboxSummary(WmoSkyboxSummary summary)
 {
-	Console.WriteLine($"MOSB: payloadBytes={summary.PayloadSizeBytes} skybox={summary.SkyboxName}");
+	Console.WriteLine($"MOSB: payloadBytes={summary.PayloadSizeBytes} skybox={summary.SkyboxName} source=explicit-root-skybox");
 }
 
 static void PrintWmoPortalVertexSummary(WmoPortalVertexSummary summary)
@@ -2136,7 +2372,7 @@ static void PrintWmoGroupSummary(WmoGroupSummary summary)
 	Console.WriteLine("WowViewer.Tool.Inspect WMO group report");
 	Console.WriteLine($"Input: {summary.SourcePath}");
 	Console.WriteLine($"Version: {summary.Version?.ToString() ?? "n/a"}");
-	Console.WriteLine($"Header: bytes={summary.HeaderSizeBytes} nameOff={summary.NameOffset} descOff={summary.DescriptiveNameOffset} flags=0x{summary.Flags:X8} portals={summary.PortalCount}@{summary.PortalStart} liquid={summary.GroupLiquid}");
+	Console.WriteLine($"Header: bytes={summary.HeaderSizeBytes} nameOff={summary.NameOffset} descOff={summary.DescriptiveNameOffset} flags=0x{summary.Flags:X8} ({FormatWmoGroupFlags(summary)}) portals={summary.PortalCount}@{summary.PortalStart} liquid={summary.GroupLiquid}");
 	Console.WriteLine($"Geometry: faces={summary.FaceMaterialCount} vertices={summary.VertexCount} indices={summary.IndexCount} normals={summary.NormalCount} primaryUv={summary.PrimaryUvCount} extraUvSets={summary.AdditionalUvSetCount} batches={summary.BatchCount}/{summary.DeclaredBatchCount} vertexColors={summary.VertexColorCount} doodadRefs={summary.DoodadRefCount} lightRefs={summary.LightRefCount} bspNodes={summary.BspNodeCount} bspFaceRefs={summary.BspFaceRefCount} hasLiquid={summary.HasLiquid}");
 	Console.WriteLine($"Bounds: min={FormatVector(summary.BoundsMin)} max={FormatVector(summary.BoundsMax)}");
 }
@@ -2528,6 +2764,7 @@ static void ShowUsage()
 {
 	Console.WriteLine("WowViewer.Tool.Inspect");
 	Console.WriteLine("Usage:");
+	Console.WriteLine("  wowviewer-inspect archive build-listfile-cache --archive-root <game|data dir> --cache-key <client-build> [--listfile <listfile.txt>] [--cache-dir <directory>]");
 	Console.WriteLine("  wowviewer-inspect blp inspect --input <file.blp>");
 	Console.WriteLine("  wowviewer-inspect blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect mdx inspect --input <file.mdx>");
@@ -2549,6 +2786,12 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect pm4 audit --input <file.pm4>");
 	Console.WriteLine("  wowviewer-inspect pm4 audit-directory --input <directory>");
 	Console.WriteLine("  wowviewer-inspect pm4 export-json --input <file.pm4> [--output <report.json>] [--ck24 <decimal|0xHEX>]");
+}
+
+static void ShowArchiveUsage()
+{
+	Console.WriteLine("Archive commands:");
+	Console.WriteLine("  archive build-listfile-cache --archive-root <game|data dir> --cache-key <client-build> [--listfile <listfile.txt>] [--cache-dir <directory>]");
 }
 
 static void ShowBlpUsage()
@@ -2579,14 +2822,15 @@ static void ShowMdxUsage()
 static void ShowWmoUsage()
 {
 	Console.WriteLine("WMO commands:");
-	Console.WriteLine("  wmo inspect --input <file.wmo> [--dump-lights]");
-	Console.WriteLine("  wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
+	Console.WriteLine("  wmo inspect --input <file.wmo> [--dump-lights] [--flag-correlation]");
+	Console.WriteLine("  wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights] [--flag-correlation]");
 }
 
 static void ShowMapUsage()
 {
 	Console.WriteLine("Map commands:");
 	Console.WriteLine("  map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]");
+	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]");
 }
 
 static void ShowPm4Usage()

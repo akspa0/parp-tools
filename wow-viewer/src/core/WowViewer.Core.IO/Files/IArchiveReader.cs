@@ -13,6 +13,8 @@ public interface IArchiveCatalog : IArchiveReader, IDisposable
 
     void LoadListfile(string path);
 
+    void LoadListfileEntries(IEnumerable<string> entries);
+
     IReadOnlyList<string> ExtractInternalListfiles();
 
     IReadOnlyList<string> GetAllKnownFiles();

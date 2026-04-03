@@ -1,5 +1,91 @@
 # wow-viewer Shared I/O Library Plan
 
+# wow-viewer Shared I/O Library Plan
+
+## Apr 03, 2026 - Shared per-build ADT UniqueId report slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Tool.Inspect` now supports `map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]` as the first thin build-manifest consumer over the existing shared `AdtPlacementReader` seam
+  - the command scans ADT or ADTOBJ placement sources, persists every raw `MDDF` and `MODF` `UniqueId` with model path and placement metadata, and also emits duplicate-id summaries plus per-source counts so later build-to-build diffs have a stable artifact surface
+  - the output is intentionally report-first: it does not invent new placement heuristics or duplicate parser ownership in the tool; it reuses the current shared placement reader and keeps malformed or unsupported files explicit in a `Failures` section instead of dropping them silently
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "ArchiveVirtualFileReaderTests|ArchiveCatalogBootstrapperTests|AdtPlacementReaderTests"`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- map uniqueid-report --input i:/parp/parp-tools/gillijimproject_refactor/test_data/development/World/Maps/development/development.wdt --build development --output i:/parp/parp-tools/wow-viewer/output/reports/map-uniqueids/development.json`
+- notes:
+  - current real-data proof on the fixed development map produced `wow-viewer/output/reports/map-uniqueids/development.json` with `64435` placements, `62490` distinct `UniqueId` values, `1701` reused IDs, and `maxReuse=30`
+  - the current report is a per-build evidence artifact only; it does not yet compute cross-build added or removed timelines by itself
+  - `114` scanned development files currently remain explicit failures because they classify as `Unknown` rather than `Adt` or `AdtObj`; keep those surfaced until the file-family gap is understood instead of treating the report as a silent full-coverage pass
+
+## Apr 03, 2026 - Shared MPQ listfile cache and trust boundary slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.IO/Files` now contains `ArchiveListfileCache` and `ArchiveListfileCacheManifest` as the first shared persistent known-file cache seam for MPQ-era archive roots
+  - `IArchiveCatalog` and `MpqArchiveCatalog` now support direct `LoadListfileEntries(...)` seeding, so trusted internal entries, cached entries, and supplemental external entries all feed the same known-file universe without requiring a physical listfile on every reuse
+  - `ArchiveCatalogBootstrapper` now accepts explicit `ArchiveCatalogBootstrapOptions`, reloads trusted internal MPQ listfiles back into the catalog, can hydrate from a named cache manifest, and can persist the merged result under an explicit client/build cache key
+  - `WowViewer.Tool.Inspect` now supports `archive build-listfile-cache --archive-root <dir> --cache-key <client.version.build> [--listfile <listfile.txt>] [--cache-dir <directory>]` as the first thin consumer for building per-client manifests
+  - archive-backed `mdx chunk-carriers` now enumerates `ArchiveCatalogBootstrapResult.AllFiles` so trusted internal entries plus cached supplemental entries actually affect carrier discovery
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "ArchiveCatalogBootstrapperTests|ArchiveVirtualFileReaderTests"`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- archive build-listfile-cache --archive-root "i:/parp/parp-tools/wow-viewer/testdata/0.6.0/World of Warcraft/Data" --cache-key 0.6.0.3592 --listfile "i:/parp/parp-tools/wow-viewer/libs/wowdev/wow-listfile/listfile.txt"`
+- notes:
+  - for MPQ-era clients, internal listfiles extracted from the client archives are now treated as the trusted primary source of the known-file universe; the vendored/community listfile remains supplemental gap-fill input only
+  - current real-data proof produced `wow-viewer/output/cache/archive-listfiles/0.6.0.3592.json` with `56742` trusted internal entries, `1291033` supplemental external entries, and `1347773` merged known files
+  - this slice closes the shared caching and trust-boundary seam only; it does not prove that every cached virtual path exists in every local root or that deeper format ownership is complete
+
+## Apr 03, 2026 - Shared WMO exterior-flag naming refinement
+
+- status: landed
+- implementation surface:
+  - `WmoGroupFlags` now also names repo-documented `MOGP` bit `0x00000008` as `IsExterior` and `0x00000040` as `UsesExteriorLighting`
+  - `WowViewer.Tool.Inspect wmo inspect` now prints those names in both per-group output and `--flag-correlation` labels instead of leaving them as raw unknown bits
+  - `0x00000002` remains intentionally unnamed because the broader Alpha Ironforge corpus still does not separate it from the default BSP or vertex-color groups strongly enough to justify a shared semantic claim
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WmoGroupSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/KhazModan/Cities/Ironforge/ironforge.wmo.MPQ --flag-correlation`
+- notes:
+  - the larger Alpha Ironforge corpus keeps confirming the already-typed chunk-gating bits for `0x00000200`, `0x00000800`, and `0x00001000`
+  - archived repo-local WMO notes plus the in-repo `Warcraft.NET` flag names provide enough support to stop treating `0x00000008` and `0x00000040` as anonymous
+  - this is still shared interpretation work, not a runtime culling or lighting signoff
+
+## Apr 03, 2026 - Shared WMO root skybox-presence and flag-correlation inspect slice
+
+- status: landed
+- implementation surface:
+  - `WmoSummary` now carries explicit root `MOSB` presence as `HasSkybox`, so root WMO summaries can say whether the file advertises an explicit skybox without requiring the dedicated `MOSB` reader first
+  - `WmoSummaryReader` now detects `MOSB` presence through the shared root chunk map instead of leaving that capability only on the dedicated skybox reader path
+  - `WowViewer.Tool.Inspect wmo inspect` now supports `--flag-correlation`, which summarizes how each `MOGP` flag bit seen in the current root WMO aligns with actual group-side signals such as BSP payloads, doodad refs, light refs, liquid, vertex colors, and extra UV sets
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WmoSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ --flag-correlation`
+- notes:
+  - this makes the current WMO audit answer more concrete:
+    - root skybox ownership is now visible directly in `WmoSummary`
+    - the castle real-data sample shows `0x00000001` aligning cleanly with BSP presence and `0x00000800` aligning with doodad refs, while `0x00000002` remains intentionally unknown
+  - this is still summary/reporting evidence, not final runtime collision or portal-culling ownership
+
+## Apr 03, 2026 - Shared WMO `MOGP` flag interpretation slice
+
+- status: landed
+- implementation surface:
+  - `WowViewer.Core.Wmo` now contains shared `WmoGroupFlags` as a typed interpretation layer over the currently evidence-backed `MOGP` flag bits that gate optional WMO group chunk families
+  - `WmoGroupSummary` now exposes `KnownFlags` so consumers can distinguish the bits we actually understand from unknown residual flag bits instead of treating the raw word as fully decoded
+  - `WowViewer.Tool.Inspect wmo inspect` now prints decoded group flag labels beside the raw `MOGP` flag word for both standalone group files and embedded root-group details
+  - `MOSB` output now explicitly labels skyboxes as root-level explicit skybox payloads rather than leaving that implication in chat only
+- validation:
+  - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WmoGroupSummaryReaderTests`
+  - `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/inspect/WowViewer.Tool.Inspect/WowViewer.Tool.Inspect.csproj -- wmo inspect --input i:/parp/parp-tools/wow-viewer/testdata/0.5.3/tree/World/wmo/Azeroth/Buildings/Castle/castle01.wmo.MPQ`
+- notes:
+  - current evidence now supports a cleaner statement for the user’s open WMO question:
+    - skybox ownership is explicit at the root via `MOSB`
+    - collision-relevant group-side ownership is not coming from group names; it is primarily a combination of `MOGP` flag gates and actual `MOBN`/`MOBR` BSP payload presence
+  - this slice is interpretation and inspect-surface work only; it does not yet claim full runtime collision behavior, portal culling behavior, or final semantic names for every unknown `MOGP` bit
+- recommended next narrow slices from this state:
+  - shared root-summary slice: carry `MOSB` presence into `WmoSummary` as an explicit root capability signal, with optional skybox-name ownership only if that stays summary-safe
+  - inspect/report slice: add a focused WMO flag-to-chunk correlation report so real files can show which `MOGP` flags actually align with `MOBN`/`MOBR`, `MOLR`, `MODR`, `MLIQ`, `MOCV`, and extra `MOTV` sets in the current corpus
+  - later runtime slice: consume the shared `WmoGroupFlags` + BSP summaries in a runtime-owned visibility/collision seam instead of re-deriving those decisions in viewer-local code
+
 ## Mar 28, 2026 - MDX Audit Classification Update
 
 - status: active audit note

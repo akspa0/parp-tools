@@ -35,7 +35,14 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
             return;
         }
 
-        foreach (string rawLine in File.ReadLines(path))
+        LoadListfileEntries(File.ReadLines(path));
+    }
+
+    public void LoadListfileEntries(IEnumerable<string> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        foreach (string rawLine in entries)
         {
             string name = rawLine;
             if (rawLine.Contains(';', StringComparison.Ordinal))
@@ -53,12 +60,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 continue;
             }
 
-            string normalized = NormalizeVirtualPath(name);
-            ulong hash = ((ulong)HashString(normalized, HashNameA) << 32) | HashString(normalized, HashNameB);
-            if (_knownFileHashes.Add(hash))
-            {
-                _hashToName[hash] = name;
-            }
+            AddKnownFileName(name);
         }
     }
 
@@ -457,6 +459,16 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     private static string NormalizeVirtualPath(string path)
     {
         return path.Replace('/', '\\');
+    }
+
+    private void AddKnownFileName(string name)
+    {
+        string normalized = NormalizeVirtualPath(name);
+        ulong hash = ((ulong)HashString(normalized, HashNameA) << 32) | HashString(normalized, HashNameB);
+        if (_knownFileHashes.Add(hash))
+        {
+            _hashToName[hash] = name;
+        }
     }
 
     private static int GetMpqPriority(string filename)

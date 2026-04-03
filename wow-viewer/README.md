@@ -105,6 +105,7 @@ Current shared-core foundation slice:
   - `WdtSummary`
 - `src/core/WowViewer.Core/Wmo` now contains the first shared WMO root-summary contracts:
   - `WmoChunkIds`
+	- `WmoGroupFlags`
   - `WmoSummary`
   - `WmoGroupSummary`
   - `WmoLiquidBasicType`
@@ -149,6 +150,8 @@ Current shared-core foundation slice:
    - `WmoEmbeddedGroupLinkageSummary`
 	- `WmoEmbeddedGroupDetail`
    - Alpha root `MOMO` wrapper handling is now also part of the shared root-summary ownership boundary
+	- `WmoGroupFlags` currently provides the first typed interpretation layer for evidence-backed `MOGP` flag bits that gate BSP or exterior or vertex-color or exterior-lighting or light-ref or doodad-ref or liquid or extra-UV families; residual bits such as `0x00000002` remain intentionally raw until the corpus says more
+	- `WmoSummary` now also exposes root `MOSB` presence as `HasSkybox`, so root summary consumers can tell whether the file advertises an explicit skybox without re-running the dedicated skybox reader first
 - `src/core/WowViewer.Core/Mdx` now contains the first shared `MDX` top-level summary contracts:
 	- `MdxChunkIds`
 	- `MdxChunkSummary`
@@ -216,6 +219,12 @@ Current shared-core foundation slice:
    - `WmoOpaqueChunkSummaryReader`
    - `WmoRootReaderCommon`
    - `WmoDoodadNameReferenceSummaryReader`
+
+Current WMO inspect workflow note:
+
+- `wowviewer-inspect wmo inspect` now also supports `--flag-correlation` for root WMOs.
+- This is a per-file evidence surface that correlates the `MOGP` bits seen in the current file against actual group signals such as BSP payloads, doodad refs, light refs, liquid, vertex colors, and extra UV sets.
+- Treat it as an audit/ranking surface, not final runtime semantics for every unknown `MOGP` bit.
    - `WmoGroupNameReferenceSummaryReader`
    - `WmoDoodadSetRangeSummaryReader`
    - `WmoVisibleVertexSummaryReader`
@@ -247,6 +256,8 @@ Current shared-core foundation slice:
 - `src/core/WowViewer.Core.IO` now also contains the first shared archive bootstrap and Alpha wrapper helpers:
 	- `ArchiveCatalogBootstrapper`
 	- `ArchiveCatalogBootstrapResult`
+	- `ArchiveListfileCache`
+	- `ArchiveListfileCacheManifest`
 	- `AlphaArchiveReader`
 	- `PkwareExplode`
 - `src/core/WowViewer.Core.IO` now also contains the concrete shared standard MPQ implementation used by the active consumer path:
@@ -305,6 +316,7 @@ Current shared-core foundation slice:
 Current non-PM4 inspect slice:
 
 - `tools/inspect/WowViewer.Tool.Inspect` now also supports:
+	- `archive build-listfile-cache --archive-root <game|data dir> --cache-key <client.version.build> [--listfile <listfile.txt>] [--cache-dir <directory>]`
 	- `blp inspect --input <file.blp>`
 	- `blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]`
 	- `m2 inspect --input <file.m2|file.mdx|file.mdl> [--profile-index <n>]`
@@ -316,6 +328,7 @@ Current non-PM4 inspect slice:
 	- `mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]`
 	- `mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]`
 	- `map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]`
+	- `map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]`
 	- `wmo inspect --input <file.wmo> [--dump-lights]`
 	- `wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]`
 - This is intentionally narrow for now:
@@ -327,6 +340,7 @@ Current non-PM4 inspect slice:
 	- it now also reports a shared ADT semantic summary for terrain-chunk counts, string-table counts, placement counts, and selected MFBO or MH2O or MAMP or MTXF presence across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports a shared ADT `MCNK` semantic summary for root-header coverage, selected flags, split-file subchunk presence, and per-chunk layer-count signals across root, `_tex0.adt`, and `_obj0.adt`
 	- it now also reports shared root-plus-`_tex0` per-chunk layer and decoded alpha detail on demand through `--dump-tex-chunks`
+	- it now also supports `map uniqueid-report` as the first per-build placement manifest workflow for `MDDF` and `MODF` `UniqueId` collection, emitting JSON reports that can be diffed later into added/removed-object timelines
 	- it now also reports a shared WDT semantic summary for MPHD WMO-based flags, MAIN tile occupancy, string-table counts, and top-level MDDF or MODF placement counts
 	- it now also reports a first shared WMO root semantic summary for `MOHD`-reported counts, top-level entry counts, string-table counts, flags, and bounds
 	- it now also reports a first shared WMO group semantic summary for `MOGP` header fields, geometry subchunk counts, optional extra UV-set count, doodad-ref count, and liquid presence
@@ -354,6 +368,8 @@ Current non-PM4 inspect slice:
 	- it now also reports shared root-WMO portal-linkage summaries for `MOPT -> MOPV`, `MOPR -> MOPT`, and `MOPR -> MOGI` when those related chunks are present
 	- it now also accepts Alpha per-asset `.wmo.MPQ` inputs for shared root-WMO inspect by routing them through the shared archive fallback and the Alpha `MOMO`-aware root reader path
 	- it now also accepts standard shared-MPQ archive roots plus virtual WMO paths, defaulting to the vendored `wow-listfile` when that file is available under the repo root
+	- it now also supports `archive build-listfile-cache` as the first shared per-client known-file cache workflow for MPQ-era roots, with internal MPQ listfiles treated as the trusted primary source and any supplied external/community listfile persisted as supplemental gap-fill input
+	- archive-backed `mdx chunk-carriers` now enumerates the shared bootstrap `AllFiles` universe instead of only the catalog's pre-bootstrap known-file set, so trusted internal entries and cached supplemental entries actually affect carrier discovery
 	- it now also reports an Alpha monolithic embedded-group aggregate `MOGP(root)` line when a root WMO contains top-level embedded `MOGP` blocks
 	- that same `MOGP(root)` aggregate now also reports embedded `lightRefs`, `bspNodes`, and `bspFaceRefs`, which real `castle01.wmo.MPQ` currently proves as `0`, `583`, and `6716`
 	- it now also reports an Alpha `MOGI -> MOGP(root)` linkage line showing paired count/flag/bounds metrics across root group-info and embedded-group surfaces
@@ -375,7 +391,9 @@ Current non-PM4 inspect slice:
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx export-json --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --virtual-path creature/airelemental/airelemental.mdx --include-texture-animations --output .\output\mdx-airelemental-texture-animations.json`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks LITE --archive-root .\testdata\0.6.0\World of Warcraft\Data --listfile .\libs\wowdev\wow-listfile\listfile.txt --path-filter braziers --limit 100`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- mdx chunk-carriers --chunks TXAN,PREM,CORN --input .\testdata\0.5.3\tree --limit 500`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- archive build-listfile-cache --archive-root .\testdata\0.6.0\World of Warcraft\Data --cache-key 0.6.0.3592 --listfile .\libs\wowdev\wow-listfile\listfile.txt`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt`
+	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map uniqueid-report --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt --build development --output .\output\reports\map-uniqueids\development.json`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- wmo inspect --archive-root .\testdata\0.6.0\World of Warcraft\Data --virtual-path world/wmo/khazmodan/cities/ironforge/ironforge.wmo`
 	- `dotnet run --project .\tools\inspect\WowViewer.Tool.Inspect\WowViewer.Tool.Inspect.csproj -- map inspect --input ..\gillijimproject_refactor\test_data\development\World\Maps\development\development_0_0.adt`
 
