@@ -5,6 +5,14 @@ namespace WowViewer.Core.Maps;
 public static class MapChunkIds
 {
     public static readonly FourCC Mver = FourCC.FromString("MVER");
+    public static readonly FourCC Ahdr = FourCC.FromString("AHDR");
+    public static readonly FourCC Avtx = FourCC.FromString("AVTX");
+    public static readonly FourCC Anrm = FourCC.FromString("ANRM");
+    public static readonly FourCC Atex = FourCC.FromString("ATEX");
+    public static readonly FourCC Adoo = FourCC.FromString("ADOO");
+    public static readonly FourCC Acnk = FourCC.FromString("ACNK");
+    public static readonly FourCC Afbo = FourCC.FromString("AFBO");
+    public static readonly FourCC Acvt = FourCC.FromString("ACVT");
     public static readonly FourCC Mamp = FourCC.FromString("MAMP");
     public static readonly FourCC Mphd = FourCC.FromString("MPHD");
     public static readonly FourCC Main = FourCC.FromString("MAIN");

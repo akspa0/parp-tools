@@ -144,19 +144,19 @@ public class WdlTerrainRenderer : IDisposable
 
     private unsafe WdlTileMesh? BuildTileMesh(WdlParser.WdlTile tile, int tileX, int tileY)
     {
-        // WDL uses same 17×17 outer + 16×16 inner layout as MCNK but at ADT tile scale.
+        // WDL uses the same 17×17 outer + 16×16 inner layout as MCNK, but each WDL cell
+        // maps onto the viewer's 64×64 chunk grid. The terrain manager, minimap, and WDL
+        // preview all use ChunkSize spacing for these coordinates.
         // 17×17 = 289 outer vertices, 16×16 = 256 inner vertices = 545 total.
-        // Each WDL cell = one ADT tile = 16 chunks × 533.33 = 8533.33 world units per edge.
         const int outerEdge = 17;
         const int innerEdge = 16;
         int totalVerts = outerEdge * outerEdge + innerEdge * innerEdge; // 545
 
-        // Tile world origin (top-left corner in renderer space)
-        // Each WDL cell spans one full ADT tile = TileSize world units
-        float tileWorldX = WoWConstants.MapOrigin - tileX * WoWConstants.TileSize;
-        float tileWorldY = WoWConstants.MapOrigin - tileY * WoWConstants.TileSize;
-        float tileSize = WoWConstants.TileSize; // One WDL cell = one ADT tile
-        float cellSize = tileSize / innerEdge; // Distance between outer vertices
+        // Cell world origin (top-left corner in renderer space).
+        // A WDL cell spans one ChunkSize step, not one full ADT tile.
+        float tileWorldX = WoWConstants.MapOrigin - tileX * WoWConstants.ChunkSize;
+        float tileWorldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize;
+        float cellSize = WoWConstants.ChunkSize / innerEdge;
 
         // Vertex data: position(3) + normal(3) = 6 floats per vertex
         float[] vertices = new float[totalVerts * 6];

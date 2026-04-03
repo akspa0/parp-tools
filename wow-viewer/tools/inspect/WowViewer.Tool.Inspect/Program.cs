@@ -5,10 +5,12 @@ using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Blp;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Lit;
 using WowViewer.Core.IO.M2;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Wmo;
+using WowViewer.Core.Lit;
 using WowViewer.Core.M2;
 using WowViewer.Core.Mdx;
 using WowViewer.Core.Maps;
@@ -45,6 +47,9 @@ switch (area)
 		break;
 	case "map":
 		RunMap(tail);
+		break;
+	case "lit":
+		RunLit(tail);
 		break;
 	case "pm4":
 		RunPm4(tail);
@@ -685,6 +690,31 @@ static void RunMap(string[] args)
 	}
 }
 
+static void RunLit(string[] args)
+{
+	if (args.Length == 0)
+	{
+		ShowLitUsage();
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	string command = args[0].ToLowerInvariant();
+	string[] tail = args.Skip(1).ToArray();
+
+	switch (command)
+	{
+		case "inspect":
+			RunLitInspect(tail);
+			break;
+		default:
+			Console.Error.WriteLine($"Unknown lit command '{command}'.");
+			ShowLitUsage();
+			Environment.ExitCode = 1;
+			break;
+	}
+}
+
 static void RunMapInspect(string[] args)
 {
 	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
@@ -698,6 +728,50 @@ static void RunMapInspect(string[] args)
 
 	MapFileSummary summary = MapFileSummaryReader.Read(input);
 	PrintMapSummary(summary, dumpTexChunks);
+}
+
+static void RunLitInspect(string[] args)
+{
+	string? input = GetOption(args, "--input", "-i") ?? args.FirstOrDefault(static arg => !arg.StartsWith('-'));
+	string? archiveRoot = GetOption(args, "--archive-root", "-r");
+	string? virtualPath = GetOption(args, "--virtual-path", "-v");
+	if (!TryBuildArchiveBootstrapOptions(args, out ArchiveCatalogBootstrapOptions archiveBootstrapOptions))
+		return;
+	if (!string.IsNullOrWhiteSpace(archiveRoot) && string.IsNullOrWhiteSpace(virtualPath))
+		virtualPath = input;
+
+	if (string.IsNullOrWhiteSpace(input) && (string.IsNullOrWhiteSpace(archiveRoot) || string.IsNullOrWhiteSpace(virtualPath)))
+	{
+		Console.Error.WriteLine("Error: provide --input <lights.lit> or --archive-root <game|data dir> with --virtual-path <world/.../lights.lit>.");
+		Environment.ExitCode = 1;
+		return;
+	}
+
+	byte[]? archivedBytes = null;
+	string sourceLabel = !string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath)
+		? virtualPath
+		: input!;
+	Stream OpenInputStream()
+	{
+		if (!string.IsNullOrWhiteSpace(archiveRoot) && !string.IsNullOrWhiteSpace(virtualPath))
+		{
+			archivedBytes ??= ArchiveVirtualFileReader.ReadVirtualFile(virtualPath, [archiveRoot], archiveBootstrapOptions);
+			return new MemoryStream(archivedBytes, writable: false);
+		}
+
+		if (File.Exists(input) && !input.EndsWith(".mpq", StringComparison.OrdinalIgnoreCase))
+			return File.OpenRead(input);
+
+		archivedBytes ??= AlphaArchiveReader.ReadWithMpqFallback(input!)
+			?? throw new FileNotFoundException($"Could not read inspect input '{input}' directly or from a companion MPQ archive.", input);
+		return new MemoryStream(archivedBytes, writable: false);
+	}
+
+	LitSummary summary;
+	using (Stream stream = OpenInputStream())
+		summary = LitSummaryReader.Read(stream, sourceLabel);
+
+	PrintLitSummary(summary);
 }
 
 static void RunMapUniqueIdReport(string[] args)
@@ -2026,20 +2100,18 @@ static void PrintMapSummary(MapFileSummary summary, bool dumpTexChunks)
 		if (wdtSummary.MainFlags is not null)
 			Console.WriteLine($"WDT MAIN flags: any={wdtSummary.MainFlags.CellsWithAnyFlags} hasAdt={wdtSummary.MainFlags.CellsWithHasAdt} allWater={wdtSummary.MainFlags.CellsWithAllWater} loaded={wdtSummary.MainFlags.CellsWithLoaded} unknown={wdtSummary.MainFlags.CellsWithUnknownFlags} asyncIds={wdtSummary.MainFlags.CellsWithAsyncId} distinct={FormatWdtMainFlags(wdtSummary.MainFlags)}");
 	}
+	else if (summary.Kind is MapFileKind.AdtV23 or MapFileKind.AdtV23Error)
+	{
+		using FileStream stream = File.OpenRead(summary.SourcePath);
+		AdtV23Summary v23Summary = AdtV23SummaryReader.Read(stream, summary);
+		Console.WriteLine($"ADT/v23 semantics: kind={v23Summary.Kind} headerVersion={v23Summary.HeaderVersion} vertices={v23Summary.VerticesX}x{v23Summary.VerticesY} chunks={v23Summary.ChunksX}x{v23Summary.ChunksY} acnk={v23Summary.TerrainChunkCount} textures={v23Summary.TextureNameCount} objects={v23Summary.ObjectNameCount} avtx={v23Summary.HasVertexHeights} anrm={v23Summary.HasNormals} afbo={v23Summary.HasFlightBounds} acvt={v23Summary.HasVertexShading}");
+	}
 	else if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj or MapFileKind.AdtLod)
 	{
 		AdtTileFamily family = AdtTileFamilyResolver.Resolve(summary.SourcePath);
 		Console.WriteLine($"ADT family: root={(family.HasRoot ? "present" : "missing")} tex0={(family.HasTex0 ? "present" : "missing")} obj0={(family.HasObj0 ? "present" : "missing")} lod={(family.HasLod ? "present" : "missing")} textureSource={FormatMapFileKind(family.TextureSourceKind)} placementSource={FormatMapFileKind(family.PlacementSourceKind)}");
 	}
 
-
-static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
-{
-	if (summary.DistinctNonZeroValues.Count == 0)
-		return "none";
-
-	return string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
-}
 	if (summary.Kind is MapFileKind.Adt or MapFileKind.AdtTex or MapFileKind.AdtObj)
 	{
 		using FileStream stream = File.OpenRead(summary.SourcePath);
@@ -2080,6 +2152,23 @@ static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
 
 	if (summary.Chunks.Count > 12)
 		Console.WriteLine($"  ... {summary.Chunks.Count - 12} more chunks");
+}
+
+static string FormatWdtMainFlags(WdtMainFlagsSummary summary)
+{
+	if (summary.DistinctNonZeroValues.Count == 0)
+		return "none";
+
+	return string.Join(",", summary.DistinctNonZeroValues.Select(static value => $"0x{value.Value:x}:{value.TileCount}"));
+}
+
+static void PrintLitSummary(LitSummary summary)
+{
+	Console.WriteLine("WowViewer.Tool.Inspect LIT report");
+	Console.WriteLine($"Input: {summary.SourcePath}");
+	Console.WriteLine($"Version: 0x{summary.VersionNumber:X8}");
+	Console.WriteLine($"LIT semantics: lightCount={summary.LightCount} listEntries={summary.ListEntryCount} singlePartial={summary.UsesSinglePartialEntry} defaultFirstEntry={summary.HasDefaultFirstEntry} namedEntries={summary.NamedEntryCount} remainingPayloadBytes={summary.RemainingPayloadBytes}");
+	Console.WriteLine("Proof boundary: parser-only summary; runtime .lit ownership is still unproven.");
 }
 
 static void PrintWmoSummary(WmoSummary summary)
@@ -2775,7 +2864,9 @@ static void ShowUsage()
 	Console.WriteLine("  wowviewer-inspect mdx export-json --archive-root <game|data dir> --virtual-path <path/to/file.mdx> [--listfile <listfile.txt>] [--output <report.json>] [--include-geometry] [--include-collision] [--include-hit-test] [--include-texture-animations]");
 	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --input <file|directory> [--path-filter <text>] [--limit <n>]");
 	Console.WriteLine("  wowviewer-inspect mdx chunk-carriers --chunks <FOURCC[,FOURCC...]> --archive-root <game|data dir> [--listfile <listfile.txt>] [--path-filter <text>] [--limit <n>]");
-	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt>");
+	Console.WriteLine("  wowviewer-inspect map inspect --input <file.wdt|file.adt|file.error>");
+	Console.WriteLine("  wowviewer-inspect lit inspect --input <lights.lit>");
+	Console.WriteLine("  wowviewer-inspect lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --input <file.wmo> [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect wmo inspect --archive-root <game|data dir> --virtual-path <world/...wmo> [--listfile <listfile.txt>] [--dump-lights]");
 	Console.WriteLine("  wowviewer-inspect pm4 inspect --input <file.pm4>");
@@ -2799,6 +2890,13 @@ static void ShowBlpUsage()
 	Console.WriteLine("BLP commands:");
 	Console.WriteLine("  blp inspect --input <file.blp>");
 	Console.WriteLine("  blp inspect --archive-root <game|data dir> --virtual-path <path/to/file.blp> [--listfile <listfile.txt>]");
+}
+
+static void ShowLitUsage()
+{
+	Console.WriteLine("LIT commands:");
+	Console.WriteLine("  lit inspect --input <lights.lit>");
+	Console.WriteLine("  lit inspect --archive-root <game|data dir> --virtual-path <world/.../lights.lit> [--listfile <listfile.txt>]");
 }
 
 static void ShowM2Usage()
@@ -2829,7 +2927,7 @@ static void ShowWmoUsage()
 static void ShowMapUsage()
 {
 	Console.WriteLine("Map commands:");
-	Console.WriteLine("  map inspect --input <file.wdt|file.adt> [--dump-tex-chunks]");
+	Console.WriteLine("  map inspect --input <file.wdt|file.adt|file.error> [--dump-tex-chunks]");
 	Console.WriteLine("  map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]");
 }
 

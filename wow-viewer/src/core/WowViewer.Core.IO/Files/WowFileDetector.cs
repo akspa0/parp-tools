@@ -42,6 +42,9 @@ public static class WowFileDetector
             if (MatchesAscii(signature, "BLP1") || MatchesAscii(signature, "BLP2"))
                 return new WowFileDetection(sourcePath, WowFileKind.Blp, null);
 
+            if (LooksLikeLit(sourcePath, signature))
+                return new WowFileDetection(sourcePath, WowFileKind.Lit, null);
+
             if (MatchesAscii(signature, "WDBC"))
                 return new WowFileDetection(sourcePath, WowFileKind.Dbc, null);
 
@@ -61,6 +64,13 @@ public static class WowFileDetector
             {
                 IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
                 return Detect(sourcePath, chunks, version: null);
+            }
+
+            if (FourCC.FromFileBytes(signature) == MapChunkIds.Ahdr)
+            {
+                IReadOnlyList<ChunkSpan> chunks = ChunkedFileReader.ReadTopLevelChunks(stream);
+                uint? version = TryReadVersion(stream, chunks);
+                return Detect(sourcePath, chunks, version);
             }
 
             if (FourCC.FromFileBytes(signature) == MapChunkIds.Mver)
@@ -97,6 +107,14 @@ public static class WowFileDetector
         if (chunks[0].Header.Id == Mogp)
             return new WowFileDetection(sourcePath, WowFileKind.WmoGroup, version);
 
+        if (chunks[0].Header.Id == MapChunkIds.Ahdr)
+        {
+            if (fileName.EndsWith(".error", StringComparison.OrdinalIgnoreCase))
+                return new WowFileDetection(sourcePath, WowFileKind.AdtV23Error, version);
+
+            return new WowFileDetection(sourcePath, WowFileKind.AdtV23, version);
+        }
+
         if (chunks[0].Header.Id != MapChunkIds.Mver)
             return new WowFileDetection(sourcePath, WowFileKind.Unknown, version);
 
@@ -131,10 +149,22 @@ public static class WowFileDetector
 
     private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
     {
-        if (chunks.Count == 0 || chunks[0].Header.Id != MapChunkIds.Mver)
+        if (chunks.Count == 0)
+            return null;
+
+        if (chunks[0].Header.Id is not (var id) || (id != MapChunkIds.Mver && id != MapChunkIds.Ahdr))
             return null;
 
         return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
+    }
+
+    private static bool LooksLikeLit(string sourcePath, ReadOnlySpan<byte> signature)
+    {
+        if (!sourcePath.EndsWith(".lit", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        uint version = BinaryPrimitives.ReadUInt32LittleEndian(signature);
+        return (version & 0x80000000u) != 0;
     }
 
     private static bool MatchesAscii(ReadOnlySpan<byte> bytes, string text)

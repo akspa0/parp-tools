@@ -50,6 +50,28 @@ public sealed class MapFileSummaryReaderTests
     }
 
     [Fact]
+    public void Read_AdtV23ErrorBuffer_ProducesExpectedSummary()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("AHDR", CreateAhdrPayload(version: 23, verticesX: 129, verticesY: 129, chunksX: 16, chunksY: 16)),
+            .. CreateChunk("AVTX", new byte[32]),
+            .. CreateChunk("ANRM", new byte[24]),
+            .. CreateChunk("ACNK", new byte[64]),
+            .. CreateChunk("ACNK", new byte[64]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary summary = MapFileSummaryReader.Read(stream, "synthetic.error");
+
+        Assert.Equal(MapFileKind.AdtV23Error, summary.Kind);
+        Assert.Equal(23u, summary.Version);
+        Assert.Equal(5, summary.ChunkCount);
+        Assert.True(summary.HasChunk(MapChunkIds.Ahdr));
+        Assert.Equal(2, summary.CountChunks(MapChunkIds.Acnk));
+    }
+
+    [Fact]
     public void Read_AdtLodBuffer_ProducesExpectedSummary()
     {
         byte[] bytes =
@@ -104,6 +126,17 @@ public sealed class MapFileSummaryReaderTests
     {
         byte[] bytes = new byte[4];
         BinaryPrimitives.WriteUInt32LittleEndian(bytes, value);
+        return bytes;
+    }
+
+    private static byte[] CreateAhdrPayload(uint version, uint verticesX, uint verticesY, uint chunksX, uint chunksY)
+    {
+        byte[] bytes = new byte[0x40];
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x00, 4), version);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x04, 4), verticesX);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x08, 4), verticesY);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x0C, 4), chunksX);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x10, 4), chunksY);
         return bytes;
     }
 }

@@ -1,5 +1,17 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 03, 2026 - Adapted M2 section layering is restored and WDL far-terrain placement no longer uses ADT-tile spacing
+
+- followed fresh runtime evidence that some adapted M2 shiny or semi-transparent surfaces were rendering like translucent shells instead of a complete material stack
+- landed two narrow renderer-path fixes:
+   - `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` no longer locks each skin section to its first texture unit; the existing `MaterialLayer` grouping path is active again so later texture-unit batches can extend the section material stack or start a new slot when the batch stream returns to `MaterialLayer == 0`
+   - `src/MdxViewer/Terrain/WdlTerrainRenderer.cs` now places WDL cells on `WoWConstants.ChunkSize` spacing, matching the minimap/WDL preview/terrain streaming grid instead of stretching them across `WoWConstants.TileSize`
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 03, 2026 with existing workspace warnings only
+- important boundary:
+   - this is build validation only
+   - no live runtime signoff has been captured yet for the affected shiny M2 surfaces or for WDL far-terrain correctness after the spacing correction
+
 ## Apr 02, 2026 - WMO renderer now has renderer-local group visibility and first portal-aware admission
 
 - landed a narrow WMO runtime slice in `src/MdxViewer/Rendering/WmoRenderer.cs`:

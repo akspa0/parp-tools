@@ -59,6 +59,55 @@ public sealed class WowFileDetectorTests
     }
 
     [Fact]
+    public void Detect_SyntheticAdtV23Buffer_ReturnsAdtV23AndVersion()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("AHDR", CreateAhdrPayload(version: 23, verticesX: 129, verticesY: 129, chunksX: 16, chunksY: 16)),
+            .. CreateChunk("AVTX", new byte[16]),
+            .. CreateChunk("ACNK", new byte[64]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "synthetic_0_0.adt");
+
+        Assert.Equal(WowFileKind.AdtV23, detection.Kind);
+        Assert.Equal(23u, detection.Version);
+    }
+
+    [Fact]
+    public void Detect_SyntheticAdtV23ErrorBuffer_ReturnsAdtV23Error()
+    {
+        byte[] bytes =
+        [
+            .. CreateChunk("AHDR", CreateAhdrPayload(version: 23, verticesX: 129, verticesY: 129, chunksX: 16, chunksY: 16)),
+            .. CreateChunk("ACNK", new byte[64]),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "project_tile.error");
+
+        Assert.Equal(WowFileKind.AdtV23Error, detection.Kind);
+        Assert.Equal(23u, detection.Version);
+    }
+
+    [Fact]
+    public void Detect_SyntheticLitBuffer_ReturnsLit()
+    {
+        byte[] bytes =
+        [
+            0x04, 0x00, 0x00, 0x80,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        using MemoryStream stream = new(bytes);
+        WowFileDetection detection = WowFileDetector.Detect(stream, "lights.lit");
+
+        Assert.Equal(WowFileKind.Lit, detection.Kind);
+        Assert.Null(detection.Version);
+    }
+
+    [Fact]
     public void Detect_SyntheticWmoGroupBufferWithoutMver_ReturnsWmoGroup()
     {
         byte[] bytes =
@@ -111,6 +160,17 @@ public sealed class WowFileDetectorTests
     private static byte[] CreateUInt32Payload(uint value)
     {
         return MapFileSummaryReaderTestsAccessor.CreateUInt32Payload(value);
+    }
+
+    private static byte[] CreateAhdrPayload(uint version, uint verticesX, uint verticesY, uint chunksX, uint chunksY)
+    {
+        byte[] bytes = new byte[0x40];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x00, 4), version);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x04, 4), verticesX);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x08, 4), verticesY);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x0C, 4), chunksX);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0x10, 4), chunksY);
+        return bytes;
     }
 }
 

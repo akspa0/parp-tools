@@ -33,7 +33,10 @@ public static class MapFileSummaryReader
 
     private static uint? TryReadVersion(Stream stream, IReadOnlyList<ChunkSpan> chunks)
     {
-        if (chunks.Count == 0 || chunks[0].Header.Id != MapChunkIds.Mver)
+        if (chunks.Count == 0)
+            return null;
+
+        if (chunks[0].Header.Id != MapChunkIds.Mver && chunks[0].Header.Id != MapChunkIds.Ahdr)
             return null;
 
         return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);
@@ -45,6 +48,8 @@ public static class MapFileSummaryReader
         {
             WowFileKind.Wdt => MapFileKind.Wdt,
             WowFileKind.Adt => MapFileKind.Adt,
+            WowFileKind.AdtV23 => MapFileKind.AdtV23,
+            WowFileKind.AdtV23Error => MapFileKind.AdtV23Error,
             WowFileKind.AdtTex => MapFileKind.AdtTex,
             WowFileKind.AdtObj => MapFileKind.AdtObj,
             WowFileKind.AdtLod => MapFileKind.AdtLod,

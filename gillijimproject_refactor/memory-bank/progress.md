@@ -1,5 +1,19 @@
 # Progress
 
+### Apr 03, 2026 - MdxViewer adapted M2 material stacks and WDL far-terrain spacing were corrected in build-verified slices
+
+- narrowed two live-runtime regressions in the active viewer path:
+	- adapted M2 shiny or semi-transparent surfaces could collapse into incomplete translucent shells because `WarcraftNetM2Adapter.BuildMaterialsFromBatches(...)` still locked each skin section after its first texture unit
+	- WDL far terrain was still being laid out on `WoWConstants.TileSize` instead of the viewer's 64x64 chunk grid, which stretched the low-detail mesh by `16x`
+- landed focused fixes:
+	- removed the per-section first-batch lock so the existing `MaterialLayer` grouping logic can build full adapted M2 material stacks again
+	- switched `WdlTerrainRenderer` to `WoWConstants.ChunkSize` spacing for WDL cell placement
+- current proof:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added in this slice
+	- no runtime viewer signoff has been captured yet for the affected shiny M2 models or the corrected WDL far-terrain path
+
 ### Apr 03, 2026 - wow-viewer now emits per-build ADT UniqueId manifests for later timeline diffs
 
 - landed `map uniqueid-report` in `WowViewer.Tool.Inspect` as the first build-manifest workflow over the shared `AdtPlacementReader` seam
