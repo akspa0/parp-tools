@@ -131,6 +131,16 @@ Toggle these from the UI panel:
 - **Contour Lines** — Topographical contour lines with adjustable interval (major lines every 5th interval)
 - **Wireframe Mode** — Toggle wireframe rendering for terrain
 
+### 9. Capture Automation
+
+Use the live viewer capture tools when debugging renderer regressions, especially M2 material, texture, and animation issues.
+
+- **Quick Capture** — `Tools -> Capture Current View (No UI)` or `Tools -> Capture Current View (With UI)` saves the current framebuffer immediately.
+- **Shot Points** — `Tools -> Capture Automation...` lets you save named camera positions with map name, build version, yaw, pitch, and FOV.
+- **Batch Evidence Loop** — The capture window can filter saved shots to the current map/build and queue a whole set of before/after screenshots for the same viewpoints.
+- **Output Path** — Captures are written under `output/captures/<map>/<build>/...` by default.
+- **Recommended Regression Workflow** — Save stable shot points for problematic assets or zones, run `No UI` captures before a change, repeat after the change, and compare the resulting PNGs against probe output.
+
 ---
 
 ## Asset Catalog

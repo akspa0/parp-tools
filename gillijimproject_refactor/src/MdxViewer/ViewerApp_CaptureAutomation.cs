@@ -6,6 +6,7 @@ using Silk.NET.OpenGL;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using MdxViewer.Rendering;
 
 namespace MdxViewer;
 
@@ -60,6 +61,14 @@ public partial class ViewerApp
         string currentBuildVersion = GetCurrentCaptureBuildVersion();
         ImGui.TextDisabled($"Current map/build: {currentMapName} [{currentBuildVersion}]");
         ImGui.TextDisabled($"Camera: pos=({_camera.Position.X:F2}, {_camera.Position.Y:F2}, {_camera.Position.Z:F2}) yaw={_camera.Yaw:F2} pitch={_camera.Pitch:F2} fov={_fovDegrees:F1}");
+        ImGui.TextDisabled(BuildSceneBookmarkText(CreateCameraShotPoint("current")));
+
+        if (ImGui.Button("Copy Current Scene Bookmark"))
+            CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
+
+        ImGui.SameLine();
+        if (ImGui.Button("Log Current Scene Bookmark"))
+            LogSceneBookmark(CreateCameraShotPoint("current"));
 
         ImGui.Separator();
 
@@ -118,6 +127,21 @@ public partial class ViewerApp
         ImGui.EndChild();
 
         bool hasSelection = _selectedCameraShotIndex >= 0 && _selectedCameraShotIndex < _cameraShotPoints.Count;
+        if (hasSelection)
+        {
+            CameraShotPoint selectedShot = _cameraShotPoints[_selectedCameraShotIndex];
+            ImGui.Separator();
+            ImGui.TextDisabled($"Selected shot: {selectedShot.Name}");
+            ImGui.TextDisabled(BuildSceneBookmarkText(selectedShot));
+
+            if (ImGui.Button("Copy Selected Scene Bookmark"))
+                CopyTextToClipboard(BuildSceneBookmarkText(selectedShot), "scene bookmark");
+
+            ImGui.SameLine();
+            if (ImGui.Button("Log Selected Scene Bookmark"))
+                LogSceneBookmark(selectedShot);
+        }
+
         if (ImGui.Button("Move Camera To Selected") && hasSelection)
             ApplyCameraShotPoint(_cameraShotPoints[_selectedCameraShotIndex]);
 
@@ -153,6 +177,53 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Queued captures: {_captureQueue.Count + (_activeCaptureRequest != null ? 1 : 0)}");
 
         ImGui.End();
+    }
+
+    private static (float wowX, float wowY, float wowZ) GetWowCoordinates(float positionX, float positionY, float positionZ)
+    {
+        float wowX = WoWConstants.MapOrigin - positionY;
+        float wowY = WoWConstants.MapOrigin - positionX;
+        return (wowX, wowY, positionZ);
+    }
+
+    private static float GetWorldFacingDegrees(float yawDegrees)
+    {
+        float yawRad = yawDegrees * MathF.PI / 180f;
+        float rendererForwardX = MathF.Cos(yawRad);
+        float rendererForwardY = MathF.Sin(yawRad);
+        float wowForwardX = -rendererForwardY;
+        float wowForwardY = -rendererForwardX;
+
+        float degrees = MathF.Atan2(-wowForwardY, wowForwardX) * 180f / MathF.PI;
+        if (degrees < 0f)
+            degrees += 360f;
+
+        return degrees;
+    }
+
+    private static string GetWorldFacingLabel(float degrees)
+    {
+        string[] labels =
+        {
+            "N", "NE", "E", "SE", "S", "SW", "W", "NW"
+        };
+
+        int index = (int)MathF.Round(degrees / 45f) % labels.Length;
+        return labels[index];
+    }
+
+    private static string BuildSceneBookmarkText(CameraShotPoint shot)
+    {
+        var (wowX, wowY, wowZ) = GetWowCoordinates(shot.PositionX, shot.PositionY, shot.PositionZ);
+        float facingDegrees = GetWorldFacingDegrees(shot.Yaw);
+        string facingLabel = GetWorldFacingLabel(facingDegrees);
+
+        return $"Scene: map={shot.MapName} build={shot.BuildVersion} WoW=({wowX:F1}, {wowY:F1}, {wowZ:F1}) Facing={facingDegrees:F1}° {facingLabel} Local=({shot.PositionX:F1}, {shot.PositionY:F1}, {shot.PositionZ:F1}) Yaw={shot.Yaw:F1} Pitch={shot.Pitch:F1} FOV={shot.FovDegrees:F1}";
+    }
+
+    private void LogSceneBookmark(CameraShotPoint shot)
+    {
+        _statusMessage = BuildSceneBookmarkText(shot);
     }
 
     private void AddCameraShotPointFromCurrentCamera()

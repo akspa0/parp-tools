@@ -513,11 +513,15 @@ public class WorldScene : ISceneRenderer
     private readonly List<ObjectInstance> _externalWmoInstances = new();
     private readonly List<ObjectInstance> _taxiActorInstances = new();
     private bool _instancesDirty = false;
+    private readonly Dictionary<string, float> _pendingVisibleMdxLoadDistances = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, float> _pendingVisibleWmoLoadDistances = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<KeyValuePair<string, float>> _pendingVisibleMdxLoadScratch = new();
+    private readonly List<KeyValuePair<string, float>> _pendingVisibleWmoLoadScratch = new();
 
     private bool _objectsVisible = true;
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
-    private bool _objectFogEnabled = false;
+    private bool _objectFogEnabled = true;
     private bool _limitHoveredAssetRange = true;
     private bool _useDynamicHoveredAssetRange = false;
     private bool _showSelectedObjectBounds = true;
@@ -526,17 +530,29 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 5000f; // Max distance for small doodads; raised to prevent long-range tree pop-out
+    private const float DoodadCullDistance = 5000f; // Hard ceiling for very small doodads when fog allows farther visibility
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
-    private const float WmoCullDistance = 4000f;     // Minimum WMO instance cull distance; actual range expands with fog distance
+    private const float WmoCullDistance = 1600f;     // Default world-object visibility should stay close to terrain fog unless explicitly widened
     private const float NoCullRadius = 512f;         // Objects within this radius are never frustum-culled
     private const float NoCullRadiusSq = NoCullRadius * NoCullRadius;
+    private const float ObjectNearHoldRadius = 384f;
+    private const float ObjectNearHoldRadiusSq = ObjectNearHoldRadius * ObjectNearHoldRadius;
+    private const float VisionConeFrontDot = 0.15f;
+    private const float VisionConeRearDot = -0.35f;
+    private const float RearConeCullFraction = 0.45f;
+    private const float MinOffFrustumConeFactor = 0.35f;
+    private const float RearConeFadeFloor = 0.25f;
+    private const float RearConeLoadPenalty = 2.5f;
     private const float HoverInfoBrushPixels = 32f;
     private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
+    private const int MaxNewMdxLoadsPerFrame = 6;
+    private const int MaxNewWmoLoadsPerFrame = 3;
+    private const float MaxWorldObjectViewDistance = 8192f;
+    private const float MaxWorldObjectViewDistanceSq = MaxWorldObjectViewDistance * MaxWorldObjectViewDistance;
 
     private readonly struct VisibleWmoInstance
     {
@@ -5688,7 +5704,6 @@ public class WorldScene : ISceneRenderer
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
             string key = WorldAssetManager.NormalizeKey(mdxNames[p.NameIndex]);
-            _assets.QueueMdxLoad(key);
             float scale = p.Scale > 0 ? p.Scale : 1.0f;
 
             // Rotation stored as degrees in WoW coords — axes swapped to match position swap.
@@ -5742,7 +5757,6 @@ public class WorldScene : ISceneRenderer
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
             string key = WorldAssetManager.NormalizeKey(wmoNames[p.NameIndex]);
-            _assets.QueueWmoLoad(key);
             float rx = p.Rotation.X * MathF.PI / 180f;
             float ry = p.Rotation.Y * MathF.PI / 180f;
             float rz = p.Rotation.Z * MathF.PI / 180f;
@@ -5838,8 +5852,6 @@ public class WorldScene : ISceneRenderer
     {
         if (_assets.TryGetLoadedMdx(modelKey, out var renderer))
             return renderer;
-
-        _assets.PrioritizeMdxLoad(modelKey);
         return null;
     }
 
@@ -5847,14 +5859,54 @@ public class WorldScene : ISceneRenderer
     {
         if (_assets.TryGetLoadedWmo(modelKey, out var renderer))
             return renderer;
-
-        _assets.PrioritizeWmoLoad(modelKey);
         return null;
+    }
+
+    private void TrackPendingVisibleLoad(Dictionary<string, float> pendingLoads, string modelKey, float distanceSq)
+    {
+        if (pendingLoads.TryGetValue(modelKey, out float existingDistanceSq) && existingDistanceSq <= distanceSq)
+            return;
+
+        pendingLoads[modelKey] = distanceSq;
+    }
+
+    private void FlushPendingVisibleMdxLoads()
+    {
+        if (_pendingVisibleMdxLoadDistances.Count == 0)
+            return;
+
+        _pendingVisibleMdxLoadScratch.Clear();
+        _pendingVisibleMdxLoadScratch.AddRange(_pendingVisibleMdxLoadDistances);
+        _pendingVisibleMdxLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
+
+        int queued = 0;
+        for (int i = 0; i < _pendingVisibleMdxLoadScratch.Count && queued < MaxNewMdxLoadsPerFrame; i++)
+        {
+            _assets.PrioritizeMdxLoad(_pendingVisibleMdxLoadScratch[i].Key);
+            queued++;
+        }
+    }
+
+    private void FlushPendingVisibleWmoLoads()
+    {
+        if (_pendingVisibleWmoLoadDistances.Count == 0)
+            return;
+
+        _pendingVisibleWmoLoadScratch.Clear();
+        _pendingVisibleWmoLoadScratch.AddRange(_pendingVisibleWmoLoadDistances);
+        _pendingVisibleWmoLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
+
+        int queued = 0;
+        for (int i = 0; i < _pendingVisibleWmoLoadScratch.Count && queued < MaxNewWmoLoadsPerFrame; i++)
+        {
+            _assets.PrioritizeWmoLoad(_pendingVisibleWmoLoadScratch[i].Key);
+            queued++;
+        }
     }
 
     private void ProcessDeferredAssetLoads()
     {
-        int processed = _assets.ProcessPendingLoads(maxLoads: 6, maxBudgetMs: 4.0);
+        int processed = _assets.ProcessPendingLoads();
         if (processed <= 0)
             return;
 
@@ -5871,10 +5923,7 @@ public class WorldScene : ISceneRenderer
         boundsChanged |= RefreshWmoInstanceBounds(_externalWmoInstances);
 
         if (boundsChanged)
-        {
             _instancesDirty = true;
-            RebuildInstanceLists();
-        }
     }
 
     private bool RefreshMdxInstanceBounds(List<ObjectInstance> instances)
@@ -5966,8 +6015,6 @@ public class WorldScene : ISceneRenderer
 
             if (isWmo)
             {
-                _assets.QueueWmoLoad(key);
-
                 var transform = Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
 
@@ -6005,8 +6052,6 @@ public class WorldScene : ISceneRenderer
             }
             else
             {
-                _assets.QueueMdxLoad(key);
-
                 var transform = Matrix4x4.CreateScale(mdxScale)
                     * Matrix4x4.CreateRotationZ(finalYawRadians)
                     * Matrix4x4.CreateTranslation(pos);
@@ -6117,7 +6162,22 @@ public class WorldScene : ISceneRenderer
 
     private static float ComputeWmoCullDistance(float fogEnd)
     {
-        return MathF.Max(WmoCullDistance, fogEnd + 1200f);
+        if (fogEnd <= 0f)
+            return MathF.Min(WmoCullDistance, MaxWorldObjectViewDistance);
+
+        return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(WmoCullDistance, fogEnd + 256f));
+    }
+
+    private static float ComputeMdxCullDistance(float fogEnd, float boundsDiagonal, bool isTaxiActor)
+    {
+        if (isTaxiActor)
+            return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(1024f, fogEnd + 384f));
+
+        if (fogEnd <= 0f)
+            return MathF.Min(DoodadCullDistance, MaxWorldObjectViewDistance);
+
+        float objectAllowance = MathF.Min(512f, boundsDiagonal * 0.5f + 96f);
+        return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(DoodadCullDistance, MathF.Max(1024f, fogEnd + objectAllowance)));
     }
 
     private void AccumulateUniqueIdFilterRange(
@@ -6192,10 +6252,9 @@ public class WorldScene : ISceneRenderer
         return (tileX, tileY);
     }
 
-    private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, float fogEnd)
+    private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd)
     {
         float wmoCullDistance = ComputeWmoCullDistance(fogEnd);
-        float wmoCullDistanceSq = wmoCullDistance * wmoCullDistance;
 
         foreach (var inst in _wmoInstances)
         {
@@ -6203,14 +6262,25 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
+            float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, inst.PlacementPosition, centerDistanceSq);
+            float coneCullDistance = ComputeConeCullDistance(wmoCullDistance, coneFactor);
+            float coneCullDistanceSq = coneCullDistance * coneCullDistance;
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            if (boundsDistSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+            bool frustumVisible = _frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax);
+            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
             {
                 WmoCulledCount++;
                 continue;
             }
 
-            if (boundsDistSq > wmoCullDistanceSq)
+            if (boundsDistSq > coneCullDistanceSq)
+            {
+                WmoCulledCount++;
+                continue;
+            }
+
+            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
             {
                 WmoCulledCount++;
                 continue;
@@ -6218,9 +6288,12 @@ public class WorldScene : ISceneRenderer
 
             var renderer = TryGetQueuedWmo(inst.ModelKey);
             if (renderer == null)
+            {
+                TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, inst.ModelKey,
+                    ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
                 continue;
+            }
 
-            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
             frame.VisibleWmoInstances.Add(new VisibleWmoInstance(inst, renderer, centerDistanceSq));
         }
     }
@@ -6229,9 +6302,8 @@ public class WorldScene : ISceneRenderer
         WorldRenderFrame frame,
         List<ObjectInstance> instances,
         Vector3 cameraPos,
-        float mdxFadeStart,
-        float mdxFadeStartSq,
-        float mdxFadeRange,
+        Vector3 cameraForward,
+        float fogEnd,
         bool cullSmallDoodadsOnly,
         bool countAsTaxiActor)
     {
@@ -6241,14 +6313,26 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
+            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
+            float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, inst.Transform.Translation, centerDistanceSq);
             float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            if (boundsDistSq > noCullDistanceSq && !_frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax))
+            bool frustumVisible = _frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax);
+            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
             {
                 MdxCulledCount++;
                 continue;
             }
 
             float diag = (inst.BoundsMax - inst.BoundsMin).Length();
+            float mdxCullDistance = ComputeMdxCullDistance(fogEnd, diag, countAsTaxiActor);
+            float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, coneFactor);
+            float coneCullDistanceSq = coneCullDistance * coneCullDistance;
+            if (boundsDistSq > coneCullDistanceSq)
+            {
+                MdxCulledCount++;
+                continue;
+            }
+
             bool useSmallDoodadCull = cullSmallDoodadsOnly && diag < DoodadSmallThreshold;
             if (useSmallDoodadCull && boundsDistSq > DoodadCullDistanceSq)
             {
@@ -6256,29 +6340,98 @@ public class WorldScene : ISceneRenderer
                 continue;
             }
 
+            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
+            {
+                MdxCulledCount++;
+                continue;
+            }
+
             var renderer = TryGetQueuedMdx(inst.ModelKey);
             if (renderer == null)
+            {
+                TrackPendingVisibleLoad(_pendingVisibleMdxLoadDistances, inst.ModelKey,
+                    ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
                 continue;
+            }
 
             float opaqueFade = 1.0f;
-            if ((!cullSmallDoodadsOnly || useSmallDoodadCull) && boundsDistSq > mdxFadeStartSq)
+            float mdxFadeStart = coneCullDistance * FadeStartFraction;
+            float mdxFadeStartSq = mdxFadeStart * mdxFadeStart;
+            float mdxFadeRange = MathF.Max(1f, coneCullDistance - mdxFadeStart);
+            if (boundsDistSq > mdxFadeStartSq)
             {
                 float boundsDist = MathF.Sqrt(boundsDistSq);
                 opaqueFade = MathF.Max(0f, 1.0f - (boundsDist - mdxFadeStart) / mdxFadeRange);
             }
 
-            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
             float transparentFade = 1.0f;
-            if ((!cullSmallDoodadsOnly || useSmallDoodadCull) && centerDistanceSq > mdxFadeStartSq)
+            if (centerDistanceSq > mdxFadeStartSq)
             {
                 float centerDistance = MathF.Sqrt(centerDistanceSq);
                 transparentFade = MathF.Max(0f, 1.0f - (centerDistance - mdxFadeStart) / mdxFadeRange);
             }
 
+            float coneFade = ComputeConeFade(coneFactor, centerDistanceSq);
+            opaqueFade *= coneFade;
+            transparentFade *= coneFade;
+
             frame.VisibleMdxInstances.Add(new VisibleMdxInstance(inst, renderer, centerDistanceSq, opaqueFade, transparentFade));
             if (countAsTaxiActor)
                 frame.VisibleTaxiMdxCount++;
         }
+    }
+
+    private static Vector3 ExtractCameraForward(Matrix4x4 viewInverse)
+    {
+        Vector3 forward = Vector3.TransformNormal(-Vector3.UnitZ, viewInverse);
+        float lengthSq = forward.LengthSquared();
+        if (lengthSq <= 1e-6f)
+            return Vector3.UnitY;
+
+        return forward / MathF.Sqrt(lengthSq);
+    }
+
+    private static float ComputeVisionConeFactor(Vector3 cameraPos, Vector3 cameraForward, Vector3 targetPos, float targetDistanceSq)
+    {
+        if (targetDistanceSq <= ObjectNearHoldRadiusSq)
+            return 1.0f;
+
+        float forwardLengthSq = cameraForward.LengthSquared();
+        if (forwardLengthSq <= 1e-6f)
+            return 1.0f;
+
+        Vector3 toTarget = targetPos - cameraPos;
+        float toTargetLengthSq = toTarget.LengthSquared();
+        if (toTargetLengthSq <= 1e-6f)
+            return 1.0f;
+
+        float invTargetLength = 1.0f / MathF.Sqrt(toTargetLengthSq);
+        float alignment = Vector3.Dot(toTarget * invTargetLength, cameraForward);
+        float factor = (alignment - VisionConeRearDot) / MathF.Max(0.001f, VisionConeFrontDot - VisionConeRearDot);
+        return Math.Clamp(factor, 0.0f, 1.0f);
+    }
+
+    private static float ComputeConeCullDistance(float baseCullDistance, float coneFactor)
+    {
+        if (baseCullDistance <= 0f)
+            return ObjectNearHoldRadius;
+
+        float scale = RearConeCullFraction + (1.0f - RearConeCullFraction) * coneFactor;
+        return MathF.Max(ObjectNearHoldRadius, baseCullDistance * scale);
+    }
+
+    private static float ComputeConeFade(float coneFactor, float centerDistanceSq)
+    {
+        if (centerDistanceSq <= ObjectNearHoldRadiusSq)
+            return 1.0f;
+
+        return RearConeFadeFloor + (1.0f - RearConeFadeFloor) * coneFactor;
+    }
+
+    private static float ComputeLoadPriorityScore(float centerDistanceSq, float coneFactor)
+    {
+        float penalty = RearConeLoadPenalty - (RearConeLoadPenalty - 1.0f) * coneFactor;
+        return centerDistanceSq * penalty;
     }
 
     private static double MeasureDurationMs(Action action)
@@ -6307,6 +6460,8 @@ public class WorldScene : ISceneRenderer
         WorldRenderFrame frame = _renderFrame;
         frame.Reset();
         var frameTimer = Stopwatch.StartNew();
+        _pendingVisibleMdxLoadDistances.Clear();
+        _pendingVisibleWmoLoadDistances.Clear();
 
         TryFinalizePm4OverlayLoad();
 
@@ -6415,6 +6570,7 @@ public class WorldScene : ISceneRenderer
         // Extract camera position from view matrix (inverse of view translation)
         Matrix4x4.Invert(view, out var viewInv);
         var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
+        Vector3 cameraForward = ExtractCameraForward(viewInv);
         _lastRenderedCameraPosition = cameraPos;
         _hasLastRenderedCameraPosition = true;
 
@@ -6437,7 +6593,8 @@ public class WorldScene : ISceneRenderer
         WmoCulledCount = 0;
         if (_wmosVisible)
         {
-            frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, fogEnd));
+            frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, cameraForward, fogEnd));
+            FlushPendingVisibleWmoLoads();
 
             // State is constant for this pass; set once to reduce per-instance churn and
             // keep WMO submission running through one explicit visible-instance bucket.
@@ -6460,10 +6617,6 @@ public class WorldScene : ISceneRenderer
         // 3a. MDX opaque pass (with frustum + distance culling + fade)
         MdxRenderedCount = 0;
         MdxCulledCount = 0;
-        float mdxFadeStart = DoodadCullDistance * FadeStartFraction;
-        float mdxFadeStartSq = mdxFadeStart * mdxFadeStart;
-        float mdxFadeRange = DoodadCullDistance - mdxFadeStart;
-
         // Advance animation once per unique MDX renderer before any render passes
         if (_doodadsVisible)
         {
@@ -6495,9 +6648,10 @@ public class WorldScene : ISceneRenderer
         {
             frame.MdxVisibilityMs = MeasureDurationMs(() =>
             {
-                CollectVisibleMdxInstances(frame, _mdxInstances, cameraPos, mdxFadeStart, mdxFadeStartSq, mdxFadeRange, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
-                CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, mdxFadeStart, mdxFadeStartSq, mdxFadeRange, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
+                CollectVisibleMdxInstances(frame, _mdxInstances, cameraPos, cameraForward, fogEnd, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+                CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, cameraForward, fogEnd, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
             });
+            FlushPendingVisibleMdxLoads();
 
             frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
             {

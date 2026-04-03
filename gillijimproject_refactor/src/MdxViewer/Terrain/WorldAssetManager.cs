@@ -470,7 +470,9 @@ public class WorldAssetManager : IDisposable
                 var renderer = LoadMdxModel(key);
                 _mdxModels[key] = renderer;
                 if (renderer != null)
+                {
                     TouchLru(_mdxLru, _mdxLruMap, key);
+                }
                 EvictMdxIfNeeded();
             }
             else
@@ -479,7 +481,10 @@ public class WorldAssetManager : IDisposable
                 {
                     var renderer = LoadWmoModel(key);
                     _wmoModels[key] = renderer;
-                    TouchLru(_wmoLru, _wmoLruMap, key);
+                    if (renderer != null)
+                    {
+                        TouchLru(_wmoLru, _wmoLruMap, key);
+                    }
                     EvictWmoIfNeeded();
                 }
             }
@@ -828,6 +833,7 @@ public class WorldAssetManager : IDisposable
     private int _mdxLoadFailCount = 0;
     private IModelRenderer? LoadMdxModel(string normalizedKey)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
@@ -880,7 +886,7 @@ public class WorldAssetManager : IDisposable
                         ViewerLog.Info(ViewerLog.Category.Mdx,
                             $"[M2] Selected skin for {Path.GetFileName(normalizedKey)}: {skinPath} ({skinBytes.Length} bytes)");
                         return new M2Renderer(
-                            new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                            new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
                             runtimeModel,
                             resolvedModelPath);
                     }
@@ -903,7 +909,7 @@ public class WorldAssetManager : IDisposable
                             ViewerLog.Info(ViewerLog.Category.Mdx,
                                 $"[M2] Loaded embedded root-profile geometry for {Path.GetFileName(normalizedKey)} after no external .skin resolved");
                             return new M2Renderer(
-                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                                new MdxRenderer(_gl, adapted, adaptedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
                                 resolvedModelPath);
                         }
                         catch (Exception ex)
@@ -932,7 +938,7 @@ public class WorldAssetManager : IDisposable
                                 ViewerLog.Info(ViewerLog.Category.Mdx,
                                     $"[M2] Falling back to M2->MDX conversion for {Path.GetFileName(normalizedKey)} after adapter failure");
                                 return new M2Renderer(
-                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion),
+                                    new MdxRenderer(_gl, convertedMdx, convertedModelDir, _dataSource, _texResolver, resolvedModelPath, true, _buildVersion, deferInitialTextureLoads: true),
                                     resolvedModelPath);
                             }
 
@@ -959,13 +965,22 @@ public class WorldAssetManager : IDisposable
             using var ms = new MemoryStream(data);
             var mdx = MdxFile.Load(ms);
             string modelDir = Path.GetDirectoryName(resolvedModelPath) ?? "";
-            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath);
+            return new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver, resolvedModelPath, buildVersion: _buildVersion, deferInitialTextureLoads: true);
         }
         catch (Exception ex)
         {
             if (_mdxLoadFailCount++ < 20)
                 ViewerLog.Important(ViewerLog.Category.Mdx, $"MDX failed [{_mdxLoadFailCount}]: {normalizedKey}\n{ex.Message}");
             return null;
+        }
+        finally
+        {
+            if (stopwatch.Elapsed.TotalMilliseconds >= 50)
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Mdx,
+                    $"[MODEL-LOAD] {normalizedKey}: total {stopwatch.Elapsed.TotalMilliseconds:F1} ms");
+            }
         }
     }
 
@@ -1059,6 +1074,7 @@ public class WorldAssetManager : IDisposable
 
     private WmoRenderer? LoadWmoModel(string normalizedKey)
     {
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             WmoV14ToV17Converter.WmoV14Data? wmo = LoadWmoDataModel(normalizedKey);
@@ -1066,12 +1082,23 @@ public class WorldAssetManager : IDisposable
                 return null;
 
             string modelDir = Path.GetDirectoryName(normalizedKey) ?? "";
-            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion, deferInitialDoodadLoads: true);
+            return new WmoRenderer(_gl, wmo, modelDir, _dataSource, _texResolver, _buildVersion,
+                deferInitialDoodadLoads: true,
+                deferInitialMaterialTextureLoads: true);
         }
         catch (Exception ex)
         {
             ViewerLog.Error(ViewerLog.Category.Wmo, $"WMO failed: {Path.GetFileName(normalizedKey)}\n{ex}");
             return null;
+        }
+        finally
+        {
+            if (stopwatch.Elapsed.TotalMilliseconds >= 50)
+            {
+                ViewerLog.Info(
+                    ViewerLog.Category.Wmo,
+                    $"[WMO-LOAD] {normalizedKey}: total {stopwatch.Elapsed.TotalMilliseconds:F1} ms");
+            }
         }
     }
 

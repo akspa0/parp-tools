@@ -77,3 +77,15 @@ If multiple candidates are strong, prefer the image that most clearly shows "thi
 
 - If you provide a batch of screenshots, we can pick the best hero image and wire it into README/release notes in a follow-up pass.
 - Keep raw source screenshots if post-cropping is needed later.
+
+## M2 Regression Loop
+
+Use the in-app capture automation path for renderer debugging instead of one-off manual screenshots.
+
+- Save stable camera shot points from `Tools -> Capture Automation...` for the exact asset family or world viewpoint under investigation.
+- Prefer `Capture Selected (No UI)` or `Capture Filtered Set (No UI)` for before/after comparisons so ImGui chrome does not pollute the evidence.
+- Keep the same map, build, FOV, yaw, pitch, and camera position across captures.
+- Record the status-bar WoW coordinates and facing when you find a broken scene during a flythrough so the same viewpoint can be reconstructed later.
+- Compare the resulting PNGs under `output/captures/<map>/<build>/...` with probe output from `AssetProbe` or adapter/runtime diagnostics.
+- For broad world regressions, do not limit the batch to one tree family. Keep scene bookmarks for any broken object cluster found while flying maps such as Azeroth or Kalimdor.
+- For tree regressions, keep at least one near shot for foliage cards and one medium shot for silhouette/alpha sorting.

@@ -1,0 +1,48 @@
+{
+  "Shots": [
+    {
+      "Name": "winterspring_tree02_near_foliage",
+      "MapName": "Kalimdor",
+      "BuildVersion": "3.3.5.12340",
+      "PositionX": 0.0,
+      "PositionY": 0.0,
+      "PositionZ": 0.0,
+      "Yaw": 0.0,
+      "Pitch": 0.0,
+      "FovDegrees": 60.0
+    },
+    {
+      "Name": "winterspring_tree02_mid_silhouette",
+      "MapName": "Kalimdor",
+      "BuildVersion": "3.3.5.12340",
+      "PositionX": 0.0,
+      "PositionY": 0.0,
+      "PositionZ": 0.0,
+      "Yaw": 0.0,
+      "Pitch": 0.0,
+      "FovDegrees": 60.0
+    },
+    {
+      "Name": "creature_clothing_front",
+      "MapName": "standalone",
+      "BuildVersion": "3.3.5.12340",
+      "PositionX": 0.0,
+      "PositionY": 0.0,
+      "PositionZ": 0.0,
+      "Yaw": 0.0,
+      "Pitch": 0.0,
+      "FovDegrees": 60.0
+    },
+    {
+      "Name": "development_grizzlyhills_tree05_cluster",
+      "MapName": "development",
+      "BuildVersion": "3.3.5.12340",
+      "PositionX": 4550.7,
+      "PositionY": 335.7,
+      "PositionZ": 374.0,
+      "Yaw": 80.0,
+      "Pitch": -1.0,
+      "FovDegrees": 60.0
+    }
+  ]
+}

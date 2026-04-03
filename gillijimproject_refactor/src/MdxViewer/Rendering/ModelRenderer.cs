@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using MdxLTool.Formats.Mdx;
 using MdxViewer.DataSources;
@@ -112,6 +113,11 @@ public class MdxRenderer : IModelRenderer
     private bool _wireframe;
     private MdxAnimator? _animator;
     private DateTime _lastFrameTime = DateTime.UtcNow;
+    private readonly bool _deferInitialTextureLoads;
+    private readonly Queue<int> _pendingTextureLoads = new();
+
+    private const int DeferredTextureLoadsPerFrame = 1;
+    private const double DeferredTextureLoadBudgetMs = 2.0;
 
     // ── Particle system ──
     private readonly List<ParticleEmitter> _particleEmitters = new();
@@ -161,12 +167,14 @@ public class MdxRenderer : IModelRenderer
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false,
-        string? buildVersion = null)
+        string? buildVersion = null, bool deferInitialTextureLoads = false)
     {
+        var initStopwatch = Stopwatch.StartNew();
         _gl = gl;
         _mdx = mdx;
         _modelDir = modelDir;
         _dataSource = dataSource;
+        _deferInitialTextureLoads = deferInitialTextureLoads;
         _isM2AdapterModel = isM2AdapterModel;
         _usesPreRelease301M2Profile = _isM2AdapterModel
             && string.Equals(
@@ -174,11 +182,11 @@ public class MdxRenderer : IModelRenderer
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
-        bool m2AnimationEnabled = !string.IsNullOrWhiteSpace(m2AnimationSetting)
-            && (string.Equals(m2AnimationSetting, "1", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "true", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(m2AnimationSetting, "yes", StringComparison.OrdinalIgnoreCase));
-        _enableM2Animation = !_isM2AdapterModel || m2AnimationEnabled;
+        bool disableM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
+            && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "false", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(m2AnimationSetting, "no", StringComparison.OrdinalIgnoreCase));
+        _enableM2Animation = !_isM2AdapterModel || !disableM2Animation;
         string? forceSolidSetting = Environment.GetEnvironmentVariable("PARP_M2_FORCE_SOLID");
         _forceM2SolidDebug = _isM2AdapterModel
             && !string.IsNullOrWhiteSpace(forceSolidSetting)
@@ -213,12 +221,15 @@ public class MdxRenderer : IModelRenderer
             }
         }
 
-        LoadTextures();
+        if (_deferInitialTextureLoads)
+            QueueDeferredTextureLoads();
+        else
+            LoadTextures();
 
         // Initialize animation system.
-        // Adapted M2 models stay static by default because the current compatibility path
-        // still translates M2 into MdxFile/MdxRenderer state and animated assets are not
-        // behaving correctly there. Opt in with PARP_M2_ENABLE_ANIMATION=1 when probing.
+        // Adapted M2 models keep material/geoset/UV animation guardrails, but skeletal motion
+        // is enabled by default again because the compatibility path already advances animators
+        // in both standalone and world rendering. Set PARP_M2_ENABLE_ANIMATION=0 to disable it.
         if (_enableM2Animation && (mdx.Bones.Count > 0 || MdxAnimator.HasAnimationData(mdx)))
         {
             _animator = new MdxAnimator(mdx);
@@ -236,7 +247,7 @@ public class MdxRenderer : IModelRenderer
         {
             ViewerLog.Info(
                 ViewerLog.Category.Mdx,
-                $"[M2-DIAG] Skeletal animation disabled by default for adapted model: {_modelVirtualPath ?? modelDir} (set PARP_M2_ENABLE_ANIMATION=1 to probe the old compatibility path)");
+                $"[M2-DIAG] Skeletal animation disabled for adapted model: {_modelVirtualPath ?? modelDir} (set PARP_M2_ENABLE_ANIMATION=0 only when debugging compatibility regressions)");
         }
 
         // Initialize particle emitters from PRE2 chunk data
@@ -295,6 +306,13 @@ public class MdxRenderer : IModelRenderer
                 }
             }
             ViewerLog.Debug(ViewerLog.Category.Mdx, $"  Geoset[{i}]: {layerInfo} ({g.Vertices.Count}v)");
+        }
+
+        if (initStopwatch.Elapsed.TotalMilliseconds >= 50)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[MODEL-LOAD] {modelDebugName}: init {initStopwatch.Elapsed.TotalMilliseconds:F1} ms (geosets={_mdx.Geosets.Count}, textures={_mdx.Textures.Count}, deferredTextures={_deferInitialTextureLoads})");
         }
     }
 
@@ -588,6 +606,8 @@ public class MdxRenderer : IModelRenderer
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
     private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha, bool forceBackdropState = false)
     {
+        ProcessDeferredTextureLoads();
+
         List<int>? geosetOrder = null;
         if (pass == RenderPass.Transparent && _geosets.Count > 1)
         {
@@ -1590,307 +1610,326 @@ void main() {
         int loaded = 0, failed = 0, replaceableResolved = 0, replaceableFailed = 0;
 
         for (int i = 0; i < _mdx.Textures.Count; i++)
+            LoadTextureAtIndex(i, ref loaded, ref failed, ref replaceableResolved, ref replaceableFailed);
+
+        ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
+        MdxTextureDiagnosticLogger.Close();
+    }
+
+    private void QueueDeferredTextureLoads()
+    {
+        _pendingTextureLoads.Clear();
+        for (int i = 0; i < _mdx.Textures.Count; i++)
+            _pendingTextureLoads.Enqueue(i);
+
+        if (_pendingTextureLoads.Count > 0)
         {
-            var tex = _mdx.Textures[i];
-            string? texPath = tex.Path;
-            string? replaceablePath = null;
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[MODEL-LOAD] Deferred {_pendingTextureLoads.Count} textures for {_modelVirtualPath ?? _modelDir}");
+        }
+    }
 
-            // Handle Replaceable textures via DBC resolution
-            if (string.IsNullOrEmpty(texPath) && tex.ReplaceableId > 0)
+    private void ProcessDeferredTextureLoads()
+    {
+        if (!_deferInitialTextureLoads || _pendingTextureLoads.Count == 0)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        int loaded = 0, failed = 0, replaceableResolved = 0, replaceableFailed = 0;
+
+        while (loadsCompleted < DeferredTextureLoadsPerFrame
+            && stopwatch.Elapsed.TotalMilliseconds < DeferredTextureLoadBudgetMs
+            && _pendingTextureLoads.TryDequeue(out int textureIndex))
+        {
+            LoadTextureAtIndex(textureIndex, ref loaded, ref failed, ref replaceableResolved, ref replaceableFailed);
+            loadsCompleted++;
+        }
+
+        if (_pendingTextureLoads.Count == 0)
+            MdxTextureDiagnosticLogger.Close();
+    }
+
+    private void LoadTextureAtIndex(int i, ref int loaded, ref int failed, ref int replaceableResolved, ref int replaceableFailed)
+    {
+        var tex = _mdx.Textures[i];
+        string? texPath = tex.Path;
+        string? replaceablePath = null;
+
+        if (string.IsNullOrEmpty(texPath) && tex.ReplaceableId > 0)
+        {
+            replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
+            texPath = replaceablePath;
+            if (texPath != null)
             {
-                replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
-                texPath = replaceablePath;
-                if (texPath != null)
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} -> {texPath}");
+                replaceableResolved++;
+            }
+            else
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} (unresolved)");
+                replaceableFailed++;
+            }
+        }
+
+        if (replaceablePath == null && tex.ReplaceableId > 0)
+            replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
+
+        if (string.IsNullOrEmpty(texPath))
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: empty path, replaceableId={tex.ReplaceableId}");
+            failed++;
+            return;
+        }
+
+        byte[]? blpData = null;
+        string loadSource = "";
+        string? textureCachePath = null;
+        string textureCachePrefix = "mpq-blp";
+
+        string? actualPath = null;
+        if (_dataSource is MpqDataSource mpqDS)
+            actualPath = mpqDS.FindInFileSet(texPath);
+
+        if (_dataSource != null)
+        {
+            if (actualPath != null)
+            {
+                blpData = _dataSource.ReadFile(actualPath);
+                if (blpData != null)
                 {
-                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} -> {texPath}");
-                    replaceableResolved++;
+                    texPath = actualPath;
+                    loadSource = "MPQ (file set match)";
+                    textureCachePath = texPath;
                 }
-                else
+            }
+
+            if (blpData == null)
+            {
+                blpData = _dataSource.ReadFile(texPath);
+                if (blpData != null)
                 {
-                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: Replaceable #{tex.ReplaceableId} (unresolved)");
-                    replaceableFailed++;
+                    loadSource = "MPQ (original path)";
+                    textureCachePath = texPath;
                 }
             }
 
-            // Some pre-release M2 records carry both a nominal file path and a replaceable id.
-            // Keep this fallback scoped to M2-adapted models so classic MDX textures do not get
-            // redirected through replaceable heuristics when their normal file path should win.
-            if (replaceablePath == null && tex.ReplaceableId > 0)
-                replaceablePath = ResolveReplaceableTexture(tex.ReplaceableId);
-
-            if (string.IsNullOrEmpty(texPath))
+            if (blpData == null)
             {
-                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: empty path, replaceableId={tex.ReplaceableId}");
-                failed++;
-                continue;
+                var normalized = texPath.Replace('/', '\\');
+                blpData = _dataSource.ReadFile(normalized);
+                if (blpData != null)
+                {
+                    texPath = normalized;
+                    loadSource = "MPQ (normalized path)";
+                    textureCachePath = texPath;
+                }
             }
 
-            byte[]? blpData = null;
-            string loadSource = "";
-            string? textureCachePath = null;
-            string textureCachePrefix = "mpq-blp";
+            if (blpData == null)
+            {
+                var lowerPath = texPath.ToLowerInvariant();
+                if (actualPath == null && _dataSource is MpqDataSource mpqDS2)
+                    actualPath = mpqDS2.FindInFileSet(lowerPath);
 
-            // Try to find the actual path in the file set (case-insensitive)
-            string? actualPath = null;
-            if (_dataSource is MpqDataSource mpqDS)
-            {
-                actualPath = mpqDS.FindInFileSet(texPath);
-            }
-            
-            // 1. Try data source (MPQ) first
-            if (_dataSource != null)
-            {
-                // Try with actual path from file set if available
                 if (actualPath != null)
                 {
                     blpData = _dataSource.ReadFile(actualPath);
                     if (blpData != null)
                     {
-                        texPath = actualPath; // Use the correctly-cased path
-                        loadSource = "MPQ (file set match)";
+                        texPath = actualPath;
+                        loadSource = "MPQ (lowercase match)";
                         textureCachePath = texPath;
                     }
                 }
-                
-                // Try original path if not found yet
-                if (blpData == null)
+            }
+
+            if (blpData == null)
+            {
+                var upperPath = texPath.ToUpperInvariant();
+                if (actualPath == null && _dataSource is MpqDataSource mpqDS3)
+                    actualPath = mpqDS3.FindInFileSet(upperPath);
+
+                if (actualPath != null)
                 {
-                    blpData = _dataSource.ReadFile(texPath);
+                    blpData = _dataSource.ReadFile(actualPath);
                     if (blpData != null)
                     {
-                        loadSource = "MPQ (original path)";
+                        texPath = actualPath;
+                        loadSource = "MPQ (uppercase match)";
                         textureCachePath = texPath;
                     }
                 }
-                
-                // Try with normalized slashes
-                if (blpData == null)
+            }
+
+            if (blpData == null)
+            {
+                string modelDir = _modelVirtualPath != null
+                    ? Path.GetDirectoryName(_modelVirtualPath)?.Replace('/', '\\') ?? ""
+                    : "";
+                if (!string.IsNullOrEmpty(modelDir))
                 {
-                    var normalized = texPath.Replace('/', '\\');
-                    blpData = _dataSource.ReadFile(normalized);
-                    if (blpData != null)
+                    string altPath = Path.Combine(modelDir, Path.GetFileName(texPath));
+
+                    if (_dataSource is MpqDataSource mpqDS4)
                     {
-                        texPath = normalized;
-                        loadSource = "MPQ (normalized path)";
-                        textureCachePath = texPath;
-                    }
-                }
-                
-                // Try case-insensitive: lowercase
-                if (blpData == null)
-                {
-                    var lowerPath = texPath.ToLowerInvariant();
-                    if (actualPath == null && _dataSource is MpqDataSource mpqDS2)
-                    {
-                        actualPath = mpqDS2.FindInFileSet(lowerPath);
-                    }
-                    if (actualPath != null)
-                    {
-                        blpData = _dataSource.ReadFile(actualPath);
-                        if (blpData != null)
+                        var foundPath = mpqDS4.FindInFileSet(altPath);
+                        if (foundPath != null)
                         {
-                            texPath = actualPath;
-                            loadSource = "MPQ (lowercase match)";
-                            textureCachePath = texPath;
-                        }
-                    }
-                }
-                
-                // Try case-insensitive: uppercase
-                if (blpData == null)
-                {
-                    var upperPath = texPath.ToUpperInvariant();
-                    if (actualPath == null && _dataSource is MpqDataSource mpqDS3)
-                    {
-                        actualPath = mpqDS3.FindInFileSet(upperPath);
-                    }
-                    if (actualPath != null)
-                    {
-                        blpData = _dataSource.ReadFile(actualPath);
-                        if (blpData != null)
-                        {
-                            texPath = actualPath;
-                            loadSource = "MPQ (uppercase match)";
-                            textureCachePath = texPath;
-                        }
-                    }
-                }
-                
-                // Try case-insensitive search with just filename in model's directory
-                if (blpData == null)
-                {
-                    string modelDir = _modelVirtualPath != null
-                        ? Path.GetDirectoryName(_modelVirtualPath)?.Replace('/', '\\') ?? ""
-                        : "";
-                    if (!string.IsNullOrEmpty(modelDir))
-                    {
-                        string altPath = Path.Combine(modelDir, Path.GetFileName(texPath));
-                        
-                        // Try case-insensitive match for the alt path
-                        if (_dataSource is MpqDataSource mpqDS4)
-                        {
-                            var foundPath = mpqDS4.FindInFileSet(altPath);
-                            if (foundPath != null)
-                            {
-                                blpData = _dataSource.ReadFile(foundPath);
-                                if (blpData != null)
-                                {
-                                    texPath = foundPath;
-                                    loadSource = "MPQ (model dir match)";
-                                    textureCachePath = texPath;
-                                }
-                            }
-                        }
-                        
-                        if (blpData == null)
-                        {
-                            blpData = _dataSource.ReadFile(altPath);
+                            blpData = _dataSource.ReadFile(foundPath);
                             if (blpData != null)
                             {
-                                texPath = altPath;
-                                loadSource = "MPQ (model dir)";
+                                texPath = foundPath;
+                                loadSource = "MPQ (model dir match)";
                                 textureCachePath = texPath;
                             }
                         }
                     }
-                }
-            }
 
-            // If the direct texture path failed, fall back to the resolved replaceable path when available.
-            if (blpData == null
-                && !string.IsNullOrWhiteSpace(replaceablePath)
-                && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
-            {
-                string fallbackPath = replaceablePath;
-                string? replaceableActualPath = null;
-
-                if (_dataSource is MpqDataSource mpqReplaceable)
-                {
-                    replaceableActualPath = mpqReplaceable.FindInFileSet(fallbackPath);
-                    if (replaceableActualPath != null)
+                    if (blpData == null)
                     {
-                        blpData = _dataSource!.ReadFile(replaceableActualPath);
+                        blpData = _dataSource.ReadFile(altPath);
                         if (blpData != null)
                         {
-                            texPath = replaceableActualPath;
-                            loadSource = "MPQ (replaceable fallback match)";
+                            texPath = altPath;
+                            loadSource = "MPQ (model dir)";
                             textureCachePath = texPath;
                         }
                     }
                 }
+            }
+        }
 
-                if (blpData == null && _dataSource != null)
+        if (blpData == null
+            && !string.IsNullOrWhiteSpace(replaceablePath)
+            && !string.Equals(replaceablePath, texPath, StringComparison.OrdinalIgnoreCase))
+        {
+            string fallbackPath = replaceablePath;
+            string? replaceableActualPath = null;
+
+            if (_dataSource is MpqDataSource mpqReplaceable)
+            {
+                replaceableActualPath = mpqReplaceable.FindInFileSet(fallbackPath);
+                if (replaceableActualPath != null)
                 {
-                    blpData = _dataSource.ReadFile(fallbackPath);
-                    if (blpData == null)
-                        blpData = _dataSource.ReadFile(fallbackPath.Replace('/', '\\'));
-
+                    blpData = _dataSource!.ReadFile(replaceableActualPath);
                     if (blpData != null)
                     {
-                        texPath = fallbackPath.Replace('/', '\\');
-                        loadSource = "MPQ (replaceable fallback)";
+                        texPath = replaceableActualPath;
+                        loadSource = "MPQ (replaceable fallback match)";
                         textureCachePath = texPath;
                     }
                 }
+            }
 
-                if (blpData == null && File.Exists(fallbackPath))
-                {
-                    blpData = File.ReadAllBytes(fallbackPath);
-                    texPath = fallbackPath;
-                    loadSource = "Local replaceable BLP";
-                    textureCachePath = fallbackPath;
-                    textureCachePrefix = "disk-blp";
-                }
+            if (blpData == null && _dataSource != null)
+            {
+                blpData = _dataSource.ReadFile(fallbackPath);
+                if (blpData == null)
+                    blpData = _dataSource.ReadFile(fallbackPath.Replace('/', '\\'));
 
                 if (blpData != null)
                 {
-                    ViewerLog.Debug(ViewerLog.Category.Mdx,
-                        $"Texture[{i}]: using replaceable fallback for direct path '{tex.Path}' -> '{texPath}'");
-                    replaceableResolved++;
+                    texPath = fallbackPath.Replace('/', '\\');
+                    loadSource = "MPQ (replaceable fallback)";
+                    textureCachePath = texPath;
                 }
             }
 
-            // 2. Try local BLP file on disk
-            if (blpData == null)
+            if (blpData == null && File.Exists(fallbackPath))
             {
-                string blpLocal = Path.Combine(_modelDir, Path.GetFileName(texPath));
-                if (File.Exists(blpLocal))
-                {
-                    blpData = File.ReadAllBytes(blpLocal);
-                    loadSource = "Local BLP";
-                    textureCachePath = blpLocal;
-                    textureCachePrefix = "disk-blp";
-                }
+                blpData = File.ReadAllBytes(fallbackPath);
+                texPath = fallbackPath;
+                loadSource = "Local replaceable BLP";
+                textureCachePath = fallbackPath;
+                textureCachePrefix = "disk-blp";
             }
 
-            // 3. Try local PNG fallback
-            if (blpData == null)
+            if (blpData != null)
             {
-                string pngName = Path.ChangeExtension(Path.GetFileName(texPath), ".png");
-                string pngPath = Path.Combine(_modelDir, pngName);
-                if (File.Exists(pngPath))
-                {
-                    string pngCacheKey = BuildTextureCacheKey("png", pngPath, clampS: false, clampT: false);
-                    SharedTextureEntry? textureEntry = AcquireSharedTexture(pngCacheKey, () => LoadTextureFromPng(pngPath));
-                    if (textureEntry != null)
-                    {
-                        _textures[i] = textureEntry.TextureId;
-                        _textureCacheKeys[i] = pngCacheKey;
-                        _textureAlphaKinds[i] = textureEntry.AlphaKind;
-                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - loaded");
-                        loaded++;
-                    }
-                    else
-                    {
-                        ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - failed to load");
-                        failed++;
-                    }
-                    continue;
-                }
+                ViewerLog.Debug(ViewerLog.Category.Mdx,
+                    $"Texture[{i}]: using replaceable fallback for direct path '{tex.Path}' -> '{texPath}'");
+                replaceableResolved++;
             }
+        }
 
-            if (blpData != null && blpData.Length > 0)
+        if (blpData == null)
+        {
+            string blpLocal = Path.Combine(_modelDir, Path.GetFileName(texPath));
+            if (File.Exists(blpLocal))
             {
-                // Classic MDX keeps the legacy clamp-flag interpretation.
-                // M2 texture flags are repeat flags, so clamp only when the flag is absent.
-                var texFlags = (MdlGeoFlags)tex.Flags;
-                bool clampS = _isM2AdapterModel
-                    ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
-                    : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
-                bool clampT = _isM2AdapterModel
-                    ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
-                    : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
-                
-                MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
-                MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
-                MdxTextureDiagnosticLogger.Log($"  Source: {loadSource}, Size: {blpData.Length} bytes");
-                
-                string cacheKey = BuildTextureCacheKey(textureCachePrefix, textureCachePath ?? texPath, clampS, clampT);
-                SharedTextureEntry? textureEntry = AcquireSharedTexture(cacheKey, () => LoadTextureFromBlp(blpData, texPath, clampS, clampT));
+                blpData = File.ReadAllBytes(blpLocal);
+                loadSource = "Local BLP";
+                textureCachePath = blpLocal;
+                textureCachePrefix = "disk-blp";
+            }
+        }
+
+        if (blpData == null)
+        {
+            string pngName = Path.ChangeExtension(Path.GetFileName(texPath), ".png");
+            string pngPath = Path.Combine(_modelDir, pngName);
+            if (File.Exists(pngPath))
+            {
+                string pngCacheKey = BuildTextureCacheKey("png", pngPath, clampS: false, clampT: false);
+                SharedTextureEntry? textureEntry = AcquireSharedTexture(pngCacheKey, () => LoadTextureFromPng(pngPath));
                 if (textureEntry != null)
                 {
+                    NormalizeAdaptedM2TextureSampling(textureEntry);
                     _textures[i] = textureEntry.TextureId;
-                    _textureCacheKeys[i] = cacheKey;
+                    _textureCacheKeys[i] = pngCacheKey;
                     _textureAlphaKinds[i] = textureEntry.AlphaKind;
-                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource})" +
-                        (clampS || clampT ? $" [clamp S={clampS} T={clampT}]" : ""));
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - loaded");
                     loaded++;
                 }
                 else
                 {
-                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}) - failed to decode");
+                    ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {pngName} (PNG) - failed to load");
                     failed++;
                 }
-            }
-            else
-            {
-                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: not found ({texPath})");
-                failed++;
+
+                return;
             }
         }
 
-        ViewerLog.Info(ViewerLog.Category.Mdx, $"Texture summary: {loaded} loaded, {failed} failed, {replaceableResolved} replaceable resolved, {replaceableFailed} replaceable failed");
-        MdxTextureDiagnosticLogger.Close();
+        if (blpData != null && blpData.Length > 0)
+        {
+            var texFlags = (MdlGeoFlags)tex.Flags;
+            bool clampS = _isM2AdapterModel
+                ? !texFlags.HasFlag(MdlGeoFlags.WrapWidth)
+                : texFlags.HasFlag(MdlGeoFlags.WrapWidth);
+            bool clampT = _isM2AdapterModel
+                ? !texFlags.HasFlag(MdlGeoFlags.WrapHeight)
+                : texFlags.HasFlag(MdlGeoFlags.WrapHeight);
+
+            MdxTextureDiagnosticLogger.Log($"Texture[{i}]: {Path.GetFileName(texPath)}");
+            MdxTextureDiagnosticLogger.Log($"  Flags: 0x{tex.Flags:X8} (clampS={clampS}, clampT={clampT})");
+            MdxTextureDiagnosticLogger.Log($"  Source: {loadSource}, Size: {blpData.Length} bytes");
+
+            string cacheKey = BuildTextureCacheKey(textureCachePrefix, textureCachePath ?? texPath, clampS, clampT);
+            SharedTextureEntry? textureEntry = AcquireSharedTexture(cacheKey, () => LoadTextureFromBlp(blpData, texPath, clampS, clampT));
+            if (textureEntry != null)
+            {
+                NormalizeAdaptedM2TextureSampling(textureEntry);
+                _textures[i] = textureEntry.TextureId;
+                _textureCacheKeys[i] = cacheKey;
+                _textureAlphaKinds[i] = textureEntry.AlphaKind;
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource})" +
+                    (clampS || clampT ? $" [clamp S={clampS} T={clampT}]" : ""));
+                loaded++;
+            }
+            else
+            {
+                ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: {Path.GetFileName(texPath)} (BLP2, {blpData.Length} bytes, {loadSource}) - failed to decode");
+                failed++;
+            }
+        }
+        else
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx, $"Texture[{i}]: not found ({texPath})");
+            failed++;
+        }
     }
 
     private static string BuildTextureCacheKey(string prefix, string path, bool clampS, bool clampT)
@@ -1917,6 +1956,25 @@ void main() {
             SharedTextureCache[cacheKey] = created;
             return created;
         }
+    }
+
+    private void NormalizeAdaptedM2TextureSampling(SharedTextureEntry textureEntry)
+    {
+        if (!_isM2AdapterModel)
+            return;
+
+        if (textureEntry.AlphaKind == TextureAlphaKind.Opaque)
+            return;
+
+        if (textureEntry.WrapS == TextureWrapMode.ClampToEdge && textureEntry.WrapT == TextureWrapMode.ClampToEdge)
+            return;
+
+        _gl.BindTexture(TextureTarget.Texture2D, textureEntry.TextureId);
+        RenderQualitySettings.ApplySampling(_gl, TextureTarget.Texture2D, hasMipmaps: true,
+            TextureWrapMode.ClampToEdge, TextureWrapMode.ClampToEdge);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
+        textureEntry.WrapS = TextureWrapMode.ClampToEdge;
+        textureEntry.WrapT = TextureWrapMode.ClampToEdge;
     }
 
     private bool ShouldUseNeutralMissingTextureFallback(int layerIndex, MdlTexLayer layer, MdlTexOp effectiveBlendMode)

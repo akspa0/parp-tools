@@ -25,6 +25,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _buildVersion;
     private readonly bool _deferInitialDoodadLoads;
+    private readonly bool _deferInitialMaterialTextureLoads;
 
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
@@ -36,6 +37,16 @@ public class WmoRenderer : ISceneRenderer
 
     private readonly List<GroupBuffers> _groups = new();
     private readonly List<(int groupBufferIndex, float distSq)> _transparentGroupSortScratch = new();
+    private readonly FrustumCuller _groupFrustumCuller = new();
+    private readonly List<PortalNeighbor>[] _groupPortalNeighbors;
+    private readonly List<int>[] _groupPortalRefs;
+    private readonly Vector3[] _portalCenters;
+    private readonly bool[] _runtimeVisibleGroups;
+    private readonly bool[] _frustumVisibleScratch;
+    private readonly HashSet<int> _runtimeVisibleDoodadDefIndices = new();
+    private readonly Queue<(int GroupIndex, int Depth)> _visibilityQueue = new();
+    private readonly HashSet<int> _visibilityVisited = new();
+    private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
     private bool _wireframe;
 
     // Material textures: materialIndex → GL texture handle
@@ -43,6 +54,9 @@ public class WmoRenderer : ISceneRenderer
     private readonly HashSet<string> _materialFallbackLogKeys = new(StringComparer.OrdinalIgnoreCase);
     private int _materialFallbackLogCount;
     private const int MaxMaterialFallbackLogs = 200;
+    private readonly Queue<int> _pendingMaterialTextureLoads = new();
+    private const int DeferredMaterialTextureLoadsPerFrame = 1;
+    private const double DeferredMaterialTextureLoadBudgetMs = 2.0;
 
     // Doodad support
     private readonly Dictionary<string, IModelRenderer?> _doodadModelCache = new(StringComparer.OrdinalIgnoreCase);
@@ -59,6 +73,11 @@ public class WmoRenderer : ISceneRenderer
     private bool _doodadsVisible = true;
     private const int DeferredDoodadLoadsPerFrame = 1;
     private const double DeferredDoodadLoadBudgetMs = 2.0;
+    private const float GroupVisibilityBoundsPadding = 32f;
+    private const float ExteriorPortalRevealDistance = 1024f;
+    private const float InteriorPortalRevealDistance = 3072f;
+    private const int ExteriorPortalTraversalDepth = 1;
+    private const int InteriorPortalTraversalDepth = 4;
 
     // Doodad culling constants
     private const float DoodadCullDistance = 4000f;  // Minimum distance from camera to render WMO doodads; expanded further by fog range at runtime
@@ -93,8 +112,9 @@ public class WmoRenderer : ISceneRenderer
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null,
-        bool deferInitialDoodadLoads = false)
+        bool deferInitialDoodadLoads = false, bool deferInitialMaterialTextureLoads = false)
     {
+        var initStopwatch = Stopwatch.StartNew();
         _gl = gl;
         _wmo = wmo;
         _modelDir = modelDir;
@@ -102,14 +122,32 @@ public class WmoRenderer : ISceneRenderer
         _texResolver = texResolver;
         _buildVersion = buildVersion;
         _deferInitialDoodadLoads = deferInitialDoodadLoads;
+        _deferInitialMaterialTextureLoads = deferInitialMaterialTextureLoads;
+        _groupPortalNeighbors = new List<PortalNeighbor>[_wmo.Groups.Count];
+        _groupPortalRefs = new List<int>[_wmo.Groups.Count];
+        _portalCenters = new Vector3[_wmo.Portals.Count];
+        _runtimeVisibleGroups = new bool[_wmo.Groups.Count];
+        _frustumVisibleScratch = new bool[_wmo.Groups.Count];
+
+        InitializeGroupVisibilityData();
 
         InitShaders();
         InitLiquidShader();
         InitBuffers();
         BuildLiquidMeshes();
-        LoadMaterialTextures();
+        if (_deferInitialMaterialTextureLoads)
+            QueueDeferredMaterialTextureLoads();
+        else
+            LoadMaterialTextures();
         ResolveDoodadNames();
         LoadActiveDoodadSet();
+
+        if (initStopwatch.Elapsed.TotalMilliseconds >= 50)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Wmo,
+                $"[WMO-LOAD] {modelDir}: init {initStopwatch.Elapsed.TotalMilliseconds:F1} ms (groups={_wmo.Groups.Count}, materials={_wmo.Materials.Count}, doodadDefs={_wmo.DoodadDefs.Count}, deferredMaterials={_deferInitialMaterialTextureLoads}, deferredDoodads={_deferInitialDoodadLoads})");
+        }
     }
 
     /// <summary>MOHD bounding box min in WMO local space.</summary>
@@ -143,7 +181,7 @@ public class WmoRenderer : ISceneRenderer
     public bool GetSubObjectVisible(int index)
     {
         if (index < _groups.Count)
-            return _groups[index].Visible;
+            return _groups[index].ManualVisible;
         if (index == _groups.Count)
             return _doodadsVisible;
         int di = index - _groups.Count - 1;
@@ -155,7 +193,7 @@ public class WmoRenderer : ISceneRenderer
     public void SetSubObjectVisible(int index, bool visible)
     {
         if (index < _groups.Count)
-            _groups[index].Visible = visible;
+            _groups[index].ManualVisible = visible;
         else if (index == _groups.Count)
             _doodadsVisible = visible;
         else
@@ -241,7 +279,7 @@ public class WmoRenderer : ISceneRenderer
 
         foreach (var gb in _groups)
         {
-            if (!gb.Visible) continue;
+            if (!gb.IsVisible) continue;
             _gl.BindVertexArray(gb.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, gb.IndexCount, DrawElementsType.UnsignedShort, null);
         }
@@ -265,6 +303,7 @@ public class WmoRenderer : ISceneRenderer
         Vector3? fogColor = null, float fogStart = 200f, float fogEnd = 1500f, Vector3? cameraPos = null,
         Vector3? lightDir = null, Vector3? lightColor = null, Vector3? ambientColor = null)
     {
+        ProcessDeferredMaterialTextureLoads();
         EnsureLiquidMeshesUpToDate();
         ProcessDeferredDoodadLoads();
 
@@ -293,6 +332,8 @@ public class WmoRenderer : ISceneRenderer
         _gl.Uniform3(_uLightColor, lc.X, lc.Y, lc.Z);
         _gl.Uniform3(_uAmbientColor, ac.X, ac.Y, ac.Z);
 
+        UpdateRuntimeVisibility(modelMatrix, view, proj, cp, fogEnd);
+
         if (_wireframe)
             _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
         else
@@ -306,7 +347,7 @@ public class WmoRenderer : ISceneRenderer
 
         foreach (var gb in _groups)
         {
-            if (!gb.Visible) continue;
+            if (!gb.IsVisible) continue;
             var group = _wmo.Groups[gb.GroupIndex];
             _gl.BindVertexArray(gb.Vao);
 
@@ -351,7 +392,7 @@ public class WmoRenderer : ISceneRenderer
         {
             // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
             // Update once per model to avoid redundant work when many instances share the same MDX.
-            var updatedDoodadModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _updatedDoodadModelsScratch.Clear();
 
             // Build list of visible doodads with world-space distance to camera
             visibleDoodads = new List<(int idx, float distSq)>();
@@ -361,8 +402,10 @@ public class WmoRenderer : ISceneRenderer
             {
                 var inst = _doodadInstances[di];
                 if (!inst.Visible || inst.Renderer == null) continue;
+                if (_runtimeVisibleDoodadDefIndices.Count > 0 && !_runtimeVisibleDoodadDefIndices.Contains(inst.DoodadDefIndex))
+                    continue;
 
-                if (updatedDoodadModels.Add(inst.ModelPath))
+                if (_updatedDoodadModelsScratch.Add(inst.ModelPath))
                     inst.Renderer.UpdateAnimation();
 
                 // Transform local position to world space
@@ -400,6 +443,9 @@ public class WmoRenderer : ISceneRenderer
 
             foreach (var liq in _liquidMeshes)
             {
+                if (liq.GroupIndex >= 0 && liq.GroupIndex < _runtimeVisibleGroups.Length && !_runtimeVisibleGroups[liq.GroupIndex])
+                    continue;
+
                 _gl.Uniform4(_uLiqColor, liq.ColorR, liq.ColorG, liq.ColorB, liq.ColorA);
                 _gl.BindVertexArray(liq.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, liq.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -443,7 +489,7 @@ public class WmoRenderer : ISceneRenderer
         for (int groupBufferIndex = 0; groupBufferIndex < _groups.Count; groupBufferIndex++)
         {
             var groupBuffer = _groups[groupBufferIndex];
-            if (!groupBuffer.Visible)
+            if (!groupBuffer.IsVisible)
                 continue;
 
             Vector3 worldCenter = Vector3.Transform(groupBuffer.GroupCenter, modelMatrix);
@@ -456,7 +502,7 @@ public class WmoRenderer : ISceneRenderer
         foreach (var (groupBufferIndex, _) in _transparentGroupSortScratch)
         {
             var gb = _groups[groupBufferIndex];
-            if (!gb.Visible) continue;
+            if (!gb.IsVisible) continue;
             var group = _wmo.Groups[gb.GroupIndex];
             _gl.BindVertexArray(gb.Vao);
 
@@ -667,6 +713,281 @@ void main() {
             throw new Exception($"Shader compile error ({type}): {_gl.GetShaderInfoLog(shader)}");
 
         return shader;
+    }
+
+    private void InitializeGroupVisibilityData()
+    {
+        var portalGroups = new Dictionary<ushort, HashSet<int>>();
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var group = _wmo.Groups[groupIndex];
+            var portalRefs = new List<int>();
+            _groupPortalRefs[groupIndex] = portalRefs;
+            _groupPortalNeighbors[groupIndex] = new List<PortalNeighbor>();
+
+            for (int offset = 0; offset < group.PortalCount; offset++)
+            {
+                int portalRefIndex = group.PortalStart + offset;
+                if ((uint)portalRefIndex >= (uint)_wmo.PortalRefs.Count)
+                    break;
+
+                portalRefs.Add(portalRefIndex);
+                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
+                if (!portalGroups.TryGetValue(portalIndex, out var groups))
+                {
+                    groups = new HashSet<int>();
+                    portalGroups[portalIndex] = groups;
+                }
+
+                groups.Add(groupIndex);
+            }
+        }
+
+        for (int portalIndex = 0; portalIndex < _wmo.Portals.Count; portalIndex++)
+        {
+            var portal = _wmo.Portals[portalIndex];
+            Vector3 center = Vector3.Zero;
+            int count = 0;
+
+            for (int vertexOffset = 0; vertexOffset < portal.Count; vertexOffset++)
+            {
+                int vertexIndex = portal.StartVertex + vertexOffset;
+                if ((uint)vertexIndex >= (uint)_wmo.PortalVertices.Count)
+                    break;
+
+                center += _wmo.PortalVertices[vertexIndex];
+                count++;
+            }
+
+            _portalCenters[portalIndex] = count > 0 ? center / count : Vector3.Zero;
+        }
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var neighbors = new HashSet<long>();
+            foreach (int portalRefIndex in _groupPortalRefs[groupIndex])
+            {
+                ushort portalIndex = _wmo.PortalRefs[portalRefIndex].PortalIndex;
+                if (!portalGroups.TryGetValue(portalIndex, out var groups))
+                    continue;
+
+                foreach (int neighborGroup in groups)
+                {
+                    if (neighborGroup == groupIndex)
+                        continue;
+
+                    long key = ((long)portalIndex << 32) | (uint)neighborGroup;
+                    if (!neighbors.Add(key))
+                        continue;
+
+                    _groupPortalNeighbors[groupIndex].Add(new PortalNeighbor(neighborGroup, portalIndex));
+                }
+            }
+        }
+    }
+
+    private void UpdateRuntimeVisibility(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, float fogEnd)
+    {
+        Array.Clear(_runtimeVisibleGroups, 0, _runtimeVisibleGroups.Length);
+        Array.Clear(_frustumVisibleScratch, 0, _frustumVisibleScratch.Length);
+        _runtimeVisibleDoodadDefIndices.Clear();
+        _visibilityQueue.Clear();
+        _visibilityVisited.Clear();
+
+        if (_wmo.Groups.Count == 0)
+            return;
+
+        if (!Matrix4x4.Invert(modelMatrix, out var inverseModel))
+        {
+            for (int i = 0; i < _runtimeVisibleGroups.Length; i++)
+                _runtimeVisibleGroups[i] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
+
+        Vector3 localCameraPos = Vector3.Transform(cameraPos, inverseModel);
+        _groupFrustumCuller.Update(view * proj);
+
+        bool anyExteriorGroups = false;
+        bool cameraInsideRoot = ContainsPointExpanded(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax, GroupVisibilityBoundsPadding);
+        int nearestGroupIndex = -1;
+        float nearestGroupDistSq = float.MaxValue;
+
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            var group = _wmo.Groups[groupIndex];
+            if (IsExteriorGroup(group.Flags))
+                anyExteriorGroups = true;
+
+            TransformAabb(group.BoundsMin, group.BoundsMax, modelMatrix, out var worldMin, out var worldMax);
+            bool isFrustumVisible = _groupFrustumCuller.TestAABB(worldMin, worldMax);
+            _frustumVisibleScratch[groupIndex] = isFrustumVisible;
+
+            float distanceSq = DistanceSquaredPointToAabb(localCameraPos, group.BoundsMin, group.BoundsMax);
+            if (distanceSq < nearestGroupDistSq)
+            {
+                nearestGroupDistSq = distanceSq;
+                nearestGroupIndex = groupIndex;
+            }
+
+            if (cameraInsideRoot)
+            {
+                if (ContainsPointExpanded(localCameraPos, group.BoundsMin, group.BoundsMax, GroupVisibilityBoundsPadding))
+                    EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
+            }
+            else if (isFrustumVisible && IsExteriorGroup(group.Flags))
+            {
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, groupIndex, 0);
+            }
+        }
+
+        if (_visibilityQueue.Count == 0)
+        {
+            if (!cameraInsideRoot && !anyExteriorGroups)
+            {
+                for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+                    _runtimeVisibleGroups[groupIndex] = _frustumVisibleScratch[groupIndex];
+
+                ApplyRuntimeVisibilityToBuffers();
+                CollectVisibleDoodadDefs();
+                return;
+            }
+
+            if (nearestGroupIndex >= 0)
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, nearestGroupIndex, 0);
+        }
+
+        float portalRevealDistance = cameraInsideRoot
+            ? MathF.Max(InteriorPortalRevealDistance, MathF.Min(fogEnd, 5000f))
+            : MathF.Max(ExteriorPortalRevealDistance, MathF.Min(fogEnd * 0.4f, 1800f));
+        int maxTraversalDepth = cameraInsideRoot ? InteriorPortalTraversalDepth : ExteriorPortalTraversalDepth;
+        float portalRevealDistanceSq = portalRevealDistance * portalRevealDistance;
+
+        while (_visibilityQueue.Count > 0)
+        {
+            var (groupIndex, depth) = _visibilityQueue.Dequeue();
+            _runtimeVisibleGroups[groupIndex] = true;
+
+            if (depth >= maxTraversalDepth)
+                continue;
+
+            foreach (var neighbor in _groupPortalNeighbors[groupIndex])
+            {
+                int neighborGroupIndex = neighbor.GroupIndex;
+                if (_visibilityVisited.Contains(neighborGroupIndex))
+                    continue;
+
+                if (!ShouldTraversePortal(neighbor, modelMatrix, cameraPos, portalRevealDistanceSq, cameraInsideRoot))
+                    continue;
+
+                EnqueueVisibleGroup(_visibilityQueue, _visibilityVisited, neighborGroupIndex, depth + 1);
+            }
+        }
+
+        if (!cameraInsideRoot)
+        {
+            for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+            {
+                if (_frustumVisibleScratch[groupIndex] && IsExteriorGroup(_wmo.Groups[groupIndex].Flags))
+                    _runtimeVisibleGroups[groupIndex] = true;
+            }
+        }
+
+        ApplyRuntimeVisibilityToBuffers();
+        CollectVisibleDoodadDefs();
+    }
+
+    private void ApplyRuntimeVisibilityToBuffers()
+    {
+        foreach (var groupBuffer in _groups)
+        {
+            if ((uint)groupBuffer.GroupIndex < (uint)_runtimeVisibleGroups.Length)
+                groupBuffer.RuntimeVisible = _runtimeVisibleGroups[groupBuffer.GroupIndex];
+            else
+                groupBuffer.RuntimeVisible = true;
+        }
+    }
+
+    private void CollectVisibleDoodadDefs()
+    {
+        for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
+        {
+            if (!_runtimeVisibleGroups[groupIndex])
+                continue;
+
+            foreach (ushort doodadRef in _wmo.Groups[groupIndex].DoodadRefs)
+            {
+                if ((uint)doodadRef < (uint)_wmo.DoodadDefs.Count)
+                    _runtimeVisibleDoodadDefIndices.Add(doodadRef);
+            }
+        }
+    }
+
+    private bool ShouldTraversePortal(PortalNeighbor neighbor, Matrix4x4 modelMatrix, Vector3 cameraPos,
+        float portalRevealDistanceSq, bool cameraInsideRoot)
+    {
+        int neighborGroupIndex = neighbor.GroupIndex;
+        bool neighborFrustumVisible = (uint)neighborGroupIndex < (uint)_frustumVisibleScratch.Length && _frustumVisibleScratch[neighborGroupIndex];
+        bool neighborExterior = IsExteriorGroup(_wmo.Groups[neighborGroupIndex].Flags);
+
+        ushort portalIndex = neighbor.PortalIndex;
+        if ((uint)portalIndex >= (uint)_portalCenters.Length)
+            return false;
+
+        Vector3 portalCenterWorld = Vector3.Transform(_portalCenters[portalIndex], modelMatrix);
+        float portalDistanceSq = Vector3.DistanceSquared(cameraPos, portalCenterWorld);
+        if (portalDistanceSq > portalRevealDistanceSq)
+            return false;
+
+        if (cameraInsideRoot)
+            return true;
+
+        return neighborFrustumVisible || neighborExterior;
+    }
+
+    private static void EnqueueVisibleGroup(Queue<(int GroupIndex, int Depth)> queue, HashSet<int> visited, int groupIndex, int depth)
+    {
+        if (visited.Add(groupIndex))
+            queue.Enqueue((groupIndex, depth));
+    }
+
+    private static bool ContainsPointExpanded(Vector3 point, Vector3 min, Vector3 max, float padding)
+    {
+        return point.X >= min.X - padding && point.X <= max.X + padding
+            && point.Y >= min.Y - padding && point.Y <= max.Y + padding
+            && point.Z >= min.Z - padding && point.Z <= max.Z + padding;
+    }
+
+    private static bool IsExteriorGroup(uint flags) => (flags & 0x8) != 0;
+
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private static void TransformAabb(Vector3 min, Vector3 max, Matrix4x4 transform, out Vector3 outMin, out Vector3 outMax)
+    {
+        outMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        outMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+
+        Span<float> xs = stackalloc float[] { min.X, max.X };
+        Span<float> ys = stackalloc float[] { min.Y, max.Y };
+        Span<float> zs = stackalloc float[] { min.Z, max.Z };
+
+        foreach (float x in xs)
+        foreach (float y in ys)
+        foreach (float z in zs)
+        {
+            Vector3 transformed = Vector3.Transform(new Vector3(x, y, z), transform);
+            outMin = Vector3.Min(outMin, transformed);
+            outMax = Vector3.Max(outMax, transformed);
+        }
     }
 
     private unsafe void InitBuffers()
@@ -898,53 +1219,83 @@ void main() {
 
         int loaded = 0, failed = 0;
         for (int i = 0; i < _wmo.Materials.Count; i++)
+            TryLoadMaterialTexture(i, ref loaded, ref failed);
+
+        ViewerLog.Trace($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+    }
+
+    private void QueueDeferredMaterialTextureLoads()
+    {
+        _pendingMaterialTextureLoads.Clear();
+        for (int i = 0; i < _wmo.Materials.Count; i++)
+            _pendingMaterialTextureLoads.Enqueue(i);
+
+        if (_pendingMaterialTextureLoads.Count > 0)
         {
-            var mat = _wmo.Materials[i];
-            string? texName = ResolveMaterialTextureName(mat);
-            if (string.IsNullOrEmpty(texName)) continue;
+            ViewerLog.Info(ViewerLog.Category.Wmo,
+                $"[WMO-LOAD] Deferred {_pendingMaterialTextureLoads.Count} material textures for {_modelDir}");
+        }
+    }
 
-            // Ensure .blp extension
-            if (!texName.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
-                texName += ".blp";
+    private void ProcessDeferredMaterialTextureLoads()
+    {
+        if (!_deferInitialMaterialTextureLoads || _pendingMaterialTextureLoads.Count == 0 || _dataSource == null)
+            return;
 
-            byte[]? blpData = null;
+        var stopwatch = Stopwatch.StartNew();
+        int loadsCompleted = 0;
+        int loaded = 0, failed = 0;
 
-            // Try data source (MPQ)
-            blpData = _dataSource.ReadFile(texName);
+        while (loadsCompleted < DeferredMaterialTextureLoadsPerFrame
+            && stopwatch.Elapsed.TotalMilliseconds < DeferredMaterialTextureLoadBudgetMs
+            && _pendingMaterialTextureLoads.TryDequeue(out int materialIndex))
+        {
+            TryLoadMaterialTexture(materialIndex, ref loaded, ref failed);
+            loadsCompleted++;
+        }
+    }
 
-            // Try normalized slashes
-            if (blpData == null)
-                blpData = _dataSource.ReadFile(texName.Replace('/', '\\'));
+    private void TryLoadMaterialTexture(int i, ref int loaded, ref int failed)
+    {
+        var mat = _wmo.Materials[i];
+        string? texName = ResolveMaterialTextureName(mat);
+        if (string.IsNullOrEmpty(texName))
+            return;
 
-            // Try case-insensitive via FindInFileSet
-            if (blpData == null && _dataSource is MpqDataSource mpqDs)
+        if (!texName.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+            texName += ".blp";
+
+        byte[]? blpData = _dataSource?.ReadFile(texName);
+
+        if (blpData == null)
+            blpData = _dataSource?.ReadFile(texName.Replace('/', '\\'));
+
+        if (blpData == null && _dataSource is MpqDataSource mpqDs)
+        {
+            var found = mpqDs.FindInFileSet(texName);
+            if (found != null)
+                blpData = _dataSource.ReadFile(found);
+        }
+
+        if (blpData != null && blpData.Length > 0)
+        {
+            uint glTex = LoadWmoTexture(blpData, texName);
+            if (glTex != 0)
             {
-                var found = mpqDs.FindInFileSet(texName);
-                if (found != null)
-                    blpData = _dataSource.ReadFile(found);
-            }
-
-            if (blpData != null && blpData.Length > 0)
-            {
-                uint glTex = LoadWmoTexture(blpData, texName);
-                if (glTex != 0)
-                {
-                    _materialTextures[i] = glTex;
-                    loaded++;
-                }
-                else
-                {
-                    ViewerLog.Trace($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
-                    failed++;
-                }
+                _materialTextures[i] = glTex;
+                loaded++;
             }
             else
             {
-                ViewerLog.Trace($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
+                ViewerLog.Trace($"[WmoRenderer] Mat {i}: BLP decode failed for '{texName}'");
                 failed++;
             }
         }
-        ViewerLog.Trace($"[WmoRenderer] Textures: {loaded} loaded, {failed} failed out of {_wmo.Materials.Count} materials");
+        else
+        {
+            ViewerLog.Trace($"[WmoRenderer] Mat {i}: texture not found '{texName}'");
+            failed++;
+        }
     }
 
     private int ResolveBatchMaterialId(WmoV14ToV17Converter.WmoGroupData group, WmoV14ToV17Converter.WmoBatch batch)
@@ -1595,6 +1946,8 @@ void main() {
 
     private unsafe void BuildLiquidMeshes()
     {
+        _liquidMeshes.Clear();
+
         for (int gi = 0; gi < _wmo.Groups.Count; gi++)
         {
             var group = _wmo.Groups[gi];
@@ -1783,6 +2136,7 @@ void main() {
 
                 _liquidMeshes.Add(new LiquidMeshData
                 {
+                    GroupIndex = gi,
                     Vao = vao, Vbo = vbo, Ebo = ebo,
                     IndexCount = (uint)indexArr.Length,
                     ColorR = cr, ColorG = cg, ColorB = cb, ColorA = ca
@@ -1949,8 +2303,12 @@ void main() {
         public Vector3 GroupCenter;
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
-        public bool Visible = true;
+        public bool ManualVisible = true;
+        public bool RuntimeVisible = true;
+        public bool IsVisible => ManualVisible && RuntimeVisible;
     }
+
+    private readonly record struct PortalNeighbor(int GroupIndex, ushort PortalIndex);
 
     private class DoodadInstance
     {
@@ -1965,6 +2323,7 @@ void main() {
 
     private class LiquidMeshData
     {
+        public int GroupIndex;
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
         public float ColorR, ColorG, ColorB, ColorA;

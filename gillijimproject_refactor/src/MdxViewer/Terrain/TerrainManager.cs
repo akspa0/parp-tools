@@ -40,9 +40,8 @@ public class TerrainManager : ISceneRenderer
     // AOI: how many tiles around the camera to keep loaded
     private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
     private const int UnloadRadius = AoiRadius + 1; // Keep one extra ring to prevent aggressive edge pop-out
-    private const int AoiForwardExtra = 3; // Extra tiles ahead of camera heading
-    private const int MaxGpuUploadsPerFrame = 4; // Avoid large upload bursts that can stall render thread
-    private const double MaxGpuUploadBudgetMs = 5.0; // Native-like per-frame prep budget for non-priority work
+    private const int MaxGpuUploadsPerFrame = 4;
+    private const double MaxGpuUploadBudgetMs = 5.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
     private readonly SemaphoreSlim _mpqReadSemaphore = new(MaxConcurrentMpqReads);
 
@@ -59,8 +58,6 @@ public class TerrainManager : ISceneRenderer
     private int _lastCameraTileX = -1;
     private int _lastCameraTileY = -1;
     private Vector3 _cameraPos;
-    private Vector3 _lastCameraPos; // For computing movement direction
-    private Vector2 _cameraHeading; // Normalized XY movement direction
     private bool _disposed;
 
     // Stats
@@ -239,8 +236,7 @@ public class TerrainManager : ISceneRenderer
     /// <summary>
     /// Update terrain AOI based on camera position. Call each frame before Render.
     /// Queues new tiles for background loading and submits completed tiles to GPU.
-    /// Uses directional loading: tiles ahead of camera heading are prioritized,
-    /// tiles behind camera are unloaded first.
+    /// Uses a square AOI with one-ring unload hysteresis.
     /// </summary>
     public void UpdateAOI(Vector3 cameraPos)
     {
@@ -252,16 +248,6 @@ public class TerrainManager : ISceneRenderer
 
         // Submit any background-loaded tiles to GPU (render thread only)
         SubmitPendingTiles();
-
-        // Track camera movement direction for directional loading
-        var delta = cameraPos - _lastCameraPos;
-        if (delta.LengthSquared() > 1f) // Only update heading if camera moved meaningfully
-        {
-            var dir2d = new Vector2(delta.X, delta.Y);
-            if (dir2d.LengthSquared() > 0.01f)
-                _cameraHeading = Vector2.Normalize(dir2d);
-        }
-        _lastCameraPos = cameraPos;
 
         // Convert camera world position to tile coordinates
         int tileX = (int)((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize);
@@ -277,8 +263,7 @@ public class TerrainManager : ISceneRenderer
         _lastCameraTileX = tileX;
         _lastCameraTileY = tileY;
 
-        // Determine which tiles should be loaded:
-        // Base AOI (AoiRadius square) + extra tiles ahead of camera heading
+        // Determine which tiles should be loaded: a square AOI around the current camera tile.
         var desiredTiles = new HashSet<(int, int)>();
         for (int dy = -AoiRadius; dy <= AoiRadius; dy++)
         {
@@ -288,35 +273,6 @@ public class TerrainManager : ISceneRenderer
                 int ty = tileY + dy;
                 if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64 && _adapter.TileExists(tx, ty))
                     desiredTiles.Add((tx, ty));
-            }
-        }
-
-        // Add extra tiles ahead of camera heading (directional lookahead)
-        if (_cameraHeading.LengthSquared() > 0.5f)
-        {
-            // World X maps to tile via (MapOrigin - X) / ChunkSize, so moving +X = decreasing tileX
-            // Heading is in world coords, so negate for tile coords
-            int headDx = _cameraHeading.X > 0.3f ? -1 : _cameraHeading.X < -0.3f ? 1 : 0;
-            int headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
-
-            for (int step = 1; step <= AoiForwardExtra; step++)
-            {
-                int fx = tileX + headDx * (AoiRadius + step);
-                int fy = tileY + headDy * (AoiRadius + step);
-                if (fx >= 0 && fx < 64 && fy >= 0 && fy < 64 && _adapter.TileExists(fx, fy))
-                    desiredTiles.Add((fx, fy));
-                // Also add diagonal neighbors for smoother coverage
-                if (headDx != 0 && headDy != 0)
-                {
-                    int fx2 = tileX + headDx * (AoiRadius + step);
-                    int fy2 = tileY;
-                    if (fx2 >= 0 && fx2 < 64 && fy2 >= 0 && fy2 < 64 && _adapter.TileExists(fx2, fy2))
-                        desiredTiles.Add((fx2, fy2));
-                    fx2 = tileX;
-                    fy2 = tileY + headDy * (AoiRadius + step);
-                    if (fx2 >= 0 && fx2 < 64 && fy2 >= 0 && fy2 < 64 && _adapter.TileExists(fx2, fy2))
-                        desiredTiles.Add((fx2, fy2));
-                }
             }
         }
 
@@ -355,27 +311,13 @@ public class TerrainManager : ISceneRenderer
             OnTileUnloaded?.Invoke(key.Item1, key.Item2);
         }
 
-        // Queue new tiles for background loading, prioritized by direction
-        // Sort: tiles ahead of camera heading load first, tiles behind load last
+        // Queue new tiles for background loading.
         _tilesToLoadScratch.Clear();
         foreach (var (tx, ty) in desiredTiles)
         {
             if (_loadedTiles.ContainsKey((tx, ty)) || !_loadingTiles.TryAdd((tx, ty), 0))
                 continue;
-            // Priority: lower = load first. Tiles in heading direction get lower priority values.
-            float priority = 0f;
-            if (_cameraHeading.LengthSquared() > 0.5f)
-            {
-                // Tile offset from camera in world-ish direction
-                float offX = -(tx - tileX); // negate because tile coords are inverted from world
-                float offY = -(ty - tileY);
-                var off2d = new Vector2(offX, offY);
-                if (off2d.LengthSquared() > 0.01f)
-                {
-                    float dot = Vector2.Dot(Vector2.Normalize(off2d), _cameraHeading);
-                    priority = -dot; // ahead = negative priority = loads first
-                }
-            }
+            float priority = MathF.Abs(tx - tileX) + MathF.Abs(ty - tileY);
             _tilesToLoadScratch.Add((tx, ty, priority));
             _loadingTiles.TryRemove((tx, ty), out _); // will re-add below
         }

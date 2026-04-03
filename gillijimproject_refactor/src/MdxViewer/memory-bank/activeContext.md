@@ -1,5 +1,61 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 02, 2026 - WMO renderer now has renderer-local group visibility and first portal-aware admission
+
+- landed a narrow WMO runtime slice in `src/MdxViewer/Rendering/WmoRenderer.cs`:
+   - per-group runtime visibility now exists separately from user toggle state
+   - exterior groups seed visibility when the camera is outside a WMO shell
+   - when the camera is inside or near an entry, visibility can expand through nearby portal-linked groups instead of brute-force rendering the whole WMO
+   - WMO liquids and doodad defs are now gated by the same visible-group mask when group doodad refs exist
+- purpose:
+   - this is the first real runtime step toward exterior-first and portal-aware WMO behavior instead of only scene-level fog/radius heuristics
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-wmo-portal-groups/` passed on Apr 03, 2026 with existing workspace warnings only
+- important boundary:
+   - no automated tests were added in this slice
+   - no real-data viewer flythrough signoff has been captured yet for portal/group correctness, interior reveal behavior, or skybox/root parity
+
+## Apr 02, 2026 - WMO group-visibility hot path no longer allocates per render call
+
+- followed immediate runtime feedback that the first portal/group slice introduced haphazard long UI freezes
+- landed a narrow hot-path correction in `src/MdxViewer/Rendering/WmoRenderer.cs`:
+   - per-render `bool[]`, `Queue<>`, and `HashSet<>` allocations in group visibility are now replaced with renderer-owned scratch state
+   - portal traversal now uses precomputed `(neighbor group, portal index)` links instead of rescanning portal connectivity for each neighbor test
+   - doodad animation update scratch also now reuses one renderer-owned set instead of allocating per render
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-wmo-portal-groups-hotfix/` passed on Apr 02, 2026 with existing workspace warnings only
+- important boundary:
+   - this is still build validation only
+   - no runtime confirmation has been captured yet that the long hourglass stalls are fully gone
+
+## Apr 02, 2026 - World object visibility now uses a near-hold zone plus camera-forward cone
+
+- followed runtime feedback that objects were unloading and flickering back in even when the camera was very close
+- landed a world-scene policy change in `src/MdxViewer/Terrain/WorldScene.cs`:
+   - near-camera objects now get an explicit hold radius instead of relying only on frustum edge behavior
+   - WMO and MDX far-object admission now uses a camera-forward cone factor instead of only a hard spherical cutoff
+   - pending object load priority is now cone-biased so in-front objects win over behind-camera objects at the same distance
+   - MDX fade now combines distance fade with cone fade so off-axis objects ease out instead of snapping
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-object-cone/` passed on Apr 02, 2026 with existing workspace warnings only
+- important boundary:
+   - this does not yet add literal fade for WMO shell rendering; the current WMO renderer path still renders opaque shell passes without a scene-owned fade contract
+   - no runtime signoff has been captured yet for the new cone tuning on the development map
+
+## Apr 02, 2026 - Terrain AOI streaming dropped the directional lookahead heuristic
+
+- followed user feedback that the AOI behavior itself looked suspicious and may have come from an earlier speculative implementation rather than grounded client behavior
+- compared the active `TerrainManager` against the simpler `VlmTerrainManager` path and removed the extra heading-driven lookahead and direction-priority layer from `src/MdxViewer/Terrain/TerrainManager.cs`
+- active terrain streaming behavior is now:
+   - square AOI around the camera tile
+   - one-ring unload hysteresis
+   - center-first background tile queueing by tile distance instead of movement-direction prediction
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-aoi-simplified/` passed on Apr 02, 2026 with existing workspace warnings only
+- important boundary:
+   - this is a simplification/removal of a speculative heuristic, not proof that AOI churn was the only hitch source
+   - no runtime signoff has been captured yet after the AOI rollback
+
 ## Apr 01, 2026 - Adapted M2 Skeletal Animation Re-enabled In Staged Mode
 
 - landed a staged animation recovery in `src/MdxViewer/Rendering/ModelRenderer.cs`:

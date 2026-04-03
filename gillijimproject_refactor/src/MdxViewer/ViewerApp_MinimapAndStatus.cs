@@ -155,11 +155,21 @@ public partial class ViewerApp
                 float wowX = WoWConstants.MapOrigin - pos.Y;
                 float wowY = WoWConstants.MapOrigin - pos.X;
                 float wowZ = pos.Z;
-                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})";
+                float facingDegrees = GetWorldFacingDegrees(_camera.Yaw);
+                string facingLabel = GetWorldFacingLabel(facingDegrees);
+                string coordText = $"Local: ({pos.X:F0}, {pos.Y:F0}, {pos.Z:F0})  WoW: ({wowX:F0}, {wowY:F0}, {wowZ:F0})  Facing: {facingDegrees:F1}° {facingLabel}";
                 float coordWidth = ImGui.CalcTextSize(coordText).X;
                 float centerX = (io.DisplaySize.X - coordWidth) * 0.5f;
                 ImGui.SameLine(centerX);
                 ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f), coordText);
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Copy Scene##statusbar"))
+                    CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
+
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Log Scene##statusbar"))
+                    LogSceneBookmark(CreateCameraShotPoint("current"));
             }
 
             string fpsText = $"{_currentFps:F0} FPS  {_frameTimeMs:F1} ms";
