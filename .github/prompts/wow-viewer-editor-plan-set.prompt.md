@@ -1,11 +1,11 @@
 ---
-description: "Route wow-viewer editor-transition work to the right implementation prompt and execute one narrow slice now. Use when the ask is PM4 MPRL-assisted terrain conform, saved PM4 object choices, moved-object persistence, map save/write ownership, editor-mode panel presets, or the broader shift from viewer to viewer-editor."
+description: "Route wow-viewer editor-transition work to the right planning prompt. Use when the ask is PM4 MPRL-assisted terrain conform, saved PM4 object choices, moved-object persistence, map save or write ownership, editor-mode panel presets, or the broader shift from viewer to viewer-editor."
 name: "wow-viewer Editor Plan Set"
 argument-hint: "Describe the editor feature family, persistence seam, or UI reorganization slice you want to attack"
 agent: "agent"
 ---
 
-Choose the right detailed prompt for the staged `wow-viewer` editor transition and execute the first viable implementation slice now unless the user explicitly asks for planning-only output.
+Choose the right detailed prompt for the staged `wow-viewer` editor transition.
 
 ## Read First
 
@@ -18,7 +18,7 @@ Choose the right detailed prompt for the staged `wow-viewer` editor transition a
 
 ## Goal
 
-Route the current request to the correct focused prompt in `.github/prompts/`, then implement the first viable narrow slice in this chat so the viewer-to-editor transition lands as validated code changes instead of another planning-only response.
+Route the current request to the correct focused prompt in `.github/prompts/` so the viewer-to-editor transition lands as narrow, validated slices instead of one unstable UI or persistence rewrite.
 
 ## Companion Prompts
 
@@ -38,12 +38,6 @@ Route the current request to the correct focused prompt in `.github/prompts/`, t
 - Use `wow-viewer-pm4-library-implementation.prompt.md` when the ask is specifically the next `Core.PM4` seam needed by editing, such as promoting `MPRL` summaries, terrain-contact helpers, placement solvers, or saved-object evidence contracts into the library.
 - Use `wow-viewer-tool-migration-sequence-plan.prompt.md` when the ask is broader phasing for the editor transition across runtime, tools, save paths, and UI cutover.
 
-## Mandatory Execution Rule
-
-- Unless the user explicitly asks for planning-only output, implement one narrow slice in this chat after routing.
-- Make code changes in workspace files, run applicable validation commands, and report concrete proof.
-- Do not rewrite prompts, instructions, or other workflow docs unless the user explicitly asks for that maintenance task.
-
 ## Deliverables
 
 Return all items:
@@ -54,16 +48,6 @@ Return all items:
 4. what concrete repo and file scope the next slice should include
 5. what should stay out of scope for the next slice
 6. what proof level is realistic for that slice
-7. whether the chosen prompt should produce a planning artifact or an implementation-ready build plan
-8. the exact next action the implementing chat should take after reading the chosen prompt
-9. exact files changed for the implemented slice
-10. exact validation commands run and their outcome
-
-## Output Rule
-
-- Do not stop at naming the next prompt.
-- The answer must hand off a buildable next step with exact repo scope, explicit deferrals, and the proof target for the next slice.
-- If the chosen prompt is itself a planning prompt, say that it must produce an implementation-ready slice plan rather than generic architecture commentary.
 
 ## First Output
 

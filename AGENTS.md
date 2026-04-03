@@ -39,14 +39,14 @@ This file is the Codex-facing conversion of the workspace memory-bank rules, `.g
 
 ## Prompt Registry
 
-- Use `.codex/prompts/wow-viewer-tool-suite-plan-set.md` to route broader `wow-viewer` asks and execute one narrow implementation slice now (unless user asks planning-only).
-- Use `.codex/prompts/wow-viewer-editor-plan-set.md` to route broader editor-transition asks and execute one narrow implementation slice now (unless user asks planning-only), including PM4 `MPRL`-assisted terrain conform, object-save ownership, map persistence, and viewer-vs-editor workspace routing.
-- Use `.codex/prompts/wow-viewer-map-editing-foundation-plan.md` to implement the first true terrain/object editing transaction or dirty-map/save pipeline slice.
-- Use `.codex/prompts/wow-viewer-editor-ui-surface-plan.md` to implement viewer/editor workspace presets, editor task clustering, and panel reorganization slices.
+- Use `.codex/prompts/wow-viewer-tool-suite-plan-set.md` to route broader `wow-viewer` planning asks to the right focused prompt.
+- Use `.codex/prompts/wow-viewer-editor-plan-set.md` for broader editor-transition planning, including PM4 `MPRL`-assisted terrain conform, object-save ownership, map persistence, and viewer-vs-editor workspace routing.
+- Use `.codex/prompts/wow-viewer-map-editing-foundation-plan.md` for planning the first true terrain or object editing or dirty-map or save pipeline slice.
+- Use `.codex/prompts/wow-viewer-editor-ui-surface-plan.md` for planning viewer and editor workspace presets, editor task clustering, and panel reorganization.
 - Use `.codex/prompts/wow-viewer-pm4-library-implementation.md` for the next narrow `Core.PM4` implementation slice.
 - Use `.codex/prompts/wow-viewer-shared-io-implementation.md` for the next narrow shared `Core` or `Core.IO` format slice.
-- Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` to execute the next narrow `WorldScene` split slice now (unless user asks planning-only), including negative asset lookup suppression, explicit terrain/WMO/MDX/overlay runtime service extraction, and world-runtime cutover.
-- Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` to execute the next narrow M2 runtime slice now (unless user asks planning-only), including `%02d.skin` handling, section classification, material/effect routing, animation/lighting state, scene batching, and consumer cutover.
+- Use `.codex/prompts/wow-viewer-world-runtime-plan-set.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
+- Use `.codex/prompts/wow-viewer-m2-runtime-plan-set.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
 - Use `.github/prompts/m2-rendering-investigation.prompt.md` for diagnosing invisible M2 models, Ghidra-based native-client M2 render investigation on a live 3.3.5.12340 sandbox, adapter vertex/index validation against native ground truth, or renderer parity fixes for M2-family assets in `MdxViewer`.
 - Use `.codex/prompts/m2-cross-build-native-investigation.md` for cross-build native M2 behavior recovery across multiple client branches (for example 3.3.5 through 6.x), including per-build anchor mapping, runtime breakpoint validation, and compatibility-matrix output before implementation.
 
