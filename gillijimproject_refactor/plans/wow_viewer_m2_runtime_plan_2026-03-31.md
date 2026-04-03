@@ -13,7 +13,16 @@
 - current proof floor:
   - native 3.3.5 OS X and 3.3.5 PTR OS X PowerPC behavior-recovery notes now live in `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`
   - the active `MdxViewer` path has enough real regressions isolated to tell us what should not remain the long-term design owner
-  - `wow-viewer` still has no first-class M2-owned library/runtime area yet, which is now the main architectural gap
+  - first M2 ownership seam is already landed in `wow-viewer` (`Core/M2`, `Core.IO/M2`, `Core.Runtime/M2`, `m2 inspect`, and foundation tests)
+  - the main architectural gap is now slice completion after foundation: section/material routing, animation/light/effect runtime, scene submission/batching, and consumer cutover
+
+## Apr 03, 2026 Status Snapshot
+
+- slice 01 (`MD20` and skin runtime foundation): landed
+- slice 02 (section classification and material routing): open
+- slice 03 (animation, lighting, and effect runtime): open
+- slice 04 (scene submission and batching): open
+- slice 05 (consumer cutover and parity harness): open
 
 ## Why This Plan Exists
 

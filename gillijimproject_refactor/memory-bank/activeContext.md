@@ -13,6 +13,9 @@
 	- use the editor plan set for broad editor-transition asks
 	- use the map-editing foundation prompt for PM4 `MPRL` terrain conform, saved object choices, moved-object persistence, dirty-map state, and map-save planning
 	- use the editor UI surface prompt for viewer/editor workspace switching and editor task clustering
+- prompt output rule:
+	- these editor prompts should now emit implementation-ready build plans with exact slice order, repo or file scope, validation, and explicit next actions instead of stopping at architecture commentary
+	- this now applies across the whole editor-transition companion set: map-editing foundation, editor UI surface, CLI or GUI surface, and tool-migration sequence
 - important boundary:
 	- this is workflow and continuity structure only
 	- no wow-viewer editor runtime, map save pipeline, or UI reorganization code is landed yet

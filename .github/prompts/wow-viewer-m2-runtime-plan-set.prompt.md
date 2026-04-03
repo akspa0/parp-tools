@@ -5,7 +5,7 @@ argument-hint: "Describe the M2 runtime seam, renderer problem, or migration sli
 agent: "agent"
 ---
 
-Choose the right detailed prompt for the staged `wow-viewer` M2 runtime and renderer recovery path.
+Choose the right detailed prompt for the staged `wow-viewer` M2 runtime and renderer recovery path and implement one narrow slice now unless the user explicitly asks for planning-only output.
 
 ## Read First
 
@@ -18,7 +18,13 @@ Choose the right detailed prompt for the staged `wow-viewer` M2 runtime and rend
 
 ## Goal
 
-Route the current request to the correct ordered prompt in `.github/prompts/wow-viewer-m2-runtime/` so M2 ownership moves into `wow-viewer` as a sequence of narrow, validated slices instead of another run of mixed parser/renderer/viewer hotfixes.
+Route the current request to the correct ordered prompt in `.github/prompts/wow-viewer-m2-runtime/`, then execute one narrow slice so M2 ownership moves as validated code instead of another planning-only cycle.
+
+## Mandatory Execution Rule
+
+- Unless the user explicitly asks for planning-only output, implement one narrow slice in this chat after routing.
+- Run applicable validation commands and report exact changed files.
+- Do not rewrite prompts/instructions/plans unless explicitly requested.
 
 ## Ordered Prompts
 
@@ -52,6 +58,8 @@ Return all items:
 5. what should stay out of scope for the next slice
 6. what proof level is realistic for that slice
 7. which M2 terms in the slice are native-client/research names versus raw format names
+8. exact files changed in this chat for the implemented slice
+9. exact validation commands run in this chat
 
 ## First Output
 

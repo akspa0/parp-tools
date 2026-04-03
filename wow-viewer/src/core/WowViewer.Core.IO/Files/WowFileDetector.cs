@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using WowViewer.Core.Chunks;
 using WowViewer.Core.Files;
 using WowViewer.Core.IO.Chunked;
@@ -152,7 +153,8 @@ public static class WowFileDetector
         if (chunks.Count == 0)
             return null;
 
-        if (chunks[0].Header.Id is not (var id) || (id != MapChunkIds.Mver && id != MapChunkIds.Ahdr))
+        FourCC id = chunks[0].Header.Id;
+        if (id != MapChunkIds.Mver && id != MapChunkIds.Ahdr)
             return null;
 
         return ChunkedFileReader.TryReadUInt32(stream, chunks[0]);

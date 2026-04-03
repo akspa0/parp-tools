@@ -5,7 +5,7 @@ argument-hint: "Describe the WorldScene split seam, runtime service slice, or pe
 agent: "codex"
 ---
 
-Choose the right detailed prompt for the staged `WorldScene` to `wow-viewer` world-runtime split.
+Choose the right detailed prompt for the staged `WorldScene` to `wow-viewer` world-runtime split and implement one narrow slice now unless the user explicitly asks for planning-only output.
 
 ## Read First
 
@@ -18,7 +18,13 @@ Choose the right detailed prompt for the staged `WorldScene` to `wow-viewer` wor
 
 ## Goal
 
-Route the current request to the correct ordered prompt in `.codex/prompts/wow-viewer-world-runtime/` so the `WorldScene` split happens as a sequence of narrow, validated slices instead of another monolithic renderer rewrite.
+Route the current request to the correct ordered prompt in `.codex/prompts/wow-viewer-world-runtime/`, then execute one narrow slice so the `WorldScene` split lands as code changes instead of another planning-only cycle.
+
+## Mandatory Execution Rule
+
+- Unless the user explicitly asks for planning-only output, implement one narrow slice in this chat after routing.
+- Run applicable validation commands and report exact changed files.
+- Do not rewrite prompts/instructions/plans unless explicitly requested.
 
 ## Ordered Prompts
 
@@ -46,6 +52,8 @@ Return all items:
 4. what concrete repo and file scope the next slice should include
 5. what should stay out of scope for the next slice
 6. what proof level is realistic for that slice
+7. exact files changed in this chat for the implemented slice
+8. exact validation commands run in this chat
 
 ## First Output
 

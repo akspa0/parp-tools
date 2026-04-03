@@ -7,6 +7,15 @@
 - current proof floor:
   - renderer telemetry contracts and optimization-hint logic already live in `wow-viewer/src/core/WowViewer.Core.Runtime/World`
   - `MdxViewer` currently consumes that seam successfully
+  - slice 01 (negative lookup suppression) has meaningful compatibility-path progress in `MdxViewer`, but the full runtime extraction sequence is still open
+
+## Apr 03, 2026 Status Snapshot
+
+- slice 01 (negative asset lookup suppression): partial
+- slice 02 (visible set runtime extraction): open
+- slice 03 (world pass service extraction): open
+- slice 04 (WorldScene host thinning): open
+- slice 05 (wow-viewer app runtime consumer): open
 
 ## Why This Plan Exists
 
@@ -27,6 +36,10 @@
 ## Ordered Slices
 
 ### Slice 01 - Negative Asset Lookup Suppression
+
+- status update:
+  - compatibility-path work has already reduced repeated miss churn in the active viewer path
+  - this slice is still only partial relative to the full plan because the seam is not yet completed as a reusable runtime-owned service extraction in `wow-viewer`
 
 - target problem:
   - repeated `.skin` candidate searches

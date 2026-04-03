@@ -4,6 +4,11 @@ This matrix tracks the full-ownership gap between the active `MdxViewer` format 
 
 Use it as the working backlog for the Mar 28, 2026 full-format ownership reset.
 
+## Apr 03, 2026 Refresh
+
+- `M2` is no longer `none`; foundation ownership is landed in `wow-viewer` (`Core/M2`, `Core.IO/M2`, `Core.Runtime/M2`, inspect surface, and tests).
+- This matrix still tracks deep ownership and consumer cutover gaps, so rows remain conservative where behavior is summary-only or contract-only.
+
 ## Status Legend
 
 - `none`: no real owned seam yet
@@ -26,7 +31,7 @@ Use it as the working backlog for the Mar 28, 2026 full-format ownership reset.
 | `WMO` group | runtime group rendering and conversion depend on deep payloads | `partial` | standalone group ownership, liquid detail, visibility/topology behavior | shared standalone group reader/detail contracts consumed outside inspect |
 | `WMO` embedded groups | Alpha monolithic roots already partially surfaced | `partial` | full parity with standalone group behavior and converter/runtime consumers | reuse one owned group payload model across embedded and standalone paths |
 | `MDX` | full model parse, animation, bones, geosets, materials, emitters | `summary` | deep chunk parsing, animation tracks, runtime model contracts, write/export seams | shared deep `MDX` reader past `VERS`/`MODL`/`TEXS`/`MTLS` |
-| `M2` | active viewer depends on Warcraft.NET adapter behavior | `none` | first-party parsing, runtime contracts, build/version routing, texture/material ownership | shared `M2` inspect reader and core chunk contracts |
+| `M2` | active viewer depends on Warcraft.NET adapter behavior | `partial` | complete slices after foundation: section/material routing, animation/effect runtime, submission/batching, and consumer cutover | move from inspect/foundation ownership to full runtime/service ownership used by real consumers |
 | `BLP` | active viewer depends on pixel decode and mip use | `summary` | first-party palette/JPEG/DXT decode, mip write, export parity | shared decode service for `BLP1`/`BLP2` pixel paths |
 | `PM4` | active overlay/alignment/correlation logic still partly viewer-local | `strong` | remaining semantic extraction, restore-facing services, final consumer cutover | continue `Core.PM4` extraction until `WorldScene` no longer owns active semantics |
 | `DBC` / `DB2` | active viewer and converter consume a narrow subset | `partial` | breadth, schema-backed ownership, runtime service consolidation | explicit inventory of actively consumed tables and first-party access seams |

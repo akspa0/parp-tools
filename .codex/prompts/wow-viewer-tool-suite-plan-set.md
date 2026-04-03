@@ -1,11 +1,11 @@
 ---
-description: "Route wow-viewer migration work to the right detailed Codex prompt. Use when the task is choosing between PM4 implementation for inspect or audit or linkage or MSCN or unknowns work, shared-I/O implementation for ADT or WDT or WMO or BLP or DBC families, bootstrap, shared-library ownership planning, tool inventory, CLI or GUI parity, or migration sequencing."
+description: "Route wow-viewer migration work to the right detailed Codex prompt and execute one narrow implementation slice now. Use when choosing between PM4/shared-I/O/world-runtime/editor/tool-cutover seams."
 name: "wow-viewer Tool Suite Plan Set"
 argument-hint: "Describe the tool family, file type, migration problem, or planning slice you want to attack"
 agent: "codex"
 ---
 
-Choose the right detailed planning or implementation prompt for the `wow-viewer` tool-suite refactor.
+Choose the right detailed prompt for the `wow-viewer` tool-suite refactor and implement one narrow slice now unless the user explicitly asks for planning-only output.
 
 ## Read First
 
@@ -16,7 +16,13 @@ Choose the right detailed planning or implementation prompt for the `wow-viewer`
 
 ## Goal
 
-Route the current request to the correct focused prompt in `.codex/prompts/` so the planning work stays specific, detailed, and tied to the actual tool/library mess in `parp-tools`.
+Route the current request to the correct focused prompt in `.codex/prompts/`, then execute one narrow implementation slice so progress lands as code rather than repeated planning responses.
+
+## Mandatory Execution Rule
+
+- Unless the user explicitly asks for planning-only output, implement one narrow slice in this chat after routing.
+- Run applicable validation commands and report exact changed files.
+- Do not rewrite prompts/instructions/plans unless the user explicitly asks for workflow maintenance.
 
 ## Companion Prompts
 
@@ -55,11 +61,14 @@ Return all items:
 3. which companion prompts should follow after it
 4. what concrete repo/tool/file-type scope the next prompt should include
 5. what not to waste time on yet
+6. exact files changed in this chat for the implemented slice
+7. exact validation commands run in this chat
 
 ## First Output
 
 Start with:
 
-1. the exact planning problem you think the user is actually trying to solve
+1. the exact implementation problem you think the user is actually trying to solve
 2. the single best next prompt from the set above
 3. the concrete migration/tool scope that prompt should cover first
+4. the narrow slice you will implement immediately in this chat

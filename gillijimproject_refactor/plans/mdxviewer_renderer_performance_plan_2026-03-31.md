@@ -10,6 +10,16 @@ Make camera movement on real world maps usable again by reducing per-frame draw-
 
 This plan is intentionally about the active renderer in `WorldScene`, not a speculative future engine. The first job is to make the existing world path collect visibility once, own explicit render layers, and submit less redundant work every frame.
 
+## Apr 03, 2026 Status Snapshot
+
+- phase 1 (frame instrumentation and stats): landed
+- phase 2 (explicit world render-frame contract): partial
+- phase 3 (MDX batching by compatible state): open
+- phase 4 (WMO scene/pass boundary extraction): open
+- phase 5 (late-pass overlay isolation): open
+- phase 6 (shared light contract completion): partial/open follow-up
+- phase 7 (`WorldSafeLocs` graveyard overlay): open
+
 ## Current State
 
 The current hot path is still centered in `src/MdxViewer/Terrain/WorldScene.cs`:
@@ -210,16 +220,16 @@ Exit condition:
 
 - graveyards are their own optional overlay and do not add hidden per-frame cost when disabled
 
-## Suggested First Implementation Slice
+## Updated Next Implementation Slice
 
-The first actual code slice should be `Phase 1` plus the smallest viable `Phase 2` setup:
+The next practical slice should focus on `Phase 3` with minimal blast radius:
 
-- add frame counters and timers
-- introduce an explicit frame data contract in `WorldScene`
-- move existing visible WMO/MDX scratch ownership under that contract
-- leave renderer internals mostly alone in that first landing
+- keep one visibility pass
+- batch compatible opaque MDX submission by renderer/state requirements
+- limit transparent sorting to the subset that actually needs sorting
+- preserve conservative adapted-M2 compatibility behavior while reducing submission churn
 
-That is the lowest-risk path that gives immediate measurement value and sets up the batching/culling work the user actually asked for.
+That is the fastest way to convert the already-landed instrumentation/frame contract work into measurable frame-time wins.
 
 ## Validation Rules
 

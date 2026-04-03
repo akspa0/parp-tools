@@ -31,9 +31,19 @@
 - `wow-viewer-editor-plan-set`:
   - route broad editor-transition asks to the right next focused prompt
 - `wow-viewer-map-editing-foundation-plan`:
-  - plan the first real terrain or object editing or dirty-map or save pipeline boundary
+  - plan the first real terrain or object editing or dirty-map or save pipeline boundary as an implementation-ready build plan with exact slice order, file scope, and validation
 - `wow-viewer-editor-ui-surface-plan`:
-  - plan viewer vs editor workspaces, panel presets, and editor affordances
+  - plan viewer vs editor workspaces, panel presets, and editor affordances as an implementation-ready UI build plan with exact slice scope, dependencies, and validation
+- `wow-viewer-cli-gui-surface-plan`:
+  - plan dual-surface workflows as an implementation-ready build plan with exact slice scope, shared-service ownership, and proof targets
+- `wow-viewer-tool-migration-sequence-plan`:
+  - plan the migration order as an implementation-ready phase queue with the exact first slice to build now and its validation path
+
+## Prompt output rule
+
+- these editor prompts are not meant to stop at architecture commentary
+- their outputs should be the implementation plans the next chat can build from directly
+- every plan response should name the first slice to implement now, the exact repo or file scope, the proof target, and the immediate follow-up prompt or implementation seam
 
 ## First editor problem buckets
 

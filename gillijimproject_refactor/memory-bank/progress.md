@@ -1,5 +1,22 @@
 # Progress
 
+### Apr 03, 2026 - Plan-state audit and implementation queue normalization
+
+- audited active and prompt-era planning docs under `gillijimproject_refactor/plans` to separate landed work from still-open slices
+- added `gillijimproject_refactor/plans/plan_audit_2026-04-03.md` as the continuity snapshot for:
+	- implemented-but-still-worded-as-pending items
+	- truly open implementation gaps
+	- stale/superseded prompt-era docs
+- updated active plan statuses to reduce queue confusion:
+	- `wow_viewer_m2_runtime_plan_2026-03-31.md` now explicitly treats slice 01 as landed and slices 02-05 as open
+	- `wow_viewer_world_runtime_service_plan_2026-03-31.md` now marks slice 01 as partial and slices 02-05 as open
+	- `mdxviewer_renderer_performance_plan_2026-03-31.md` now includes an Apr 03 status snapshot and an updated next-slice focus on phase 3
+	- `wow_viewer_format_parity_matrix_2026-03-28.md` now reflects M2 foundation ownership as `partial` instead of `none`
+- added `gillijimproject_refactor/plans/implementation_queue_2026-04-03.md` as the numbered chat-by-chat execution queue for upcoming implementation sessions
+- proof boundary:
+	- this slice is documentation/continuity maintenance only
+	- no new runtime or library behavior was implemented in this audit pass
+
 ### Apr 03, 2026 - wow-viewer editor-transition prompts and continuity plan landed
 
 - added a dedicated planning surface for the user’s stated shift from viewer-first tooling toward a real viewer-editor:
@@ -14,6 +31,10 @@
 	- `.github/copilot-instructions.md`
 	- `AGENTS.md`
 	- `wow-viewer/README.md`
+- follow-up correction on Apr 03, 2026:
+	- the editor plan set and map-editing foundation prompt are now explicitly worded to produce implementation-ready build plans with exact slice scope, validation commands, and immediate next actions rather than generic planning commentary
+	- the editor UI surface prompt now follows the same rule, so workspace or panel planning should also return an implementation-ready UI slice with explicit dependencies and proof targets
+	- the remaining companion prompts for CLI or GUI dual-surface planning and tool-migration sequencing now follow the same rule, so the full editor-transition prompt family behaves like a build queue rather than an architecture essay
 - current proof boundary:
 	- this slice is workflow-asset and continuity maintenance only
 	- no editor runtime, map persistence, or UI-mode implementation has landed yet
