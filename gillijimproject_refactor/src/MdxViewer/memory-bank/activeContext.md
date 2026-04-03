@@ -56,6 +56,21 @@
    - this is a simplification/removal of a speculative heuristic, not proof that AOI churn was the only hitch source
    - no runtime signoff has been captured yet after the AOI rollback
 
+## Apr 02, 2026 - Adapted M2 material ownership rolled back to conservative per-section UV0 mode again
+
+- followed fresh runtime evidence that some tree-family adapted M2s still showed random invisible trunk geometry even after the recent streaming work improved frame rate
+- current code had drifted away from the earlier conservative compatibility path in `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs`:
+   - multiple batches per skin section were being materialized again
+   - texture coord lookup ids were being honored again instead of pinning adapted layers to UV0
+- landed a narrow rollback for the adapted runtime path:
+   - first valid batch now locks each skin section
+   - adapted runtime material coord selection is forced back to UV0
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -p:OutDir=i:/parp/parp-tools/output/tmp/mdxviewer-tree-trunk-fix/` passed on Apr 02, 2026 with existing workspace warnings only
+- important boundary:
+   - this is a compatibility-first rollback, not proof that full M2 material parity is solved
+   - no 3.3.5 real-asset adapter probe or live runtime signoff has been captured yet for `SholazarHugeCanopy_Tree02.M2`
+
 ## Apr 01, 2026 - Adapted M2 Skeletal Animation Re-enabled In Staged Mode
 
 - landed a staged animation recovery in `src/MdxViewer/Rendering/ModelRenderer.cs`:

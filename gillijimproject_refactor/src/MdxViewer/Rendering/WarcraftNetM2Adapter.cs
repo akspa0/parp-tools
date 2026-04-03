@@ -404,6 +404,7 @@ internal static class WarcraftNetM2Adapter
     {
         var sectionMaterialIds = Enumerable.Repeat(-1, skin.Submeshes.Count).ToArray();
         var batchMaterialIdsBySection = new Dictionary<int, List<int>>();
+        var sectionLocked = new bool[skin.Submeshes.Count];
         string modelName = string.IsNullOrWhiteSpace(model.Name) ? "<unnamed>" : model.Name;
 
         foreach (SkinTextureUnitData batch in skin.TextureUnits
@@ -412,6 +413,11 @@ internal static class WarcraftNetM2Adapter
             .ThenBy(static textureUnit => textureUnit.PriorityPlane))
         {
             if (batch.SkinSectionIndex < 0 || batch.SkinSectionIndex >= sectionMaterialIds.Length)
+                continue;
+
+            // Keep adapted M2 world ownership conservative: use the first valid batch family per section.
+            // Broader multi-batch reconstruction regressed trees into missing or foliage-routed trunk sections.
+            if (sectionLocked[batch.SkinSectionIndex])
                 continue;
 
             ushort renderFlagBits = 0;
@@ -475,6 +481,8 @@ internal static class WarcraftNetM2Adapter
             ViewerLog.Debug(
                 ViewerLog.Category.Mdx,
                 $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} layerCount={material.Layers.Count}");
+
+            sectionLocked[batch.SkinSectionIndex] = true;
         }
 
         return new MaterialAssignmentMap(sectionMaterialIds, batchMaterialIdsBySection);
@@ -495,13 +503,8 @@ internal static class WarcraftNetM2Adapter
 
     private static int ResolveTextureCoordId(ParsedModelData model, int lookupIndex)
     {
-        if (lookupIndex >= 0 && lookupIndex < model.TextureCoordLookup.Count)
-        {
-            int coordId = model.TextureCoordLookup[lookupIndex].CoordId;
-            if (coordId >= 0)
-                return coordId;
-        }
-
+        // Keep the adapted runtime on conservative UV0 ownership for now.
+        // Richer coord-id routing regressed foliage-family assets into broken trunk/detail mapping.
         return 0;
     }
 
