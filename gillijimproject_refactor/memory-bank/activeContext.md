@@ -2,6 +2,21 @@
 
 # Active Context
 
+## Apr 03, 2026 - wow-viewer editor-transition workflow surface is now explicit
+
+- new workflow assets now exist for the viewer-to-editor push:
+	- `.github/prompts/wow-viewer-editor-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md`
+	- `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md`
+	- matching `.codex/prompts/` mirrors plus the new continuity file `gillijimproject_refactor/plans/wow_viewer_editor_plan_2026-04-03.md`
+- immediate routing intent:
+	- use the editor plan set for broad editor-transition asks
+	- use the map-editing foundation prompt for PM4 `MPRL` terrain conform, saved object choices, moved-object persistence, dirty-map state, and map-save planning
+	- use the editor UI surface prompt for viewer/editor workspace switching and editor task clustering
+- important boundary:
+	- this is workflow and continuity structure only
+	- no wow-viewer editor runtime, map save pipeline, or UI reorganization code is landed yet
+
 ## Apr 03, 2026 - `wow-viewer` now emits per-build ADT UniqueId reports for timeline work
 
 - `WowViewer.Tool.Inspect` now supports `map uniqueid-report --input <file.wdt|file.adt|directory> [--build <label>] [--output <report.json>]`

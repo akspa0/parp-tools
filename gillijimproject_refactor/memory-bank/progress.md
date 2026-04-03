@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 03, 2026 - wow-viewer editor-transition prompts and continuity plan landed
+
+- added a dedicated planning surface for the user’s stated shift from viewer-first tooling toward a real viewer-editor:
+	- `.github/prompts/wow-viewer-editor-plan-set.prompt.md`
+	- `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md`
+	- `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md`
+	- matching `.codex/prompts/` mirrors
+	- `gillijimproject_refactor/plans/wow_viewer_editor_plan_2026-04-03.md`
+- wired the new prompt family into the existing workflow discovery surfaces:
+	- `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`
+	- `.codex/prompts/wow-viewer-tool-suite-plan-set.md`
+	- `.github/copilot-instructions.md`
+	- `AGENTS.md`
+	- `wow-viewer/README.md`
+- current proof boundary:
+	- this slice is workflow-asset and continuity maintenance only
+	- no editor runtime, map persistence, or UI-mode implementation has landed yet
+
 ### Apr 03, 2026 - MdxViewer adapted M2 material stacks and WDL far-terrain spacing were corrected in build-verified slices
 
 - narrowed two live-runtime regressions in the active viewer path:
