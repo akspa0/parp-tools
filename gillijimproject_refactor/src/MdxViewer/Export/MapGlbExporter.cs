@@ -132,11 +132,12 @@ public static class MapGlbExporter
 
     private static Matrix4x4 ConvertTransformZupToYup(Matrix4x4 zupTransform)
     {
-        // If vertices are converted Z-up → Y-up at mesh build time, transforms must be conjugated:
-        // T_yup = C * T_zup * C^{-1}.
+        // Matrix4x4/vector usage here follows System.Numerics row-vector semantics, so after
+        // converting mesh vertices with v_yup = v_zup * C, the matching placement transform is:
+        // T_yup = C^{-1} * T_zup * C.
         Matrix4x4 c = ZupToYupMatrix;
         Matrix4x4 cInv = Matrix4x4.Transpose(c);
-        return c * zupTransform * cInv;
+        return cInv * zupTransform * c;
     }
 
     private static MeshBuilder<VertexPositionNormal, VertexTexture1, VertexEmpty>? BuildTerrainTileMesh(

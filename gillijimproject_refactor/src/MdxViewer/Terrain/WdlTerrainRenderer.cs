@@ -63,7 +63,7 @@ public class WdlTerrainRenderer : IDisposable
         {
             for (int tileX = 0; tileX < 64; tileX++)
             {
-                int idx = tileY * 64 + tileX;
+                int idx = GetTileIndex(tileX, tileY);
                 var tile = wdlData.Tiles[idx];
                 if (tile?.HasData != true) continue;
 
@@ -85,7 +85,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void HideTile(int tileX, int tileY)
     {
-        _hiddenTiles.Add(tileY * 64 + tileX);
+        _hiddenTiles.Add(GetTileIndex(tileX, tileY));
     }
 
     /// <summary>
@@ -93,7 +93,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void ShowTile(int tileX, int tileY)
     {
-        _hiddenTiles.Remove(tileY * 64 + tileX);
+        _hiddenTiles.Remove(GetTileIndex(tileX, tileY));
     }
 
     /// <summary>
@@ -141,6 +141,8 @@ public class WdlTerrainRenderer : IDisposable
     }
 
     // ── Mesh building ────────────────────────────────────────────────────
+
+    private static int GetTileIndex(int tileX, int tileY) => tileX * 64 + tileY;
 
     private unsafe WdlTileMesh? BuildTileMesh(WdlParser.WdlTile tile, int tileX, int tileY)
     {

@@ -174,7 +174,7 @@ Console.WriteLine($"Parsed WDL: {tileCount} tiles with data");
         {
             for (int x = 0; x < 64; x++)
             {
-                uint offset = maofOffsets[y * 64 + x];
+                uint offset = maofOffsets[x * 64 + y];
                 if (offset == 0) continue;
 
                 var tile = new WdlToAdtGenerator.WdlTileData();

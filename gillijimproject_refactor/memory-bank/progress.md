@@ -1,5 +1,47 @@
 # Progress
 
+### Apr 04, 2026 - Scene picking now uses the same docked viewport projection as rendering, and WDL tile lookup is X-major again
+
+- fixed the active `MdxViewer` selection-offset regression in `src/MdxViewer/ViewerApp.cs`:
+	- the live picker and hover tooltip were already normalizing mouse coordinates against the docked scene viewport rect
+	- the 3D scene itself was still being rendered with full-window viewport sizing and projection aspect, which let the mouse ray, tooltip, bounding boxes, and visible objects drift apart when docked side panels changed the usable scene width
+	- the render path now applies the same docked scene viewport rectangle to OpenGL viewport setup and projection aspect, then restores the full framebuffer viewport before UI rendering
+- fixed WDL tile lookup drift across active consumers:
+	- `src/MdxViewer/Terrain/WdlTerrainRenderer.cs` now reads and hides WDL tiles with X-major indexing (`tileX * 64 + tileY`) instead of Y-major indexing
+	- `WoWRollback/WoWRollback.PM4Module/Services/WdlService.cs` and `WoWRollback/WoWRollback.PM4Module/WdlToAdtProgram.cs` now use the same X-major MAOF lookup, which matches the rest of the map tile codepath and avoids swapped-tile WDL terrain generation
+- validation completed:
+	- file diagnostics were clean for the touched files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live runtime signoff was captured yet for the corrected click-selection alignment or the WDL terrain/generation output
+
+### Apr 04, 2026 - Transparent MDX geosets now sort by camera depth within each priority plane
+
+- fixed the active `MdxViewer` MDX material-order issue in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+	- transparent geosets were only being ordered by material priority plane and static geoset index during the transparent pass
+	- that left some translucent MDX surfaces rendering as if they were behind their own model or nearby objects when multiple transparent geosets shared the same priority plane
+	- the renderer now caches a model-space bounds center per geoset and sorts transparent geosets back-to-front by world-space camera distance within each priority plane instead of falling back to raw geoset index
+- validation completed:
+	- file diagnostics were clean for `src/MdxViewer/Rendering/ModelRenderer.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live runtime validation was captured yet for the affected MDX materials, so viewer signoff is still pending
+
+### Apr 04, 2026 - Map GLB tile export now converts placement transforms into glTF Y-up space correctly
+
+- fixed the active `MdxViewer` terrain-plus-objects GLB export mismatch in `src/MdxViewer/Export/MapGlbExporter.cs`:
+	- the exporter was conjugating object placement transforms with the Z-up to Y-up basis in the wrong order for `System.Numerics` row-vector semantics
+	- terrain vertices were already converted correctly, but placement matrices were landing in the wrong Y-up space, which made exported objects appear rotated or mirrored relative to the tile terrain
+	- `ConvertTransformZupToYup(...)` now uses `C^{-1} * T_zup * C`, matching the direct `(X,Y,Z) -> (X,Z,-Y)` position conversion already used by the mesh builders
+- validation completed:
+	- file diagnostics were clean for `src/MdxViewer/Export/MapGlbExporter.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no real-data viewer export re-run was performed in this session, so runtime/export signoff is still pending
+
 ### Apr 04, 2026 - MDX clicked-object selection now follows hovered identity, and terrain worlds prewarm streamed object assets
 
 - fixed the remaining clicked-object mismatch in the live viewer path for dense MDX scenes:

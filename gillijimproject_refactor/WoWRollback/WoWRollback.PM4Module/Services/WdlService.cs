@@ -44,7 +44,7 @@ public class WdlService
             if (head == "MAOF")
             {
                 // Area Offsets - 64x64 array of uints
-                // Indices are [y * 64 + x]
+                // Indices are X-major: [tileX * 64 + tileY]
                 if (size != 64 * 64 * 4) 
                 {
                     // Invalid MAOF size?
@@ -62,7 +62,7 @@ public class WdlService
 
         if (maofOffsets == null) return null;
 
-        int index = tileY * 64 + tileX;
+        int index = tileX * 64 + tileY;
         uint tileOffset = maofOffsets[index];
 
         if (tileOffset == 0) return null;

@@ -744,6 +744,19 @@ uniform vec3 uCameraPos;
 
 out vec4 FragColor;
 
+float ComputeGridAxisMask(float worldCoord, float spacing, float normalizedHalfWidth) {
+    float gridCoord = worldCoord / spacing;
+    float centeredFrac = abs(fract(gridCoord - 0.5) - 0.5);
+    float aa = max(fwidth(gridCoord) * 1.5, 0.0001);
+    return 1.0 - smoothstep(normalizedHalfWidth, normalizedHalfWidth + aa, centeredFrac);
+}
+
+float ComputeGridMask(vec2 worldPos, float spacing, float normalizedHalfWidth) {
+    float xMask = ComputeGridAxisMask(worldPos.x, spacing, normalizedHalfWidth);
+    float yMask = ComputeGridAxisMask(worldPos.y, spacing, normalizedHalfWidth);
+    return clamp(max(xMask, yMask), 0.0, 1.0);
+}
+
 void main() {
     // Diffuse texture: use WORLD-SPACE UVs for seamless tiling across chunks.
     // WoW terrain textures tile ~8 times per chunk (chunk = ChunkSize/16 = 33.333 units).
@@ -823,22 +836,12 @@ void main() {
 
     // Grid overlays (drawn on base layer only to avoid double-drawing)
     if (uIsBaseLayer == 1) {
-        // Chunk grid: chunk size = 33.333 units
         if (uShowChunkGrid == 1) {
-            float chunkSize = 33.333;
-            vec2 chunkFrac = fract(vWorldPos.xy / chunkSize);
-            float chunkLine = step(chunkFrac.x, 0.005) + step(1.0 - chunkFrac.x, 0.005)
-                            + step(chunkFrac.y, 0.005) + step(1.0 - chunkFrac.y, 0.005);
-            chunkLine = clamp(chunkLine, 0.0, 1.0);
+            float chunkLine = ComputeGridMask(vWorldPos.xy, 33.333, 0.012);
             finalColor = mix(finalColor, vec3(0.0, 1.0, 1.0), chunkLine * 0.6);
         }
-        // Tile grid: tile size = 533.333 units
         if (uShowTileGrid == 1) {
-            float tileSize = 533.333;
-            vec2 tileFrac = fract(vWorldPos.xy / tileSize);
-            float tileLine = step(tileFrac.x, 0.001) + step(1.0 - tileFrac.x, 0.001)
-                           + step(tileFrac.y, 0.001) + step(1.0 - tileFrac.y, 0.001);
-            tileLine = clamp(tileLine, 0.0, 1.0);
+            float tileLine = ComputeGridMask(vWorldPos.xy, 533.333, 0.0035);
             finalColor = mix(finalColor, vec3(1.0, 0.3, 0.0), tileLine * 0.8);
         }
     }

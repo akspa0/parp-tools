@@ -7110,11 +7110,23 @@ public class WorldScene : ISceneRenderer
                 _gl.Enable(EnableCap.DepthTest);
                 _gl.DepthFunc(DepthFunction.Lequal);
                 _gl.DepthMask(false);
+                _bbRenderer.BeginBatch();
+
+                float selectedBoundsTime = (float)(Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency);
+                Vector3 selectedBoundsInnerColor = new(1.00f, 1.00f, 1.00f);
+                Vector3 selectedBoundsAccentA = new(1.00f, 0.45f, 0.05f);
+                Vector3 selectedBoundsAccentB = new(0.10f, 0.95f, 1.00f);
 
                 if (_showSelectedObjectBounds)
                 {
                     if (SelectedInstance is ObjectInstance selectedInstance && !ShouldHideObjectInstanceByUniqueId(selectedInstance))
-                        _bbRenderer.DrawBoxMinMax(selectedInstance.BoundsMin, selectedInstance.BoundsMax, view, proj, new Vector3(1f, 1f, 1f));
+                        _bbRenderer.BatchHighlightedBoxMinMax(
+                            selectedInstance.BoundsMin,
+                            selectedInstance.BoundsMax,
+                            selectedBoundsTime,
+                            selectedBoundsInnerColor,
+                            selectedBoundsAccentA,
+                            selectedBoundsAccentB);
 
                     if (_showPm4Overlay
                         && _selectedPm4ObjectKey.HasValue
@@ -7130,7 +7142,13 @@ public class WorldScene : ISceneRenderer
                         if (applyObjectTransform)
                             TransformBounds(boundsMin, boundsMax, objectTransform, out boundsMin, out boundsMax);
 
-                        _bbRenderer.DrawBoxMinMax(boundsMin, boundsMax, view, proj, new Vector3(1f, 1f, 1f));
+                        _bbRenderer.BatchHighlightedBoxMinMax(
+                            boundsMin,
+                            boundsMax,
+                            selectedBoundsTime,
+                            selectedBoundsInnerColor,
+                            selectedBoundsAccentA,
+                            selectedBoundsAccentB);
                     }
                 }
 
@@ -7144,13 +7162,13 @@ public class WorldScene : ISceneRenderer
                     foreach (var inst in _mdxInstances)
                     {
                         if (!ShouldHideObjectInstanceByUniqueId(inst))
-                            _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(1f, 0f, 1f));
+                            _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, new Vector3(1f, 0f, 1f));
                     }
                     // MODF bounding boxes (cyan)
                     foreach (var inst in _wmoInstances)
                     {
                         if (!ShouldHideObjectInstanceByUniqueId(inst))
-                            _bbRenderer.DrawBoxMinMax(inst.BoundsMin, inst.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+                            _bbRenderer.BatchBoxMinMax(inst.BoundsMin, inst.BoundsMax, new Vector3(0f, 1f, 1f));
                     }
                 }
 
@@ -7190,10 +7208,12 @@ public class WorldScene : ISceneRenderer
                             if (_selectedPm4ObjectKey.HasValue && _selectedPm4ObjectKey.Value == objectKey)
                                 boxColor = new Vector3(1.0f, 1.0f, 1.0f);
 
-                            _bbRenderer.DrawBoxMinMax(boundsMin, boundsMax, view, proj, boxColor);
+                            _bbRenderer.BatchBoxMinMax(boundsMin, boundsMax, boxColor);
                         }
                     }
                 }
+
+                _bbRenderer.FlushBatch(view, proj);
 
                 _gl.DepthMask(true);
             }
@@ -7785,8 +7805,7 @@ public class WorldScene : ISceneRenderer
                 if (ShouldHideObjectInstanceByUniqueId(inst))
                     continue;
 
-                float t = RayAABBIntersect(rayOrigin, rayDir, inst.BoundsMin - padding, inst.BoundsMax + padding);
-                if (t < 0f)
+                if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, inst, padding, out float t))
                     continue;
 
                 ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst, ObjectType.Wmo, i), t);
@@ -7802,8 +7821,7 @@ public class WorldScene : ISceneRenderer
                 if (ShouldHideObjectInstanceByUniqueId(inst))
                     continue;
 
-                float t = RayAABBIntersect(rayOrigin, rayDir, inst.BoundsMin - padding, inst.BoundsMax + padding);
-                if (t < 0f)
+                if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, inst, padding, out float t))
                     continue;
 
                 ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst, ObjectType.Mdx, i), t);
@@ -7968,8 +7986,7 @@ public class WorldScene : ISceneRenderer
 
             // Slightly inflate AABBs to make selection more forgiving for thin geometry.
             Vector3 pad = new(2f, 2f, 2f);
-            float t = RayAABBIntersect(rayOrigin, rayDir, _wmoInstances[i].BoundsMin - pad, _wmoInstances[i].BoundsMax + pad);
-            if (t >= 0f && IsHoverPickDistanceAllowed(t))
+            if (TryRayIntersectInstanceBounds(rayOrigin, rayDir, _wmoInstances[i], pad, out float t) && IsHoverPickDistanceAllowed(t))
             {
                 hits.Add(("WMO", i, t, _wmoInstances[i].ModelName));
                 if (t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
@@ -7983,8 +8000,7 @@ public class WorldScene : ISceneRenderer
                 continue;
 
             Vector3 pad = new(1f, 1f, 1f);
-            float t = RayAABBIntersect(rayOrigin, rayDir, _mdxInstances[i].BoundsMin - pad, _mdxInstances[i].BoundsMax + pad);
-            if (t >= 0f && IsHoverPickDistanceAllowed(t))
+            if (TryRayIntersectInstanceBounds(rayOrigin, rayDir, _mdxInstances[i], pad, out float t) && IsHoverPickDistanceAllowed(t))
             {
                 hits.Add(("MDX", i, t, _mdxInstances[i].ModelName));
                 if (t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
@@ -8381,6 +8397,36 @@ public class WorldScene : ISceneRenderer
         }
 
         return tmin >= 0 ? tmin : tmax >= 0 ? tmax : -1;
+    }
+
+    private static bool TryRayIntersectInstanceBounds(Vector3 origin, Vector3 dir, in ObjectInstance instance, Vector3 padding, out float distance)
+    {
+        if (instance.BoundsResolved
+            && Matrix4x4.Invert(instance.Transform, out Matrix4x4 inverseTransform))
+        {
+            Vector3 localOrigin = Vector3.Transform(origin, inverseTransform);
+            Vector3 localDirection = Vector3.TransformNormal(dir, inverseTransform);
+
+            if (localDirection.LengthSquared() > 1e-10f)
+            {
+                float localT = RayAABBIntersect(
+                    localOrigin,
+                    localDirection,
+                    instance.LocalBoundsMin - padding,
+                    instance.LocalBoundsMax + padding);
+
+                if (localT >= 0f)
+                {
+                    Vector3 localHit = localOrigin + (localDirection * localT);
+                    Vector3 worldHit = Vector3.Transform(localHit, instance.Transform);
+                    distance = Vector3.Distance(origin, worldHit);
+                    return true;
+                }
+            }
+        }
+
+        distance = RayAABBIntersect(origin, dir, instance.BoundsMin - padding, instance.BoundsMax + padding);
+        return distance >= 0f;
     }
 
     private void PopulateWireframeRevealHits(List<ObjectInstance> instances, List<int> hitIndices,

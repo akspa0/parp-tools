@@ -1,5 +1,47 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 04, 2026 - Scene render/pick viewport alignment is restored; active WDL tile lookup no longer treats MAOF as Y-major
+
+- followed live runtime evidence that the mouse cursor and hover tooltip could sit over one object while selection and bounding boxes jumped to another instance
+- fixed the root cause in `src/MdxViewer/ViewerApp.cs`:
+   - hover and click picking were already using the docked scene viewport rect
+   - the 3D scene render path was still projecting with full-window aspect and viewport, so any docked side-panel width changed the visible scene without changing the ray math the same way
+   - the render path now uses the same docked scene viewport rectangle for OpenGL viewport setup and perspective aspect, then restores the full framebuffer viewport before ImGui/UI work
+- followed a second report that generated WDL terrain looked nonsensical and likely had swapped `XX_YY` tile coordinates
+- fixed the active WDL source lookup convention:
+   - `src/MdxViewer/Terrain/WdlTerrainRenderer.cs` now reads and hides WDL tiles with X-major indexing (`tileX * 64 + tileY`)
+   - `WoWRollback/WoWRollback.PM4Module/Services/WdlService.cs` and `WoWRollback/WoWRollback.PM4Module/WdlToAdtProgram.cs` now use the same X-major MAOF lookup for WDL-to-ADT generation paths instead of the old Y-major read
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with warnings on Apr 04, 2026
+- important boundary:
+   - this is still build validation only
+   - no live runtime confirmation has been captured yet that the click-selection alignment is fully corrected or that the WDL terrain/generation output now matches expected tile placement
+
+## Apr 04, 2026 - Transparent MDX geosets no longer fall back to static geoset index ordering
+
+- followed a live viewer report that some MDX materials were appearing behind their own model or behind nearby objects even though the affected surfaces were supposed to be blended overlays
+- fixed the transparent geoset ordering path in `src/MdxViewer/Rendering/ModelRenderer.cs`:
+   - the transparent pass was already separating opaque vs blended layers and world-scene submission was already sorting whole MDX instances by distance
+   - inside one MDX renderer, transparent geosets were still only ordered by priority plane and raw geoset index, which is not stable enough once multiple blended geosets share the same priority plane
+   - `InitBuffers()` now caches a model-space bounds center per geoset, and the transparent pass now sorts back-to-front by world-space camera distance within each priority plane before falling back to geoset index as a final tie-break
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with warnings on Apr 04, 2026
+- important boundary:
+   - this is build validation only
+   - no live runtime confirmation has been captured yet that the originally reported MDX materials now composite correctly in-scene
+
+## Apr 04, 2026 - Map GLB tile export placement transforms were using the wrong Z-up to Y-up conjugation
+
+- fixed the terrain-plus-objects GLB tile export mismatch in `src/MdxViewer/Export/MapGlbExporter.cs`:
+   - terrain vertices were already converted into glTF Y-up correctly with the direct `(X,Y,Z) -> (X,Z,-Y)` mapping
+   - placement transforms were being conjugated in the wrong order for `System.Numerics` row-vector semantics, which put exported objects in the wrong Y-up space relative to the terrain tile
+   - `ConvertTransformZupToYup(...)` now uses `C^{-1} * T_zup * C`, which matches the mesh-space conversion instead of mirroring the placement transform basis
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with warnings on Apr 04, 2026
+- important boundary:
+   - this is build validation plus direct transform-math verification only
+   - no real-data GLB export rerun was captured yet in this session
+
 ## Apr 04, 2026 - MDX click-selection now follows hovered instance; terrain-streamed worlds now prewarm tile assets
 
 - the remaining selected-object mismatch reported from dense foliage is now targeted at the scene-selection path rather than WMO bounds:

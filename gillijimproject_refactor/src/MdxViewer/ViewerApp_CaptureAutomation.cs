@@ -41,7 +41,6 @@ public partial class ViewerApp
         public string OutputPath { get; set; } = string.Empty;
         public bool IncludeUi { get; set; }
         public bool Applied { get; set; }
-        public bool PreviousHideUiChrome { get; set; }
     }
 
     private sealed class CameraShotPointDocument
@@ -337,11 +336,9 @@ public partial class ViewerApp
             return;
 
         PendingCaptureRequest request = _captureQueue.Dequeue();
-        request.PreviousHideUiChrome = _hideUiChrome;
         _activeCaptureRequest = request;
 
         ApplyCameraShotPoint(request.Shot);
-        _hideUiChrome = !request.IncludeUi;
         request.Applied = true;
         _activeCaptureRequest = request;
     }
@@ -355,8 +352,7 @@ public partial class ViewerApp
         if (!request.Applied || request.IncludeUi != includeUi)
             return;
 
-        bool ok = TryCaptureFramebufferToPng(request.OutputPath);
-        _hideUiChrome = request.PreviousHideUiChrome;
+        bool ok = TryCaptureFramebufferToPng(request.OutputPath, includeUi);
         _activeCaptureRequest = null;
 
         _statusMessage = ok
@@ -364,20 +360,34 @@ public partial class ViewerApp
             : $"Capture failed: {request.OutputPath}";
     }
 
-    private unsafe bool TryCaptureFramebufferToPng(string outputPath)
+    private unsafe bool TryCaptureFramebufferToPng(string outputPath, bool includeUi)
     {
         try
         {
-            Vector2D<int> framebufferSize = _window.FramebufferSize;
-            int width = framebufferSize.X;
-            int height = framebufferSize.Y;
+            int readX = 0;
+            int readY = 0;
+            int width;
+            int height;
+
+            if (includeUi || !TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
+            {
+                Vector2D<int> framebufferSize = _window.FramebufferSize;
+                width = framebufferSize.X;
+                height = framebufferSize.Y;
+            }
+            else
+            {
+                width = (int)sceneWidth;
+                height = (int)sceneHeight;
+            }
+
             if (width <= 0 || height <= 0)
                 return false;
 
             byte[] pixels = new byte[width * height * 4];
             fixed (byte* ptr = pixels)
             {
-                _gl.ReadPixels(0, 0, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+                _gl.ReadPixels(readX, readY, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
             }
 
             ForceOpaqueAlpha(pixels);

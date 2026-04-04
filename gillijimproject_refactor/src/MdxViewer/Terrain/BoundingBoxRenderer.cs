@@ -218,6 +218,37 @@ void main() { FragColor = vColor; }";
         _batchLineVertexCount += 2;
     }
 
+    public void BatchBoxMinMax(Vector3 min, Vector3 max, Vector3 color)
+    {
+        GetSanitizedBoxCorners(min, max,
+            out Vector3 v0, out Vector3 v1, out Vector3 v2, out Vector3 v3,
+            out Vector3 v4, out Vector3 v5, out Vector3 v6, out Vector3 v7);
+
+        BatchLine(v0, v1, color); BatchLine(v1, v2, color);
+        BatchLine(v2, v3, color); BatchLine(v3, v0, color);
+        BatchLine(v4, v5, color); BatchLine(v5, v6, color);
+        BatchLine(v6, v7, color); BatchLine(v7, v4, color);
+        BatchLine(v0, v4, color); BatchLine(v1, v5, color);
+        BatchLine(v2, v6, color); BatchLine(v3, v7, color);
+    }
+
+    public void BatchHighlightedBoxMinMax(Vector3 min, Vector3 max, float timeSeconds, Vector3 innerColor, Vector3 accentColorA, Vector3 accentColorB)
+    {
+        BatchBoxMinMax(min, max, innerColor);
+
+        Vector3 actualMin = Vector3.Min(min, max);
+        Vector3 actualMax = Vector3.Max(min, max);
+        Vector3 size = actualMax - actualMin;
+        float maxDimension = MathF.Max(size.X, MathF.Max(size.Y, size.Z));
+        float pulse = 0.85f + 0.35f * (0.5f + 0.5f * MathF.Sin(timeSeconds * 4.0f));
+        float inflate = Math.Clamp(maxDimension * 0.015f, 0.75f, 6.0f) * pulse;
+        Vector3 accentMin = actualMin - new Vector3(inflate);
+        Vector3 accentMax = actualMax + new Vector3(inflate);
+        float segmentLength = Math.Clamp(maxDimension * 0.08f, 6.0f, 22.0f);
+
+        BatchAlternatingBoxMinMax(accentMin, accentMax, accentColorA, accentColorB, timeSeconds, segmentLength);
+    }
+
     /// <summary>
     /// Add a pin marker to the batch: vertical line + diamond head wireframe.
     /// Adds 28 vertices (14 line segments) per pin.
@@ -253,6 +284,115 @@ void main() { FragColor = vColor; }";
         // Verticals
         BatchLine(v0, v4, color); BatchLine(v1, v5, color);
         BatchLine(v2, v6, color); BatchLine(v3, v7, color);
+    }
+
+    private void BatchAlternatingBoxMinMax(Vector3 min, Vector3 max, Vector3 colorA, Vector3 colorB, float timeSeconds, float segmentLength)
+    {
+        GetSanitizedBoxCorners(min, max,
+            out Vector3 v0, out Vector3 v1, out Vector3 v2, out Vector3 v3,
+            out Vector3 v4, out Vector3 v5, out Vector3 v6, out Vector3 v7);
+
+        BatchAlternatingLine(v0, v1, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v1, v2, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v2, v3, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v3, v0, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v4, v5, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v5, v6, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v6, v7, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v7, v4, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v0, v4, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v1, v5, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v2, v6, colorA, colorB, timeSeconds, segmentLength);
+        BatchAlternatingLine(v3, v7, colorA, colorB, timeSeconds, segmentLength);
+    }
+
+    private void BatchAlternatingLine(Vector3 from, Vector3 to, Vector3 colorA, Vector3 colorB, float timeSeconds, float segmentLength)
+    {
+        Vector3 delta = to - from;
+        float lineLength = delta.Length();
+        if (lineLength <= 0.001f)
+        {
+            BatchLine(from, to, colorA);
+            return;
+        }
+
+        int segmentCount = Math.Clamp((int)MathF.Ceiling(lineLength / MathF.Max(segmentLength, 1.0f)), 2, 32);
+        float phase = timeSeconds * 5.0f;
+        for (int i = 0; i < segmentCount; i++)
+        {
+            float t0 = i / (float)segmentCount;
+            float t1 = (i + 1) / (float)segmentCount;
+            Vector3 segmentFrom = Vector3.Lerp(from, to, t0);
+            Vector3 segmentTo = Vector3.Lerp(from, to, t1);
+            float mix = 0.5f + 0.5f * MathF.Sin(i * MathF.PI + phase);
+            Vector3 segmentColor = Vector3.Lerp(colorA, colorB, mix);
+            BatchLine(segmentFrom, segmentTo, segmentColor);
+        }
+    }
+
+    private static void GetSanitizedBoxCorners(
+        Vector3 min,
+        Vector3 max,
+        out Vector3 v0,
+        out Vector3 v1,
+        out Vector3 v2,
+        out Vector3 v3,
+        out Vector3 v4,
+        out Vector3 v5,
+        out Vector3 v6,
+        out Vector3 v7)
+    {
+        SanitizeBox(ref min, ref max);
+
+        v0 = new Vector3(min.X, min.Y, min.Z);
+        v1 = new Vector3(max.X, min.Y, min.Z);
+        v2 = new Vector3(max.X, max.Y, min.Z);
+        v3 = new Vector3(min.X, max.Y, min.Z);
+        v4 = new Vector3(min.X, min.Y, max.Z);
+        v5 = new Vector3(max.X, min.Y, max.Z);
+        v6 = new Vector3(max.X, max.Y, max.Z);
+        v7 = new Vector3(min.X, max.Y, max.Z);
+    }
+
+    private static void SanitizeBox(ref Vector3 min, ref Vector3 max)
+    {
+        Vector3 actualMin = Vector3.Min(min, max);
+        Vector3 actualMax = Vector3.Max(min, max);
+        Vector3 size = actualMax - actualMin;
+        const float minimumAxis = 0.1f;
+
+        if (size.LengthSquared() < 0.0001f)
+        {
+            Vector3 center = (actualMin + actualMax) * 0.5f;
+            actualMin = center - new Vector3(5f, 5f, 5f);
+            actualMax = center + new Vector3(5f, 5f, 5f);
+        }
+        else
+        {
+            if (size.X < minimumAxis)
+            {
+                float pad = (minimumAxis - size.X) * 0.5f;
+                actualMin.X -= pad;
+                actualMax.X += pad;
+            }
+
+            if (size.Y < minimumAxis)
+            {
+                float pad = (minimumAxis - size.Y) * 0.5f;
+                actualMin.Y -= pad;
+                actualMax.Y += pad;
+            }
+
+            if (size.Z < minimumAxis)
+            {
+                float pad = (minimumAxis - size.Z) * 0.5f;
+                actualMin.Z -= pad;
+                actualMax.Z += pad;
+            }
+        }
+
+        min = actualMin;
+        max = actualMax;
     }
 
     /// <summary>
@@ -349,10 +489,10 @@ void main() { FragColor = vColor; }";
     /// </summary>
     public void DrawBoxMinMax(Vector3 min, Vector3 max, Matrix4x4 view, Matrix4x4 proj, Vector3 color)
     {
+        SanitizeBox(ref min, ref max);
         var center = (min + max) * 0.5f;
         var halfExtents = (max - min) * 0.5f;
         halfExtents = new Vector3(MathF.Abs(halfExtents.X), MathF.Abs(halfExtents.Y), MathF.Abs(halfExtents.Z));
-        if (halfExtents.X < 0.1f) halfExtents = new Vector3(5f, 5f, 5f);
         DrawBox(center, halfExtents, view, proj, color);
     }
 

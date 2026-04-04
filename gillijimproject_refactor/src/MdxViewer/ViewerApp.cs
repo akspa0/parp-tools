@@ -965,7 +965,21 @@ public partial class ViewerApp : IDisposable
         if (_renderer != null)
         {
             var size = _window.Size;
-            float aspect = (float)size.X / Math.Max(size.Y, 1);
+            bool hasSceneViewportRect = TryGetSceneViewportRect(out float sceneViewportX, out float sceneViewportY, out float sceneViewportWidth, out float sceneViewportHeight);
+            int sceneFramebufferX = 0;
+            int sceneFramebufferY = 0;
+            uint sceneFramebufferWidth = 0;
+            uint sceneFramebufferHeight = 0;
+            bool hasSceneViewport = hasSceneViewportRect
+                && TryGetSceneFramebufferViewport(out sceneFramebufferX, out sceneFramebufferY, out sceneFramebufferWidth, out sceneFramebufferHeight);
+            if (hasSceneViewport)
+                _gl.Viewport(sceneFramebufferX, sceneFramebufferY, sceneFramebufferWidth, sceneFramebufferHeight);
+            else
+                _gl.Viewport(_window.FramebufferSize);
+
+            float aspect = hasSceneViewport
+                ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
+                : (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
             float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
             var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
@@ -1042,6 +1056,9 @@ public partial class ViewerApp : IDisposable
                 _renderer.Render(view, proj);
                 DrawEditorOverlays(view, proj);
             }
+
+            if (hasSceneViewport)
+                _gl.Viewport(_window.FramebufferSize);
         }
 
         CompleteCaptureIfReady(includeUi: false);
@@ -3427,21 +3444,32 @@ void main() {
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(false);
+        _editorOverlayBb.BeginBatch();
+
+        float overlayTime = (float)(System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
 
         if (_selectedChunks.Count > 0)
         {
             foreach (var (tx, ty, cx, cy) in _selectedChunks)
             {
                 if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
-                    _editorOverlayBb.DrawBoxMinMax(sel.BoundsMin, sel.BoundsMax, view, proj, new Vector3(0f, 1f, 1f));
+                    _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
             }
         }
 
         if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
-            _editorOverlayBb.DrawBoxMinMax(lockedInfo.BoundsMin, lockedInfo.BoundsMax, view, proj, new Vector3(1f, 1f, 1f));
+            _editorOverlayBb.BatchHighlightedBoxMinMax(
+                lockedInfo.BoundsMin,
+                lockedInfo.BoundsMax,
+                overlayTime,
+                new Vector3(1f, 1f, 1f),
+                new Vector3(1f, 0.8f, 0.1f),
+                new Vector3(0.1f, 0.9f, 1f));
 
         if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
-            _editorOverlayBb.DrawBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, view, proj, new Vector3(1f, 1f, 0f));
+            _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+
+        _editorOverlayBb.FlushBatch(view, proj);
 
         _gl.DepthMask(true);
     }
@@ -10088,6 +10116,39 @@ void main() {
         width = MathF.Max(width, 0f);
         height = MathF.Max(height, 0f);
         return width > 10f && height > 10f;
+    }
+
+    private bool TryGetSceneFramebufferViewport(out int x, out int y, out uint width, out uint height)
+    {
+        x = y = 0;
+        width = height = 0;
+
+        if (!TryGetSceneViewportRect(out float viewportX, out float viewportY, out float viewportWidth, out float viewportHeight))
+            return false;
+
+        Vector2D<int> windowSize = _window.Size;
+        Vector2D<int> framebufferSize = _window.FramebufferSize;
+        if (windowSize.X <= 0 || windowSize.Y <= 0 || framebufferSize.X <= 0 || framebufferSize.Y <= 0)
+            return false;
+
+        float scaleX = (float)framebufferSize.X / windowSize.X;
+        float scaleY = (float)framebufferSize.Y / windowSize.Y;
+
+        int viewportLeft = (int)MathF.Round(viewportX * scaleX);
+        int viewportTop = (int)MathF.Round(viewportY * scaleY);
+        int viewportRight = (int)MathF.Round((viewportX + viewportWidth) * scaleX);
+        int viewportBottom = (int)MathF.Round((viewportY + viewportHeight) * scaleY);
+
+        viewportLeft = Math.Clamp(viewportLeft, 0, framebufferSize.X);
+        viewportRight = Math.Clamp(viewportRight, viewportLeft, framebufferSize.X);
+        viewportTop = Math.Clamp(viewportTop, 0, framebufferSize.Y);
+        viewportBottom = Math.Clamp(viewportBottom, viewportTop, framebufferSize.Y);
+
+        x = viewportLeft;
+        y = framebufferSize.Y - viewportBottom;
+        width = (uint)Math.Max(1, viewportRight - viewportLeft);
+        height = (uint)Math.Max(1, viewportBottom - viewportTop);
+        return true;
     }
 
     private static bool TryProjectToScreen(Vector3 worldPos, Matrix4x4 viewProj, int screenW, int screenH, out float sx, out float sy)

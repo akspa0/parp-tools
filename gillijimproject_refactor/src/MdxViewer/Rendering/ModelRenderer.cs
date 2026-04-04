@@ -154,6 +154,7 @@ public class MdxRenderer : IModelRenderer
     // ── Cached view/proj for particle rendering after batch ──
     private Matrix4x4 _cachedView, _cachedProj;
     private Vector3 _cachedCameraPos;
+    private Matrix4x4 _currentModelMatrix = Matrix4x4.Identity;
     private readonly Vector3 _effectiveBoundsMin;
     private readonly Vector3 _effectiveBoundsMax;
 
@@ -558,6 +559,7 @@ public class MdxRenderer : IModelRenderer
     /// </summary>
     public unsafe void RenderInstance(Matrix4x4 modelMatrix, RenderPass pass, float fadeAlpha = 1.0f)
     {
+        _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
 
@@ -602,6 +604,7 @@ public class MdxRenderer : IModelRenderer
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthMask(true);
 
+        _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
@@ -675,6 +678,7 @@ public class MdxRenderer : IModelRenderer
         _gl.Disable(EnableCap.DepthTest);
         _gl.DepthMask(false);
 
+        _currentModelMatrix = modelMatrix;
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
         _gl.UniformMatrix4(_uView, 1, false, (float*)&view);
@@ -732,6 +736,14 @@ public class MdxRenderer : IModelRenderer
                 int priorityCompare = leftPriority.CompareTo(rightPriority);
                 if (priorityCompare != 0)
                     return priorityCompare;
+
+                Vector3 leftCenter = Vector3.Transform(_geosets[leftIndex].BoundsCenter, _currentModelMatrix);
+                Vector3 rightCenter = Vector3.Transform(_geosets[rightIndex].BoundsCenter, _currentModelMatrix);
+                float leftDistanceSq = Vector3.DistanceSquared(leftCenter, _cachedCameraPos);
+                float rightDistanceSq = Vector3.DistanceSquared(rightCenter, _cachedCameraPos);
+                int distanceCompare = rightDistanceSq.CompareTo(leftDistanceSq);
+                if (distanceCompare != 0)
+                    return distanceCompare;
 
                 return _geosets[leftIndex].GeosetIndex.CompareTo(_geosets[rightIndex].GeosetIndex);
             });
@@ -1552,6 +1564,8 @@ void main() {
             }
 
             var gb = new GeosetBuffers { GeosetIndex = i };
+            Vector3 boundsMin = new(geoset.Vertices[0].X, geoset.Vertices[0].Y, geoset.Vertices[0].Z);
+            Vector3 boundsMax = new(geoset.Vertices[0].X, geoset.Vertices[0].Y, geoset.Vertices[0].Z);
 
             // Build bone weight data
             var (boneIndices, boneWeights) = BuildBoneWeights(geoset, i);
@@ -1597,6 +1611,9 @@ void main() {
                 
                 // Position (0-2)
                 var pos = geoset.Vertices[v];
+                Vector3 posVector = new(pos.X, pos.Y, pos.Z);
+                boundsMin = Vector3.Min(boundsMin, posVector);
+                boundsMax = Vector3.Max(boundsMax, posVector);
                 vertexData[offset + 0] = pos.X;
                 vertexData[offset + 1] = pos.Y;
                 vertexData[offset + 2] = pos.Z;
@@ -1683,6 +1700,8 @@ void main() {
                     continue;
                 }
             }
+
+            gb.BoundsCenter = (boundsMin + boundsMax) * 0.5f;
 
             // Reverse triangle winding: WoW/D3D uses CW front faces, OpenGL uses CCW.
             for (int t = 0; t + 2 < indices.Length; t += 3)
@@ -2548,6 +2567,7 @@ void main() {
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
         public int UvSetCount = 0;
+        public Vector3 BoundsCenter;
         public bool Visible = true;
     }
 }
