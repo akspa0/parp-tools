@@ -18,6 +18,12 @@ public interface IDataSource : IDisposable
     /// Read file bytes by virtual path (e.g. "World\Maps\...").
     /// </summary>
     byte[]? ReadFile(string virtualPath);
+
+    /// <summary>
+    /// Resolve a virtual path to a writable loose-file path when one exists.
+    /// Returns false for archive-backed files with no loose source on disk.
+    /// </summary>
+    bool TryResolveWritablePath(string virtualPath, out string? fullPath);
     
     /// <summary>
     /// Get a filtered list of known file paths matching a pattern.

@@ -19,7 +19,9 @@ using Silk.NET.OpenGL;
 using Silk.NET.OpenGL.Extensions.ImGui;
 using Silk.NET.Windowing;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.M2;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
@@ -204,6 +206,16 @@ public partial class ViewerApp : IDisposable
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
+    private Terrain.ObjectType _selectedPlacementEditType = Terrain.ObjectType.None;
+    private int _selectedPlacementEditUniqueId = -1;
+    private int _selectedPlacementEditTileX = -1;
+    private int _selectedPlacementEditTileY = -1;
+    private int _selectedPlacementEditEntryIndex = -1;
+    private Vector3 _selectedPlacementOriginalPosition;
+    private Vector3 _selectedPlacementEditedPosition;
+    private bool _selectedPlacementDirty;
+    private string? _selectedPlacementSaveTargetPath;
+    private string _selectedPlacementSaveStatus = "Select a tile-backed world object to stage a translation-only save.";
 
     private struct DockPanelState
     {
@@ -4782,6 +4794,8 @@ void main() {
     {
         if (_worldScene == null) return;
 
+        DrawSelectedPlacementEditControls();
+
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
         ImGui.Separator();
@@ -8443,6 +8457,278 @@ void main() {
         }
 
         ClearSelectedTaxiInfo();
+    }
+
+    private void RefreshSelectedWorldObjectInfo()
+    {
+        if (_worldScene == null)
+            return;
+
+        ObjectInstance? selected = _worldScene.SelectedInstance;
+        if (!selected.HasValue)
+        {
+            _selectedObjectIndex = -1;
+            _selectedObjectType = "";
+            _selectedObjectInfo = "";
+            return;
+        }
+
+        ObjectInstance inst = selected.Value;
+        string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
+        int idx = _worldScene.SelectedObjectIndex;
+        float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
+        float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
+        float wowZ = inst.PlacementPosition.Z;
+
+        _selectedObjectType = type;
+        _selectedObjectIndex = idx;
+        _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
+            $"Path: {inst.ModelPath}\n" +
+            $"UniqueId: {inst.UniqueId}\n" +
+            $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
+            $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
+            $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
+            $"Scale: {inst.PlacementScale:F3}\n" +
+            $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
+    }
+
+    private void DrawSelectedPlacementEditControls()
+    {
+        SyncSelectedPlacementEditState();
+
+        ImGui.Separator();
+        ImGui.Text("Selected Placement Move");
+        ImGui.TextDisabled("Translation-only save for existing ADT MDDF/MODF placements.");
+
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        {
+            ImGui.TextDisabled(_selectedPlacementSaveStatus);
+            return;
+        }
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        bool editable = selected.HasTileCoordinate && selected.PlacementEntryIndex >= 0
+            && _worldScene.SelectedObjectType is Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo;
+
+        if (!editable)
+        {
+            ImGui.TextDisabled(_selectedPlacementSaveStatus);
+            return;
+        }
+
+        ImGui.TextDisabled($"Tile ({selected.TileX}, {selected.TileY})  Entry {selected.PlacementEntryIndex}  UniqueId {selected.UniqueId}");
+
+        Vector3 editedPosition = _selectedPlacementEditedPosition;
+        if (ImGui.InputFloat3("Placement Position", ref editedPosition, "%.3f"))
+        {
+            if (_worldScene.TryUpdateSelectedPlacementPosition(editedPosition, out string error))
+            {
+                _selectedPlacementEditedPosition = editedPosition;
+                _selectedPlacementDirty = !PositionsNearlyEqual(_selectedPlacementEditedPosition, _selectedPlacementOriginalPosition);
+                _selectedPlacementSaveStatus = _selectedPlacementDirty
+                    ? "Preview updated. Save writes a translated copy of the selected tile placement."
+                    : "Preview matches the original tile placement position.";
+                RefreshSelectedWorldObjectInfo();
+            }
+            else
+            {
+                _selectedPlacementSaveStatus = error;
+            }
+        }
+
+        if (_selectedPlacementDirty && ImGui.Button("Reset Preview"))
+        {
+            if (_worldScene.TryUpdateSelectedPlacementPosition(_selectedPlacementOriginalPosition, out string error))
+            {
+                _selectedPlacementEditedPosition = _selectedPlacementOriginalPosition;
+                _selectedPlacementDirty = false;
+                _selectedPlacementSaveStatus = "Preview reset to the source tile placement position.";
+                RefreshSelectedWorldObjectInfo();
+            }
+            else
+            {
+                _selectedPlacementSaveStatus = error;
+            }
+        }
+
+        string targetLabel = string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+            ? "No save path selected."
+            : _selectedPlacementSaveTargetPath!;
+        ImGui.TextWrapped($"Save target: {targetLabel}");
+
+        if (ImGui.Button("Choose Save Path"))
+            ChooseSelectedPlacementSavePath();
+
+        ImGui.SameLine();
+        if (!_selectedPlacementDirty)
+            ImGui.BeginDisabled();
+        if (ImGui.Button("Save Placement"))
+            SaveSelectedPlacementEdit();
+        if (!_selectedPlacementDirty)
+            ImGui.EndDisabled();
+
+        ImGui.TextDisabled(_selectedPlacementSaveStatus);
+    }
+
+    private void SyncSelectedPlacementEditState()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        {
+            ResetSelectedPlacementEditState("Select a tile-backed world object to stage a translation-only save.");
+            return;
+        }
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        if (!selected.HasTileCoordinate || selected.PlacementEntryIndex < 0)
+        {
+            ResetSelectedPlacementEditState("The selected object is not backed by a writable ADT tile placement.");
+            return;
+        }
+
+        Terrain.ObjectType selectedType = _worldScene.SelectedObjectType;
+        if (selectedType is not (Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo))
+        {
+            ResetSelectedPlacementEditState("Only MDDF and MODF tile placements are supported by the current save seam.");
+            return;
+        }
+
+        bool sameSelection = _selectedPlacementEditType == selectedType
+            && _selectedPlacementEditUniqueId == selected.UniqueId
+            && _selectedPlacementEditTileX == selected.TileX
+            && _selectedPlacementEditTileY == selected.TileY
+            && _selectedPlacementEditEntryIndex == selected.PlacementEntryIndex;
+
+        if (sameSelection)
+            return;
+
+        _selectedPlacementEditType = selectedType;
+        _selectedPlacementEditUniqueId = selected.UniqueId;
+        _selectedPlacementEditTileX = selected.TileX;
+        _selectedPlacementEditTileY = selected.TileY;
+        _selectedPlacementEditEntryIndex = selected.PlacementEntryIndex;
+        _selectedPlacementOriginalPosition = selected.PlacementPosition;
+        _selectedPlacementEditedPosition = selected.PlacementPosition;
+        _selectedPlacementDirty = false;
+        _selectedPlacementSaveTargetPath = null;
+        if (_worldScene.TryGetSelectedPlacementWritablePath(out string? writablePath) && !string.IsNullOrWhiteSpace(writablePath))
+            _selectedPlacementSaveTargetPath = writablePath;
+        _selectedPlacementSaveStatus = string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+            ? "Preview only until you choose an output .adt path."
+            : "Ready to save a translated copy of the selected tile placement.";
+    }
+
+    private void ResetSelectedPlacementEditState(string status)
+    {
+        _selectedPlacementEditType = Terrain.ObjectType.None;
+        _selectedPlacementEditUniqueId = -1;
+        _selectedPlacementEditTileX = -1;
+        _selectedPlacementEditTileY = -1;
+        _selectedPlacementEditEntryIndex = -1;
+        _selectedPlacementOriginalPosition = Vector3.Zero;
+        _selectedPlacementEditedPosition = Vector3.Zero;
+        _selectedPlacementDirty = false;
+        _selectedPlacementSaveTargetPath = null;
+        _selectedPlacementSaveStatus = status;
+    }
+
+    private void ChooseSelectedPlacementSavePath()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return;
+
+        string initialDir = Environment.CurrentDirectory;
+        string defaultFileName = $"placement_{DateTime.Now:yyyyMMdd_HHmmss}.adt";
+
+        if (_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out _))
+            defaultFileName = Path.GetFileName(sourcePath);
+
+        if (!string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+        {
+            string? existingDir = Path.GetDirectoryName(_selectedPlacementSaveTargetPath);
+            if (!string.IsNullOrWhiteSpace(existingDir) && Directory.Exists(existingDir))
+                initialDir = existingDir;
+            defaultFileName = Path.GetFileName(_selectedPlacementSaveTargetPath);
+        }
+        else if (_worldScene.TryGetSelectedPlacementWritablePath(out string? writablePath) && !string.IsNullOrWhiteSpace(writablePath))
+        {
+            string? writableDir = Path.GetDirectoryName(writablePath);
+            if (!string.IsNullOrWhiteSpace(writableDir) && Directory.Exists(writableDir))
+                initialDir = writableDir;
+            defaultFileName = Path.GetFileName(writablePath);
+        }
+
+        string? picked = ShowSaveFileDialogSTA(
+            "Save moved ADT placement as",
+            "ADT Files (*.adt)|*.adt|All Files (*.*)|*.*",
+            initialDir,
+            defaultFileName);
+        if (string.IsNullOrWhiteSpace(picked))
+            return;
+
+        _selectedPlacementSaveTargetPath = picked;
+        _selectedPlacementSaveStatus = _selectedPlacementDirty
+            ? $"Ready to save translated placement to {picked}."
+            : $"Save target set to {picked}.";
+    }
+
+    private void SaveSelectedPlacementEdit()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return;
+
+        if (!_selectedPlacementDirty)
+        {
+            _selectedPlacementSaveStatus = "No staged placement move to save.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+        {
+            ChooseSelectedPlacementSavePath();
+            if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+            {
+                _selectedPlacementSaveStatus = "Save cancelled. No output path selected.";
+                return;
+            }
+        }
+
+        if (!_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out byte[] sourceBytes))
+        {
+            _selectedPlacementSaveStatus = "The selected placement source ADT could not be read from the current data source.";
+            return;
+        }
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        AdtPlacementKind kind = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo
+            ? AdtPlacementKind.WorldModel
+            : AdtPlacementKind.Model;
+
+        var placementRef = new AdtPlacementReference(kind, selected.PlacementEntryIndex, selected.UniqueId);
+        var move = new AdtPlacementMove(placementRef, _selectedPlacementEditedPosition, "MdxViewer selected placement move");
+        var transaction = new AdtPlacementEditTransaction(sourcePath, new[] { move });
+
+        try
+        {
+            byte[] updatedBytes = AdtPlacementWriter.ApplyTransaction(sourceBytes, sourcePath, transaction);
+            string outputPath = _selectedPlacementSaveTargetPath!;
+            string? outputDirectory = Path.GetDirectoryName(outputPath);
+            if (!string.IsNullOrWhiteSpace(outputDirectory))
+                Directory.CreateDirectory(outputDirectory);
+
+            File.WriteAllBytes(outputPath, updatedBytes);
+            _selectedPlacementOriginalPosition = _selectedPlacementEditedPosition;
+            _selectedPlacementDirty = false;
+            _selectedPlacementSaveStatus = $"Saved translated placement to {outputPath}.";
+        }
+        catch (Exception ex)
+        {
+            _selectedPlacementSaveStatus = $"Placement save failed: {ex.Message}";
+        }
+    }
+
+    private static bool PositionsNearlyEqual(Vector3 left, Vector3 right)
+    {
+        return Vector3.DistanceSquared(left, right) < 0.0001f;
     }
 
     private void ClearSelectedTaxiInfo()

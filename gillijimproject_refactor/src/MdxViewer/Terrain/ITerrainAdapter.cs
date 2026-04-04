@@ -18,6 +18,12 @@ public interface ITerrainAdapter
     /// <summary>Load a tile and return terrain chunks + per-tile placements.</summary>
     TileLoadResult LoadTileWithPlacements(int tileX, int tileY);
 
+    /// <summary>Read the placement-bearing ADT payload for a tile when the format supports writing it.</summary>
+    bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes);
+
+    /// <summary>Resolve the placement-bearing ADT payload to a writable loose-file path when available.</summary>
+    bool TryGetPlacementWritablePath(int tileX, int tileY, out string? fullPath);
+
     /// <summary>Texture names per tile (MTEX).</summary>
     ConcurrentDictionary<(int tileX, int tileY), List<string>> TileTextures { get; }
 

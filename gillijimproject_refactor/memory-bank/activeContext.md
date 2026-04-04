@@ -2,6 +2,41 @@
 
 # Active Context
 
+## Apr 04, 2026 - MdxViewer now stages and saves selected existing ADT object moves through wow-viewer
+
+- `gillijimproject_refactor/src/MdxViewer` now wires the first live UI consumer onto the shared `wow-viewer` placement writer seam:
+	- selected tile-backed MDDF and MODF placements can now be translated in-session from the `Objects` workspace
+	- the moved preview updates the live `WorldScene` instance, tile cache, and adapter placement list instead of remaining a placeholder-only status surface
+	- save output is explicit: the user chooses an `.adt` path unless a writable loose source path already exists
+- shared/data-source seams added to support that wiring:
+	- `IDataSource.TryResolveWritablePath(...)`
+	- `ITerrainAdapter.TryGetPlacementSourceData(...)`
+	- `ITerrainAdapter.TryGetPlacementWritablePath(...)`
+	- `TerrainManager.TryUpdateCachedPlacementPosition(...)`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+	- this is still only translation-only save for one selected existing ADT placement at a time
+	- no add/remove placement support, dirty-map aggregation, terrain writes, or full packaged map-save workflow landed
+
+## Apr 03, 2026 - wow-viewer now has a first save-capable ADT object move seam
+
+- `wow-viewer` now owns the first narrow shared object-edit transaction boundary for editor work:
+	- `WowViewer.Core/Maps/AdtPlacementEditTransaction.cs`
+	- `WowViewer.Core.IO/Maps/AdtPlacementWriter.cs`
+- landed behavior:
+	- translation-only moves for existing `MDDF` and `MODF` entries in ADT or ADTOBJ files
+	- `MODF` bounds are translated with the moved placement instead of being left stale
+	- the seam is shared-library ownership in `wow-viewer`, not UI-panel-local state
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "AdtPlacementReaderTests|AdtPlacementWriterTests"`
+	- proof includes a real-data roundtrip on `gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt`
+- important boundary:
+	- this is not general map-save closure
+	- no add/remove placement support yet
+	- no path-table rebuilds for new models or WMOs yet
+	- no terrain writes, dirty-map pipeline, or save packaging workflow yet
+
 ## Apr 03, 2026 - wow-viewer editor-transition workflow surface is now explicit
 
 - new workflow assets now exist for the viewer-to-editor push:

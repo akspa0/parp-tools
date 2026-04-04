@@ -734,6 +734,12 @@ public class MpqDataSource : IDataSource
         return null;
     }
 
+    public bool TryResolveWritablePath(string virtualPath, out string? fullPath)
+    {
+        fullPath = TryResolveLoosePath(virtualPath);
+        return fullPath != null;
+    }
+
     public IReadOnlyList<string> GetFileList(string? extensionFilter = null)
     {
         if (extensionFilter != null)

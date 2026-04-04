@@ -144,6 +144,19 @@ public class AlphaTerrainAdapter : ITerrainAdapter
         return idx >= 0 && idx < _adtOffsets.Count && _adtOffsets[idx] != 0;
     }
 
+    public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
+    {
+        sourcePath = string.Empty;
+        sourceBytes = Array.Empty<byte>();
+        return false;
+    }
+
+    public bool TryGetPlacementWritablePath(int tileX, int tileY, out string? fullPath)
+    {
+        fullPath = null;
+        return false;
+    }
+
     /// <summary>
     /// Load all 256 chunks for a given tile, returning GPU-ready chunk data.
     /// Uses AdtAlpha + McnkAlpha parsers from gillijimproject-csharp.

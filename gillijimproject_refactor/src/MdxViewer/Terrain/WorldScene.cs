@@ -2229,6 +2229,89 @@ public class WorldScene : ISceneRenderer
         _ => null
     };
 
+    public bool TryGetSelectedPlacementSourceData(out string sourcePath, out byte[] sourceBytes)
+    {
+        sourcePath = string.Empty;
+        sourceBytes = Array.Empty<byte>();
+
+        ObjectInstance? selected = SelectedInstance;
+        if (!selected.HasValue)
+            return false;
+
+        ObjectInstance instance = selected.Value;
+        if (!instance.HasTileCoordinate || instance.PlacementEntryIndex < 0)
+            return false;
+
+        return _terrainManager.Adapter.TryGetPlacementSourceData(instance.TileX, instance.TileY, out sourcePath, out sourceBytes);
+    }
+
+    public bool TryGetSelectedPlacementWritablePath(out string? fullPath)
+    {
+        fullPath = null;
+
+        ObjectInstance? selected = SelectedInstance;
+        if (!selected.HasValue)
+            return false;
+
+        ObjectInstance instance = selected.Value;
+        if (!instance.HasTileCoordinate || instance.PlacementEntryIndex < 0)
+            return false;
+
+        return _terrainManager.Adapter.TryGetPlacementWritablePath(instance.TileX, instance.TileY, out fullPath);
+    }
+
+    public bool TryUpdateSelectedPlacementPosition(Vector3 newPosition, out string error)
+    {
+        error = string.Empty;
+
+        ObjectInstance? selected = SelectedInstance;
+        if (!selected.HasValue)
+        {
+            error = "No world object is selected.";
+            return false;
+        }
+
+        ObjectInstance current = selected.Value;
+        if (!current.HasTileCoordinate || current.PlacementEntryIndex < 0)
+        {
+            error = "The selected object is not backed by a writable ADT placement entry.";
+            return false;
+        }
+
+        if (_selectedObjectType is not (ObjectType.Mdx or ObjectType.Wmo))
+        {
+            error = "Only ADT MDDF and MODF placements are supported by the current save seam.";
+            return false;
+        }
+
+        Dictionary<(int, int), List<ObjectInstance>> tileInstances = _selectedObjectType == ObjectType.Mdx
+            ? _tileMdxInstances
+            : _tileWmoInstances;
+
+        if (!tileInstances.TryGetValue((current.TileX, current.TileY), out List<ObjectInstance>? instances))
+        {
+            error = $"Tile ({current.TileX}, {current.TileY}) is not currently loaded.";
+            return false;
+        }
+
+        int instanceIndex = FindPlacementInstanceIndex(instances, current);
+        if (instanceIndex < 0)
+        {
+            error = "The selected placement could not be matched back to the loaded tile instance list.";
+            return false;
+        }
+
+        ObjectInstance updated = MovePlacementInstance(current, newPosition, _selectedObjectType);
+        instances[instanceIndex] = updated;
+
+        _terrainManager.TryUpdateCachedPlacementPosition(_selectedObjectType, current.TileX, current.TileY, current.PlacementEntryIndex, newPosition);
+        UpdateAdapterPlacementPosition(_selectedObjectType, current, newPosition);
+
+        _instancesDirty = true;
+        RebuildInstanceLists();
+        return true;
+    }
+
     // Area POI (lazy-loaded on first toggle)
     private AreaPoiLoader? _poiLoader;
     private bool _showPoi = false;
@@ -5573,6 +5656,7 @@ public class WorldScene : ISceneRenderer
                 PlacementRotation = p.Rotation,
                 PlacementScale = scale,
                 UniqueId = p.UniqueId,
+                PlacementEntryIndex = -1,
                 TileX = -1,
                 TileY = -1,
                 HasTileCoordinate = false
@@ -5633,6 +5717,7 @@ public class WorldScene : ISceneRenderer
                 PlacementRotation = p.Rotation,
                 PlacementScale = 1.0f,
                 UniqueId = p.UniqueId,
+                PlacementEntryIndex = -1,
                 TileX = -1,
                 TileY = -1,
                 HasTileCoordinate = false
@@ -5700,6 +5785,7 @@ public class WorldScene : ISceneRenderer
         // Build MDX instances for this tile
         var tileMdx = new List<ObjectInstance>();
         var tileSkyboxes = new List<ObjectInstance>();
+        int tileMddfEntryIndex = 0;
         foreach (var p in result.MddfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= mdxNames.Count) continue;
@@ -5740,6 +5826,7 @@ public class WorldScene : ISceneRenderer
                 ModelName = Path.GetFileName(modelPath), ModelPath = modelPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = scale,
                 UniqueId = p.UniqueId,
+                PlacementEntryIndex = tileMddfEntryIndex,
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true
@@ -5749,10 +5836,13 @@ public class WorldScene : ISceneRenderer
                 tileSkyboxes.Add(instance);
             else
                 tileMdx.Add(instance);
+
+            tileMddfEntryIndex++;
         }
 
         // Build WMO instances for this tile
         var tileWmo = new List<ObjectInstance>();
+        int tileModfEntryIndex = 0;
         foreach (var p in result.ModfPlacements)
         {
             if (p.NameIndex < 0 || p.NameIndex >= wmoNames.Count) continue;
@@ -5795,10 +5885,13 @@ public class WorldScene : ISceneRenderer
                 ModelName = Path.GetFileName(wmoPath), ModelPath = wmoPath,
                 PlacementPosition = p.Position, PlacementRotation = p.Rotation, PlacementScale = 1.0f,
                 UniqueId = p.UniqueId,
+                PlacementEntryIndex = tileModfEntryIndex,
                 TileX = tileX,
                 TileY = tileY,
                 HasTileCoordinate = true
             });
+
+            tileModfEntryIndex++;
         }
 
         _tileMdxInstances[(tileX, tileY)] = tileMdx;
@@ -5978,6 +6071,187 @@ public class WorldScene : ISceneRenderer
         return changed;
     }
 
+    private static int FindPlacementInstanceIndex(List<ObjectInstance> instances, ObjectInstance current)
+    {
+        for (int index = 0; index < instances.Count; index++)
+        {
+            ObjectInstance candidate = instances[index];
+            if (candidate.UniqueId == current.UniqueId
+                && candidate.PlacementEntryIndex == current.PlacementEntryIndex
+                && candidate.TileX == current.TileX
+                && candidate.TileY == current.TileY)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private ObjectInstance MovePlacementInstance(ObjectInstance current, Vector3 newPosition, ObjectType objectType)
+    {
+        Vector3 delta = newPosition - current.PlacementPosition;
+        current.PlacementPosition = newPosition;
+
+        switch (objectType)
+        {
+            case ObjectType.Mdx:
+            {
+                float rx = -current.PlacementRotation.Y * MathF.PI / 180f;
+                float ry = -current.PlacementRotation.X * MathF.PI / 180f;
+                float rz = current.PlacementRotation.Z * MathF.PI / 180f;
+                var transform = Matrix4x4.CreateRotationZ(MathF.PI)
+                    * Matrix4x4.CreateScale(current.PlacementScale)
+                    * Matrix4x4.CreateRotationX(rx)
+                    * Matrix4x4.CreateRotationY(ry)
+                    * Matrix4x4.CreateRotationZ(rz)
+                    * Matrix4x4.CreateTranslation(newPosition);
+
+                current.Transform = transform;
+                if (_assets.TryGetMdxBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))
+                {
+                    current.LocalBoundsMin = localMin;
+                    current.LocalBoundsMax = localMax;
+                    current.BoundsResolved = true;
+                    TransformBounds(localMin, localMax, transform, out Vector3 worldMin, out Vector3 worldMax);
+                    current.BoundsMin = worldMin;
+                    current.BoundsMax = worldMax;
+                }
+                else
+                {
+                    current.BoundsMin += delta;
+                    current.BoundsMax += delta;
+                    current.BoundsResolved = false;
+                }
+
+                return current;
+            }
+
+            case ObjectType.Wmo:
+            {
+                float rx = current.PlacementRotation.X * MathF.PI / 180f;
+                float ry = current.PlacementRotation.Y * MathF.PI / 180f;
+                float rz = current.PlacementRotation.Z * MathF.PI / 180f;
+                var transform = Matrix4x4.CreateRotationZ(MathF.PI)
+                    * Matrix4x4.CreateRotationX(rx)
+                    * Matrix4x4.CreateRotationY(ry)
+                    * Matrix4x4.CreateRotationZ(rz)
+                    * Matrix4x4.CreateTranslation(newPosition);
+
+                current.Transform = transform;
+                if (_assets.TryGetWmoBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))
+                {
+                    current.LocalBoundsMin = localMin;
+                    current.LocalBoundsMax = localMax;
+                    current.BoundsResolved = true;
+                    TransformBounds(localMin, localMax, transform, out Vector3 worldMin, out Vector3 worldMax);
+                    current.BoundsMin = worldMin;
+                    current.BoundsMax = worldMax;
+                }
+                else
+                {
+                    current.BoundsMin += delta;
+                    current.BoundsMax += delta;
+                    current.BoundsResolved = false;
+                }
+
+                return current;
+            }
+
+            default:
+                return current;
+        }
+    }
+
+    private void UpdateAdapterPlacementPosition(ObjectType objectType, ObjectInstance current, Vector3 newPosition)
+    {
+        switch (objectType)
+        {
+            case ObjectType.Mdx:
+                UpdateMddfPlacementPosition(current, newPosition);
+                break;
+
+            case ObjectType.Wmo:
+                UpdateModfPlacementPosition(current, newPosition);
+                break;
+        }
+    }
+
+    private void UpdateMddfPlacementPosition(ObjectInstance current, Vector3 newPosition)
+    {
+        List<MddfPlacement> placements = _terrainManager.Adapter.MddfPlacements;
+        int index = FindPlacementIndexByUniqueIdAndPosition(placements, current.UniqueId, current.PlacementPosition);
+        if (index < 0)
+            index = FindPlacementIndexByUniqueId(placements, current.UniqueId);
+        if (index < 0)
+            return;
+
+        MddfPlacement updated = placements[index];
+        updated.Position = newPosition;
+        placements[index] = updated;
+    }
+
+    private void UpdateModfPlacementPosition(ObjectInstance current, Vector3 newPosition)
+    {
+        List<ModfPlacement> placements = _terrainManager.Adapter.ModfPlacements;
+        int index = FindPlacementIndexByUniqueIdAndPosition(placements, current.UniqueId, current.PlacementPosition);
+        if (index < 0)
+            index = FindPlacementIndexByUniqueId(placements, current.UniqueId);
+        if (index < 0)
+            return;
+
+        ModfPlacement updated = placements[index];
+        Vector3 delta = newPosition - updated.Position;
+        updated.Position = newPosition;
+        updated.BoundsMin += delta;
+        updated.BoundsMax += delta;
+        placements[index] = updated;
+    }
+
+    private static int FindPlacementIndexByUniqueIdAndPosition(List<MddfPlacement> placements, int uniqueId, Vector3 position)
+    {
+        for (int index = 0; index < placements.Count; index++)
+        {
+            if (placements[index].UniqueId == uniqueId && Vector3.DistanceSquared(placements[index].Position, position) < 0.0001f)
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static int FindPlacementIndexByUniqueId(List<MddfPlacement> placements, int uniqueId)
+    {
+        for (int index = 0; index < placements.Count; index++)
+        {
+            if (placements[index].UniqueId == uniqueId)
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static int FindPlacementIndexByUniqueIdAndPosition(List<ModfPlacement> placements, int uniqueId, Vector3 position)
+    {
+        for (int index = 0; index < placements.Count; index++)
+        {
+            if (placements[index].UniqueId == uniqueId && Vector3.DistanceSquared(placements[index].Position, position) < 0.0001f)
+                return index;
+        }
+
+        return -1;
+    }
+
+    private static int FindPlacementIndexByUniqueId(List<ModfPlacement> placements, int uniqueId)
+    {
+        for (int index = 0; index < placements.Count; index++)
+        {
+            if (placements[index].UniqueId == uniqueId)
+                return index;
+        }
+
+        return -1;
+    }
+
     public void ClearExternalSpawns()
     {
         _externalMdxInstances.Clear();
@@ -6045,6 +6319,7 @@ public class WorldScene : ISceneRenderer
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = 1.0f,
                     UniqueId = spawn.SpawnId,
+                    PlacementEntryIndex = -1,
                     TileX = tileX,
                     TileY = tileY,
                     HasTileCoordinate = true
@@ -6088,6 +6363,7 @@ public class WorldScene : ISceneRenderer
                     PlacementRotation = new Vector3(0f, 0f, finalYawDegrees),
                     PlacementScale = mdxScale,
                     UniqueId = spawn.SpawnId,
+                    PlacementEntryIndex = -1,
                     TileX = tileX,
                     TileY = tileY,
                     HasTileCoordinate = true
@@ -9650,6 +9926,8 @@ public struct ObjectInstance
     public string ModelPath;
     /// <summary>UniqueId from MODF/MDDF placement (for dedup and display).</summary>
     public int UniqueId;
+    /// <summary>Placement entry index within the owning tile's MDDF/MODF chunk when known.</summary>
+    public int PlacementEntryIndex;
     /// <summary>Owning terrain tile X when known.</summary>
     public int TileX;
     /// <summary>Owning terrain tile Y when known.</summary>

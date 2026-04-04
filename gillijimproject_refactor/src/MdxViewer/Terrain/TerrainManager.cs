@@ -185,6 +185,39 @@ public class TerrainManager : ISceneRenderer
         return false;
     }
 
+    public bool TryUpdateCachedPlacementPosition(ObjectType objectType, int tileX, int tileY, int placementEntryIndex, Vector3 newPosition)
+    {
+        if (!_tileCache.TryGetValue((tileX, tileY), out TileLoadResult? cached))
+            return false;
+
+        switch (objectType)
+        {
+            case ObjectType.Mdx:
+                if (placementEntryIndex < 0 || placementEntryIndex >= cached.MddfPlacements.Count)
+                    return false;
+
+                MddfPlacement mddf = cached.MddfPlacements[placementEntryIndex];
+                mddf.Position = newPosition;
+                cached.MddfPlacements[placementEntryIndex] = mddf;
+                return true;
+
+            case ObjectType.Wmo:
+                if (placementEntryIndex < 0 || placementEntryIndex >= cached.ModfPlacements.Count)
+                    return false;
+
+                ModfPlacement modf = cached.ModfPlacements[placementEntryIndex];
+                Vector3 delta = newPosition - modf.Position;
+                modf.Position = newPosition;
+                modf.BoundsMin += delta;
+                modf.BoundsMax += delta;
+                cached.ModfPlacements[placementEntryIndex] = modf;
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     /// <summary>
     /// Get parsed tile data from cache, loading it if needed.
     /// </summary>

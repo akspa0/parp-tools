@@ -1,11 +1,11 @@
 using System.Numerics;
 using ImGuiNET;
+using MdxViewer.Rendering;
 using MdxViewer.Terrain;
 
 namespace MdxViewer;
 
 /// <summary>
-using MdxViewer.Rendering;
 /// Partial class containing viewer/editor workspace shell helpers.
 /// </summary>
 public partial class ViewerApp
@@ -296,7 +296,7 @@ public partial class ViewerApp
 
     private void DrawEditorPublishWorkspace()
     {
-        ImGui.TextWrapped("Save and publish are explicit here. Current MdxViewer support is export and capture only; map save and object persistence are still not implemented.");
+        ImGui.TextWrapped("Save and publish are explicit here. Current MdxViewer support is still narrow: translation-only saves for selected existing ADT object placements, plus export and capture. General map save and terrain persistence are still not implemented.");
         ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
         ImGui.Separator();
 
@@ -381,7 +381,14 @@ public partial class ViewerApp
         return _workspaceMode switch
         {
             WorkspaceMode.Viewer => "Read-only viewer workspace.",
-            WorkspaceMode.Editor when HasWorldEditingContext() => "Session-only edits and exports. No map save pipeline yet.",
+            WorkspaceMode.Editor when _selectedPlacementDirty && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+                => $"1 pending selected placement move. Target: {_selectedPlacementSaveTargetPath}",
+            WorkspaceMode.Editor when _selectedPlacementDirty
+                => "1 pending selected placement move. Choose an output .adt path to save.",
+            WorkspaceMode.Editor when HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+                => $"Selected placement save target: {_selectedPlacementSaveTargetPath}. No general map save pipeline yet.",
+            WorkspaceMode.Editor when HasWorldEditingContext()
+                => "Selected placement save available for translation-only ADT object moves. No general map save pipeline yet.",
             WorkspaceMode.Editor => "Editor workspace loaded without a world save target.",
             _ => "Unknown save state.",
         };

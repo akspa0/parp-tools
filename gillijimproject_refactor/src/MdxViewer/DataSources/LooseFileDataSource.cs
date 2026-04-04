@@ -28,6 +28,18 @@ public class LooseFileDataSource : IDataSource
         return File.Exists(fullPath) ? File.ReadAllBytes(fullPath) : null;
     }
 
+    public bool TryResolveWritablePath(string virtualPath, out string? fullPath)
+    {
+        fullPath = ResolvePath(virtualPath);
+        if (!File.Exists(fullPath))
+        {
+            fullPath = null;
+            return false;
+        }
+
+        return true;
+    }
+
     public IReadOnlyList<string> GetFileList(string? extensionFilter = null)
     {
         if (_fileList == null)

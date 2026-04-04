@@ -216,6 +216,50 @@ public class StandardTerrainAdapter : ITerrainAdapter
         return result;
     }
 
+    public bool TryGetPlacementSourceData(int tileX, int tileY, out string sourcePath, out byte[] sourceBytes)
+    {
+        sourcePath = string.Empty;
+        sourceBytes = Array.Empty<byte>();
+
+        if (!TileExists(tileX, tileY))
+            return false;
+
+        sourcePath = GetPlacementSourceVirtualPath(tileX, tileY);
+        byte[]? bytes = _dataSource.ReadFile(sourcePath);
+        if (bytes == null || bytes.Length == 0)
+        {
+            sourcePath = string.Empty;
+            return false;
+        }
+
+        sourceBytes = bytes;
+        return true;
+    }
+
+    public bool TryGetPlacementWritablePath(int tileX, int tileY, out string? fullPath)
+    {
+        fullPath = null;
+        if (!TileExists(tileX, tileY))
+            return false;
+
+        return _dataSource.TryResolveWritablePath(GetPlacementSourceVirtualPath(tileX, tileY), out fullPath);
+    }
+
+    private string GetPlacementSourceVirtualPath(int tileX, int tileY)
+    {
+        string basePath = $"{_mapDir}\\{_mapName}_{tileY}_{tileX}";
+        string rootPath = $"{basePath}.adt";
+        string objPath = $"{basePath}_obj0.adt";
+
+        if (_adtProfile.PreferObj0ForPlacementData && _dataSource.FileExists(objPath))
+            return objPath;
+
+        if (_dataSource.FileExists(rootPath))
+            return rootPath;
+
+        return objPath;
+    }
+
     private List<int> ResolveExistingTiles(byte[] wdtBytes)
     {
         var wdtTiles = ReadMainChunk(wdtBytes);

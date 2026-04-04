@@ -1,5 +1,37 @@
 # Progress
 
+### Apr 04, 2026 - MdxViewer now consumes the shared selected-placement save seam
+
+- landed the first end-to-end UI wiring on top of the existing `wow-viewer` placement writer:
+	- selected existing ADT MDDF/MODF placements can now be translated from the `Objects` workspace in `MdxViewer`
+	- live preview updates propagate through `WorldScene`, tile-instance caches, and adapter placement lists instead of staying as status text only
+	- save-target plumbing now supports either a resolved writable loose source path or an explicit user-chosen `.adt` output path
+- supporting runtime/data-source work landed in the active viewer path:
+	- writable loose-path resolution on `IDataSource`
+	- placement-source and writable-path resolution on `ITerrainAdapter`
+	- cached tile placement mutation in `TerrainManager`
+	- tile-local placement entry tracking on `WorldScene.ObjectInstance`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- proof boundary:
+	- this is not general map-save closure; it only covers translation-only saves for selected existing ADT object placements
+	- no add/remove placement support, aggregated dirty-map model, terrain persistence, or runtime signoff was completed in this slice
+
+### Apr 03, 2026 - wow-viewer first save-capable ADT object move transaction landed
+
+- landed the first shared editor-save seam in `wow-viewer` instead of keeping object edits as viewer-only state:
+	- new shared placement move contracts in `wow-viewer/src/core/WowViewer.Core/Maps/AdtPlacementEditTransaction.cs`
+	- new shared in-place ADT placement writer in `wow-viewer/src/core/WowViewer.Core.IO/Maps/AdtPlacementWriter.cs`
+	- translation-only persistence for existing `MDDF` and `MODF` entries
+	- `MODF` bounds are shifted with the moved placement so shared readers see a coherent translation result after save
+- validation completed:
+	- focused synthetic roundtrip coverage for `MDDF` and `MODF`
+	- real-data roundtrip coverage against `gillijimproject_refactor/test_data/development/World/Maps/development/development_0_0_obj0.adt`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "AdtPlacementReaderTests|AdtPlacementWriterTests"` passed
+- proof boundary:
+	- this is a translation-only move seam for existing placements, not full editor save closure
+	- no add/remove placement support, dirty-map pipeline, terrain write path, or save packaging landed in this slice
+
 ### Apr 03, 2026 - MdxViewer viewer/editor workspace shell landed in the live UI
 
 - implemented the first actual editor-surface regrouping inside `gillijimproject_refactor/src/MdxViewer` instead of leaving the editor UI plan as prompt-only continuity:

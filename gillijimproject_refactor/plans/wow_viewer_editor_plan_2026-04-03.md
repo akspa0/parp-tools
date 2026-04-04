@@ -5,7 +5,9 @@
 - status: active continuity plan
 - current state:
   - the first viewer/editor workspace shell is now landed in `gillijimproject_refactor/src/MdxViewer`
-  - the broader editor-transition plan is still open because save-capable object or terrain transactions and shared writer ownership are still missing
+  - the first save-capable object move transaction is now landed in `wow-viewer`
+  - the first `MdxViewer` consumer wiring for selected existing ADT object moves is now landed on top of that shared seam
+  - the broader editor-transition plan is still open because editor save is still translation-only and does not yet cover add/remove, dirty-map flow, terrain writes, or full save packaging
 - goal:
   - treat the current feature request as the start of `wow-viewer` becoming the modern WoW map viewer-editor, not only a viewer or inspection shell
   - keep the next chats on narrow editor slices instead of mixing terrain editing, PM4 evidence, object persistence, UI reorganization, and file writing into one unstable task
@@ -22,10 +24,37 @@
 - important boundaries:
   - this is still UI-shell regrouping over existing `MdxViewer` services, not shared save ownership
   - `Objects` still reuses the mixed legacy world-object surface as a first regrouping step
-  - there is still no save-capable object transaction, map dirty pipeline, or terrain writer path
+  - there is now narrow UI wiring for selected existing ADT object moves only
+  - there is still no dirty-map pipeline, aggregated save queue, add/remove object support, or terrain writer path
 - proof captured so far:
   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
   - no runtime signoff was captured yet for the new workspace flow
+
+## Apr 03, 2026 - First save-capable object move transaction landed in wow-viewer
+
+- landed shared save ownership for one narrow object-edit milestone in `wow-viewer`:
+  - `AdtPlacementEditTransaction` now models translation-only moves for existing ADT placements
+  - `AdtPlacementWriter` now patches `MDDF` and `MODF` entries in place and translates `MODF` bounds with moved WMOs
+- proof captured so far:
+  - focused synthetic roundtrip tests for both placement families
+  - real-data roundtrip test against `development_0_0_obj0.adt`
+  - `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "AdtPlacementReaderTests|AdtPlacementWriterTests"` passed
+- important boundaries:
+  - this only supports moving existing placements; it does not add or remove entries
+  - string-table rebuilds for new model paths are still out of scope
+  - there is still no dirty-map state, terrain-write ownership, or end-to-end editor save workflow in `MdxViewer`
+
+## Apr 04, 2026 - First MdxViewer selected-placement save consumer landed
+
+- landed the first active-viewer UI consumer over the shared `wow-viewer` object-move seam:
+  - selected existing ADT MDDF and MODF placements can now be translated from the `Objects` workspace
+  - the moved preview updates live `WorldScene` placement state and cached tile placement data instead of only changing status text
+  - save target handling now distinguishes between writable loose sources and explicit user-chosen output `.adt` paths
+- proof captured so far:
+  - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+- important boundaries:
+  - this is still one-placement-at-a-time translation-only save wiring
+  - no aggregated dirty-map flow, add/remove placement support, terrain writer path, or packaged map-save workflow landed in this slice
 
 ## Confirmed starting inputs
 
@@ -90,12 +119,13 @@
 
 ## Recommended continuation order
 
-1. implement the first saved-map milestone with `wow-viewer-map-editing-foundation-plan.prompt.md`
-2. land the shared save-ownership seam required by that first object or terrain transaction
-3. continue MdxViewer-side UI extraction only where it supports the real save path or removes remaining mixed legacy task panels
+1. extend the object persistence seam from translation-only moves into the next editor-needed operation, likely add/remove or chosen-object persistence
+2. land dirty-map and save-target plumbing in `MdxViewer` on top of the new shared `wow-viewer` transaction seam
+3. extend the current selected-placement save wiring into aggregated dirty-map state and multi-placement save packaging
+4. keep terrain-write ownership separate until object-save flow and save packaging are honest end to end
 
 ## Proof boundary
 
-- this continuity slice now covers both workflow structure and one landed `MdxViewer` UI-scaffolding slice
-- no `wow-viewer` editor runtime, map save pipeline, object transaction boundary, or shared writer ownership is landed yet
+- this continuity slice now covers workflow structure, one landed `MdxViewer` UI-scaffolding slice, and one landed `wow-viewer` object-move transaction seam
+- no full `wow-viewer` editor runtime, dirty-map pipeline, terrain writer path, add/remove object persistence, or packaged map-save workflow is landed yet
 - do not archive this plan until the save-capable editor foundation slices are also closed
