@@ -5361,6 +5361,37 @@ void main() {
             }
         }
 
+        if (_worldScene.LitLoader != null && _worldScene.LitLoader.HasData)
+        {
+            bool showLitLights = _worldScene.ShowLitLights;
+            if (ImGui.Checkbox($"LIT Lights ({_worldScene.LitLoader.Lights.Count})", ref showLitLights))
+                _worldScene.ShowLitLights = showLitLights;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Alpha-era lights.lit placement overlay. Pins show light origins; boxes show approximate influence radius.");
+
+            bool useLitFogOverride = _worldScene.UseLitFogOverride;
+            if (ImGui.Checkbox("Use LIT Fog Override", ref useLitFogOverride))
+                _worldScene.UseLitFogOverride = useLitFogOverride;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Experimental: sample LIT clear-weather colors and fog distances instead of the current DBC lighting path.");
+
+            if (_worldScene.LastLitSample != null)
+                ImGui.TextDisabled($"LIT sample: {_worldScene.LastLitSample.DominantLightName}  fogEnd={_worldScene.LastLitSample.FogEnd:F1}");
+            else
+                ImGui.TextDisabled(_worldScene.LitStatus);
+        }
+        else if (!_worldScene.LitLoadAttempted)
+        {
+            if (ImGui.Button("Load LIT Lights"))
+                _worldScene.ShowLitLights = true;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Load Alpha-era World\\<map>\\lights.lit data for overlay and inspection.");
+        }
+        else
+        {
+            ImGui.TextDisabled(_worldScene.LitStatus);
+        }
+
         bool objectFogEnabled = _worldScene.ObjectFogEnabled;
         if (ImGui.Checkbox("Fog Objects", ref objectFogEnabled))
             _worldScene.ObjectFogEnabled = objectFogEnabled;

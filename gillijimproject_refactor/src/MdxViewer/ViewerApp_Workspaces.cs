@@ -272,6 +272,9 @@ public partial class ViewerApp
         {
             ImGui.Separator();
             DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
+
+            ImGui.Separator();
+            DrawLitInvestigationPanel(defaultOpen: _worldScene.LitLoader?.HasData == true || _worldScene.UseLitFogOverride);
         }
 
         if (_terrainManager != null || _vlmTerrainManager != null)

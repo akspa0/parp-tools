@@ -2402,6 +2402,40 @@ public class WorldScene : ISceneRenderer
     private LightService? _lightService;
     public LightService? LightService => _lightService;
 
+    // Alpha LIT lighting (lazy-loaded on first request)
+    private LitLoader? _litLoader;
+    private bool _showLitLights;
+    private bool _litLoadAttempted;
+    private bool _useLitFogOverride;
+    private string _litStatus = "LIT not loaded.";
+    private int _selectedLitLightIndex = -1;
+    private LitLoader.LitLightingSample? _lastLitSample;
+    public bool ShowLitLights
+    {
+        get => _showLitLights;
+        set
+        {
+            _showLitLights = value;
+            if (value && !_litLoadAttempted)
+                LazyLoadLit();
+        }
+    }
+    public bool UseLitFogOverride
+    {
+        get => _useLitFogOverride;
+        set
+        {
+            _useLitFogOverride = value;
+            if (value && !_litLoadAttempted)
+                LazyLoadLit();
+        }
+    }
+    public LitLoader? LitLoader => _litLoader;
+    public bool LitLoadAttempted => _litLoadAttempted;
+    public string LitStatus => _litStatus;
+    public int SelectedLitLightIndex { get => _selectedLitLightIndex; set => _selectedLitLightIndex = value; }
+    public LitLoader.LitLightingSample? LastLitSample => _lastLitSample;
+
     // Taxi selection: -1 = show all (or none if !_showTaxi)
     private int _selectedTaxiNodeId = -1;
     private int _selectedTaxiRouteId = -1;
@@ -2516,6 +2550,29 @@ public class WorldScene : ISceneRenderer
         _wlLoader.LoadAll();
         if (_wlLoader.HasData)
             _terrainManager.LiquidRenderer.AddWlBodies(_wlLoader.Bodies);
+    }
+
+    private void LazyLoadLit()
+    {
+        _litLoadAttempted = true;
+        _lastLitSample = null;
+
+        if (_dataSource == null)
+        {
+            _litStatus = "LIT unavailable: no data source.";
+            return;
+        }
+
+        _litLoader = new LitLoader(_dataSource, _terrainManager.MapName);
+        if (_litLoader.Load())
+        {
+            _litStatus = _litLoader.Status;
+            if (_selectedLitLightIndex < 0 && _litLoader.Lights.Count > 0)
+                _selectedLitLightIndex = 0;
+            return;
+        }
+
+        _litStatus = _litLoader.Status;
     }
 
     private void BeginPm4OverlayLoad(bool ignoreCache = false)
@@ -6839,10 +6896,34 @@ public class WorldScene : ISceneRenderer
         fogEnd = 0f;
         frame.LightingMs = MeasureDurationMs(() =>
         {
+            LitLoader.LitLightingSample? litSample = null;
             _lightService?.Update(camPos);
             if (_lightService != null && _lightService.ActiveLightId >= 0)
-            {
                 lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
+
+            if (_litLoader != null && _litLoader.HasData)
+                litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
+
+            if (_useLitFogOverride && litSample != null)
+            {
+                lighting.ApplyExternalLighting(
+                    litSample.DirectColor,
+                    litSample.AmbientColor,
+                    litSample.FogColor);
+                lighting.FogStart = litSample.FogStart;
+                lighting.FogEnd = litSample.FogEnd;
+                lighting.Update();
+
+                _skyDome.ZenithColor = litSample.SkyTopColor;
+                _skyDome.HorizonColor = litSample.SkyHorizonColor;
+                _skyDome.SkyFogColor = litSample.FogColor;
+                fogColor = lighting.FogColor;
+                fogStart = lighting.FogStart;
+                fogEnd = lighting.FogEnd;
+                _lastLitSample = litSample;
+            }
+            else if (_lightService != null && _lightService.ActiveLightId >= 0)
+            {
                 lighting.ApplyExternalLighting(
                     _lightService.DirectColor,
                     _lightService.AmbientColor,
@@ -6855,6 +6936,7 @@ public class WorldScene : ISceneRenderer
                 fogColor = lighting.FogColor;
                 fogStart = lighting.FogStart;
                 fogEnd = lighting.FogEnd;
+                _lastLitSample = litSample;
             }
             else
             {
@@ -6864,6 +6946,7 @@ public class WorldScene : ISceneRenderer
                 fogColor = lighting.FogColor;
                 fogStart = lighting.FogStart;
                 fogEnd = lighting.FogEnd;
+                _lastLitSample = litSample;
             }
         });
 
@@ -7486,6 +7569,34 @@ public class WorldScene : ISceneRenderer
                             _bbRenderer.BatchLine(v2, v6, triggerColor);
                             _bbRenderer.BatchLine(v3, v7, triggerColor);
                         }
+                    }
+                }
+
+                if (_showLitLights && _litLoader != null && _litLoader.HasData)
+                {
+                    int highlightedLightIndex = _selectedLitLightIndex >= 0
+                        ? _selectedLitLightIndex
+                        : _lastLitSample?.DominantLightIndex ?? -1;
+
+                    for (int lightIndex = 0; lightIndex < _litLoader.Lights.Count; lightIndex++)
+                    {
+                        LitLoader.LitLight light = _litLoader.Lights[lightIndex];
+                        if (!light.HasMeaningfulPosition)
+                            continue;
+
+                        Vector3 lightColor = _litLoader.EvaluateOverlayColor(light, lighting.GameTime);
+                        bool isHighlighted = lightIndex == highlightedLightIndex;
+                        float pinHeight = isHighlighted ? 60f : 36f;
+                        float headSize = isHighlighted ? 8f : 5f;
+                        _bbRenderer.BatchPin(light.Position, pinHeight, headSize,
+                            isHighlighted ? new Vector3(1f, 1f, 1f) : lightColor);
+
+                        float footprintRadius = Math.Max(light.Radius, 6f);
+                        float footprintHeight = Math.Max(8f, Math.Min(light.Dropoff, 80f));
+                        var min = new Vector3(light.Position.X - footprintRadius, light.Position.Y - footprintRadius, light.Position.Z - footprintHeight * 0.25f);
+                        var max = new Vector3(light.Position.X + footprintRadius, light.Position.Y + footprintRadius, light.Position.Z + footprintHeight * 0.25f);
+                        _bbRenderer.BatchBoxMinMax(min, max,
+                            isHighlighted ? new Vector3(1f, 1f, 1f) : lightColor);
                     }
                 }
 

@@ -16,6 +16,14 @@ public partial class ViewerApp
     }
 
     private VisualInvestigationMode _visualInvestigationMode = VisualInvestigationMode.Auto;
+    private readonly int[] _litFocusTrackOrder =
+    {
+        LitLoader.TrackDirectColor,
+        LitLoader.TrackAmbientColor,
+        LitLoader.TrackSkyTop,
+        LitLoader.TrackSkyHorizon,
+        LitLoader.TrackFogColor,
+    };
 
     private void DrawVisualInvestigationToolbox(bool showWorldObjectRangeControls)
     {
@@ -293,6 +301,117 @@ public partial class ViewerApp
 
             ImGui.EndTable();
         }
+    }
+
+    private void DrawLitInvestigationPanel(bool defaultOpen)
+    {
+        if (_worldScene == null)
+            return;
+
+        ImGuiTreeNodeFlags flags = defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
+        if (!ImGui.CollapsingHeader("LIT Lighting Investigation", flags))
+            return;
+
+        bool showLitLights = _worldScene.ShowLitLights;
+        if (ImGui.Checkbox("Show LIT Overlay", ref showLitLights))
+            _worldScene.ShowLitLights = showLitLights;
+
+        ImGui.SameLine();
+        bool useLitFogOverride = _worldScene.UseLitFogOverride;
+        if (ImGui.Checkbox("Use LIT Fog Override", ref useLitFogOverride))
+            _worldScene.UseLitFogOverride = useLitFogOverride;
+
+        if (!_worldScene.LitLoadAttempted)
+        {
+            ImGui.TextDisabled("World\\<map>\\lights.lit is lazy-loaded for the current map.");
+            if (ImGui.Button("Load LIT Lighting"))
+                _worldScene.ShowLitLights = true;
+            return;
+        }
+
+        LitLoader? loader = _worldScene.LitLoader;
+        if (loader == null || !loader.HasData)
+        {
+            ImGui.TextDisabled(_worldScene.LitStatus);
+            return;
+        }
+
+        ImGui.TextDisabled($"Path: {loader.SourcePath}");
+        ImGui.TextDisabled($"Version: 0x{loader.Version:X8}  RawCount: {loader.RawLightCount}  Parsed lights: {loader.Lights.Count}");
+        ImGui.TextDisabled("Current runtime sampling uses LIT group 0 only; other groups remain visible for inspection but are not applied yet.");
+
+        LitLoader.LitLightingSample? litSample = _worldScene.LastLitSample;
+        if (litSample != null)
+        {
+            ImGui.Separator();
+            ImGui.TextDisabled($"Camera sample: {litSample.DominantLightName}  weight={litSample.DominantWeight:F2}  time={litSample.TimeOfDay:F0}/2880");
+            DrawLitColorSwatch("sample_direct", "Direct", litSample.DirectColor);
+            ImGui.SameLine();
+            DrawLitColorSwatch("sample_ambient", "Ambient", litSample.AmbientColor);
+            ImGui.SameLine();
+            DrawLitColorSwatch("sample_fog", "Fog", litSample.FogColor);
+            ImGui.TextDisabled($"Fog start/end: {litSample.FogStart:F1} / {litSample.FogEnd:F1}  scaler={litSample.FogStartScalar:F3}");
+
+            if (ImGui.SmallButton("Copy LIT Sample Summary"))
+                CopyTextToClipboard(BuildLitSampleSummary(loader, litSample), "LIT lighting summary");
+        }
+
+        int selectedIndex = _worldScene.SelectedLitLightIndex;
+        if (selectedIndex < 0 || selectedIndex >= loader.Lights.Count)
+            selectedIndex = 0;
+
+        ImGui.Separator();
+        if (ImGui.BeginTable("##lit_investigation", 5, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY, new Vector2(0f, 220f)))
+        {
+            ImGui.TableSetupColumn("Sel", ImGuiTableColumnFlags.WidthFixed, 28f);
+            ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 56f);
+            ImGui.TableSetupColumn("Radius", ImGuiTableColumnFlags.WidthFixed, 72f);
+            ImGui.TableSetupColumn("Position", ImGuiTableColumnFlags.WidthFixed, 210f);
+            ImGui.TableSetupColumn("Light", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            for (int i = 0; i < loader.Lights.Count; i++)
+            {
+                LitLoader.LitLight light = loader.Lights[i];
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                bool isSelected = selectedIndex == i;
+                if (ImGui.Selectable($"##lit_sel_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
+                    _worldScene.SelectedLitLightIndex = i;
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted(light.IsDefaultLight ? "Default" : "Local");
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.Text(light.Radius > 0f ? $"{light.Radius:F1}" : "-");
+
+                ImGui.TableSetColumnIndex(3);
+                ImGui.Text(light.HasMeaningfulPosition
+                    ? $"({light.Position.X:F1}, {light.Position.Y:F1}, {light.Position.Z:F1})"
+                    : "(none)");
+
+                ImGui.TableSetColumnIndex(4);
+                if (ImGui.Selectable($"{light.DisplayName}##lit_label_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
+                    _worldScene.SelectedLitLightIndex = i;
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(light.DisplayName);
+                    ImGui.TextDisabled($"Chunk=({light.ChunkX}, {light.ChunkY}) chunkRadius={light.ChunkRadius}");
+                    ImGui.TextDisabled($"Radius raw={light.RadiusRaw:F1} normalized={light.Radius:F1}");
+                    ImGui.TextDisabled($"Dropoff raw={light.DropoffRaw:F1} normalized={light.Dropoff:F1}");
+                    ImGui.EndTooltip();
+                }
+            }
+
+            ImGui.EndTable();
+        }
+
+        selectedIndex = Math.Clamp(_worldScene.SelectedLitLightIndex >= 0 ? _worldScene.SelectedLitLightIndex : selectedIndex, 0, loader.Lights.Count - 1);
+        LitLoader.LitLight selectedLight = loader.Lights[selectedIndex];
+        DrawLitLightDetails(selectedLight, litSample?.TimeOfDay ?? (_terrainManager?.Lighting.GameTime ?? 0f) * 2880f);
     }
 
     private bool TryDrawTerrainChunkHoverOverlay()
@@ -581,5 +700,72 @@ public partial class ViewerApp
             .AppendLine();
         builder.Append("SourceBlocks=").Append(string.Join(",", body.SourceBlockIndices));
         return builder.ToString().TrimEnd();
+    }
+
+    private void DrawLitLightDetails(LitLoader.LitLight light, float timeOfDay)
+    {
+        ImGui.Separator();
+        ImGui.Text(light.DisplayName);
+        ImGui.TextDisabled($"Chunk=({light.ChunkX}, {light.ChunkY}) chunkRadius={light.ChunkRadius}  Groups={light.Groups.Count}");
+        ImGui.TextDisabled(light.HasMeaningfulPosition
+            ? $"Position: ({light.Position.X:F2}, {light.Position.Y:F2}, {light.Position.Z:F2})"
+            : "Position: none");
+        ImGui.TextDisabled($"Radius={light.Radius:F2} (raw {light.RadiusRaw:F2})  Dropoff={light.Dropoff:F2} (raw {light.DropoffRaw:F2})");
+
+        if (light.Groups.Count == 0)
+        {
+            ImGui.TextDisabled("No light-data groups were parsed for this entry.");
+            return;
+        }
+
+        LitLoader.LitGroup group = light.Groups[0];
+        ImGui.TextDisabled($"Inspecting group 0 at time {timeOfDay:F0}/2880.");
+        for (int i = 0; i < _litFocusTrackOrder.Length; i++)
+        {
+            int trackIndex = _litFocusTrackOrder[i];
+            if (!group.TryEvaluateTrack(trackIndex, timeOfDay, out Vector3 color))
+                continue;
+
+            DrawLitColorSwatch($"detail_track_{trackIndex}", GetLitTrackLabel(trackIndex), color);
+            if ((i % 3) != 2 && i + 1 < _litFocusTrackOrder.Length)
+                ImGui.SameLine();
+        }
+
+        ImGui.TextDisabled($"Fog end={group.EvaluateFogEnd(timeOfDay):F1}  Fog start scalar={group.EvaluateFogStartScaler(timeOfDay):F3}");
+    }
+
+    private static void DrawLitColorSwatch(string id, string label, Vector3 color)
+    {
+        ImGui.ColorButton($"##{id}", new Vector4(color, 1f), ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoDragDrop, new Vector2(18f, 18f));
+        ImGui.SameLine();
+        ImGui.TextUnformatted(label);
+    }
+
+    private static string GetLitTrackLabel(int trackIndex)
+    {
+        return trackIndex switch
+        {
+            LitLoader.TrackDirectColor => "Direct",
+            LitLoader.TrackAmbientColor => "Ambient",
+            LitLoader.TrackSkyTop => "Sky Top",
+            LitLoader.TrackSkyHorizon => "Sky Horizon",
+            LitLoader.TrackFogColor => "Fog",
+            _ => $"Track {trackIndex}",
+        };
+    }
+
+    private static string BuildLitSampleSummary(LitLoader loader, LitLoader.LitLightingSample sample)
+    {
+        var builder = new System.Text.StringBuilder();
+        builder.AppendLine(loader.SourcePath ?? "(unknown)");
+        builder.AppendLine($"Version=0x{loader.Version:X8} RawCount={loader.RawLightCount} Parsed={loader.Lights.Count}");
+        builder.AppendLine($"Dominant={sample.DominantLightName} Weight={sample.DominantWeight:F3} Time={sample.TimeOfDay:F0}/2880");
+        builder.AppendLine($"Direct={sample.DirectColor.X:F3},{sample.DirectColor.Y:F3},{sample.DirectColor.Z:F3}");
+        builder.AppendLine($"Ambient={sample.AmbientColor.X:F3},{sample.AmbientColor.Y:F3},{sample.AmbientColor.Z:F3}");
+        builder.AppendLine($"Fog={sample.FogColor.X:F3},{sample.FogColor.Y:F3},{sample.FogColor.Z:F3}");
+        builder.AppendLine($"FogStart={sample.FogStart:F3} FogEnd={sample.FogEnd:F3} FogStartScalar={sample.FogStartScalar:F3}");
+        builder.Append($"SkyTop={sample.SkyTopColor.X:F3},{sample.SkyTopColor.Y:F3},{sample.SkyTopColor.Z:F3} ");
+        builder.Append($"SkyHorizon={sample.SkyHorizonColor.X:F3},{sample.SkyHorizonColor.Y:F3},{sample.SkyHorizonColor.Z:F3}");
+        return builder.ToString();
     }
 }
