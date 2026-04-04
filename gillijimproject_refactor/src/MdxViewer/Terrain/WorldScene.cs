@@ -527,6 +527,7 @@ public class WorldScene : ISceneRenderer
     private bool _showSelectedObjectBounds = true;
     private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
+    private float _objectStreamingRangeMultiplier = 2.0f;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -842,6 +843,11 @@ public class WorldScene : ISceneRenderer
     public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
     public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
     public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
+    public float ObjectStreamingRangeMultiplier
+    {
+        get => _objectStreamingRangeMultiplier;
+        set => _objectStreamingRangeMultiplier = Math.Clamp(value, 1.0f, 4.0f);
+    }
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
     public float HoveredAssetMaxDistance
     {
@@ -6505,24 +6511,28 @@ public class WorldScene : ISceneRenderer
         return (disabledStart, disabledStart + 1f);
     }
 
-    private static float ComputeWmoCullDistance(float fogEnd)
+    private static float ComputeWmoCullDistance(float fogEnd, float rangeMultiplier)
     {
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
         if (fogEnd <= 0f)
-            return MathF.Min(WmoCullDistance, MaxWorldObjectViewDistance);
+            return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(WmoCullDistance, MaxWorldObjectViewDistance) * clampedMultiplier);
 
-        return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(WmoCullDistance, fogEnd + 256f));
+        float baseDistance = MathF.Min(MaxWorldObjectViewDistance, MathF.Max(WmoCullDistance, fogEnd + 256f));
+        return MathF.Min(MaxWorldObjectViewDistance, baseDistance * clampedMultiplier);
     }
 
-    private static float ComputeMdxCullDistance(float fogEnd, float boundsDiagonal, bool isTaxiActor)
+    private static float ComputeMdxCullDistance(float fogEnd, float boundsDiagonal, bool isTaxiActor, float rangeMultiplier)
     {
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
         if (isTaxiActor)
-            return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(1024f, fogEnd + 384f));
+            return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(1024f, fogEnd + 384f) * clampedMultiplier);
 
         if (fogEnd <= 0f)
-            return MathF.Min(DoodadCullDistance, MaxWorldObjectViewDistance);
+            return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(DoodadCullDistance, MaxWorldObjectViewDistance) * clampedMultiplier);
 
         float objectAllowance = MathF.Min(512f, boundsDiagonal * 0.5f + 96f);
-        return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(DoodadCullDistance, MathF.Max(1024f, fogEnd + objectAllowance)));
+        float baseDistance = MathF.Min(DoodadCullDistance, MathF.Max(1024f, fogEnd + objectAllowance));
+        return MathF.Min(MaxWorldObjectViewDistance, baseDistance * clampedMultiplier);
     }
 
     private void AccumulateUniqueIdFilterRange(
@@ -6599,7 +6609,7 @@ public class WorldScene : ISceneRenderer
 
     private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd)
     {
-        float wmoCullDistance = ComputeWmoCullDistance(fogEnd);
+        float wmoCullDistance = ComputeWmoCullDistance(fogEnd, _objectStreamingRangeMultiplier);
 
         foreach (var inst in _wmoInstances)
         {
@@ -6669,7 +6679,7 @@ public class WorldScene : ISceneRenderer
             }
 
             float diag = (inst.BoundsMax - inst.BoundsMin).Length();
-            float mdxCullDistance = ComputeMdxCullDistance(fogEnd, diag, countAsTaxiActor);
+            float mdxCullDistance = ComputeMdxCullDistance(fogEnd, diag, countAsTaxiActor, _objectStreamingRangeMultiplier);
             float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, coneFactor);
             float coneCullDistanceSq = coneCullDistance * coneCullDistance;
             if (boundsDistSq > coneCullDistanceSq)

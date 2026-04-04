@@ -5101,6 +5101,10 @@ void main() {
         if (_worldScene == null) return;
 
         DrawSelectedPlacementEditControls();
+        DrawVisualInvestigationToolbox(showWorldObjectRangeControls: true);
+        ImGui.Separator();
+        DrawTerrainChunkInvestigationPanel(defaultOpen: _visualInvestigationMode == VisualInvestigationMode.Adt);
+        ImGui.Separator();
 
         LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
@@ -9859,10 +9863,19 @@ void main() {
 
     private void DrawSceneHoverAssetOverlay()
     {
+        if (_visualInvestigationMode == VisualInvestigationMode.Adt)
+        {
+            TryDrawTerrainChunkHoverOverlay();
+            return;
+        }
+
         if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
             return;
 
         if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info)
+            return;
+
+        if (!ShouldShowHoveredAssetInfoForInvestigation(info))
             return;
 
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))

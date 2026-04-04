@@ -74,6 +74,7 @@ public class WmoRenderer : ISceneRenderer
     private const int DeferredDoodadLoadsPerFrame = 1;
     private const double DeferredDoodadLoadBudgetMs = 2.0;
     private const float GroupVisibilityBoundsPadding = 32f;
+    private const float NearRootFullVisibilityDistance = 192f;
     private const float ExteriorPortalRevealDistance = 1024f;
     private const float InteriorPortalRevealDistance = 3072f;
     private const int ExteriorPortalTraversalDepth = 1;
@@ -813,8 +814,20 @@ void main() {
 
         bool anyExteriorGroups = false;
         bool cameraInsideRoot = ContainsPointExpanded(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax, GroupVisibilityBoundsPadding);
+        float nearRootDistanceSq = DistanceSquaredPointToAabb(localCameraPos, _wmo.BoundsMin, _wmo.BoundsMax);
+        bool cameraNearRoot = nearRootDistanceSq <= NearRootFullVisibilityDistance * NearRootFullVisibilityDistance;
         int nearestGroupIndex = -1;
         float nearestGroupDistSq = float.MaxValue;
+
+        if (cameraInsideRoot || cameraNearRoot)
+        {
+            for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                _runtimeVisibleGroups[groupIndex] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
 
         for (int groupIndex = 0; groupIndex < _wmo.Groups.Count; groupIndex++)
         {
