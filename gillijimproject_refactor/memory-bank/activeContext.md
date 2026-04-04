@@ -2,6 +2,51 @@
 
 # Active Context
 
+## Apr 04, 2026 - MDX click selection now follows hovered instance and terrain worlds prewarm streamed object assets
+
+- narrowed the remaining selected-object mismatch to the MDX scene-selection path rather than WMO selection:
+	- `HoveredAssetInfo` in `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now carries the exact hovered scene object type/index, not just display text
+	- `ViewerApp` now prefers the hovered scene object identity on left-click before falling back to the broader ray picker, which should stop dense-foliage MDX clicks from selecting a different overlapping instance than the tooltip target
+- landed a cross-version terrain-world object-load policy in `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs`:
+	- streamed terrain tiles now queue their MDX/WMO assets as soon as the tile enters the AOI instead of waiting for the later visible-object prioritization pass to be the first load signal
+	- deferred asset-load throughput is now scene-policy driven for terrain worlds instead of being hardcoded to the old `6 MDX / 3 WMO / 2 loads / 6 ms` bottleneck
+	- the policy is terrain-streaming vs WMO-only, not a new exact-build branch, so `0.5.x`, `0.6.0`, `0.11+`, and later terrain worlds share the same warmup path instead of drifting by accident
+- validation completed:
+	- file diagnostics were clean for the touched `WorldScene.cs`, `ViewerApp.cs`, and `ModelRenderer.cs` paths
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime signoff was captured yet for the MDX click-selection fix or the terrain-world loading improvement
+
+## Apr 04, 2026 - MdxViewer inspector build is repaired and UniqueId hide controls are more usable
+
+- repaired the broken selected-object inspector slice in `gillijimproject_refactor/src/MdxViewer/ViewerApp_Sidebars.cs`:
+	- `DrawModelInfoContent()` is valid again and no longer embeds the selected-object helper in the wrong place
+	- the fixed right inspector now exposes an explicit `Inspector Width` slider so the user can widen it even if the edge splitter is awkward to grab
+- tightened the UniqueId archaeology UI in `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs`:
+	- changing the hide-range sliders now enables the UniqueId filter immediately instead of leaving a selected range inert until the checkbox or layer buttons are used
+	- the detected-layer table is now more compact so the `Hide` action remains reachable in narrower inspector widths
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build-verified UI/runtime plumbing only
+	- no live runtime validation was captured yet for selected-object inspector behavior, UniqueId hide behavior, or fixed-sidebar usability
+
+## Apr 04, 2026 - MdxViewer now stages grouped dirty ADT placement saves by source
+
+- `gillijimproject_refactor/src/MdxViewer` now extends the first selected-placement save seam into a real grouped dirty-source queue:
+	- translation-only MDDF and MODF moves are now staged across selection changes instead of being limited to one current selection state
+	- pending placement moves are grouped by source ADT so one save can write multiple staged moves from the same tile file
+	- the `Publish` workspace now surfaces the same pending dirty-source queue, so `Save All Pending` is available even when nothing is currently selected
+- current save boundary after this slice:
+	- still translation-only for existing ADT placements only
+	- grouped save packaging now exists for multiple staged moves, but add/remove placement support, terrain writes, and full packaged map-save workflow are still open
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- no automated tests were added or run for this `MdxViewer` slice
+	- no live runtime or real-data editor workflow signoff was captured yet for the new grouped save queue
+
 ## Apr 04, 2026 - MdxViewer now stages and saves selected existing ADT object moves through wow-viewer
 
 - `gillijimproject_refactor/src/MdxViewer` now wires the first live UI consumer onto the shared `wow-viewer` placement writer seam:

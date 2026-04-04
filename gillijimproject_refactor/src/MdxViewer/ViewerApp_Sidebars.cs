@@ -513,6 +513,23 @@ public partial class ViewerApp
             if (_useDockspaceUi)
                 CaptureDockPanelState(ref _inspectorDockState);
 
+            if (!_useDockspaceUi)
+            {
+                float maxInspectorWidth = ClampFixedSidebarWidth(SidebarMaxWidth, isLeftSidebar: false, io.DisplaySize.X);
+                if (maxInspectorWidth > SidebarMinWidth)
+                {
+                    float inspectorWidth = _rightSidebarWidth;
+                    ImGui.SetNextItemWidth(-1f);
+                    if (ImGui.SliderFloat("Inspector Width", ref inspectorWidth, SidebarMinWidth, maxInspectorWidth, "%.0f px"))
+                        _rightSidebarWidth = ClampFixedSidebarWidth(inspectorWidth, isLeftSidebar: false, io.DisplaySize.X);
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Resize the fixed inspector without relying on the edge splitter.");
+
+                    ImGui.Separator();
+                }
+            }
+
             if (_workspaceMode == WorkspaceMode.Editor)
             {
                 DrawEditorWorkspaceInspector();
@@ -687,6 +704,23 @@ public partial class ViewerApp
         return Math.Clamp(width, SidebarMinWidth, maxWidth);
     }
 
+    private bool DrawSelectedObjectInspectorSection(bool defaultOpen = true)
+    {
+        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        if (string.IsNullOrEmpty(_selectedObjectInfo) || hasSelectedPm4)
+            return false;
+
+        ImGuiTreeNodeFlags flags = defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
+        if (!ImGui.CollapsingHeader("Selected Object", flags))
+            return true;
+
+        ImGui.TextWrapped(_selectedObjectInfo);
+        DrawSelectedTaxiControls();
+        DrawSelectedWmoControls();
+        DrawSelectedSqlGameObjectAnimationControls();
+        return true;
+    }
+
     private void DrawModelInfoContent()
     {
         if (string.IsNullOrEmpty(_modelInfo))
@@ -697,7 +731,7 @@ public partial class ViewerApp
 
         ImGui.TextWrapped(_modelInfo);
 
-        if (_renderer is IModelRenderer || _renderer is WmoRenderer)
+        if (_renderer is MdxRenderer || _renderer is WmoRenderer)
         {
             ImGui.Separator();
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);

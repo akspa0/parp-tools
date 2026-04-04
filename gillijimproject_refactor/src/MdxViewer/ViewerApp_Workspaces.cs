@@ -263,7 +263,12 @@ public partial class ViewerApp
 
     private void DrawEditorInspectWorkspace()
     {
-        ImGui.TextWrapped("Use Navigator for map and asset browse. This task keeps read-only inspection, camera, and utility panels together.");
+        ImGui.TextWrapped("Use Navigator for map and asset browse. This task keeps selection details, loaded-asset inspection, camera, and utility panels together.");
+
+        if (DrawSelectedObjectInspectorSection())
+        {
+            ImGui.Separator();
+        }
 
         ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
         if (_showModelInfo && ImGui.CollapsingHeader("Model Info", ImGuiTreeNodeFlags.DefaultOpen))
@@ -296,8 +301,30 @@ public partial class ViewerApp
 
     private void DrawEditorPublishWorkspace()
     {
-        ImGui.TextWrapped("Save and publish are explicit here. Current MdxViewer support is still narrow: translation-only saves for selected existing ADT object placements, plus export and capture. General map save and terrain persistence are still not implemented.");
+        ImGui.TextWrapped("Save and publish are explicit here. Current MdxViewer support is still narrow: translation-only saves for staged existing ADT object placement moves, grouped by source ADT, plus export and capture. Saves now default into timestamped project output folders instead of overwriting source files. General map save and terrain persistence are still not implemented.");
         ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
+        ImGui.Separator();
+        ImGui.Text("Project Output");
+        ImGui.TextDisabled("Editor saves and map conversions write into timestamped project folders under this root.");
+        ImGui.SetNextItemWidth(-80);
+        if (ImGui.InputText("##projectOutputRoot", ref _projectOutputRootDir, 512))
+            HandleProjectOutputRootChanged();
+        ImGui.SameLine();
+        if (ImGui.Button("Browse##projectOutputRoot"))
+        {
+            string? picked = ShowFolderDialogSTA("Select project output root", GetProjectOutputRootDirectory(), showNewFolderButton: true);
+            if (!string.IsNullOrWhiteSpace(picked))
+            {
+                _projectOutputRootDir = picked;
+                HandleProjectOutputRootChanged();
+            }
+        }
+
+        ImGui.TextWrapped($"Current project folder: {DescribeEditorProjectOutputDirectory()}");
+        if (ImGui.Button("New Project Folder##publish"))
+            StartNewEditorProjectOutputDirectory();
+
+        DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
         ImGui.Separator();
 
         if (ImGui.Button("Capture Current (No UI)"))
@@ -378,19 +405,31 @@ public partial class ViewerApp
 
     private string GetWorkspaceSaveStatusSummary()
     {
-        return _workspaceMode switch
+        if (_workspaceMode == WorkspaceMode.Viewer)
+            return "Read-only viewer workspace.";
+
+        if (_workspaceMode == WorkspaceMode.Editor)
         {
-            WorkspaceMode.Viewer => "Read-only viewer workspace.",
-            WorkspaceMode.Editor when _selectedPlacementDirty && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
-                => $"1 pending selected placement move. Target: {_selectedPlacementSaveTargetPath}",
-            WorkspaceMode.Editor when _selectedPlacementDirty
-                => "1 pending selected placement move. Choose an output .adt path to save.",
-            WorkspaceMode.Editor when HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
-                => $"Selected placement save target: {_selectedPlacementSaveTargetPath}. No general map save pipeline yet.",
-            WorkspaceMode.Editor when HasWorldEditingContext()
-                => "Selected placement save available for translation-only ADT object moves. No general map save pipeline yet.",
-            WorkspaceMode.Editor => "Editor workspace loaded without a world save target.",
-            _ => "Unknown save state.",
-        };
+            int pendingEditCount = GetPendingPlacementEditCount();
+            if (pendingEditCount > 0)
+            {
+                int pendingSourceCount = GetPendingPlacementSourceCount();
+                int missingTargets = GetPendingPlacementSourceCountMissingTargets();
+                string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
+                return missingTargets > 0
+                    ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."
+                    : pendingSummary;
+            }
+
+            if (HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+                return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
+
+            if (HasWorldEditingContext())
+                return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
+
+            return "Editor workspace loaded without a world save target.";
+        }
+
+        return "Unknown save state.";
     }
 }

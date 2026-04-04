@@ -61,6 +61,16 @@ public partial class ViewerApp : IDisposable
         Publish,
     }
 
+    private readonly record struct PlacementEditKey(Terrain.ObjectType ObjectType, int TileX, int TileY, int EntryIndex, int UniqueId);
+
+    private sealed class StagedPlacementEdit
+    {
+        public PlacementEditKey Key { get; init; }
+        public string SourcePath { get; init; } = string.Empty;
+        public Vector3 OriginalPosition { get; set; }
+        public Vector3 EditedPosition { get; set; }
+    }
+
     private const string ViewerProductName = "parp-tools WoW Viewer";
     private const string ViewerAboutPopupTitle = "About parp-tools WoW Viewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
@@ -142,6 +152,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string OutputDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output");
     private static readonly string CacheDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "cache");
     private static readonly string ExportDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "output", "export");
+    private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
@@ -206,6 +217,9 @@ public partial class ViewerApp : IDisposable
     private bool _wantExportGlb = false;
     private bool _wantExportGlbCollision = false;
     private bool _wantExportMapGlbTiles = false;
+    private string _projectOutputRootDir = ProjectsDir;
+    private string _editorProjectOutputDir = string.Empty;
+    private string _editorProjectSourceKey = string.Empty;
     private Terrain.ObjectType _selectedPlacementEditType = Terrain.ObjectType.None;
     private int _selectedPlacementEditUniqueId = -1;
     private int _selectedPlacementEditTileX = -1;
@@ -214,7 +228,10 @@ public partial class ViewerApp : IDisposable
     private Vector3 _selectedPlacementOriginalPosition;
     private Vector3 _selectedPlacementEditedPosition;
     private bool _selectedPlacementDirty;
+    private string? _selectedPlacementSourcePath;
     private string? _selectedPlacementSaveTargetPath;
+    private readonly Dictionary<PlacementEditKey, StagedPlacementEdit> _stagedPlacementEdits = new();
+    private readonly Dictionary<string, string> _placementSaveTargetsBySourcePath = new(StringComparer.OrdinalIgnoreCase);
     private string _selectedPlacementSaveStatus = "Select a tile-backed world object to stage a translation-only save.";
 
     private struct DockPanelState
@@ -454,13 +471,17 @@ public partial class ViewerApp : IDisposable
     private int _mapConvertDirection = 0; // 0 = Alpha→LK, 1 = LK→Alpha
     private string _mapConvertSourcePath = "";
     private string _mapConvertOutputDir = "";
+    private string _mapConvertProjectSourceKey = string.Empty;
     private string _mapConvertLkMapDir = ""; // LK→Alpha: directory containing LK ADT files
+    private bool _mapConvertCopyAlphaSourceWdt = true;
+    private bool _mapConvertEmitLkSplitOutputs = true;
     private bool _mapConvertVerbose = true;
     private bool _mapConverting = false;
     private readonly List<string> _mapConvertLog = new();
     private bool _mapConvertScrollToBottom = false;
     private string? _mapConvertError = null;
     private bool _mapConvertDone = false;
+    private string? _mapConvertLastLoadPath;
 
     // WMO Converter state
     private bool _showWmoConverterDialog = false;
@@ -3701,6 +3722,7 @@ void main() {
         if (ImGui.Begin("Map Converter", ref _showMapConverterDialog))
         {
             ImGui.TextWrapped("Convert maps between Alpha 0.5.3 monolithic WDT and split ADT formats, including LK 3.3.5 and no-MCIN later-era roots where supported.");
+            ImGui.TextDisabled("Conversions write into timestamped project folders under the configured project root. Original source files are not overwritten.");
             ImGui.Spacing();
 
             // Direction selector
@@ -3711,6 +3733,9 @@ void main() {
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
+
+            if (!string.IsNullOrWhiteSpace(_mapConvertSourcePath))
+                EnsureMapConverterProjectOutputDirectory(forceNew: false);
 
             if (_mapConvertDirection == 0)
             {
@@ -3723,18 +3748,15 @@ void main() {
                 {
                     string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
                     var picked = ShowFileDialogSTA("Select Alpha WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
-                    if (picked != null) _mapConvertSourcePath = picked;
+                    if (picked != null)
+                    {
+                        _mapConvertSourcePath = picked;
+                        EnsureMapConverterProjectOutputDirectory(forceNew: false);
+                    }
                 }
 
-                ImGui.Text("Output Directory:");
-                ImGui.SetNextItemWidth(-80);
-                ImGui.InputText("##a2l_out", ref _mapConvertOutputDir, 512);
-                ImGui.SameLine();
-                if (ImGui.Button("Browse##a2l_out"))
-                {
-                    var picked = ShowFolderDialogSTA("Select output directory for LK ADT files");
-                    if (picked != null) _mapConvertOutputDir = picked;
-                }
+                ImGui.Checkbox("Copy source Alpha WDT into project", ref _mapConvertCopyAlphaSourceWdt);
+                ImGui.Checkbox("Emit converted LK split outputs", ref _mapConvertEmitLkSplitOutputs);
             }
             else
             {
@@ -3747,7 +3769,11 @@ void main() {
                 {
                     string? initDir = !string.IsNullOrEmpty(_mapConvertSourcePath) ? Path.GetDirectoryName(_mapConvertSourcePath) : null;
                     var picked = ShowFileDialogSTA("Select split-ADT WDT file", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
-                    if (picked != null) _mapConvertSourcePath = picked;
+                    if (picked != null)
+                    {
+                        _mapConvertSourcePath = picked;
+                        EnsureMapConverterProjectOutputDirectory(forceNew: false);
+                    }
                 }
 
                 ImGui.Text("Split ADT Directory (containing MapName_X_Y.adt roots):");
@@ -3759,33 +3785,32 @@ void main() {
                     var picked = ShowFolderDialogSTA("Select directory containing split ADT files");
                     if (picked != null) _mapConvertLkMapDir = picked;
                 }
+            }
 
-                ImGui.Text("Output Alpha WDT Path:");
-                ImGui.SetNextItemWidth(-80);
-                ImGui.InputText("##l2a_out", ref _mapConvertOutputDir, 512);
-                ImGui.SameLine();
-                if (ImGui.Button("Browse##l2a_out"))
+            ImGui.Spacing();
+            ImGui.Text("Project Output Root:");
+            ImGui.SetNextItemWidth(-80);
+            if (ImGui.InputText("##mapconv_project_root", ref _projectOutputRootDir, 512))
+                HandleProjectOutputRootChanged();
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##mapconv_project_root"))
+            {
+                string? picked = ShowFolderDialogSTA("Select project output root", GetProjectOutputRootDirectory(), showNewFolderButton: true);
+                if (!string.IsNullOrWhiteSpace(picked))
                 {
-                    string? initDir = !string.IsNullOrEmpty(_mapConvertOutputDir) ? Path.GetDirectoryName(_mapConvertOutputDir) : null;
-                    var picked = ShowSaveFileDialogSTA("Save Alpha WDT as", "WDT Files (*.wdt)|*.wdt|All Files (*.*)|*.*", initDir);
-                    if (picked != null) _mapConvertOutputDir = picked;
+                    _projectOutputRootDir = picked;
+                    HandleProjectOutputRootChanged();
                 }
             }
+
+            ImGui.TextWrapped($"Project Folder: {DescribeMapConverterProjectOutputDirectory()}");
+            if (ImGui.Button("New Project Folder##mapconv"))
+                EnsureMapConverterProjectOutputDirectory(forceNew: true);
 
             ImGui.Spacing();
             ImGui.Checkbox("Verbose logging", ref _mapConvertVerbose);
             ImGui.Spacing();
 
-            // Auto-fill hints
-            if (!string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertOutputDir))
-            {
-                string srcDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
-                string mapName = Path.GetFileNameWithoutExtension(_mapConvertSourcePath);
-                if (_mapConvertDirection == 0)
-                    _mapConvertOutputDir = Path.Combine(srcDir, $"{mapName}_lk");
-                else
-                    _mapConvertOutputDir = Path.Combine(srcDir, $"{mapName}_alpha.wdt");
-            }
             if (_mapConvertDirection == 1 && !string.IsNullOrEmpty(_mapConvertSourcePath) && string.IsNullOrEmpty(_mapConvertLkMapDir))
             {
                 _mapConvertLkMapDir = Path.GetDirectoryName(_mapConvertSourcePath) ?? "";
@@ -3795,6 +3820,7 @@ void main() {
             bool canConvert = !_mapConverting
                 && !string.IsNullOrWhiteSpace(_mapConvertSourcePath)
                 && !string.IsNullOrWhiteSpace(_mapConvertOutputDir)
+                && (_mapConvertDirection != 0 || _mapConvertCopyAlphaSourceWdt || _mapConvertEmitLkSplitOutputs)
                 && (_mapConvertDirection == 0 || !string.IsNullOrWhiteSpace(_mapConvertLkMapDir));
 
             if (!canConvert) ImGui.BeginDisabled();
@@ -3810,6 +3836,9 @@ void main() {
                 string lkMapDir = _mapConvertLkMapDir;
                 int direction = _mapConvertDirection;
                 bool verbose = _mapConvertVerbose;
+                bool copyAlphaSourceWdt = _mapConvertCopyAlphaSourceWdt;
+                bool emitLkSplitOutputs = _mapConvertEmitLkSplitOutputs;
+                _mapConvertLastLoadPath = null;
 
                 Task.Run(async () =>
                 {
@@ -3817,69 +3846,107 @@ void main() {
                     {
                         if (direction == 0)
                         {
-                            // Alpha → LK
-                            var opts = new WoWMapConverter.Core.Converters.ConversionOptions { Verbose = verbose };
-                            var converter = new WoWMapConverter.Core.Converters.AlphaToLkConverter(opts);
+                            string alphaCopyPath = BuildMapConverterAlphaSourceCopyPath(outPath, srcPath);
+                            string lkOutputDir = BuildMapConverterLkOutputDirectory(outPath, srcPath);
+                            string lkLoadPath = Path.Combine(lkOutputDir, Path.GetFileNameWithoutExtension(srcPath) + ".wdt");
 
-                            // Redirect console output to log
-                            var origOut = Console.Out;
-                            var sw = new StringWriter();
-                            Console.SetOut(sw);
-
-                            var result = await converter.ConvertWdtAsync(srcPath, outPath);
-
-                            Console.SetOut(origOut);
-                            var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                            lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
-                            _mapConvertScrollToBottom = true;
-
-                            if (result.Success)
+                            if (copyAlphaSourceWdt)
                             {
+                                Directory.CreateDirectory(Path.GetDirectoryName(alphaCopyPath)!);
+                                File.Copy(srcPath, alphaCopyPath, overwrite: true);
                                 lock (_mapConvertLog)
-                                    _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                    _mapConvertLog.Add($"Copied Alpha source WDT: {alphaCopyPath}");
+                                _mapConvertScrollToBottom = true;
+                                _mapConvertLastLoadPath = alphaCopyPath;
+                            }
+
+                            if (emitLkSplitOutputs)
+                            {
+                                var opts = new WoWMapConverter.Core.Converters.ConversionOptions { Verbose = verbose };
+                                var converter = new WoWMapConverter.Core.Converters.AlphaToLkConverter(opts);
+
+                                var origOut = Console.Out;
+                                var sw = new StringWriter();
+                                try
+                                {
+                                    Console.SetOut(sw);
+                                    var result = await converter.ConvertWdtAsync(srcPath, lkOutputDir);
+
+                                    var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                                    lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
+                                    _mapConvertScrollToBottom = true;
+
+                                    if (result.Success)
+                                    {
+                                        _mapConvertLastLoadPath = lkLoadPath;
+                                        lock (_mapConvertLog)
+                                            _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                        lock (_mapConvertLog)
+                                            _mapConvertLog.Add($"Project outputs: alpha-source={(copyAlphaSourceWdt ? alphaCopyPath : "skipped")}, lk-split={lkOutputDir}");
+                                    }
+                                    else
+                                    {
+                                        _mapConvertError = result.Error ?? "Unknown error";
+                                        lock (_mapConvertLog)
+                                            _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
+                                    }
+
+                                    foreach (var w in result.Warnings)
+                                    {
+                                        lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                                    }
+                                }
+                                finally
+                                {
+                                    Console.SetOut(origOut);
+                                }
                             }
                             else
                             {
-                                _mapConvertError = result.Error ?? "Unknown error";
                                 lock (_mapConvertLog)
-                                    _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
-                            }
-                            foreach (var w in result.Warnings)
-                            {
-                                lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                                    _mapConvertLog.Add($"\n=== SUCCESS: source Alpha WDT copied to project only ({alphaCopyPath}) ===");
                             }
                         }
                         else
                         {
-                            // LK → Alpha
+                            string alphaOutputPath = BuildMapConverterAlphaOutputPath(outPath, srcPath);
                             var opts = new WoWMapConverter.Core.Converters.LkToAlphaOptions { Verbose = verbose };
                             var converter = new WoWMapConverter.Core.Converters.LkToAlphaConverter(opts);
 
                             var origOut = Console.Out;
                             var sw = new StringWriter();
-                            Console.SetOut(sw);
-
-                            var result = await converter.ConvertAsync(srcPath, lkMapDir, outPath);
-
-                            Console.SetOut(origOut);
-                            var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                            lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
-                            _mapConvertScrollToBottom = true;
-
-                            if (result.Success)
+                            try
                             {
-                                lock (_mapConvertLog)
-                                    _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                Console.SetOut(sw);
+                                var result = await converter.ConvertAsync(srcPath, lkMapDir, alphaOutputPath);
+
+                                var lines = sw.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                                lock (_mapConvertLog) _mapConvertLog.AddRange(lines);
+                                _mapConvertScrollToBottom = true;
+
+                                if (result.Success)
+                                {
+                                    _mapConvertLastLoadPath = alphaOutputPath;
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"\n=== SUCCESS: {result.TilesConverted}/{result.TotalTiles} tiles converted in {result.ElapsedMs}ms ===");
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"Project alpha output: {alphaOutputPath}");
+                                }
+                                else
+                                {
+                                    _mapConvertError = result.Error ?? "Unknown error";
+                                    lock (_mapConvertLog)
+                                        _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
+                                }
+
+                                foreach (var w in result.Warnings)
+                                {
+                                    lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                                }
                             }
-                            else
+                            finally
                             {
-                                _mapConvertError = result.Error ?? "Unknown error";
-                                lock (_mapConvertLog)
-                                    _mapConvertLog.Add($"\n=== FAILED: {result.Error} ===");
-                            }
-                            foreach (var w in result.Warnings)
-                            {
-                                lock (_mapConvertLog) _mapConvertLog.Add($"  WARN: {w}");
+                                Console.SetOut(origOut);
                             }
                         }
                     }
@@ -3937,11 +4004,9 @@ void main() {
             {
                 if (ImGui.Button("Load Converted Map in Viewer"))
                 {
-                    // Find the WDT in the output directory
-                    var wdtFiles = Directory.GetFiles(_mapConvertOutputDir, "*.wdt");
-                    if (wdtFiles.Length > 0)
+                    if (!string.IsNullOrWhiteSpace(_mapConvertLastLoadPath) && File.Exists(_mapConvertLastLoadPath))
                     {
-                        LoadWdtTerrain(wdtFiles[0]);
+                        LoadWdtTerrain(_mapConvertLastLoadPath);
                         _showMapConverterDialog = false;
                     }
                 }
@@ -3950,9 +4015,9 @@ void main() {
             {
                 if (ImGui.Button("Load Converted Alpha WDT in Viewer"))
                 {
-                    if (File.Exists(_mapConvertOutputDir))
+                    if (!string.IsNullOrWhiteSpace(_mapConvertLastLoadPath) && File.Exists(_mapConvertLastLoadPath))
                     {
-                        LoadWdtTerrain(_mapConvertOutputDir);
+                        LoadWdtTerrain(_mapConvertLastLoadPath);
                         _showMapConverterDialog = false;
                     }
                 }
@@ -4540,6 +4605,219 @@ void main() {
         return Path.Combine(baseDir, $"{prefix}{version}");
     }
 
+    private string GetProjectOutputRootDirectory()
+    {
+        if (string.IsNullOrWhiteSpace(_projectOutputRootDir))
+            _projectOutputRootDir = ProjectsDir;
+
+        return Path.GetFullPath(_projectOutputRootDir);
+    }
+
+    private void HandleProjectOutputRootChanged()
+    {
+        _editorProjectOutputDir = string.Empty;
+        _editorProjectSourceKey = string.Empty;
+        _mapConvertOutputDir = string.Empty;
+        _mapConvertProjectSourceKey = string.Empty;
+        RefreshProjectManagedPlacementTargets();
+
+        if (!string.IsNullOrWhiteSpace(_mapConvertSourcePath))
+            EnsureMapConverterProjectOutputDirectory(forceNew: false);
+    }
+
+    private static string SanitizeProjectPathSegment(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "project";
+
+        char[] invalid = Path.GetInvalidFileNameChars();
+        var builder = new StringBuilder(value.Trim().Length);
+        foreach (char c in value.Trim())
+        {
+            builder.Append(Array.IndexOf(invalid, c) >= 0 || char.IsControl(c)
+                ? '_'
+                : char.IsWhiteSpace(c) ? '_' : c);
+        }
+
+        string sanitized = builder.ToString().Trim('.', ' ');
+        return string.IsNullOrWhiteSpace(sanitized) ? "project" : sanitized;
+    }
+
+    private static string CreateTimestampedProjectOutputDirectory(string rootDirectory, string projectName)
+    {
+        string safeProjectName = SanitizeProjectPathSegment(projectName);
+        string projectRoot = Path.Combine(rootDirectory, safeProjectName);
+        Directory.CreateDirectory(projectRoot);
+
+        string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+        string candidate = Path.Combine(projectRoot, timestamp);
+        int suffix = 1;
+        while (Directory.Exists(candidate))
+        {
+            candidate = Path.Combine(projectRoot, $"{timestamp}_{suffix:D2}");
+            suffix++;
+        }
+
+        return candidate;
+    }
+
+    private string GetEditorProjectName(string? fallbackName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(GetCurrentSessionMapName()))
+            return SanitizeProjectPathSegment(GetCurrentSessionMapName()!);
+
+        string? wdtPath = TryGetLoadedLocalWdtPath();
+        if (!string.IsNullOrWhiteSpace(wdtPath))
+            return SanitizeProjectPathSegment(Path.GetFileNameWithoutExtension(wdtPath));
+
+        if (!string.IsNullOrWhiteSpace(_lastWorldSceneWdtPath) && File.Exists(_lastWorldSceneWdtPath))
+            return SanitizeProjectPathSegment(Path.GetFileNameWithoutExtension(_lastWorldSceneWdtPath));
+
+        if (!string.IsNullOrWhiteSpace(fallbackName))
+            return SanitizeProjectPathSegment(fallbackName);
+
+        return "project";
+    }
+
+    private string? GetEditorProjectSourceKey()
+    {
+        string? wdtPath = TryGetLoadedLocalWdtPath();
+        if (!string.IsNullOrWhiteSpace(wdtPath))
+            return Path.GetFullPath(wdtPath);
+
+        if (!string.IsNullOrWhiteSpace(_lastWorldSceneWdtPath) && File.Exists(_lastWorldSceneWdtPath))
+            return Path.GetFullPath(_lastWorldSceneWdtPath);
+
+        if (!string.IsNullOrWhiteSpace(_loadedFilePath) && File.Exists(_loadedFilePath))
+            return Path.GetFullPath(_loadedFilePath);
+
+        string? currentMapName = GetCurrentSessionMapName();
+        return string.IsNullOrWhiteSpace(currentMapName) ? null : $"map:{currentMapName}";
+    }
+
+    private string EnsureEditorProjectOutputDirectory(bool forceNew = false)
+    {
+        string sourceKey = GetEditorProjectSourceKey() ?? $"editor:{GetEditorProjectName()}";
+        if (!forceNew
+            && !string.IsNullOrWhiteSpace(_editorProjectOutputDir)
+            && string.Equals(_editorProjectSourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return _editorProjectOutputDir;
+        }
+
+        _editorProjectSourceKey = sourceKey;
+        _editorProjectOutputDir = CreateTimestampedProjectOutputDirectory(GetProjectOutputRootDirectory(), GetEditorProjectName());
+        return _editorProjectOutputDir;
+    }
+
+    private string DescribeEditorProjectOutputDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_editorProjectOutputDir))
+            return _editorProjectOutputDir;
+
+        return Path.Combine(GetProjectOutputRootDirectory(), GetEditorProjectName(), "<timestamp>");
+    }
+
+    private void StartNewEditorProjectOutputDirectory()
+    {
+        _editorProjectOutputDir = EnsureEditorProjectOutputDirectory(forceNew: true);
+        RefreshProjectManagedPlacementTargets();
+        _selectedPlacementSaveStatus = $"Created new project output folder: {_editorProjectOutputDir}";
+    }
+
+    private bool IsProjectManagedOutputPath(string? outputPath)
+    {
+        if (string.IsNullOrWhiteSpace(outputPath))
+            return false;
+
+        string fullPath = Path.GetFullPath(outputPath);
+        string rootPath = GetProjectOutputRootDirectory();
+        return fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string BuildProjectManagedPlacementOutputPath(string sourcePath)
+    {
+        string normalizedSourcePath = sourcePath.Replace('/', '\\').TrimStart('\\');
+        return Path.Combine(EnsureEditorProjectOutputDirectory(), "lk-split", normalizedSourcePath);
+    }
+
+    private void RefreshProjectManagedPlacementTargets()
+    {
+        foreach (string sourcePath in _stagedPlacementEdits.Values
+            .Select(edit => edit.SourcePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!_placementSaveTargetsBySourcePath.TryGetValue(sourcePath, out string? targetPath)
+                || string.IsNullOrWhiteSpace(targetPath)
+                || IsProjectManagedOutputPath(targetPath))
+            {
+                _placementSaveTargetsBySourcePath[sourcePath] = BuildProjectManagedPlacementOutputPath(sourcePath);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_selectedPlacementSourcePath)
+            && (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+                || IsProjectManagedOutputPath(_selectedPlacementSaveTargetPath)))
+        {
+            _selectedPlacementSaveTargetPath = BuildProjectManagedPlacementOutputPath(_selectedPlacementSourcePath);
+        }
+    }
+
+    private string BuildMapConverterProjectSourceKey()
+    {
+        string fullSourcePath = Path.GetFullPath(_mapConvertSourcePath);
+        return $"map-convert:{_mapConvertDirection}:{fullSourcePath}";
+    }
+
+    private string EnsureMapConverterProjectOutputDirectory(bool forceNew)
+    {
+        if (string.IsNullOrWhiteSpace(_mapConvertSourcePath))
+            return _mapConvertOutputDir;
+
+        string sourceKey = BuildMapConverterProjectSourceKey();
+        if (!forceNew
+            && !string.IsNullOrWhiteSpace(_mapConvertOutputDir)
+            && string.Equals(_mapConvertProjectSourceKey, sourceKey, StringComparison.OrdinalIgnoreCase))
+        {
+            return _mapConvertOutputDir;
+        }
+
+        _mapConvertProjectSourceKey = sourceKey;
+        _mapConvertOutputDir = CreateTimestampedProjectOutputDirectory(
+            GetProjectOutputRootDirectory(),
+            Path.GetFileNameWithoutExtension(_mapConvertSourcePath));
+        return _mapConvertOutputDir;
+    }
+
+    private string DescribeMapConverterProjectOutputDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_mapConvertOutputDir))
+            return _mapConvertOutputDir;
+
+        string projectName = string.IsNullOrWhiteSpace(_mapConvertSourcePath)
+            ? "map-conversion"
+            : Path.GetFileNameWithoutExtension(_mapConvertSourcePath);
+        return Path.Combine(GetProjectOutputRootDirectory(), SanitizeProjectPathSegment(projectName), "<timestamp>");
+    }
+
+    private static string BuildMapConverterAlphaSourceCopyPath(string projectOutputDir, string sourceWdtPath)
+    {
+        string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
+        return Path.Combine(projectOutputDir, "alpha-source", "World", "Maps", mapName, Path.GetFileName(sourceWdtPath));
+    }
+
+    private static string BuildMapConverterLkOutputDirectory(string projectOutputDir, string sourceWdtPath)
+    {
+        string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
+        return Path.Combine(projectOutputDir, "lk-split", "World", "Maps", mapName);
+    }
+
+    private static string BuildMapConverterAlphaOutputPath(string projectOutputDir, string sourceWdtPath)
+    {
+        string mapName = Path.GetFileNameWithoutExtension(sourceWdtPath);
+        return Path.Combine(projectOutputDir, "alpha-output", "World", "Maps", mapName, $"{mapName}.wdt");
+    }
+
     /// <summary>
     /// Show a native folder picker on an STA thread to avoid deadlocking the GLFW render thread.
     /// </summary>
@@ -5108,6 +5386,7 @@ void main() {
                 }
 
                 _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                _worldScene.UniqueIdFilterEnabled = true;
                 uniqueIdFilterChanged = true;
                 hasConfiguredRange = true;
             }
@@ -5124,6 +5403,7 @@ void main() {
                 }
 
                 _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                _worldScene.UniqueIdFilterEnabled = true;
                 uniqueIdFilterChanged = true;
                 hasConfiguredRange = true;
             }
@@ -5152,13 +5432,13 @@ void main() {
                 if (_worldScene.UniqueIdVisibilityScope != UniqueIdVisibilityScope.CameraTile)
                     ImGui.TextDisabled("Switch scope to Camera Tile to inspect one tile's layer stack directly.");
 
-                if (ImGui.BeginTable("UniqueIdArchaeologyLayers", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+                if (ImGui.BeginTable("UniqueIdArchaeologyLayers", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollX))
                 {
-                    ImGui.TableSetupColumn("Layer");
-                    ImGui.TableSetupColumn("Range");
-                    ImGui.TableSetupColumn("Count");
-                    ImGui.TableSetupColumn("Types");
-                    ImGui.TableSetupColumn("Action");
+                    ImGui.TableSetupScrollFreeze(0, 1);
+                    ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 56f);
+                    ImGui.TableSetupColumn("Range", ImGuiTableColumnFlags.WidthFixed, 120f);
+                    ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 72f);
                     ImGui.TableHeadersRow();
 
                     for (int i = 0; i < detectedLayers.Count; i++)
@@ -5173,12 +5453,9 @@ void main() {
                         ImGui.TextUnformatted($"{layer.MinUniqueId}..{layer.MaxUniqueId}");
 
                         ImGui.TableSetColumnIndex(2);
-                        ImGui.TextUnformatted(layer.PlacementCount.ToString());
+                        ImGui.TextUnformatted($"{layer.PlacementCount} placements | WMO {layer.WmoCount} / M2 {layer.MdxCount}");
 
                         ImGui.TableSetColumnIndex(3);
-                        ImGui.TextUnformatted($"WMO {layer.WmoCount} / M2 {layer.MdxCount}");
-
-                        ImGui.TableSetColumnIndex(4);
                         if (ImGui.SmallButton($"Hide##UniqueIdLayer{layer.LayerNumber}"))
                         {
                             _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
@@ -5962,6 +6239,9 @@ void main() {
         preferredMapDir ??= TryResolveCurrentMapDirectory(preferLooseOverlay: false);
         if (!string.IsNullOrWhiteSpace(preferredMapDir))
             _mapConvertLkMapDir = preferredMapDir;
+
+        if (!string.IsNullOrWhiteSpace(_mapConvertSourcePath))
+            EnsureMapConverterProjectOutputDirectory(forceNew: false);
     }
 
     private void PrepareWmoConverterDialogInputs()
@@ -8498,10 +8778,11 @@ void main() {
 
         ImGui.Separator();
         ImGui.Text("Selected Placement Move");
-        ImGui.TextDisabled("Translation-only save for existing ADT MDDF/MODF placements.");
+        ImGui.TextDisabled("Translation-only save for existing ADT MDDF/MODF placements, grouped by source ADT when multiple moves are staged.");
 
         if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
         {
+            DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
             ImGui.TextDisabled(_selectedPlacementSaveStatus);
             return;
         }
@@ -8512,6 +8793,7 @@ void main() {
 
         if (!editable)
         {
+            DrawPlacementSaveQueueActions(includeCurrentSourceSave: false);
             ImGui.TextDisabled(_selectedPlacementSaveStatus);
             return;
         }
@@ -8521,13 +8803,27 @@ void main() {
         Vector3 editedPosition = _selectedPlacementEditedPosition;
         if (ImGui.InputFloat3("Placement Position", ref editedPosition, "%.3f"))
         {
-            if (_worldScene.TryUpdateSelectedPlacementPosition(editedPosition, out string error))
+            if (!EnsureSelectedPlacementSourcePath(out _, out string sourceError))
+            {
+                _selectedPlacementSaveStatus = sourceError;
+            }
+            else if (_worldScene.TryUpdateSelectedPlacementPosition(editedPosition, out string error))
             {
                 _selectedPlacementEditedPosition = editedPosition;
                 _selectedPlacementDirty = !PositionsNearlyEqual(_selectedPlacementEditedPosition, _selectedPlacementOriginalPosition);
-                _selectedPlacementSaveStatus = _selectedPlacementDirty
-                    ? "Preview updated. Save writes a translated copy of the selected tile placement."
-                    : "Preview matches the original tile placement position.";
+                if (_selectedPlacementDirty)
+                {
+                    UpsertSelectedPlacementEdit();
+                    _selectedPlacementSaveStatus = BuildSelectedPlacementSaveStatus();
+                }
+                else
+                {
+                    RemoveSelectedPlacementEdit();
+                    _selectedPlacementSaveStatus = HasPendingPlacementEdits()
+                        ? "Preview matches the source tile placement. Other staged placement moves remain pending."
+                        : "Preview matches the source tile placement position.";
+                }
+
                 RefreshSelectedWorldObjectInfo();
             }
             else
@@ -8542,7 +8838,10 @@ void main() {
             {
                 _selectedPlacementEditedPosition = _selectedPlacementOriginalPosition;
                 _selectedPlacementDirty = false;
-                _selectedPlacementSaveStatus = "Preview reset to the source tile placement position.";
+                RemoveSelectedPlacementEdit();
+                _selectedPlacementSaveStatus = HasPendingPlacementEdits()
+                    ? "Preview reset to the source tile placement position. Other staged placement moves remain pending."
+                    : "Preview reset to the source tile placement position.";
                 RefreshSelectedWorldObjectInfo();
             }
             else
@@ -8559,13 +8858,7 @@ void main() {
         if (ImGui.Button("Choose Save Path"))
             ChooseSelectedPlacementSavePath();
 
-        ImGui.SameLine();
-        if (!_selectedPlacementDirty)
-            ImGui.BeginDisabled();
-        if (ImGui.Button("Save Placement"))
-            SaveSelectedPlacementEdit();
-        if (!_selectedPlacementDirty)
-            ImGui.EndDisabled();
+        DrawPlacementSaveQueueActions(includeCurrentSourceSave: true);
 
         ImGui.TextDisabled(_selectedPlacementSaveStatus);
     }
@@ -8606,15 +8899,39 @@ void main() {
         _selectedPlacementEditTileX = selected.TileX;
         _selectedPlacementEditTileY = selected.TileY;
         _selectedPlacementEditEntryIndex = selected.PlacementEntryIndex;
-        _selectedPlacementOriginalPosition = selected.PlacementPosition;
-        _selectedPlacementEditedPosition = selected.PlacementPosition;
-        _selectedPlacementDirty = false;
+        PlacementEditKey key = CreatePlacementEditKey(selectedType, selected);
+        if (_stagedPlacementEdits.TryGetValue(key, out StagedPlacementEdit? stagedEdit))
+        {
+            _selectedPlacementOriginalPosition = stagedEdit.OriginalPosition;
+            _selectedPlacementEditedPosition = stagedEdit.EditedPosition;
+            _selectedPlacementDirty = !PositionsNearlyEqual(stagedEdit.EditedPosition, stagedEdit.OriginalPosition);
+            _selectedPlacementSourcePath = stagedEdit.SourcePath;
+        }
+        else
+        {
+            _selectedPlacementOriginalPosition = selected.PlacementPosition;
+            _selectedPlacementEditedPosition = selected.PlacementPosition;
+            _selectedPlacementDirty = false;
+            _selectedPlacementSourcePath = null;
+        }
+
         _selectedPlacementSaveTargetPath = null;
-        if (_worldScene.TryGetSelectedPlacementWritablePath(out string? writablePath) && !string.IsNullOrWhiteSpace(writablePath))
-            _selectedPlacementSaveTargetPath = writablePath;
-        _selectedPlacementSaveStatus = string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
-            ? "Preview only until you choose an output .adt path."
-            : "Ready to save a translated copy of the selected tile placement.";
+        if (!string.IsNullOrWhiteSpace(_selectedPlacementSourcePath)
+            && _placementSaveTargetsBySourcePath.TryGetValue(_selectedPlacementSourcePath, out string? stagedTarget)
+            && !string.IsNullOrWhiteSpace(stagedTarget))
+        {
+            _selectedPlacementSaveTargetPath = stagedTarget;
+        }
+        else if (!string.IsNullOrWhiteSpace(_selectedPlacementSourcePath))
+        {
+            _selectedPlacementSaveTargetPath = BuildProjectManagedPlacementOutputPath(_selectedPlacementSourcePath);
+        }
+
+        _selectedPlacementSaveStatus = _selectedPlacementDirty
+            ? BuildSelectedPlacementSaveStatus()
+            : string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+                ? "Adjust the selected placement to stage a dirty ADT source. A timestamped project output folder will be created for the save target."
+                : "Ready to stage placement moves for this ADT source.";
     }
 
     private void ResetSelectedPlacementEditState(string status)
@@ -8627,8 +8944,11 @@ void main() {
         _selectedPlacementOriginalPosition = Vector3.Zero;
         _selectedPlacementEditedPosition = Vector3.Zero;
         _selectedPlacementDirty = false;
+        _selectedPlacementSourcePath = null;
         _selectedPlacementSaveTargetPath = null;
-        _selectedPlacementSaveStatus = status;
+        _selectedPlacementSaveStatus = HasPendingPlacementEdits()
+            ? $"{status} {GetPendingPlacementEditCount()} staged move(s) across {GetPendingPlacementSourceCount()} ADT source(s) remain pending."
+            : status;
     }
 
     private void ChooseSelectedPlacementSavePath()
@@ -8636,11 +8956,20 @@ void main() {
         if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
             return;
 
+        if (!EnsureSelectedPlacementSourcePath(out string sourcePath, out string error))
+        {
+            _selectedPlacementSaveStatus = error;
+            return;
+        }
+
         string initialDir = Environment.CurrentDirectory;
         string defaultFileName = $"placement_{DateTime.Now:yyyyMMdd_HHmmss}.adt";
 
-        if (_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out _))
-            defaultFileName = Path.GetFileName(sourcePath);
+        defaultFileName = Path.GetFileName(sourcePath);
+
+        string projectManagedTargetPath = BuildProjectManagedPlacementOutputPath(sourcePath);
+        if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath) || IsProjectManagedOutputPath(_selectedPlacementSaveTargetPath))
+            _selectedPlacementSaveTargetPath = projectManagedTargetPath;
 
         if (!string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
         {
@@ -8666,64 +8995,355 @@ void main() {
             return;
 
         _selectedPlacementSaveTargetPath = picked;
-        _selectedPlacementSaveStatus = _selectedPlacementDirty
-            ? $"Ready to save translated placement to {picked}."
-            : $"Save target set to {picked}.";
+        _placementSaveTargetsBySourcePath[sourcePath] = picked;
+        int pendingForSource = GetPendingPlacementCountForSource(sourcePath);
+        _selectedPlacementSaveStatus = pendingForSource > 0
+            ? $"Ready to save {pendingForSource} staged placement move(s) from {Path.GetFileName(sourcePath)} to {picked}."
+            : $"Default save target for {Path.GetFileName(sourcePath)} set to {picked}.";
     }
 
     private void SaveSelectedPlacementEdit()
     {
-        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
-            return;
-
-        if (!_selectedPlacementDirty)
+        if (!EnsureSelectedPlacementSourcePath(out string sourcePath, out string error))
         {
-            _selectedPlacementSaveStatus = "No staged placement move to save.";
+            _selectedPlacementSaveStatus = error;
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+        SaveStagedPlacementEdits(sourcePath);
+    }
+
+    private void DrawPlacementSaveQueueActions(bool includeCurrentSourceSave)
+    {
+        int pendingEditCount = GetPendingPlacementEditCount();
+        int pendingSourceCount = GetPendingPlacementSourceCount();
+
+        if (pendingEditCount <= 0)
+            return;
+
+        ImGui.Separator();
+        ImGui.Text($"{pendingEditCount} staged placement move(s) across {pendingSourceCount} ADT source(s).");
+
+        string? currentSourcePath = null;
+        int currentSourcePendingCount = 0;
+        if (includeCurrentSourceSave && TryGetSelectedPlacementSourcePathForQueue(out string sourcePath))
         {
-            ChooseSelectedPlacementSavePath();
-            if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+            currentSourcePath = sourcePath;
+            currentSourcePendingCount = GetPendingPlacementCountForSource(sourcePath);
+        }
+
+        if (includeCurrentSourceSave)
+        {
+            if (currentSourcePendingCount <= 0)
+                ImGui.BeginDisabled();
+            if (ImGui.Button("Save Current Source") && currentSourcePath != null)
+                SaveStagedPlacementEdits(currentSourcePath);
+            if (currentSourcePendingCount <= 0)
+                ImGui.EndDisabled();
+
+            ImGui.SameLine();
+        }
+
+        if (ImGui.Button("Save All Pending"))
+            SaveStagedPlacementEdits();
+
+        if (ImGui.CollapsingHeader("Pending Dirty Sources", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            foreach ((string pendingSourcePath, int editCount, string? targetPath) in EnumeratePendingPlacementSourceSummaries())
             {
-                _selectedPlacementSaveStatus = "Save cancelled. No output path selected.";
-                return;
+                ImGui.TextWrapped($"{editCount} move(s): {pendingSourcePath}");
+                ImGui.TextDisabled(string.IsNullOrWhiteSpace(targetPath)
+                    ? "Output: choose an .adt path before save."
+                    : $"Output: {targetPath}");
             }
         }
+    }
 
-        if (!_worldScene.TryGetSelectedPlacementSourceData(out string sourcePath, out byte[] sourceBytes))
+    private void SaveStagedPlacementEdits(string? sourcePathFilter = null)
+    {
+        if (_dataSource == null)
         {
-            _selectedPlacementSaveStatus = "The selected placement source ADT could not be read from the current data source.";
+            _selectedPlacementSaveStatus = "Placement save failed: no data source is loaded.";
             return;
         }
 
-        ObjectInstance selected = _worldScene.SelectedInstance.Value;
-        AdtPlacementKind kind = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo
-            ? AdtPlacementKind.WorldModel
-            : AdtPlacementKind.Model;
+        List<(string SourcePath, List<StagedPlacementEdit> Edits)> groups = BuildPendingPlacementSaveGroups(sourcePathFilter);
+        if (groups.Count == 0)
+        {
+            _selectedPlacementSaveStatus = string.IsNullOrWhiteSpace(sourcePathFilter)
+                ? "No staged placement moves to save."
+                : "No staged placement moves are pending for the selected ADT source.";
+            return;
+        }
 
-        var placementRef = new AdtPlacementReference(kind, selected.PlacementEntryIndex, selected.UniqueId);
-        var move = new AdtPlacementMove(placementRef, _selectedPlacementEditedPosition, "MdxViewer selected placement move");
-        var transaction = new AdtPlacementEditTransaction(sourcePath, new[] { move });
+        List<string> missingTargets = new();
+        foreach ((string sourcePath, _) in groups)
+        {
+            if (!_placementSaveTargetsBySourcePath.TryGetValue(sourcePath, out string? outputPath) || string.IsNullOrWhiteSpace(outputPath))
+                missingTargets.Add(sourcePath);
+        }
+
+        if (missingTargets.Count > 0)
+        {
+            string missingSummary = missingTargets.Count == 1
+                ? missingTargets[0]
+                : $"{missingTargets.Count} ADT sources";
+            _selectedPlacementSaveStatus = $"Choose an output .adt path before saving pending placement moves for {missingSummary}.";
+            return;
+        }
+
+        var savedKeys = new List<PlacementEditKey>();
+        int savedSourceCount = 0;
+        int savedEditCount = 0;
 
         try
         {
-            byte[] updatedBytes = AdtPlacementWriter.ApplyTransaction(sourceBytes, sourcePath, transaction);
-            string outputPath = _selectedPlacementSaveTargetPath!;
-            string? outputDirectory = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrWhiteSpace(outputDirectory))
-                Directory.CreateDirectory(outputDirectory);
+            foreach ((string sourcePath, List<StagedPlacementEdit> edits) in groups)
+            {
+                string outputPath = _placementSaveTargetsBySourcePath[sourcePath];
+                byte[]? sourceBytes = File.Exists(outputPath)
+                    ? File.ReadAllBytes(outputPath)
+                    : _dataSource.ReadFile(sourcePath);
+                if (sourceBytes == null)
+                    throw new InvalidOperationException($"The source ADT could not be read from the current data source: {sourcePath}");
 
-            File.WriteAllBytes(outputPath, updatedBytes);
-            _selectedPlacementOriginalPosition = _selectedPlacementEditedPosition;
-            _selectedPlacementDirty = false;
-            _selectedPlacementSaveStatus = $"Saved translated placement to {outputPath}.";
+                AdtPlacementMove[] moves = edits
+                    .OrderBy(edit => edit.Key.EntryIndex)
+                    .Select(edit => new AdtPlacementMove(
+                        new AdtPlacementReference(
+                            edit.Key.ObjectType == Terrain.ObjectType.Wmo ? AdtPlacementKind.WorldModel : AdtPlacementKind.Model,
+                            edit.Key.EntryIndex,
+                            edit.Key.UniqueId),
+                        edit.EditedPosition,
+                        "MdxViewer staged placement move"))
+                    .ToArray();
+
+                var transaction = new AdtPlacementEditTransaction(sourcePath, moves);
+                byte[] updatedBytes = AdtPlacementWriter.ApplyTransaction(sourceBytes, sourcePath, transaction);
+
+                string? outputDirectory = Path.GetDirectoryName(outputPath);
+                if (!string.IsNullOrWhiteSpace(outputDirectory))
+                    Directory.CreateDirectory(outputDirectory);
+
+                File.WriteAllBytes(outputPath, updatedBytes);
+
+                savedSourceCount++;
+                savedEditCount += edits.Count;
+                foreach (StagedPlacementEdit edit in edits)
+                    savedKeys.Add(edit.Key);
+            }
+
+            foreach (PlacementEditKey key in savedKeys)
+                _stagedPlacementEdits.Remove(key);
+
+            if (TryGetSelectedPlacementKey(out PlacementEditKey selectedKey) && savedKeys.Contains(selectedKey))
+            {
+                _selectedPlacementOriginalPosition = _selectedPlacementEditedPosition;
+                _selectedPlacementDirty = false;
+            }
+
+            _selectedPlacementSaveStatus = $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s).";
         }
         catch (Exception ex)
         {
             _selectedPlacementSaveStatus = $"Placement save failed: {ex.Message}";
+            return;
         }
+
+        SyncSelectedPlacementEditState();
+        RefreshSelectedWorldObjectInfo();
+    }
+
+    private List<(string SourcePath, List<StagedPlacementEdit> Edits)> BuildPendingPlacementSaveGroups(string? sourcePathFilter)
+    {
+        var grouped = new Dictionary<string, List<StagedPlacementEdit>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (StagedPlacementEdit edit in _stagedPlacementEdits.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(sourcePathFilter)
+                && !string.Equals(edit.SourcePath, sourcePathFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!grouped.TryGetValue(edit.SourcePath, out List<StagedPlacementEdit>? edits))
+            {
+                edits = new List<StagedPlacementEdit>();
+                grouped.Add(edit.SourcePath, edits);
+            }
+
+            edits.Add(edit);
+        }
+
+        return grouped
+            .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => (entry.Key, entry.Value))
+            .ToList();
+    }
+
+    private IEnumerable<(string SourcePath, int EditCount, string? TargetPath)> EnumeratePendingPlacementSourceSummaries()
+    {
+        foreach ((string sourcePath, List<StagedPlacementEdit> edits) in BuildPendingPlacementSaveGroups(sourcePathFilter: null))
+        {
+            _placementSaveTargetsBySourcePath.TryGetValue(sourcePath, out string? targetPath);
+            yield return (sourcePath, edits.Count, targetPath);
+        }
+    }
+
+    private bool EnsureSelectedPlacementSourcePath(out string sourcePath, out string error)
+    {
+        sourcePath = _selectedPlacementSourcePath ?? string.Empty;
+        error = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(sourcePath))
+            return true;
+
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+        {
+            error = "No tile-backed world object is selected.";
+            return false;
+        }
+
+        if (!_worldScene.TryGetSelectedPlacementSourceData(out sourcePath, out _))
+        {
+            error = "The selected placement source ADT could not be read from the current data source.";
+            return false;
+        }
+
+        _selectedPlacementSourcePath = sourcePath;
+        if (!string.IsNullOrWhiteSpace(sourcePath))
+        {
+            if (!_placementSaveTargetsBySourcePath.TryGetValue(sourcePath, out string? savedTarget)
+                || string.IsNullOrWhiteSpace(savedTarget)
+                || IsProjectManagedOutputPath(savedTarget))
+            {
+                savedTarget = BuildProjectManagedPlacementOutputPath(sourcePath);
+                _placementSaveTargetsBySourcePath[sourcePath] = savedTarget;
+            }
+
+            if (string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath) || IsProjectManagedOutputPath(_selectedPlacementSaveTargetPath))
+                _selectedPlacementSaveTargetPath = savedTarget;
+        }
+
+        return true;
+    }
+
+    private void UpsertSelectedPlacementEdit()
+    {
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return;
+
+        if (!EnsureSelectedPlacementSourcePath(out string sourcePath, out _))
+            return;
+
+        PlacementEditKey key = CreatePlacementEditKey(_worldScene.SelectedObjectType, _worldScene.SelectedInstance.Value);
+        _stagedPlacementEdits[key] = new StagedPlacementEdit
+        {
+            Key = key,
+            SourcePath = sourcePath,
+            OriginalPosition = _selectedPlacementOriginalPosition,
+            EditedPosition = _selectedPlacementEditedPosition,
+        };
+
+        if (!string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+            _placementSaveTargetsBySourcePath[sourcePath] = _selectedPlacementSaveTargetPath!;
+    }
+
+    private void RemoveSelectedPlacementEdit()
+    {
+        if (!TryGetSelectedPlacementKey(out PlacementEditKey key))
+            return;
+
+        _stagedPlacementEdits.Remove(key);
+    }
+
+    private bool TryGetSelectedPlacementKey(out PlacementEditKey key)
+    {
+        key = default;
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return false;
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        Terrain.ObjectType selectedType = _worldScene.SelectedObjectType;
+        if (!selected.HasTileCoordinate || selected.PlacementEntryIndex < 0 || selectedType is not (Terrain.ObjectType.Mdx or Terrain.ObjectType.Wmo))
+            return false;
+
+        key = CreatePlacementEditKey(selectedType, selected);
+        return true;
+    }
+
+    private bool TryGetSelectedPlacementSourcePathForQueue(out string sourcePath)
+    {
+        sourcePath = string.Empty;
+        if (!_selectedPlacementDirty && !HasPendingPlacementEdits())
+            return false;
+
+        return EnsureSelectedPlacementSourcePath(out sourcePath, out _);
+    }
+
+    private PlacementEditKey CreatePlacementEditKey(Terrain.ObjectType objectType, ObjectInstance selected)
+    {
+        return new PlacementEditKey(objectType, selected.TileX, selected.TileY, selected.PlacementEntryIndex, selected.UniqueId);
+    }
+
+    private bool HasPendingPlacementEdits()
+    {
+        return _stagedPlacementEdits.Count > 0;
+    }
+
+    private int GetPendingPlacementEditCount()
+    {
+        return _stagedPlacementEdits.Count;
+    }
+
+    private int GetPendingPlacementSourceCount()
+    {
+        return _stagedPlacementEdits.Values
+            .Select(edit => edit.SourcePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+    }
+
+    private int GetPendingPlacementCountForSource(string sourcePath)
+    {
+        int count = 0;
+        foreach (StagedPlacementEdit edit in _stagedPlacementEdits.Values)
+        {
+            if (string.Equals(edit.SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase))
+                count++;
+        }
+
+        return count;
+    }
+
+    private int GetPendingPlacementSourceCountMissingTargets()
+    {
+        int count = 0;
+        foreach ((string sourcePath, _, string? targetPath) in EnumeratePendingPlacementSourceSummaries())
+        {
+            if (string.IsNullOrWhiteSpace(targetPath))
+                count++;
+        }
+
+        return count;
+    }
+
+    private string BuildSelectedPlacementSaveStatus()
+    {
+        int pendingForSource = 0;
+        if (!string.IsNullOrWhiteSpace(_selectedPlacementSourcePath))
+            pendingForSource = GetPendingPlacementCountForSource(_selectedPlacementSourcePath);
+
+        if (pendingForSource > 0)
+        {
+            return string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+                ? $"Preview updated. {pendingForSource} staged placement move(s) are pending for this ADT source. Choose an output .adt path before saving."
+                : $"Preview updated. {pendingForSource} staged placement move(s) are pending for this ADT source.";
+        }
+
+        return string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath)
+            ? "Preview updated. A timestamped project output folder will be used unless you choose a different .adt path."
+            : "Preview updated. Save writes a translated copy into the active project output folder unless you override the target.";
     }
 
     private static bool PositionsNearlyEqual(Vector3 left, Vector3 right)
@@ -9050,7 +9670,17 @@ void main() {
             return;
         }
 
-        if (hasPm4Hit && pm4HitKey.HasValue && (!hasSceneHit || pm4HitDistance <= sceneHitDistance) && _worldScene.SelectPm4Object(pm4HitKey.Value))
+        var hoveredSceneInfo = _worldScene.HoveredAssetInfo;
+        bool selectedHoveredScene = hoveredSceneInfo.HasValue
+            && hoveredSceneInfo.Value.HasSceneObject
+            && _worldScene.SelectSceneObject(hoveredSceneInfo.Value.SceneObjectType, hoveredSceneInfo.Value.SceneObjectIndex);
+
+        if (selectedHoveredScene)
+        {
+            _worldScene.ClearTaxiSelection();
+            _worldScene.ClearPm4ObjectSelection();
+        }
+        else if (hasPm4Hit && pm4HitKey.HasValue && (!hasSceneHit || pm4HitDistance <= sceneHitDistance) && _worldScene.SelectPm4Object(pm4HitKey.Value))
         {
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
@@ -9070,12 +9700,12 @@ void main() {
             return;
         }
 
-        if (hasSceneHit)
+        if (!selectedHoveredScene && hasSceneHit)
         {
             _worldScene.ClearTaxiSelection();
             _worldScene.SelectObjectByRay(rayOrigin, rayDir);
         }
-        else
+        else if (!selectedHoveredScene)
         {
             _worldScene.ClearSelection();
         }

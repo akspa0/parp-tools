@@ -92,9 +92,9 @@ public sealed class M2Renderer : IModelRenderer
 
     public bool UsesCompatibilityFallback => _legacyRenderer != null || (_runtimeModel?.UsesCompatibilityFallback ?? false);
 
-    public Vector3 BoundsMin => _legacyRenderer?.BoundsMin ?? _runtimeModel!.BoundsMin;
+    public Vector3 BoundsMin => _runtimeModel?.BoundsMin ?? _legacyRenderer?.BoundsMin ?? Vector3.Zero;
 
-    public Vector3 BoundsMax => _legacyRenderer?.BoundsMax ?? _runtimeModel!.BoundsMax;
+    public Vector3 BoundsMax => _runtimeModel?.BoundsMax ?? _legacyRenderer?.BoundsMax ?? Vector3.Zero;
 
     public bool RequiresUnbatchedWorldRender => true;
 

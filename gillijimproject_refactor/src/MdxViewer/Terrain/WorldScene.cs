@@ -549,10 +549,29 @@ public class WorldScene : ISceneRenderer
     private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
-    private const int MaxNewMdxLoadsPerFrame = 6;
-    private const int MaxNewWmoLoadsPerFrame = 3;
     private const float MaxWorldObjectViewDistance = 8192f;
     private const float MaxWorldObjectViewDistanceSq = MaxWorldObjectViewDistance * MaxWorldObjectViewDistance;
+
+    private readonly record struct TerrainAssetLoadPolicy(
+        bool PrewarmTileAssets,
+        int MaxNewMdxLoadsPerFrame,
+        int MaxNewWmoLoadsPerFrame,
+        int MaxDeferredLoadsPerFrame,
+        double MaxDeferredLoadBudgetMs);
+
+    private static readonly TerrainAssetLoadPolicy WmoOnlyAssetLoadPolicy = new(
+        PrewarmTileAssets: false,
+        MaxNewMdxLoadsPerFrame: 6,
+        MaxNewWmoLoadsPerFrame: 3,
+        MaxDeferredLoadsPerFrame: 2,
+        MaxDeferredLoadBudgetMs: 6.0);
+
+    private static readonly TerrainAssetLoadPolicy StreamingTerrainAssetLoadPolicy = new(
+        PrewarmTileAssets: true,
+        MaxNewMdxLoadsPerFrame: 24,
+        MaxNewWmoLoadsPerFrame: 12,
+        MaxDeferredLoadsPerFrame: 8,
+        MaxDeferredLoadBudgetMs: 10.0);
 
     private readonly struct VisibleWmoInstance
     {
@@ -687,6 +706,7 @@ public class WorldScene : ISceneRenderer
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
     private HoveredAssetInfo? _hoveredAssetInfo;
+    private TerrainAssetLoadPolicy _assetLoadPolicy = StreamingTerrainAssetLoadPolicy;
     private bool _wireframeRevealEnabled;
     private bool _showHoveredAssetTooltips = true;
     private const int UniqueIdLayerGapThreshold = 100;
@@ -5520,6 +5540,7 @@ public class WorldScene : ISceneRenderer
     private void InitFromAdapter(Action<string>? onStatus)
     {
         var adapter = _terrainManager.Adapter;
+        _assetLoadPolicy = ResolveTerrainAssetLoadPolicy(adapter);
 
         if (adapter.IsWmoBased && adapter.ModfPlacements.Count > 0)
         {
@@ -5573,12 +5594,27 @@ public class WorldScene : ISceneRenderer
             }
             onStatus?.Invoke("World loaded (tiles stream as you move).");
         }
+
+        if (!adapter.IsWmoBased)
+        {
+            AdtProfile adtProfile = FormatProfileRegistry.ResolveAdtProfile(_dbcBuild);
+            ViewerLog.Info(
+                ViewerLog.Category.Terrain,
+                $"Terrain asset load policy: build={_dbcBuild ?? "unknown"}, adtProfile={adtProfile.ProfileId}, prewarmTileAssets={_assetLoadPolicy.PrewarmTileAssets}, visibleMdx={_assetLoadPolicy.MaxNewMdxLoadsPerFrame}, visibleWmo={_assetLoadPolicy.MaxNewWmoLoadsPerFrame}, deferredLoads={_assetLoadPolicy.MaxDeferredLoadsPerFrame}, deferredBudgetMs={_assetLoadPolicy.MaxDeferredLoadBudgetMs:F1}");
+        }
         
         // Auto-load WL liquids if enabled
         if (_showWlLiquids && !_wlLoadAttempted)
         {
             LazyLoadWlLiquids();
         }
+    }
+
+    private TerrainAssetLoadPolicy ResolveTerrainAssetLoadPolicy(ITerrainAdapter adapter)
+    {
+        return adapter.IsWmoBased
+            ? WmoOnlyAssetLoadPolicy
+            : StreamingTerrainAssetLoadPolicy;
     }
 
     private Vector3? _wmoCameraOverride;
@@ -5899,6 +5935,9 @@ public class WorldScene : ISceneRenderer
         _tileWmoInstances[(tileX, tileY)] = tileWmo;
         _instancesDirty = true;
 
+        if (_assetLoadPolicy.PrewarmTileAssets)
+            QueueTileAssetLoads(tileMdx, tileSkyboxes, tileWmo);
+
         // Hide WDL low-res tile now that detailed ADT is loaded
         _wdlTerrain?.HideTile(tileX, tileY);
 
@@ -5963,6 +6002,18 @@ public class WorldScene : ISceneRenderer
         pendingLoads[modelKey] = distanceSq;
     }
 
+    private void QueueTileAssetLoads(List<ObjectInstance> tileMdx, List<ObjectInstance> tileSkyboxes, List<ObjectInstance> tileWmo)
+    {
+        for (int i = 0; i < tileWmo.Count; i++)
+            _assets.QueueWmoLoad(tileWmo[i].ModelKey);
+
+        for (int i = 0; i < tileMdx.Count; i++)
+            _assets.QueueMdxLoad(tileMdx[i].ModelKey);
+
+        for (int i = 0; i < tileSkyboxes.Count; i++)
+            _assets.QueueMdxLoad(tileSkyboxes[i].ModelKey);
+    }
+
     private void FlushPendingVisibleMdxLoads()
     {
         if (_pendingVisibleMdxLoadDistances.Count == 0)
@@ -5973,7 +6024,7 @@ public class WorldScene : ISceneRenderer
         _pendingVisibleMdxLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
 
         int queued = 0;
-        for (int i = 0; i < _pendingVisibleMdxLoadScratch.Count && queued < MaxNewMdxLoadsPerFrame; i++)
+        for (int i = 0; i < _pendingVisibleMdxLoadScratch.Count && queued < _assetLoadPolicy.MaxNewMdxLoadsPerFrame; i++)
         {
             _assets.PrioritizeMdxLoad(_pendingVisibleMdxLoadScratch[i].Key);
             queued++;
@@ -5990,7 +6041,7 @@ public class WorldScene : ISceneRenderer
         _pendingVisibleWmoLoadScratch.Sort((left, right) => left.Value.CompareTo(right.Value));
 
         int queued = 0;
-        for (int i = 0; i < _pendingVisibleWmoLoadScratch.Count && queued < MaxNewWmoLoadsPerFrame; i++)
+        for (int i = 0; i < _pendingVisibleWmoLoadScratch.Count && queued < _assetLoadPolicy.MaxNewWmoLoadsPerFrame; i++)
         {
             _assets.PrioritizeWmoLoad(_pendingVisibleWmoLoadScratch[i].Key);
             queued++;
@@ -5999,7 +6050,25 @@ public class WorldScene : ISceneRenderer
 
     private void ProcessDeferredAssetLoads()
     {
-        int processed = _assets.ProcessPendingLoads();
+        int pendingLoadCount = _assets.PendingAssetLoadCount;
+        int maxLoads = _assetLoadPolicy.MaxDeferredLoadsPerFrame;
+        double maxBudgetMs = _assetLoadPolicy.MaxDeferredLoadBudgetMs;
+
+        if (_assetLoadPolicy.PrewarmTileAssets)
+        {
+            if (pendingLoadCount >= 96)
+            {
+                maxLoads = Math.Max(maxLoads, 16);
+                maxBudgetMs = Math.Max(maxBudgetMs, 18.0);
+            }
+            else if (pendingLoadCount >= 32)
+            {
+                maxLoads = Math.Max(maxLoads, 12);
+                maxBudgetMs = Math.Max(maxBudgetMs, 14.0);
+            }
+        }
+
+        int processed = _assets.ProcessPendingLoads(maxLoads, maxBudgetMs);
         if (processed <= 0)
             return;
 
@@ -7557,7 +7626,9 @@ public class WorldScene : ISceneRenderer
                 pm4BrushInfo.DetailLine,
                 pm4BrushInfo.WorldPosition,
                 Math.Max(0, hoveredPm4Count - 1),
-                pm4BrushInfo.Pm4ObjectKey);
+                pm4BrushInfo.Pm4ObjectKey,
+                pm4BrushInfo.SceneObjectType,
+                pm4BrushInfo.SceneObjectIndex);
             return;
         }
 
@@ -7631,7 +7702,7 @@ public class WorldScene : ISceneRenderer
                 if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                     continue;
 
-                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), distanceSq, depth);
+                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst, ObjectType.Wmo, i), distanceSq, depth);
             }
         }
 
@@ -7646,7 +7717,7 @@ public class WorldScene : ISceneRenderer
                 if (!TryMeasureHoverInfoHit(inst.BoundsMin, inst.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
                     continue;
 
-                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), distanceSq, depth);
+                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst, ObjectType.Mdx, i), distanceSq, depth);
             }
         }
 
@@ -7678,7 +7749,9 @@ public class WorldScene : ISceneRenderer
             bestCandidate.DetailLine,
             bestCandidate.WorldPosition,
             Math.Max(0, hitCount - 1),
-            bestCandidate.Pm4ObjectKey);
+            bestCandidate.Pm4ObjectKey,
+            bestCandidate.SceneObjectType,
+            bestCandidate.SceneObjectIndex);
         return true;
     }
 
@@ -7716,7 +7789,7 @@ public class WorldScene : ISceneRenderer
                 if (t < 0f)
                     continue;
 
-                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst), t);
+                ConsiderCandidate(BuildHoveredObjectInfo("WMO", inst, ObjectType.Wmo, i), t);
             }
         }
 
@@ -7733,7 +7806,7 @@ public class WorldScene : ISceneRenderer
                 if (t < 0f)
                     continue;
 
-                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst), t);
+                ConsiderCandidate(BuildHoveredObjectInfo("MDX", inst, ObjectType.Mdx, i), t);
             }
         }
 
@@ -7854,6 +7927,26 @@ public class WorldScene : ISceneRenderer
 
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+    }
+
+    public bool SelectSceneObject(ObjectType objectType, int objectIndex)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        switch (objectType)
+        {
+            case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
+                _selectedObjectType = objectType;
+                _selectedObjectIndex = objectIndex;
+                return true;
+            case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
+                _selectedObjectType = objectType;
+                _selectedObjectIndex = objectIndex;
+                return true;
+            default:
+                return false;
+        }
     }
 
     public bool TryPickSceneObjectByRay(Vector3 rayOrigin, Vector3 rayDir, out ObjectType objectType, out int objectIndex, out float distance)
@@ -8367,7 +8460,7 @@ public class WorldScene : ISceneRenderer
         return distanceSq <= revealRadius * revealRadius;
     }
 
-    private static HoveredAssetInfo BuildHoveredObjectInfo(string assetKind, in ObjectInstance inst)
+    private static HoveredAssetInfo BuildHoveredObjectInfo(string assetKind, in ObjectInstance inst, ObjectType objectType, int objectIndex)
     {
         return new HoveredAssetInfo(
             assetKind,
@@ -8376,7 +8469,9 @@ public class WorldScene : ISceneRenderer
             $"UniqueId: {inst.UniqueId}",
             inst.PlacementPosition,
             0,
-            null);
+            null,
+            objectType,
+            objectIndex);
     }
 
     private static HoveredAssetInfo BuildHoveredWlLiquidInfo(WlLiquidBody body)
@@ -9968,7 +10063,16 @@ public readonly struct UniqueIdArchaeologyLayer
 
 public readonly struct HoveredAssetInfo
 {
-    public HoveredAssetInfo(string assetKind, string displayName, string sourcePath, string detailLine, Vector3 worldPosition, int additionalHitCount, (int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey)
+    public HoveredAssetInfo(
+        string assetKind,
+        string displayName,
+        string sourcePath,
+        string detailLine,
+        Vector3 worldPosition,
+        int additionalHitCount,
+        (int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey,
+        ObjectType sceneObjectType = ObjectType.None,
+        int sceneObjectIndex = -1)
     {
         AssetKind = assetKind ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
@@ -9977,6 +10081,8 @@ public readonly struct HoveredAssetInfo
         WorldPosition = worldPosition;
         AdditionalHitCount = Math.Max(0, additionalHitCount);
         Pm4ObjectKey = pm4ObjectKey;
+        SceneObjectType = sceneObjectType;
+        SceneObjectIndex = sceneObjectIndex;
     }
 
     public string AssetKind { get; }
@@ -9986,4 +10092,7 @@ public readonly struct HoveredAssetInfo
     public Vector3 WorldPosition { get; }
     public int AdditionalHitCount { get; }
     public (int tileX, int tileY, uint ck24, int objectPart)? Pm4ObjectKey { get; }
+    public ObjectType SceneObjectType { get; }
+    public int SceneObjectIndex { get; }
+    public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo && SceneObjectIndex >= 0;
 }

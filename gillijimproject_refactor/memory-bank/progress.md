@@ -1,5 +1,48 @@
 # Progress
 
+### Apr 04, 2026 - MDX clicked-object selection now follows hovered identity, and terrain worlds prewarm streamed object assets
+
+- fixed the remaining clicked-object mismatch in the live viewer path for dense MDX scenes:
+	- `HoveredAssetInfo` now carries scene-object identity for MDX/WMO hits instead of only PM4 identity plus display text
+	- `ViewerApp` now selects the hovered scene instance directly before falling back to the generic scene ray pick, so the clicked MDX should line up with the hovered tooltip target instead of a competing overlapping AABB
+- replaced the old terrain-world object-load bottleneck with a scene load policy in `WorldScene`:
+	- streamed terrain tiles now queue their tile-local MDX/WMO assets immediately on `OnTileLoaded(...)`
+	- terrain maps now use a higher deferred-load throughput path with queue-pressure scaling instead of the old fixed `ProcessPendingLoads()` defaults and the old `6/3` visible-load promotion cap
+	- WMO-only maps keep their eager-manifest path; terrain-streamed worlds share the same warmup behavior across early Alpha and later roots instead of adding new exact-version branches
+- validation completed:
+	- file diagnostics were clean for the touched files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with warnings in this workspace
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live runtime validation was captured yet for the MDX selection fix or the terrain-world performance change
+
+### Apr 04, 2026 - MdxViewer inspector build repaired; UniqueId range edits now activate hides directly
+
+- repaired the current `ViewerApp_Sidebars.cs` compile break from the selected-object inspector regrouping slice:
+	- `DrawModelInfoContent()` is restored to a valid standalone model-inspection block
+	- the fixed right inspector now also exposes an `Inspector Width` slider so width can be changed without relying only on the custom splitter
+- tightened the `UniqueId Archaeology` UI in `ViewerApp.cs`:
+	- hide-range slider changes now set `UniqueIdFilterEnabled = true` immediately
+	- the detected-layer table is compressed so the action buttons fit more reliably in the inspector
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live runtime validation was captured yet for the inspector recovery, UniqueId hide behavior, or fixed-sidebar width control
+
+### Apr 04, 2026 - MdxViewer now keeps a grouped dirty-source queue for staged placement moves
+
+- extended the first selected-placement save consumer into a multi-change dirty-map slice in `gillijimproject_refactor/src/MdxViewer`:
+	- staged translation-only MDDF and MODF moves now persist across selection changes instead of being reset to the active selection only
+	- pending moves are grouped by source ADT and can be written with `Save Current Source` or `Save All Pending`
+	- the `Publish` workspace now exposes the same pending dirty-source queue so save packaging is visible outside the object inspector
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- proof boundary:
+	- this is still translation-only object persistence for existing ADT placements
+	- no automated tests were added or run for this slice
+	- no real-data interactive workflow validation was captured yet for the grouped save queue
+
 ### Apr 04, 2026 - MdxViewer now consumes the shared selected-placement save seam
 
 - landed the first end-to-end UI wiring on top of the existing `wow-viewer` placement writer:

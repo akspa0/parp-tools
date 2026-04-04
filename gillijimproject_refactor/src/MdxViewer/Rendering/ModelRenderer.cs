@@ -154,11 +154,13 @@ public class MdxRenderer : IModelRenderer
     // ── Cached view/proj for particle rendering after batch ──
     private Matrix4x4 _cachedView, _cachedProj;
     private Vector3 _cachedCameraPos;
+    private readonly Vector3 _effectiveBoundsMin;
+    private readonly Vector3 _effectiveBoundsMax;
 
     /// <summary>Model-space bounding box min corner.</summary>
-    public Vector3 BoundsMin => new(_mdx.Model.Bounds.Extent.Min.X, _mdx.Model.Bounds.Extent.Min.Y, _mdx.Model.Bounds.Extent.Min.Z);
+    public Vector3 BoundsMin => _effectiveBoundsMin;
     /// <summary>Model-space bounding box max corner.</summary>
-    public Vector3 BoundsMax => new(_mdx.Model.Bounds.Extent.Max.X, _mdx.Model.Bounds.Extent.Max.Y, _mdx.Model.Bounds.Extent.Max.Z);
+    public Vector3 BoundsMax => _effectiveBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
     public bool RequiresUnbatchedWorldRender => _isM2AdapterModel || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
@@ -181,6 +183,7 @@ public class MdxRenderer : IModelRenderer
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
+        (_effectiveBoundsMin, _effectiveBoundsMax) = ComputeRenderableBounds(_mdx);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
         bool disableM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
             && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
@@ -353,6 +356,113 @@ public class MdxRenderer : IModelRenderer
     /// WorldScene callers use RenderWithTransform directly (no mirror needed — camera handles it).
     /// </summary>
     private static readonly Matrix4x4 MirrorX = Matrix4x4.CreateScale(-1f, 1f, 1f);
+
+    private static (Vector3 min, Vector3 max) ComputeRenderableBounds(MdxFile mdx)
+    {
+        if (TryComputeSkinnedRenderableBounds(mdx, out Vector3 skinnedMin, out Vector3 skinnedMax))
+            return (skinnedMin, skinnedMax);
+
+        if (TryComputeRawRenderableBounds(mdx, out Vector3 rawMin, out Vector3 rawMax))
+            return (rawMin, rawMax);
+
+        return (
+            new Vector3(_GetBoundsMinX(mdx), _GetBoundsMinY(mdx), _GetBoundsMinZ(mdx)),
+            new Vector3(_GetBoundsMaxX(mdx), _GetBoundsMaxY(mdx), _GetBoundsMaxZ(mdx)));
+    }
+
+    private static bool TryComputeSkinnedRenderableBounds(MdxFile mdx, out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+
+        if (mdx.Bones.Count == 0)
+            return false;
+
+        var animator = new MdxAnimator(mdx);
+        animator.Update(0f);
+
+        bool hasRenderableVertex = false;
+        foreach (var geoset in mdx.Geosets)
+        {
+            var (boneIndices, boneWeights) = BuildBoneWeights(mdx, geoset);
+            int vertexCount = Math.Min(geoset.Vertices.Count, boneIndices.Length);
+            for (int vertexIndex = 0; vertexIndex < vertexCount; vertexIndex++)
+            {
+                C3Vector vertex = geoset.Vertices[vertexIndex];
+                Vector3 position = new(vertex.X, vertex.Y, vertex.Z);
+                if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z))
+                    continue;
+
+                Vector3 skinnedPosition = ApplySkinning(position, boneIndices[vertexIndex], boneWeights[vertexIndex], animator.BoneMatrices);
+                min = Vector3.Min(min, skinnedPosition);
+                max = Vector3.Max(max, skinnedPosition);
+                hasRenderableVertex = true;
+            }
+        }
+
+        return hasRenderableVertex;
+    }
+
+    private static bool TryComputeRawRenderableBounds(MdxFile mdx, out Vector3 min, out Vector3 max)
+    {
+        min = new Vector3(float.MaxValue);
+        max = new Vector3(float.MinValue);
+        bool hasRenderableVertex = false;
+
+        foreach (var geoset in mdx.Geosets)
+        {
+            foreach (var vertex in geoset.Vertices)
+            {
+                Vector3 position = new(vertex.X, vertex.Y, vertex.Z);
+                if (!float.IsFinite(position.X) || !float.IsFinite(position.Y) || !float.IsFinite(position.Z))
+                    continue;
+
+                min = Vector3.Min(min, position);
+                max = Vector3.Max(max, position);
+                hasRenderableVertex = true;
+            }
+        }
+
+        return hasRenderableVertex;
+    }
+
+    private static Vector3 ApplySkinning(Vector3 position, Vector4 boneIndices, Vector4 boneWeights, Matrix4x4[] boneMatrices)
+    {
+        float totalWeight = boneWeights.X + boneWeights.Y + boneWeights.Z + boneWeights.W;
+        if (totalWeight <= 0.0001f)
+            return position;
+
+        Vector4 source = new(position, 1f);
+        Vector4 skinned = Vector4.Zero;
+        bool appliedMatrix = false;
+
+        appliedMatrix |= TryAccumulateSkinnedPosition(source, boneIndices.X, boneWeights.X / totalWeight, boneMatrices, ref skinned);
+        appliedMatrix |= TryAccumulateSkinnedPosition(source, boneIndices.Y, boneWeights.Y / totalWeight, boneMatrices, ref skinned);
+        appliedMatrix |= TryAccumulateSkinnedPosition(source, boneIndices.Z, boneWeights.Z / totalWeight, boneMatrices, ref skinned);
+        appliedMatrix |= TryAccumulateSkinnedPosition(source, boneIndices.W, boneWeights.W / totalWeight, boneMatrices, ref skinned);
+
+        return appliedMatrix ? new Vector3(skinned.X, skinned.Y, skinned.Z) : position;
+    }
+
+    private static bool TryAccumulateSkinnedPosition(Vector4 source, float boneIndexValue, float weight, Matrix4x4[] boneMatrices, ref Vector4 destination)
+    {
+        if (weight <= 0f)
+            return false;
+
+        int boneIndex = (int)boneIndexValue;
+        if ((uint)boneIndex >= (uint)boneMatrices.Length)
+            return false;
+
+        destination += Vector4.Transform(source, boneMatrices[boneIndex]) * weight;
+        return true;
+    }
+
+    private static float _GetBoundsMinX(MdxFile mdx) => mdx.Model.Bounds.Extent.Min.X;
+    private static float _GetBoundsMinY(MdxFile mdx) => mdx.Model.Bounds.Extent.Min.Y;
+    private static float _GetBoundsMinZ(MdxFile mdx) => mdx.Model.Bounds.Extent.Min.Z;
+    private static float _GetBoundsMaxX(MdxFile mdx) => mdx.Model.Bounds.Extent.Max.X;
+    private static float _GetBoundsMaxY(MdxFile mdx) => mdx.Model.Bounds.Extent.Max.Y;
+    private static float _GetBoundsMaxZ(MdxFile mdx) => mdx.Model.Bounds.Extent.Max.Z;
 
     /// <summary>Advance animation by wall-clock delta. Call once per frame before any RenderWithTransform calls.</summary>
     public void UpdateAnimation()
@@ -1331,6 +1441,11 @@ void main() {
     /// </summary>
     private (Vector4[] indices, Vector4[] weights) BuildBoneWeights(MdlGeoset geoset, int geosetIdx)
     {
+        return BuildBoneWeights(_mdx, geoset);
+    }
+
+    private static (Vector4[] indices, Vector4[] weights) BuildBoneWeights(MdxFile mdx, MdlGeoset geoset)
+    {
         int vertCount = geoset.Vertices.Count;
         var indices = new Vector4[vertCount];
         var weights = new Vector4[vertCount];
@@ -1359,8 +1474,8 @@ void main() {
         
         // Build ObjectId → bone list index mapping for MATS values
         var objectIdToBoneIndex = new Dictionary<uint, int>();
-        for (int bi = 0; bi < _mdx.Bones.Count; bi++)
-            objectIdToBoneIndex[(uint)_mdx.Bones[bi].ObjectId] = bi;
+        for (int bi = 0; bi < mdx.Bones.Count; bi++)
+            objectIdToBoneIndex[(uint)mdx.Bones[bi].ObjectId] = bi;
         
         // Build group offset lookup table
         var groupOffsets = new int[geoset.MatrixGroups.Count];
@@ -1400,7 +1515,7 @@ void main() {
                     {
                         idx[b] = boneListIdx;
                     }
-                    else if (matsValue < (uint)_mdx.Bones.Count)
+                    else if (matsValue < (uint)mdx.Bones.Count)
                     {
                         // Already a valid list index
                         idx[b] = matsValue;

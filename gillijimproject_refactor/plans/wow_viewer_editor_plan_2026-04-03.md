@@ -1,5 +1,19 @@
 # wow-viewer Editor Transition Plan
 
+## Apr 04, 2026 - MdxViewer dirty-map save packaging now groups staged moves by ADT source
+
+- extended the first `MdxViewer` save consumer beyond one current selection state:
+  - staged translation-only MDDF and MODF placement moves now persist across selection changes
+  - pending moves are grouped by source ADT and can be saved per source or with `Save All Pending`
+  - the `Publish` workspace now exposes the grouped dirty-source queue instead of leaving save packaging only in the selected-object controls
+- proof captured so far:
+  - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+- important boundaries:
+  - this is still translation-only placement persistence for existing ADT entries only
+  - no automated tests were added for this slice
+  - no real-data interactive workflow signoff was captured yet for grouped save packaging
+  - add/remove placement support, terrain writer ownership, and full packaged map-save workflow are still open
+
 ## Apr 03, 2026 - Editor direction reset
 
 - status: active continuity plan
@@ -119,13 +133,12 @@
 
 ## Recommended continuation order
 
-1. extend the object persistence seam from translation-only moves into the next editor-needed operation, likely add/remove or chosen-object persistence
-2. land dirty-map and save-target plumbing in `MdxViewer` on top of the new shared `wow-viewer` transaction seam
-3. extend the current selected-placement save wiring into aggregated dirty-map state and multi-placement save packaging
-4. keep terrain-write ownership separate until object-save flow and save packaging are honest end to end
+1. extend the shared object persistence seam from translation-only moves into the next editor-needed operation, likely add/remove or chosen-object persistence
+2. capture real-data interactive proof for the new grouped `MdxViewer` dirty-source queue instead of treating the build as runtime closure
+3. keep terrain-write ownership separate until object-save flow and save packaging are honest end to end
 
 ## Proof boundary
 
-- this continuity slice now covers workflow structure, one landed `MdxViewer` UI-scaffolding slice, and one landed `wow-viewer` object-move transaction seam
-- no full `wow-viewer` editor runtime, dirty-map pipeline, terrain writer path, add/remove object persistence, or packaged map-save workflow is landed yet
+- this continuity slice now covers workflow structure, one landed `MdxViewer` UI-scaffolding slice, one landed `wow-viewer` object-move transaction seam, and one build-validated grouped dirty-source save queue in `MdxViewer`
+- no full `wow-viewer` editor runtime, terrain writer path, add/remove object persistence, or fully runtime-validated packaged map-save workflow is landed yet
 - do not archive this plan until the save-capable editor foundation slices are also closed

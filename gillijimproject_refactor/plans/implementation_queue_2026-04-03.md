@@ -12,19 +12,19 @@ Each item should be one narrow implementation chat with explicit proof.
 - former queue item 1, `Editor Slice 01 - object-delta transaction boundary`, is now landed in `wow-viewer`
 - proof captured so far: `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter "AdtPlacementReaderTests|AdtPlacementWriterTests"`
 - boundary: translation-only moves for existing `MDDF` and `MODF` entries; no add/remove placement support, path-table rebuilds, terrain writes, or dirty-map pipeline yet
-- former queue item 2, `MdxViewer dirty/save-target plumbing over the shared move seam`, is now partially landed in `gillijimproject_refactor/src/MdxViewer`
+- former queue item 2, `MdxViewer aggregated dirty-map/save packaging slice`, is now implementation-landed in `gillijimproject_refactor/src/MdxViewer`
 - proof captured so far: `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
-- boundary: selected existing ADT MDDF/MODF placements can now be translated and saved one at a time; no aggregated dirty-map queue, add/remove support, or full save packaging yet
+- boundary: selected existing ADT MDDF/MODF placements can now be staged across selection changes and saved in grouped per-source batches, but proof is still build-only; no add/remove support, terrain writes, or runtime signoff yet
 
 1. Shared I/O seam for broader editor save ownership
 - source plans: `wow_viewer_shared_io_library_plan_2026-03-26.md`, `wow_viewer_full_format_ownership_plan_2026-03-28.md`
 - target: extend the first placement writer beyond translation-only updates into the next required save operation such as add/remove placement support or path-table rebuilds
 - proof: focused tests + real-data roundtrip on the fixed development dataset
 
-2. MdxViewer aggregated dirty-map/save packaging slice
+2. Real-data validation for grouped MdxViewer save packaging
 - source plans: `wow_viewer_editor_plan_2026-04-03.md`
-- target: extend the current selected-placement save controls into a real multi-change dirty-map model with explicit save packaging instead of one-placement-at-a-time output
-- proof: `MdxViewer.sln` build + real-data selected-placement save workflow against the fixed development dataset
+- target: validate the new grouped pending-save queue against the fixed development dataset and capture the exact workflow/result without overstating runtime closure
+- proof: real-data selected-placement save workflow against the fixed development dataset
 
 3. M2 Slice 02 - section classification and material routing
 - source plans: `wow_viewer_m2_runtime_plan_2026-03-31.md`
