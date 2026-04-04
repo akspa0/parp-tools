@@ -149,6 +149,21 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
             }
 
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.72f, 0.84f, 1f, 1f), $"  Workspace: {GetWorkspaceModeLabel(_workspaceMode)}");
+
+            if (_workspaceMode == WorkspaceMode.Editor)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.72f, 1f, 0.82f, 1f), $"  Task: {GetEditorWorkspaceTaskLabel(_editorWorkspaceTask)}");
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), $"  Target: {GetWorkspaceTargetSummary()}");
+
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 0.72f, 0.72f, 1f), $"  Save: {GetWorkspaceSaveStatusSummary()}");
+            }
+
             if (_terrainManager != null || _vlmTerrainManager != null)
             {
                 var pos = _camera.Position;

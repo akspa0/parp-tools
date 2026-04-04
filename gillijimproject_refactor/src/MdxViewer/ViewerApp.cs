@@ -44,6 +44,21 @@ public partial class ViewerApp : IDisposable
         Correlation,
     }
 
+    private enum WorkspaceMode
+    {
+        Viewer,
+        Editor,
+    }
+
+    private enum EditorWorkspaceTask
+    {
+        Terrain,
+        Objects,
+        Pm4Evidence,
+        Inspect,
+        Publish,
+    }
+
     private const string ViewerProductName = "parp-tools WoW Viewer";
     private const string ViewerAboutPopupTitle = "About parp-tools WoW Viewer";
     private static readonly MethodInfo? ImGuiControllerWindowResizedMethod =
@@ -177,6 +192,8 @@ public partial class ViewerApp : IDisposable
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
     private bool _showRenderQualityWindow = false;
+    private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
+    private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
     private bool _useDockspaceUi = false;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
@@ -1503,6 +1520,28 @@ void main() {
                     }
 
                     ImGui.EndMenu();
+                }
+
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Workspace"))
+            {
+                if (ImGui.MenuItem("Viewer Mode", "", _workspaceMode == WorkspaceMode.Viewer))
+                    SetWorkspaceMode(WorkspaceMode.Viewer);
+
+                if (ImGui.MenuItem("Editor Mode", "", _workspaceMode == WorkspaceMode.Editor))
+                    SetWorkspaceMode(WorkspaceMode.Editor);
+
+                ImGui.Separator();
+
+                foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
+                {
+                    if (ImGui.MenuItem(GetEditorWorkspaceTaskLabel(task), "", _editorWorkspaceTask == task))
+                    {
+                        SetWorkspaceMode(WorkspaceMode.Editor);
+                        SetEditorWorkspaceTask(task);
+                    }
                 }
 
                 ImGui.EndMenu();

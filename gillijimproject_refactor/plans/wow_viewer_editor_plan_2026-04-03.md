@@ -3,9 +3,29 @@
 ## Apr 03, 2026 - Editor direction reset
 
 - status: active continuity plan
+- current state:
+  - the first viewer/editor workspace shell is now landed in `gillijimproject_refactor/src/MdxViewer`
+  - the broader editor-transition plan is still open because save-capable object or terrain transactions and shared writer ownership are still missing
 - goal:
   - treat the current feature request as the start of `wow-viewer` becoming the modern WoW map viewer-editor, not only a viewer or inspection shell
   - keep the next chats on narrow editor slices instead of mixing terrain editing, PM4 evidence, object persistence, UI reorganization, and file writing into one unstable task
+
+## Apr 03, 2026 - First workspace shell landed in MdxViewer
+
+- the editor UI organization bucket is no longer prompt-only
+- landed in the live `MdxViewer` UI:
+  - `Viewer` vs `Editor` workspace mode in the menu and toolbar
+  - editor task routing for `Terrain`, `Objects`, `PM4 Evidence`, `Inspect`, and `Publish`
+  - editor-mode navigator routing on the left sidebar
+  - editor-mode inspector routing on the right sidebar
+  - status-bar affordances for workspace mode, active task, current target, and explicit save boundary
+- important boundaries:
+  - this is still UI-shell regrouping over existing `MdxViewer` services, not shared save ownership
+  - `Objects` still reuses the mixed legacy world-object surface as a first regrouping step
+  - there is still no save-capable object transaction, map dirty pipeline, or terrain writer path
+- proof captured so far:
+  - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing warnings
+  - no runtime signoff was captured yet for the new workspace flow
 
 ## Confirmed starting inputs
 
@@ -59,6 +79,7 @@
 - reorganize the current tool sprawl into explicit viewer and editor workspaces or panel presets
 - keep chunk clipboard, alpha-mask tools, PM4 workbench, and related editor features grouped by task instead of spread across debug-style menus
 - make dirty-state, selection target, and save scope obvious once true editing starts
+- first scaffolding slice is now landed in `MdxViewer`; follow-up UI work should focus on extracting mixed legacy object panels and wiring real dirty/save contracts once the shared foundation exists
 
 ## Guardrails
 
@@ -69,11 +90,12 @@
 
 ## Recommended continuation order
 
-1. plan the first saved-map milestone with `wow-viewer-map-editing-foundation-plan.prompt.md`
-2. plan editor vs viewer workspaces with `wow-viewer-editor-ui-surface-plan.prompt.md`
-3. after those boundaries are concrete, use the existing shared-I/O and PM4 implementation prompts for the first actual library slices
+1. implement the first saved-map milestone with `wow-viewer-map-editing-foundation-plan.prompt.md`
+2. land the shared save-ownership seam required by that first object or terrain transaction
+3. continue MdxViewer-side UI extraction only where it supports the real save path or removes remaining mixed legacy task panels
 
 ## Proof boundary
 
-- this continuity slice adds workflow assets and planning structure only
-- no `wow-viewer` editor runtime, map save pipeline, or UI reorganization code is landed yet
+- this continuity slice now covers both workflow structure and one landed `MdxViewer` UI-scaffolding slice
+- no `wow-viewer` editor runtime, map save pipeline, object transaction boundary, or shared writer ownership is landed yet
+- do not archive this plan until the save-capable editor foundation slices are also closed

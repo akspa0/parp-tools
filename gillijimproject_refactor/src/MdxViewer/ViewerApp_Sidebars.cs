@@ -32,6 +32,11 @@ public partial class ViewerApp
         if (ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
+            DrawWorkspaceToolbarControls();
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+            ImGui.SameLine();
+
             TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
@@ -222,20 +227,27 @@ public partial class ViewerApp
 
             bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
 
-            if (hasWorldLoaded)
+            if (_workspaceMode == WorkspaceMode.Editor)
             {
-                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                    DrawWorldOverviewContent();
+                DrawEditorWorkspaceNavigator(hasWorldLoaded);
             }
+            else
+            {
+                if (hasWorldLoaded)
+                {
+                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                    if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+                        DrawWorldOverviewContent();
+                }
 
-            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-            if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
-                DrawFileBrowserContent();
+                ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+                if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
+                    DrawFileBrowserContent();
 
-            ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-            if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
-                DrawMapDiscoveryContent();
+                ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+                if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
+                    DrawMapDiscoveryContent();
+            }
         }
         ImGui.End();
         ImGui.PopStyleVar();
@@ -501,57 +513,64 @@ public partial class ViewerApp
             if (_useDockspaceUi)
                 CaptureDockPanelState(ref _inspectorDockState);
 
-            bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
-
-            if (!string.IsNullOrEmpty(_selectedObjectInfo) && !hasSelectedPm4)
+            if (_workspaceMode == WorkspaceMode.Editor)
             {
-                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
-                ImGui.Separator();
-                ImGui.TextWrapped(_selectedObjectInfo);
-                DrawSelectedTaxiControls();
-                DrawSelectedWmoControls();
-                DrawSelectedSqlGameObjectAnimationControls();
-                ImGui.Spacing();
+                DrawEditorWorkspaceInspector();
             }
-
-            if (_worldScene != null)
+            else
             {
-                bool defaultOpenPm4Workbench = _worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0;
-                if (_forceOpenPm4WorkbenchInspector)
-                    ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-                else
-                    ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
+                bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
 
-                if (ImGui.CollapsingHeader("PM4 Workbench"))
-                    DrawPm4WorkbenchInspector();
+                if (!string.IsNullOrEmpty(_selectedObjectInfo) && !hasSelectedPm4)
+                {
+                    ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
+                    ImGui.Separator();
+                    ImGui.TextWrapped(_selectedObjectInfo);
+                    DrawSelectedTaxiControls();
+                    DrawSelectedWmoControls();
+                    DrawSelectedSqlGameObjectAnimationControls();
+                    ImGui.Spacing();
+                }
 
-                _forceOpenPm4WorkbenchInspector = false;
-            }
+                if (_worldScene != null)
+                {
+                    bool defaultOpenPm4Workbench = _worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0;
+                    if (_forceOpenPm4WorkbenchInspector)
+                        ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+                    else
+                        ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
 
-            ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
-            if (_showModelInfo && ImGui.CollapsingHeader("Model Info"))
-                DrawModelInfoContent();
+                    if (ImGui.CollapsingHeader("PM4 Workbench"))
+                        DrawPm4WorkbenchInspector();
 
-            ImGui.SetNextItemOpen(false, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("Camera"))
-            {
-                ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
-                ImGui.Text("Hold Shift for 5x boost");
-                ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
-            }
+                    _forceOpenPm4WorkbenchInspector = false;
+                }
 
-            if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
-            {
-                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("Terrain Controls"))
-                    DrawTerrainControlsContent();
-            }
+                ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
+                if (_showModelInfo && ImGui.CollapsingHeader("Model Info"))
+                    DrawModelInfoContent();
 
-            if (_worldScene != null)
-            {
-                ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("World Objects"))
-                    DrawWorldObjectsContent();
+                ImGui.SetNextItemOpen(false, ImGuiCond.Once);
+                if (ImGui.CollapsingHeader("Camera"))
+                {
+                    ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
+                    ImGui.Text("Hold Shift for 5x boost");
+                    ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
+                }
+
+                if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
+                {
+                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                    if (ImGui.CollapsingHeader("Terrain Controls"))
+                        DrawTerrainControlsContent();
+                }
+
+                if (_worldScene != null)
+                {
+                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+                    if (ImGui.CollapsingHeader("World Objects"))
+                        DrawWorldObjectsContent();
+                }
             }
         }
         ImGui.End();

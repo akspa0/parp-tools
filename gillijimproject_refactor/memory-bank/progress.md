@@ -1,5 +1,23 @@
 # Progress
 
+### Apr 03, 2026 - MdxViewer viewer/editor workspace shell landed in the live UI
+
+- implemented the first actual editor-surface regrouping inside `gillijimproject_refactor/src/MdxViewer` instead of leaving the editor UI plan as prompt-only continuity:
+	- new `Viewer` vs `Editor` workspace mode in the existing menu and toolbar
+	- editor task routing for `Terrain`, `Objects`, `PM4 Evidence`, `Inspect`, and `Publish`
+	- editor-mode navigator task rail on the left sidebar
+	- editor-mode task inspector on the right sidebar
+	- explicit status-bar affordances for workspace mode, active task, current target, and current save boundary
+	- terrain task now hosts chunk clipboard inline in the inspector, while publish task makes export/capture-only status explicit
+- proof boundary:
+	- this is an MdxViewer UI-shell change only; it does not add map save, object persistence, or new format ownership
+	- object task still reuses the existing mixed `DrawWorldObjectsContentCore()` surface as a first regrouping step, so follow-up extraction is still needed
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- validation not completed:
+	- no automated tests were added or run for this slice
+	- no live runtime validation of the new workspace/task flow was performed yet
+
 ### Apr 03, 2026 - Plan-state audit and implementation queue normalization
 
 - audited active and prompt-era planning docs under `gillijimproject_refactor/plans` to separate landed work from still-open slices

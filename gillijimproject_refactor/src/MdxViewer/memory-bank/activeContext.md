@@ -1,5 +1,25 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 03, 2026 - MdxViewer now has first viewer/editor workspace shell routing in the live UI
+
+- the active UI no longer treats editor regrouping as prompt-only planning
+- landed a first shell slice in the existing `MdxViewer` UI instead of a separate new app:
+   - explicit `Viewer` vs `Editor` workspace mode
+   - editor task routing for `Terrain`, `Objects`, `PM4 Evidence`, `Inspect`, and `Publish`
+   - workspace menu plus toolbar mode/task controls
+   - left navigator now exposes an editor task rail when editor mode is active
+   - right inspector now switches by editor task instead of only generic collapsers
+   - status bar now surfaces workspace mode, active task, current target, and an explicit save-state warning
+- current truth boundary:
+   - this is UI-shell regrouping on top of the existing `MdxViewer` services
+   - terrain/object save ownership is still not implemented; the new status text says that directly as `session-only edits and exports` / `no map save pipeline yet`
+   - object task still reuses the existing `DrawWorldObjectsContentCore()` surface, so some legacy mixed content remains and needs later extraction
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed with existing workspace warnings only
+- important boundary:
+   - no automated tests were added in this slice
+   - no live runtime signoff was captured yet for the new workflow shell
+
 ## Apr 03, 2026 - Adapted M2 section layering is restored and WDL far-terrain placement no longer uses ADT-tile spacing
 
 - followed fresh runtime evidence that some adapted M2 shiny or semi-transparent surfaces were rendering like translucent shells instead of a complete material stack
