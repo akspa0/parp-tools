@@ -39,10 +39,13 @@ public class WlFile
         WlFileType fileType;
         if (magicStr == "*QIL" || magicStr == "LIQ*")
         {
-            // Determine WLW vs WLM from filename
-            fileType = fileName?.EndsWith(".wlm", StringComparison.OrdinalIgnoreCase) == true
-                ? WlFileType.WLM
-                : WlFileType.WLW;
+            if (fileName?.EndsWith(".wlm", StringComparison.OrdinalIgnoreCase) == true)
+                fileType = WlFileType.WLM;
+            else if (fileName?.EndsWith(".wll", StringComparison.OrdinalIgnoreCase) == true)
+                fileType = WlFileType.WLL;
+            else
+                fileType = WlFileType.WLW;
+
             wl.Header = ReadWlwHeader(br, magic, fileType);
         }
         else if (magicStr == "2QIL")

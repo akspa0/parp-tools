@@ -312,6 +312,25 @@ public class WorldAssetManager : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Get geometry-tight local bounds for a WMO model.
+    /// Prefers the mesh-summary bounds derived from group vertices and falls back
+    /// to raw MOHD root bounds if the geometry summary is unavailable.
+    /// </summary>
+    public bool TryGetWmoPlacementBounds(string normalizedKey, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (TryGetWmoMeshSummary(normalizedKey, out var summary))
+        {
+            boundsMin = summary.BoundsMin;
+            boundsMax = summary.BoundsMax;
+            return true;
+        }
+
+        return TryGetWmoBounds(normalizedKey, out boundsMin, out boundsMax);
+    }
+
     public bool TryGetWmoMeshSummary(string normalizedKey, out WmoMeshSummary summary)
     {
         normalizedKey = NormalizeKey(normalizedKey);
@@ -1185,6 +1204,7 @@ public class WorldAssetManager : IDisposable
         int indexCount = 0;
         int batchCount = 0;
         Vector3[] footprintSampleVertices = BuildWmoFootprintSamples(wmo.Groups);
+        ComputeWmoGeometryBounds(wmo, out Vector3 boundsMin, out Vector3 boundsMax);
 
         foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
         {
@@ -1200,9 +1220,38 @@ public class WorldAssetManager : IDisposable
             IndexCount: indexCount,
             TriangleCount: indexCount / 3,
             BatchCount: batchCount,
-            BoundsMin: wmo.BoundsMin,
-            BoundsMax: wmo.BoundsMax,
+            BoundsMin: boundsMin,
+            BoundsMax: boundsMax,
             FootprintSampleVertices: footprintSampleVertices);
+    }
+
+    private static void ComputeWmoGeometryBounds(WmoV14ToV17Converter.WmoV14Data wmo, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        bool hasBounds = false;
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+
+        foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
+        {
+            List<Vector3> vertices = group.Vertices;
+            for (int vertexIndex = 0; vertexIndex < vertices.Count; vertexIndex++)
+            {
+                Vector3 vertex = vertices[vertexIndex];
+                min = Vector3.Min(min, vertex);
+                max = Vector3.Max(max, vertex);
+                hasBounds = true;
+            }
+        }
+
+        if (hasBounds)
+        {
+            boundsMin = min;
+            boundsMax = max;
+            return;
+        }
+
+        boundsMin = wmo.BoundsMin;
+        boundsMax = wmo.BoundsMax;
     }
 
     private static Vector3[] BuildWmoFootprintSamples(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)

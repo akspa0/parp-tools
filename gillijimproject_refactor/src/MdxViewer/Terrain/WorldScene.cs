@@ -5726,13 +5726,10 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
-            // Get MOHD local bounds from the loaded WMO model and transform to world space.
-            // The WMO is a container — its internal geometry has its own local bounding box
-            // (MOHD bounds) around the WMO's local origin. We transform that through the
-            // placement matrix to get the correct world-space AABB.
-            // Falls back to MODF file bounds if model isn't loaded.
+            // Get geometry-tight local bounds for the WMO placement and transform them to world space.
+            // Falls back to MODF file bounds if the model summary is unavailable.
             Vector3 localMin, localMax, worldMin, worldMax;
-            if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+            if (_assets.TryGetWmoPlacementBounds(key, out localMin, out localMax))
             {
                 TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
             }
@@ -5901,9 +5898,9 @@ public class WorldScene : ISceneRenderer
                 * Matrix4x4.CreateRotationZ(rz)
                 * Matrix4x4.CreateTranslation(p.Position);
 
-            // Get MOHD local bounds and transform to world space
+            // Get geometry-tight local bounds and transform to world space.
             Vector3 localMin, localMax, worldMin, worldMax;
-            if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+            if (_assets.TryGetWmoPlacementBounds(key, out localMin, out localMax))
             {
                 TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
             }
@@ -6130,7 +6127,7 @@ public class WorldScene : ISceneRenderer
             if (inst.BoundsResolved)
                 continue;
 
-            if (!_assets.TryGetWmoBounds(inst.ModelKey, out var localMin, out var localMax))
+            if (!_assets.TryGetWmoPlacementBounds(inst.ModelKey, out var localMin, out var localMax))
                 continue;
 
             TransformBounds(localMin, localMax, inst.Transform, out var worldMin, out var worldMax);
@@ -6214,7 +6211,7 @@ public class WorldScene : ISceneRenderer
                     * Matrix4x4.CreateTranslation(newPosition);
 
                 current.Transform = transform;
-                if (_assets.TryGetWmoBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))
+                if (_assets.TryGetWmoPlacementBounds(current.ModelKey, out Vector3 localMin, out Vector3 localMax))
                 {
                     current.LocalBoundsMin = localMin;
                     current.LocalBoundsMax = localMax;
@@ -6368,7 +6365,7 @@ public class WorldScene : ISceneRenderer
                     * Matrix4x4.CreateTranslation(pos);
 
                 Vector3 localMin, localMax, worldMin, worldMax;
-                if (_assets.TryGetWmoBounds(key, out localMin, out localMax))
+                if (_assets.TryGetWmoPlacementBounds(key, out localMin, out localMax))
                 {
                     TransformBounds(localMin, localMax, transform, out worldMin, out worldMax);
                 }
@@ -7756,7 +7753,7 @@ public class WorldScene : ISceneRenderer
             for (int i = 0; i < _wlLoader.Bodies.Count; i++)
             {
                 WlLiquidBody body = _wlLoader.Bodies[i];
-                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.SourcePath))
+                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.BodyKey))
                     continue;
 
                 if (!TryMeasureHoverInfoHit(body.BoundsMin, body.BoundsMax, view, proj, mouseViewportX, mouseViewportY, viewportWidth, viewportHeight, out float distanceSq, out float depth))
@@ -7844,7 +7841,7 @@ public class WorldScene : ISceneRenderer
             for (int i = 0; i < _wlLoader.Bodies.Count; i++)
             {
                 WlLiquidBody body = _wlLoader.Bodies[i];
-                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.SourcePath))
+                if (liquidRenderer != null && !liquidRenderer.IsWlBodyVisible(body.BodyKey))
                     continue;
 
                 float t = RayAABBIntersect(rayOrigin, rayDir, body.BoundsMin - padding, body.BoundsMax + padding);
@@ -8537,7 +8534,7 @@ public class WorldScene : ISceneRenderer
             "WL liquid",
             body.Name,
             body.SourcePath,
-            $"{body.FileType} • {body.BlockCount} blocks",
+            $"{body.FileType} • {body.GroupLabel} • {body.BlockCount} blocks • Z {body.MinHeight:F1}..{body.MaxHeight:F1}",
             worldPosition,
             0,
             null);

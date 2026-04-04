@@ -32,22 +32,22 @@ public class LiquidRenderer : IDisposable
     public int MeshCount => _meshes.Count;
     public int WlMeshCount => _wlMeshes.Count;
 
-    public bool IsWlBodyVisible(string sourcePath)
+    public bool IsWlBodyVisible(string bodyKey)
     {
-        if (string.IsNullOrWhiteSpace(sourcePath))
+        if (string.IsNullOrWhiteSpace(bodyKey))
             return true;
-        return !_hiddenWlBodies.Contains(sourcePath);
+        return !_hiddenWlBodies.Contains(bodyKey);
     }
 
-    public void SetWlBodyVisible(string sourcePath, bool visible)
+    public void SetWlBodyVisible(string bodyKey, bool visible)
     {
-        if (string.IsNullOrWhiteSpace(sourcePath))
+        if (string.IsNullOrWhiteSpace(bodyKey))
             return;
 
         if (visible)
-            _hiddenWlBodies.Remove(sourcePath);
+            _hiddenWlBodies.Remove(bodyKey);
         else
-            _hiddenWlBodies.Add(sourcePath);
+            _hiddenWlBodies.Add(bodyKey);
     }
 
     public void SetAllWlBodiesVisible(bool visible)
@@ -57,8 +57,8 @@ public class LiquidRenderer : IDisposable
         {
             foreach (var mesh in _wlMeshes)
             {
-                if (!string.IsNullOrWhiteSpace(mesh.WlSourcePath))
-                    _hiddenWlBodies.Add(mesh.WlSourcePath);
+                if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey))
+                    _hiddenWlBodies.Add(mesh.WlBodyKey);
             }
         }
     }
@@ -153,7 +153,7 @@ public class LiquidRenderer : IDisposable
         {
             foreach (var mesh in _wlMeshes)
             {
-                if (!string.IsNullOrWhiteSpace(mesh.WlSourcePath) && _hiddenWlBodies.Contains(mesh.WlSourcePath))
+                if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
                     continue;
 
                 var (r, g, b, a) = GetLiquidColor(mesh.Type);
@@ -419,13 +419,14 @@ void main() {
                 TileX = -1, // WL bodies are not tile-specific
                 TileY = -1,
                 UseUint32Indices = true,
+                WlBodyKey = body.BodyKey,
                 WlBodyName = body.Name,
                 WlSourcePath = body.SourcePath
             });
             added++;
 
             ViewerLog.Info(ViewerLog.Category.Terrain,
-                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}): {body.BlockCount} blocks, {body.Vertices.Length} verts, type={body.Type}");
+                $"[WlLoader] Uploaded '{body.Name}' ({body.FileType}, {body.GroupLabel}): {body.BlockCount} blocks, {body.Vertices.Length} verts, type={body.Type}");
         }
 
         if (added > 0)
@@ -466,6 +467,7 @@ internal class LiquidMesh
     public int TileX { get; init; }
     public int TileY { get; init; }
     public bool UseUint32Indices { get; init; }
+    public string? WlBodyKey { get; init; }
     public string? WlBodyName { get; init; }
     public string? WlSourcePath { get; init; }
 

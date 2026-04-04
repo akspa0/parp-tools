@@ -124,6 +124,177 @@ public partial class ViewerApp
         }
     }
 
+    private void DrawWlLiquidInvestigationPanel(bool defaultOpen)
+    {
+        if (_worldScene == null)
+            return;
+
+        ImGuiTreeNodeFlags flags = defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
+        if (!ImGui.CollapsingHeader("WL Liquid Investigation", flags))
+            return;
+
+        bool showWlLiquids = _worldScene.ShowWlLiquids;
+        if (ImGui.Checkbox("Show WL Liquids", ref showWlLiquids))
+            _worldScene.ShowWlLiquids = showWlLiquids;
+
+        if (!_worldScene.WlLoadAttempted)
+        {
+            ImGui.TextDisabled("WLW/WLM/WLQ/WLL files are lazy-loaded for the current map.");
+            if (ImGui.Button("Load WL Liquids"))
+                _worldScene.ShowWlLiquids = true;
+            return;
+        }
+
+        WlLiquidLoader? loader = _worldScene.WlLoader;
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer;
+        if (loader == null || !loader.HasData)
+        {
+            ImGui.TextDisabled("No WL loose liquid files were found for this map.");
+            return;
+        }
+
+        var ts = WlLiquidLoader.TransformSettings;
+        int visibleCount = loader.Bodies.Count;
+        if (liquidRenderer != null)
+        {
+            visibleCount = 0;
+            for (int i = 0; i < loader.Bodies.Count; i++)
+            {
+                if (liquidRenderer.IsWlBodyVisible(loader.Bodies[i].BodyKey))
+                    visibleCount++;
+            }
+        }
+
+        ImGui.TextDisabled($"Files: {loader.SourceFileCount}  Bodies: {loader.Bodies.Count}  Blocks: {loader.TotalBlockCount}");
+        ImGui.TextDisabled($"Visible: {visibleCount}/{loader.Bodies.Count}  Mode: {GetWlLiquidGroupingModeLabel(ts.GroupingMode)}");
+
+        WlLiquidLoader.WlBodyGroupingMode groupingMode = ts.GroupingMode;
+        if (ImGui.BeginCombo("WL Grouping", GetWlLiquidGroupingModeLabel(groupingMode)))
+        {
+            foreach (WlLiquidLoader.WlBodyGroupingMode option in Enum.GetValues<WlLiquidLoader.WlBodyGroupingMode>())
+            {
+                bool isSelected = option == groupingMode;
+                if (ImGui.Selectable(GetWlLiquidGroupingModeLabel(option), isSelected))
+                    ts.GroupingMode = option;
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        float planeHeightTolerance = ts.PlaneHeightTolerance;
+        if (ts.GroupingMode != WlLiquidLoader.WlBodyGroupingMode.PlaneWelded)
+            ImGui.BeginDisabled();
+        if (ImGui.SliderFloat("WL Plane Weld Tolerance", ref planeHeightTolerance, 0.05f, 4.00f, "%.2f"))
+            ts.PlaneHeightTolerance = planeHeightTolerance;
+        if (ts.GroupingMode != WlLiquidLoader.WlBodyGroupingMode.PlaneWelded)
+            ImGui.EndDisabled();
+
+        if (ImGui.Button("Apply + Reload WL"))
+            _worldScene.ReloadWlLiquids();
+
+        if (liquidRenderer != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Show All WL"))
+                liquidRenderer.SetAllWlBodiesVisible(true);
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Hide All WL"))
+                liquidRenderer.SetAllWlBodiesVisible(false);
+
+            ImGui.SameLine();
+            bool hasSelectedBody = !string.IsNullOrWhiteSpace(_wlLayerSelectedBodyKey);
+            if (!hasSelectedBody)
+                ImGui.BeginDisabled();
+            if (ImGui.SmallButton("Solo Selected WL"))
+            {
+                liquidRenderer.SetAllWlBodiesVisible(false);
+                liquidRenderer.SetWlBodyVisible(_wlLayerSelectedBodyKey, true);
+            }
+            if (!hasSelectedBody)
+                ImGui.EndDisabled();
+        }
+
+        ImGui.TextDisabled("Plane-welded mode is heuristic: neighboring WL blocks stay together only when their shared edge heights match within tolerance.");
+        ImGui.Separator();
+
+        if (TryGetFocusedWlLiquidBody(out WlLiquidBody? focusedBody, out bool usingHoveredBody) && focusedBody != null)
+        {
+            ImGui.TextDisabled(usingHoveredBody ? "Target: hovered WL body" : "Target: selected WL body");
+            ImGui.Text($"{focusedBody.Name}");
+            ImGui.TextDisabled(focusedBody.SourcePath);
+            ImGui.TextDisabled($"{focusedBody.FileType}  {focusedBody.GroupLabel}  blocks={focusedBody.BlockCount}  verts={focusedBody.Vertices.Length}");
+            ImGui.TextDisabled($"Height range: {focusedBody.MinHeight:F2} .. {focusedBody.MaxHeight:F2}  avg={focusedBody.AverageHeight:F2}");
+            ImGui.TextDisabled($"Coord range: X {focusedBody.CoordMinX:F1}..{focusedBody.CoordMaxX:F1}  Y {focusedBody.CoordMinY:F1}..{focusedBody.CoordMaxY:F1}");
+            ImGui.TextDisabled($"Metadata patterns: {focusedBody.MetadataPatternCount}  non-zero words/block: {focusedBody.MetadataNonZeroMin}..{focusedBody.MetadataNonZeroMax}");
+
+            if (ImGui.SmallButton("Copy WL Summary"))
+                CopyTextToClipboard(BuildWlLiquidSummary(focusedBody), "WL liquid summary");
+        }
+        else
+        {
+            ImGui.TextDisabled("Hover or select a WL body to inspect its grouped block data.");
+        }
+
+        ImGui.Separator();
+        if (ImGui.BeginTable("##wl_investigation", 6, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.ScrollY, new Vector2(0f, 240f)))
+        {
+            ImGui.TableSetupColumn("V", ImGuiTableColumnFlags.WidthFixed, 24f);
+            ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 46f);
+            ImGui.TableSetupColumn("Group", ImGuiTableColumnFlags.WidthFixed, 78f);
+            ImGui.TableSetupColumn("Blocks", ImGuiTableColumnFlags.WidthFixed, 54f);
+            ImGui.TableSetupColumn("Z", ImGuiTableColumnFlags.WidthFixed, 110f);
+            ImGui.TableSetupColumn("Body", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            for (int i = 0; i < loader.Bodies.Count; i++)
+            {
+                WlLiquidBody body = loader.Bodies[i];
+                ImGui.TableNextRow();
+
+                ImGui.TableSetColumnIndex(0);
+                bool visible = liquidRenderer == null || liquidRenderer.IsWlBodyVisible(body.BodyKey);
+                if (liquidRenderer == null)
+                    ImGui.BeginDisabled();
+                if (ImGui.Checkbox($"##wl_invest_vis_{i}", ref visible) && liquidRenderer != null)
+                    liquidRenderer.SetWlBodyVisible(body.BodyKey, visible);
+                if (liquidRenderer == null)
+                    ImGui.EndDisabled();
+
+                ImGui.TableSetColumnIndex(1);
+                ImGui.TextUnformatted(body.FileType.ToString());
+
+                ImGui.TableSetColumnIndex(2);
+                ImGui.TextUnformatted(body.GroupLabel);
+
+                ImGui.TableSetColumnIndex(3);
+                ImGui.Text($"{body.BlockCount}");
+
+                ImGui.TableSetColumnIndex(4);
+                ImGui.Text($"{body.MinHeight:F1}..{body.MaxHeight:F1}");
+
+                ImGui.TableSetColumnIndex(5);
+                bool isSelected = string.Equals(_wlLayerSelectedBodyKey, body.BodyKey, StringComparison.OrdinalIgnoreCase);
+                if (ImGui.Selectable($"{body.Name}##wl_invest_body_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
+                    _wlLayerSelectedBodyKey = body.BodyKey;
+
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(body.SourcePath);
+                    ImGui.TextDisabled($"{body.FileType}  {body.GroupLabel}");
+                    ImGui.TextDisabled($"Blocks={body.BlockCount}  Verts={body.Vertices.Length}");
+                    ImGui.TextDisabled($"Coord X {body.CoordMinX:F1}..{body.CoordMaxX:F1}  Y {body.CoordMinY:F1}..{body.CoordMaxY:F1}");
+                    ImGui.EndTooltip();
+                }
+            }
+
+            ImGui.EndTable();
+        }
+    }
+
     private bool TryDrawTerrainChunkHoverOverlay()
     {
         if (_worldScene != null && !_worldScene.ShowHoveredAssetTooltips)
@@ -312,6 +483,103 @@ public partial class ViewerApp
                 .AppendLine();
         }
 
+        return builder.ToString().TrimEnd();
+    }
+
+    private bool TryGetFocusedWlLiquidBody(out WlLiquidBody? body, out bool usingHoveredBody)
+    {
+        body = null;
+        usingHoveredBody = false;
+
+        if (_worldScene?.WlLoader == null || !_worldScene.WlLoader.HasData)
+            return false;
+
+        if (_worldScene.HoveredAssetInfo is HoveredAssetInfo hoveredInfo
+            && string.Equals(hoveredInfo.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
+            && TryFindWlLiquidBody(hoveredInfo.SourcePath, hoveredInfo.DisplayName, out body))
+        {
+            usingHoveredBody = true;
+            return true;
+        }
+
+        return TryFindWlLiquidBodyByKey(_wlLayerSelectedBodyKey, out body);
+    }
+
+    private bool TryFindWlLiquidBodyByKey(string bodyKey, out WlLiquidBody? body)
+    {
+        body = null;
+        if (_worldScene?.WlLoader == null || string.IsNullOrWhiteSpace(bodyKey))
+            return false;
+
+        for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
+        {
+            WlLiquidBody candidate = _worldScene.WlLoader.Bodies[i];
+            if (!string.Equals(candidate.BodyKey, bodyKey, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            body = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryFindWlLiquidBody(string sourcePath, string displayName, out WlLiquidBody? body)
+    {
+        body = null;
+        if (_worldScene?.WlLoader == null)
+            return false;
+
+        for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
+        {
+            WlLiquidBody candidate = _worldScene.WlLoader.Bodies[i];
+            if (!string.Equals(candidate.SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!string.Equals(candidate.Name, displayName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            body = candidate;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string GetWlLiquidGroupingModeLabel(WlLiquidLoader.WlBodyGroupingMode mode)
+    {
+        return mode switch
+        {
+            WlLiquidLoader.WlBodyGroupingMode.FileWelded => "File welded",
+            WlLiquidLoader.WlBodyGroupingMode.PlaneWelded => "Plane welded",
+            WlLiquidLoader.WlBodyGroupingMode.BlockUnwelded => "Block unwelded",
+            _ => "Unknown",
+        };
+    }
+
+    private static string BuildWlLiquidSummary(WlLiquidBody body)
+    {
+        var builder = new System.Text.StringBuilder();
+        builder.AppendLine(body.Name);
+        builder.AppendLine(body.SourcePath);
+        builder.Append("FileType=").Append(body.FileType)
+            .Append(" Group=").Append(body.GroupLabel)
+            .Append(" Blocks=").Append(body.BlockCount)
+            .Append(" Verts=").Append(body.Vertices.Length)
+            .AppendLine();
+        builder.Append("Height=").Append(body.MinHeight.ToString("F3"))
+            .Append("..").Append(body.MaxHeight.ToString("F3"))
+            .Append(" Avg=").Append(body.AverageHeight.ToString("F3"))
+            .AppendLine();
+        builder.Append("CoordX=").Append(body.CoordMinX.ToString("F2"))
+            .Append("..").Append(body.CoordMaxX.ToString("F2"))
+            .Append(" CoordY=").Append(body.CoordMinY.ToString("F2"))
+            .Append("..").Append(body.CoordMaxY.ToString("F2"))
+            .AppendLine();
+        builder.Append("MetadataPatterns=").Append(body.MetadataPatternCount)
+            .Append(" NonZeroWordsPerBlock=").Append(body.MetadataNonZeroMin)
+            .Append("..").Append(body.MetadataNonZeroMax)
+            .AppendLine();
+        builder.Append("SourceBlocks=").Append(string.Join(",", body.SourceBlockIndices));
         return builder.ToString().TrimEnd();
     }
 }

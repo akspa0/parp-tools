@@ -268,6 +268,12 @@ public partial class ViewerApp
         ImGui.Separator();
         DrawTerrainChunkInvestigationPanel(defaultOpen: _visualInvestigationMode == VisualInvestigationMode.Adt);
 
+        if (_worldScene != null)
+        {
+            ImGui.Separator();
+            DrawWlLiquidInvestigationPanel(defaultOpen: _worldScene.WlLoader?.HasData == true);
+        }
+
         if (_terrainManager != null || _vlmTerrainManager != null)
             ImGui.Separator();
 

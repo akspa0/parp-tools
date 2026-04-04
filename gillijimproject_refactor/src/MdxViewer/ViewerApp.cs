@@ -395,7 +395,7 @@ public partial class ViewerApp : IDisposable
     private int _sqlMapSpawnsCacheMapId = -1;
     private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _sqlForceStreamRefresh;
-    private string _wlLayerSelectedSourcePath = "";
+    private string _wlLayerSelectedBodyKey = "";
     private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
     private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
@@ -5232,12 +5232,12 @@ void main() {
             if (_worldScene.ShowWlLiquids && ImGui.IsItemHovered())
                 ImGui.SetTooltip("Loose WLW/WLQ/WLM liquid project files.\nContains water data for deleted/missing tiles.");
 
-            if (liquidRenderer != null && ImGui.TreeNode("WL Layers"))
+            if (liquidRenderer != null && ImGui.TreeNode("WL Bodies"))
             {
                 int visibleCount = 0;
                 foreach (var b in _worldScene.WlLoader.Bodies)
                 {
-                    if (liquidRenderer.IsWlBodyVisible(b.SourcePath))
+                    if (liquidRenderer.IsWlBodyVisible(b.BodyKey))
                         visibleCount++;
                 }
 
@@ -5247,23 +5247,24 @@ void main() {
                 if (ImGui.SmallButton("Hide All"))
                     liquidRenderer.SetAllWlBodiesVisible(false);
                 ImGui.SameLine();
-                bool hasSelected = !string.IsNullOrWhiteSpace(_wlLayerSelectedSourcePath);
+                bool hasSelected = !string.IsNullOrWhiteSpace(_wlLayerSelectedBodyKey);
                 if (!hasSelected)
                     ImGui.BeginDisabled();
                 if (ImGui.SmallButton("Solo Selected"))
                 {
                     liquidRenderer.SetAllWlBodiesVisible(false);
-                    liquidRenderer.SetWlBodyVisible(_wlLayerSelectedSourcePath, true);
+                    liquidRenderer.SetWlBodyVisible(_wlLayerSelectedBodyKey, true);
                 }
                 if (!hasSelected)
                     ImGui.EndDisabled();
 
                 ImGui.TextDisabled($"Visible: {visibleCount}/{_worldScene.WlLoader.Bodies.Count}");
 
-                if (ImGui.BeginTable("##wl_layers", 3, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+                if (ImGui.BeginTable("##wl_layers", 4, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
                 {
                     ImGui.TableSetupColumn("V", ImGuiTableColumnFlags.WidthFixed, 24f);
                     ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 48f);
+                    ImGui.TableSetupColumn("Group", ImGuiTableColumnFlags.WidthFixed, 72f);
                     ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthStretch);
                     ImGui.TableHeadersRow();
 
@@ -5273,23 +5274,27 @@ void main() {
                         ImGui.TableNextRow();
 
                         ImGui.TableSetColumnIndex(0);
-                        bool visible = liquidRenderer.IsWlBodyVisible(body.SourcePath);
+                        bool visible = liquidRenderer.IsWlBodyVisible(body.BodyKey);
                         if (ImGui.Checkbox($"##wl_vis_{i}", ref visible))
-                            liquidRenderer.SetWlBodyVisible(body.SourcePath, visible);
+                            liquidRenderer.SetWlBodyVisible(body.BodyKey, visible);
 
                         ImGui.TableSetColumnIndex(1);
                         ImGui.TextUnformatted(body.FileType.ToString());
 
                         ImGui.TableSetColumnIndex(2);
-                        bool isSelected = string.Equals(_wlLayerSelectedSourcePath, body.SourcePath, StringComparison.OrdinalIgnoreCase);
+                        ImGui.TextUnformatted(body.GroupLabel);
+
+                        ImGui.TableSetColumnIndex(3);
+                        bool isSelected = string.Equals(_wlLayerSelectedBodyKey, body.BodyKey, StringComparison.OrdinalIgnoreCase);
                         string label = $"{body.Name}##wl_layer_{i}";
                         if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                            _wlLayerSelectedSourcePath = body.SourcePath;
+                            _wlLayerSelectedBodyKey = body.BodyKey;
                         if (ImGui.IsItemHovered())
                         {
                             ImGui.BeginTooltip();
                             ImGui.TextUnformatted(body.SourcePath);
                             ImGui.Text($"Blocks: {body.BlockCount}  Verts: {body.Vertices.Length}");
+                            ImGui.Text($"Mode: {body.GroupLabel}  Z: {body.MinHeight:F1}..{body.MaxHeight:F1}");
                             ImGui.EndTooltip();
                         }
                     }
@@ -5319,6 +5324,25 @@ void main() {
                 var tr = ts.Translation;
                 if (ImGui.InputFloat3("Translation", ref tr, "%.3f"))
                     ts.Translation = tr;
+
+                WlLiquidLoader.WlBodyGroupingMode groupingMode = ts.GroupingMode;
+                if (ImGui.BeginCombo("Grouping", GetWlLiquidGroupingModeLabel(groupingMode)))
+                {
+                    foreach (WlLiquidLoader.WlBodyGroupingMode option in Enum.GetValues<WlLiquidLoader.WlBodyGroupingMode>())
+                    {
+                        bool isSelected = option == groupingMode;
+                        if (ImGui.Selectable(GetWlLiquidGroupingModeLabel(option), isSelected))
+                            ts.GroupingMode = option;
+                        if (isSelected)
+                            ImGui.SetItemDefaultFocus();
+                    }
+
+                    ImGui.EndCombo();
+                }
+
+                float planeHeightTolerance = ts.PlaneHeightTolerance;
+                if (ImGui.SliderFloat("Plane Weld Tolerance", ref planeHeightTolerance, 0.05f, 4.00f, "%.2f"))
+                    ts.PlaneHeightTolerance = planeHeightTolerance;
 
                 if (ImGui.Button("Apply + Reload WL"))
                     _worldScene.ReloadWlLiquids();
