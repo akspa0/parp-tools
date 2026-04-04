@@ -282,13 +282,7 @@ public partial class ViewerApp
 
         ImGui.SameLine();
         if (ImGui.Button(_fullscreenMinimap ? "Exit Full Minimap" : "Full Minimap"))
-        {
-            _fullscreenMinimap = !_fullscreenMinimap;
-            if (_fullscreenMinimap)
-                PrepareFullscreenMinimapState();
-            else
-                _minimapDragging = false;
-        }
+            ToggleFullscreenMinimap();
 
         if (_pendingMinimapTeleportTile.HasValue)
             ImGui.TextDisabled($"Teleport armed: ({_pendingMinimapTeleportTile.Value.tileX}, {_pendingMinimapTeleportTile.Value.tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}");
@@ -1195,7 +1189,7 @@ public partial class ViewerApp
                 ImGui.Text($"WMO vis/draw: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} ms");
                 ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
                 ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");
-                ImGui.Text($"MDX opaque batch u/b: {renderStats.OpaqueUnbatchedMdxCount}/{renderStats.OpaqueBatchedMdxCount}  transparent u/b: {renderStats.TransparentUnbatchedMdxCount}/{renderStats.TransparentBatchedMdxCount}");
+                ImGui.Text($"MDX opaque shared/unbatched: {renderStats.OpaqueBatchedMdxCount}/{renderStats.OpaqueUnbatchedMdxCount}  transparent shared/unbatched: {renderStats.TransparentBatchedMdxCount}/{renderStats.TransparentUnbatchedMdxCount}");
                 ImGui.Text($"Sky/backdrop/overlay: {renderStats.Sky.DurationMs:0.00} / {renderStats.SkyboxBackdrop.DurationMs:0.00} / {renderStats.Overlay.DurationMs:0.00} ms");
                 ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
                 ImGui.TreePop();

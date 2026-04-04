@@ -2,6 +2,86 @@
 
 # Active Context
 
+## Apr 04, 2026 - UniqueId archaeology now filters to a visible range, and terrain streaming no longer prewarms whole tile object sets
+
+- followed immediate live feedback that the two UniqueId archaeology sliders were behaving like a split hide mask instead of a normal `[start..end]` range selector
+- current active behavior in `gillijimproject_refactor/src/MdxViewer`:
+	- the top UniqueId slider now sets the start of the visible range and the bottom slider sets the end of the visible range
+	- enabling the filter now keeps placements inside the selected range visible within the chosen scope instead of hiding the selected band and leaving the outside ranges visible
+	- detected archaeology-layer actions now apply that visible band directly instead of a `Hide` action label
+- followed the same feedback that terrain-world performance was still collapsing while the scene `settled` under asset loading pressure
+	- `Terrain/WorldScene.cs` no longer prewarms every streamed tile's MDX/WMO asset set as soon as the tile enters AOI
+	- the active terrain-streaming asset policy was cut back to lower visible/deferred load throughput and now further throttles deferred work when the previous frame CPU time is already high
+	- `Terrain/WorldAssetManager.cs` also no longer double-enqueues first-time priority MDX/WMO loads into the priority queues
+- validation completed:
+	- file diagnostics were clean for `ViewerApp.cs`, `Terrain/WorldScene.cs`, and `Terrain/WorldAssetManager.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime signoff has been captured yet for the revised frame stability or the corrected UniqueId archaeology workflow
+
+## Apr 04, 2026 - Steady-state world performance is still limited by object visibility/submission; visible-only MDX animation update and 1.00x default range are now active
+
+- followed live runtime screenshots showing that load speed improved but standstill frame rate was still collapsing with large visible-object counts
+- current active findings in `gillijimproject_refactor/src/MdxViewer`:
+	- the current MDX `batched` path is not true GPU instancing; it shares shader/frame state but still renders each visible instance through its own geoset draw loop
+	- WMO rendering is also per-visible-instance and each visible WMO still runs its internal opaque/transparent/doodad passes independently
+	- one clear avoidable cost was still present: `WorldScene` was advancing animation by scanning all placed MDX/taxi instances every frame instead of only the renderers that survived visibility admission
+- landed follow-up:
+	- `Terrain/WorldScene.cs` now updates animation only for visible MDX renderers in the current frame
+	- the default `ObjectStreamingRangeMultiplier` is now `1.00x` instead of `2.00x`
+	- the investigation/sidebar UI text now explicitly says the MDX `batched` counters are shared-shader submissions, not true GPU instancing
+- validation completed:
+	- file diagnostics were clean for the touched files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime signoff has been captured yet for the new default range or the visible-only animation update
+
+## Apr 04, 2026 - Fullscreen minimap teleport hold experiment was rolled back; teleports are immediate again
+
+- the short-lived fullscreen minimap `teleport loading` hold added earlier on Apr 04 was removed the same day after live feedback showed it made teleports feel blocked and turned the fullscreen minimap into a chore
+- current active behavior:
+	- triple-click teleport still moves the camera immediately
+	- if fullscreen minimap is open, teleport now drops straight back to the world instead of waiting on destination tile settle logic
+	- the extra minimap hold-state fields and overlay flow in `ViewerApp` were removed from the active viewer path
+- related active minimap state after the same follow-up:
+	- `Rendering/MinimapRenderer.cs` was also narrowed to a cheaper tile path by parallelizing background decode, preferring canonical tile paths first, removing first-hit PNG writeback from the critical path, and avoiding mipmap generation for UI tile textures
+- validation completed:
+	- file diagnostics were clean for the touched viewer files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime signoff was captured yet for the revised fullscreen minimap responsiveness on real teleports
+
+## Apr 04, 2026 - Active MdxViewer LIT path now preserves full group metadata, but only sky/fog override is trusted live
+
+- active `gillijimproject_refactor/src/MdxViewer` LIT handling was tightened after real runtime feedback that the first parser no longer crashed but still produced implausible terrain lighting colors
+- current landed state:
+	- `src/MdxViewer/Terrain/LitLoader.cs` now keeps `highlightSky`, the four sky float bands, `cloudMask`, and the version-`0x80000005` parameter float bands instead of discarding most of the non-color payload
+	- the same viewer path now discovers alternate per-map LIT filenames (`lights.lit`, `areatest.lit`, `light.lit`) and lets the user reload a specific source from the LIT investigation panel instead of hardwiring `lights.lit`
+	- the live viewer toggle now says `Use LIT Sky/Fog Override`, and `WorldScene` only applies LIT sky/fog values while leaving direct/ambient lighting on the pre-existing scene path until those light-color semantics are proven on real map data
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+	- one real archive-shape check against repo test data confirmed `world/maps/azeroth/lights.lit` is `0x80000004` with `57` entries and `57 * 4 * 0x1550` bytes of light-group payload
+	- a second archive-backed check confirmed `world/maps/azeroth/areatest.lit` exists and is an older partial-form file (`version=0x00000002`, `lightCount=-1`, payload `5316` bytes) rather than another full `57`-light list
+- important proof boundary:
+	- this is still not runtime signoff for exact LIT direct/ambient color semantics
+	- the viewer now has a more honest parse boundary and a safer live override boundary, but real-map visual confirmation is still required
+
+## Apr 04, 2026 - WL scene picks now target one loose-liquid body and expose a selected-body wiremesh overlay in MdxViewer
+
+- `gillijimproject_refactor/src/MdxViewer` now treats hovered `WL liquid` hits as a first-class inspect target instead of hover-only metadata:
+	- left-clicking a WL plane now selects that exact WL body, switches the UI into the `Editor -> Inspect` task, and isolates the WL body list to the picked entry so the user does not have to search the full grouped table manually
+	- the selected-object inspector is now populated with the picked WL body summary, and the WL investigation panel can render a selected-body wiremesh overlay over the translucent WL mesh data
+	- `HoveredAssetInfo` now carries the exact `WlBodyKey` for WL hits so scene picks resolve against stable body identity instead of only display text
+- validation completed:
+	- file diagnostics were clean for the touched `ViewerApp.cs`, `ViewerApp_Investigation.cs`, `Terrain/LiquidRenderer.cs`, and `Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime signoff was captured yet for WL click-selection, list isolation, or the wiremesh overlay on real scene data
+
 ## Apr 04, 2026 - MDX click selection now follows hovered instance and terrain worlds prewarm streamed object assets
 
 - narrowed the remaining selected-object mismatch to the MDX scene-selection path rather than WMO selection:

@@ -11,6 +11,7 @@ namespace MdxViewer.Terrain;
 /// </summary>
 public sealed class LitLoader
 {
+    public const uint Version02Test = 0x00000002;
     public const uint Version83 = 0x80000003;
     public const uint Version84 = 0x80000004;
     public const uint Version85 = 0x80000005;
@@ -18,12 +19,24 @@ public sealed class LitLoader
     public const int TrackDirectColor = 0;
     public const int TrackAmbientColor = 1;
     public const int TrackSkyTop = 2;
+    public const int TrackSkyMiddle = 3;
+    public const int TrackSkyMiddleToHorizon = 4;
+    public const int TrackSkyAboveHorizon = 5;
     public const int TrackSkyHorizon = 6;
     public const int TrackFogColor = 7;
+    public const int TrackShadowOpacity = 8;
+    public const int TrackSunColor = 9;
+    public const int TrackSunHaloColor = 10;
+    public const int TrackCloudColor = 12;
+    public const int TrackGroundShadowColor = 15;
+    public const int TrackWaterColorLight = 16;
+    public const int TrackWaterColorDark = 17;
 
     private const float RadiusScale = 36f;
     private readonly IDataSource _dataSource;
     private readonly string _mapName;
+    private readonly string? _preferredSourcePath;
+    private readonly List<string> _availableSourcePaths = new();
 
     public sealed record LitColorKeyframe(int TimeOfDay, uint PackedColor, Vector3 Color);
 
@@ -91,15 +104,19 @@ public sealed class LitLoader
             IReadOnlyList<LitTrack> tracks,
             IReadOnlyList<float> fogEndSamples,
             IReadOnlyList<float> fogStartScalers,
-            int skyValue,
-            int cloudValue)
+            int highlightSky,
+            IReadOnlyList<IReadOnlyList<float>> skyFloatBands,
+            int cloudMask,
+            IReadOnlyList<IReadOnlyList<float>> parameterBands)
         {
             GroupIndex = groupIndex;
             Tracks = tracks;
             FogEndSamples = fogEndSamples;
             FogStartScalers = fogStartScalers;
-            SkyValue = skyValue;
-            CloudValue = cloudValue;
+            HighlightSky = highlightSky;
+            SkyFloatBands = skyFloatBands;
+            CloudMask = cloudMask;
+            ParameterBands = parameterBands;
         }
 
         public int GroupIndex { get; }
@@ -110,9 +127,17 @@ public sealed class LitLoader
 
         public IReadOnlyList<float> FogStartScalers { get; }
 
-        public int SkyValue { get; }
+        public int HighlightSky { get; }
 
-        public int CloudValue { get; }
+        public IReadOnlyList<IReadOnlyList<float>> SkyFloatBands { get; }
+
+        public int CloudMask { get; }
+
+        public IReadOnlyList<IReadOnlyList<float>> ParameterBands { get; }
+
+        public int SkyValue => HighlightSky;
+
+        public int CloudValue => CloudMask;
 
         public bool TryEvaluateTrack(int trackIndex, float timeOfDay, out Vector3 color)
         {
@@ -217,23 +242,28 @@ public sealed class LitLoader
 
     public string? SourcePath { get; private set; }
 
+    public IReadOnlyList<string> AvailableSourcePaths => _availableSourcePaths;
+
     public string Status { get; private set; } = "LIT not loaded.";
 
     public bool HasData => Lights.Count > 0;
 
-    public LitLoader(IDataSource dataSource, string mapName)
+    public LitLoader(IDataSource dataSource, string mapName, string? preferredSourcePath = null)
     {
         _dataSource = dataSource;
         _mapName = mapName;
+        _preferredSourcePath = string.IsNullOrWhiteSpace(preferredSourcePath) ? null : preferredSourcePath;
     }
 
     public bool Load()
     {
         Lights.Clear();
+        _availableSourcePaths.Clear();
+        _availableSourcePaths.AddRange(ResolveAvailableSourcePaths());
         SourcePath = ResolveSourcePath();
         if (SourcePath == null)
         {
-            Status = $"LIT: no lights.lit found for map '{_mapName}'.";
+            Status = $"LIT: no lit variants found for map '{_mapName}' (lights.lit, areatest.lit, light.lit).";
             return false;
         }
 
@@ -251,38 +281,25 @@ public sealed class LitLoader
 
             Version = reader.ReadUInt32();
             RawLightCount = reader.ReadInt32();
-            int declaredLightCount = Math.Max(RawLightCount, 0);
             int dataLightCount = RawLightCount < 0 ? Math.Abs(RawLightCount) : RawLightCount;
-            int trackCount = Version == Version83 ? 14 : 18;
+            int trackCount = GetTrackCountForVersion(Version);
             bool partialDataOnly = RawLightCount < 0;
-
-            var listEntries = new List<(int ChunkX, int ChunkY, int ChunkRadius, Vector3 Position, float RadiusRaw, float DropoffRaw, string Name)>();
-            for (int i = 0; i < declaredLightCount; i++)
-            {
-                int chunkX = reader.ReadInt32();
-                int chunkY = reader.ReadInt32();
-                int chunkRadius = reader.ReadInt32();
-                float x = reader.ReadSingle();
-                float y = reader.ReadSingle();
-                float z = reader.ReadSingle();
-                float radiusRaw = reader.ReadSingle();
-                float dropoffRaw = reader.ReadSingle();
-                string name = ReadFixedString(reader, 32);
-                listEntries.Add((chunkX, chunkY, chunkRadius, new Vector3(x, y, z), radiusRaw, dropoffRaw, name));
-            }
 
             if (partialDataOnly)
             {
-                var groups = new List<LitGroup> { ReadGroup(reader, 0, trackCount) };
+                var groups = new List<LitGroup>
+                {
+                    Version == Version02Test
+                        ? ReadLegacyVersion02PartialGroup(reader, 0)
+                        : ReadGroup(reader, 0, trackCount)
+                };
                 Lights.Add(new LitLight(0, -1, -1, -1, Vector3.Zero, 0f, 0f, "Default", groups));
             }
             else
             {
                 for (int lightIndex = 0; lightIndex < dataLightCount; lightIndex++)
                 {
-                    var meta = lightIndex < listEntries.Count
-                        ? listEntries[lightIndex]
-                        : (-1, -1, -1, Vector3.Zero, 0f, 0f, $"Light {lightIndex}");
+                    var meta = ReadLightHeader(reader, lightIndex);
 
                     var groups = new List<LitGroup>(4);
                     for (int groupIndex = 0; groupIndex < 4; groupIndex++)
@@ -493,34 +510,140 @@ public sealed class LitLoader
 
         float[] fogEndSamples = ReadFloatArray(reader, 32);
         float[] fogStartScalers = ReadFloatArray(reader, 32);
-        int skyValue = reader.ReadInt32();
-        ReadFloatArray(reader, 32);
-        ReadFloatArray(reader, 32);
-        ReadFloatArray(reader, 32);
-        ReadFloatArray(reader, 32);
-        int cloudValue = reader.ReadInt32();
-        ReadFloatArray(reader, 32);
-        for (int i = 0; i < 8; i++)
-            reader.ReadUInt32();
+        int highlightSky = reader.ReadInt32();
+        var skyFloatBands = new IReadOnlyList<float>[]
+        {
+            ReadFloatArray(reader, 32),
+            ReadFloatArray(reader, 32),
+            ReadFloatArray(reader, 32),
+            ReadFloatArray(reader, 32),
+        };
+        int cloudMask = reader.ReadInt32();
+        IReadOnlyList<float>[] parameterBands = Array.Empty<IReadOnlyList<float>>();
 
-        return new LitGroup(groupIndex, tracks, fogEndSamples, fogStartScalers, skyValue, cloudValue);
+        if (Version >= Version85)
+        {
+            parameterBands = new IReadOnlyList<float>[]
+            {
+                ReadFloatArray(reader, 10),
+                ReadFloatArray(reader, 10),
+                ReadFloatArray(reader, 10),
+                ReadFloatArray(reader, 10),
+            };
+        }
+
+        return new LitGroup(groupIndex, tracks, fogEndSamples, fogStartScalers, highlightSky, skyFloatBands, cloudMask, parameterBands);
+    }
+
+    private LitGroup ReadLegacyVersion02PartialGroup(BinaryReader reader, int groupIndex)
+    {
+        const int legacyTrackCount = 17;
+
+        var lengths = new int[legacyTrackCount];
+        for (int i = 0; i < legacyTrackCount; i++)
+            lengths[i] = Math.Clamp(reader.ReadInt32(), 0, 32);
+
+        var tracks = new List<LitTrack>(legacyTrackCount);
+        for (int trackIndex = 0; trackIndex < legacyTrackCount; trackIndex++)
+        {
+            var keyframes = new List<LitColorKeyframe>(lengths[trackIndex]);
+            for (int sampleIndex = 0; sampleIndex < 32; sampleIndex++)
+            {
+                int timeOfDay = reader.ReadInt32();
+                uint packedColor = unchecked((uint)reader.ReadInt32());
+                if (sampleIndex < lengths[trackIndex])
+                    keyframes.Add(new LitColorKeyframe(timeOfDay, packedColor, DecodeBgrx(packedColor)));
+            }
+
+            tracks.Add(new LitTrack(trackIndex, keyframes));
+        }
+
+        var legacyFloatBands = new List<IReadOnlyList<float>>(7);
+        int availableLegacyBands = (int)((reader.BaseStream.Length - reader.BaseStream.Position) / (32 * sizeof(float)));
+        int bandCount = Math.Clamp(availableLegacyBands, 0, 7);
+        for (int i = 0; i < bandCount; i++)
+            legacyFloatBands.Add(ReadFloatArray(reader, 32));
+
+        while (legacyFloatBands.Count < 7)
+            legacyFloatBands.Add(Array.Empty<float>());
+
+        var skyFloatBands = new IReadOnlyList<float>[]
+        {
+            legacyFloatBands[2],
+            legacyFloatBands[3],
+            legacyFloatBands[4],
+            legacyFloatBands[5],
+        };
+
+        IReadOnlyList<float>[] parameterBands = legacyFloatBands[6].Count > 0
+            ? new[] { legacyFloatBands[6] }
+            : Array.Empty<IReadOnlyList<float>>();
+
+        return new LitGroup(
+            groupIndex,
+            tracks,
+            legacyFloatBands[0],
+            legacyFloatBands[1],
+            highlightSky: 0,
+            skyFloatBands,
+            cloudMask: 0,
+            parameterBands);
+    }
+
+    private static (int ChunkX, int ChunkY, int ChunkRadius, Vector3 Position, float RadiusRaw, float DropoffRaw, string Name) ReadLightHeader(BinaryReader reader, int lightIndex)
+    {
+        int chunkX = reader.ReadInt32();
+        int chunkY = reader.ReadInt32();
+        int chunkRadius = reader.ReadInt32();
+        float x = reader.ReadSingle();
+        float y = reader.ReadSingle();
+        float z = reader.ReadSingle();
+        float radiusRaw = reader.ReadSingle();
+        float dropoffRaw = reader.ReadSingle();
+        string name = ReadFixedString(reader, 32);
+        return (chunkX, chunkY, chunkRadius, new Vector3(x, y, z), radiusRaw, dropoffRaw, string.IsNullOrWhiteSpace(name) ? $"Light {lightIndex}" : name);
     }
 
     private string? ResolveSourcePath()
+    {
+        if (!string.IsNullOrWhiteSpace(_preferredSourcePath))
+        {
+            for (int i = 0; i < _availableSourcePaths.Count; i++)
+            {
+                if (string.Equals(_availableSourcePaths[i], _preferredSourcePath, StringComparison.OrdinalIgnoreCase))
+                    return _availableSourcePaths[i];
+            }
+        }
+
+        return _availableSourcePaths.Count > 0 ? _availableSourcePaths[0] : null;
+    }
+
+    private IReadOnlyList<string> ResolveAvailableSourcePaths()
     {
         string[] candidates =
         {
             $"World\\{_mapName}\\lights.lit",
             $"World\\Maps\\{_mapName}\\lights.lit",
+            $"World\\{_mapName}\\areatest.lit",
+            $"World\\Maps\\{_mapName}\\areatest.lit",
+            $"World\\{_mapName}\\light.lit",
+            $"World\\Maps\\{_mapName}\\light.lit",
         };
+
+        var available = new List<string>(candidates.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (int i = 0; i < candidates.Length; i++)
         {
-            if (_dataSource.FileExists(candidates[i]))
-                return candidates[i];
+            string candidate = candidates[i];
+            if (!seen.Add(candidate))
+                continue;
+
+            if (_dataSource.FileExists(candidate))
+                available.Add(candidate);
         }
 
-        return null;
+        return available;
     }
 
     private static float[] ReadFloatArray(BinaryReader reader, int count)
@@ -529,6 +652,16 @@ public sealed class LitLoader
         for (int i = 0; i < count; i++)
             result[i] = reader.ReadSingle();
         return result;
+    }
+
+    private static int GetTrackCountForVersion(uint version)
+    {
+        return version switch
+        {
+            Version02Test => 17,
+            Version83 => 14,
+            _ => 18,
+        };
     }
 
     private static string ReadFixedString(BinaryReader reader, int length)

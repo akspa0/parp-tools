@@ -422,10 +422,7 @@ public class WorldAssetManager : IDisposable
         }
 
         if (_queuedMdxLoads.Add(normalizedKey))
-        {
             PrefetchModelBytes(normalizedKey);
-            _priorityMdxLoads.Enqueue(normalizedKey);
-        }
 
         if (_priorityQueuedMdxLoads.Add(normalizedKey))
             _priorityMdxLoads.Enqueue(normalizedKey);
@@ -453,10 +450,7 @@ public class WorldAssetManager : IDisposable
             return;
 
         if (_queuedWmoLoads.Add(normalizedKey))
-        {
             PrefetchModelBytes(normalizedKey);
-            _priorityWmoLoads.Enqueue(normalizedKey);
-        }
 
         if (_priorityQueuedWmoLoads.Add(normalizedKey))
             _priorityWmoLoads.Enqueue(normalizedKey);

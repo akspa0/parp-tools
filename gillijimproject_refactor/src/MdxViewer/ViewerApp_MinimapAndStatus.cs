@@ -122,7 +122,21 @@ public partial class ViewerApp
         float worldY = WoWConstants.MapOrigin - clickTileY * MinimapWorldTileSize;
         _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
         _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
+        if (_fullscreenMinimap)
+        {
+            _fullscreenMinimap = false;
+            _minimapDragging = false;
+        }
         ClearPendingMinimapTeleport();
+    }
+
+    private void ToggleFullscreenMinimap()
+    {
+        _fullscreenMinimap = !_fullscreenMinimap;
+        if (_fullscreenMinimap)
+            PrepareFullscreenMinimapState();
+        else
+            _minimapDragging = false;
     }
 
     private void ClearPendingMinimapTeleport()
@@ -401,7 +415,7 @@ public partial class ViewerApp
                         : "Minimap ready");
             }
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), $"  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click same tile to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click same tile to teleport");
 
             if (_minimapPanOffset != Vector2.Zero)
             {

@@ -527,7 +527,7 @@ public class WorldScene : ISceneRenderer
     private bool _showSelectedObjectBounds = true;
     private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
-    private float _objectStreamingRangeMultiplier = 2.0f;
+    private float _objectStreamingRangeMultiplier = 1.0f;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -568,11 +568,11 @@ public class WorldScene : ISceneRenderer
         MaxDeferredLoadBudgetMs: 6.0);
 
     private static readonly TerrainAssetLoadPolicy StreamingTerrainAssetLoadPolicy = new(
-        PrewarmTileAssets: true,
-        MaxNewMdxLoadsPerFrame: 24,
-        MaxNewWmoLoadsPerFrame: 12,
-        MaxDeferredLoadsPerFrame: 8,
-        MaxDeferredLoadBudgetMs: 10.0);
+        PrewarmTileAssets: false,
+        MaxNewMdxLoadsPerFrame: 8,
+        MaxNewWmoLoadsPerFrame: 4,
+        MaxDeferredLoadsPerFrame: 3,
+        MaxDeferredLoadBudgetMs: 2.5);
 
     private readonly struct VisibleWmoInstance
     {
@@ -843,6 +843,7 @@ public class WorldScene : ISceneRenderer
     public bool ShowHoveredAssetTooltips { get => _showHoveredAssetTooltips; set => _showHoveredAssetTooltips = value; }
     public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
     public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
+    public int PendingAssetLoadCount => _assets.PendingAssetLoadCount;
     public float ObjectStreamingRangeMultiplier
     {
         get => _objectStreamingRangeMultiplier;
@@ -2409,6 +2410,7 @@ public class WorldScene : ISceneRenderer
     private bool _useLitFogOverride;
     private string _litStatus = "LIT not loaded.";
     private int _selectedLitLightIndex = -1;
+    private string? _selectedLitSourcePath;
     private LitLoader.LitLightingSample? _lastLitSample;
     public bool ShowLitLights
     {
@@ -2434,6 +2436,8 @@ public class WorldScene : ISceneRenderer
     public bool LitLoadAttempted => _litLoadAttempted;
     public string LitStatus => _litStatus;
     public int SelectedLitLightIndex { get => _selectedLitLightIndex; set => _selectedLitLightIndex = value; }
+    public string? SelectedLitSourcePath => _selectedLitSourcePath ?? _litLoader?.SourcePath;
+    public IReadOnlyList<string> AvailableLitSourcePaths => _litLoader?.AvailableSourcePaths ?? Array.Empty<string>();
     public LitLoader.LitLightingSample? LastLitSample => _lastLitSample;
 
     // Taxi selection: -1 = show all (or none if !_showTaxi)
@@ -2563,16 +2567,27 @@ public class WorldScene : ISceneRenderer
             return;
         }
 
-        _litLoader = new LitLoader(_dataSource, _terrainManager.MapName);
+        _litLoader = new LitLoader(_dataSource, _terrainManager.MapName, _selectedLitSourcePath);
         if (_litLoader.Load())
         {
             _litStatus = _litLoader.Status;
+            _selectedLitSourcePath = _litLoader.SourcePath;
             if (_selectedLitLightIndex < 0 && _litLoader.Lights.Count > 0)
                 _selectedLitLightIndex = 0;
             return;
         }
 
         _litStatus = _litLoader.Status;
+    }
+
+    public void ReloadLit(string? sourcePath = null)
+    {
+        _selectedLitSourcePath = string.IsNullOrWhiteSpace(sourcePath) ? null : sourcePath;
+        _selectedLitLightIndex = -1;
+        _litLoader = null;
+        _litLoadAttempted = false;
+        _litStatus = "LIT reload queued.";
+        LazyLoadLit();
     }
 
     private void BeginPm4OverlayLoad(bool ignoreCache = false)
@@ -6114,6 +6129,18 @@ public class WorldScene : ISceneRenderer
         int maxLoads = _assetLoadPolicy.MaxDeferredLoadsPerFrame;
         double maxBudgetMs = _assetLoadPolicy.MaxDeferredLoadBudgetMs;
 
+        double previousFrameCpuMs = LastRenderFrameStats.TotalCpuMs;
+        if (previousFrameCpuMs >= 33.0)
+        {
+            maxLoads = Math.Min(maxLoads, 1);
+            maxBudgetMs = Math.Min(maxBudgetMs, 1.0);
+        }
+        else if (previousFrameCpuMs >= 20.0)
+        {
+            maxLoads = Math.Min(maxLoads, 2);
+            maxBudgetMs = Math.Min(maxBudgetMs, 1.5);
+        }
+
         if (_assetLoadPolicy.PrewarmTileAssets)
         {
             if (pendingLoadCount >= 96)
@@ -6651,7 +6678,7 @@ public class WorldScene : ISceneRenderer
 
         int minUniqueId = Math.Min(_uniqueIdFilterMin, _uniqueIdFilterMax);
         int maxUniqueId = Math.Max(_uniqueIdFilterMin, _uniqueIdFilterMax);
-        return inst.UniqueId >= minUniqueId && inst.UniqueId <= maxUniqueId;
+        return inst.UniqueId < minUniqueId || inst.UniqueId > maxUniqueId;
     }
 
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)
@@ -6904,25 +6931,7 @@ public class WorldScene : ISceneRenderer
             if (_litLoader != null && _litLoader.HasData)
                 litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
 
-            if (_useLitFogOverride && litSample != null)
-            {
-                lighting.ApplyExternalLighting(
-                    litSample.DirectColor,
-                    litSample.AmbientColor,
-                    litSample.FogColor);
-                lighting.FogStart = litSample.FogStart;
-                lighting.FogEnd = litSample.FogEnd;
-                lighting.Update();
-
-                _skyDome.ZenithColor = litSample.SkyTopColor;
-                _skyDome.HorizonColor = litSample.SkyHorizonColor;
-                _skyDome.SkyFogColor = litSample.FogColor;
-                fogColor = lighting.FogColor;
-                fogStart = lighting.FogStart;
-                fogEnd = lighting.FogEnd;
-                _lastLitSample = litSample;
-            }
-            else if (_lightService != null && _lightService.ActiveLightId >= 0)
+            if (_lightService != null && _lightService.ActiveLightId >= 0)
             {
                 lighting.ApplyExternalLighting(
                     _lightService.DirectColor,
@@ -6936,7 +6945,6 @@ public class WorldScene : ISceneRenderer
                 fogColor = lighting.FogColor;
                 fogStart = lighting.FogStart;
                 fogEnd = lighting.FogEnd;
-                _lastLitSample = litSample;
             }
             else
             {
@@ -6946,8 +6954,29 @@ public class WorldScene : ISceneRenderer
                 fogColor = lighting.FogColor;
                 fogStart = lighting.FogStart;
                 fogEnd = lighting.FogEnd;
-                _lastLitSample = litSample;
             }
+
+            if (_useLitFogOverride && litSample != null)
+            {
+                Vector3 baseLightColor = lighting.LightColor;
+                Vector3 baseAmbientColor = lighting.AmbientColor;
+
+                // Keep the scene's base diffuse/ambient path and only trust LIT for the
+                // sky/fog seam until the light-color semantics are validated on real maps.
+                lighting.ApplyExternalLighting(baseLightColor, baseAmbientColor, litSample.FogColor);
+                lighting.FogStart = litSample.FogStart;
+                lighting.FogEnd = litSample.FogEnd;
+                lighting.Update();
+
+                _skyDome.ZenithColor = litSample.SkyTopColor;
+                _skyDome.HorizonColor = litSample.SkyHorizonColor;
+                _skyDome.SkyFogColor = litSample.FogColor;
+                fogColor = lighting.FogColor;
+                fogStart = lighting.FogStart;
+                fogEnd = lighting.FogEnd;
+            }
+
+            _lastLitSample = litSample;
         });
 
         _lastHoverPickFogEnd = fogEnd;
@@ -7052,32 +7081,6 @@ public class WorldScene : ISceneRenderer
         // 3a. MDX opaque pass (with frustum + distance culling + fade)
         MdxRenderedCount = 0;
         MdxCulledCount = 0;
-        // Advance animation once per unique MDX renderer before any render passes
-        if (_doodadsVisible)
-        {
-            frame.MdxAnimationMs = MeasureDurationMs(() =>
-            {
-                _updatedMdxRenderers.Clear();
-                foreach (var inst in _mdxInstances)
-                {
-                    if (_updatedMdxRenderers.Add(inst.ModelKey))
-                    {
-                        _assets.TryGetLoadedMdx(inst.ModelKey, out var r);
-                        r?.UpdateAnimation();
-                    }
-                }
-
-                foreach (var inst in _taxiActorInstances)
-                {
-                    if (_updatedMdxRenderers.Add(inst.ModelKey))
-                    {
-                        _assets.TryGetLoadedMdx(inst.ModelKey, out var r);
-                        r?.UpdateAnimation();
-                    }
-                }
-            });
-        }
-
         IModelRenderer? batchRenderer = null;
         if (_doodadsVisible)
         {
@@ -7087,6 +7090,19 @@ public class WorldScene : ISceneRenderer
                 CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, cameraForward, fogEnd, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
             });
             FlushPendingVisibleMdxLoads();
+
+            // Advance animation only for renderers that survived visibility admission.
+            // The previous path scanned every placed MDX instance every frame, which was
+            // pure idle CPU cost on large maps even when only a fraction were visible.
+            frame.MdxAnimationMs = MeasureDurationMs(() =>
+            {
+                _updatedMdxRenderers.Clear();
+                foreach (var visible in frame.VisibleMdxInstances)
+                {
+                    if (_updatedMdxRenderers.Add(visible.Instance.ModelKey))
+                        visible.Renderer.UpdateAnimation();
+                }
+            });
 
             frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
             {
@@ -7766,7 +7782,8 @@ public class WorldScene : ISceneRenderer
                 Math.Max(0, hoveredPm4Count - 1),
                 pm4BrushInfo.Pm4ObjectKey,
                 pm4BrushInfo.SceneObjectType,
-                pm4BrushInfo.SceneObjectIndex);
+                pm4BrushInfo.SceneObjectIndex,
+                pm4BrushInfo.WlBodyKey);
             return;
         }
 
@@ -7889,7 +7906,8 @@ public class WorldScene : ISceneRenderer
             Math.Max(0, hitCount - 1),
             bestCandidate.Pm4ObjectKey,
             bestCandidate.SceneObjectType,
-            bestCandidate.SceneObjectIndex);
+            bestCandidate.SceneObjectIndex,
+            bestCandidate.WlBodyKey);
         return true;
     }
 
@@ -8635,7 +8653,8 @@ public class WorldScene : ISceneRenderer
             0,
             null,
             objectType,
-            objectIndex);
+                objectIndex,
+                null);
     }
 
     private static HoveredAssetInfo BuildHoveredWlLiquidInfo(WlLiquidBody body)
@@ -8648,7 +8667,10 @@ public class WorldScene : ISceneRenderer
             $"{body.FileType} • {body.GroupLabel} • {body.BlockCount} blocks • Z {body.MinHeight:F1}..{body.MaxHeight:F1}",
             worldPosition,
             0,
-            null);
+                null,
+                ObjectType.None,
+                -1,
+                body.BodyKey);
     }
 
     private static HoveredAssetInfo BuildHoveredPm4Info(Pm4OverlayObject obj, Vector3 worldPosition, (int tileX, int tileY, uint ck24, int objectPart) objectKey)
@@ -8660,7 +8682,10 @@ public class WorldScene : ISceneRenderer
             $"type=0x{obj.Ck24Type:X2} obj={obj.Ck24ObjectId} mslk=0x{obj.LinkGroupObjectId:X8} surfaces={obj.SurfaceCount}",
             worldPosition,
             0,
-            objectKey);
+                objectKey,
+                ObjectType.None,
+                -1,
+                null);
     }
 
     private bool TryBuildHoveredPm4Info(
@@ -10236,7 +10261,8 @@ public readonly struct HoveredAssetInfo
         int additionalHitCount,
         (int tileX, int tileY, uint ck24, int objectPart)? pm4ObjectKey,
         ObjectType sceneObjectType = ObjectType.None,
-        int sceneObjectIndex = -1)
+        int sceneObjectIndex = -1,
+        string? wlBodyKey = null)
     {
         AssetKind = assetKind ?? string.Empty;
         DisplayName = displayName ?? string.Empty;
@@ -10247,6 +10273,7 @@ public readonly struct HoveredAssetInfo
         Pm4ObjectKey = pm4ObjectKey;
         SceneObjectType = sceneObjectType;
         SceneObjectIndex = sceneObjectIndex;
+        WlBodyKey = wlBodyKey ?? string.Empty;
     }
 
     public string AssetKind { get; }
@@ -10258,5 +10285,6 @@ public readonly struct HoveredAssetInfo
     public (int tileX, int tileY, uint ck24, int objectPart)? Pm4ObjectKey { get; }
     public ObjectType SceneObjectType { get; }
     public int SceneObjectIndex { get; }
+    public string WlBodyKey { get; }
     public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo && SceneObjectIndex >= 0;
 }

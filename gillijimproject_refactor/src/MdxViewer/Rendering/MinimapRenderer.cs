@@ -16,7 +16,7 @@ namespace MdxViewer.Rendering;
 /// </summary>
 public class MinimapRenderer : IDisposable
 {
-    private const int BackgroundWorkerCount = 1;
+    private const int BackgroundWorkerCount = 4;
 
     private readonly GL _gl;
     private readonly IDataSource _dataSource;
@@ -26,6 +26,7 @@ public class MinimapRenderer : IDisposable
     private readonly ConcurrentQueue<MinimapTileRequest> _pendingRequests = new();
     private readonly ConcurrentQueue<DecodedMinimapTileUpload> _readyUploads = new();
     private readonly ConcurrentDictionary<string, byte> _queuedCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string?> _resolvedTilePathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _requestSignal = new(0);
     private readonly CancellationTokenSource _disposeCts = new();
     private readonly Task[] _loaderTasks;
@@ -162,12 +163,15 @@ public class MinimapRenderer : IDisposable
         if (TryLoadCachedBitmap(cacheKey, out DecodedMinimapTile? cachedTile) && cachedTile != null)
             return cachedTile;
 
-        byte[]? data = null;
-        foreach (string candidatePath in EnumerateTileCandidates(mapName, tx, ty))
+        byte[]? data = TryReadTileData(cacheKey);
+        if (data == null || data.Length == 0)
         {
-            data = TryReadTileData(candidatePath);
-            if (data != null && data.Length > 0)
-                break;
+            foreach (string candidatePath in EnumerateTileCandidates(mapName, tx, ty, cacheKey))
+            {
+                data = TryReadTileData(candidatePath);
+                if (data != null && data.Length > 0)
+                    break;
+            }
         }
 
         if (data == null || data.Length == 0)
@@ -179,7 +183,6 @@ public class MinimapRenderer : IDisposable
             using var blp = new BlpFile(ms);
             var bmp = blp.GetBitmap(0);
             DecodedMinimapTile decoded = ConvertBitmap(bmp);
-            TrySaveCachedBitmap(cacheKey, bmp);
             bmp.Dispose();
             return decoded;
         }
@@ -192,6 +195,18 @@ public class MinimapRenderer : IDisposable
 
     private byte[]? TryReadTileData(string plainPath)
     {
+        if (_resolvedTilePathCache.TryGetValue(plainPath, out string? resolvedPath))
+        {
+            if (resolvedPath == null)
+                return null;
+
+            byte[]? cachedData = ReadVirtualFile(resolvedPath);
+            if (cachedData != null && cachedData.Length > 0)
+                return cachedData;
+
+            _resolvedTilePathCache.TryRemove(plainPath, out _);
+        }
+
         byte[]? data = null;
 
         if (_md5Index != null)
@@ -199,23 +214,44 @@ public class MinimapRenderer : IDisposable
             var normalized = _md5Index.Normalize(plainPath);
             if (_md5Index.PlainToHash.TryGetValue(normalized, out string? hashedPath))
             {
-                data = _dataSource.ReadFile(hashedPath);
-                if (data == null)
-                    data = _dataSource.ReadFile(hashedPath.Replace('/', '\\'));
+                data = ReadVirtualFile(hashedPath);
+                if (data != null && data.Length > 0)
+                {
+                    _resolvedTilePathCache[plainPath] = hashedPath;
+                    return data;
+                }
             }
         }
 
-        if (data == null)
+        data = ReadVirtualFile(plainPath);
+        if (data != null && data.Length > 0)
         {
-            data = _dataSource.ReadFile(plainPath);
-            if (data == null)
-                data = _dataSource.ReadFile(plainPath.Replace('/', '\\'));
+            _resolvedTilePathCache[plainPath] = plainPath;
+            return data;
         }
 
-        return data;
+        _resolvedTilePathCache[plainPath] = null;
+        return null;
     }
 
-    private static IEnumerable<string> EnumerateTileCandidates(string mapName, int x, int y)
+    private byte[]? ReadVirtualFile(string virtualPath)
+    {
+        byte[]? data = _dataSource.ReadFile(virtualPath);
+        if (data != null && data.Length > 0)
+            return data;
+
+        string altPath = virtualPath.Replace('/', '\\');
+        if (!string.Equals(altPath, virtualPath, StringComparison.Ordinal))
+        {
+            data = _dataSource.ReadFile(altPath);
+            if (data != null && data.Length > 0)
+                return data;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateTileCandidates(string mapName, int x, int y, string primaryCandidate)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var yieldReturnList = new List<string>();
@@ -230,6 +266,8 @@ public class MinimapRenderer : IDisposable
         string x2 = x.ToString("D2");
         string y2 = y.ToString("D2");
         string trsFormat = $"map{x}_{y2}.blp";
+
+        AddCandidate(primaryCandidate);
 
         AddCandidate($"{normalizedMapName}\\{trsFormat}");
         AddCandidate($"{normalizedMapName}/{trsFormat}");
@@ -322,8 +360,7 @@ public class MinimapRenderer : IDisposable
             _gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
                 (uint)tile.Width, (uint)tile.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
 
-        _gl.GenerateMipmap(TextureTarget.Texture2D);
-        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
         _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);

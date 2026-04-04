@@ -14,6 +14,7 @@ public class LiquidRenderer : IDisposable
 {
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
+    private readonly ShaderProgram _wireframeShader;
 
     // Per-chunk liquid meshes (from MCLQ/MH2O)
     private readonly List<LiquidMesh> _meshes = new();
@@ -25,6 +26,8 @@ public class LiquidRenderer : IDisposable
     // Global toggles
     public bool ShowLiquid { get; set; } = true;
     public bool ShowWlLiquids { get; set; } = true;
+    public bool ShowSelectedWlWireframeOverlay { get; set; } = true;
+    public string? SelectedWlBodyKey { get; set; }
 
     // Animation time
     private float _time;
@@ -67,6 +70,7 @@ public class LiquidRenderer : IDisposable
     {
         _gl = gl;
         _shader = CreateLiquidShader();
+        _wireframeShader = CreateWireframeShader();
     }
 
     /// <summary>
@@ -163,12 +167,56 @@ public class LiquidRenderer : IDisposable
                 _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount,
                     mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort, null);
             }
+
+            if (ShowSelectedWlWireframeOverlay && !string.IsNullOrWhiteSpace(SelectedWlBodyKey))
+                RenderSelectedWlWireframe(view, proj);
         }
 
         _gl.BindVertexArray(0);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+        _gl.LineWidth(1.0f);
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private unsafe void RenderSelectedWlWireframe(Matrix4x4 view, Matrix4x4 proj)
+    {
+        _wireframeShader.Use();
+        _wireframeShader.SetMat4("uView", view);
+        _wireframeShader.SetMat4("uProj", proj);
+        _wireframeShader.SetMat4("uModel", Matrix4x4.Identity);
+
+        _gl.DepthMask(false);
+        _gl.Disable(EnableCap.CullFace);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.LineWidth(1.8f);
+        _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+
+        foreach (var mesh in _wlMeshes)
+        {
+            if (!string.Equals(mesh.WlBodyKey, SelectedWlBodyKey, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
+                continue;
+
+            Vector4 color = mesh.Type switch
+            {
+                LiquidType.Ocean => new Vector4(0.74f, 0.90f, 1.00f, 0.98f),
+                LiquidType.Magma => new Vector4(1.00f, 0.78f, 0.32f, 0.98f),
+                LiquidType.Slime => new Vector4(0.78f, 1.00f, 0.42f, 0.98f),
+                _ => new Vector4(0.96f, 0.92f, 0.30f, 0.98f)
+            };
+
+            _wireframeShader.SetVec4("uColor", color);
+            _gl.BindVertexArray(mesh.Vao);
+            _gl.DrawElements(
+                PrimitiveType.Triangles,
+                mesh.IndexCount,
+                mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort,
+                null);
+        }
     }
 
     private static (float r, float g, float b, float a) GetLiquidColor(LiquidType type)
@@ -368,6 +416,34 @@ void main() {
         return ShaderProgram.Create(_gl, vertSrc, fragSrc);
     }
 
+    private ShaderProgram CreateWireframeShader()
+    {
+        string vertSrc = @"
+#version 330 core
+layout(location = 0) in vec3 aPos;
+
+uniform mat4 uModel;
+uniform mat4 uView;
+uniform mat4 uProj;
+
+void main() {
+    gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+}
+";
+
+        string fragSrc = @"
+#version 330 core
+uniform vec4 uColor;
+out vec4 FragColor;
+
+void main() {
+    FragColor = uColor;
+}
+";
+
+        return ShaderProgram.Create(_gl, vertSrc, fragSrc);
+    }
+
     /// <summary>
     /// Upload WL liquid bodies as GPU meshes for rendering.
     /// Call once after WlLiquidLoader.LoadAll() completes.
@@ -439,6 +515,7 @@ void main() {
         foreach (var mesh in _wlMeshes)
             mesh.Dispose(_gl);
         _wlMeshes.Clear();
+        SelectedWlBodyKey = null;
         _hiddenWlBodies.Clear();
     }
 
@@ -451,6 +528,7 @@ void main() {
             mesh.Dispose(_gl);
         _wlMeshes.Clear();
         _shader.Dispose();
+        _wireframeShader.Dispose();
     }
 }
 

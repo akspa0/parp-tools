@@ -67,6 +67,9 @@ public class TerrainManager : ISceneRenderer
     public IEnumerable<(int tileX, int tileY)> LoadedTiles => _loadedTiles.Keys;
     /// <summary>True while background tile loads or pending GPU uploads remain.</summary>
     public bool IsStreaming => !_loadingTiles.IsEmpty || !_pendingTiles.IsEmpty;
+    public int BackgroundTileLoadCount => _loadingTiles.Count;
+    public int PendingGpuTileUploadCount => _pendingTiles.Count;
+    public int PendingTerrainLoadCount => _loadingTiles.Count + _pendingTiles.Count;
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;

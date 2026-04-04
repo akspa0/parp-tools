@@ -55,7 +55,8 @@ public partial class ViewerApp
             ? $"WMO scene-pass extraction is still the larger measured object-side cost ({wmoObjectCostMs:0.00} ms)."
             : $"MDX visibility/submission is currently larger ({mdxObjectCostMs:0.00} ms).";
         ImGui.TextDisabled(hotspot);
-        ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 2.00x.");
+        ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 1.00x.");
+        ImGui.TextDisabled("MDX 'batched' counts in the stats are shared-shader submissions, not true GPU instancing.");
     }
 
     private void DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip)
@@ -176,6 +177,21 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Files: {loader.SourceFileCount}  Bodies: {loader.Bodies.Count}  Blocks: {loader.TotalBlockCount}");
         ImGui.TextDisabled($"Visible: {visibleCount}/{loader.Bodies.Count}  Mode: {GetWlLiquidGroupingModeLabel(ts.GroupingMode)}");
 
+        if (liquidRenderer != null)
+        {
+            bool showSelectedWiremesh = liquidRenderer.ShowSelectedWlWireframeOverlay;
+            if (ImGui.Checkbox("Show Selected WL Wiremesh Overlay", ref showSelectedWiremesh))
+                liquidRenderer.ShowSelectedWlWireframeOverlay = showSelectedWiremesh;
+        }
+
+        if (IsWlListIsolationActive)
+        {
+            ImGui.TextDisabled("List is isolated to the selected WL body from the last scene pick.");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Clear WL List Isolation"))
+                _wlLayerListIsolationEnabled = false;
+        }
+
         WlLiquidLoader.WlBodyGroupingMode groupingMode = ts.GroupingMode;
         if (ImGui.BeginCombo("WL Grouping", GetWlLiquidGroupingModeLabel(groupingMode)))
         {
@@ -260,6 +276,9 @@ public partial class ViewerApp
             for (int i = 0; i < loader.Bodies.Count; i++)
             {
                 WlLiquidBody body = loader.Bodies[i];
+                if (!ShouldIncludeWlBodyInUiList(body))
+                    continue;
+
                 ImGui.TableNextRow();
 
                 ImGui.TableSetColumnIndex(0);
@@ -286,7 +305,13 @@ public partial class ViewerApp
                 ImGui.TableSetColumnIndex(5);
                 bool isSelected = string.Equals(_wlLayerSelectedBodyKey, body.BodyKey, StringComparison.OrdinalIgnoreCase);
                 if (ImGui.Selectable($"{body.Name}##wl_invest_body_{i}", isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                    _wlLayerSelectedBodyKey = body.BodyKey;
+                    SetSelectedWlLiquidBody(body, isolateInList: false, focusInspectWorkspace: false);
+
+                if (isSelected && _wlPendingScrollToSelectedBody)
+                {
+                    ImGui.SetScrollHereY(0.20f);
+                    _wlPendingScrollToSelectedBody = false;
+                }
 
                 if (ImGui.IsItemHovered())
                 {
@@ -318,12 +343,12 @@ public partial class ViewerApp
 
         ImGui.SameLine();
         bool useLitFogOverride = _worldScene.UseLitFogOverride;
-        if (ImGui.Checkbox("Use LIT Fog Override", ref useLitFogOverride))
+        if (ImGui.Checkbox("Use LIT Sky/Fog Override", ref useLitFogOverride))
             _worldScene.UseLitFogOverride = useLitFogOverride;
 
         if (!_worldScene.LitLoadAttempted)
         {
-            ImGui.TextDisabled("World\\<map>\\lights.lit is lazy-loaded for the current map.");
+            ImGui.TextDisabled("World\\<map>\\lights.lit, areatest.lit, and light.lit are lazy-loaded when present for the current map.");
             if (ImGui.Button("Load LIT Lighting"))
                 _worldScene.ShowLitLights = true;
             return;
@@ -334,6 +359,31 @@ public partial class ViewerApp
         {
             ImGui.TextDisabled(_worldScene.LitStatus);
             return;
+        }
+
+        IReadOnlyList<string> sourcePaths = _worldScene.AvailableLitSourcePaths;
+        string currentSourcePath = _worldScene.SelectedLitSourcePath ?? loader.SourcePath ?? string.Empty;
+        if (sourcePaths.Count > 1)
+        {
+            if (ImGui.BeginCombo("LIT Source", currentSourcePath))
+            {
+                for (int i = 0; i < sourcePaths.Count; i++)
+                {
+                    string sourcePath = sourcePaths[i];
+                    bool isSelectedSource = string.Equals(currentSourcePath, sourcePath, StringComparison.OrdinalIgnoreCase);
+                    if (ImGui.Selectable(sourcePath, isSelectedSource))
+                    {
+                        _worldScene.ReloadLit(sourcePath);
+                        ImGui.EndCombo();
+                        return;
+                    }
+
+                    if (isSelectedSource)
+                        ImGui.SetItemDefaultFocus();
+                }
+
+                ImGui.EndCombo();
+            }
         }
 
         ImGui.TextDisabled($"Path: {loader.SourcePath}");
@@ -615,7 +665,7 @@ public partial class ViewerApp
 
         if (_worldScene.HoveredAssetInfo is HoveredAssetInfo hoveredInfo
             && string.Equals(hoveredInfo.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
-            && TryFindWlLiquidBody(hoveredInfo.SourcePath, hoveredInfo.DisplayName, out body))
+            && TryResolveHoveredWlLiquidBody(hoveredInfo, out body))
         {
             usingHoveredBody = true;
             return true;
@@ -662,6 +712,85 @@ public partial class ViewerApp
         }
 
         return false;
+    }
+
+    private bool TryResolveHoveredWlLiquidBody(HoveredAssetInfo hoveredInfo, out WlLiquidBody? body)
+    {
+        body = null;
+        if (!string.Equals(hoveredInfo.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(hoveredInfo.WlBodyKey)
+            && TryFindWlLiquidBodyByKey(hoveredInfo.WlBodyKey, out body))
+        {
+            return true;
+        }
+
+        return TryFindWlLiquidBody(hoveredInfo.SourcePath, hoveredInfo.DisplayName, out body);
+    }
+
+    private int FindWlLiquidBodyIndex(string bodyKey)
+    {
+        if (_worldScene?.WlLoader == null || string.IsNullOrWhiteSpace(bodyKey))
+            return -1;
+
+        for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
+        {
+            if (string.Equals(_worldScene.WlLoader.Bodies[i].BodyKey, bodyKey, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private bool IsWlListIsolationActive
+        => _wlLayerListIsolationEnabled && !string.IsNullOrWhiteSpace(_wlLayerSelectedBodyKey);
+
+    private bool ShouldIncludeWlBodyInUiList(WlLiquidBody body)
+    {
+        if (!IsWlListIsolationActive)
+            return true;
+
+        return string.Equals(body.BodyKey, _wlLayerSelectedBodyKey, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void SetSelectedWlLiquidBody(WlLiquidBody body, bool isolateInList, bool focusInspectWorkspace, string? statusMessage = null)
+    {
+        _wlLayerSelectedBodyKey = body.BodyKey;
+        if (isolateInList)
+            _wlLayerListIsolationEnabled = true;
+
+        _wlPendingScrollToSelectedBody = true;
+        _selectedObjectType = "WL liquid";
+        _selectedObjectIndex = FindWlLiquidBodyIndex(body.BodyKey);
+        _selectedObjectInfo = BuildWlLiquidSummary(body);
+
+        if (_terrainManager?.LiquidRenderer != null)
+            _terrainManager.LiquidRenderer.SelectedWlBodyKey = body.BodyKey;
+
+        if (focusInspectWorkspace)
+            SetEditorWorkspaceTask(EditorWorkspaceTask.Inspect);
+
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+            _statusMessage = statusMessage;
+    }
+
+    private void ClearSelectedWlLiquidBody(bool clearListIsolation)
+    {
+        _wlLayerSelectedBodyKey = string.Empty;
+        _wlPendingScrollToSelectedBody = false;
+        if (clearListIsolation)
+            _wlLayerListIsolationEnabled = false;
+
+        if (_terrainManager?.LiquidRenderer != null)
+            _terrainManager.LiquidRenderer.SelectedWlBodyKey = null;
+
+        if (string.Equals(_selectedObjectType, "WL liquid", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedObjectIndex = -1;
+            _selectedObjectType = string.Empty;
+            _selectedObjectInfo = string.Empty;
+        }
     }
 
     private static string GetWlLiquidGroupingModeLabel(WlLiquidLoader.WlBodyGroupingMode mode)

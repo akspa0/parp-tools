@@ -396,6 +396,8 @@ public partial class ViewerApp : IDisposable
     private (int tileX, int tileY)? _sqlLastCameraTile;
     private bool _sqlForceStreamRefresh;
     private string _wlLayerSelectedBodyKey = "";
+    private bool _wlLayerListIsolationEnabled;
+    private bool _wlPendingScrollToSelectedBody;
     private Vector3 _pm4SavedOverlayTranslation = Vector3.Zero;
     private Vector3 _pm4SavedOverlayRotationDegrees = Vector3.Zero;
     private Vector3 _pm4SavedOverlayScale = Vector3.One;
@@ -847,13 +849,7 @@ public partial class ViewerApp : IDisposable
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
         if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
-        {
-            _fullscreenMinimap = !_fullscreenMinimap;
-            if (_fullscreenMinimap)
-                PrepareFullscreenMinimapState();
-            else
-                _minimapDragging = false;
-        }
+            ToggleFullscreenMinimap();
         _mKeyWasPressed = mPressed;
 
         // Arrow keys and spacebar for MDX animation control
@@ -5259,6 +5255,12 @@ void main() {
                     ImGui.EndDisabled();
 
                 ImGui.TextDisabled($"Visible: {visibleCount}/{_worldScene.WlLoader.Bodies.Count}");
+                if (IsWlListIsolationActive)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton("Clear List Isolation"))
+                        _wlLayerListIsolationEnabled = false;
+                }
 
                 if (ImGui.BeginTable("##wl_layers", 4, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
                 {
@@ -5271,6 +5273,9 @@ void main() {
                     for (int i = 0; i < _worldScene.WlLoader.Bodies.Count; i++)
                     {
                         var body = _worldScene.WlLoader.Bodies[i];
+                        if (!ShouldIncludeWlBodyInUiList(body))
+                            continue;
+
                         ImGui.TableNextRow();
 
                         ImGui.TableSetColumnIndex(0);
@@ -5288,7 +5293,7 @@ void main() {
                         bool isSelected = string.Equals(_wlLayerSelectedBodyKey, body.BodyKey, StringComparison.OrdinalIgnoreCase);
                         string label = $"{body.Name}##wl_layer_{i}";
                         if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                            _wlLayerSelectedBodyKey = body.BodyKey;
+                            SetSelectedWlLiquidBody(body, isolateInList: false, focusInspectWorkspace: false);
                         if (ImGui.IsItemHovered())
                         {
                             ImGui.BeginTooltip();
@@ -5370,7 +5375,7 @@ void main() {
                 ImGui.SetTooltip("Alpha-era lights.lit placement overlay. Pins show light origins; boxes show approximate influence radius.");
 
             bool useLitFogOverride = _worldScene.UseLitFogOverride;
-            if (ImGui.Checkbox("Use LIT Fog Override", ref useLitFogOverride))
+            if (ImGui.Checkbox("Use LIT Sky/Fog Override", ref useLitFogOverride))
                 _worldScene.UseLitFogOverride = useLitFogOverride;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Experimental: sample LIT clear-weather colors and fog distances instead of the current DBC lighting path.");
@@ -5385,7 +5390,7 @@ void main() {
             if (ImGui.Button("Load LIT Lights"))
                 _worldScene.ShowLitLights = true;
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Load Alpha-era World\\<map>\\lights.lit data for overlay and inspection.");
+                ImGui.SetTooltip("Load Alpha-era World\\<map>\\*.lit data for overlay and inspection, including lights.lit and alternate variants when present.");
         }
         else
         {
@@ -5430,7 +5435,7 @@ void main() {
 
         bool uniqueIdFilterChanged = false;
         bool uniqueIdFilterEnabled = _worldScene.UniqueIdFilterEnabled;
-        if (ImGui.Checkbox("Hide UniqueId Layers", ref uniqueIdFilterEnabled))
+        if (ImGui.Checkbox("Filter UniqueId Range", ref uniqueIdFilterEnabled))
         {
             _worldScene.UniqueIdFilterEnabled = uniqueIdFilterEnabled;
             uniqueIdFilterChanged = true;
@@ -5454,42 +5459,42 @@ void main() {
             int configuredMin = _worldScene.UniqueIdFilterMin;
             int configuredMax = _worldScene.UniqueIdFilterMax;
             bool hasConfiguredRange = configuredMin >= minUniqueId && configuredMax >= minUniqueId;
-            int hideMin = hasConfiguredRange
+            int visibleMin = hasConfiguredRange
                 ? Math.Clamp(Math.Min(configuredMin, configuredMax), minUniqueId, maxUniqueId)
                 : minUniqueId;
-            int hideMax = hasConfiguredRange
+            int visibleMax = hasConfiguredRange
                 ? Math.Clamp(Math.Max(configuredMin, configuredMax), minUniqueId, maxUniqueId)
                 : maxUniqueId;
 
-            if (ImGui.SliderInt("Hide Range Min", ref hideMin, minUniqueId, maxUniqueId))
+            if (ImGui.SliderInt("Visible Range Start", ref visibleMin, minUniqueId, maxUniqueId))
             {
                 if (!hasConfiguredRange)
                 {
-                    hideMax = hideMin;
+                    visibleMax = visibleMin;
                 }
-                else if (hideMin > hideMax)
+                else if (visibleMin > visibleMax)
                 {
-                    hideMax = hideMin;
+                    visibleMax = visibleMin;
                 }
 
-                _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
                 uniqueIdFilterChanged = true;
                 hasConfiguredRange = true;
             }
 
-            if (ImGui.SliderInt("Hide Range Max", ref hideMax, minUniqueId, maxUniqueId))
+            if (ImGui.SliderInt("Visible Range End", ref visibleMax, minUniqueId, maxUniqueId))
             {
                 if (!hasConfiguredRange)
                 {
-                    hideMin = hideMax;
+                    visibleMin = visibleMax;
                 }
-                else if (hideMax < hideMin)
+                else if (visibleMax < visibleMin)
                 {
-                    hideMin = hideMax;
+                    visibleMin = visibleMax;
                 }
 
-                _worldScene.SetUniqueIdFilterRange(hideMin, hideMax);
+                _worldScene.SetUniqueIdFilterRange(visibleMin, visibleMax);
                 _worldScene.UniqueIdFilterEnabled = true;
                 uniqueIdFilterChanged = true;
                 hasConfiguredRange = true;
@@ -5497,15 +5502,15 @@ void main() {
 
             if (!hasConfiguredRange)
             {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  No hide range selected.");
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  No visible range selected.");
             }
             else if (!_worldScene.UniqueIdFilterEnabled)
             {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected hide range: {hideMin}..{hideMax}");
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Selected visible range: {visibleMin}..{visibleMax}");
             }
             else
             {
-                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Hidden range: {hideMin}..{hideMax}");
+                ImGui.TextDisabled($"Scoped placements: {instanceCount}  Range: {minUniqueId}..{maxUniqueId}  Visible range: {visibleMin}..{visibleMax}");
             }
 
             IReadOnlyList<UniqueIdArchaeologyLayer> detectedLayers = _worldScene.GetUniqueIdArchaeologyLayers();
@@ -5543,7 +5548,7 @@ void main() {
                         ImGui.TextUnformatted($"{layer.PlacementCount} placements | WMO {layer.WmoCount} / M2 {layer.MdxCount}");
 
                         ImGui.TableSetColumnIndex(3);
-                        if (ImGui.SmallButton($"Hide##UniqueIdLayer{layer.LayerNumber}"))
+                        if (ImGui.SmallButton($"Show##UniqueIdLayer{layer.LayerNumber}"))
                         {
                             _worldScene.SetUniqueIdFilterRange(layer.MinUniqueId, layer.MaxUniqueId);
                             _worldScene.UniqueIdFilterEnabled = true;
@@ -9749,26 +9754,45 @@ void main() {
             return;
         }
 
+        var hoveredSceneInfo = _worldScene.HoveredAssetInfo;
+        if (hoveredSceneInfo.HasValue
+            && string.Equals(hoveredSceneInfo.Value.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
+            && TryResolveHoveredWlLiquidBody(hoveredSceneInfo.Value, out WlLiquidBody? hoveredWlBody)
+            && hoveredWlBody != null)
+        {
+            _worldScene.ClearSelection();
+            _worldScene.ClearTaxiSelection();
+            _worldScene.ClearPm4ObjectSelection();
+            SetSelectedWlLiquidBody(
+                hoveredWlBody,
+                isolateInList: true,
+                focusInspectWorkspace: true,
+                statusMessage: $"WL inspect: selected '{hoveredWlBody.Name}' and isolated it in the inspect list.");
+            return;
+        }
+
         if (hoveredPm4Key.HasValue && _worldScene.SelectPm4Object(hoveredPm4Key.Value))
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
             UpdateSelectedPm4ObjectInfo(hoveredPm4Key);
             return;
         }
 
-        var hoveredSceneInfo = _worldScene.HoveredAssetInfo;
         bool selectedHoveredScene = hoveredSceneInfo.HasValue
             && hoveredSceneInfo.Value.HasSceneObject
             && _worldScene.SelectSceneObject(hoveredSceneInfo.Value.SceneObjectType, hoveredSceneInfo.Value.SceneObjectIndex);
 
         if (selectedHoveredScene)
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearPm4ObjectSelection();
         }
         else if (hasPm4Hit && pm4HitKey.HasValue && (!hasSceneHit || pm4HitDistance <= sceneHitDistance) && _worldScene.SelectPm4Object(pm4HitKey.Value))
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
             UpdateSelectedPm4ObjectInfo(pm4HitKey);
@@ -9777,12 +9801,14 @@ void main() {
 
         if (TryPickTaxiNodeAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiNodeId))
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             SelectTaxiNode(taxiNodeId, toggle: true);
             return;
         }
 
         if (TryPickTaxiRouteAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiRouteId))
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             SelectTaxiRoute(taxiRouteId, toggle: false);
             return;
         }
@@ -9801,6 +9827,7 @@ void main() {
         var sel = _worldScene.SelectedInstance;
         if (sel.HasValue)
         {
+            ClearSelectedWlLiquidBody(clearListIsolation: true);
             _worldScene.ClearPm4ObjectSelection();
             var inst = sel.Value;
             string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
@@ -9823,6 +9850,7 @@ void main() {
             return;
         }
 
+        ClearSelectedWlLiquidBody(clearListIsolation: true);
         _worldScene.ClearSelection();
         _worldScene.ClearTaxiSelection();
         _worldScene.ClearPm4ObjectSelection();
