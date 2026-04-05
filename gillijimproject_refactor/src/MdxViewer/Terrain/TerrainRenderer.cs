@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
@@ -25,6 +26,7 @@ public class TerrainRenderer : IDisposable
     private readonly int _uAlphaDebugChannelLoc;
     private readonly int _uTileAlphaDebugChannelLoc;
     private readonly int _uTileDiffuseLayerCountLoc;
+    private readonly int _uTileOpacityLoc;
     private readonly int[] _uHasTexLoc = new int[4];
     private readonly int[] _uHasAlphaLoc = new int[4];
     private readonly int[] _uImplicitAlphaLoc = new int[4];
@@ -44,6 +46,11 @@ public class TerrainRenderer : IDisposable
     private int _loadedTileChunkCount;
 
     private readonly Dictionary<(int, int), List<string>> _tileTextures = new();
+    private readonly Dictionary<(int, int), float> _tileAlphas = new();
+    private readonly Dictionary<(int, int), float> _tileTargetAlphas = new();
+    private long _lastTileFadeTimestamp;
+
+    private const float TileFadeInDurationSeconds = 0.28f;
 
     private bool _wireframe;
 
@@ -303,6 +310,7 @@ public class TerrainRenderer : IDisposable
         _tileShader = CreateTileTerrainShader();
 
         _uTileDiffuseLayerCountLoc = _tileShader.GetUniformLocation("uDiffuseLayerCount");
+        _uTileOpacityLoc = _tileShader.GetUniformLocation("uOpacity");
         _uUseWorldUvLoc = _shader.GetUniformLocation("uUseWorldUV");
         _uTileUseWorldUvLoc = _tileShader.GetUniformLocation("uUseWorldUV");
         _uUseMccvLoc = _shader.GetUniformLocation("uUseMccv");
@@ -319,6 +327,7 @@ public class TerrainRenderer : IDisposable
             _uHasAlphaLoc[i] = _shader.GetUniformLocation($"uHasAlpha{i}");
 
         InitializeSamplerUniforms();
+        _lastTileFadeTimestamp = Stopwatch.GetTimestamp();
     }
 
     public void AddChunks(List<TerrainChunkMesh> chunks, IDictionary<(int, int), List<string>> tileTextures)
@@ -343,7 +352,7 @@ public class TerrainRenderer : IDisposable
         ViewerLog.Trace($"[TerrainRenderer] Now rendering {_chunks.Count} chunks, {_textureCache.Count} textures cached");
     }
 
-    public void AddTile(TerrainTileMesh tileMesh, List<string> tileTextureNames, List<global::MdxViewer.Terrain.TerrainChunkInfo> chunkInfos)
+    public void AddTile(TerrainTileMesh tileMesh, List<string> tileTextureNames, List<global::MdxViewer.Terrain.TerrainChunkInfo> chunkInfos, bool fadeIn = true)
     {
         var key = (tileMesh.TileX, tileMesh.TileY);
         if (_tileMap.ContainsKey(key))
@@ -354,6 +363,8 @@ public class TerrainRenderer : IDisposable
 
         _tiles.Add(tileMesh);
         _tileMap[key] = tileMesh;
+        _tileAlphas[key] = fadeIn ? 0.0f : 1.0f;
+        _tileTargetAlphas[key] = 1.0f;
         _chunkInfosByTile[key] = chunkInfos;
         foreach (var chunkInfo in chunkInfos)
             _chunkInfoByKey[(chunkInfo.TileX, chunkInfo.TileY, chunkInfo.ChunkX, chunkInfo.ChunkY)] = chunkInfo;
@@ -371,6 +382,9 @@ public class TerrainRenderer : IDisposable
             _tiles.Remove(mesh);
             _tileMap.Remove(key);
         }
+
+        _tileAlphas.Remove(key);
+        _tileTargetAlphas.Remove(key);
 
         if (_chunkInfosByTile.TryGetValue(key, out var infos))
         {
@@ -644,6 +658,8 @@ public class TerrainRenderer : IDisposable
 
     private unsafe void RenderTiles(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos, FrustumCuller? frustum)
     {
+        UpdateTileFades();
+
         _tileShader.Use();
         _tileShader.SetMat4("uView", view);
         _tileShader.SetMat4("uProj", proj);
@@ -686,6 +702,9 @@ public class TerrainRenderer : IDisposable
 
         foreach (var tile in _tiles)
         {
+            var tileKey = (tile.TileX, tile.TileY);
+            float tileOpacity = _tileAlphas.TryGetValue(tileKey, out float storedAlpha) ? storedAlpha : 1.0f;
+
             var center = (tile.BoundsMin + tile.BoundsMax) * 0.5f;
             float distanceSq = Vector3.DistanceSquared(cameraPos, center);
             if (distanceSq > cullDistanceSq)
@@ -706,6 +725,12 @@ public class TerrainRenderer : IDisposable
                 _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 _gl.DepthMask(false);
             }
+            else if (tileOpacity < 0.999f)
+            {
+                _gl.Enable(EnableCap.Blend);
+                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                _gl.DepthMask(true);
+            }
             else
             {
                 _gl.Disable(EnableCap.Blend);
@@ -718,6 +743,7 @@ public class TerrainRenderer : IDisposable
             BindTextureArray(1, tile.AlphaShadowArrayTexture);
             _gl.Uniform1(_uTileDiffuseLayerCountLoc, tile.DiffuseLayerCount);
             LastFrameUniform1Calls++;
+            _tileShader.SetFloat("uOpacity", tileOpacity);
 
             _gl.BindVertexArray(tile.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, tile.IndexCount, DrawElementsType.UnsignedShort, null);
@@ -731,6 +757,31 @@ public class TerrainRenderer : IDisposable
         _gl.DepthMask(true);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private void UpdateTileFades()
+    {
+        long now = Stopwatch.GetTimestamp();
+        float deltaSeconds = (float)(now - _lastTileFadeTimestamp) / Stopwatch.Frequency;
+        _lastTileFadeTimestamp = now;
+        if (deltaSeconds <= 0f)
+            return;
+
+        float blend = Math.Clamp(deltaSeconds / TileFadeInDurationSeconds, 0f, 1f);
+        blend = blend * blend * (3f - 2f * blend);
+
+        foreach (var tileKey in _tileMap.Keys)
+        {
+            float currentAlpha = _tileAlphas.TryGetValue(tileKey, out float storedAlpha) ? storedAlpha : 1.0f;
+            float targetAlpha = _tileTargetAlphas.TryGetValue(tileKey, out float storedTarget) ? storedTarget : 1.0f;
+            if (MathF.Abs(currentAlpha - targetAlpha) <= 0.001f)
+            {
+                _tileAlphas[tileKey] = targetAlpha;
+                continue;
+            }
+
+            _tileAlphas[tileKey] = currentAlpha + (targetAlpha - currentAlpha) * blend;
+        }
     }
 
     private void Uniform1Counted(int location, int value)
@@ -1382,6 +1433,7 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform float uOpacity;
 
 out vec4 FragColor;
 
@@ -1501,7 +1553,7 @@ void main() {
         outAlpha = 1.0 - inv;
     }
 
-    FragColor = vec4(finalColor, outAlpha);
+    FragColor = vec4(finalColor, outAlpha * uOpacity);
 }
 ";
 

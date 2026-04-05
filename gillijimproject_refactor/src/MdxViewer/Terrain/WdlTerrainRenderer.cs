@@ -21,12 +21,15 @@ public class WdlTerrainRenderer : IDisposable
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
 
-    private const float TileFadeDurationSeconds = 0.22f;
+    private const float TileFadeOutDurationSeconds = 0.18f;
+    private const float TileFadeInDurationSeconds = 0.32f;
+    private const float TileShowDelaySeconds = 0.12f;
 
     // Per-tile GPU mesh data
     private readonly Dictionary<int, WdlTileMesh> _tileMeshes = new(); // tileIndex → mesh
     private readonly Dictionary<int, float> _tileAlphas = new();
     private readonly Dictionary<int, float> _tileTargetAlphas = new();
+    private readonly Dictionary<int, long> _tileShowReadyTimestamps = new();
     private long _lastFadeTimestamp;
 
     // Stats
@@ -168,6 +171,10 @@ public class WdlTerrainRenderer : IDisposable
             _tileAlphas[tileIndex] = targetAlpha;
 
         _tileTargetAlphas[tileIndex] = targetAlpha;
+        if (targetAlpha >= 0.999f)
+            _tileShowReadyTimestamps[tileIndex] = Stopwatch.GetTimestamp() + (long)(TileShowDelaySeconds * Stopwatch.Frequency);
+        else
+            _tileShowReadyTimestamps.Remove(tileIndex);
     }
 
     private void UpdateTileFades(float deltaSeconds)
@@ -175,11 +182,18 @@ public class WdlTerrainRenderer : IDisposable
         if (deltaSeconds <= 0f)
             return;
 
-        float fadeStep = deltaSeconds / TileFadeDurationSeconds;
+        long now = _lastFadeTimestamp;
         foreach (int tileIndex in _tileMeshes.Keys)
         {
             float currentAlpha = _tileAlphas.TryGetValue(tileIndex, out float storedAlpha) ? storedAlpha : 1.0f;
             float targetAlpha = _tileTargetAlphas.TryGetValue(tileIndex, out float storedTarget) ? storedTarget : 1.0f;
+
+            if (targetAlpha > currentAlpha
+                && _tileShowReadyTimestamps.TryGetValue(tileIndex, out long showReadyTimestamp)
+                && now < showReadyTimestamp)
+            {
+                continue;
+            }
 
             if (MathF.Abs(currentAlpha - targetAlpha) <= 0.001f)
             {
@@ -187,7 +201,9 @@ public class WdlTerrainRenderer : IDisposable
                 continue;
             }
 
-            float blend = Math.Clamp(fadeStep, 0f, 1f);
+            float duration = targetAlpha > currentAlpha ? TileFadeInDurationSeconds : TileFadeOutDurationSeconds;
+            float blend = Math.Clamp(deltaSeconds / duration, 0f, 1f);
+            blend = blend * blend * (3f - 2f * blend);
             _tileAlphas[tileIndex] = currentAlpha + (targetAlpha - currentAlpha) * blend;
         }
     }
@@ -425,6 +441,7 @@ void main() {
         _tileMeshes.Clear();
         _tileAlphas.Clear();
         _tileTargetAlphas.Clear();
+        _tileShowReadyTimestamps.Clear();
         _shader.Dispose();
     }
 

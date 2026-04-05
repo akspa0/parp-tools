@@ -1,11 +1,23 @@
 # Progress
 
+### Apr 05, 2026 - Recorded the next viewer-shell direction: panel-based docks and drawers, no more UI-profile sprawl
+
+- followed the user's explicit correction that the current UI is too confusing because too many controls are duplicated across sidebars, investigation surfaces, and other one-off windows
+- recorded the next shell direction in continuity instead of treating it like another optional preset pass:
+	- the active viewer should move toward individual dockable panels that can live in left, right, top, or bottom drawers/dock lanes
+	- multiple panels should be able to stack in each dock area
+	- panels should be pop-out capable when needed, but the default layout should stay understandable without profile switching
+	- UI profiles/presets for shell organization are now treated as low-priority or non-useful compared with simply giving each workflow one canonical panel home
+	- future shell work should focus on removing duplicated controls from `ViewerApp_Sidebars.cs`, `ViewerApp_Investigation.cs`, and related utility surfaces rather than adding more alternate UI modes
+- proof boundary:
+	- this is continuity-only and planning-only; no viewer-shell implementation changed in this step
+
 ### Apr 05, 2026 - Switched the active viewer back toward near-field ADT residency with WDL fallback and tighter object streaming
 
 - followed the user's explicit requirement that only about `3-4` detailed ADTs should stay loaded while WDL covers distance terrain, because the prior retest was still around `18 FPS` with too many visible objects and too much terrain detail resident
 - landed the streaming-policy follow-up:
 	- `Camera.cs` now exposes a reusable forward vector and `ViewerApp.cs` passes it into `TerrainManager.UpdateAOI(...)`
-	- `TerrainManager.cs` now uses a much smaller near-field AOI plus forward-biased tile lookahead instead of the old broad square radius
+	- `TerrainManager.cs` now uses a much smaller near-field AOI instead of the old broad square radius, and the latest tuning pass raises the fully detailed working set to 8 tiles by preferring the three most useful diagonals around the camera tile
 	- `WorldScene.cs` no longer globally hides WDL for ADT-backed tiles at startup and now restores WDL visibility when an ADT tile unloads
 	- object streaming now defaults to `0.50x` and can be lowered to `0.25x` in both the active viewer and the shared `wow-viewer` visibility collector
 	- `ViewerApp_Investigation.cs` now exposes the lower object-stream floor in the live UI

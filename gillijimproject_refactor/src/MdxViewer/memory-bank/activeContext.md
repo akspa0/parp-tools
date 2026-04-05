@@ -1,11 +1,25 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 05, 2026 - Viewer UI direction is now explicit: one panel model, docked drawers, and no more shell-profile duplication
+
+- latest user direction for the active `src/MdxViewer` shell is not another profile/preset layer; it is a cleanup pass that makes the UI legible by turning duplicated surfaces into explicit panels
+- active shell target to preserve for the next implementation pass:
+   - break the current sidebar-heavy surfaces into individual panels with clear ownership
+   - support left/right/top/bottom dock or drawer regions that can each hold multiple stacked panels
+   - keep pop-out behavior available, but do not make profile switching the primary way users discover tools
+   - remove duplicated controls and workflow overlap between `ViewerApp_Sidebars.cs`, `ViewerApp_Investigation.cs`, and related utility windows instead of deepening that split
+   - treat one canonical panel per workflow as the rule: for example navigator, inspector, minimap, terrain/runtime stats, PM4 workbench, object tools, lighting/tools, and any future publish/save surfaces
+- immediate guardrail:
+   - do not add more shell-level UI duplication unless it is a temporary bridge to the panel extraction work
+- important boundary:
+   - this is continuity only; no panel rewrite has landed yet from this note alone
+
 ## Apr 05, 2026 - Terrain streaming is now camera-biased and near-field again, WDL stays active for distance terrain, and object stream range can drop below 1.00x
 
 - followed the same-session user direction that the active viewer should behave more like the real engine: only a few detailed ADTs near the camera, WDL for far terrain, and no huge far-object admission band at startup
 - active `src/MdxViewer` behavior after this slice:
    - `Rendering/Camera.cs` now exposes `Forward`, and `ViewerApp.cs` passes that into `TerrainManager.UpdateAOI(...)` during loading, startup, and normal frame updates
-   - `Terrain/TerrainManager.cs` now keeps a much smaller detailed ADT working set and biases the tile queue toward the camera heading instead of using the old broad square `AoiRadius = 4` residency pattern
+   - `Terrain/TerrainManager.cs` now keeps a much smaller detailed ADT working set and biases the tile queue toward the camera heading instead of using the old broad square `AoiRadius = 4` residency pattern; the latest tuning pass expands that detailed residency to an 8-tile near field by filling in three preferred diagonals around the camera tile
    - `Terrain/WorldScene.cs` no longer hides WDL globally for all ADT-backed tiles on startup, still hides the matching WDL tile when a detailed ADT is loaded, and now shows that WDL tile again when the detailed tile unloads
    - `Terrain/WorldScene.cs` now defaults object stream range to `0.50x` and allows `0.25x..4.00x`; `ViewerApp_Investigation.cs` exposes the same range in the live UI
    - `Terrain/WdlTerrainRenderer.cs` now animates WDL tile opacity for `HideTile(...)` and `ShowTile(...)`, so the fallback terrain blends in/out over a short duration instead of hard switching

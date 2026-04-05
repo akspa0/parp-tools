@@ -2,12 +2,28 @@
 
 # Active Context
 
+## Apr 05, 2026 - Next viewer-shell direction is a panel-based dock/drawer UI, not more UI profiles or duplicated surfaces
+
+- recorded the latest user direction after the streaming and MDX stabilization work reached a better checkpoint: the active viewer UI should stop accumulating duplicated workspace/profile-style surfaces and instead move to one coherent panel model
+- current shell direction to preserve for the next UI pass:
+	- split the existing sidebar-heavy and duplicated UI into individual panels instead of monolithic left/right shell buckets
+	- support panel drawers or dock lanes on the left, right, top, and bottom of the screen
+	- allow multiple panels to stack within each dock area instead of scattering the same controls across `ViewerApp_Sidebars`, investigation surfaces, and one-off windows
+	- allow panels to be popped out when the user wants, but keep the default workflow understandable without requiring profile switching or preset hunting
+	- treat UI profiles/presets for shell organization as low value for the active viewer; the immediate problem is duplicated controls and unclear ownership, not lack of another shell mode
+- implementation bias to preserve:
+	- prefer one canonical home per workflow or data family (`Navigator`, `Inspector`, terrain/runtime stats, minimap, PM4 workbench, object tools, lighting/tools) instead of repeating the same toggles in multiple sidebars or investigation panes
+	- use docking and stacked panel containers as the primary organization primitive, with drawers as the constrained-screen fallback
+	- avoid adding more UI duplication before this shell regrouping lands
+- important boundary:
+	- this is continuity and direction only; no panel extraction or shell rewrite has landed yet from this note alone
+
 ## Apr 05, 2026 - Active terrain streaming is now near-field and camera-biased again, WDL is restored as the far-terrain fallback, and object range can drop below 1.00x
 
 - followed the user's direct correction after another live screenshot still near `18 FPS`: the active viewer was still behaving unlike the retail engine by keeping too many detailed ADTs and too many far objects resident instead of leaning on WDL for distance terrain
 - landed the new active-viewer streaming policy slice:
 	- `src/MdxViewer/Rendering/Camera.cs` now exposes `Forward`, and `src/MdxViewer/ViewerApp.cs` passes that forward vector into terrain AOI updates so terrain residency can bias toward what the camera is actually facing
-	- `src/MdxViewer/Terrain/TerrainManager.cs` no longer uses the old broad `AoiRadius = 4` square; the detailed ADT working set is now a much smaller near-field set with one forward-biased lookahead row and heading-aware tile load priority
+	- `src/MdxViewer/Terrain/TerrainManager.cs` no longer uses the old broad `AoiRadius = 4` square; the detailed ADT working set is now a much smaller near-field set, and the latest follow-up raises that active detailed footprint to a stable 8-tile neighborhood by preferring three useful diagonals around the camera instead of only the older cross-plus-lookahead strip
 	- `src/MdxViewer/Terrain/WorldScene.cs` no longer hides WDL for every ADT-backed tile at startup, and `OnTileUnloaded(...)` now restores the matching WDL tile so low-res terrain fills back in when detailed ADTs stream out
 	- active object visibility/load range is now intentionally tighter by default: `WorldScene` defaults `ObjectStreamingRangeMultiplier` to `0.50x` and allows lowering it to `0.25x`; the shared runtime floor in `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/WorldObjectVisibilityCollector.cs` was lowered to match
 	- `src/MdxViewer/ViewerApp_Investigation.cs` now exposes the lower object-stream floor and updated default text in the live investigation UI

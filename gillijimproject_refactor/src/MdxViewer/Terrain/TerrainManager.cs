@@ -37,9 +37,9 @@ public class TerrainManager : ISceneRenderer
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
     private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
-    // AOI: keep only a small high-detail near field and rely on WDL for distance terrain.
+    // AOI: keep an 8-tile high-detail near field and rely on WDL for distance terrain.
     private const int NearTileRadius = 1;
-    private const int ForwardLookaheadTiles = 1;
+    private const int TargetDetailedTileCount = 8;
     private const int UnloadRadius = 1;
     private const int MaxGpuUploadsPerFrame = 4;
     private const double MaxGpuUploadBudgetMs = 5.0;
@@ -135,7 +135,7 @@ public class TerrainManager : ISceneRenderer
         _loadedTiles[key] = tileMesh;
         if (!_adapter.TileTextures.TryGetValue(key, out var textureNames))
             textureNames = new List<string>();
-        _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos);
+        _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos, fadeIn: false);
         _liquidRenderer.AddChunks(cached.Chunks);
     }
 
@@ -369,7 +369,9 @@ public class TerrainManager : ISceneRenderer
         _lastCornerBiasX = cornerBiasX;
         _lastCornerBiasY = cornerBiasY;
 
-        // Determine which tiles should be loaded: a small near-field cross plus one forward-biased row.
+        // Determine which tiles should be loaded: a stable 8-tile near field.
+        // This is effectively a 3x3 neighborhood with the least useful rear diagonal dropped,
+        // so detailed ADT coverage feels denser without going back to a large residency window.
         var desiredTiles = new HashSet<(int, int)>();
         for (int dy = -NearTileRadius; dy <= NearTileRadius; dy++)
         {
@@ -385,42 +387,42 @@ public class TerrainManager : ISceneRenderer
             }
         }
 
-        if (cornerBiasX != 0 && cornerBiasY != 0)
-        {
-            int diagonalX = tileX + cornerBiasX;
-            int diagonalY = tileY + cornerBiasY;
-            if (diagonalX >= 0 && diagonalX < 64 && diagonalY >= 0 && diagonalY < 64 && _adapter.TileExists(diagonalX, diagonalY))
-                desiredTiles.Add((diagonalX, diagonalY));
-        }
-
+        var diagonalCandidates = new List<(int tx, int ty, float score)>();
+        int headDx = 0;
+        int headDy = 0;
         if (_cameraHeading.LengthSquared() > 0.25f)
         {
-            int headDx = _cameraHeading.X > 0.3f ? -1 : _cameraHeading.X < -0.3f ? 1 : 0;
-            int headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
+            headDx = _cameraHeading.X > 0.3f ? -1 : _cameraHeading.X < -0.3f ? 1 : 0;
+            headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
+        }
 
-            for (int step = 1; step <= ForwardLookaheadTiles; step++)
+        for (int diagonalDy = -1; diagonalDy <= 1; diagonalDy += 2)
+        {
+            for (int diagonalDx = -1; diagonalDx <= 1; diagonalDx += 2)
             {
-                int fx = tileX + headDx * step;
-                int fy = tileY + headDy * step;
-                if (fx >= 0 && fx < 64 && fy >= 0 && fy < 64 && _adapter.TileExists(fx, fy))
-                    desiredTiles.Add((fx, fy));
+                int diagonalX = tileX + diagonalDx;
+                int diagonalY = tileY + diagonalDy;
+                if (diagonalX < 0 || diagonalX >= 64 || diagonalY < 0 || diagonalY >= 64 || !_adapter.TileExists(diagonalX, diagonalY))
+                    continue;
 
-                if (headDx != 0)
-                {
-                    if (fy - 1 >= 0 && _adapter.TileExists(fx, fy - 1))
-                        desiredTiles.Add((fx, fy - 1));
-                    if (fy + 1 < 64 && _adapter.TileExists(fx, fy + 1))
-                        desiredTiles.Add((fx, fy + 1));
-                }
+                float score = 0f;
+                if (headDx != 0 || headDy != 0)
+                    score += diagonalDx * headDx + diagonalDy * headDy;
 
-                if (headDy != 0)
-                {
-                    if (fx - 1 >= 0 && _adapter.TileExists(fx - 1, fy))
-                        desiredTiles.Add((fx - 1, fy));
-                    if (fx + 1 < 64 && _adapter.TileExists(fx + 1, fy))
-                        desiredTiles.Add((fx + 1, fy));
-                }
+                if (cornerBiasX != 0 || cornerBiasY != 0)
+                    score += (diagonalDx * cornerBiasX + diagonalDy * cornerBiasY) * 0.25f;
+
+                diagonalCandidates.Add((diagonalX, diagonalY, score));
             }
+        }
+
+        diagonalCandidates.Sort((left, right) => right.score.CompareTo(left.score));
+        foreach (var (diagonalX, diagonalY, _) in diagonalCandidates)
+        {
+            if (desiredTiles.Count >= TargetDetailedTileCount)
+                break;
+
+            desiredTiles.Add((diagonalX, diagonalY));
         }
 
         // Build a wider retention set for unloading. This hysteresis avoids dropping tiles
@@ -542,7 +544,7 @@ public class TerrainManager : ISceneRenderer
             _loadedTiles[(tx, ty)] = tileMesh;
             if (!_adapter.TileTextures.TryGetValue((tx, ty), out var textureNames))
                 textureNames = new List<string>();
-            _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos);
+            _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos, fadeIn: true);
             _liquidRenderer.AddChunks(result.Chunks);
 
             // Notify listeners (WorldScene) about the new tile's placements
@@ -588,7 +590,7 @@ public class TerrainManager : ISceneRenderer
         _loadedTiles[(tileX, tileY)] = tileMesh;
         if (!_adapter.TileTextures.TryGetValue((tileX, tileY), out var textureNames))
             textureNames = new List<string>();
-        _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos);
+        _terrainRenderer.AddTile(tileMesh, textureNames, chunkInfos, fadeIn: false);
         _liquidRenderer.AddChunks(result.Chunks);
 
         OnTileLoaded?.Invoke(tileX, tileY, result);
