@@ -96,6 +96,24 @@ public sealed class M2Renderer : IModelRenderer
 
     public Vector3 BoundsMax => _runtimeModel?.BoundsMax ?? _legacyRenderer?.BoundsMax ?? Vector3.Zero;
 
+    public bool HasTransparentWorldPass
+    {
+        get
+        {
+            if (_legacyRenderer != null)
+                return _legacyRenderer.HasTransparentWorldPass;
+
+            for (int index = 0; index < _sections.Count; index++)
+            {
+                SectionBuffers section = _sections[index];
+                if (section.Visible && section.Material.IsTransparent)
+                    return true;
+            }
+
+            return false;
+        }
+    }
+
     public bool RequiresUnbatchedWorldRender => true;
 
     public MdxAnimator? Animator => _legacyRenderer?.Animator;

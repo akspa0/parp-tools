@@ -163,6 +163,7 @@ public class MdxRenderer : IModelRenderer
     /// <summary>Model-space bounding box max corner.</summary>
     public Vector3 BoundsMax => _effectiveBoundsMax;
     public bool IsM2AdapterModel => _isM2AdapterModel;
+    public bool HasTransparentWorldPass => !_forceM2SolidDebug && ComputeHasTransparentWorldPass();
     public bool RequiresUnbatchedWorldRender => _isM2AdapterModel || _particleEmitters.Count > 0 || _mdx.RawParticleEmitterCount > 0 || _mdx.RawRibbonEmitterCount > 0;
 
     /// <summary>Animation controller (null if model has no bones)</summary>
@@ -2217,6 +2218,38 @@ void main() {
             return true;
 
         return layerIndex == 0 && GetTextureAlphaKind(textureId) != TextureAlphaKind.Translucent;
+    }
+
+    private bool ComputeHasTransparentWorldPass()
+    {
+        for (int materialIndex = 0; materialIndex < _mdx.Materials.Count; materialIndex++)
+        {
+            var material = _mdx.Materials[materialIndex];
+            for (int layerIndex = 0; layerIndex < material.Layers.Count; layerIndex++)
+            {
+                var layer = material.Layers[layerIndex];
+                if (LayerNeedsTransparentPass(layerIndex, layer.TextureId, layer.BlendMode))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool LayerNeedsTransparentPass(int layerIndex, int textureId, MdlTexOp declaredBlendMode)
+    {
+        if (_isM2AdapterModel
+            && _deferInitialTextureLoads
+            && layerIndex == 0
+            && declaredBlendMode == MdlTexOp.Load
+            && !_textureAlphaKinds.ContainsKey(textureId))
+        {
+            return true;
+        }
+
+        MdlTexOp effectiveBlendMode = GetEffectiveBlendMode(layerIndex, textureId, declaredBlendMode);
+        bool isAlphaCutout = ShouldUseAlphaCutout(layerIndex, textureId, declaredBlendMode, effectiveBlendMode);
+        return !isAlphaCutout && (layerIndex > 0 || effectiveBlendMode != MdlTexOp.Load);
     }
 
     private MdlTexOp GetEffectiveBlendMode(int layerIndex, int textureId, MdlTexOp declaredBlendMode)

@@ -15,6 +15,9 @@ public class LiquidRenderer : IDisposable
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
     private readonly ShaderProgram _wireframeShader;
+    private readonly FrustumCuller _frustumCuller = new();
+    private const float LiquidVisibilityPadding = 2.0f;
+    private const float LiquidDistanceSlack = 96.0f;
 
     // Per-chunk liquid meshes (from MCLQ/MH2O)
     private readonly List<LiquidMesh> _meshes = new();
@@ -34,6 +37,8 @@ public class LiquidRenderer : IDisposable
 
     public int MeshCount => _meshes.Count;
     public int WlMeshCount => _wlMeshes.Count;
+    public int LastVisibleTerrainMeshCount { get; private set; }
+    public int LastVisibleWlMeshCount { get; private set; }
 
     public bool IsWlBodyVisible(string bodyKey)
     {
@@ -117,9 +122,17 @@ public class LiquidRenderer : IDisposable
     {
         bool renderTerrainLiquids = ShowLiquid && _meshes.Count > 0;
         bool renderWlLiquids = ShowWlLiquids && _wlMeshes.Count > 0;
-        if (!renderTerrainLiquids && !renderWlLiquids) return;
+        if (!renderTerrainLiquids && !renderWlLiquids)
+        {
+            LastVisibleTerrainMeshCount = 0;
+            LastVisibleWlMeshCount = 0;
+            return;
+        }
 
         _time += deltaTime;
+        _frustumCuller.Update(view * proj);
+        float maxRenderDistance = MathF.Max(256f, lighting.FogEnd + LiquidDistanceSlack);
+        float maxRenderDistanceSq = maxRenderDistance * maxRenderDistance;
 
         _shader.Use();
         _shader.SetMat4("uView", view);
@@ -140,15 +153,22 @@ public class LiquidRenderer : IDisposable
         _gl.DepthMask(false); // Don't write to depth buffer
         _gl.Disable(EnableCap.CullFace);
 
+        int visibleTerrainMeshCount = 0;
+        int visibleWlMeshCount = 0;
+
         if (renderTerrainLiquids)
         {
             foreach (var mesh in _meshes)
             {
+                if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
+                    continue;
+
                 var (r, g, b, a) = GetLiquidColor(mesh.Type);
                 _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
 
                 _gl.BindVertexArray(mesh.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedShort, null);
+                visibleTerrainMeshCount++;
             }
         }
 
@@ -159,6 +179,8 @@ public class LiquidRenderer : IDisposable
             {
                 if (!string.IsNullOrWhiteSpace(mesh.WlBodyKey) && _hiddenWlBodies.Contains(mesh.WlBodyKey))
                     continue;
+                if (!ShouldRenderMesh(mesh, cameraPos, maxRenderDistanceSq))
+                    continue;
 
                 var (r, g, b, a) = GetLiquidColor(mesh.Type);
                 _shader.SetVec4("uLiquidColor", new Vector4(r, g, b, a));
@@ -166,11 +188,15 @@ public class LiquidRenderer : IDisposable
                 _gl.BindVertexArray(mesh.Vao);
                 _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount,
                     mesh.UseUint32Indices ? DrawElementsType.UnsignedInt : DrawElementsType.UnsignedShort, null);
+                visibleWlMeshCount++;
             }
 
             if (ShowSelectedWlWireframeOverlay && !string.IsNullOrWhiteSpace(SelectedWlBodyKey))
                 RenderSelectedWlWireframe(view, proj);
         }
+
+        LastVisibleTerrainMeshCount = visibleTerrainMeshCount;
+        LastVisibleWlMeshCount = visibleWlMeshCount;
 
         _gl.BindVertexArray(0);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
@@ -324,6 +350,13 @@ public class LiquidRenderer : IDisposable
 
         _gl.BindVertexArray(0);
 
+        float minX = liquid.WorldPosition.X - chunkSize;
+        float maxX = liquid.WorldPosition.X;
+        float minY = liquid.WorldPosition.Y - chunkSize;
+        float maxY = liquid.WorldPosition.Y;
+        float minZ = liquid.MinHeight - LiquidVisibilityPadding;
+        float maxZ = liquid.MaxHeight + LiquidVisibilityPadding;
+
         return new LiquidMesh
         {
             Vao = vao,
@@ -332,7 +365,9 @@ public class LiquidRenderer : IDisposable
             IndexCount = (uint)indexArray.Length,
             Type = liquid.Type,
             TileX = liquid.TileX,
-            TileY = liquid.TileY
+            TileY = liquid.TileY,
+            BoundsMin = new Vector3(minX, minY, minZ),
+            BoundsMax = new Vector3(maxX, maxY, maxZ)
         };
     }
 
@@ -457,11 +492,16 @@ void main() {
 
             // Build flat vertex array: 3 floats per vertex
             var verts = new float[body.Vertices.Length * 3];
+            Vector3 boundsMin = new(float.MaxValue, float.MaxValue, float.MaxValue);
+            Vector3 boundsMax = new(float.MinValue, float.MinValue, float.MinValue);
             for (int i = 0; i < body.Vertices.Length; i++)
             {
-                verts[i * 3 + 0] = body.Vertices[i].X;
-                verts[i * 3 + 1] = body.Vertices[i].Y;
-                verts[i * 3 + 2] = body.Vertices[i].Z;
+                Vector3 vertex = body.Vertices[i];
+                verts[i * 3 + 0] = vertex.X;
+                verts[i * 3 + 1] = vertex.Y;
+                verts[i * 3 + 2] = vertex.Z;
+                boundsMin = Vector3.Min(boundsMin, vertex);
+                boundsMax = Vector3.Max(boundsMax, vertex);
             }
 
             uint vao = _gl.GenVertexArray();
@@ -497,7 +537,9 @@ void main() {
                 UseUint32Indices = true,
                 WlBodyKey = body.BodyKey,
                 WlBodyName = body.Name,
-                WlSourcePath = body.SourcePath
+                WlSourcePath = body.SourcePath,
+                BoundsMin = boundsMin - new Vector3(LiquidVisibilityPadding),
+                BoundsMax = boundsMax + new Vector3(LiquidVisibilityPadding)
             });
             added++;
 
@@ -530,6 +572,22 @@ void main() {
         _shader.Dispose();
         _wireframeShader.Dispose();
     }
+
+    private bool ShouldRenderMesh(LiquidMesh mesh, Vector3 cameraPos, float maxRenderDistanceSq)
+    {
+        if (!_frustumCuller.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
+            return false;
+
+        return DistanceSquaredPointToAabb(cameraPos, mesh.BoundsMin, mesh.BoundsMax) <= maxRenderDistanceSq;
+    }
+
+    private static float DistanceSquaredPointToAabb(Vector3 point, Vector3 min, Vector3 max)
+    {
+        float dx = point.X < min.X ? min.X - point.X : point.X > max.X ? point.X - max.X : 0f;
+        float dy = point.Y < min.Y ? min.Y - point.Y : point.Y > max.Y ? point.Y - max.Y : 0f;
+        float dz = point.Z < min.Z ? min.Z - point.Z : point.Z > max.Z ? point.Z - max.Z : 0f;
+        return dx * dx + dy * dy + dz * dz;
+    }
 }
 
 /// <summary>
@@ -548,6 +606,8 @@ internal class LiquidMesh
     public string? WlBodyKey { get; init; }
     public string? WlBodyName { get; init; }
     public string? WlSourcePath { get; init; }
+    public Vector3 BoundsMin { get; init; }
+    public Vector3 BoundsMax { get; init; }
 
     public void Dispose(GL gl)
     {

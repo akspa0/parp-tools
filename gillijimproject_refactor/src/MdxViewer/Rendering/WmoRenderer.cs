@@ -71,6 +71,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly Dictionary<string, string> _doodadSourceModelPaths = new(StringComparer.OrdinalIgnoreCase);
     private int _activeDoodadSet = 0;
     private bool _doodadsVisible = true;
+    private bool _runtimeDoodadsVisible = true;
     private const int DeferredDoodadLoadsPerFrame = 1;
     private const double DeferredDoodadLoadBudgetMs = 2.0;
     private const float GroupVisibilityBoundsPadding = 32f;
@@ -216,6 +217,11 @@ public class WmoRenderer : ISceneRenderer
         if (index == _activeDoodadSet || index < 0 || index >= _wmo.DoodadSets.Count) return;
         _activeDoodadSet = index;
         LoadActiveDoodadSet();
+    }
+
+    public void SetRuntimeDoodadsVisible(bool visible)
+    {
+        _runtimeDoodadsVisible = visible;
     }
 
     public void ToggleWireframe()
@@ -389,7 +395,7 @@ public class WmoRenderer : ISceneRenderer
         // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount.
         List<(int idx, float distSq)>? visibleDoodads = null;
         int visibleDoodadRenderCount = 0;
-        if (_doodadsVisible && _doodadInstances.Count > 0)
+        if (_doodadsVisible && _runtimeDoodadsVisible && _doodadInstances.Count > 0)
         {
             // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
             // Update once per model to avoid redundant work when many instances share the same MDX.

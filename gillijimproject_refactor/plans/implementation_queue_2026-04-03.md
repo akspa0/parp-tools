@@ -38,8 +38,15 @@ Each item should be one narrow implementation chat with explicit proof.
 
 5. World Runtime Slice 02 - visible-set extraction
 - source plans: `wow_viewer_world_runtime_service_plan_2026-03-31.md`
-- target: move visible-set contracts/scratch orchestration out of `WorldScene`
-- proof: compatibility build + service seam usage in active consumer path
+- target: move pure WMO/MDX/taxi visibility admission and visible-bucket scratch ownership out of `WorldScene`, while keeping renderer lookup, pending-load queueing, animation advance, and draw submission host-side
+- concrete first file set:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldObjectInstance.cs`
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/*`
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs`
+- proof:
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+	- focused runtime collector tests for frustum/rear-cone rejection, near-hold preservation, small-doodad cull, deterministic fade output, and taxi visible-count handling
 
 6. World Runtime Slice 03 - pass service extraction
 - source plans: `wow_viewer_world_runtime_service_plan_2026-03-31.md`

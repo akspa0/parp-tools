@@ -45,7 +45,16 @@ using CorePm4ResearchAuditAnalyzer = WowViewer.Core.PM4.Research.Pm4ResearchAudi
 using CorePm4ResearchHierarchyAnalyzer = WowViewer.Core.PM4.Research.Pm4ResearchHierarchyAnalyzer;
 using CorePm4ResearchSnapshotBuilder = WowViewer.Core.PM4.Research.Pm4ResearchSnapshotBuilder;
 using CorePm4TileObjectHypothesisReport = WowViewer.Core.PM4.Models.Pm4TileObjectHypothesisReport;
+using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
+using WorldFramePassCoordinator = WowViewer.Core.Runtime.World.Passes.WorldFramePassCoordinator;
+using WorldFramePassOptions = WowViewer.Core.Runtime.World.Passes.WorldFramePassOptions;
+using WorldFramePasses = WowViewer.Core.Runtime.World.Passes.WorldFramePasses;
+using WorldObjectPassCoordinator = WowViewer.Core.Runtime.World.Passes.WorldObjectPassCoordinator;
+using WorldObjectPassFrame = WowViewer.Core.Runtime.World.Passes.WorldObjectPassFrame;
+using VisibleMdxInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleMdxEntry;
+using VisibleWmoInstance = WowViewer.Core.Runtime.World.Visibility.WorldVisibleWmoEntry;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Visibility;
 
 namespace MdxViewer.Terrain;
 
@@ -528,6 +537,7 @@ public class WorldScene : ISceneRenderer
     private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
     private float _objectStreamingRangeMultiplier = 1.0f;
+    private WorldObjectVisibilityProfile _objectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
@@ -574,45 +584,21 @@ public class WorldScene : ISceneRenderer
         MaxDeferredLoadsPerFrame: 3,
         MaxDeferredLoadBudgetMs: 2.5);
 
-    private readonly struct VisibleWmoInstance
-    {
-        public VisibleWmoInstance(ObjectInstance instance, WmoRenderer renderer, float centerDistanceSq)
-        {
-            Instance = instance;
-            Renderer = renderer;
-            CenterDistanceSq = centerDistanceSq;
-        }
-
-        public ObjectInstance Instance { get; }
-        public WmoRenderer Renderer { get; }
-        public float CenterDistanceSq { get; }
-    }
-
-    private readonly struct VisibleMdxInstance
-    {
-        public VisibleMdxInstance(ObjectInstance instance, IModelRenderer renderer, float centerDistanceSq, float opaqueFade, float transparentFade)
-        {
-            Instance = instance;
-            Renderer = renderer;
-            CenterDistanceSq = centerDistanceSq;
-            OpaqueFade = opaqueFade;
-            TransparentFade = transparentFade;
-        }
-
-        public ObjectInstance Instance { get; }
-        public IModelRenderer Renderer { get; }
-        public float CenterDistanceSq { get; }
-        public float OpaqueFade { get; }
-        public float TransparentFade { get; }
-    }
-
     private sealed class WorldRenderFrame
     {
-        public List<VisibleWmoInstance> VisibleWmoInstances { get; } = new();
-        public List<VisibleMdxInstance> VisibleMdxInstances { get; } = new();
-        public List<(int visibleIdx, float distSq)> TransparentSortScratch { get; } = new();
+        public WorldVisibilityFrame Visibility { get; } = new();
+        public WorldObjectPassFrame ObjectPasses { get; } = new();
+        public Dictionary<string, WmoRenderer> VisibleWmoRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, IModelRenderer> VisibleMdxRendererCache { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public int VisibleTaxiMdxCount { get; set; }
+        public List<VisibleWmoInstance> VisibleWmoInstances => Visibility.VisibleWmos;
+        public List<VisibleMdxInstance> VisibleMdxInstances => Visibility.VisibleMdx;
+        public int VisibleTaxiMdxCount
+        {
+            get => Visibility.VisibleTaxiMdxCount;
+            set => Visibility.VisibleTaxiMdxCount = value;
+        }
+
         public int OpaqueBatchedMdxCount { get; set; }
         public int OpaqueUnbatchedMdxCount { get; set; }
         public int TransparentBatchedMdxCount { get; set; }
@@ -637,10 +623,10 @@ public class WorldScene : ISceneRenderer
 
         public void Reset()
         {
-            VisibleWmoInstances.Clear();
-            VisibleMdxInstances.Clear();
-            TransparentSortScratch.Clear();
-            VisibleTaxiMdxCount = 0;
+            Visibility.Reset();
+            ObjectPasses.Reset();
+            VisibleWmoRendererCache.Clear();
+            VisibleMdxRendererCache.Clear();
             OpaqueBatchedMdxCount = 0;
             OpaqueUnbatchedMdxCount = 0;
             TransparentBatchedMdxCount = 0;
@@ -695,14 +681,13 @@ public class WorldScene : ISceneRenderer
                 new WorldRenderStageStats(MdxVisibilityMs, VisibleMdxInstances.Count),
                 new WorldRenderStageStats(MdxOpaqueSubmissionMs, VisibleMdxInstances.Count, OpaqueBatchedMdxCount + OpaqueUnbatchedMdxCount),
                 new WorldRenderStageStats(LiquidMs),
-                new WorldRenderStageStats(MdxTransparentSortMs, TransparentSortScratch.Count),
-                new WorldRenderStageStats(MdxTransparentSubmissionMs, TransparentSortScratch.Count, TransparentBatchedMdxCount + TransparentUnbatchedMdxCount),
+                new WorldRenderStageStats(MdxTransparentSortMs, ObjectPasses.TransparentVisibleMdxRoutes.Count),
+                new WorldRenderStageStats(MdxTransparentSubmissionMs, ObjectPasses.TransparentVisibleMdxRoutes.Count, TransparentBatchedMdxCount + TransparentUnbatchedMdxCount),
                 new WorldRenderStageStats(OverlayMs));
         }
     }
 
     // Scratch collections reused every frame to avoid hot-path allocations.
-    private readonly HashSet<string> _updatedMdxRenderers = new();
     private readonly WorldRenderFrame _renderFrame = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
@@ -849,6 +834,14 @@ public class WorldScene : ISceneRenderer
         get => _objectStreamingRangeMultiplier;
         set => _objectStreamingRangeMultiplier = Math.Clamp(value, 1.0f, 4.0f);
     }
+    public WorldObjectVisibilityProfile ObjectVisibilityProfile
+    {
+        get => _objectVisibilityProfile;
+        set => _objectVisibilityProfile = value;
+    }
+    public bool ObjectsVisible { get => _objectsVisible; set => _objectsVisible = value; }
+    public bool WmosVisible { get => _wmosVisible; set => _wmosVisible = value; }
+    public bool DoodadsVisible { get => _doodadsVisible; set => _doodadsVisible = value; }
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
     public float HoveredAssetMaxDistance
     {
@@ -6069,6 +6062,66 @@ public class WorldScene : ISceneRenderer
         return null;
     }
 
+    private IModelRenderer? ResolveVisibleMdxRenderer(WorldRenderFrame frame, string modelKey)
+    {
+        if (frame.VisibleMdxRendererCache.TryGetValue(modelKey, out IModelRenderer? renderer))
+            return renderer;
+
+        renderer = TryGetQueuedMdx(modelKey);
+        if (renderer != null)
+            frame.VisibleMdxRendererCache[modelKey] = renderer;
+
+        return renderer;
+    }
+
+    private WmoRenderer? ResolveVisibleWmoRenderer(WorldRenderFrame frame, string modelKey)
+    {
+        if (frame.VisibleWmoRendererCache.TryGetValue(modelKey, out WmoRenderer? renderer))
+        {
+            renderer?.SetRuntimeDoodadsVisible(_doodadsVisible);
+            return renderer;
+        }
+
+        renderer = TryGetQueuedWmo(modelKey);
+        if (renderer != null)
+        {
+            renderer.SetRuntimeDoodadsVisible(_doodadsVisible);
+            frame.VisibleWmoRendererCache[modelKey] = renderer;
+        }
+
+        return renderer;
+    }
+
+    private void PlanVisibleMdxPasses(WorldRenderFrame frame)
+    {
+        WorldObjectPassCoordinator.PlanOpaqueMdxRoutes(
+            frame.ObjectPasses,
+            frame.Visibility,
+            visible =>
+            {
+                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                return renderer == null || renderer.RequiresUnbatchedWorldRender;
+            });
+
+        WorldObjectPassCoordinator.PlanTransparentMdxRoutes(
+            frame.ObjectPasses,
+            frame.Visibility,
+            visible =>
+            {
+                IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                return renderer != null && renderer.HasTransparentWorldPass;
+            });
+    }
+
+    private IModelRenderer? ResolveFirstOpaqueBatchedVisibleMdxRenderer(WorldRenderFrame frame)
+    {
+        if (frame.ObjectPasses.FirstOpaqueBatchedVisibleMdxIndex < 0)
+            return null;
+
+        VisibleMdxInstance visible = frame.Visibility.VisibleMdx[frame.ObjectPasses.FirstOpaqueBatchedVisibleMdxIndex];
+        return ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+    }
+
     private void TrackPendingVisibleLoad(Dictionary<string, float> pendingLoads, string modelKey, float distanceSq)
     {
         if (pendingLoads.TryGetValue(modelKey, out float existingDistanceSq) && existingDistanceSq <= distanceSq)
@@ -6688,50 +6741,24 @@ public class WorldScene : ISceneRenderer
         return (tileX, tileY);
     }
 
-    private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd)
+    private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd, float verticalFieldOfViewRadians)
     {
-        float wmoCullDistance = ComputeWmoCullDistance(fogEnd, _objectStreamingRangeMultiplier);
-
-        foreach (var inst in _wmoInstances)
-        {
-            if (ShouldHideObjectInstanceByUniqueId(inst))
-                continue;
-
-            float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.PlacementPosition);
-            float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, inst.PlacementPosition, centerDistanceSq);
-            float coneCullDistance = ComputeConeCullDistance(wmoCullDistance, coneFactor);
-            float coneCullDistanceSq = coneCullDistance * coneCullDistance;
-            float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            bool frustumVisible = _frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax);
-            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
-            {
-                WmoCulledCount++;
-                continue;
-            }
-
-            if (boundsDistSq > coneCullDistanceSq)
-            {
-                WmoCulledCount++;
-                continue;
-            }
-
-            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
-            {
-                WmoCulledCount++;
-                continue;
-            }
-
-            var renderer = TryGetQueuedWmo(inst.ModelKey);
-            if (renderer == null)
-            {
-                TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, inst.ModelKey,
-                    ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
-                continue;
-            }
-
-            frame.VisibleWmoInstances.Add(new VisibleWmoInstance(inst, renderer, centerDistanceSq));
-        }
+        WmoCulledCount = WorldObjectVisibilityCollector.CollectVisibleWmos(
+            frame.Visibility,
+            _wmoInstances,
+            new WorldObjectVisibilityContext(
+                cameraPos,
+                cameraForward,
+                fogEnd,
+                _objectStreamingRangeMultiplier,
+                CullSmallDoodadsOnly: false,
+                CountAsTaxiActor: false,
+                VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
+                VisibilityProfile: _objectVisibilityProfile),
+            inst => ShouldHideObjectInstanceByUniqueId(inst),
+            (min, max) => _frustumCuller.TestAABB(min, max),
+            modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+            (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
     }
 
     private void CollectVisibleMdxInstances(
@@ -6740,81 +6767,35 @@ public class WorldScene : ISceneRenderer
         Vector3 cameraPos,
         Vector3 cameraForward,
         float fogEnd,
+        float verticalFieldOfViewRadians,
         bool cullSmallDoodadsOnly,
         bool countAsTaxiActor)
     {
-        foreach (var inst in instances)
-        {
-            if (ShouldHideObjectInstanceByUniqueId(inst))
-                continue;
+        MdxCulledCount += WorldObjectVisibilityCollector.CollectVisibleMdx(
+            frame.Visibility,
+            instances,
+            new WorldObjectVisibilityContext(
+                cameraPos,
+                cameraForward,
+                fogEnd,
+                _objectStreamingRangeMultiplier,
+                cullSmallDoodadsOnly,
+                countAsTaxiActor,
+                verticalFieldOfViewRadians,
+                _objectVisibilityProfile),
+            inst => ShouldHideObjectInstanceByUniqueId(inst),
+            (min, max) => _frustumCuller.TestAABB(min, max),
+            modelKey => ResolveVisibleMdxRenderer(frame, modelKey) != null,
+            (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleMdxLoadDistances, modelKey, priorityScore));
+    }
 
-            float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, inst.BoundsMin, inst.BoundsMax);
-            float centerDistanceSq = Vector3.DistanceSquared(cameraPos, inst.Transform.Translation);
-            float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, inst.Transform.Translation, centerDistanceSq);
-            float noCullDistanceSq = ComputeNoCullDistanceSq(inst.BoundsMin, inst.BoundsMax);
-            bool frustumVisible = _frustumCuller.TestAABB(inst.BoundsMin, inst.BoundsMax);
-            if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
-            {
-                MdxCulledCount++;
-                continue;
-            }
+    private static float ExtractVerticalFieldOfViewRadians(Matrix4x4 projection)
+    {
+        float inverseTanHalfFov = projection.M22;
+        if (!float.IsFinite(inverseTanHalfFov) || inverseTanHalfFov <= 1e-6f)
+            return MathF.PI / 3f;
 
-            float diag = (inst.BoundsMax - inst.BoundsMin).Length();
-            float mdxCullDistance = ComputeMdxCullDistance(fogEnd, diag, countAsTaxiActor, _objectStreamingRangeMultiplier);
-            float coneCullDistance = ComputeConeCullDistance(mdxCullDistance, coneFactor);
-            float coneCullDistanceSq = coneCullDistance * coneCullDistance;
-            if (boundsDistSq > coneCullDistanceSq)
-            {
-                MdxCulledCount++;
-                continue;
-            }
-
-            bool useSmallDoodadCull = cullSmallDoodadsOnly && diag < DoodadSmallThreshold;
-            if (useSmallDoodadCull && boundsDistSq > DoodadCullDistanceSq)
-            {
-                MdxCulledCount++;
-                continue;
-            }
-
-            if (centerDistanceSq > MaxWorldObjectViewDistanceSq)
-            {
-                MdxCulledCount++;
-                continue;
-            }
-
-            var renderer = TryGetQueuedMdx(inst.ModelKey);
-            if (renderer == null)
-            {
-                TrackPendingVisibleLoad(_pendingVisibleMdxLoadDistances, inst.ModelKey,
-                    ComputeLoadPriorityScore(centerDistanceSq, coneFactor));
-                continue;
-            }
-
-            float opaqueFade = 1.0f;
-            float mdxFadeStart = coneCullDistance * FadeStartFraction;
-            float mdxFadeStartSq = mdxFadeStart * mdxFadeStart;
-            float mdxFadeRange = MathF.Max(1f, coneCullDistance - mdxFadeStart);
-            if (boundsDistSq > mdxFadeStartSq)
-            {
-                float boundsDist = MathF.Sqrt(boundsDistSq);
-                opaqueFade = MathF.Max(0f, 1.0f - (boundsDist - mdxFadeStart) / mdxFadeRange);
-            }
-
-            float transparentFade = 1.0f;
-            if (centerDistanceSq > mdxFadeStartSq)
-            {
-                float centerDistance = MathF.Sqrt(centerDistanceSq);
-                transparentFade = MathF.Max(0f, 1.0f - (centerDistance - mdxFadeStart) / mdxFadeRange);
-            }
-
-            float coneFade = ComputeConeFade(coneFactor, centerDistanceSq);
-            opaqueFade *= coneFade;
-            transparentFade *= coneFade;
-
-            frame.VisibleMdxInstances.Add(new VisibleMdxInstance(inst, renderer, centerDistanceSq, opaqueFade, transparentFade));
-            if (countAsTaxiActor)
-                frame.VisibleTaxiMdxCount++;
-        }
+        return 2f * MathF.Atan(1f / inverseTanHalfFov);
     }
 
     private static Vector3 ExtractCameraForward(Matrix4x4 viewInverse)
@@ -6921,282 +6902,292 @@ public class WorldScene : ISceneRenderer
         fogColor = Vector3.Zero;
         fogStart = 0f;
         fogEnd = 0f;
-        frame.LightingMs = MeasureDurationMs(() =>
-        {
-            LitLoader.LitLightingSample? litSample = null;
-            _lightService?.Update(camPos);
-            if (_lightService != null && _lightService.ActiveLightId >= 0)
-                lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
-
-            if (_litLoader != null && _litLoader.HasData)
-                litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
-
-            if (_lightService != null && _lightService.ActiveLightId >= 0)
-            {
-                lighting.ApplyExternalLighting(
-                    _lightService.DirectColor,
-                    _lightService.AmbientColor,
-                    _lightService.FogColor);
-                lighting.Update();
-
-                _skyDome.ZenithColor = _lightService.SkyTopColor;
-                _skyDome.HorizonColor = lighting.FogColor;
-                _skyDome.SkyFogColor = lighting.FogColor;
-                fogColor = lighting.FogColor;
-                fogStart = lighting.FogStart;
-                fogEnd = lighting.FogEnd;
-            }
-            else
-            {
-                lighting.ClearExternalLighting();
-                lighting.Update();
-                _skyDome.UpdateFromLighting(lighting.GameTime);
-                fogColor = lighting.FogColor;
-                fogStart = lighting.FogStart;
-                fogEnd = lighting.FogEnd;
-            }
-
-            if (_useLitFogOverride && litSample != null)
-            {
-                Vector3 baseLightColor = lighting.LightColor;
-                Vector3 baseAmbientColor = lighting.AmbientColor;
-
-                // Keep the scene's base diffuse/ambient path and only trust LIT for the
-                // sky/fog seam until the light-color semantics are validated on real maps.
-                lighting.ApplyExternalLighting(baseLightColor, baseAmbientColor, litSample.FogColor);
-                lighting.FogStart = litSample.FogStart;
-                lighting.FogEnd = litSample.FogEnd;
-                lighting.Update();
-
-                _skyDome.ZenithColor = litSample.SkyTopColor;
-                _skyDome.HorizonColor = litSample.SkyHorizonColor;
-                _skyDome.SkyFogColor = litSample.FogColor;
-                fogColor = lighting.FogColor;
-                fogStart = lighting.FogStart;
-                fogEnd = lighting.FogEnd;
-            }
-
-            _lastLitSample = litSample;
-        });
-
-        _lastHoverPickFogEnd = fogEnd;
-
-        frame.SkyMs = MeasureDurationMs(() => _skyDome.Render(view, proj, camPos));
-
-        var (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
-
-        // Also set clear color to horizon color so any gaps match the sky
-        _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
-
-        frame.SkyboxBackdropMs = MeasureDurationMs(() => RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting));
-
-        // 0. Render WDL low-res terrain (far background — hidden tiles replaced by detailed ADTs)
-        frame.WdlMs = MeasureDurationMs(() =>
-        {
-            if (ShowWdlTerrain && _wdlTerrain != null)
-                _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller);
-        });
-
-        // 1. Render terrain (with frustum culling)
-        frame.TerrainMs = MeasureDurationMs(() => _terrainManager.Render(view, proj, camPos, _frustumCuller));
-
-        // Reset GL state after terrain
-        _gl.DepthFunc(DepthFunction.Lequal);
-        _gl.DepthMask(true);
-        _gl.Disable(EnableCap.Blend);
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.UseProgram(0); // unbind terrain shader
-
-        if (!_objectsVisible)
-        {
-            FinalizeRenderFrameStats(frame, frameTimer);
-            return;
-        }
-
-        // One-time render diagnostic
-        if (!_renderDiagPrinted)
-        {
-            int wmoFound = 0, wmoMissing = 0;
-            foreach (var inst in _wmoInstances)
-            {
-                if (_assets.TryGetLoadedWmo(inst.ModelKey, out _)) wmoFound++;
-                else { wmoMissing++; if (wmoMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Wmo, $"NOT FOUND: \"{inst.ModelKey}\""); }
-            }
-            int mdxFound = 0, mdxMissing = 0;
-            foreach (var inst in _mdxInstances)
-            {
-                if (_assets.TryGetLoadedMdx(inst.ModelKey, out _)) mdxFound++;
-                else { mdxMissing++; if (mdxMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Mdx, $"NOT FOUND: \"{inst.ModelKey}\""); }
-            }
-            ViewerLog.Info(ViewerLog.Category.Terrain, $"Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
-        }
-
-        // Extract camera position from view matrix (inverse of view translation)
-        Matrix4x4.Invert(view, out var viewInv);
-        var cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
-        Vector3 cameraForward = ExtractCameraForward(viewInv);
-        _lastRenderedCameraPosition = cameraPos;
-        _hasLastRenderedCameraPosition = true;
-
-        EnsurePm4OverlayMatchesCameraWindow(cameraPos);
-
-        // Update frustum planes for culling
-        var vp = view * proj;
-        _frustumCuller.Update(vp);
-
-        // ── PASS 1: OPAQUE ──────────────────────────────────────────────
-        // Render all opaque geometry first with depth write ON.
-        // This ensures correct depth buffer before any transparent rendering.
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Less);
-        _gl.DepthMask(true);
-        _gl.Disable(EnableCap.Blend);
-
-        // 2a. WMO opaque pass (with frustum + distance culling + fade)
-        WmoRenderedCount = 0;
-        WmoCulledCount = 0;
-        if (_wmosVisible)
-        {
-            frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, cameraForward, fogEnd));
-            FlushPendingVisibleWmoLoads();
-
-            // State is constant for this pass; set once to reduce per-instance churn and
-            // keep WMO submission running through one explicit visible-instance bucket.
-            frame.WmoSubmissionMs = MeasureDurationMs(() =>
-            {
-                _gl.Disable(EnableCap.Blend);
-                _gl.DepthMask(true);
-
-                foreach (var visible in frame.VisibleWmoInstances)
-                {
-                    visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj,
-                        fogColor, objectFogStart, objectFogEnd, cameraPos,
-                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                    WmoRenderedCount++;
-                }
-            });
-            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
-        }
-
-        // 3a. MDX opaque pass (with frustum + distance culling + fade)
-        MdxRenderedCount = 0;
-        MdxCulledCount = 0;
+        float objectFogStart = 0f;
+        float objectFogEnd = 0f;
+        Vector3 cameraPos = Vector3.Zero;
+        Vector3 cameraForward = Vector3.UnitZ;
+        float verticalFieldOfViewRadians = ExtractVerticalFieldOfViewRadians(proj);
         IModelRenderer? batchRenderer = null;
-        if (_doodadsVisible)
-        {
-            frame.MdxVisibilityMs = MeasureDurationMs(() =>
-            {
-                CollectVisibleMdxInstances(frame, _mdxInstances, cameraPos, cameraForward, fogEnd, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
-                CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, cameraForward, fogEnd, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
-            });
-            FlushPendingVisibleMdxLoads();
 
-            // Advance animation only for renderers that survived visibility admission.
-            // The previous path scanned every placed MDX instance every frame, which was
-            // pure idle CPU cost on large maps even when only a fraction were visible.
-            frame.MdxAnimationMs = MeasureDurationMs(() =>
-            {
-                _updatedMdxRenderers.Clear();
-                foreach (var visible in frame.VisibleMdxInstances)
+        bool continuedPastTerrain = WorldFramePassCoordinator.Execute(
+            new WorldFramePassOptions(_objectsVisible, _wmosVisible, _doodadsVisible),
+            new WorldFramePasses(
+                () =>
                 {
-                    if (_updatedMdxRenderers.Add(visible.Instance.ModelKey))
-                        visible.Renderer.UpdateAnimation();
-                }
-            });
-
-            frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
-            {
-                if (frame.VisibleMdxInstances.Count > 0)
-                {
-                    batchRenderer = frame.VisibleMdxInstances
-                        .Select(static visible => visible.Renderer)
-                        .FirstOrDefault(static renderer => !renderer.RequiresUnbatchedWorldRender);
-                    batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                }
-
-                foreach (var visible in frame.VisibleMdxInstances)
-                {
-                    if (visible.Renderer.RequiresUnbatchedWorldRender)
+                    frame.LightingMs = MeasureDurationMs(() =>
                     {
-                        visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
-                            fogColor, objectFogStart, objectFogEnd, cameraPos,
+                        LitLoader.LitLightingSample? litSample = null;
+                        _lightService?.Update(camPos);
+                        if (_lightService != null && _lightService.ActiveLightId >= 0)
+                            lighting.GameTime = Math.Clamp(_lightService.TimeOfDay / 2880f, 0f, 1f);
+
+                        if (_litLoader != null && _litLoader.HasData)
+                            litSample = _litLoader.EvaluateLighting(camPos, lighting.GameTime);
+
+                        if (_lightService != null && _lightService.ActiveLightId >= 0)
+                        {
+                            lighting.ApplyExternalLighting(
+                                _lightService.DirectColor,
+                                _lightService.AmbientColor,
+                                _lightService.FogColor);
+                            lighting.Update();
+
+                            _skyDome.ZenithColor = _lightService.SkyTopColor;
+                            _skyDome.HorizonColor = lighting.FogColor;
+                            _skyDome.SkyFogColor = lighting.FogColor;
+                            fogColor = lighting.FogColor;
+                            fogStart = lighting.FogStart;
+                            fogEnd = lighting.FogEnd;
+                        }
+                        else
+                        {
+                            lighting.ClearExternalLighting();
+                            lighting.Update();
+                            _skyDome.UpdateFromLighting(lighting.GameTime);
+                            fogColor = lighting.FogColor;
+                            fogStart = lighting.FogStart;
+                            fogEnd = lighting.FogEnd;
+                        }
+
+                        if (_useLitFogOverride && litSample != null)
+                        {
+                            Vector3 baseLightColor = lighting.LightColor;
+                            Vector3 baseAmbientColor = lighting.AmbientColor;
+
+                            // Keep the scene's base diffuse/ambient path and only trust LIT for the
+                            // sky/fog seam until the light-color semantics are validated on real maps.
+                            lighting.ApplyExternalLighting(baseLightColor, baseAmbientColor, litSample.FogColor);
+                            lighting.FogStart = litSample.FogStart;
+                            lighting.FogEnd = litSample.FogEnd;
+                            lighting.Update();
+
+                            _skyDome.ZenithColor = litSample.SkyTopColor;
+                            _skyDome.HorizonColor = litSample.SkyHorizonColor;
+                            _skyDome.SkyFogColor = litSample.FogColor;
+                            fogColor = lighting.FogColor;
+                            fogStart = lighting.FogStart;
+                            fogEnd = lighting.FogEnd;
+                        }
+
+                        _lastLitSample = litSample;
+                    });
+
+                    _lastHoverPickFogEnd = fogEnd;
+                    (objectFogStart, objectFogEnd) = ComputeObjectFogRange(fogStart, fogEnd, _objectFogEnabled);
+                },
+                () => frame.SkyMs = MeasureDurationMs(() => _skyDome.Render(view, proj, camPos)),
+                () =>
+                {
+                    // Also set clear color to horizon color so any gaps match the sky
+                    _gl.ClearColor(_skyDome.HorizonColor.X, _skyDome.HorizonColor.Y, _skyDome.HorizonColor.Z, 1f);
+                    frame.SkyboxBackdropMs = MeasureDurationMs(() => RenderSkyboxBackdrop(view, proj, camPos, fogColor, fogStart, fogEnd, lighting));
+                },
+                () =>
+                {
+                    // 0. Render WDL low-res terrain (far background — hidden tiles replaced by detailed ADTs)
+                    frame.WdlMs = MeasureDurationMs(() =>
+                    {
+                        if (ShowWdlTerrain && _wdlTerrain != null)
+                            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller);
+                    });
+                },
+                () =>
+                {
+                    // 1. Render terrain (with frustum culling)
+                    frame.TerrainMs = MeasureDurationMs(() => _terrainManager.Render(view, proj, camPos, _frustumCuller));
+
+                    // Reset GL state after terrain
+                    _gl.DepthFunc(DepthFunction.Lequal);
+                    _gl.DepthMask(true);
+                    _gl.Disable(EnableCap.Blend);
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.UseProgram(0); // unbind terrain shader
+                },
+                () =>
+                {
+                    // One-time render diagnostic
+                    if (!_renderDiagPrinted)
+                    {
+                        int wmoFound = 0, wmoMissing = 0;
+                        foreach (var inst in _wmoInstances)
+                        {
+                            if (_assets.TryGetLoadedWmo(inst.ModelKey, out _)) wmoFound++;
+                            else { wmoMissing++; if (wmoMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Wmo, $"NOT FOUND: \"{inst.ModelKey}\""); }
+                        }
+                        int mdxFound = 0, mdxMissing = 0;
+                        foreach (var inst in _mdxInstances)
+                        {
+                            if (_assets.TryGetLoadedMdx(inst.ModelKey, out _)) mdxFound++;
+                            else { mdxMissing++; if (mdxMissing <= 3) ViewerLog.Debug(ViewerLog.Category.Mdx, $"NOT FOUND: \"{inst.ModelKey}\""); }
+                        }
+                        ViewerLog.Info(ViewerLog.Category.Terrain, $"Render check: WMO {wmoFound} found / {wmoMissing} missing, MDX {mdxFound} found / {mdxMissing} missing");
+                    }
+
+                    // Extract camera position from view matrix (inverse of view translation)
+                    Matrix4x4.Invert(view, out var viewInv);
+                    cameraPos = new Vector3(viewInv.M41, viewInv.M42, viewInv.M43);
+                    cameraForward = ExtractCameraForward(viewInv);
+                    _lastRenderedCameraPosition = cameraPos;
+                    _hasLastRenderedCameraPosition = true;
+
+                    EnsurePm4OverlayMatchesCameraWindow(cameraPos);
+
+                    // Update frustum planes for culling
+                    var vp = view * proj;
+                    _frustumCuller.Update(vp);
+
+                    // ── PASS 1: OPAQUE ──────────────────────────────────────────────
+                    // Render all opaque geometry first with depth write ON.
+                    // This ensures correct depth buffer before any transparent rendering.
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Less);
+                    _gl.DepthMask(true);
+                    _gl.Disable(EnableCap.Blend);
+
+                    WmoRenderedCount = 0;
+                    WmoCulledCount = 0;
+                    MdxRenderedCount = 0;
+                    MdxCulledCount = 0;
+                    batchRenderer = null;
+                },
+                () =>
+                {
+                    frame.WmoVisibilityMs = MeasureDurationMs(() => CollectVisibleWmoInstances(frame, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians));
+                    FlushPendingVisibleWmoLoads();
+
+                    // State is constant for this pass; set once to reduce per-instance churn and
+                    // keep WMO submission running through one explicit visible-instance bucket.
+                    frame.WmoSubmissionMs = MeasureDurationMs(() =>
+                    {
+                        _gl.Disable(EnableCap.Blend);
+                        _gl.DepthMask(true);
+
+                        WmoRenderedCount = WorldObjectPassCoordinator.ExecuteVisibleWmoOpaque(frame.Visibility, visible =>
+                        {
+                            WmoRenderer? renderer = ResolveVisibleWmoRenderer(frame, visible.Instance.ModelKey);
+                            if (renderer == null)
+                                return;
+
+                            renderer.RenderWithTransform(visible.Instance.Transform, view, proj,
+                                fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                        });
+                    });
+                    if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Wmo, $"WMO render: {WmoRenderedCount} drawn, {WmoCulledCount} culled");
+                },
+                () =>
+                {
+                    frame.MdxVisibilityMs = MeasureDurationMs(() =>
+                    {
+                        CollectVisibleMdxInstances(frame, _mdxInstances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+                        CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
+                    });
+                    FlushPendingVisibleMdxLoads();
+
+                    // Advance animation only for renderers that survived visibility admission.
+                    // The previous path scanned every placed MDX instance every frame, which was
+                    // pure idle CPU cost on large maps even when only a fraction were visible.
+                    frame.MdxAnimationMs = MeasureDurationMs(() =>
+                    {
+                        WorldObjectPassCoordinator.ExecuteVisibleMdxAnimation(frame.ObjectPasses, frame.Visibility, visible =>
+                        {
+                            IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                            if (renderer == null)
+                                return;
+
+                            renderer.UpdateAnimation();
+                        });
+                    });
+
+                    frame.MdxTransparentSortMs = MeasureDurationMs(() => PlanVisibleMdxPasses(frame));
+
+                    frame.MdxOpaqueSubmissionMs = MeasureDurationMs(() =>
+                    {
+                        batchRenderer = ResolveFirstOpaqueBatchedVisibleMdxRenderer(frame);
+                        batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                             lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                        frame.OpaqueUnbatchedMdxCount++;
-                    }
-                    else
-                    {
-                        visible.Renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
-                        frame.OpaqueBatchedMdxCount++;
-                    }
 
-                    MdxRenderedCount++;
-                }
-            });
+                        (frame.OpaqueBatchedMdxCount, frame.OpaqueUnbatchedMdxCount) =
+                            WorldObjectPassCoordinator.ExecutePlannedOpaqueMdx(
+                                frame.ObjectPasses,
+                                frame.Visibility,
+                                visible =>
+                                {
+                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    if (renderer == null)
+                                        return;
 
-            if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
-        }
+                                    renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Opaque, visible.OpaqueFade,
+                                        fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                    MdxRenderedCount++;
+                                },
+                                visible =>
+                                {
+                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    if (renderer == null)
+                                        return;
 
-        // ── PASS 2: LIQUID ──────────────────────────────────────────────
-        // Render liquid after opaque geometry has established the depth buffer,
-        // but before transparent MDX layers so reflective/translucent model
-        // surfaces are composited on top instead of being overpainted by water.
-        _gl.Disable(EnableCap.Blend);
-        _gl.DepthMask(true);
-        _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthFunc(DepthFunction.Lequal);
-        frame.LiquidMs = MeasureDurationMs(() => _terrainManager.RenderLiquid(view, proj, cameraPos));
+                                    renderer.RenderInstance(visible.Instance.Transform, RenderPass.Opaque, visible.OpaqueFade);
+                                    MdxRenderedCount++;
+                                });
+                    });
 
-        // ── PASS 3: TRANSPARENT (back-to-front, frustum-culled) ─────────
-        // Render transparent/blended layers sorted by distance to camera.
-        // Depth test ON but depth write OFF so transparent objects don't
-        // occlude each other incorrectly.
-        if (_doodadsVisible)
-        {
-            frame.MdxTransparentSortMs = MeasureDurationMs(() =>
-            {
-                for (int i = 0; i < frame.VisibleMdxInstances.Count; i++)
+                    if (!_renderDiagPrinted) ViewerLog.Info(ViewerLog.Category.Mdx, $"MDX opaque: {MdxRenderedCount} drawn, {MdxCulledCount} culled");
+                },
+                () =>
                 {
-                    frame.TransparentSortScratch.Add((i, frame.VisibleMdxInstances[i].CenterDistanceSq));
-                }
-
-                frame.TransparentSortScratch.Sort((a, b) => b.distSq.CompareTo(a.distSq));
-            });
-
-            frame.MdxTransparentSubmissionMs = MeasureDurationMs(() =>
-            {
-                batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
-                    lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-
-                _gl.Enable(EnableCap.DepthTest);
-                _gl.DepthFunc(DepthFunction.Lequal);
-
-                foreach (var (visibleIdx, _) in frame.TransparentSortScratch)
+                    // ── PASS 2: LIQUID ──────────────────────────────────────────────
+                    // Render liquid after opaque geometry has established the depth buffer,
+                    // but before transparent MDX layers so reflective/translucent model
+                    // surfaces are composited on top instead of being overpainted by water.
+                    _gl.Disable(EnableCap.Blend);
+                    _gl.DepthMask(true);
+                    _gl.Enable(EnableCap.DepthTest);
+                    _gl.DepthFunc(DepthFunction.Lequal);
+                    frame.LiquidMs = MeasureDurationMs(() => _terrainManager.RenderLiquid(view, proj, cameraPos));
+                },
+                () =>
                 {
-                    var visible = frame.VisibleMdxInstances[visibleIdx];
-                    if (visible.Renderer.RequiresUnbatchedWorldRender)
+                    // ── PASS 3: TRANSPARENT (back-to-front, frustum-culled) ─────────
+                    // Render transparent/blended layers sorted by distance to camera.
+                    // Depth test ON but depth write OFF so transparent objects don't
+                    // occlude each other incorrectly.
+                    frame.MdxTransparentSubmissionMs = MeasureDurationMs(() =>
                     {
-                        visible.Renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
-                            fogColor, objectFogStart, objectFogEnd, cameraPos,
+                        batchRenderer?.BeginBatch(view, proj, fogColor, objectFogStart, objectFogEnd, cameraPos,
                             lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
-                        frame.TransparentUnbatchedMdxCount++;
-                    }
-                    else
-                    {
-                        visible.Renderer.RenderInstance(visible.Instance.Transform, RenderPass.Transparent, visible.TransparentFade);
-                        frame.TransparentBatchedMdxCount++;
-                    }
-                }
-            });
-            if (!_renderDiagPrinted) _renderDiagPrinted = true;
-        }
-        else
-        {
-            if (!_renderDiagPrinted) _renderDiagPrinted = true;
-        }
 
-        frame.OverlayMs = MeasureDurationMs(() =>
-        {
+                        _gl.Enable(EnableCap.DepthTest);
+                        _gl.DepthFunc(DepthFunction.Lequal);
+
+                        (frame.TransparentBatchedMdxCount, frame.TransparentUnbatchedMdxCount) =
+                            WorldObjectPassCoordinator.ExecutePlannedTransparentMdx(
+                                frame.ObjectPasses,
+                                frame.Visibility,
+                                visible =>
+                                {
+                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    if (renderer == null)
+                                        return;
+
+                                    renderer.RenderWithTransform(visible.Instance.Transform, view, proj, RenderPass.Transparent, visible.TransparentFade,
+                                        fogColor, objectFogStart, objectFogEnd, cameraPos,
+                                        lighting.LightDirection, lighting.LightColor, lighting.AmbientColor);
+                                },
+                                visible =>
+                                {
+                                    IModelRenderer? renderer = ResolveVisibleMdxRenderer(frame, visible.Instance.ModelKey);
+                                    if (renderer == null)
+                                        return;
+
+                                    renderer.RenderInstance(visible.Instance.Transform, RenderPass.Transparent, visible.TransparentFade);
+                                });
+                    });
+                    if (!_renderDiagPrinted) _renderDiagPrinted = true;
+                },
+                () => frame.OverlayMs = MeasureDurationMs(() =>
+                {
             if (_wireframeRevealEnabled)
                 RenderWireframeReveal(view, proj, cameraPos, fogColor, fogStart, fogEnd, lighting);
 
@@ -7618,7 +7609,16 @@ public class WorldScene : ISceneRenderer
 
                 _bbRenderer.FlushBatch(view, proj);
             }
-        });
+                })));
+
+        if (!continuedPastTerrain)
+        {
+            FinalizeRenderFrameStats(frame, frameTimer);
+            return;
+        }
+
+        if (!_doodadsVisible && !_renderDiagPrinted)
+            _renderDiagPrinted = true;
 
         FinalizeRenderFrameStats(frame, frameTimer);
     }
@@ -10186,42 +10186,6 @@ public readonly struct Pm4OverlayTileStats
 /// Lightweight placement instance — just a model key and world transform.
 /// The actual renderer is looked up from WorldAssetManager at render time.
 /// </summary>
-public struct ObjectInstance
-{
-    public string ModelKey;
-    public Matrix4x4 Transform;
-    /// <summary>World-space AABB (local bounds transformed through placement matrix).</summary>
-    public Vector3 BoundsMin;
-    /// <summary>World-space AABB (local bounds transformed through placement matrix).</summary>
-    public Vector3 BoundsMax;
-    /// <summary>Model-local bounding box min (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
-    public Vector3 LocalBoundsMin;
-    /// <summary>Model-local bounding box max (MOHD for WMO, model extents for MDX). Zero if unavailable.</summary>
-    public Vector3 LocalBoundsMax;
-    /// <summary>Display name (filename) for UI.</summary>
-    public string ModelName;
-    /// <summary>Renderer-space position from placement.</summary>
-    public Vector3 PlacementPosition;
-    /// <summary>Rotation in degrees from placement.</summary>
-    public Vector3 PlacementRotation;
-    /// <summary>Scale from placement (1.0 = default).</summary>
-    public float PlacementScale;
-    /// <summary>Full model path for diagnostics.</summary>
-    public string ModelPath;
-    /// <summary>UniqueId from MODF/MDDF placement (for dedup and display).</summary>
-    public int UniqueId;
-    /// <summary>Placement entry index within the owning tile's MDDF/MODF chunk when known.</summary>
-    public int PlacementEntryIndex;
-    /// <summary>Owning terrain tile X when known.</summary>
-    public int TileX;
-    /// <summary>Owning terrain tile Y when known.</summary>
-    public int TileY;
-    /// <summary>True when TileX/TileY are meaningful for tile-scoped filtering.</summary>
-    public bool HasTileCoordinate;
-    /// <summary>True once bounds were derived from the loaded model instead of a temporary placement fallback.</summary>
-    public bool BoundsResolved;
-}
-
 public enum ObjectType { None, Wmo, Mdx }
 
 public enum UniqueIdVisibilityScope

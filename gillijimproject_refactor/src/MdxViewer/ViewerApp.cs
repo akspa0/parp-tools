@@ -23,6 +23,7 @@ using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.M2;
+using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
 using CoreMdxCollisionSummary = WowViewer.Core.Mdx.MdxCollisionSummary;
@@ -88,6 +89,8 @@ public partial class ViewerApp : IDisposable
     private GL _gl = null!;
     private IInputContext _input = null!;
     private ImGuiController _imGui = null!;
+    private readonly Lock _pendingImGuiMouseEventLock = new();
+    private readonly Queue<(int ButtonIndex, bool Down)> _pendingImGuiMouseButtonEvents = new();
     private Camera _camera = new();
     private ISceneRenderer? _renderer;
     private Vector2D<int> _lastSyncedImGuiWindowSize;
@@ -589,6 +592,8 @@ public partial class ViewerApp : IDisposable
         {
             mouse.MouseDown += (_, btn) =>
             {
+                QueueImGuiMouseButtonEvent(btn, down: true);
+
                 if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse
                     && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
                     _mouseDown = true;
@@ -619,6 +624,8 @@ public partial class ViewerApp : IDisposable
             };
             mouse.MouseUp += (_, btn) =>
             {
+                QueueImGuiMouseButtonEvent(btn, down: false);
+
                 if (btn == MouseButton.Right) _mouseDown = false;
             };
             mouse.MouseMove += (_, pos) =>
@@ -647,11 +654,7 @@ public partial class ViewerApp : IDisposable
             };
         }
 
-        // If launched with a file argument, load it
-        if (initialArgs != null && initialArgs.Length > 0 && File.Exists(initialArgs[0]))
-        {
-            LoadFileFromDisk(initialArgs[0]);
-        }
+        ApplyStartupAutomation(initialArgs);
     }
 
     private void TryAutoPopulateAlphaCoreRoot()
@@ -766,6 +769,7 @@ public partial class ViewerApp : IDisposable
     {
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         _imGui.Update((float)dt);
+        FlushPendingImGuiMouseButtonEvents();
         HandleKeyboardInput((float)dt);
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
@@ -10129,6 +10133,41 @@ void main() {
             && x <= state.Position.X + state.Size.X
             && y >= state.Position.Y
             && y <= state.Position.Y + state.Size.Y;
+    }
+
+    private void QueueImGuiMouseButtonEvent(MouseButton button, bool down)
+    {
+        int? buttonIndex = button switch
+        {
+            MouseButton.Left => 0,
+            MouseButton.Right => 1,
+            MouseButton.Middle => 2,
+            _ => null,
+        };
+
+        if (!buttonIndex.HasValue)
+            return;
+
+        lock (_pendingImGuiMouseEventLock)
+        {
+            _pendingImGuiMouseButtonEvents.Enqueue((buttonIndex.Value, down));
+        }
+    }
+
+    private void FlushPendingImGuiMouseButtonEvents()
+    {
+        lock (_pendingImGuiMouseEventLock)
+        {
+            if (_pendingImGuiMouseButtonEvents.Count == 0)
+                return;
+
+            var io = ImGui.GetIO();
+            while (_pendingImGuiMouseButtonEvents.Count > 0)
+            {
+                var (buttonIndex, down) = _pendingImGuiMouseButtonEvents.Dequeue();
+                io.AddMouseButtonEvent(buttonIndex, down);
+            }
+        }
     }
 
     private void CaptureDockPanelState(ref DockPanelState state)

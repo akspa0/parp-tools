@@ -1,5 +1,89 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 05, 2026 - Terrain-world ADT rendering is back on a tile-batched path in the active viewer
+
+- followed the user's correction that map-size/tile-count scaling, not just object density, is the dominant remaining symptom in the active viewer
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/TerrainManager.cs` now builds and uploads one `TerrainTileMesh` per loaded terrain tile instead of materializing `List<TerrainChunkMesh>` terrain uploads for streamed ADT worlds
+   - `Terrain/TerrainRenderer.cs` now uses the tile-batched terrain draw path when those tile meshes are present, while keeping the old chunk path available for consumers that still submit chunk meshes directly
+   - hole-visibility rebuilds still work: the manager now rebuilds the batched tile mesh with hole masks zeroed only for render-time output when `IgnoreTerrainHoles` is enabled for a tile or globally
+   - `ViewerApp_Sidebars.cs` now shows `Terrain draw/uniform/tex-bind` counters inside `Renderer Stats`, which should make the next live screenshot immediately show whether terrain submission actually collapsed
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - this is build validation only
+   - no live runtime retest has been captured yet for continent-map FPS after the tile-batching restore
+   - no real-data blend-correctness check has been captured yet for the restored alpha/shadow tile-array path
+
+## Apr 05, 2026 - MDX pass routing is now planned in wow-viewer runtime before the active viewer submits renderers
+
+- followed the user's latest direction to rethink the low-FPS world path structurally after they reported the UI was somewhat better but the scene was still only around `2-5 FPS`
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/WorldScene.cs` now calls into `WowViewer.Core.Runtime.World.Passes.WorldObjectPassCoordinator` to plan opaque and transparent MDX routes once per frame after visibility collection
+   - the host now uses the runtime-owned first-batched-visible index and planned route lists instead of rediscovering batching eligibility and transparent ordering inline during submission
+   - `WorldScene` still owns renderer lookup, GL state, batch begin, and the actual renderer calls; this is a host-thinning slice, not a full object-render migration
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldObjectPassCoordinatorTests|WorldFramePassCoordinatorTests|WorldObjectVisibilityCollectorTests"`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - no live runtime retest has been captured yet for FPS impact from this new route-planning seam
+
+## Apr 05, 2026 - The active UI click-loss bug is now explicitly mitigated in the viewer host path
+
+- followed live feedback that even simple UI buttons were often taking multiple clicks to respond under the current low-FPS scenes
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now latches raw Silk mouse down/up transitions and flushes them into ImGui right after `_imGui.Update(...)`
+   - this is specifically covering the current Silk.NET OpenGL ImGui backend behavior where mouse buttons are otherwise polled once per frame; short clicks can be missed entirely when frame times are very high
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - this is build validation only
+   - no live runtime retest has been captured yet for same-scene UI responsiveness after the input fix
+
+## Apr 05, 2026 - Liquid no longer draws every loaded chunk blindly, and the renderer stats now expose liquid visible counts
+
+- followed a new live screenshot where the active terrain liquid stage was still taking about `16.7 ms`
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/LiquidRenderer.cs` now stores bounds per terrain and WL liquid mesh and culls them against the current frustum plus fog-range distance before draw submission
+   - `ViewerApp_Sidebars.cs` now shows `Liquid visible: visible/total` in the renderer stats so future retests can confirm whether liquid over-submission dropped on the current scene
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - this is build validation only
+   - no live runtime signoff has been captured yet for the liquid-stage CPU reduction
+
+## Apr 05, 2026 - LIT base sampling no longer falls back to the first local light, and Show Doodads now reaches WMO-internal doodads too
+
+- followed fresh live feedback that the active viewer's LIT output still looked globally wrong and that a hidden WMO doodad path might still be contributing to the remaining frame collapse
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/LitLoader.cs` now uses only an actual default light as the base LIT sample; if no default light exists, the camera sample falls back to scene defaults plus spatially relevant local lights instead of globally applying whichever local light happens to appear first in file order
+   - `Rendering/WmoRenderer.cs` now separates manual doodad visibility from a runtime doodad gate, and `Terrain/WorldScene.cs` forwards the scene-level doodad visibility into visible WMO renderers so world `Show Doodads` actually suppresses WMO-internal doodad rendering too
+   - `ViewerApp_Investigation.cs` now explicitly says the current runtime sample is camera-driven and group-0-only, while table selection remains inspection/highlight only
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - this is build validation only
+   - no live runtime signoff has been captured yet for corrected LIT visuals or WMO-side FPS impact
+
+## Apr 04, 2026 - Object detail is now an explicit live control, and the active world collector is FOV-aware instead of distance-only
+
+- followed fresh live feedback that the terrain-world viewer remained unusable around `5 FPS` even after earlier loading and transparent-pass trims
+- active `src/MdxViewer` now exposes scene-pressure controls directly in the live UI:
+   - `ViewerApp_Sidebars.cs` and `ViewerApp_Investigation.cs` now expose `Show Scene Objects`, `Show WMOs`, `Show Doodads`, and `Object Detail`
+   - the current object-detail modes are `Quality`, `Balanced`, and `Performance`
+   - renderer stats now show the selected object-detail profile next to the existing stream-range and frame-stage numbers
+- active `WorldScene` behavior after this slice:
+   - the world collector now derives the live vertical FOV from the projection matrix and forwards it into the shared runtime visibility collector
+   - the default active detail mode is `Performance`
+   - visible-object admission is now affected by projected screen size, not only by raw distance and loose cone checks
+   - missing WMO/MDX assets are no longer always queued just because they are in a broad distance band; tiny or low-value off-view candidates can now be skipped
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+   - shared runtime proof also passed in `wow-viewer` via focused `WorldObjectVisibilityCollectorTests`, `WorldObjectPassCoordinatorTests`, and `WorldFramePassCoordinatorTests`
+- important boundary:
+   - this is build plus focused runtime-unit validation only
+   - no live same-scene FPS signoff has been captured yet for the new detail profiles
+
 ## Apr 04, 2026 - UniqueId archaeology now selects a visible range, and terrain streaming no longer prewarms whole tile object sets
 
 - followed live feedback that the active UniqueId archaeology sliders were effectively selecting two outside ranges to keep visible instead of a normal inclusive range window

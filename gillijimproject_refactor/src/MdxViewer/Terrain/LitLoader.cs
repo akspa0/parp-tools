@@ -338,9 +338,7 @@ public sealed class LitLoader
 
         float timeOfDay = WrapTime(gameTime * 2880f);
         int clearGroupIndex = 0;
-        int baseLightIndex = Lights.FindIndex(light => light.IsDefaultLight || light.Groups.Count > clearGroupIndex);
-        if (baseLightIndex < 0)
-            baseLightIndex = 0;
+        int baseLightIndex = Lights.FindIndex(light => light.IsDefaultLight);
 
         LitLight? baseLight = baseLightIndex >= 0 && baseLightIndex < Lights.Count ? Lights[baseLightIndex] : null;
         LitLightingSample? baseSample = baseLight != null

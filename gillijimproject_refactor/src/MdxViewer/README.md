@@ -96,6 +96,23 @@ Use `File > Open File...` or pass a file path on launch.
 - standalone WMOs can be inspected directly
 - world files can be opened after the relevant data source/base client is configured
 
+### Optional CLI automation workflow
+
+The viewer now supports a narrow non-interactive startup path for real-data capture runs.
+
+- `--game-path <clientRoot>` loads a base MPQ client directly
+- `--build <buildVersion>` pins the client build instead of using the UI picker
+- `--loose-map-overlay <folder>` attaches a split map overlay after the base client loads
+- `--world <path-or-virtual-path>` loads a world or other asset after startup configuration finishes
+- `--capture-shot <shotName>` queues a saved camera shot from `output/settings/camera_shot_points.json`
+- `--capture-output <folder>` overrides the capture output root
+- `--capture-with-ui` captures the full framebuffer instead of the scene viewport only
+- `--exit-after-capture` closes the viewer after the queued startup capture completes
+
+Example:
+
+`dotnet run --project .\MdxViewer.csproj -- --game-path "D:\WoW\Wrath-3.3.5.12340" --build 3.3.5.12340 --loose-map-overlay "I:\parp\parp-tools\gillijimproject_refactor\test_data\development" --world "I:\parp\parp-tools\gillijimproject_refactor\test_data\development\World\Maps\development\development.wdt" --capture-shot development_gate --capture-output "I:\parp\parp-tools\output\captures" --exit-after-capture`
+
 ## What the viewer currently supports
 
 ### World and terrain viewing

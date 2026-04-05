@@ -2,11 +2,19 @@ using System.Numerics;
 using ImGuiNET;
 using MdxViewer.Terrain;
 using WowViewer.Core.Runtime.World;
+using WowViewer.Core.Runtime.World.Visibility;
 
 namespace MdxViewer;
 
 public partial class ViewerApp
 {
+    private static readonly string[] WorldObjectVisibilityProfileLabels =
+    [
+        "Quality",
+        "Balanced",
+        "Performance",
+    ];
+
     private enum VisualInvestigationMode
     {
         Auto,
@@ -47,6 +55,18 @@ public partial class ViewerApp
         if (ImGui.SliderFloat("Object Stream Range", ref objectRangeMultiplier, 1.00f, 4.00f, "%.2fx"))
             _worldScene.ObjectStreamingRangeMultiplier = objectRangeMultiplier;
 
+        int visibilityProfileIndex = (int)_worldScene.ObjectVisibilityProfile;
+        if (ImGui.Combo("Object Detail", ref visibilityProfileIndex, WorldObjectVisibilityProfileLabels, WorldObjectVisibilityProfileLabels.Length))
+            _worldScene.ObjectVisibilityProfile = (WorldObjectVisibilityProfile)visibilityProfileIndex;
+
+        bool showWmos = _worldScene.WmosVisible;
+        if (ImGui.Checkbox("Show WMOs", ref showWmos))
+            _worldScene.WmosVisible = showWmos;
+        ImGui.SameLine();
+        bool showDoodads = _worldScene.DoodadsVisible;
+        if (ImGui.Checkbox("Show Doodads", ref showDoodads))
+            _worldScene.DoodadsVisible = showDoodads;
+
         WorldRenderFrameStats stats = _worldScene.LastRenderFrameStats;
         double wmoObjectCostMs = stats.WmoVisibility.DurationMs + stats.WmoSubmission.DurationMs;
         double mdxObjectCostMs = stats.MdxVisibility.DurationMs + stats.MdxOpaqueSubmission.DurationMs
@@ -56,6 +76,7 @@ public partial class ViewerApp
             : $"MDX visibility/submission is currently larger ({mdxObjectCostMs:0.00} ms).";
         ImGui.TextDisabled(hotspot);
         ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 1.00x.");
+        ImGui.TextDisabled("Balanced/Performance also use FOV-aware projected-size culling and stop queueing tiny off-view assets.");
         ImGui.TextDisabled("MDX 'batched' counts in the stats are shared-shader submissions, not true GPU instancing.");
     }
 
@@ -388,7 +409,7 @@ public partial class ViewerApp
 
         ImGui.TextDisabled($"Path: {loader.SourcePath}");
         ImGui.TextDisabled($"Version: 0x{loader.Version:X8}  RawCount: {loader.RawLightCount}  Parsed lights: {loader.Lights.Count}");
-        ImGui.TextDisabled("Current runtime sampling uses LIT group 0 only; other groups remain visible for inspection but are not applied yet.");
+        ImGui.TextDisabled("Runtime LIT is still camera-driven and uses group 0 only; table selection is inspection/highlight only, and other groups are not applied yet.");
 
         LitLoader.LitLightingSample? litSample = _worldScene.LastLitSample;
         if (litSample != null)

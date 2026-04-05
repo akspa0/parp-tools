@@ -8,6 +8,8 @@ public interface IModelRenderer : ISceneRenderer
 
     Vector3 BoundsMax { get; }
 
+    bool HasTransparentWorldPass { get; }
+
     bool RequiresUnbatchedWorldRender { get; }
 
     MdxAnimator? Animator { get; }

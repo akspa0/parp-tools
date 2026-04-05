@@ -41,6 +41,7 @@ public partial class ViewerApp
         public string OutputPath { get; set; } = string.Empty;
         public bool IncludeUi { get; set; }
         public bool Applied { get; set; }
+        public bool ExitAfterCapture { get; set; }
     }
 
     private sealed class CameraShotPointDocument
@@ -297,7 +298,7 @@ public partial class ViewerApp
             _statusMessage = "No shot points matched the current filter.";
     }
 
-    private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi)
+    private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture = false)
     {
         if (string.IsNullOrWhiteSpace(_captureOutputDir))
             _captureOutputDir = Path.Combine(OutputDir, "captures");
@@ -325,6 +326,7 @@ public partial class ViewerApp
             },
             OutputPath = outputPath,
             IncludeUi = includeUi,
+            ExitAfterCapture = exitAfterCapture,
         });
 
         _statusMessage = $"Queued capture '{shot.Name}' ({mode}).";
@@ -358,6 +360,9 @@ public partial class ViewerApp
         _statusMessage = ok
             ? $"Captured shot: {request.OutputPath}"
             : $"Capture failed: {request.OutputPath}";
+
+        if (request.ExitAfterCapture)
+            _window.Close();
     }
 
     private unsafe bool TryCaptureFramebufferToPng(string outputPath, bool includeUi)

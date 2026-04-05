@@ -4,6 +4,8 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using MdxViewer.Terrain;
+using WowViewer.Core.Runtime.World.Visibility;
+using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 
 namespace MdxViewer;
 
@@ -1148,6 +1150,25 @@ public partial class ViewerApp
                 _worldScene.ShowWdlTerrain = showWdl;
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
+
+            bool showObjects = _worldScene.ObjectsVisible;
+            if (ImGui.Checkbox("Show Scene Objects", ref showObjects))
+                _worldScene.ObjectsVisible = showObjects;
+
+            bool showWmos = _worldScene.WmosVisible;
+            if (ImGui.Checkbox("Show WMOs", ref showWmos))
+                _worldScene.WmosVisible = showWmos;
+            ImGui.SameLine();
+            bool showDoodads = _worldScene.DoodadsVisible;
+            if (ImGui.Checkbox("Show Doodads", ref showDoodads))
+                _worldScene.DoodadsVisible = showDoodads;
+
+            int visibilityProfileIndex = (int)_worldScene.ObjectVisibilityProfile;
+            if (ImGui.Combo("Object Detail", ref visibilityProfileIndex, WorldObjectVisibilityProfileLabels, WorldObjectVisibilityProfileLabels.Length))
+                _worldScene.ObjectVisibilityProfile = (WorldObjectVisibilityProfile)visibilityProfileIndex;
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Quality keeps more far objects alive. Performance culls tiny projected objects and skips low-value off-view loads.");
         }
 
         if (renderer.ShowContours)
@@ -1177,15 +1198,21 @@ public partial class ViewerApp
             ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
 
             var renderStats = _worldScene.LastRenderFrameStats;
+            LiquidRenderer? renderStatsLiquidRenderer = _terrainManager?.LiquidRenderer;
             if (ImGui.TreeNode("Renderer Stats"))
             {
                 ImGui.TextDisabled("World render CPU only. UI/layout/input/swap are not included.");
                 ImGui.Text($"World CPU: {renderStats.TotalCpuMs:0.00} ms  Pending asset loads: {renderStats.PendingAssetLoadCount}");
                 ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
                 ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");
+                ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
                 ImGui.Text($"Terrain chunks: {renderStats.TerrainChunksRendered}  WDL tiles: {renderStats.WdlVisibleTileCount}");
+                if (terrainRenderer != null)
+                    ImGui.Text($"Terrain draw/uniform/tex-bind: {terrainRenderer.LastFrameDrawCalls}/{terrainRenderer.LastFrameUniform1Calls}/{terrainRenderer.LastFrameBindTextureCalls}");
                 ImGui.Text($"Deferred/taxi/light: {renderStats.DeferredAssetLoads.DurationMs:0.00} / {renderStats.TaxiActorUpdate.DurationMs:0.00} / {renderStats.Lighting.DurationMs:0.00} ms");
                 ImGui.Text($"WDL/terrain/liquid: {renderStats.Wdl.DurationMs:0.00} / {renderStats.Terrain.DurationMs:0.00} / {renderStats.Liquid.DurationMs:0.00} ms");
+                if (renderStatsLiquidRenderer != null)
+                    ImGui.Text($"Liquid visible: {renderStatsLiquidRenderer.LastVisibleTerrainMeshCount}/{renderStatsLiquidRenderer.MeshCount}  WL: {renderStatsLiquidRenderer.LastVisibleWlMeshCount}/{renderStatsLiquidRenderer.WlMeshCount}");
                 ImGui.Text($"WMO vis/draw: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} ms");
                 ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
                 ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");

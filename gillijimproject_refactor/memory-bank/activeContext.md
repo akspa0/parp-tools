@@ -2,6 +2,213 @@
 
 # Active Context
 
+## Apr 05, 2026 - Active terrain rendering is back on a tile-batched submission path for streamed ADT worlds
+
+- followed the user's correction that normal continent-sized maps remain near `5 FPS` regardless of scene composition, while tiny maps with only about a dozen tiles normalize near `60 FPS`; that invalidated the earlier object-heavy interpretation as the primary answer
+- confirmed the active terrain-world path had regressed to per-chunk terrain submission:
+	- `TerrainManager` was keeping loaded tiles as `List<TerrainChunkMesh>`
+	- `TerrainRenderer` was issuing terrain draw work chunk-by-chunk and layer-by-layer across the loaded AOI
+	- rollback branches still contained a tile-batched terrain path using `TerrainTileMeshBuilder`, `TerrainTileMesh`, and one terrain draw per tile
+- landed the restore in the active `src/MdxViewer` path:
+	- added `Terrain/TerrainTileMesh.cs` and `Terrain/TerrainTileMeshBuilder.cs`
+	- `Terrain/TerrainManager.cs` now uploads one batched terrain tile mesh per loaded ADT tile instead of uploading hundreds of per-chunk terrain meshes, while preserving the current hole-visibility rebuild hooks by zeroing hole masks only for the render-time tile build when the user disables holes
+	- `Terrain/TerrainRenderer.cs` now renders the tile-batched terrain path when tile meshes are present, but still preserves the chunk path for consumers like VLM that still upload chunk meshes directly
+	- `ViewerApp_Sidebars.cs` now exposes `Terrain draw/uniform/tex-bind` counters in `Renderer Stats` so the next live screenshot can confirm whether terrain submission actually collapsed as expected
+- terrain guardrail follow-up completed:
+	- compared the touched terrain batching file set against baseline commit `343dadfa27df08d384614737b6c5921efe6409c8`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no real-data runtime retest has been captured yet for the restored tile-batched terrain path
+	- because this slice touches alpha/shadow packing again through the tile array path, do not claim terrain safety until a real development-map runtime check confirms both FPS behavior and blend correctness
+
+## Apr 05, 2026 - WorldScene now delegates MDX route planning to wow-viewer runtime instead of deciding batching and transparent ordering inline
+
+- followed live retest feedback after the UI click fix: the active UI felt somewhat less laggy, but scene performance was still catastrophic at roughly `2-5 FPS`, and the next explicit user direction was to shrink `WorldScene` through `wow-viewer` instead of stacking more host-only patches
+- landed a new runtime-owned object-pass seam in `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes`:
+	- `WorldObjectPassFrame` now carries planned opaque and transparent MDX route lists plus the first batched opaque visible index
+	- `WorldObjectPassCoordinator` now owns opaque-route planning, transparent-route planning, and execution over those planned routes instead of leaving `WorldScene` to rediscover batching eligibility and transparent ordering inline during submission
+	- new `WorldVisibleMdxPassRoute` is the reusable contract for one visible-MDX route decision
+- active `MdxViewer` consumption changed in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- `WorldScene` now asks the runtime seam to plan MDX pass routes once per frame after visibility and before submission
+	- the host still resolves concrete renderers and issues GL draw calls, but it no longer owns the per-frame decision logic for first batched opaque MDX selection or transparent route ordering
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldObjectPassCoordinatorTests|WorldFramePassCoordinatorTests|WorldObjectVisibilityCollectorTests"`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is focused runtime-test plus build validation only
+	- no live runtime FPS capture has been recorded yet for the new route-planning seam
+
+## Apr 05, 2026 - UI click loss is not just scene overload; the active ImGui path was dropping short mouse clicks at very low FPS
+
+- followed live feedback that the active viewer UI itself was laggy enough to need multiple clicks for buttons, which pointed to a deeper frame/input path problem than scene draw cost alone
+- confirmed a concrete backend issue in the current `MdxViewer` host path:
+	- the Silk.NET OpenGL `ImGuiController` used by `src/MdxViewer/ViewerApp.cs` polls mouse button state once per `Update()` via `CaptureState()` instead of queueing mouse down/up transitions, so at `~5 FPS` short clicks can disappear between frames
+- landed a narrow host-side mitigation in `src/MdxViewer/ViewerApp.cs`:
+	- raw Silk mouse down/up events are now latched into a pending queue and flushed into ImGui with explicit mouse-button events immediately after `_imGui.Update(...)`
+	- this keeps short clicks visible to ImGui even when the scene frame time is bad enough that pure per-frame polling misses them
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime retest has been captured yet for same-scene button responsiveness after the backend fix
+
+## Apr 05, 2026 - Terrain liquid no longer submits every loaded mesh blindly; the active viewer now frustum- and fog-culls liquid chunks
+
+- followed a new live screenshot showing the active scene still around `5 FPS` with `World CPU` near `89 ms`, where the liquid pass alone was still costing roughly `16.7 ms`
+- found a direct renderer-side over-submission bug in `src/MdxViewer/Terrain/LiquidRenderer.cs`:
+	- terrain liquid and loose WL liquid bodies were being drawn by iterating every loaded mesh with no frustum cull and no fog-range distance gate
+- landed a narrow hot-path fix:
+	- `LiquidRenderer` now keeps bounds per liquid mesh and uses `FrustumCuller` plus a fog-range distance gate before issuing liquid draw calls
+	- the renderer now also exposes `LastVisibleTerrainMeshCount` and `LastVisibleWlMeshCount`, and `ViewerApp_Sidebars.cs` shows those live counts in `Renderer Stats` so the next screenshot can confirm whether liquid submission actually dropped
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no live runtime retest has been captured yet for the new liquid cull, so no FPS improvement is claimed yet
+
+## Apr 05, 2026 - Active LIT sampling no longer treats the first local light as a global base, and scene doodad visibility now gates WMO-internal doodads too
+
+- followed fresh live feedback that the active viewer's LIT result still looked globally wrong and that world performance remained unusable even after earlier object-admission trims
+- landed two narrow correctness/perf fixes in the active `MdxViewer` host path:
+	- `src/MdxViewer/Terrain/LitLoader.cs` no longer picks the first light with any groups as the base LIT sample; the base sample now comes only from an actual default light, so local lights no longer tint the whole scene just because they appear first in file order
+	- `src/MdxViewer/Rendering/WmoRenderer.cs` now has a runtime doodad-visibility gate, and `src/MdxViewer/Terrain/WorldScene.cs` forwards the scene-level doodad visibility into visible WMO renderers so `Show Doodads` also suppresses WMO-internal doodad rendering instead of only standalone scene doodads
+- tightened the live investigation wording in `src/MdxViewer/ViewerApp_Investigation.cs` so the LIT panel explicitly says table selection is inspection-only while runtime sampling remains camera-driven and group-0-only
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build validation only
+	- no automated tests were added or run for these active-viewer changes
+	- no live LIT-correctness or same-scene FPS signoff has been captured yet
+
+## Apr 04, 2026 - Active renderer path now has FOV-aware object detail profiles and explicit object-family controls, but live FPS signoff is still pending
+
+- followed new live feedback that even after earlier loading and transparent-pass trims, the active viewer was still stuck around `5 FPS` and remained unusable on dense terrain scenes
+- landed a new runtime-owned object-visibility policy slice instead of only another distance/range tweak:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/WorldObjectVisibilityContext.cs` now carries `VerticalFieldOfViewRadians` plus a new `WorldObjectVisibilityProfile` (`Quality`, `Balanced`, `Performance`)
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/WorldObjectVisibilityCollector.cs` now uses that policy to:
+		- cull tiny far objects by projected on-screen size, not only raw distance
+		- skip queueing pending assets that are both tiny and low-value for the current view
+		- keep near-hold and meaningful front-view assets eligible so the viewer still fills the scene in front of the camera
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now derives vertical FOV from the live projection matrix and passes it into the shared collector; the active viewer default is now the new `Performance` detail profile
+- active viewer controls now surface the new efficiency seam directly:
+	- `ViewerApp_Sidebars.cs` and `ViewerApp_Investigation.cs` now expose `Show Scene Objects`, `Show WMOs`, `Show Doodads`, and `Object Detail` controls instead of leaving object pressure management as an implicit code path only
+	- renderer stats now also show the current `Object detail` profile alongside the existing object-stream range and render timings
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldObjectVisibilityCollectorTests|WorldObjectPassCoordinatorTests|WorldFramePassCoordinatorTests"`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build plus focused runtime-unit proof only
+	- no new live runtime FPS signoff has been captured yet
+	- the immediate next step is a same-scene retest to compare visible counts, pending loads, and world CPU under the new `Balanced` and `Performance` object-detail modes
+
+## Apr 04, 2026 - New integrated wow-viewer reference-renderer performance plan now treats wow-viewer as the canonical cross-version C# engine target
+
+- added `gillijimproject_refactor/plans/wow_viewer_reference_renderer_performance_plan_2026-04-04.md`
+- the new plan explicitly reframes the renderer goal as:
+	- one version-aware engine for Alpha-era and 3.x-era data
+	- artifact-preserving runtime ownership, not just parser ownership
+	- real performance architecture work in `wow-viewer`, not endless isolated `MdxViewer` hotfixes
+- the plan unifies the previously separate world-runtime and M2-runtime directions under one staged renderer program:
+	- measurement and fixed-scene proof harness
+	- version-profile system for runtime rules
+	- world frame and visible-set extraction
+	- spatial index and residency ownership
+	- WMO runtime decomposition
+	- M2 runtime completion plus real batching/submission work
+	- shared lighting and era parity
+	- `WowViewer.App` consumer cutover
+- current recommended next slices from that plan:
+	- visible-set runtime extraction in `wow-viewer`
+	- M2 scene-submission and batching design in `wow-viewer`
+	- fixed Alpha/3.3.5 performance proof harness work
+- important proof boundary:
+	- this is planning and continuity only
+	- no new runtime behavior or performance result is claimed from the plan itself
+
+## Apr 04, 2026 - World runtime slice 02 now has an implementation-ready build boundary instead of only an umbrella label
+
+- tightened `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md` so `Slice 02 - Visible Set Runtime Extraction` is now a concrete build plan rather than only a phase heading
+- the current agreed first extraction seam is narrow on purpose:
+	- move pure WMO/MDX/taxi visibility admission and visible-bucket scratch ownership into `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility`
+	- keep renderer lookup, pending visible-load queueing, animation advance, transparent sort, and actual draw submission in `MdxViewer.WorldScene`
+- important compatibility-bridge rule recorded in that plan:
+	- do not let `WowViewer.Core.Runtime` take dependencies on `WmoRenderer`, `IModelRenderer`, `WorldAssetManager`, or raw GL-state ownership just to force the extraction
+	- if frustum checks need host help, use a tiny adapter seam rather than smuggling viewer renderer types into the runtime layer
+- expected first file set from the build plan:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/WorldObjectInstance.cs`
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/*`
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs`
+- important proof boundary:
+	- this is still continuity and execution-surface work only
+	- no slice-02 runtime extraction code has landed yet from the plan edit itself
+
+## Apr 04, 2026 - First world-runtime visible-set bridge is now landed in wow-viewer and consumed by MdxViewer
+
+- the first real `wow-viewer` world-runtime slice beyond telemetry is now in code:
+	- `WowViewer.Core.Runtime.World.WorldObjectInstance`
+	- `WowViewer.Core.Runtime.World.Visibility.WorldObjectVisibilityContext`
+	- `WowViewer.Core.Runtime.World.Visibility.WorldVisibleWmoEntry`
+	- `WowViewer.Core.Runtime.World.Visibility.WorldVisibleMdxEntry`
+	- `WowViewer.Core.Runtime.World.Visibility.WorldVisibilityFrame`
+	- `WowViewer.Core.Runtime.World.Visibility.WorldObjectVisibilityCollector`
+- active `MdxViewer` integration now uses that seam in `src/MdxViewer/Terrain/WorldScene.cs`:
+	- nested visible-entry structs were removed from `WorldScene`
+	- `WorldRenderFrame` now delegates visible-bucket ownership to runtime-owned `WorldVisibilityFrame`
+	- WMO and MDX visible-set collection now routes through `WorldObjectVisibilityCollector`
+	- `WorldScene` still owns renderer lookup, pending visible-load queueing, animation update, transparent sort, and actual draw submission
+- focused proof landed:
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldObjectVisibilityCollectorTests.cs`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter WorldObjectVisibilityCollectorTests`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- this is build plus focused runtime-unit proof only
+	- no real-data viewer capture or performance signoff was done in this slice
+	- slice 03 pass extraction is still open
+
+## Apr 04, 2026 - First world-runtime object-pass coordinator bridge is now landed, but capture automation is still not non-interactive
+
+- the next world-runtime slice beyond visible-set ownership now exists in code:
+	- `WowViewer.Core.Runtime.World.Passes.WorldObjectPassFrame`
+	- `WowViewer.Core.Runtime.World.Passes.WorldObjectPassCoordinator`
+- active `MdxViewer` usage after this slice:
+	- transparent MDX sort scratch no longer lives only in `WorldScene`
+	- MDX animation dedup and concrete object-pass iteration for WMO opaque, MDX opaque, and MDX transparent now route through runtime-owned pass helpers
+	- `WorldScene` still owns GL state, renderer lookup, batch begin, and actual renderer invocation
+- focused proof landed:
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldObjectPassCoordinatorTests.cs`
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldObjectPassCoordinatorTests|WorldObjectVisibilityCollectorTests"`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- capture automation clarification from the same investigation:
+	- queued capture execution is automatic once a request exists, but queue creation is still UI-driven in `ViewerApp_CaptureAutomation`
+	- current startup args for `MdxViewer` still only open a file path; they do not queue a capture or drive the split development-map world path non-interactively
+	- do not claim a real-data capture pass was completed from this environment unless a startup capture hook or equivalent non-UI path is added first
+
+## Apr 04, 2026 - Startup capture automation and a frame-order coordinator are now landed, but proof is still build-and-unit only
+
+- active `MdxViewer` now has a narrow non-interactive startup path in `src/MdxViewer/ViewerApp_StartupAutomation.cs`:
+	- `--game-path <clientRoot>` loads a base MPQ client directly
+	- `--build <buildVersion>` pins the selected client build
+	- `--loose-map-overlay <folder>` reuses the existing loose-overlay attach path without UI
+	- `--world <path-or-virtual-path>` loads a world or asset after startup setup
+	- `--capture-shot <shotName>`, `--capture-output <folder>`, `--capture-with-ui`, and `--exit-after-capture` now reuse the existing queued capture pipeline without manual queue creation
+- world-runtime slice 03 is now widened beyond the object-family helpers:
+	- `wow-viewer/src/core/WowViewer.Core.Runtime/World/Passes/WorldFramePassCoordinator.cs` now owns the current top-level frame order and visibility gating from lighting/sky/skybox/WDL/terrain through object-phase preparation, liquid, transparent MDX, and overlay
+	- `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` now provides concrete host callbacks into that coordinator instead of keeping the whole stage order inline
+	- `wow-viewer/tests/WowViewer.Core.Tests/WorldFramePassCoordinatorTests.cs` adds focused order/gating proof on top of the existing visibility and object-pass tests
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter "WorldFramePassCoordinatorTests|WorldObjectPassCoordinatorTests|WorldObjectVisibilityCollectorTests"`
+	- `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important proof boundary:
+	- the new startup hook was not exercised against a real fixed capture in this session
+	- the frame-order seam is runtime-owned, but actual GL state and renderer calls are still host-owned in `WorldScene`
+	- no real-data capture or performance signoff is claimed from this slice
+
 ## Apr 04, 2026 - UniqueId archaeology now filters to a visible range, and terrain streaming no longer prewarms whole tile object sets
 
 - followed immediate live feedback that the two UniqueId archaeology sliders were behaving like a split hide mask instead of a normal `[start..end]` range selector
