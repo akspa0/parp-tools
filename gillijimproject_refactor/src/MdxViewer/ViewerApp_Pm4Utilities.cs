@@ -15,9 +15,9 @@ public partial class ViewerApp
 {
     private void OpenPm4Workbench(Pm4WorkbenchTab tab)
     {
-        _showRightSidebar = true;
-        _forceOpenPm4WorkbenchInspector = true;
+        FocusShellPanel(ShellPanelId.Pm4Workbench);
         _pendingPm4WorkbenchTab = tab;
+        _useDockspaceUi = true;
     }
 
     private void DrawPm4WorkbenchInspector()

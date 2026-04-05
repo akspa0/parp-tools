@@ -53,6 +53,25 @@ public partial class ViewerApp : IDisposable
         Editor,
     }
 
+    private enum ShellPanelId
+    {
+        Navigator,
+        Inspector,
+        Pm4Workbench,
+        TerrainControls,
+        RuntimeStats,
+        WorldObjects,
+        ModelInfo,
+        Minimap,
+    }
+
+    private enum ShellPanelLane
+    {
+        Left,
+        Right,
+        Floating,
+    }
+
     private enum EditorWorkspaceTask
     {
         Terrain,
@@ -63,6 +82,15 @@ public partial class ViewerApp : IDisposable
     }
 
     private readonly record struct PlacementEditKey(Terrain.ObjectType ObjectType, int TileX, int TileY, int EntryIndex, int UniqueId);
+
+    private readonly record struct ShellPanelDefinition(
+        ShellPanelId Id,
+        string WindowName,
+        ShellPanelLane Lane,
+        float DefaultWidth,
+        float MinWidth,
+        float CompactMinWidth,
+        float MaxWidth);
 
     private sealed class StagedPlacementEdit
     {
@@ -210,7 +238,7 @@ public partial class ViewerApp : IDisposable
     private bool _showRenderQualityWindow = false;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
-    private bool _useDockspaceUi = false;
+    private bool _useDockspaceUi = true;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
     private bool _fallbackToFixedPanelsNextFrame;
@@ -245,8 +273,25 @@ public partial class ViewerApp : IDisposable
         public Vector2 Size;
     }
 
+    private static readonly ShellPanelDefinition[] ShellPanelDefinitions =
+    {
+        new(ShellPanelId.Navigator, "Navigator", ShellPanelLane.Left, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
+        new(ShellPanelId.Inspector, "Selection", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
+        new(ShellPanelId.Pm4Workbench, "PM4 Workbench", ShellPanelLane.Right, 420f, 300f, 220f, 820f),
+        new(ShellPanelId.TerrainControls, "Terrain Controls", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
+        new(ShellPanelId.RuntimeStats, "Runtime Stats", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
+        new(ShellPanelId.WorldObjects, "World Objects", ShellPanelLane.Right, 420f, 300f, 220f, 820f),
+        new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
+        new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
+    };
+
     private DockPanelState _navigatorDockState;
     private DockPanelState _inspectorDockState;
+    private DockPanelState _pm4WorkbenchDockState;
+    private DockPanelState _terrainControlsDockState;
+    private DockPanelState _runtimeStatsDockState;
+    private DockPanelState _worldObjectsDockState;
+    private DockPanelState _modelInfoDockState;
     private DockPanelState _minimapDockState;
 
     private enum TerrainTileScope
@@ -358,11 +403,16 @@ public partial class ViewerApp : IDisposable
     private bool _showRightSidebar = true;
     private const float DefaultSidebarWidth = 320f;
     private const float SidebarMinWidth = 260f;
+    private const float SidebarCompactMinWidth = 180f;
     private const float SidebarMaxWidth = 720f;
-        private const float SidebarSplitterWidth = 8f;
-        private const float SceneViewportPreferredMinWidth = 420f;
+    private const float SidebarSplitterWidth = 8f;
+    private const float SceneViewportPreferredMinWidth = 420f;
+    private const float SceneViewportHardMinWidth = 240f;
     private float _leftSidebarWidth = DefaultSidebarWidth;
     private float _rightSidebarWidth = DefaultSidebarWidth;
+    private bool _suppressLeftSidebarForLayout;
+    private bool _suppressRightSidebarForLayout;
+    private bool _suppressMinimapForLayout;
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
@@ -410,7 +460,7 @@ public partial class ViewerApp : IDisposable
     private bool _showPm4AlignmentWindow;
     private bool _showPm4ObjectMatchWindow;
     private bool _showPm4WmoCorrelationWindow;
-    private bool _forceOpenPm4WorkbenchInspector;
+    private ShellPanelId? _pendingFocusedShellPanel;
     private Pm4WorkbenchTab? _pendingPm4WorkbenchTab;
     private Pm4ObjectMatchReport? _pm4ObjectMatchReport;
     private Pm4ObjectMatchObject? _selectedPm4ObjectMatch;
@@ -1151,6 +1201,8 @@ void main() {
 
     private void DrawUI()
     {
+        UpdateShellLayout(ImGui.GetIO().DisplaySize);
+
         if (_fallbackToFixedPanelsNextFrame)
         {
             _fallbackToFixedPanelsNextFrame = false;
@@ -1158,9 +1210,7 @@ void main() {
             _statusMessage = "Docked panel layout was invalid; reverted to fixed sidebars.";
         }
 
-        _navigatorDockState = default;
-        _inspectorDockState = default;
-        _minimapDockState = default;
+        ResetDockPanelStates();
         if (_hideUiChrome || !_useDockspaceUi)
         {
             _dockspaceHostPosition = Vector2.Zero;
@@ -1176,9 +1226,9 @@ void main() {
             if (_useDockspaceUi)
                 DrawDockspaceHost();
 
-            if (_showLeftSidebar)
+            if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
                 DrawLeftSidebar();
-            if (_showRightSidebar)
+            if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
                 DrawRightSidebar();
             if (!_useDockspaceUi)
                 DrawFixedSidebarSplitters();
@@ -1200,7 +1250,7 @@ void main() {
                 DrawWdlPreviewDialog();
 
             // Minimap panel
-            if (_showMinimapWindow && !_fullscreenMinimap)
+            if (IsShellPanelActive(ShellPanelId.Minimap) && !_fullscreenMinimap)
                 DrawMinimapWindow();
 
             // Perf (floating window)
@@ -1342,7 +1392,7 @@ void main() {
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "", ref _showRightSidebar);
-                ImGui.MenuItem("Dock Panels", "", ref _useDockspaceUi);
+                ImGui.MenuItem("Dockable Panels", "", ref _useDockspaceUi);
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
@@ -1925,10 +1975,18 @@ void main() {
 
     private void ValidateDockspacePanels()
     {
-        bool leftBroken = _showLeftSidebar && _navigatorDockState.Visible && !_navigatorDockState.IsDocked;
-        bool rightBroken = _showRightSidebar && _inspectorDockState.Visible && !_inspectorDockState.IsDocked;
-        if (leftBroken || rightBroken)
-            _fallbackToFixedPanelsNextFrame = true;
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            if (!IsShellPanelActive(panel.Id) || panel.Lane == ShellPanelLane.Floating)
+                continue;
+
+            ref DockPanelState state = ref GetDockPanelStateRef(panel.Id);
+            if (state.Visible && !state.IsDocked)
+            {
+                _fallbackToFixedPanelsNextFrame = true;
+                return;
+            }
+        }
     }
 
     private void RunMapGlbTilesExport()
@@ -10112,11 +10170,13 @@ void main() {
 
     private bool IsPointInSceneViewport(float x, float y)
     {
-        if (IsPointInDockedWindow(_navigatorDockState, x, y)
-            || IsPointInDockedWindow(_inspectorDockState, x, y)
-            || IsPointInDockedWindow(_minimapDockState, x, y))
+        foreach (var panel in ShellPanelDefinitions)
         {
-            return false;
+            if (!IsShellPanelActive(panel.Id))
+                continue;
+
+            if (IsPointInDockedWindow(GetDockPanelStateRef(panel.Id), x, y))
+                return false;
         }
 
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
@@ -10170,12 +10230,201 @@ void main() {
         }
     }
 
-    private void CaptureDockPanelState(ref DockPanelState state)
+    private static ShellPanelDefinition GetShellPanelDefinition(ShellPanelId panelId)
     {
+        return ShellPanelDefinitions[(int)panelId];
+    }
+
+    private ref DockPanelState GetDockPanelStateRef(ShellPanelId panelId)
+    {
+        switch (panelId)
+        {
+            case ShellPanelId.Navigator:
+                return ref _navigatorDockState;
+            case ShellPanelId.Inspector:
+                return ref _inspectorDockState;
+            case ShellPanelId.Pm4Workbench:
+                return ref _pm4WorkbenchDockState;
+            case ShellPanelId.TerrainControls:
+                return ref _terrainControlsDockState;
+            case ShellPanelId.RuntimeStats:
+                return ref _runtimeStatsDockState;
+            case ShellPanelId.WorldObjects:
+                return ref _worldObjectsDockState;
+            case ShellPanelId.ModelInfo:
+                return ref _modelInfoDockState;
+            case ShellPanelId.Minimap:
+                return ref _minimapDockState;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(panelId), panelId, null);
+        }
+    }
+
+    private bool IsShellPanelRequested(ShellPanelId panelId)
+    {
+        return panelId switch
+        {
+            ShellPanelId.Navigator => _showLeftSidebar,
+            ShellPanelId.Inspector => _showRightSidebar,
+            ShellPanelId.Pm4Workbench => _showRightSidebar && _worldScene != null,
+            ShellPanelId.TerrainControls => _showRightSidebar && _showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null),
+            ShellPanelId.RuntimeStats => _showRightSidebar && (_terrainManager != null || _vlmTerrainManager != null || _worldScene != null),
+            ShellPanelId.WorldObjects => _showRightSidebar && _worldScene != null,
+            ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
+            ShellPanelId.Minimap => _showMinimapWindow,
+            _ => false,
+        };
+    }
+
+    private bool IsShellPanelSuppressedForLayout(ShellPanelId panelId)
+    {
+        return panelId switch
+        {
+            ShellPanelId.Navigator => _suppressLeftSidebarForLayout,
+            ShellPanelId.Inspector => _suppressRightSidebarForLayout,
+            ShellPanelId.Minimap => _suppressMinimapForLayout,
+            _ => false,
+        };
+    }
+
+    private bool IsShellPanelActive(ShellPanelId panelId)
+    {
+        return IsShellPanelRequested(panelId) && !IsShellPanelSuppressedForLayout(panelId);
+    }
+
+    private bool HasAnyShellPanelsInLane(ShellPanelLane lane)
+    {
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            if (panel.Lane == lane && IsShellPanelActive(panel.Id))
+                return true;
+        }
+
+        return false;
+    }
+
+    private void FocusShellPanel(ShellPanelId panelId)
+    {
+        switch (GetShellPanelDefinition(panelId).Lane)
+        {
+            case ShellPanelLane.Left:
+                _showLeftSidebar = true;
+                break;
+            case ShellPanelLane.Right:
+                _showRightSidebar = true;
+                break;
+            case ShellPanelLane.Floating:
+                if (panelId == ShellPanelId.Minimap)
+                    _showMinimapWindow = true;
+                break;
+        }
+
+        _pendingFocusedShellPanel = panelId;
+    }
+
+    private void ResetDockPanelStates()
+    {
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            ref DockPanelState state = ref GetDockPanelStateRef(panel.Id);
+            state = default;
+        }
+    }
+
+    private void CaptureDockPanelState(ShellPanelId panelId)
+    {
+        ref DockPanelState state = ref GetDockPanelStateRef(panelId);
         state.Visible = true;
         state.IsDocked = ImGui.IsWindowDocked();
         state.Position = ImGui.GetWindowPos();
         state.Size = ImGui.GetWindowSize();
+    }
+
+    private bool TryGetDockedShellPanelState(ShellPanelLane lane, out DockPanelState state)
+    {
+        bool found = false;
+        state = default;
+
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            if (panel.Lane != lane || !IsShellPanelActive(panel.Id))
+                continue;
+
+            ref DockPanelState panelState = ref GetDockPanelStateRef(panel.Id);
+            if (!panelState.Visible || !panelState.IsDocked)
+                continue;
+
+            if (!found)
+            {
+                state = panelState;
+                found = true;
+                continue;
+            }
+
+            float left = MathF.Min(state.Position.X, panelState.Position.X);
+            float top = MathF.Min(state.Position.Y, panelState.Position.Y);
+            float right = MathF.Max(state.Position.X + state.Size.X, panelState.Position.X + panelState.Size.X);
+            float bottom = MathF.Max(state.Position.Y + state.Size.Y, panelState.Position.Y + panelState.Size.Y);
+
+            state.Visible = true;
+            state.IsDocked = true;
+            state.Position = new Vector2(left, top);
+            state.Size = new Vector2(right - left, bottom - top);
+        }
+
+        if (found)
+            return true;
+
+        return false;
+    }
+
+    private void UpdateShellLayout(Vector2 displaySize)
+    {
+        _suppressLeftSidebarForLayout = false;
+        _suppressRightSidebarForLayout = false;
+        _suppressMinimapForLayout = false;
+
+        if (_hideUiChrome || displaySize.X <= 0f)
+            return;
+
+        float maxSidebarWidthBudget = MathF.Max(0f, displaySize.X - SceneViewportHardMinWidth);
+        float requiredCompactWidth = (_showLeftSidebar ? SidebarCompactMinWidth : 0f)
+            + (_showRightSidebar ? SidebarCompactMinWidth : 0f);
+
+        if (requiredCompactWidth > maxSidebarWidthBudget && _showRightSidebar)
+            _suppressRightSidebarForLayout = true;
+
+        requiredCompactWidth = (_showLeftSidebar ? SidebarCompactMinWidth : 0f)
+            + (IsShellPanelActive(ShellPanelId.Inspector) ? SidebarCompactMinWidth : 0f);
+
+        if (requiredCompactWidth > maxSidebarWidthBudget && _showLeftSidebar)
+            _suppressLeftSidebarForLayout = true;
+
+        ClampFixedSidebarLayout(displaySize.X);
+
+        if (_showMinimapWindow && !_fullscreenMinimap && _useDockspaceUi)
+        {
+            float requiredMinimapWidth = GetShellPanelDefinition(ShellPanelId.Minimap).CompactMinWidth;
+            _suppressMinimapForLayout = displaySize.X < SceneViewportHardMinWidth + requiredMinimapWidth;
+        }
+    }
+
+    private void ClampFixedSidebarLayout(float displayWidth)
+    {
+        if (displayWidth <= 0f)
+            return;
+
+        if (IsShellPanelActive(ShellPanelId.Navigator))
+            _leftSidebarWidth = Math.Clamp(_leftSidebarWidth, SidebarCompactMinWidth, SidebarMaxWidth);
+
+        if (IsShellPanelActive(ShellPanelId.Inspector))
+            _rightSidebarWidth = Math.Clamp(_rightSidebarWidth, SidebarCompactMinWidth, SidebarMaxWidth);
+
+        if (IsShellPanelActive(ShellPanelId.Navigator))
+            _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, displayWidth);
+
+        if (IsShellPanelActive(ShellPanelId.Inspector))
+            _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, displayWidth);
     }
 
     private static void ApplyDockedSidePanelInset(in DockPanelState state, bool isLeftPanel, float viewportY, float viewportHeight, ref float x, ref float width)
@@ -10233,18 +10482,21 @@ void main() {
             width = _dockspaceHostSize.X;
             height = _dockspaceHostSize.Y;
 
-            ApplyDockedSidePanelInset(_navigatorDockState, isLeftPanel: true, y, height, ref x, ref width);
-            ApplyDockedSidePanelInset(_inspectorDockState, isLeftPanel: false, y, height, ref x, ref width);
+            if (TryGetDockedShellPanelState(ShellPanelLane.Left, out DockPanelState leftDockPanel))
+                ApplyDockedSidePanelInset(leftDockPanel, isLeftPanel: true, y, height, ref x, ref width);
+
+            if (TryGetDockedShellPanelState(ShellPanelLane.Right, out DockPanelState rightDockPanel))
+                ApplyDockedSidePanelInset(rightDockPanel, isLeftPanel: false, y, height, ref x, ref width);
         }
         else
         {
-            if (_showLeftSidebar)
+            if (IsShellPanelActive(ShellPanelId.Navigator))
             {
                 x += _leftSidebarWidth;
                 width -= _leftSidebarWidth;
             }
 
-            if (_showRightSidebar)
+            if (IsShellPanelActive(ShellPanelId.Inspector))
                 width -= _rightSidebarWidth;
         }
 

@@ -1,14 +1,54 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 05, 2026 - The active shell now has one shared registry for the current core panels, and narrow-window sidebar behavior is no longer width-invalid by construction
+
+- first implementation slice from `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md` is now in code for the active `src/MdxViewer` host path
+- active shell behavior after this slice:
+   - `ViewerApp.cs` now defines one shared shell-panel registry for `Navigator`, `Inspector`, and `Minimap`
+   - current dock-state capture, dock-layout validation, viewport inset ownership, and scene-click exclusion all reuse that same registry instead of carrying three unrelated special cases
+   - the fixed-sidebar clamp now preserves a hard minimum scene viewport and narrows sidebars toward a compact width before giving up, instead of widening toward `SidebarMaxWidth` on small windows
+   - when a small window cannot keep both sidebars at compact width, the active shell now suppresses lower-priority side panels for layout rather than generating an invalid combined width
+   - docked navigator/inspector/minimap windows now take their default size and constraints from one shared definition surface, which is the intended staging point for later lane stacking and panel extraction work
+- important boundary:
+   - this does not yet remove the monolithic content ownership in `ViewerApp_Sidebars.cs` or `ViewerApp_Investigation.cs`
+   - this is a shell-stability and ownership slice, not the full panel/drawer rewrite
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and reached data-source initialization before shutdown
+- important boundary:
+   - no automated tests were added or run for this slice
+   - no live retest has been captured yet for user-facing layout quality on constrained window sizes
+
+## Apr 05, 2026 - The active shell is back on the correct path: dockable panel windows first, legacy sidebars only as fallback
+
+- corrected the same-day shell detour: the active `src/MdxViewer` path no longer treats tabbed fixed sidebars as the panel system
+- active shell behavior after this correction:
+   - `_useDockspaceUi` now defaults on, so the viewer starts in the actual dockable-panel mode by default
+   - the current registered right-side workflow panels remain: `Selection`, `PM4 Workbench`, `Terrain Controls`, `Runtime Stats`, `World Objects`, and `Model Info`
+   - dockspace mode opens those panels as separate windows and captures dock state for each of them, which is now the real shell direction for panel work
+   - the non-dock fallback is back to a plain legacy sidebar presentation instead of a tabbed lane host
+   - `OpenPm4Workbench(...)` now forces dockable mode and focuses the PM4 panel directly
+- important boundary:
+   - top/bottom lanes and drawer fallback are still not implemented yet
+   - `World Objects` still carries some older mixed investigation content, so ownership is improved but not fully clean yet
+   - no live user retest has been captured yet for docked panel usability or constrained-window layout quality
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured game source before shutdown
+
 ## Apr 05, 2026 - Viewer UI direction is now explicit: one panel model, docked drawers, and no more shell-profile duplication
 
 - latest user direction for the active `src/MdxViewer` shell is not another profile/preset layer; it is a cleanup pass that makes the UI legible by turning duplicated surfaces into explicit panels
+- concrete implementation surface for this direction now exists in `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md`
 - active shell target to preserve for the next implementation pass:
    - break the current sidebar-heavy surfaces into individual panels with clear ownership
    - support left/right/top/bottom dock or drawer regions that can each hold multiple stacked panels
    - keep pop-out behavior available, but do not make profile switching the primary way users discover tools
    - remove duplicated controls and workflow overlap between `ViewerApp_Sidebars.cs`, `ViewerApp_Investigation.cs`, and related utility windows instead of deepening that split
    - treat one canonical panel per workflow as the rule: for example navigator, inspector, minimap, terrain/runtime stats, PM4 workbench, object tools, lighting/tools, and any future publish/save surfaces
+   - treat `Viewer` and `Editor` as workspace filters over the same panel system rather than separate app personalities
+   - make startup and resize stability part of the shell contract so panels stay visible and usable when the app is not maximized
+   - restore per-layer alpha inspection and treat terrain brush or prefab harvesting as a first-class panel workflow rather than another buried sidebar toggle
 - immediate guardrail:
    - do not add more shell-level UI duplication unless it is a temporary bridge to the panel extraction work
 - important boundary:

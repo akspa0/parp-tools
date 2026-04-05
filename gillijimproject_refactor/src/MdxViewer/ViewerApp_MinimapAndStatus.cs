@@ -240,13 +240,19 @@ public partial class ViewerApp
         }
 
         var io = ImGui.GetIO();
+        var panel = GetShellPanelDefinition(ShellPanelId.Minimap);
 
         if (!_useDockspaceUi)
         {
-            float rightOffset = _showRightSidebar ? _rightSidebarWidth + 20 : 20;
-            ImGui.SetNextWindowSize(new Vector2(360, 360), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSizeConstraints(new Vector2(300, 300), new Vector2(520, 520));
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - 360 - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+            float rightOffset = IsShellPanelActive(ShellPanelId.Inspector) ? _rightSidebarWidth + 20 : 20;
+            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, panel.DefaultWidth), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(new Vector2(panel.MinWidth, panel.MinWidth), new Vector2(panel.MaxWidth, panel.MaxWidth));
+            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - panel.DefaultWidth - rightOffset, MenuBarHeight + ToolbarHeight + 20), ImGuiCond.FirstUseEver);
+        }
+        else
+        {
+            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, panel.DefaultWidth), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(new Vector2(panel.CompactMinWidth, panel.CompactMinWidth), new Vector2(panel.MaxWidth, panel.MaxWidth));
         }
 
         if (!ImGui.Begin("Minimap", ref _showMinimapWindow,
@@ -257,7 +263,7 @@ public partial class ViewerApp
         }
 
         if (_useDockspaceUi)
-            CaptureDockPanelState(ref _minimapDockState);
+            CaptureDockPanelState(ShellPanelId.Minimap);
 
         if (!hasWorldLoaded)
         {

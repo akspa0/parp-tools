@@ -1,13 +1,49 @@
 # Progress
 
+### Apr 05, 2026 - Landed the first real shell slice: shared panel metadata/state and narrow-window layout clamping
+
+- moved the active viewer one step past planning-only shell work:
+	- `ViewerApp.cs` now owns a shared panel registry for the current core shell surfaces (`Navigator`, `Inspector`, `Minimap`)
+	- dock-state capture, dock validation, scene viewport insets, and docked-window hit exclusion now reuse that panel model instead of handling each panel with a separate hardcoded code path
+	- the fixed-sidebar width clamp was corrected so narrow windows no longer incorrectly allow `SidebarMaxWidth`; sidebars now clamp toward compact widths while preserving a hard minimum viewport width
+	- the shell can now temporarily suppress side panels for layout when the window is too narrow to keep both visible at compact width, which is the first real stability bridge for non-maximized startup and later resizes
+	- docked panel defaults and size constraints for navigator, inspector, and minimap now flow from one shared definition surface, which sets up the next slice for true lane/stack ownership without another ad hoc state spread
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started successfully and was then stopped after normal initialization output
+- proof boundary:
+	- no automated tests were added or run
+	- no live runtime retest has been captured yet for actual resize behavior or panel usability under constrained window sizes
+
+### Apr 05, 2026 - Dockable panel mode is now the default again, and the tabbed-sidebar detour was removed
+
+- corrected the same-day shell mistake after user feedback:
+	- dockable panels in ImGui dockspace are again the primary shell path
+	- the tabbed fixed-sidebar host was removed from the fallback path instead of being treated as the new shell model
+- concrete shell state after the correction:
+	- the panel registry still owns explicit workflow panels for `Selection`, `PM4 Workbench`, `Terrain Controls`, `Runtime Stats`, `World Objects`, and `Model Info`
+	- `_useDockspaceUi` now defaults on so the active viewer opens in the real dockable-panel mode by default
+	- the dockspace path still renders those registered panels as separate windows and captures dock state for each of them
+	- `OpenPm4Workbench(...)` now forces dockable mode and focuses the registered PM4 panel
+	- the non-dock fallback is back to a plain legacy sidebar layout instead of tabbed lane hosts
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured MPQ source plus loose overlay before shutdown
+- proof boundary:
+	- no automated tests were added or run
+	- no live runtime retest has been captured yet for actual docked panel ergonomics or constrained-window behavior
+
 ### Apr 05, 2026 - Recorded the next viewer-shell direction: panel-based docks and drawers, no more UI-profile sprawl
 
 - followed the user's explicit correction that the current UI is too confusing because too many controls are duplicated across sidebars, investigation surfaces, and other one-off windows
 - recorded the next shell direction in continuity instead of treating it like another optional preset pass:
+	- created `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md` as the concrete implementation surface for the shell overhaul plus terrain brush or prefab harvesting pipeline
 	- the active viewer should move toward individual dockable panels that can live in left, right, top, or bottom drawers/dock lanes
 	- multiple panels should be able to stack in each dock area
 	- panels should be pop-out capable when needed, but the default layout should stay understandable without profile switching
 	- UI profiles/presets for shell organization are now treated as low-priority or non-useful compared with simply giving each workflow one canonical panel home
+	- `Viewer` vs `Editor` is now treated as a workspace distinction over one editor-capable app, not as two separate shell identities
+	- the same planning pass now captures the alpha-mask archaeology requirement: restore per-layer alpha inspection, build a brush or prefab detector, dedupe candidates using both 2D alpha and 3D terrain deformation data, and curate a known-good library
 	- future shell work should focus on removing duplicated controls from `ViewerApp_Sidebars.cs`, `ViewerApp_Investigation.cs`, and related utility surfaces rather than adding more alternate UI modes
 - proof boundary:
 	- this is continuity-only and planning-only; no viewer-shell implementation changed in this step

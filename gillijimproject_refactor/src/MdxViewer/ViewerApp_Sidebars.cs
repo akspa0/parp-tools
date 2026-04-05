@@ -205,54 +205,52 @@ public partial class ViewerApp
 
     private void DrawLeftSidebar()
     {
+        if (!HasAnyShellPanelsInLane(ShellPanelLane.Left))
+            return;
+
         var io = ImGui.GetIO();
         float topOffset = MenuBarHeight + ToolbarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowSize(new Vector2(DefaultSidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
+            DrawDockedShellPanelsForLane(ShellPanelLane.Left, sidebarHeight);
+            return;
         }
-        else
-        {
-            _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
-            ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
-        }
+
+        _leftSidebarWidth = ClampFixedSidebarWidth(_leftSidebarWidth, isLeftSidebar: true, io.DisplaySize.X);
+        ImGui.SetNextWindowPos(new Vector2(0, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        ImGuiWindowFlags flags = _useDockspaceUi
-            ? ImGuiWindowFlags.None
-            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
-        if (ImGui.Begin(_useDockspaceUi ? "Navigator" : "##LeftSidebar", flags))
-        {
-            if (_useDockspaceUi)
-                CaptureDockPanelState(ref _navigatorDockState);
-
-            bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
-
-            if (_workspaceMode == WorkspaceMode.Editor)
-            {
-                DrawEditorWorkspaceNavigator(hasWorldLoaded);
-            }
-            else
-            {
-                if (hasWorldLoaded)
-                {
-                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                    if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
-                        DrawWorldOverviewContent();
-                }
-
-                ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-                if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
-                    DrawFileBrowserContent();
-
-                ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-                if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
-                    DrawMapDiscoveryContent();
-            }
-        }
+        if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+            DrawNavigatorPanelContent();
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawNavigatorPanelContent()
+    {
+        bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
+
+        if (_workspaceMode == WorkspaceMode.Editor)
+        {
+            DrawEditorWorkspaceNavigator(hasWorldLoaded);
+            return;
+        }
+
+        if (hasWorldLoaded)
+        {
+            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            if (ImGui.CollapsingHeader("World Overview", ImGuiTreeNodeFlags.DefaultOpen))
+                DrawWorldOverviewContent();
+        }
+
+        ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+        if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
+            DrawFileBrowserContent();
+
+        ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
+        if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
+            DrawMapDiscoveryContent();
     }
 
     private void DrawWorldOverviewContent()
@@ -487,43 +485,36 @@ public partial class ViewerApp
 
     private void DrawRightSidebar()
     {
+        if (!HasAnyShellPanelsInLane(ShellPanelLane.Right))
+            return;
+
         var io = ImGui.GetIO();
         float topOffset = MenuBarHeight + ToolbarHeight;
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
-            ImGui.SetNextWindowSize(new Vector2(DefaultSidebarWidth, sidebarHeight), ImGuiCond.FirstUseEver);
+            DrawDockedShellPanelsForLane(ShellPanelLane.Right, sidebarHeight);
+            return;
         }
-        else
-        {
-            _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, io.DisplaySize.X);
-            ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
-        }
+
+        _rightSidebarWidth = ClampFixedSidebarWidth(_rightSidebarWidth, isLeftSidebar: false, io.DisplaySize.X);
+        ImGui.SetNextWindowPos(new Vector2(io.DisplaySize.X - _rightSidebarWidth, topOffset), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(_rightSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
-        ImGuiWindowFlags flags = _useDockspaceUi
-            ? ImGuiWindowFlags.None
-            : ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings;
-        if (ImGui.Begin(_useDockspaceUi ? "Inspector" : "##RightSidebar", flags))
+        if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
-            if (_useDockspaceUi)
-                CaptureDockPanelState(ref _inspectorDockState);
-
-            if (!_useDockspaceUi)
+            GetFixedSidebarWidthRange(isLeftSidebar: false, io.DisplaySize.X, out float minInspectorWidth, out float maxInspectorWidth);
+            if (maxInspectorWidth > minInspectorWidth)
             {
-                float maxInspectorWidth = ClampFixedSidebarWidth(SidebarMaxWidth, isLeftSidebar: false, io.DisplaySize.X);
-                if (maxInspectorWidth > SidebarMinWidth)
-                {
-                    float inspectorWidth = _rightSidebarWidth;
-                    ImGui.SetNextItemWidth(-1f);
-                    if (ImGui.SliderFloat("Inspector Width", ref inspectorWidth, SidebarMinWidth, maxInspectorWidth, "%.0f px"))
-                        _rightSidebarWidth = ClampFixedSidebarWidth(inspectorWidth, isLeftSidebar: false, io.DisplaySize.X);
+                float inspectorWidth = _rightSidebarWidth;
+                ImGui.SetNextItemWidth(-1f);
+                if (ImGui.SliderFloat("Inspector Width", ref inspectorWidth, minInspectorWidth, maxInspectorWidth, "%.0f px"))
+                    _rightSidebarWidth = ClampFixedSidebarWidth(inspectorWidth, isLeftSidebar: false, io.DisplaySize.X);
 
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Resize the fixed inspector without relying on the edge splitter.");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Resize the fixed inspector without relying on the edge splitter.");
 
-                    ImGui.Separator();
-                }
+                ImGui.Separator();
             }
 
             if (_workspaceMode == WorkspaceMode.Editor)
@@ -533,30 +524,16 @@ public partial class ViewerApp
             else
             {
                 bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
-
-                if (!string.IsNullOrEmpty(_selectedObjectInfo) && !hasSelectedPm4)
-                {
-                    ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Selected Object");
-                    ImGui.Separator();
-                    ImGui.TextWrapped(_selectedObjectInfo);
-                    DrawSelectedTaxiControls();
-                    DrawSelectedWmoControls();
-                    DrawSelectedSqlGameObjectAnimationControls();
+                bool hasSelectedObject = DrawSelectedObjectSummaryContent();
+                if (hasSelectedObject)
                     ImGui.Spacing();
-                }
 
                 if (_worldScene != null)
                 {
                     bool defaultOpenPm4Workbench = _worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0;
-                    if (_forceOpenPm4WorkbenchInspector)
-                        ImGui.SetNextItemOpen(true, ImGuiCond.Always);
-                    else
-                        ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
-
+                    ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
                     if (ImGui.CollapsingHeader("PM4 Workbench"))
                         DrawPm4WorkbenchInspector();
-
-                    _forceOpenPm4WorkbenchInspector = false;
                 }
 
                 ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
@@ -565,24 +542,23 @@ public partial class ViewerApp
 
                 ImGui.SetNextItemOpen(false, ImGuiCond.Once);
                 if (ImGui.CollapsingHeader("Camera"))
-                {
-                    ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
-                    ImGui.Text("Hold Shift for 5x boost");
-                    ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
-                }
+                    DrawCameraControlsContent();
 
                 if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
                 {
                     ImGui.SetNextItemOpen(true, ImGuiCond.Once);
                     if (ImGui.CollapsingHeader("Terrain Controls"))
-                        DrawTerrainControlsContent();
+                        DrawTerrainControlsPanelContent();
                 }
+
+                if ((_terrainManager != null || _vlmTerrainManager != null || _worldScene != null) && ImGui.CollapsingHeader("Runtime Stats"))
+                    DrawRuntimeStatsPanelContent();
 
                 if (_worldScene != null)
                 {
                     ImGui.SetNextItemOpen(true, ImGuiCond.Once);
                     if (ImGui.CollapsingHeader("World Objects"))
-                        DrawWorldObjectsContent();
+                        DrawWorldObjectsPanelContent();
                 }
             }
         }
@@ -590,9 +566,161 @@ public partial class ViewerApp
         ImGui.PopStyleVar();
     }
 
+    private void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight)
+    {
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            if (panel.Lane != lane || !IsShellPanelActive(panel.Id))
+                continue;
+
+            float defaultHeight = lane == ShellPanelLane.Left
+                ? sidebarHeight
+                : Math.Clamp(sidebarHeight * 0.65f, 260f, sidebarHeight);
+
+            if (_pendingFocusedShellPanel == panel.Id)
+                ImGui.SetNextWindowFocus();
+
+            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(
+                new Vector2(panel.CompactMinWidth, 220f),
+                new Vector2(panel.MaxWidth, sidebarHeight));
+
+            if (ImGui.Begin(panel.WindowName))
+            {
+                CaptureDockPanelState(panel.Id);
+                DrawShellPanelContent(panel.Id);
+            }
+
+            ImGui.End();
+
+            if (_pendingFocusedShellPanel == panel.Id)
+                _pendingFocusedShellPanel = null;
+        }
+    }
+
+    private void DrawShellPanelContent(ShellPanelId panelId)
+    {
+        switch (panelId)
+        {
+            case ShellPanelId.Navigator:
+                DrawNavigatorPanelContent();
+                break;
+            case ShellPanelId.Inspector:
+                DrawSelectionPanelContent();
+                break;
+            case ShellPanelId.Pm4Workbench:
+                DrawPm4WorkbenchInspector();
+                break;
+            case ShellPanelId.TerrainControls:
+                DrawTerrainControlsPanelContent();
+                break;
+            case ShellPanelId.RuntimeStats:
+                DrawRuntimeStatsPanelContent();
+                break;
+            case ShellPanelId.WorldObjects:
+                DrawWorldObjectsPanelContent();
+                break;
+            case ShellPanelId.ModelInfo:
+                DrawModelInfoPanelContent();
+                break;
+        }
+    }
+
+    private void DrawSelectionPanelContent()
+    {
+        if (_workspaceMode == WorkspaceMode.Editor)
+        {
+            ImGui.TextColored(new Vector4(0.75f, 0.88f, 1f, 1f), $"{GetWorkspaceModeLabel(_workspaceMode)} Workspace");
+            ImGui.SameLine();
+            ImGui.TextDisabled(GetEditorWorkspaceTaskLabel(_editorWorkspaceTask));
+            ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+            ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+            ImGui.Separator();
+        }
+
+        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        bool hasSelectedObject = DrawSelectedObjectSummaryContent();
+        if (!hasSelectedObject)
+        {
+            if (hasSelectedPm4)
+            {
+                ImGui.TextDisabled("A PM4 object is selected. Use the PM4 Workbench panel for evidence and correlation.");
+                if (ImGui.Button("Focus PM4 Workbench"))
+                    OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+            }
+            else
+            {
+                ImGui.TextDisabled("Select a world object to inspect its identity and controls here.");
+            }
+        }
+
+        ImGui.Separator();
+        DrawCameraControlsContent();
+    }
+
+    private void DrawCameraControlsContent()
+    {
+        ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
+        ImGui.Text("Hold Shift for 5x boost");
+        ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
+    }
+
+    private bool DrawSelectedObjectSummaryContent()
+    {
+        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        if (string.IsNullOrEmpty(_selectedObjectInfo) || hasSelectedPm4)
+            return false;
+
+        ImGui.TextWrapped(_selectedObjectInfo);
+        DrawSelectedTaxiControls();
+        DrawSelectedWmoControls();
+        DrawSelectedSqlGameObjectAnimationControls();
+        return true;
+    }
+
+    private void DrawTerrainControlsPanelContent()
+    {
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (lighting == null || renderer == null)
+        {
+            ImGui.TextWrapped("Load a terrain-backed world to use terrain controls.");
+            return;
+        }
+
+        DrawTerrainControlsAdjustmentContent();
+        ImGui.Separator();
+        if (ImGui.Button("Open Chunk Clipboard"))
+            _showChunkClipboardWindow = true;
+        ImGui.SameLine();
+        ImGui.TextDisabled("Chunk copy/paste stays available as its own panel window.");
+    }
+
+    private void DrawWorldObjectsPanelContent()
+    {
+        if (_worldScene == null)
+        {
+            ImGui.TextWrapped("Load a world scene to inspect object, SQL population, POI, taxi, and PM4 overlay workflows.");
+            return;
+        }
+
+        DrawWorldObjectsContentCore();
+    }
+
+    private void DrawModelInfoPanelContent()
+    {
+        if (string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            ImGui.TextDisabled("No model info is available for the current selection or loaded asset.");
+            return;
+        }
+
+        DrawModelInfoContent();
+    }
+
     private void DrawFixedSidebarSplitters()
     {
-        if (!_showLeftSidebar && !_showRightSidebar)
+        if (!IsShellPanelActive(ShellPanelId.Navigator) && !IsShellPanelActive(ShellPanelId.Inspector))
             return;
 
         var io = ImGui.GetIO();
@@ -601,7 +729,7 @@ public partial class ViewerApp
         if (panelHeight <= 0f)
             return;
 
-        if (_showLeftSidebar)
+        if (IsShellPanelActive(ShellPanelId.Navigator))
         {
             float splitterX = _leftSidebarWidth - SidebarSplitterWidth * 0.5f;
             DrawFixedSidebarSplitterWindow(
@@ -614,7 +742,7 @@ public partial class ViewerApp
                 io.DisplaySize.X);
         }
 
-        if (_showRightSidebar)
+        if (IsShellPanelActive(ShellPanelId.Inspector))
         {
             float splitterX = io.DisplaySize.X - _rightSidebarWidth - SidebarSplitterWidth * 0.5f;
             DrawFixedSidebarSplitterWindow(
@@ -681,23 +809,27 @@ public partial class ViewerApp
 
     private float ClampFixedSidebarWidth(float width, bool isLeftSidebar, float displayWidth)
     {
+        GetFixedSidebarWidthRange(isLeftSidebar, displayWidth, out float minWidth, out float maxWidth);
+        return Math.Clamp(width, minWidth, maxWidth);
+    }
+
+    private void GetFixedSidebarWidthRange(bool isLeftSidebar, float displayWidth, out float minWidth, out float maxWidth)
+    {
         float otherSidebarWidth = 0f;
         if (isLeftSidebar)
         {
-            if (_showRightSidebar)
+            if (IsShellPanelActive(ShellPanelId.Inspector))
                 otherSidebarWidth = _rightSidebarWidth;
         }
-        else if (_showLeftSidebar)
+        else if (IsShellPanelActive(ShellPanelId.Navigator))
         {
             otherSidebarWidth = _leftSidebarWidth;
         }
 
         float preferredMaxWidth = displayWidth - otherSidebarWidth - SceneViewportPreferredMinWidth;
-        float maxWidth = preferredMaxWidth >= SidebarMinWidth
-            ? MathF.Min(SidebarMaxWidth, preferredMaxWidth)
-            : SidebarMaxWidth;
-
-        return Math.Clamp(width, SidebarMinWidth, maxWidth);
+        float hardMaxWidth = displayWidth - otherSidebarWidth - SceneViewportHardMinWidth;
+        maxWidth = MathF.Min(SidebarMaxWidth, MathF.Max(SidebarCompactMinWidth, MathF.Max(preferredMaxWidth, hardMaxWidth)));
+        minWidth = MathF.Min(SidebarMinWidth, maxWidth);
     }
 
     private bool DrawSelectedObjectInspectorSection(bool defaultOpen = true)
@@ -710,10 +842,7 @@ public partial class ViewerApp
         if (!ImGui.CollapsingHeader("Selected Object", flags))
             return true;
 
-        ImGui.TextWrapped(_selectedObjectInfo);
-        DrawSelectedTaxiControls();
-        DrawSelectedWmoControls();
-        DrawSelectedSqlGameObjectAnimationControls();
+        DrawSelectedObjectSummaryContent();
         return true;
     }
 
@@ -1114,7 +1243,7 @@ public partial class ViewerApp
         _camera.Pitch = -15f;
     }
 
-    private void DrawTerrainControlsContent()
+    private void DrawTerrainControlsAdjustmentContent()
     {
         TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
         TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
@@ -1182,57 +1311,72 @@ public partial class ViewerApp
         ImGui.Separator();
         if (ImGui.Button("Toggle Wireframe"))
             _renderer?.ToggleWireframe();
+    }
 
-        ImGui.Separator();
+    private void DrawRuntimeStatsPanelContent()
+    {
         int tiles = _terrainManager?.LoadedTileCount ?? _vlmTerrainManager?.LoadedTileCount ?? 0;
         int chunks = _terrainManager?.LoadedChunkCount ?? _vlmTerrainManager?.LoadedChunkCount ?? 0;
         var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (terrainRenderer != null)
             ImGui.Text($"Tiles: {tiles}  Chunks: {terrainRenderer.ChunksRendered}/{chunks}");
-        else
+        else if (_terrainManager != null || _vlmTerrainManager != null)
             ImGui.Text($"Tiles: {tiles}  Chunks: {chunks}");
 
-        if (_worldScene != null)
+        if (_worldScene == null)
         {
-            ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
-            ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
-
-            var renderStats = _worldScene.LastRenderFrameStats;
-            LiquidRenderer? renderStatsLiquidRenderer = _terrainManager?.LiquidRenderer;
-            if (ImGui.TreeNode("Renderer Stats"))
-            {
-                ImGui.TextDisabled("World render CPU only. UI/layout/input/swap are not included.");
-                ImGui.Text($"World CPU: {renderStats.TotalCpuMs:0.00} ms  Pending asset loads: {renderStats.PendingAssetLoadCount}");
-                ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
-                ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");
-                ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
-                ImGui.Text($"Terrain chunks: {renderStats.TerrainChunksRendered}  WDL tiles: {renderStats.WdlVisibleTileCount}");
-                if (terrainRenderer != null)
-                    ImGui.Text($"Terrain draw/uniform/tex-bind: {terrainRenderer.LastFrameDrawCalls}/{terrainRenderer.LastFrameUniform1Calls}/{terrainRenderer.LastFrameBindTextureCalls}");
-                ImGui.Text($"Deferred/taxi/light: {renderStats.DeferredAssetLoads.DurationMs:0.00} / {renderStats.TaxiActorUpdate.DurationMs:0.00} / {renderStats.Lighting.DurationMs:0.00} ms");
-                ImGui.Text($"WDL/terrain/liquid: {renderStats.Wdl.DurationMs:0.00} / {renderStats.Terrain.DurationMs:0.00} / {renderStats.Liquid.DurationMs:0.00} ms");
-                if (renderStatsLiquidRenderer != null)
-                    ImGui.Text($"Liquid visible: {renderStatsLiquidRenderer.LastVisibleTerrainMeshCount}/{renderStatsLiquidRenderer.MeshCount}  WL: {renderStatsLiquidRenderer.LastVisibleWlMeshCount}/{renderStatsLiquidRenderer.WlMeshCount}");
-                ImGui.Text($"WMO vis/draw: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} ms");
-                ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
-                ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");
-                ImGui.Text($"MDX opaque shared/unbatched: {renderStats.OpaqueBatchedMdxCount}/{renderStats.OpaqueUnbatchedMdxCount}  transparent shared/unbatched: {renderStats.TransparentBatchedMdxCount}/{renderStats.TransparentUnbatchedMdxCount}");
-                ImGui.Text($"Sky/backdrop/overlay: {renderStats.Sky.DurationMs:0.00} / {renderStats.SkyboxBackdrop.DurationMs:0.00} / {renderStats.Overlay.DurationMs:0.00} ms");
-                ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
-                ImGui.TreePop();
-            }
-
-            var assetReadStats = _worldScene.Assets.GetReadStats();
-            ImGui.Text($"Asset I/O req/cache: {assetReadStats.ReadRequests}/{assetReadStats.FileCacheHits}  resolved-cache: {assetReadStats.ResolvedPathCacheHits}  probes hit/miss: {assetReadStats.PathProbeResolutions}/{assetReadStats.PathProbeMisses}");
-            ImGui.Text($"Asset misses: failed retry suppress={_worldScene.Assets.SuppressedFailedMdxRetryCount}  known missing M2 skins={_worldScene.Assets.KnownMissingM2SkinCount}  duplicate skin logs={_worldScene.Assets.SuppressedMissingM2SkinLogCount}");
-
-            if (_dataSource is MpqDataSource mpqDataSource)
-            {
-                var mpqStats = mpqDataSource.GetStatsSnapshot();
-                ImGui.Text($"MPQ I/O read cache/miss: {mpqStats.ReadCacheHits}/{mpqStats.ReadCacheMisses}  loose/alpha/mpq/miss: {mpqStats.ReadLooseHits}/{mpqStats.ReadAlphaHits}/{mpqStats.ReadMpqHits}/{mpqStats.ReadMisses}  uncached avg: {mpqStats.AverageUncachedReadMs:0.00} ms");
-                ImGui.Text($"MPQ prefetch enq/done/dup/cache: {mpqStats.PrefetchEnqueued}/{mpqStats.PrefetchCompleted}/{mpqStats.PrefetchDuplicateSkips}/{mpqStats.PrefetchCacheSkips}  queue avg: {mpqStats.AveragePrefetchQueueMs:0.00} ms  read avg: {mpqStats.AveragePrefetchReadMs:0.00} ms");
-            }
+            if (_terrainManager == null && _vlmTerrainManager == null)
+                ImGui.TextDisabled("Load a world or terrain scene to view runtime stats.");
+            return;
         }
+
+        ImGui.Text($"WMO: {_worldScene.WmoRenderedCount}/{_worldScene.WmoInstanceCount}  MDX: {_worldScene.MdxRenderedCount}/{_worldScene.MdxInstanceCount}");
+        ImGui.Text($"Asset queue: {_worldScene.Assets.PendingAssetLoadCount}  WMO ok/fail: {_worldScene.Assets.WmoModelsLoaded}/{_worldScene.Assets.WmoModelsFailed}  MDX ok/fail: {_worldScene.Assets.MdxModelsLoaded}/{_worldScene.Assets.MdxModelsFailed}");
+
+        var renderStats = _worldScene.LastRenderFrameStats;
+        LiquidRenderer? renderStatsLiquidRenderer = _terrainManager?.LiquidRenderer;
+        ImGui.TextDisabled("World render CPU only. UI/layout/input/swap are not included.");
+        ImGui.Text($"World CPU: {renderStats.TotalCpuMs:0.00} ms  Pending asset loads: {renderStats.PendingAssetLoadCount}");
+        ImGui.Text($"Visible WMO: {renderStats.VisibleWmoCount}  Visible MDX: {renderStats.VisibleMdxCount}  Taxi actors: {renderStats.VisibleTaxiMdxCount}");
+        ImGui.Text($"Object stream range: {_worldScene.ObjectStreamingRangeMultiplier:0.00}x");
+        ImGui.Text($"Object detail: {_worldScene.ObjectVisibilityProfile}");
+        ImGui.Text($"Terrain chunks: {renderStats.TerrainChunksRendered}  WDL tiles: {renderStats.WdlVisibleTileCount}");
+        if (terrainRenderer != null)
+            ImGui.Text($"Terrain draw/uniform/tex-bind: {terrainRenderer.LastFrameDrawCalls}/{terrainRenderer.LastFrameUniform1Calls}/{terrainRenderer.LastFrameBindTextureCalls}");
+        ImGui.Text($"Deferred/taxi/light: {renderStats.DeferredAssetLoads.DurationMs:0.00} / {renderStats.TaxiActorUpdate.DurationMs:0.00} / {renderStats.Lighting.DurationMs:0.00} ms");
+        ImGui.Text($"WDL/terrain/liquid: {renderStats.Wdl.DurationMs:0.00} / {renderStats.Terrain.DurationMs:0.00} / {renderStats.Liquid.DurationMs:0.00} ms");
+        if (renderStatsLiquidRenderer != null)
+            ImGui.Text($"Liquid visible: {renderStatsLiquidRenderer.LastVisibleTerrainMeshCount}/{renderStatsLiquidRenderer.MeshCount}  WL: {renderStatsLiquidRenderer.LastVisibleWlMeshCount}/{renderStatsLiquidRenderer.WlMeshCount}");
+        ImGui.Text($"WMO vis/draw: {renderStats.WmoVisibility.DurationMs:0.00} / {renderStats.WmoSubmission.DurationMs:0.00} ms");
+        ImGui.Text($"MDX anim/vis/opaque: {renderStats.MdxAnimation.DurationMs:0.00} / {renderStats.MdxVisibility.DurationMs:0.00} / {renderStats.MdxOpaqueSubmission.DurationMs:0.00} ms");
+        ImGui.Text($"MDX sort/trans: {renderStats.MdxTransparentSort.DurationMs:0.00} / {renderStats.MdxTransparentSubmission.DurationMs:0.00} ms");
+        ImGui.Text($"MDX opaque shared/unbatched: {renderStats.OpaqueBatchedMdxCount}/{renderStats.OpaqueUnbatchedMdxCount}  transparent shared/unbatched: {renderStats.TransparentBatchedMdxCount}/{renderStats.TransparentUnbatchedMdxCount}");
+        ImGui.Text($"Sky/backdrop/overlay: {renderStats.Sky.DurationMs:0.00} / {renderStats.SkyboxBackdrop.DurationMs:0.00} / {renderStats.Overlay.DurationMs:0.00} ms");
+        ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
+
+        var assetReadStats = _worldScene.Assets.GetReadStats();
+        ImGui.Separator();
+        ImGui.Text($"Asset I/O req/cache: {assetReadStats.ReadRequests}/{assetReadStats.FileCacheHits}  resolved-cache: {assetReadStats.ResolvedPathCacheHits}  probes hit/miss: {assetReadStats.PathProbeResolutions}/{assetReadStats.PathProbeMisses}");
+        ImGui.Text($"Asset misses: failed retry suppress={_worldScene.Assets.SuppressedFailedMdxRetryCount}  known missing M2 skins={_worldScene.Assets.KnownMissingM2SkinCount}  duplicate skin logs={_worldScene.Assets.SuppressedMissingM2SkinLogCount}");
+
+        if (_dataSource is MpqDataSource mpqDataSource)
+        {
+            var mpqStats = mpqDataSource.GetStatsSnapshot();
+            ImGui.Text($"MPQ I/O read cache/miss: {mpqStats.ReadCacheHits}/{mpqStats.ReadCacheMisses}  loose/alpha/mpq/miss: {mpqStats.ReadLooseHits}/{mpqStats.ReadAlphaHits}/{mpqStats.ReadMpqHits}/{mpqStats.ReadMisses}  uncached avg: {mpqStats.AverageUncachedReadMs:0.00} ms");
+            ImGui.Text($"MPQ prefetch enq/done/dup/cache: {mpqStats.PrefetchEnqueued}/{mpqStats.PrefetchCompleted}/{mpqStats.PrefetchDuplicateSkips}/{mpqStats.PrefetchCacheSkips}  queue avg: {mpqStats.AveragePrefetchQueueMs:0.00} ms  read avg: {mpqStats.AveragePrefetchReadMs:0.00} ms");
+        }
+    }
+
+    private void DrawTerrainControlsContent()
+    {
+        TerrainLighting? lighting = _terrainManager?.Lighting ?? _vlmTerrainManager?.Lighting;
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (lighting == null || renderer == null) return;
+
+        DrawTerrainControlsAdjustmentContent();
+
+        ImGui.Separator();
+        DrawRuntimeStatsPanelContent();
 
         ImGui.Separator();
         if (ImGui.Button("Open Chunk Clipboard"))

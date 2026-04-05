@@ -37,6 +37,16 @@ This plan started as a 3.3.5-focused terrain-editing roadmap. It is now missing 
 2. If seams still persist, continue RE against `TerrainBlend_*` creation/modulation behavior rather than broadening MCAL heuristics blindly.
 3. Keep 3.3.5 editing/import-export work separate from 4.0 runtime blend reconstruction.
 
+## Apr 05, 2026 Addendum - Terrain tooling is no longer just one sidebar panel, and alpha archaeology now includes prefab or brush harvesting
+
+The older UI assumptions in this plan are now too narrow for the active viewer direction.
+
+- The old `single Terrain Tools panel in existing ImGui sidebar` assumption is superseded.
+- Terrain editing and terrain archaeology now need to fit the newer panel-based dock or drawer shell described in `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md`.
+- The alpha workflow is no longer just import/export plus one visibility toggle.
+- Future terrain UI work must restore separate alpha-layer inspection and treat repeated alpha-mask plus terrain-deformation patterns as harvestable brush or prefab candidates.
+- Manual-only harvesting is not realistic; future terrain-analysis work should assume machine-assisted detection and dedupe over real ADT data.
+
 ## Objective
 Add robust terrain data support for post-0.12 ADTs (focus: 3.3.5):
 1. Correct big alpha-map handling (`MCAL` variants)

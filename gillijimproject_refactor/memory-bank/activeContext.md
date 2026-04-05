@@ -2,19 +2,63 @@
 
 # Active Context
 
+## Apr 05, 2026 - First viewer-shell extraction slice landed: shared panel registry plus resize-safe sidebar clamping
+
+- the first concrete implementation step from `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md` is now in the active `src/MdxViewer` shell instead of remaining planning-only
+- active shell behavior after this slice:
+	- `ViewerApp.cs` now defines a small shared shell-panel model for the current core surfaces (`Navigator`, `Inspector`, `Minimap`) instead of handling dock state as three unrelated special cases
+	- dock-panel capture, dock-layout validation, scene-viewport inset logic, and viewport hit exclusion now all route through that shared panel registry rather than duplicating panel assumptions in multiple methods
+	- the fixed-sidebar width clamp no longer falls back to `SidebarMaxWidth` when the window is too narrow; sidebars now shrink toward a compact width first, preserving a hard minimum scene viewport instead of overflowing the shell on non-maximized startup/resizes
+	- when the window is too narrow to keep both sidebars at compact width, the shell now suppresses lower-priority side panels for layout instead of forcing an invalid combined width
+	- docked navigator/inspector/minimap windows now share default-size and size-constraint metadata from the same panel model, which gives the next extraction slice one canonical place to grow panel ownership from
+- important boundary:
+	- this is still a bridge slice, not the full dock-lane/drawer system
+	- `ViewerApp_Sidebars.cs` and `ViewerApp_Investigation.cs` still own too much monolithic UI content; this slice only centralizes current panel metadata/state and stabilizes resize behavior
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started and reached normal data-source initialization before the process was stopped
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live user retest has been captured yet for actual non-maximized resize behavior or the new docked-panel ergonomics
+
+## Apr 05, 2026 - Dockable panels are now the active shell path again, and the bad tabbed-sidebar detour was removed
+
+- corrected the intermediate shell mistake from the same day: the active path is now dockable panel windows in dockspace mode, not tabs embedded inside fixed sidebars
+- active shell behavior after the correction:
+	- `_useDockspaceUi` now defaults on, so the current shell comes up in the actual dockable-panel mode by default instead of falling back to fixed sidebars unless the user asks for it
+	- the right-lane workflow split remains intact as explicit registered panels: `Selection`, `PM4 Workbench`, `Terrain Controls`, `Runtime Stats`, `World Objects`, and `Model Info`
+	- dockspace mode opens those panels as independent dockable windows, which is now the intended shell path for the panel work
+	- the non-dock fallback no longer uses the tabbed lane-host experiment; it is back to a plain legacy sidebar layout only as a fallback path
+	- `OpenPm4Workbench(...)` now forces dockable panel mode and focuses the registered PM4 panel instead of reopening a monolithic inspector section
+- important boundary:
+	- top/bottom lanes and drawer fallback are still not implemented yet
+	- `World Objects` still carries some older investigation and PM4-adjacent content, so workflow ownership is improved but not fully cleaned yet
+	- the fallback path still exists for safety, but it is no longer the primary shell direction
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally, loaded the configured game folder and loose overlay, and was then stopped
+- proof boundary:
+	- no automated tests were added or run for this slice
+	- no live retest has been captured yet for actual docked panel usability or constrained-window behavior
+
 ## Apr 05, 2026 - Next viewer-shell direction is a panel-based dock/drawer UI, not more UI profiles or duplicated surfaces
 
 - recorded the latest user direction after the streaming and MDX stabilization work reached a better checkpoint: the active viewer UI should stop accumulating duplicated workspace/profile-style surfaces and instead move to one coherent panel model
+- concrete implementation surface for this direction now exists in `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md`
 - current shell direction to preserve for the next UI pass:
 	- split the existing sidebar-heavy and duplicated UI into individual panels instead of monolithic left/right shell buckets
 	- support panel drawers or dock lanes on the left, right, top, and bottom of the screen
 	- allow multiple panels to stack within each dock area instead of scattering the same controls across `ViewerApp_Sidebars`, investigation surfaces, and one-off windows
 	- allow panels to be popped out when the user wants, but keep the default workflow understandable without requiring profile switching or preset hunting
 	- treat UI profiles/presets for shell organization as low value for the active viewer; the immediate problem is duplicated controls and unclear ownership, not lack of another shell mode
+	- treat `Viewer` and `Editor` as workspaces over one editor-capable app, not as two separate product identities
+	- make non-maximized startup and later window resize first-class shell requirements so panels clamp, stack, or collapse instead of disappearing off-screen
+	- fold terrain alpha archaeology into the same shell direction: restore separate alpha-layer inspection and give prefab or brush harvesting its own real panel workflow
 - implementation bias to preserve:
 	- prefer one canonical home per workflow or data family (`Navigator`, `Inspector`, terrain/runtime stats, minimap, PM4 workbench, object tools, lighting/tools) instead of repeating the same toggles in multiple sidebars or investigation panes
 	- use docking and stacked panel containers as the primary organization primitive, with drawers as the constrained-screen fallback
 	- avoid adding more UI duplication before this shell regrouping lands
+	- prefer machine-assisted alpha brush harvesting and dedupe over manual collection; future terrain-analysis UI should plan around a brush or prefab library, not just one debug image panel
 - important boundary:
 	- this is continuity and direction only; no panel extraction or shell rewrite has landed yet from this note alone
 
