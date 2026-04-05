@@ -52,7 +52,7 @@ public partial class ViewerApp
             return;
 
         float objectRangeMultiplier = _worldScene.ObjectStreamingRangeMultiplier;
-        if (ImGui.SliderFloat("Object Stream Range", ref objectRangeMultiplier, 1.00f, 4.00f, "%.2fx"))
+        if (ImGui.SliderFloat("Object Stream Range", ref objectRangeMultiplier, 0.25f, 4.00f, "%.2fx"))
             _worldScene.ObjectStreamingRangeMultiplier = objectRangeMultiplier;
 
         int visibilityProfileIndex = (int)_worldScene.ObjectVisibilityProfile;
@@ -75,7 +75,7 @@ public partial class ViewerApp
             ? $"WMO scene-pass extraction is still the larger measured object-side cost ({wmoObjectCostMs:0.00} ms)."
             : $"MDX visibility/submission is currently larger ({mdxObjectCostMs:0.00} ms).";
         ImGui.TextDisabled(hotspot);
-        ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 1.00x.");
+        ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 0.50x.");
         ImGui.TextDisabled("Balanced/Performance also use FOV-aware projected-size culling and stop queueing tiny off-view assets.");
         ImGui.TextDisabled("MDX 'batched' counts in the stats are shared-shader submissions, not true GPU instancing.");
     }

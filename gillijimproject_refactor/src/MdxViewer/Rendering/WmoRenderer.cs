@@ -47,6 +47,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly Queue<(int GroupIndex, int Depth)> _visibilityQueue = new();
     private readonly HashSet<int> _visibilityVisited = new();
     private readonly HashSet<string> _updatedDoodadModelsScratch = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(int idx, float distSq)> _visibleDoodadsScratch = new();
     private bool _wireframe;
 
     // Material textures: materialIndex → GL texture handle
@@ -393,16 +394,15 @@ public class WmoRenderer : ISceneRenderer
 
         // Pass 2: Doodad opaque layers.
         // Distance-culled, sorted nearest-first, capped at DoodadMaxRenderCount.
-        List<(int idx, float distSq)>? visibleDoodads = null;
         int visibleDoodadRenderCount = 0;
         if (_doodadsVisible && _runtimeDoodadsVisible && _doodadInstances.Count > 0)
         {
             // Animated doodads rendered via RenderWithTransform need explicit per-frame animator updates.
             // Update once per model to avoid redundant work when many instances share the same MDX.
             _updatedDoodadModelsScratch.Clear();
+            _visibleDoodadsScratch.Clear();
 
             // Build list of visible doodads with world-space distance to camera
-            visibleDoodads = new List<(int idx, float distSq)>();
             float doodadCullDistance = MathF.Max(DoodadCullDistance, MathF.Min(fogEnd + 800f, 6000f));
             float cullDistSq = doodadCullDistance * doodadCullDistance;
             for (int di = 0; di < _doodadInstances.Count; di++)
@@ -419,16 +419,18 @@ public class WmoRenderer : ISceneRenderer
                 var worldPos = Vector3.Transform(inst.LocalPosition, modelMatrix);
                 float distSq = Vector3.DistanceSquared(cp, worldPos);
                 if (distSq > cullDistSq) continue; // Distance cull
-                visibleDoodads.Add((di, distSq));
+                _visibleDoodadsScratch.Add((di, distSq));
             }
 
             // Sort nearest-first and cap at max render count
-            visibleDoodads.Sort((a, b) => a.distSq.CompareTo(b.distSq));
-            visibleDoodadRenderCount = Math.Min(visibleDoodads.Count, (int)DoodadMaxRenderCount);
+            if (_visibleDoodadsScratch.Count > 1)
+                _visibleDoodadsScratch.Sort((a, b) => a.distSq.CompareTo(b.distSq));
+
+            visibleDoodadRenderCount = Math.Min(_visibleDoodadsScratch.Count, (int)DoodadMaxRenderCount);
 
             for (int vi = 0; vi < visibleDoodadRenderCount; vi++)
             {
-                var inst = _doodadInstances[visibleDoodads[vi].idx];
+                var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
                 var doodadWorld = inst.Transform * modelMatrix;
                 inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Opaque, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,
@@ -464,13 +466,16 @@ public class WmoRenderer : ISceneRenderer
         }
 
         // Pass 4: Doodad transparent layers back-to-front so model glass/reflection stays above liquids.
-        if (visibleDoodads != null && visibleDoodadRenderCount > 0)
+        if (visibleDoodadRenderCount > 0)
         {
             for (int vi = visibleDoodadRenderCount - 1; vi >= 0; vi--)
             {
-                var inst = _doodadInstances[visibleDoodads[vi].idx];
+                var inst = _doodadInstances[_visibleDoodadsScratch[vi].idx];
+                if (!inst.Renderer!.HasTransparentWorldPass)
+                    continue;
+
                 var doodadWorld = inst.Transform * modelMatrix;
-                inst.Renderer!.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
+                inst.Renderer.RenderWithTransform(doodadWorld, view, proj, RenderPass.Transparent, 1.0f,
                     fogColor, fogStart, fogEnd, cameraPos,
                     lightDir, lightColor, ambientColor);
             }

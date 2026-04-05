@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
@@ -20,19 +21,24 @@ public class WdlTerrainRenderer : IDisposable
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
 
+    private const float TileFadeDurationSeconds = 0.22f;
+
     // Per-tile GPU mesh data
     private readonly Dictionary<int, WdlTileMesh> _tileMeshes = new(); // tileIndex → mesh
-    private readonly HashSet<int> _hiddenTiles = new(); // tiles hidden by loaded ADTs
+    private readonly Dictionary<int, float> _tileAlphas = new();
+    private readonly Dictionary<int, float> _tileTargetAlphas = new();
+    private long _lastFadeTimestamp;
 
     // Stats
     public int TotalTiles => _tileMeshes.Count;
-    public int VisibleTiles => _tileMeshes.Count - _hiddenTiles.Count;
-    public int HiddenTiles => _hiddenTiles.Count;
+    public int VisibleTiles => _tileAlphas.Values.Count(static alpha => alpha > 0.01f);
+    public int HiddenTiles => _tileAlphas.Values.Count(static alpha => alpha <= 0.01f);
 
     public WdlTerrainRenderer(GL gl)
     {
         _gl = gl;
         _shader = CreateShader();
+        _lastFadeTimestamp = Stopwatch.GetTimestamp();
     }
 
     /// <summary>
@@ -71,6 +77,8 @@ public class WdlTerrainRenderer : IDisposable
                 if (mesh != null)
                 {
                     _tileMeshes[idx] = mesh;
+                    _tileAlphas[idx] = 1.0f;
+                    _tileTargetAlphas[idx] = 1.0f;
                     built++;
                 }
             }
@@ -85,7 +93,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void HideTile(int tileX, int tileY)
     {
-        _hiddenTiles.Add(GetTileIndex(tileX, tileY));
+        SetTileTargetAlpha(GetTileIndex(tileX, tileY), 0.0f);
     }
 
     /// <summary>
@@ -93,7 +101,7 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public void ShowTile(int tileX, int tileY)
     {
-        _hiddenTiles.Remove(GetTileIndex(tileX, tileY));
+        SetTileTargetAlpha(GetTileIndex(tileX, tileY), 1.0f);
     }
 
     /// <summary>
@@ -103,6 +111,11 @@ public class WdlTerrainRenderer : IDisposable
         TerrainLighting lighting, FrustumCuller? frustum = null)
     {
         if (_tileMeshes.Count == 0) return;
+
+        long now = Stopwatch.GetTimestamp();
+        float deltaSeconds = (float)(now - _lastFadeTimestamp) / Stopwatch.Frequency;
+        _lastFadeTimestamp = now;
+        UpdateTileFades(deltaSeconds);
 
         _shader.Use();
         _shader.SetMat4("uView", view);
@@ -117,7 +130,9 @@ public class WdlTerrainRenderer : IDisposable
 
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
-        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.Blend);
+        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        _gl.DepthMask(false);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
         // Push WDL slightly behind real terrain to prevent z-fighting at tile edges
@@ -126,18 +141,55 @@ public class WdlTerrainRenderer : IDisposable
 
         foreach (var (idx, mesh) in _tileMeshes)
         {
-            if (_hiddenTiles.Contains(idx)) continue;
+            if (!_tileAlphas.TryGetValue(idx, out float alpha) || alpha <= 0.01f)
+                continue;
 
             // Frustum cull
             if (frustum != null && !frustum.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
                 continue;
 
+            _shader.SetFloat("uOpacity", alpha);
             _gl.BindVertexArray(mesh.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedInt, null);
         }
 
         _gl.Disable(EnableCap.PolygonOffsetFill);
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
         _gl.BindVertexArray(0);
+    }
+
+    private void SetTileTargetAlpha(int tileIndex, float targetAlpha)
+    {
+        if (!_tileMeshes.ContainsKey(tileIndex))
+            return;
+
+        if (!_tileAlphas.ContainsKey(tileIndex))
+            _tileAlphas[tileIndex] = targetAlpha;
+
+        _tileTargetAlphas[tileIndex] = targetAlpha;
+    }
+
+    private void UpdateTileFades(float deltaSeconds)
+    {
+        if (deltaSeconds <= 0f)
+            return;
+
+        float fadeStep = deltaSeconds / TileFadeDurationSeconds;
+        foreach (int tileIndex in _tileMeshes.Keys)
+        {
+            float currentAlpha = _tileAlphas.TryGetValue(tileIndex, out float storedAlpha) ? storedAlpha : 1.0f;
+            float targetAlpha = _tileTargetAlphas.TryGetValue(tileIndex, out float storedTarget) ? storedTarget : 1.0f;
+
+            if (MathF.Abs(currentAlpha - targetAlpha) <= 0.001f)
+            {
+                _tileAlphas[tileIndex] = targetAlpha;
+                continue;
+            }
+
+            float blend = Math.Clamp(fadeStep, 0f, 1f);
+            _tileAlphas[tileIndex] = currentAlpha + (targetAlpha - currentAlpha) * blend;
+        }
     }
 
     // ── Mesh building ────────────────────────────────────────────────────
@@ -325,6 +377,7 @@ uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
 uniform vec3 uCameraPos;
+uniform float uOpacity;
 
 out vec4 FragColor;
 
@@ -352,7 +405,7 @@ void main() {
     float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
     vec3 finalColor = mix(uFogColor, litColor, fogFactor);
 
-    FragColor = vec4(finalColor, 1.0);
+    FragColor = vec4(finalColor, uOpacity);
 }
 ";
 
@@ -370,6 +423,8 @@ void main() {
             _gl.DeleteBuffer(mesh.Ebo);
         }
         _tileMeshes.Clear();
+        _tileAlphas.Clear();
+        _tileTargetAlphas.Clear();
         _shader.Dispose();
     }
 

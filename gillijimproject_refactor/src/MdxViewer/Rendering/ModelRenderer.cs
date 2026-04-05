@@ -718,10 +718,29 @@ public class MdxRenderer : IModelRenderer
         _gl.DepthMask(true);
     }
 
+    private void ApplyFrontFaceForCurrentModelMatrix()
+    {
+        float determinant = _currentModelMatrix.GetDeterminant();
+            _gl.FrontFace(float.IsFinite(determinant) && determinant < 0f ? FrontFaceDirection.CW : FrontFaceDirection.Ccw);
+    }
+
+    private void ConfigureSurfaceCullState(bool disableCull)
+    {
+        if (disableCull)
+        {
+            _gl.Disable(EnableCap.CullFace);
+            return;
+        }
+
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(TriangleFace.Back);
+    }
+
     /// <summary>Shared geoset rendering logic used by both RenderWithTransform and RenderInstance.</summary>
     private unsafe void RenderGeosets(RenderPass pass, float fadeAlpha, bool forceBackdropState = false)
     {
         ProcessDeferredTextureLoads();
+        ApplyFrontFaceForCurrentModelMatrix();
 
         List<int>? geosetOrder = null;
         if (pass == RenderPass.Transparent && _geosets.Count > 1)
@@ -803,8 +822,8 @@ public class MdxRenderer : IModelRenderer
                     var geoFlags = layer.Flags;
                     string materialFamily = DescribeMaterialFamily(isAlphaCutout, effectiveBlendMode, geoFlags);
 
-                    // TwoSided (0x10): culling handled globally
-                    _gl.Disable(EnableCap.CullFace);
+                    // TwoSided (0x10): disable back-face culling only for explicitly two-sided layers.
+                    ConfigureSurfaceCullState(forceBackdropState || geoFlags.HasFlag(MdlGeoFlags.TwoSided));
 
                     if (forceBackdropState)
                     {
@@ -972,6 +991,7 @@ public class MdxRenderer : IModelRenderer
                 && pass != RenderPass.Transparent
                 && !(_usesPreRelease301M2Profile && suppressedMissingTextureFallback))
             {
+                ConfigureSurfaceCullState(forceBackdropState);
                 _gl.Uniform1(_uHasTexture, 0);
                 _gl.Uniform1(_uUvSet, 0);
                 ResetLayerUvTransform();
@@ -982,6 +1002,7 @@ public class MdxRenderer : IModelRenderer
             }
         }
 
+            _gl.FrontFace(FrontFaceDirection.Ccw);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
     }
 

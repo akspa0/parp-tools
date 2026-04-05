@@ -951,7 +951,7 @@ public partial class ViewerApp : IDisposable
             {
                 // Still loading — update AOI so tiles start streaming
                 if (_terrainManager != null)
-                    _terrainManager.UpdateAOI(_camera.Position);
+                    _terrainManager.UpdateAOI(_camera.Position, _camera.Forward);
                 // Update progress bar based on loaded vs expected tiles
                 if (_terrainManager != null && _terrainManager.LoadedTileCount > 0)
                     _loadingScreen.UpdateProgress(_terrainManager.LoadedTileCount, _terrainManager.LoadedTileCount + 10);
@@ -986,7 +986,7 @@ public partial class ViewerApp : IDisposable
 
             // Update terrain AOI before rendering
             if (_terrainManager != null)
-                _terrainManager.UpdateAOI(_camera.Position);
+                _terrainManager.UpdateAOI(_camera.Position, _camera.Forward);
             else if (_vlmTerrainManager != null)
                 _vlmTerrainManager.UpdateAOI(_camera.Position);
 
@@ -8626,11 +8626,11 @@ void main() {
             // Position camera — WMO-only maps use the WMO position, terrain maps use tile center
             var startPos = _pendingWorldSpawnOverride ?? _worldScene.WmoCameraOverride ?? _terrainManager.GetInitialCameraPosition();
             _camera.Position = startPos;
-            if (!_terrainManager.Adapter.IsWmoBased)
-                _terrainManager.UpdateAOI(startPos);
             _pendingWorldSpawnOverride = null;
             _camera.Yaw = 180f;
             _camera.Pitch = -20f;
+            if (!_terrainManager.Adapter.IsWmoBased)
+                _terrainManager.UpdateAOI(startPos, _camera.Forward);
 
             int poiCount = _worldScene.PoiLoader?.Entries.Count ?? 0;
             int taxiNodeCount = _worldScene.TaxiLoader?.Nodes.Count ?? 0;

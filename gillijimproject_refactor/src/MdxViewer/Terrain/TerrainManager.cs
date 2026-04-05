@@ -37,9 +37,10 @@ public class TerrainManager : ISceneRenderer
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
     private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
-    // AOI: how many tiles around the camera to keep loaded
-    private const int AoiRadius = 4; // Load 9×9 tiles around camera for smoother streaming
-    private const int UnloadRadius = AoiRadius + 1; // Keep one extra ring to prevent aggressive edge pop-out
+    // AOI: keep only a small high-detail near field and rely on WDL for distance terrain.
+    private const int NearTileRadius = 1;
+    private const int ForwardLookaheadTiles = 1;
+    private const int UnloadRadius = 1;
     private const int MaxGpuUploadsPerFrame = 4;
     private const double MaxGpuUploadBudgetMs = 5.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
@@ -57,8 +58,14 @@ public class TerrainManager : ISceneRenderer
     // Camera tracking for AOI updates
     private int _lastCameraTileX = -1;
     private int _lastCameraTileY = -1;
+    private int _lastCornerBiasX;
+    private int _lastCornerBiasY;
     private Vector3 _cameraPos;
+    private Vector3 _lastCameraPos;
+    private Vector2 _cameraHeading;
     private bool _disposed;
+
+    private const float CornerLoadBand = 0.28f;
 
     // Stats
     public int LoadedTileCount => _loadedTiles.Count;
@@ -307,7 +314,7 @@ public class TerrainManager : ISceneRenderer
     /// Queues new tiles for background loading and submits completed tiles to GPU.
     /// Uses a square AOI with one-ring unload hysteresis.
     /// </summary>
-    public void UpdateAOI(Vector3 cameraPos)
+    public void UpdateAOI(Vector3 cameraPos, Vector3? cameraForward = null)
     {
         _cameraPos = cameraPos;
 
@@ -318,6 +325,22 @@ public class TerrainManager : ISceneRenderer
         // Submit any background-loaded tiles to GPU (render thread only)
         SubmitPendingTiles();
 
+        if (cameraForward.HasValue)
+        {
+            Vector2 forward2d = new(cameraForward.Value.X, cameraForward.Value.Y);
+            if (forward2d.LengthSquared() > 1e-4f)
+                _cameraHeading = Vector2.Normalize(forward2d);
+        }
+        else
+        {
+            Vector3 delta = cameraPos - _lastCameraPos;
+            Vector2 delta2d = new(delta.X, delta.Y);
+            if (delta2d.LengthSquared() > 1f)
+                _cameraHeading = Vector2.Normalize(delta2d);
+        }
+
+        _lastCameraPos = cameraPos;
+
         // Convert camera world position to tile coordinates
         int tileX = (int)((WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize);
         int tileY = (int)((WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize);
@@ -325,23 +348,78 @@ public class TerrainManager : ISceneRenderer
         tileX = Math.Clamp(tileX, 0, 63);
         tileY = Math.Clamp(tileY, 0, 63);
 
-        // Only update if camera moved to a different tile
-        if (tileX == _lastCameraTileX && tileY == _lastCameraTileY)
+        float tileCoordX = (WoWConstants.MapOrigin - cameraPos.X) / WoWConstants.ChunkSize;
+        float tileCoordY = (WoWConstants.MapOrigin - cameraPos.Y) / WoWConstants.ChunkSize;
+        float tileFracX = tileCoordX - tileX;
+        float tileFracY = tileCoordY - tileY;
+
+        int cornerBiasX = tileFracX <= CornerLoadBand ? -1 : tileFracX >= 1f - CornerLoadBand ? 1 : 0;
+        int cornerBiasY = tileFracY <= CornerLoadBand ? -1 : tileFracY >= 1f - CornerLoadBand ? 1 : 0;
+
+        // Re-evaluate AOI when the camera crosses a tile boundary or when it moves close enough
+        // to a tile corner that a diagonal detailed tile should replace nearby WDL terrain.
+        if (tileX == _lastCameraTileX
+            && tileY == _lastCameraTileY
+            && cornerBiasX == _lastCornerBiasX
+            && cornerBiasY == _lastCornerBiasY)
             return;
 
         _lastCameraTileX = tileX;
         _lastCameraTileY = tileY;
+        _lastCornerBiasX = cornerBiasX;
+        _lastCornerBiasY = cornerBiasY;
 
-        // Determine which tiles should be loaded: a square AOI around the current camera tile.
+        // Determine which tiles should be loaded: a small near-field cross plus one forward-biased row.
         var desiredTiles = new HashSet<(int, int)>();
-        for (int dy = -AoiRadius; dy <= AoiRadius; dy++)
+        for (int dy = -NearTileRadius; dy <= NearTileRadius; dy++)
         {
-            for (int dx = -AoiRadius; dx <= AoiRadius; dx++)
+            for (int dx = -NearTileRadius; dx <= NearTileRadius; dx++)
             {
+                if (Math.Abs(dx) + Math.Abs(dy) > NearTileRadius)
+                    continue;
+
                 int tx = tileX + dx;
                 int ty = tileY + dy;
                 if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64 && _adapter.TileExists(tx, ty))
                     desiredTiles.Add((tx, ty));
+            }
+        }
+
+        if (cornerBiasX != 0 && cornerBiasY != 0)
+        {
+            int diagonalX = tileX + cornerBiasX;
+            int diagonalY = tileY + cornerBiasY;
+            if (diagonalX >= 0 && diagonalX < 64 && diagonalY >= 0 && diagonalY < 64 && _adapter.TileExists(diagonalX, diagonalY))
+                desiredTiles.Add((diagonalX, diagonalY));
+        }
+
+        if (_cameraHeading.LengthSquared() > 0.25f)
+        {
+            int headDx = _cameraHeading.X > 0.3f ? -1 : _cameraHeading.X < -0.3f ? 1 : 0;
+            int headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
+
+            for (int step = 1; step <= ForwardLookaheadTiles; step++)
+            {
+                int fx = tileX + headDx * step;
+                int fy = tileY + headDy * step;
+                if (fx >= 0 && fx < 64 && fy >= 0 && fy < 64 && _adapter.TileExists(fx, fy))
+                    desiredTiles.Add((fx, fy));
+
+                if (headDx != 0)
+                {
+                    if (fy - 1 >= 0 && _adapter.TileExists(fx, fy - 1))
+                        desiredTiles.Add((fx, fy - 1));
+                    if (fy + 1 < 64 && _adapter.TileExists(fx, fy + 1))
+                        desiredTiles.Add((fx, fy + 1));
+                }
+
+                if (headDy != 0)
+                {
+                    if (fx - 1 >= 0 && _adapter.TileExists(fx - 1, fy))
+                        desiredTiles.Add((fx - 1, fy));
+                    if (fx + 1 < 64 && _adapter.TileExists(fx + 1, fy))
+                        desiredTiles.Add((fx + 1, fy));
+                }
             }
         }
 
@@ -386,6 +464,12 @@ public class TerrainManager : ISceneRenderer
             if (_loadedTiles.ContainsKey((tx, ty)) || !_loadingTiles.TryAdd((tx, ty), 0))
                 continue;
             float priority = MathF.Abs(tx - tileX) + MathF.Abs(ty - tileY);
+            if (_cameraHeading.LengthSquared() > 0.25f)
+            {
+                Vector2 offset = new(-(tx - tileX), -(ty - tileY));
+                if (offset.LengthSquared() > 0.01f)
+                    priority -= Vector2.Dot(Vector2.Normalize(offset), _cameraHeading) * 2f;
+            }
             _tilesToLoadScratch.Add((tx, ty, priority));
             _loadingTiles.TryRemove((tx, ty), out _); // will re-add below
         }

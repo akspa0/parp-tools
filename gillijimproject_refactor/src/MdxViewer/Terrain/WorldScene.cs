@@ -517,6 +517,8 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileMdxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileSkyboxInstances = new();
     private readonly Dictionary<(int, int), List<ObjectInstance>> _tileWmoInstances = new();
+    private readonly Dictionary<(int, int), (Vector3 Min, Vector3 Max)> _tileMdxBounds = new();
+    private readonly Dictionary<(int, int), (Vector3 Min, Vector3 Max)> _tileWmoBounds = new();
     private readonly List<ObjectInstance> _externalMdxInstances = new();
     private readonly List<ObjectInstance> _externalSkyboxInstances = new();
     private readonly List<ObjectInstance> _externalWmoInstances = new();
@@ -536,7 +538,7 @@ public class WorldScene : ISceneRenderer
     private bool _showSelectedObjectBounds = true;
     private float _hoveredAssetMaxDistance = 533.33f;
     private float _lastHoverPickFogEnd = 1500f;
-    private float _objectStreamingRangeMultiplier = 1.0f;
+    private float _objectStreamingRangeMultiplier = 0.5f;
     private WorldObjectVisibilityProfile _objectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
 
     // Frustum culling
@@ -832,7 +834,7 @@ public class WorldScene : ISceneRenderer
     public float ObjectStreamingRangeMultiplier
     {
         get => _objectStreamingRangeMultiplier;
-        set => _objectStreamingRangeMultiplier = Math.Clamp(value, 1.0f, 4.0f);
+        set => _objectStreamingRangeMultiplier = Math.Clamp(value, 0.25f, 4.0f);
     }
     public WorldObjectVisibilityProfile ObjectVisibilityProfile
     {
@@ -5651,18 +5653,6 @@ public class WorldScene : ISceneRenderer
 
             _terrainManager.OnTileLoaded += OnTileLoaded;
             _terrainManager.OnTileUnloaded += OnTileUnloaded;
-
-            // Hide WDL for all ADT-backed tiles in the map so WDL only fills gaps
-            // where no detailed ADT tile exists (developer/empty tiles).
-            if (_wdlTerrain != null)
-            {
-                foreach (int tileIdx in adapter.ExistingTiles)
-                {
-                    int tx = tileIdx / 64;
-                    int ty = tileIdx % 64;
-                    _wdlTerrain.HideTile(tx, ty);
-                }
-            }
             onStatus?.Invoke("World loaded (tiles stream as you move).");
         }
 
@@ -6001,6 +5991,8 @@ public class WorldScene : ISceneRenderer
         _tileMdxInstances[(tileX, tileY)] = tileMdx;
         _tileSkyboxInstances[(tileX, tileY)] = tileSkyboxes;
         _tileWmoInstances[(tileX, tileY)] = tileWmo;
+        UpdateObjectBucketBounds(_tileMdxBounds, (tileX, tileY), tileMdx);
+        UpdateObjectBucketBounds(_tileWmoBounds, (tileX, tileY), tileWmo);
         _instancesDirty = true;
 
         if (_assetLoadPolicy.PrewarmTileAssets)
@@ -6021,6 +6013,9 @@ public class WorldScene : ISceneRenderer
         _tileMdxInstances.Remove((tileX, tileY));
         _tileSkyboxInstances.Remove((tileX, tileY));
         _tileWmoInstances.Remove((tileX, tileY));
+        _tileMdxBounds.Remove((tileX, tileY));
+        _tileWmoBounds.Remove((tileX, tileY));
+        _wdlTerrain?.ShowTile(tileX, tileY);
         _instancesDirty = true;
     }
 
@@ -6213,12 +6208,25 @@ public class WorldScene : ISceneRenderer
             return;
 
         bool boundsChanged = false;
-        foreach (var list in _tileMdxInstances.Values)
-            boundsChanged |= RefreshMdxInstanceBounds(list);
+        foreach (var pair in _tileMdxInstances)
+        {
+            if (!RefreshMdxInstanceBounds(pair.Value))
+                continue;
+
+            UpdateObjectBucketBounds(_tileMdxBounds, pair.Key, pair.Value);
+            boundsChanged = true;
+        }
+
         foreach (var list in _tileSkyboxInstances.Values)
             boundsChanged |= RefreshMdxInstanceBounds(list);
-        foreach (var list in _tileWmoInstances.Values)
-            boundsChanged |= RefreshWmoInstanceBounds(list);
+        foreach (var pair in _tileWmoInstances)
+        {
+            if (!RefreshWmoInstanceBounds(pair.Value))
+                continue;
+
+            UpdateObjectBucketBounds(_tileWmoBounds, pair.Key, pair.Value);
+            boundsChanged = true;
+        }
 
         boundsChanged |= RefreshMdxInstanceBounds(_externalMdxInstances);
         boundsChanged |= RefreshMdxInstanceBounds(_externalSkyboxInstances);
@@ -6226,6 +6234,59 @@ public class WorldScene : ISceneRenderer
 
         if (boundsChanged)
             _instancesDirty = true;
+    }
+
+    private static void UpdateObjectBucketBounds(
+        Dictionary<(int, int), (Vector3 Min, Vector3 Max)> boundsByTile,
+        (int, int) tileKey,
+        IReadOnlyList<ObjectInstance> instances)
+    {
+        if (instances.Count == 0)
+        {
+            boundsByTile.Remove(tileKey);
+            return;
+        }
+
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        for (int i = 0; i < instances.Count; i++)
+        {
+            ObjectInstance instance = instances[i];
+            min = Vector3.Min(min, instance.BoundsMin);
+            max = Vector3.Max(max, instance.BoundsMax);
+        }
+
+        boundsByTile[tileKey] = (min, max);
+    }
+
+    private bool ShouldVisitObjectBucket(
+        Vector3 bucketMin,
+        Vector3 bucketMax,
+        Vector3 cameraPos,
+        Vector3 cameraForward,
+        float fogEnd,
+        bool isWmo,
+        bool countAsTaxiActor)
+    {
+        float boundsDistSq = DistanceSquaredPointToAabb(cameraPos, bucketMin, bucketMax);
+        float noCullDistanceSq = ComputeNoCullDistanceSq(bucketMin, bucketMax);
+        bool frustumVisible = _frustumCuller.TestAABB(bucketMin, bucketMax);
+        Vector3 bucketCenter = (bucketMin + bucketMax) * 0.5f;
+        float centerDistanceSq = Vector3.DistanceSquared(cameraPos, bucketCenter);
+        float coneFactor = ComputeVisionConeFactor(cameraPos, cameraForward, bucketCenter, centerDistanceSq);
+
+        if (boundsDistSq > noCullDistanceSq && !frustumVisible && coneFactor < MinOffFrustumConeFactor)
+            return false;
+
+        float bucketDiagonal = (bucketMax - bucketMin).Length();
+        float baseCullDistance = isWmo
+            ? ComputeWmoCullDistance(fogEnd, _objectStreamingRangeMultiplier)
+            : ComputeMdxCullDistance(fogEnd, bucketDiagonal, countAsTaxiActor, _objectStreamingRangeMultiplier);
+        float coneCullDistance = ComputeConeCullDistance(baseCullDistance, coneFactor);
+        if (boundsDistSq > coneCullDistance * coneCullDistance)
+            return false;
+
+        return centerDistanceSq <= MaxWorldObjectViewDistanceSq;
     }
 
     private bool RefreshMdxInstanceBounds(List<ObjectInstance> instances)
@@ -6647,7 +6708,7 @@ public class WorldScene : ISceneRenderer
 
     private static float ComputeWmoCullDistance(float fogEnd, float rangeMultiplier)
     {
-        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 0.25f, 4.0f);
         if (fogEnd <= 0f)
             return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(WmoCullDistance, MaxWorldObjectViewDistance) * clampedMultiplier);
 
@@ -6657,7 +6718,7 @@ public class WorldScene : ISceneRenderer
 
     private static float ComputeMdxCullDistance(float fogEnd, float boundsDiagonal, bool isTaxiActor, float rangeMultiplier)
     {
-        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 0.25f, 4.0f);
         if (isTaxiActor)
             return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(1024f, fogEnd + 384f) * clampedMultiplier);
 
@@ -6743,22 +6804,47 @@ public class WorldScene : ISceneRenderer
 
     private void CollectVisibleWmoInstances(WorldRenderFrame frame, Vector3 cameraPos, Vector3 cameraForward, float fogEnd, float verticalFieldOfViewRadians)
     {
-        WmoCulledCount = WorldObjectVisibilityCollector.CollectVisibleWmos(
-            frame.Visibility,
-            _wmoInstances,
-            new WorldObjectVisibilityContext(
-                cameraPos,
-                cameraForward,
-                fogEnd,
-                _objectStreamingRangeMultiplier,
-                CullSmallDoodadsOnly: false,
-                CountAsTaxiActor: false,
-                VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
-                VisibilityProfile: _objectVisibilityProfile),
-            inst => ShouldHideObjectInstanceByUniqueId(inst),
-            (min, max) => _frustumCuller.TestAABB(min, max),
-            modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
-            (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+        var context = new WorldObjectVisibilityContext(
+            cameraPos,
+            cameraForward,
+            fogEnd,
+            _objectStreamingRangeMultiplier,
+            CullSmallDoodadsOnly: false,
+            CountAsTaxiActor: false,
+            VerticalFieldOfViewRadians: verticalFieldOfViewRadians,
+            VisibilityProfile: _objectVisibilityProfile);
+
+        WmoCulledCount = 0;
+        foreach (var pair in _tileWmoInstances)
+        {
+            if (_tileWmoBounds.TryGetValue(pair.Key, out var bounds)
+                && !ShouldVisitObjectBucket(bounds.Min, bounds.Max, cameraPos, cameraForward, fogEnd, isWmo: true, countAsTaxiActor: false))
+            {
+                WmoCulledCount += pair.Value.Count;
+                continue;
+            }
+
+            WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
+                frame.Visibility,
+                pair.Value,
+                context,
+                inst => ShouldHideObjectInstanceByUniqueId(inst),
+                (min, max) => _frustumCuller.TestAABB(min, max),
+                modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+        }
+
+        if (_externalWmoInstances.Count > 0)
+        {
+            WmoCulledCount += WorldObjectVisibilityCollector.CollectVisibleWmos(
+                frame.Visibility,
+                _externalWmoInstances,
+                context,
+                inst => ShouldHideObjectInstanceByUniqueId(inst),
+                (min, max) => _frustumCuller.TestAABB(min, max),
+                modelKey => ResolveVisibleWmoRenderer(frame, modelKey) != null,
+                (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleWmoLoadDistances, modelKey, priorityScore));
+        }
     }
 
     private void CollectVisibleMdxInstances(
@@ -6787,6 +6873,29 @@ public class WorldScene : ISceneRenderer
             (min, max) => _frustumCuller.TestAABB(min, max),
             modelKey => ResolveVisibleMdxRenderer(frame, modelKey) != null,
             (modelKey, priorityScore) => TrackPendingVisibleLoad(_pendingVisibleMdxLoadDistances, modelKey, priorityScore));
+    }
+
+    private void CollectVisibleMdxBuckets(
+        WorldRenderFrame frame,
+        Vector3 cameraPos,
+        Vector3 cameraForward,
+        float fogEnd,
+        float verticalFieldOfViewRadians)
+    {
+        foreach (var pair in _tileMdxInstances)
+        {
+            if (_tileMdxBounds.TryGetValue(pair.Key, out var bounds)
+                && !ShouldVisitObjectBucket(bounds.Min, bounds.Max, cameraPos, cameraForward, fogEnd, isWmo: false, countAsTaxiActor: false))
+            {
+                MdxCulledCount += pair.Value.Count;
+                continue;
+            }
+
+            CollectVisibleMdxInstances(frame, pair.Value, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+        }
+
+        if (_externalMdxInstances.Count > 0)
+            CollectVisibleMdxInstances(frame, _externalMdxInstances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
     }
 
     private static float ExtractVerticalFieldOfViewRadians(Matrix4x4 projection)
@@ -7079,7 +7188,7 @@ public class WorldScene : ISceneRenderer
                 {
                     frame.MdxVisibilityMs = MeasureDurationMs(() =>
                     {
-                        CollectVisibleMdxInstances(frame, _mdxInstances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: true, countAsTaxiActor: false);
+                        CollectVisibleMdxBuckets(frame, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians);
                         CollectVisibleMdxInstances(frame, _taxiActorInstances, cameraPos, cameraForward, fogEnd, verticalFieldOfViewRadians, cullSmallDoodadsOnly: false, countAsTaxiActor: true);
                     });
                     FlushPendingVisibleMdxLoads();

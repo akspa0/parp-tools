@@ -16,25 +16,24 @@ public class Camera
     public float Yaw { get; set; } = 180f; // Face toward origin initially
     public float Pitch { get; set; } = -10f; // Slight downward angle
 
+    public Vector3 Forward
+    {
+        get
+        {
+            float yawRad = MathF.PI / 180f * Yaw;
+            float pitchRad = MathF.PI / 180f * Pitch;
+            float cosPitch = MathF.Cos(pitchRad);
+            return Vector3.Normalize(new Vector3(
+                cosPitch * MathF.Cos(yawRad),
+                cosPitch * MathF.Sin(yawRad),
+                MathF.Sin(pitchRad)));
+        }
+    }
+
     public Matrix4x4 GetViewMatrix()
     {
-        float yawRad = MathF.PI / 180f * Yaw;
-        float pitchRad = MathF.PI / 180f * Pitch;
-
-        // Forward direction (where camera is looking)
-        float cosPitch = MathF.Cos(pitchRad);
-        float sinPitch = MathF.Sin(pitchRad);
-        float cosYaw = MathF.Cos(yawRad);
-        float sinYaw = MathF.Sin(yawRad);
-
-        var forward = new Vector3(
-            cosPitch * cosYaw,
-            cosPitch * sinYaw,
-            sinPitch
-        );
-
         // LookAt target is camera position + forward direction
-        var target = Position + forward;
+        var target = Position + Forward;
 
         // Up vector is Z-up
         return Matrix4x4.CreateLookAt(Position, target, Vector3.UnitZ);

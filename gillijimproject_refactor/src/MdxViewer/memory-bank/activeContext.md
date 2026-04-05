@@ -1,5 +1,37 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 05, 2026 - Terrain streaming is now camera-biased and near-field again, WDL stays active for distance terrain, and object stream range can drop below 1.00x
+
+- followed the same-session user direction that the active viewer should behave more like the real engine: only a few detailed ADTs near the camera, WDL for far terrain, and no huge far-object admission band at startup
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/Camera.cs` now exposes `Forward`, and `ViewerApp.cs` passes that into `TerrainManager.UpdateAOI(...)` during loading, startup, and normal frame updates
+   - `Terrain/TerrainManager.cs` now keeps a much smaller detailed ADT working set and biases the tile queue toward the camera heading instead of using the old broad square `AoiRadius = 4` residency pattern
+   - `Terrain/WorldScene.cs` no longer hides WDL globally for all ADT-backed tiles on startup, still hides the matching WDL tile when a detailed ADT is loaded, and now shows that WDL tile again when the detailed tile unloads
+   - `Terrain/WorldScene.cs` now defaults object stream range to `0.50x` and allows `0.25x..4.00x`; `ViewerApp_Investigation.cs` exposes the same range in the live UI
+   - `Terrain/WdlTerrainRenderer.cs` now animates WDL tile opacity for `HideTile(...)` and `ShowTile(...)`, so the fallback terrain blends in/out over a short duration instead of hard switching
+- shared runtime follow-up in the same slice:
+   - `wow-viewer/src/core/WowViewer.Core.Runtime/World/Visibility/WorldObjectVisibilityCollector.cs` now uses the same `0.25x` floor for object cull-distance scaling so active-viewer behavior and shared runtime policy stay aligned
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally with no immediate startup errors before the process was stopped
+- important boundary:
+   - this is build plus startup-smoke validation only
+   - no automated tests were added or run for this slice
+   - no live runtime retest has been captured yet for actual FPS, visible-tile counts, or far-terrain transition quality
+
+## Apr 05, 2026 - World-object visibility now broad-phases chunk buckets before per-instance admission, and WMO doodads no longer pay a transparent replay when the model has no transparent pass
+
+- followed a new same-session live retest where the viewer settled around `14 FPS` and the biggest remaining numbers were object-side (`WMO vis/draw`, `MDX vis`, `MDX opaque`) rather than terrain-side
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/WorldScene.cs` now caches aggregate bounds per streamed chunk bucket for MDX and WMO object lists and refreshes those bounds when deferred asset loads resolve real geometry bounds
+   - the world visibility path now broad-phases those chunk buckets before invoking the existing per-instance collectors, which should stop the steady-state render loop from re-scanning obviously out-of-range streamed buckets every frame
+   - `Rendering/WmoRenderer.cs` now reuses doodad visibility scratch storage and skips the transparent doodad replay for opaque-only doodad models
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug`
+- important boundary:
+   - this is build validation only
+   - no live runtime retest has been captured yet for FPS impact from the new object broad-phase and WMO doodad trim
+
 ## Apr 05, 2026 - Terrain-world ADT rendering is back on a tile-batched path in the active viewer
 
 - followed the user's correction that map-size/tile-count scaling, not just object density, is the dominant remaining symptom in the active viewer

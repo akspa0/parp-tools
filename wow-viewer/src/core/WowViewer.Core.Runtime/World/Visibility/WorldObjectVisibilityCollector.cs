@@ -201,7 +201,7 @@ public static class WorldObjectVisibilityCollector
 
     private static float ComputeWmoCullDistance(float fogEnd, float rangeMultiplier)
     {
-        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 0.25f, 4.0f);
         if (fogEnd <= 0f)
             return MathF.Min(MaxWorldObjectViewDistance, MathF.Min(WmoCullDistance, MaxWorldObjectViewDistance) * clampedMultiplier);
 
@@ -211,7 +211,7 @@ public static class WorldObjectVisibilityCollector
 
     private static float ComputeMdxCullDistance(float fogEnd, float boundsDiagonal, bool isTaxiActor, float rangeMultiplier)
     {
-        float clampedMultiplier = Math.Clamp(rangeMultiplier, 1.0f, 4.0f);
+        float clampedMultiplier = Math.Clamp(rangeMultiplier, 0.25f, 4.0f);
         if (isTaxiActor)
             return MathF.Min(MaxWorldObjectViewDistance, MathF.Max(1024f, fogEnd + 384f) * clampedMultiplier);
 
