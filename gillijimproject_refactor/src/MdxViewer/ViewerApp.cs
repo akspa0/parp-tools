@@ -63,6 +63,7 @@ public partial class ViewerApp : IDisposable
         WorldObjects,
         ModelInfo,
         Minimap,
+        WorkspaceBars,
     }
 
     private enum ShellPanelLane
@@ -91,6 +92,15 @@ public partial class ViewerApp : IDisposable
         float MinWidth,
         float CompactMinWidth,
         float MaxWidth);
+
+    private sealed class SavedShellPanelLayout
+    {
+        public int PanelId { get; set; }
+        public float NormalizedX { get; set; }
+        public float NormalizedY { get; set; }
+        public float NormalizedWidth { get; set; }
+        public float NormalizedHeight { get; set; }
+    }
 
     private sealed class StagedPlacementEdit
     {
@@ -188,6 +198,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
     private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
+    private const int CurrentShellPanelLayoutVersion = 2;
     private const int MinimapTeleportConfirmClicks = 3;
     private const float MinimapClickMovementThresholdPixels = 3f;
     private static readonly TimeSpan MinimapTeleportConfirmWindow = TimeSpan.FromSeconds(3);
@@ -230,6 +241,7 @@ public partial class ViewerApp : IDisposable
     private bool _showFileBrowser = true;
     private bool _showModelInfo = true;
     private bool _showTerrainControls = true;
+    private bool _showWorkspaceBarsPanel = true;
     private bool _hideUiChrome;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
@@ -241,7 +253,6 @@ public partial class ViewerApp : IDisposable
     private bool _useDockspaceUi = true;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
-    private bool _fallbackToFixedPanelsNextFrame;
     private AssetCatalogView? _catalogView;
     private bool _wantOpenFile = false;
     private bool _wantAttachLooseMapFolder = false;
@@ -283,7 +294,13 @@ public partial class ViewerApp : IDisposable
         new(ShellPanelId.WorldObjects, "World Objects", ShellPanelLane.Right, 420f, 300f, 220f, 820f),
         new(ShellPanelId.ModelInfo, "Model Info", ShellPanelLane.Right, DefaultSidebarWidth, SidebarMinWidth, SidebarCompactMinWidth, SidebarMaxWidth),
         new(ShellPanelId.Minimap, "Minimap", ShellPanelLane.Floating, 360f, 300f, 260f, 520f),
+        new(ShellPanelId.WorkspaceBars, "Workspace Bars", ShellPanelLane.Left, 360f, 280f, 240f, 520f),
     };
+
+    private static readonly ShellPanelId[] TopLeftQuadrantPanels = { ShellPanelId.WorkspaceBars, ShellPanelId.Navigator };
+    private static readonly ShellPanelId[] TopRightQuadrantPanels = { ShellPanelId.Inspector, ShellPanelId.RuntimeStats, ShellPanelId.ModelInfo };
+    private static readonly ShellPanelId[] BottomLeftQuadrantPanels = { ShellPanelId.Pm4Workbench, ShellPanelId.Minimap };
+    private static readonly ShellPanelId[] BottomRightQuadrantPanels = { ShellPanelId.TerrainControls, ShellPanelId.WorldObjects };
 
     private DockPanelState _navigatorDockState;
     private DockPanelState _inspectorDockState;
@@ -293,6 +310,10 @@ public partial class ViewerApp : IDisposable
     private DockPanelState _worldObjectsDockState;
     private DockPanelState _modelInfoDockState;
     private DockPanelState _minimapDockState;
+    private DockPanelState _workspaceBarsDockState;
+    private readonly Dictionary<ShellPanelId, SavedShellPanelLayout> _savedShellPanelLayouts = new();
+    private readonly HashSet<ShellPanelId> _pendingShellPanelLayoutRestore = new();
+    private bool _forceApplyShellPanelLayout;
 
     private enum TerrainTileScope
     {
@@ -416,6 +437,16 @@ public partial class ViewerApp : IDisposable
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
+
+    private float GetActiveToolbarHeight()
+    {
+        return _useDockspaceUi ? 0f : ToolbarHeight;
+    }
+
+    private float GetTopChromeHeight()
+    {
+        return MenuBarHeight + GetActiveToolbarHeight();
+    }
 
     /// <summary>When true, load all tiles at startup instead of AOI streaming. Default: false (stream tiles as camera moves).</summary>
     public bool FullLoadMode { get; set; } = false;
@@ -644,11 +675,9 @@ public partial class ViewerApp : IDisposable
             {
                 QueueImGuiMouseButtonEvent(btn, down: true);
 
-                if (btn == MouseButton.Right && !ImGui.GetIO().WantCaptureMouse
-                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
+                if (btn == MouseButton.Right && CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
                     _mouseDown = true;
-                if (btn == MouseButton.Left && !ImGui.GetIO().WantCaptureMouse
-                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
+                if (btn == MouseButton.Left && CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
                 {
                     bool shift = ImGui.GetIO().KeyShift;
                     var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
@@ -685,7 +714,7 @@ public partial class ViewerApp : IDisposable
                 _lastMouseX = pos.X;
                 _lastMouseY = pos.Y;
 
-                if (_mouseDown && !ImGui.GetIO().WantCaptureMouse)
+                if (_mouseDown && !IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
                 {
                     _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
                     _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
@@ -694,8 +723,7 @@ public partial class ViewerApp : IDisposable
             };
             mouse.Scroll += (_, scroll) =>
             {
-                if (!ImGui.GetIO().WantCaptureMouse
-                    && IsPointInSceneViewport(_lastMouseX, _lastMouseY))
+                if (CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
                 {
                     // Free-fly: scroll moves camera forward/back
                     float speed = 5f * scroll.Y;
@@ -862,6 +890,8 @@ public partial class ViewerApp : IDisposable
     }
 
     private bool _mKeyWasPressed = false;
+    private bool _pKeyWasPressed = false;
+    private bool _iKeyWasPressed = false;
     private bool _tabKeyWasPressed = false;
     private bool _leftArrowWasPressed = false;
     private bool _rightArrowWasPressed = false;
@@ -899,6 +929,33 @@ public partial class ViewerApp : IDisposable
         if (!ImGui.GetIO().WantTextInput && tabPressed && !_tabKeyWasPressed)
             _hideUiChrome = !_hideUiChrome;
         _tabKeyWasPressed = tabPressed;
+
+        bool pPressed = kb.IsKeyPressed(Key.P);
+        if (!ImGui.GetIO().WantTextInput && pPressed && !_pKeyWasPressed)
+        {
+            if (!_useDockspaceUi)
+            {
+                _useDockspaceUi = true;
+                _showWorkspaceBarsPanel = true;
+            }
+            else
+            {
+                _showWorkspaceBarsPanel = !_showWorkspaceBarsPanel;
+            }
+
+            if (_showWorkspaceBarsPanel)
+                FocusShellPanel(ShellPanelId.WorkspaceBars);
+        }
+        _pKeyWasPressed = pPressed;
+
+        bool iPressed = kb.IsKeyPressed(Key.I);
+        if (!ImGui.GetIO().WantTextInput && iPressed && !_iKeyWasPressed)
+        {
+            _showRightSidebar = !_showRightSidebar;
+            if (_showRightSidebar && _useDockspaceUi)
+                FocusShellPanel(ShellPanelId.Inspector);
+        }
+        _iKeyWasPressed = iPressed;
 
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
@@ -1203,13 +1260,6 @@ void main() {
     {
         UpdateShellLayout(ImGui.GetIO().DisplaySize);
 
-        if (_fallbackToFixedPanelsNextFrame)
-        {
-            _fallbackToFixedPanelsNextFrame = false;
-            _useDockspaceUi = false;
-            _statusMessage = "Docked panel layout was invalid; reverted to fixed sidebars.";
-        }
-
         ResetDockPanelStates();
         if (_hideUiChrome || !_useDockspaceUi)
         {
@@ -1221,7 +1271,8 @@ void main() {
         {
             DrawMenuBar();
 
-            DrawToolbar();
+            if (!_useDockspaceUi)
+                DrawToolbar();
 
             if (_useDockspaceUi)
                 DrawDockspaceHost();
@@ -1232,9 +1283,6 @@ void main() {
                 DrawRightSidebar();
             if (!_useDockspaceUi)
                 DrawFixedSidebarSplitters();
-
-            if (_useDockspaceUi)
-                ValidateDockspacePanels();
 
             DrawStatusBar();
 
@@ -1268,6 +1316,8 @@ void main() {
             if (_showCaptureAutomationWindow)
                 DrawCaptureAutomationWindow();
 
+
+        _forceApplyShellPanelLayout = false;
             // PM4 alignment (advanced fallback)
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
@@ -1393,6 +1443,9 @@ void main() {
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
                 ImGui.MenuItem("Right Sidebar", "", ref _showRightSidebar);
                 ImGui.MenuItem("Dockable Panels", "", ref _useDockspaceUi);
+                ImGui.MenuItem("Workspace Bars", "P", ref _showWorkspaceBarsPanel);
+                if (ImGui.MenuItem("Reset Panel Layout"))
+                    ResetShellPanelLayoutToQuadrants();
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
@@ -1941,7 +1994,7 @@ void main() {
     private void DrawDockspaceHost()
     {
         var io = ImGui.GetIO();
-        float topOffset = MenuBarHeight + ToolbarHeight;
+        float topOffset = GetTopChromeHeight();
         float dockHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (dockHeight <= 10f)
             return;
@@ -1971,22 +2024,6 @@ void main() {
 
         ImGui.End();
         ImGui.PopStyleVar(3);
-    }
-
-    private void ValidateDockspacePanels()
-    {
-        foreach (var panel in ShellPanelDefinitions)
-        {
-            if (!IsShellPanelActive(panel.Id) || panel.Lane == ShellPanelLane.Floating)
-                continue;
-
-            ref DockPanelState state = ref GetDockPanelStateRef(panel.Id);
-            if (state.Visible && !state.IsDocked)
-            {
-                _fallbackToFixedPanelsNextFrame = true;
-                return;
-            }
-        }
     }
 
     private void RunMapGlbTilesExport()
@@ -9967,7 +10004,7 @@ void main() {
         if (_worldScene == null || !_worldScene.WireframeRevealEnabled)
             return;
 
-        if (ImGui.GetIO().WantCaptureMouse || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+        if (IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY) || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
         {
             _worldScene.ClearWireframeReveal();
             return;
@@ -9989,7 +10026,7 @@ void main() {
         if (_worldScene == null)
             return;
 
-        if (ImGui.GetIO().WantCaptureMouse || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
+        if (IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY) || !TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
         {
             _worldScene.ClearHoveredAssetInfo();
             return;
@@ -10175,7 +10212,7 @@ void main() {
             if (!IsShellPanelActive(panel.Id))
                 continue;
 
-            if (IsPointInDockedWindow(GetDockPanelStateRef(panel.Id), x, y))
+            if (IsPointInVisibleShellPanel(GetDockPanelStateRef(panel.Id), x, y))
                 return false;
         }
 
@@ -10184,9 +10221,27 @@ void main() {
         return x >= vpX && x <= vpX + vpW && y >= vpY && y <= vpY + vpH;
     }
 
-    private static bool IsPointInDockedWindow(in DockPanelState state, float x, float y)
+    private bool CanSceneConsumeMouse(float x, float y)
     {
-        if (!state.Visible || !state.IsDocked || state.Size.X <= 1f || state.Size.Y <= 1f)
+        return IsPointInSceneViewport(x, y) && !IsSceneMouseCaptureBlocked(x, y);
+    }
+
+    private bool IsSceneMouseCaptureBlocked(float x, float y)
+    {
+        return ImGui.GetIO().WantCaptureMouse && !IsPointInSceneViewport(x, y);
+    }
+
+    private bool ShouldBypassDockspaceMouseCapture(float x, float y)
+    {
+        return _useDockspaceUi
+            && _dockspaceHostSize.X > 10f
+            && _dockspaceHostSize.Y > 10f
+            && IsPointInSceneViewport(x, y);
+    }
+
+    private static bool IsPointInVisibleShellPanel(in DockPanelState state, float x, float y)
+    {
+        if (!state.Visible || state.Size.X <= 1f || state.Size.Y <= 1f)
             return false;
 
         return x >= state.Position.X
@@ -10255,6 +10310,8 @@ void main() {
                 return ref _modelInfoDockState;
             case ShellPanelId.Minimap:
                 return ref _minimapDockState;
+            case ShellPanelId.WorkspaceBars:
+                return ref _workspaceBarsDockState;
             default:
                 throw new ArgumentOutOfRangeException(nameof(panelId), panelId, null);
         }
@@ -10272,6 +10329,7 @@ void main() {
             ShellPanelId.WorldObjects => _showRightSidebar && _worldScene != null,
             ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
             ShellPanelId.Minimap => _showMinimapWindow,
+            ShellPanelId.WorkspaceBars => _useDockspaceUi && _showWorkspaceBarsPanel,
             _ => false,
         };
     }
@@ -10283,6 +10341,7 @@ void main() {
             ShellPanelId.Navigator => _suppressLeftSidebarForLayout,
             ShellPanelId.Inspector => _suppressRightSidebarForLayout,
             ShellPanelId.Minimap => _suppressMinimapForLayout,
+            ShellPanelId.WorkspaceBars => _suppressLeftSidebarForLayout,
             _ => false,
         };
     }
@@ -10305,6 +10364,13 @@ void main() {
 
     private void FocusShellPanel(ShellPanelId panelId)
     {
+        if (panelId == ShellPanelId.WorkspaceBars)
+        {
+            _showWorkspaceBarsPanel = true;
+            _pendingFocusedShellPanel = panelId;
+            return;
+        }
+
         switch (GetShellPanelDefinition(panelId).Lane)
         {
             case ShellPanelLane.Left:
@@ -10331,6 +10397,17 @@ void main() {
         }
     }
 
+    private void ResetShellPanelLayoutToQuadrants()
+    {
+        _savedShellPanelLayouts.Clear();
+        _pendingShellPanelLayoutRestore.Clear();
+        _showLeftSidebar = true;
+        _showRightSidebar = true;
+        _useDockspaceUi = true;
+        _forceApplyShellPanelLayout = true;
+        SaveViewerSettings();
+    }
+
     private void CaptureDockPanelState(ShellPanelId panelId)
     {
         ref DockPanelState state = ref GetDockPanelStateRef(panelId);
@@ -10338,6 +10415,190 @@ void main() {
         state.IsDocked = ImGui.IsWindowDocked();
         state.Position = ImGui.GetWindowPos();
         state.Size = ImGui.GetWindowSize();
+
+        CaptureSavedShellPanelLayout(panelId, state);
+    }
+
+    private void CaptureSavedShellPanelLayout(ShellPanelId panelId, in DockPanelState state)
+    {
+        if (!_useDockspaceUi || !state.Visible || state.Size.X <= 1f || state.Size.Y <= 1f)
+            return;
+
+        if (!TryGetDockableShellLayoutRect(out Vector2 origin, out Vector2 size))
+            return;
+
+        float normalizedWidth = Math.Clamp(state.Size.X / Math.Max(size.X, 1f), 0.12f, 1f);
+        float normalizedHeight = Math.Clamp(state.Size.Y / Math.Max(size.Y, 1f), 0.12f, 1f);
+        float normalizedX = Math.Clamp((state.Position.X - origin.X) / Math.Max(size.X, 1f), 0f, 1f - normalizedWidth);
+        float normalizedY = Math.Clamp((state.Position.Y - origin.Y) / Math.Max(size.Y, 1f), 0f, 1f - normalizedHeight);
+
+        _savedShellPanelLayouts[panelId] = new SavedShellPanelLayout
+        {
+            PanelId = (int)panelId,
+            NormalizedX = normalizedX,
+            NormalizedY = normalizedY,
+            NormalizedWidth = normalizedWidth,
+            NormalizedHeight = normalizedHeight,
+        };
+    }
+
+    private void PrepareDockableShellPanelWindow(ShellPanelId panelId, Vector2 defaultSize, Vector2 minSize, Vector2 maxSize)
+    {
+        if (!_useDockspaceUi)
+        {
+            ImGui.SetNextWindowSize(defaultSize, ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
+            return;
+        }
+
+        bool shouldForceLayout = _forceApplyShellPanelLayout || _pendingShellPanelLayoutRestore.Contains(panelId);
+        if (TryResolveShellPanelRect(panelId, minSize, maxSize, out Vector2 position, out Vector2 size))
+        {
+            ImGuiCond cond = shouldForceLayout ? ImGuiCond.Always : ImGuiCond.Appearing;
+            ImGui.SetNextWindowPos(position, cond);
+            ImGui.SetNextWindowSize(size, cond);
+
+            if (shouldForceLayout)
+                _pendingShellPanelLayoutRestore.Remove(panelId);
+        }
+        else
+        {
+            ImGui.SetNextWindowSize(defaultSize, ImGuiCond.FirstUseEver);
+        }
+
+        ImGui.SetNextWindowSizeConstraints(minSize, maxSize);
+    }
+
+    private bool TryResolveShellPanelRect(ShellPanelId panelId, Vector2 minSize, Vector2 maxSize, out Vector2 position, out Vector2 size)
+    {
+        if (TryGetSavedShellPanelRect(panelId, minSize, maxSize, out position, out size))
+            return true;
+
+        return TryGetDefaultShellPanelRect(panelId, minSize, maxSize, out position, out size);
+    }
+
+    private bool TryGetSavedShellPanelRect(ShellPanelId panelId, Vector2 minSize, Vector2 maxSize, out Vector2 position, out Vector2 size)
+    {
+        position = Vector2.Zero;
+        size = Vector2.Zero;
+
+        if (!_savedShellPanelLayouts.TryGetValue(panelId, out SavedShellPanelLayout? savedLayout))
+            return false;
+
+        if (!TryGetDockableShellLayoutRect(out Vector2 origin, out Vector2 hostSize))
+            return false;
+
+        size = new Vector2(
+            hostSize.X * savedLayout.NormalizedWidth,
+            hostSize.Y * savedLayout.NormalizedHeight);
+        position = new Vector2(
+            origin.X + hostSize.X * savedLayout.NormalizedX,
+            origin.Y + hostSize.Y * savedLayout.NormalizedY);
+
+        ClampShellPanelRect(origin, hostSize, minSize, maxSize, ref position, ref size);
+        return true;
+    }
+
+    private bool TryGetDefaultShellPanelRect(ShellPanelId panelId, Vector2 minSize, Vector2 maxSize, out Vector2 position, out Vector2 size)
+    {
+        position = Vector2.Zero;
+        size = Vector2.Zero;
+
+        if (!TryGetDockableShellLayoutRect(out Vector2 origin, out Vector2 hostSize))
+            return false;
+
+        ShellPanelId[] group = GetDefaultShellPanelGroup(panelId);
+        int activeCount = 0;
+        int panelIndex = -1;
+        for (int i = 0; i < group.Length; i++)
+        {
+            if (!IsShellPanelActive(group[i]))
+                continue;
+
+            if (group[i] == panelId)
+                panelIndex = activeCount;
+
+            activeCount++;
+        }
+
+        if (activeCount == 0 || panelIndex < 0)
+            return false;
+
+        const float padding = 12f;
+        const float gap = 10f;
+        float columnWidth = Math.Clamp(hostSize.X * 0.26f, 280f, 420f);
+        float quadrantHeight = Math.Max(220f, (hostSize.Y - padding * 2f - gap) * 0.5f);
+        float leftX = origin.X + padding;
+        float rightX = Math.Max(leftX + gap, origin.X + hostSize.X - columnWidth - padding);
+        float topY = origin.Y + padding;
+        float bottomY = origin.Y + hostSize.Y - quadrantHeight - padding;
+
+        bool isLeftQuadrant = panelId == ShellPanelId.Navigator
+            || panelId == ShellPanelId.Inspector
+            || panelId == ShellPanelId.Pm4Workbench
+            || panelId == ShellPanelId.Minimap;
+        bool isTopQuadrant = panelId == ShellPanelId.Navigator
+            || panelId == ShellPanelId.Inspector
+            || panelId == ShellPanelId.RuntimeStats
+            || panelId == ShellPanelId.ModelInfo;
+
+        float groupX = isLeftQuadrant ? leftX : rightX;
+        float groupY = isTopQuadrant ? topY : bottomY;
+        float slotHeight = (quadrantHeight - gap * Math.Max(0, activeCount - 1)) / activeCount;
+        position = new Vector2(groupX, groupY + panelIndex * (slotHeight + gap));
+        size = new Vector2(columnWidth, slotHeight);
+
+        if (panelId == ShellPanelId.Minimap)
+        {
+            float squareSize = MathF.Min(size.X, size.Y);
+            size = new Vector2(squareSize, squareSize);
+        }
+
+        ClampShellPanelRect(origin, hostSize, minSize, maxSize, ref position, ref size);
+        return true;
+    }
+
+    private static ShellPanelId[] GetDefaultShellPanelGroup(ShellPanelId panelId)
+    {
+        return panelId switch
+        {
+            ShellPanelId.WorkspaceBars or ShellPanelId.Navigator => TopLeftQuadrantPanels,
+            ShellPanelId.Inspector or ShellPanelId.RuntimeStats or ShellPanelId.ModelInfo => TopRightQuadrantPanels,
+            ShellPanelId.Pm4Workbench or ShellPanelId.Minimap => BottomLeftQuadrantPanels,
+            ShellPanelId.TerrainControls or ShellPanelId.WorldObjects => BottomRightQuadrantPanels,
+            _ => TopRightQuadrantPanels,
+        };
+    }
+
+    private bool TryGetDockableShellLayoutRect(out Vector2 origin, out Vector2 size)
+    {
+        var io = ImGui.GetIO();
+        float topOffset = GetTopChromeHeight();
+        float height = io.DisplaySize.Y - topOffset - StatusBarHeight;
+
+        if (_useDockspaceUi && _dockspaceHostSize.X > 10f && _dockspaceHostSize.Y > 10f)
+        {
+            origin = _dockspaceHostPosition;
+            size = _dockspaceHostSize;
+            return true;
+        }
+
+        origin = new Vector2(0f, topOffset);
+        size = new Vector2(io.DisplaySize.X, MathF.Max(0f, height));
+        return size.X > 10f && size.Y > 10f;
+    }
+
+    private static void ClampShellPanelRect(Vector2 origin, Vector2 hostSize, Vector2 minSize, Vector2 maxSize, ref Vector2 position, ref Vector2 size)
+    {
+        float clampedWidth = Math.Clamp(size.X, minSize.X, Math.Min(maxSize.X, hostSize.X));
+        float clampedHeight = Math.Clamp(size.Y, minSize.Y, Math.Min(maxSize.Y, hostSize.Y));
+        size = new Vector2(clampedWidth, clampedHeight);
+
+        float maxX = Math.Max(origin.X, origin.X + hostSize.X - size.X);
+        float maxY = Math.Max(origin.Y, origin.Y + hostSize.Y - size.Y);
+        position = new Vector2(
+            Math.Clamp(position.X, origin.X, maxX),
+            Math.Clamp(position.Y, origin.Y, maxY));
     }
 
     private bool TryGetDockedShellPanelState(ShellPanelLane lane, out DockPanelState state)
@@ -10376,6 +10637,54 @@ void main() {
             return true;
 
         return false;
+    }
+
+    private bool TryGetVisibleShellPanelInsetState(bool isLeftPanel, out DockPanelState state)
+    {
+        state = default;
+
+        if (!TryGetDockableShellLayoutRect(out Vector2 origin, out Vector2 hostSize))
+            return false;
+
+        bool found = false;
+        float hostLeft = origin.X;
+        float hostRight = origin.X + hostSize.X;
+        const float edgeTolerance = 24f;
+
+        foreach (var panel in ShellPanelDefinitions)
+        {
+            if (!IsShellPanelActive(panel.Id))
+                continue;
+
+            ref DockPanelState panelState = ref GetDockPanelStateRef(panel.Id);
+            if (!panelState.Visible || panelState.Size.X <= 1f || panelState.Size.Y <= 1f)
+                continue;
+
+            bool touchesEdge = isLeftPanel
+                ? panelState.Position.X <= hostLeft + edgeTolerance
+                : panelState.Position.X + panelState.Size.X >= hostRight - edgeTolerance;
+            if (!touchesEdge)
+                continue;
+
+            if (!found)
+            {
+                state = panelState;
+                found = true;
+                continue;
+            }
+
+            float left = MathF.Min(state.Position.X, panelState.Position.X);
+            float top = MathF.Min(state.Position.Y, panelState.Position.Y);
+            float right = MathF.Max(state.Position.X + state.Size.X, panelState.Position.X + panelState.Size.X);
+            float bottom = MathF.Max(state.Position.Y + state.Size.Y, panelState.Position.Y + panelState.Size.Y);
+
+            state.Visible = true;
+            state.IsDocked = state.IsDocked || panelState.IsDocked;
+            state.Position = new Vector2(left, top);
+            state.Size = new Vector2(right - left, bottom - top);
+        }
+
+        return found;
     }
 
     private void UpdateShellLayout(Vector2 displaySize)
@@ -10469,7 +10778,7 @@ void main() {
             return width > 10f && height > 10f;
         }
 
-        float topOffset = MenuBarHeight + ToolbarHeight;
+        float topOffset = GetTopChromeHeight();
         x = 0f;
         y = topOffset;
         width = io.DisplaySize.X;
@@ -10482,10 +10791,10 @@ void main() {
             width = _dockspaceHostSize.X;
             height = _dockspaceHostSize.Y;
 
-            if (TryGetDockedShellPanelState(ShellPanelLane.Left, out DockPanelState leftDockPanel))
+            if (TryGetVisibleShellPanelInsetState(isLeftPanel: true, out DockPanelState leftDockPanel))
                 ApplyDockedSidePanelInset(leftDockPanel, isLeftPanel: true, y, height, ref x, ref width);
 
-            if (TryGetDockedShellPanelState(ShellPanelLane.Right, out DockPanelState rightDockPanel))
+            if (TryGetVisibleShellPanelInsetState(isLeftPanel: false, out DockPanelState rightDockPanel))
                 ApplyDockedSidePanelInset(rightDockPanel, isLeftPanel: false, y, height, ref x, ref width);
         }
         else
@@ -10619,6 +10928,10 @@ void main() {
                 : TextureFilteringMode.Trilinear;
             _enableMultisample = settings.EnableMultisample;
             _showMinimapWindow = settings.ShowMinimapWindow;
+            _useDockspaceUi = settings.UseDockspaceUi;
+            _showLeftSidebar = settings.ShowLeftSidebar;
+            _showRightSidebar = settings.ShowRightSidebar;
+            _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
             _minimapZoom = float.IsFinite(settings.MinimapZoom)
                 ? Math.Clamp(settings.MinimapZoom, 1f, 32f)
                 : 4f;
@@ -10691,6 +11004,37 @@ void main() {
                             }
                         }
 
+                        _savedShellPanelLayouts.Clear();
+                        _pendingShellPanelLayoutRestore.Clear();
+                        _forceApplyShellPanelLayout = settings.ShellPanelLayoutVersion != CurrentShellPanelLayoutVersion;
+                        if (!_forceApplyShellPanelLayout && settings.ShellPanelLayouts != null)
+                        {
+                            foreach (SavedShellPanelLayout savedLayout in settings.ShellPanelLayouts)
+                            {
+                                if (!Enum.IsDefined(typeof(ShellPanelId), savedLayout.PanelId))
+                                    continue;
+
+                                if (!float.IsFinite(savedLayout.NormalizedX)
+                                    || !float.IsFinite(savedLayout.NormalizedY)
+                                    || !float.IsFinite(savedLayout.NormalizedWidth)
+                                    || !float.IsFinite(savedLayout.NormalizedHeight))
+                                {
+                                    continue;
+                                }
+
+                                var panelId = (ShellPanelId)savedLayout.PanelId;
+                                _savedShellPanelLayouts[panelId] = new SavedShellPanelLayout
+                                {
+                                    PanelId = savedLayout.PanelId,
+                                    NormalizedX = Math.Clamp(savedLayout.NormalizedX, 0f, 0.95f),
+                                    NormalizedY = Math.Clamp(savedLayout.NormalizedY, 0f, 0.95f),
+                                    NormalizedWidth = Math.Clamp(savedLayout.NormalizedWidth, 0.12f, 1f),
+                                    NormalizedHeight = Math.Clamp(savedLayout.NormalizedHeight, 0.12f, 1f),
+                                };
+                                _pendingShellPanelLayoutRestore.Add(panelId);
+                            }
+                        }
+
             ApplySavedPm4AlignmentToScene();
         }
         catch (Exception ex)
@@ -10717,6 +11061,10 @@ void main() {
                 EnableMultisample = _enableMultisample,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
+                UseDockspaceUi = _useDockspaceUi,
+                ShowLeftSidebar = _showLeftSidebar,
+                ShowRightSidebar = _showRightSidebar,
+                ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
@@ -10747,6 +11095,17 @@ void main() {
                     .ThenBy(selection => selection.TileY)
                     .ThenBy(selection => selection.Ck24)
                     .ThenBy(selection => selection.ObjectPartId)
+                    .ToList(),
+                ShellPanelLayouts = _savedShellPanelLayouts.Values
+                    .OrderBy(layout => layout.PanelId)
+                    .Select(layout => new SavedShellPanelLayout
+                    {
+                        PanelId = layout.PanelId,
+                        NormalizedX = layout.NormalizedX,
+                        NormalizedY = layout.NormalizedY,
+                        NormalizedWidth = layout.NormalizedWidth,
+                        NormalizedHeight = layout.NormalizedHeight,
+                    })
                     .ToList()
             };
 
@@ -10869,6 +11228,11 @@ void main() {
         public bool EnableMultisample { get; set; } = true;
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; } = true;
+        public bool UseDockspaceUi { get; set; } = true;
+        public bool ShowLeftSidebar { get; set; } = true;
+        public bool ShowRightSidebar { get; set; } = true;
+        public bool ShowWorkspaceBarsPanel { get; set; } = true;
+        public int ShellPanelLayoutVersion { get; set; } = CurrentShellPanelLayoutVersion;
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }
@@ -10884,6 +11248,7 @@ void main() {
         public float Pm4YawDegrees { get; set; }
         public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
         public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
+        public List<SavedShellPanelLayout> ShellPanelLayouts { get; set; } = new();
     }
 
     private sealed class SavedTaxiActorOverride

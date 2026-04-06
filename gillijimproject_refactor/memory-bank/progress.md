@@ -1,5 +1,60 @@
 # Progress
 
+### Apr 05, 2026 - Raised detailed ADT residency to a ranked 16-tile near field and loosened the terrain-world unique-asset load budget
+
+- followed the user's direction to stop letting the active terrain path feel like only a handful of ADTs are detailed at once
+- landed the streaming follow-up:
+	- `TerrainManager.cs` now ranks a `5x5` candidate neighborhood and keeps the best `16` detailed terrain tiles instead of the older `8`-tile cross-plus-diagonal footprint
+	- retention is slightly wider than the strict visible target so tile turnover is less abrupt around camera-tile boundary changes
+	- terrain GPU upload throughput was raised modestly so the larger detailed footprint can populate faster
+	- `WorldScene.cs` now gives terrain-world unique asset loads a less stingy per-frame budget for visible MDX/WMO requests and deferred drain when frame time is not already over budget
+	- `WorldAssetManager` still keeps one loaded renderer per normalized asset path; this slice tuned the drain rate for those unique requests rather than landing new per-placement instanced rendering
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+- proof boundary:
+	- this is build validation only
+	- no automated tests were added or run
+	- no live runtime retest has been captured yet for terrain pop-in or object streaming smoothness after the new `16`-tile policy
+
+### Apr 05, 2026 - Converted the fixed options bar into a real workspace panel and added WoW-style `P` and `I` shell hotkeys
+
+- followed the user's direct UI decision to stop pushing generic dock arrangements and instead lean into a WoW-like panel model
+- landed the active-viewer shell follow-up:
+	- the old fixed top options bar is no longer drawn in dockspace mode
+	- `ViewerApp_Sidebars.cs` now exposes a real `Workspace Bars` panel containing workspace controls plus the former quick terrain/world display toggles
+	- `ViewerApp.cs` now reclaims the old toolbar strip in dockspace mode by removing that top-height reservation from the scene/dock host layout path
+	- `P` now toggles the new workspace-bars panel and focuses it when opened
+	- `I` now toggles the existing right-side inspector/workflow set and focuses the selection panel when reopened in dockspace mode
+	- the new workspace-bars panel is part of both the saved shell layout path and the grouped quadrant fallback layout
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started successfully and reached normal game-folder loading before shutdown
+- proof boundary:
+	- no automated tests were added or run
+	- no live user signoff has been captured yet for the new hotkey flow or whether the workspace-bars panel fully replaces the old toolbar comfortably
+
+### Apr 05, 2026 - Dockable shell panels now persist normalized positions and sizes, and the fallback shell arrangement is a quadrant stack with a reset action
+
+- followed live shell feedback that the new dockable windows were still not usable enough in practice:
+	- panel positions were not surviving restarts reliably
+	- the default arrangement still felt messy and hard to recover from
+- landed a narrow active-viewer shell improvement:
+	- `ViewerApp.cs` now saves dockable shell panel rectangles into `output/settings/viewer_settings.json`
+	- those saved rectangles are normalized to the dockspace host so they scale with later window sizes instead of restoring as one fixed pixel layout
+	- dockable mode now has a real grouped fallback layout rather than only `FirstUseEver` placement:
+		- top-left `Navigator` + `Selection`
+		- top-right `Runtime Stats` + `Model Info`
+		- bottom-left `PM4 Workbench` + `Minimap`
+		- bottom-right `Terrain Controls` + `World Objects`
+	- `View -> Reset Panel Layout` now clears saved shell panel rectangles, re-enables dockable mode, and reapplies the grouped fallback immediately
+	- shell settings now also persist `Dockable Panels`, left sidebar visibility, and right sidebar visibility
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started successfully and loaded the configured game folder before shutdown
+- proof boundary:
+	- no automated tests were added or run
+	- no live user retest has been captured yet for actual restart persistence or whether the grouped fallback feels meaningfully better on the current workload
+
 ### Apr 05, 2026 - Landed the first real shell slice: shared panel metadata/state and narrow-window layout clamping
 
 - moved the active viewer one step past planning-only shell work:

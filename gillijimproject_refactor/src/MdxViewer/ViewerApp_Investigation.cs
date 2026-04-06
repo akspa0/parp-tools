@@ -494,7 +494,7 @@ public partial class ViewerApp
         if (renderer == null)
             return false;
 
-        if (ImGui.GetIO().WantCaptureMouse)
+        if (IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
             return false;
 
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))

@@ -581,10 +581,10 @@ public class WorldScene : ISceneRenderer
 
     private static readonly TerrainAssetLoadPolicy StreamingTerrainAssetLoadPolicy = new(
         PrewarmTileAssets: false,
-        MaxNewMdxLoadsPerFrame: 8,
-        MaxNewWmoLoadsPerFrame: 4,
-        MaxDeferredLoadsPerFrame: 3,
-        MaxDeferredLoadBudgetMs: 2.5);
+        MaxNewMdxLoadsPerFrame: 12,
+        MaxNewWmoLoadsPerFrame: 6,
+        MaxDeferredLoadsPerFrame: 4,
+        MaxDeferredLoadBudgetMs: 3.5);
 
     private sealed class WorldRenderFrame
     {
@@ -6187,6 +6187,20 @@ public class WorldScene : ISceneRenderer
         {
             maxLoads = Math.Min(maxLoads, 2);
             maxBudgetMs = Math.Min(maxBudgetMs, 1.5);
+        }
+
+        if (!_assetLoadPolicy.PrewarmTileAssets && previousFrameCpuMs < 20.0)
+        {
+            if (pendingLoadCount >= 96)
+            {
+                maxLoads = Math.Max(maxLoads, 6);
+                maxBudgetMs = Math.Max(maxBudgetMs, 4.0);
+            }
+            else if (pendingLoadCount >= 32)
+            {
+                maxLoads = Math.Max(maxLoads, 5);
+                maxBudgetMs = Math.Max(maxBudgetMs, 3.0);
+            }
         }
 
         if (_assetLoadPolicy.PrewarmTileAssets)

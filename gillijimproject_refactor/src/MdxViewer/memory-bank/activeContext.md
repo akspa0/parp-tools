@@ -1,5 +1,60 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 05, 2026 - The active terrain path now holds a ranked 16-tile detailed footprint, and terrain-world object loads drain faster without breaking unique-asset ownership
+
+- followed direct user feedback that the active terrain path should feel closer to the retail engine and stop looking like only a tiny handful of ADTs are detailed at once
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/TerrainManager.cs` now ranks a `5x5` neighborhood around the camera tile and keeps the best `16` detailed ADTs instead of the previous `8`-tile near field
+   - the ranking still favors the center and near ring first, then biases toward camera heading and corner approach so the larger footprint fills in where the player is actually moving
+   - retention is slightly larger than the strict visible set, which should reduce abrupt tile churn during boundary crossings
+   - terrain tile GPU upload throughput was raised modestly so the larger detailed set can appear faster after a move or turn
+   - `Terrain/WorldScene.cs` now gives visible terrain-world MDX/WMO requests a less stingy per-frame budget and slightly more deferred drain headroom when the prior frame is not already over budget
+   - `Terrain/WorldAssetManager.cs` was already the unique-asset ownership seam for world models; this slice did not replace that with true instanced rendering, it just makes those unique model requests arrive sooner in terrain worlds
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+- important boundary:
+   - this is build validation only
+   - no automated tests were added or run
+   - no live runtime retest has been captured yet for whether the `16`-tile footprint and tuned unique-asset drain actually feel natural on the active world scenes
+
+## Apr 05, 2026 - WoW-style shell direction is now active: `Workspace Bars` panel plus `P` and `I` hotkeys
+
+- followed the user's explicit decision to go in the WoW UI direction instead of continuing to fight the generic dockspace ergonomics
+- active `src/MdxViewer` behavior after this slice:
+   - the fixed top options bar is no longer drawn in dockspace mode; the scene now keeps that vertical space, and those controls live in a new `Workspace Bars` shell panel instead
+   - `ViewerApp.cs` now binds `P` to toggle/focus `Workspace Bars` and `I` to toggle/focus the right-side inspector/workflow set
+   - `ViewerApp_Sidebars.cs` now implements `Workspace Bars` as a real panel surface with workspace controls, source-open actions, and the former quick terrain/world display toggles that used to live in the fixed toolbar
+   - the grouped quadrant fallback now treats `Workspace Bars` as part of the top-left group with `Navigator`
+   - saved shell layout persistence now includes the new workspace-bars panel state too
+- important boundary:
+   - this is still a panel shell, not yet a true bottom action-bar or retail-WoW clone
+   - legacy non-dock mode still keeps the old fixed toolbar as a fallback path only
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured game source before shutdown
+
+## Apr 05, 2026 - Dockable shell layout is now viewer-owned: normalized panel persistence plus a quadrant-stack fallback
+
+- followed fresh user feedback that the current dockable shell still had two concrete usability failures:
+   - panel positions were not being saved between runs in a trustworthy way
+   - the startup arrangement still felt too chaotic and did not scale cleanly across window sizes
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now captures dockable shell panel rectangles continuously and persists them in `output/settings/viewer_settings.json`
+   - saved rectangles are normalized to the dockspace host, so they rescale when the app window size changes between runs
+   - dockable mode now has a real grouped fallback layout instead of only `FirstUseEver` window hints:
+      - top-left: `Navigator`, `Selection`
+      - top-right: `Runtime Stats`, `Model Info`
+      - bottom-left: `PM4 Workbench`, `Minimap`
+      - bottom-right: `Terrain Controls`, `World Objects`
+   - `View -> Reset Panel Layout` now clears saved shell rectangles, turns dockable mode back on, and reapplies the quadrant fallback immediately so the shell can recover from drift or a bad arrangement
+   - `ViewerApp_Sidebars.cs` and `ViewerApp_MinimapAndStatus.cs` now route dockable panel opening through the shared shell-layout helper instead of setting ad hoc `FirstUseEver` positions directly
+- important boundary:
+   - this is not true dock-node persistence; it is explicit window-rectangle persistence because the current binding still lacks the DockBuilder path needed for seeded dock topology
+   - the WoW-style hide/popout-on-hotkey shell idea is still open if this grouped floating layout is not enough
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured game source before shutdown
+
 ## Apr 05, 2026 - The active shell now has one shared registry for the current core panels, and narrow-window sidebar behavior is no longer width-invalid by construction
 
 - first implementation slice from `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md` is now in code for the active `src/MdxViewer` host path

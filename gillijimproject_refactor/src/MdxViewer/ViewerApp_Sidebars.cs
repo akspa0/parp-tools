@@ -203,13 +203,127 @@ public partial class ViewerApp
         ImGui.PopStyleVar(2);
     }
 
+    private void DrawWorkspaceBarsPanelContent()
+    {
+        ImGui.TextDisabled("P toggles this panel | I toggles the inspector set | M fullscreen minimap | Tab hides UI chrome");
+        ImGui.Separator();
+
+        ImGui.TextDisabled("Workspace");
+        DrawWorkspaceToolbarControls();
+        ImGui.Spacing();
+
+        if (ImGui.Button("Open Game Folder..."))
+        {
+            _showFolderInput = true;
+            _folderInputBuf = string.IsNullOrWhiteSpace(_lastGameFolderPath) ? "" : _lastGameFolderPath;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Open File..."))
+            _wantOpenFile = true;
+
+        if (_dataSource != null)
+            ImGui.TextColored(new Vector4(0.70f, 0.78f, 0.88f, 1f), $"Source: {_dataSource.Name}");
+
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
+        if (renderer == null)
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped("Load a terrain-backed world to populate the display bars. Standalone model and WMO inspection still works through the navigator and selection panels.");
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Terrain Layers");
+        bool l0 = renderer.ShowLayer0;
+        if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
+        ImGui.SameLine();
+        bool l1 = renderer.ShowLayer1;
+        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+        ImGui.SameLine();
+        bool l2 = renderer.ShowLayer2;
+        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+        ImGui.SameLine();
+        bool l3 = renderer.ShowLayer3;
+        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+
+        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+            ?? false);
+        if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
+        {
+            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+            {
+                _statusMessage = terrainHolesEnabled
+                    ? "Terrain hole masking enabled."
+                    : "Terrain hole masking disabled.";
+            }
+        }
+
+        ImGui.SameLine();
+        bool chunkGrid = renderer.ShowChunkGrid;
+        if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+        ImGui.SameLine();
+        bool tileGrid = renderer.ShowTileGrid;
+        if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("Overlays");
+        bool alphaMask = renderer.ShowAlphaMask;
+        if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+        ImGui.SameLine();
+        bool shadowMap = renderer.ShowShadowMap;
+        if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+        ImGui.SameLine();
+        bool useMccv = renderer.UseMccv;
+        if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+        ImGui.SameLine();
+        bool contours = renderer.ShowContours;
+        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+
+        ImGui.Spacing();
+        ImGui.TextDisabled("World");
+        if (liquidRenderer != null)
+        {
+            bool showLiquid = liquidRenderer.ShowLiquid;
+            if (ImGui.Checkbox($"Liquid Terrain ({liquidRenderer.MeshCount})", ref showLiquid))
+                liquidRenderer.ShowLiquid = showLiquid;
+        }
+
+        if (_worldScene != null)
+        {
+            int wlCount = liquidRenderer?.WlMeshCount ?? 0;
+            bool showWlTop = _worldScene.ShowWlLiquids;
+            if (ImGui.Checkbox($"WL* ({wlCount})", ref showWlTop))
+                _worldScene.ShowWlLiquids = showWlTop;
+
+            ImGui.SameLine();
+            bool showWdl = _worldScene.ShowWdlTerrain;
+            if (ImGui.Checkbox("WDL", ref showWdl))
+                _worldScene.ShowWdlTerrain = showWdl;
+
+            bool showBB = _worldScene.ShowBoundingBoxes;
+            if (ImGui.Checkbox("Bounding Boxes", ref showBB))
+                _worldScene.ShowBoundingBoxes = showBB;
+
+            ImGui.SameLine();
+            bool showPm4 = _worldScene.ShowPm4Overlay;
+            if (ImGui.Checkbox("PM4 Overlay", ref showPm4))
+                _worldScene.ShowPm4Overlay = showPm4;
+
+            if (_worldScene.IsPm4Loading)
+                ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "PM4 overlay is loading...");
+        }
+    }
+
     private void DrawLeftSidebar()
     {
         if (!HasAnyShellPanelsInLane(ShellPanelLane.Left))
             return;
 
         var io = ImGui.GetIO();
-        float topOffset = MenuBarHeight + ToolbarHeight;
+        float topOffset = GetTopChromeHeight();
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
@@ -489,7 +603,7 @@ public partial class ViewerApp
             return;
 
         var io = ImGui.GetIO();
-        float topOffset = MenuBarHeight + ToolbarHeight;
+        float topOffset = GetTopChromeHeight();
         float sidebarHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (_useDockspaceUi)
         {
@@ -580,8 +694,9 @@ public partial class ViewerApp
             if (_pendingFocusedShellPanel == panel.Id)
                 ImGui.SetNextWindowFocus();
 
-            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, defaultHeight), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSizeConstraints(
+            PrepareDockableShellPanelWindow(
+                panel.Id,
+                new Vector2(panel.DefaultWidth, defaultHeight),
                 new Vector2(panel.CompactMinWidth, 220f),
                 new Vector2(panel.MaxWidth, sidebarHeight));
 
@@ -602,6 +717,9 @@ public partial class ViewerApp
     {
         switch (panelId)
         {
+            case ShellPanelId.WorkspaceBars:
+                DrawWorkspaceBarsPanelContent();
+                break;
             case ShellPanelId.Navigator:
                 DrawNavigatorPanelContent();
                 break;
@@ -724,7 +842,7 @@ public partial class ViewerApp
             return;
 
         var io = ImGui.GetIO();
-        float topOffset = MenuBarHeight + ToolbarHeight;
+        float topOffset = GetTopChromeHeight();
         float panelHeight = io.DisplaySize.Y - topOffset - StatusBarHeight;
         if (panelHeight <= 0f)
             return;

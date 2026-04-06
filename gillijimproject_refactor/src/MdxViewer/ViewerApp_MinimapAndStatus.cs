@@ -251,8 +251,11 @@ public partial class ViewerApp
         }
         else
         {
-            ImGui.SetNextWindowSize(new Vector2(panel.DefaultWidth, panel.DefaultWidth), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSizeConstraints(new Vector2(panel.CompactMinWidth, panel.CompactMinWidth), new Vector2(panel.MaxWidth, panel.MaxWidth));
+            PrepareDockableShellPanelWindow(
+                ShellPanelId.Minimap,
+                new Vector2(panel.DefaultWidth, panel.DefaultWidth),
+                new Vector2(panel.CompactMinWidth, panel.CompactMinWidth),
+                new Vector2(panel.MaxWidth, panel.MaxWidth));
         }
 
         if (!ImGui.Begin("Minimap", ref _showMinimapWindow,

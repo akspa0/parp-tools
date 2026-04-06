@@ -37,12 +37,14 @@ public class TerrainManager : ISceneRenderer
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
     private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
-    // AOI: keep an 8-tile high-detail near field and rely on WDL for distance terrain.
-    private const int NearTileRadius = 1;
-    private const int TargetDetailedTileCount = 8;
-    private const int UnloadRadius = 1;
-    private const int MaxGpuUploadsPerFrame = 4;
-    private const double MaxGpuUploadBudgetMs = 5.0;
+    // AOI: keep a 16-tile high-detail near field and rely on WDL for distance terrain.
+    // Candidates come from a 5x5 neighborhood around the camera tile, then get ranked so
+    // the center, nearby ring, and forward-biased edge tiles stay resident first.
+    private const int DetailedTileCandidateRadius = 2;
+    private const int TargetDetailedTileCount = 16;
+    private const int TargetRetainedTileCount = 20;
+    private const int MaxGpuUploadsPerFrame = 6;
+    private const double MaxGpuUploadBudgetMs = 7.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
     private readonly SemaphoreSlim _mpqReadSemaphore = new(MaxConcurrentMpqReads);
 
@@ -369,25 +371,6 @@ public class TerrainManager : ISceneRenderer
         _lastCornerBiasX = cornerBiasX;
         _lastCornerBiasY = cornerBiasY;
 
-        // Determine which tiles should be loaded: a stable 8-tile near field.
-        // This is effectively a 3x3 neighborhood with the least useful rear diagonal dropped,
-        // so detailed ADT coverage feels denser without going back to a large residency window.
-        var desiredTiles = new HashSet<(int, int)>();
-        for (int dy = -NearTileRadius; dy <= NearTileRadius; dy++)
-        {
-            for (int dx = -NearTileRadius; dx <= NearTileRadius; dx++)
-            {
-                if (Math.Abs(dx) + Math.Abs(dy) > NearTileRadius)
-                    continue;
-
-                int tx = tileX + dx;
-                int ty = tileY + dy;
-                if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64 && _adapter.TileExists(tx, ty))
-                    desiredTiles.Add((tx, ty));
-            }
-        }
-
-        var diagonalCandidates = new List<(int tx, int ty, float score)>();
         int headDx = 0;
         int headDy = 0;
         if (_cameraHeading.LengthSquared() > 0.25f)
@@ -396,47 +379,62 @@ public class TerrainManager : ISceneRenderer
             headDy = _cameraHeading.Y > 0.3f ? -1 : _cameraHeading.Y < -0.3f ? 1 : 0;
         }
 
-        for (int diagonalDy = -1; diagonalDy <= 1; diagonalDy += 2)
+        var rankedCandidates = new List<(int tx, int ty, float score, int chebyshev, int manhattan)>();
+        for (int dy = -DetailedTileCandidateRadius; dy <= DetailedTileCandidateRadius; dy++)
         {
-            for (int diagonalDx = -1; diagonalDx <= 1; diagonalDx += 2)
+            for (int dx = -DetailedTileCandidateRadius; dx <= DetailedTileCandidateRadius; dx++)
             {
-                int diagonalX = tileX + diagonalDx;
-                int diagonalY = tileY + diagonalDy;
-                if (diagonalX < 0 || diagonalX >= 64 || diagonalY < 0 || diagonalY >= 64 || !_adapter.TileExists(diagonalX, diagonalY))
+                int tx = tileX + dx;
+                int ty = tileY + dy;
+                if (tx < 0 || tx >= 64 || ty < 0 || ty >= 64 || !_adapter.TileExists(tx, ty))
                     continue;
 
-                float score = 0f;
+                int chebyshev = Math.Max(Math.Abs(dx), Math.Abs(dy));
+                int manhattan = Math.Abs(dx) + Math.Abs(dy);
+                float score = chebyshev * 8f + manhattan;
+
+                if (dx == 0 && dy == 0)
+                    score -= 100f;
+
                 if (headDx != 0 || headDy != 0)
-                    score += diagonalDx * headDx + diagonalDy * headDy;
+                    score -= (dx * headDx + dy * headDy) * 1.75f;
 
                 if (cornerBiasX != 0 || cornerBiasY != 0)
-                    score += (diagonalDx * cornerBiasX + diagonalDy * cornerBiasY) * 0.25f;
+                    score -= (dx * cornerBiasX + dy * cornerBiasY) * 0.5f;
 
-                diagonalCandidates.Add((diagonalX, diagonalY, score));
+                rankedCandidates.Add((tx, ty, score, chebyshev, manhattan));
             }
         }
 
-        diagonalCandidates.Sort((left, right) => right.score.CompareTo(left.score));
-        foreach (var (diagonalX, diagonalY, _) in diagonalCandidates)
+        rankedCandidates.Sort((left, right) =>
+        {
+            int scoreCompare = left.score.CompareTo(right.score);
+            if (scoreCompare != 0)
+                return scoreCompare;
+
+            int ringCompare = left.chebyshev.CompareTo(right.chebyshev);
+            if (ringCompare != 0)
+                return ringCompare;
+
+            return left.manhattan.CompareTo(right.manhattan);
+        });
+
+        var desiredTiles = new HashSet<(int, int)>();
+        foreach (var candidate in rankedCandidates)
         {
             if (desiredTiles.Count >= TargetDetailedTileCount)
                 break;
 
-            desiredTiles.Add((diagonalX, diagonalY));
+            desiredTiles.Add((candidate.tx, candidate.ty));
         }
 
-        // Build a wider retention set for unloading. This hysteresis avoids dropping tiles
-        // that are still near/in-view right when camera crosses tile boundaries.
         var unloadKeepTiles = new HashSet<(int, int)>();
-        for (int dy = -UnloadRadius; dy <= UnloadRadius; dy++)
+        foreach (var candidate in rankedCandidates)
         {
-            for (int dx = -UnloadRadius; dx <= UnloadRadius; dx++)
-            {
-                int tx = tileX + dx;
-                int ty = tileY + dy;
-                if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64 && _adapter.TileExists(tx, ty))
-                    unloadKeepTiles.Add((tx, ty));
-            }
+            if (unloadKeepTiles.Count >= TargetRetainedTileCount)
+                break;
+
+            unloadKeepTiles.Add((candidate.tx, candidate.ty));
         }
 
         // Unload tiles outside retention radius — dispose GPU meshes but keep parsed data in cache.

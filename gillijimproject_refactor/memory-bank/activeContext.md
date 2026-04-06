@@ -2,6 +2,67 @@
 
 # Active Context
 
+## Apr 05, 2026 - Active terrain AOI now targets a 16-tile detailed near field, and terrain-world object streaming is less stingy while still staying unique-asset based
+
+- followed the user's direct correction that the detailed ADT footprint should feel more like the real game engine and less like a tiny high-detail cross that pops constantly at the edges
+- active terrain/runtime behavior after this slice:
+	- `src/MdxViewer/Terrain/TerrainManager.cs` no longer builds the detailed terrain set from the old `8`-tile cross-plus-diagonals rule
+	- the AOI selector now ranks a full `5x5` candidate neighborhood around the camera tile and keeps the best `16` detailed ADTs loaded, biased toward the center ring first and then toward camera heading and corner approach
+	- retention is now slightly wider than the strict visible target, so the terrain path can avoid dropping a tile the moment it falls out of the top `16` candidates during boundary transitions
+	- GPU terrain upload throughput was raised modestly (`6` uploads / about `7 ms` budget) so the larger detailed footprint can fill in faster without requiring full-load mode
+	- `src/MdxViewer/Terrain/WorldScene.cs` now uses a less stingy streaming terrain asset policy (`12` visible MDX, `6` visible WMO, `4` deferred loads with a slightly larger budget) so the larger ADT window does not make unique object assets appear materially later than their terrain
+	- important proof/ownership detail: `WorldAssetManager` was already de-duplicating model loads by normalized asset path; this slice keeps that unique-asset load model and tunes how quickly those unique requests drain, rather than claiming true instanced world rendering landed
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+- proof boundary:
+	- this is build validation only
+	- no automated tests were added or run
+	- no real-data runtime retest has been captured yet for whether the `16`-tile footprint and larger unique-asset load budget feel natural in the live viewer
+
+## Apr 05, 2026 - The dockable shell now follows the WoW-style direction: hotkey-driven workspace bars panel, reclaimed top chrome, and inspector-set toggle
+
+- followed the user's explicit decision to stop iterating on generic freeform docking ergonomics and instead move the active shell toward a WoW-like model with familiar panel hotkeys
+- active shell behavior after this slice:
+	- the old fixed top options bar is no longer drawn in dockspace mode; that top strip is now reclaimed for the scene/dock host, and the controls live in a real shell panel instead
+	- `src/MdxViewer/ViewerApp.cs` now adds `P` as a hotkey for the new `Workspace Bars` panel and `I` as a hotkey for the right-side inspector/workflow panel set
+	- `src/MdxViewer/ViewerApp_Sidebars.cs` now exposes `Workspace Bars` as a real panel with workspace selection plus the former quick terrain/world display toggles from the toolbar
+	- dockspace mode now treats the workspace bars panel as part of the grouped quadrant fallback and saved shell layout path
+	- the fixed toolbar remains only as the legacy non-dock fallback path; it is no longer the primary shell surface
+- important boundary:
+	- this is still a panel-based shell, not a full bottom-bar or action-bar recreation of the retail WoW UI
+	- `I` currently toggles the existing right-side inspector/workflow set rather than a newly split standalone info-only window
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured game folder before shutdown
+- proof boundary:
+	- no automated tests were added or run
+	- no live retest has been captured yet for actual `P`/`I` usability or whether the workspace-bars panel feels better than the old fixed toolbar in real usage
+
+## Apr 05, 2026 - Dockable shell panels now persist their own layout, and the default fallback is a quadrant-stack layout instead of ad hoc first-use placement
+
+- followed fresh live feedback after the dockable-panel extraction landed:
+	- panel positions were not surviving restarts reliably
+	- the default dockable layout still felt chaotic and did not scale cleanly across window sizes
+- active shell behavior after this slice:
+	- `src/MdxViewer/ViewerApp.cs` now persists dockable shell panel rectangles in `output/settings/viewer_settings.json` instead of relying only on ImGui first-use placement or ambient `.ini` behavior
+	- the saved panel rectangles are normalized against the dockspace host, so they rescale across later window sizes instead of restoring as raw absolute pixels only
+	- the shell now has a concrete quadrant-stack fallback layout for dockable mode:
+		- top-left: `Navigator`, `Selection`
+		- top-right: `Runtime Stats`, `Model Info`
+		- bottom-left: `PM4 Workbench`, `Minimap`
+		- bottom-right: `Terrain Controls`, `World Objects`
+	- `View -> Reset Panel Layout` now clears saved panel rectangles, forces dockable mode on, and reapplies that quadrant fallback so the user can recover from a bad arrangement without hand-dragging every window back into place
+	- `UseDockspaceUi`, left/right shell visibility, and panel rectangle state now save with the viewer settings payload
+- important boundary:
+	- this is explicit floating-layout persistence plus a default grouped fallback; it does not restore true dock-node topology because the current ImGui.NET binding in this workspace still does not expose DockBuilder seeding
+	- this improves persistence and startup organization, but it is not yet the WoW-style hotkey popout shell idea the user mentioned as a possible later direction
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -v q -nologo`
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started normally and loaded the configured game folder before shutdown
+- proof boundary:
+	- no automated tests were added or run
+	- no live restart-and-rearrange retest has been captured yet for actual panel persistence or user comfort with the new grouped fallback
+
 ## Apr 05, 2026 - First viewer-shell extraction slice landed: shared panel registry plus resize-safe sidebar clamping
 
 - the first concrete implementation step from `plans/mdxviewer_ui_panel_and_prefab_library_plan_2026-04-05.md` is now in the active `src/MdxViewer` shell instead of remaining planning-only
