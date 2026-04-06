@@ -14,21 +14,19 @@ This README is intentionally high level. The detailed viewer workflow lives in [
   - a WMO and MDX/M2 inspection/export tool
   - a front end for several converter and validation utilities already in this repo
 
-## v0.4.6.1 release snapshot
+## v0.4.7 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.6.1` is the current release target in this tree.
+- `parp-tools WoW Viewer` `0.4.7` is the current release target in this tree.
 - Recent viewer-facing changes that materially shape this release:
-  - fullscreen and docked minimap interaction/camera-marker behavior was repaired and then runtime-confirmed by the user on the fixed development minimap dataset
-  - taxi route inspection now has route picking, animated actor controls, asset override workflow, return-to-world flow, and saved override persistence
-  - render-quality controls expose live texture filtering changes for already loaded assets
-  - PM4 inspection/export workflows, minimap disk cache, and recent object-visibility tuning are all part of the active viewer path
-  - PM4 overlay decoding and placement are now substantially closer to correct on the development map after the latest camera-window, tile-remap, empty-carrier, and linked-group placement fixes
-  - PM4 hover information now has better WoW-styled tooltip display with clearer PM4 context for quick object inspection
-  - the first rendering-performance slices now remove duplicate MDX scene walks and defer WMO doodad expansion, while a deeper render-layer/submission refactor remains the next likely seam
+  - the active shell is now fixed-frame first again, with static left/right sidebars as the startup path and dock panels left as an opt-in fallback instead of the primary workflow
+  - the right sidebar no longer relies on the broken tab host; viewer tools now stack as sequential `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics` sections
+  - terrain and world-scene performance work now includes restored tile-batched terrain submission, streamed chunk broad-phase culling for world objects, tighter near-field or WDL streaming policy, and less stingy unique-asset drain for visible terrain-world assets
+  - PM4 hover or selection matching is now local-first and geometry-first, which is the concrete fix for the recent whole-scene OilPlatform collapse
+  - under the hood, more visibility and pass-planning seams continue moving into `wow-viewer` runtime and PM4 libraries instead of remaining fully viewer-local
 - Validation reality for the release target:
-  - the minimap blocker now has targeted runtime user signoff on the real development minimap data
-  - most other recent viewer slices are still build-validated only unless noted otherwise in the memory-bank files
-  - there is still very little first-party automated regression coverage for the active viewer
+  - the active viewer still has very little first-party automated regression coverage
+  - the newer shell, PM4-matching, and performance slices in this train are still build-validated only unless a narrower runtime note says otherwise in the memory-bank files
+  - earlier targeted runtime confirmation still exists for the repaired development minimap blocker, but that should not be stretched into broad signoff for every recent subsystem change
 
 ## Version support
 

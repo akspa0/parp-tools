@@ -1,5 +1,17 @@
 # Progress
 
+### Apr 06, 2026 - v0.4.7 release prep aligned version metadata, packaged docs, and GitHub Actions notes
+
+- followed the release request to cut the current train as `v0.4.7`
+- landed behavior/docs/workflow updates:
+	- bumped `src/MdxViewer/MdxViewer.csproj` and `src/MdxViewer/MdxViewer.CrossPlatform.csproj` to `0.4.7`
+	- added a checked-in `src/MdxViewer/docs/releases/v0.4.7.md` note and wired both release workflows to use it as the GitHub release body
+	- changed packaged release docs so the archive now carries `README.md`, `MdxViewer.README.md`, `USERGUIDE.md`, and `CHANGES-v0.4.7.md`
+	- refreshed both README snapshots and the shipped user guide so the release now talks about the real current shell, streaming/performance work, PM4 matching fix, and ongoing `wow-viewer` refactor direction instead of stale `v0.4.6.1` UI notes
+- validation boundary:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+	- no automated tests were added or run for this slice
+
 ### Apr 06, 2026 - Replaced the broken right-sidebar tabs with stacked sections
 
 - followed live feedback that the new right-sidebar tabs were still not behaving correctly and should just be sequential panels in one sidebar instead

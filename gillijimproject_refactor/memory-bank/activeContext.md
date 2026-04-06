@@ -2,6 +2,19 @@
 
 # Active Context
 
+## Apr 06, 2026 - v0.4.7 release prep now ships aligned docs and concise change notes through GitHub Actions
+
+- followed the release request to package the current performance and UI train as `v0.4.7` instead of leaving the repo and release workflow stuck on the older `v0.4.6.1` snapshot
+- active release-prep state after this slice:
+	- `src/MdxViewer/MdxViewer.csproj` and `src/MdxViewer/MdxViewer.CrossPlatform.csproj` now both report `0.4.7`
+	- the packaged release archive now includes the repo-level README, the viewer README, the shipped user guide, and a concise checked-in `v0.4.7` changes file
+	- both release workflow copies now read their GitHub release body from the same checked-in `src/MdxViewer/docs/releases/v0.4.7.md` note instead of hardcoding stale `v0.4.6.1` text
+	- top-level and viewer README release snapshots now foreground the real themes of this train: shell regrouping, performance work, PM4 ranking repair, and continued `wow-viewer` runtime extraction
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+- important boundary:
+	- this is release-prep and packaging alignment, not broad new runtime signoff for every viewer subsystem touched during the train
+
 ## Apr 06, 2026 - The right sidebar no longer uses tabs; viewer tools are stacked as sequential sections
 
 - followed fresh live feedback that the replacement right-sidebar tabs were still behaving like a broken tab host and effectively pinning the view back to the inspect surface

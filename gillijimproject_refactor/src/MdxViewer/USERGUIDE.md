@@ -10,16 +10,21 @@ A high-performance 3D world viewer for **World of Warcraft Alpha 0.5.3**, **0.6.
 
 **From a release ZIP:**
 ```
-MdxViewer.exe path\to\game\directory
+ParpToolsWoWViewer
 ```
 
 **From source:**
 ```
 cd gillijimproject_refactor/src/MdxViewer
-dotnet run -- path\to\game\directory
+dotnet run --project .\MdxViewer.csproj
 ```
 
-The viewer auto-detects the WoW build version from the game path and loads the appropriate terrain, models, and DBC data.
+The normal startup flow is in-app and explicit:
+
+1. Use `File > Open Game Folder (MPQ)...`
+2. Pick the client build in the build-selection dialog
+3. Load worlds from the left sidebar
+4. Use the right sidebar sections for `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics`
 
 ### Command-Line Options
 
@@ -27,11 +32,14 @@ The viewer auto-detects the WoW build version from the game path and loads the a
 |------|-------------|
 | `--full-load` | Load all map tiles at startup instead of streaming (high memory usage) |
 | `--verbose` | Enable detailed logging output |
+| `--game-path <clientRoot>` | Open a base client directly on startup |
+| `--build <buildVersion>` | Pin the client build instead of using the build picker |
+| `--world <path-or-virtual-path>` | Open a world or loose asset after startup configuration |
 
 ### System Requirements
 
 - **GPU**: OpenGL 3.3+ capable hardware
-- **OS**: Windows x64
+- **OS**: Windows x64 is the primary release target; cross-platform publish builds also exist, but should still be treated as compatibility output rather than broad runtime signoff
 - **Data**: WoW game directory with MPQ archives (Alpha 0.5.3, 0.6.0, or 3.3.5)
 
 ---
@@ -45,7 +53,7 @@ The viewer auto-detects the WoW build version from the game path and loads the a
 | **Right-click + Drag** | Look around (yaw / pitch) |
 | **Scroll Wheel** (viewport) | Adjust camera movement speed |
 | **Scroll Wheel** (minimap) | Zoom minimap in / out |
-| **Double-click** (minimap) | Teleport camera to clicked location |
+| **Triple-click same tile** (minimap) | Teleport camera to the clicked tile |
 
 ---
 
@@ -55,7 +63,7 @@ The viewer auto-detects the WoW build version from the game path and loads the a
 
 The main viewport renders the 3D world with terrain, buildings (WMOs), doodad models (MDX/M2), and liquid surfaces.
 
-- **AOI Streaming** — Tiles load and unload dynamically as the camera moves. A 9x9 tile radius is kept loaded around the camera with directional lookahead prioritization. This keeps memory usage manageable even on very large maps.
+- **AOI Streaming** — Tiles load and unload dynamically as the camera moves. The active viewer now keeps a ranked near-field of detailed ADTs around the camera and uses WDL fallback for distance terrain.
 - **Frustum Culling** — Only geometry visible to the camera is rendered.
 - **Fog** — Distance-based fog blends objects into the horizon for a natural look.
 - **Day/Night Slider** — Adjusts the scene lighting from dawn to dusk.
@@ -65,7 +73,7 @@ The main viewport renders the 3D world with terrain, buildings (WMOs), doodad mo
 A camera-centered minimap panel shows BLP minimap tiles with:
 - Current camera position indicator
 - Scroll-wheel zoom
-- Double-click to teleport the camera to any visible location
+- Triple-click the same visible tile to teleport the camera there
 - Area POI markers (if DBC data is available)
 
 ### 3. Terrain Rendering

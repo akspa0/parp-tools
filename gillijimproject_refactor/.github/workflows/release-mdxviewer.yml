@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.6.1)'
+        description: 'Version tag (e.g. v0.4.7)'
         required: true
 
 permissions:
@@ -82,6 +82,14 @@ jobs:
           $count = (Get-ChildItem "gillijimproject_refactor/publish/ParpToolsWoWViewer/definitions/*.dbd").Count
           Write-Host "Bundled $count .dbd definition files"
 
+      - name: Bundle README, user guide, and release notes
+        run: |
+          $pubDir = "gillijimproject_refactor/publish/ParpToolsWoWViewer"
+          Copy-Item "gillijimproject_refactor/README.md" "$pubDir/README.md"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/README.md" "$pubDir/MdxViewer.README.md"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/USERGUIDE.md" "$pubDir/USERGUIDE.md"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md" "$pubDir/CHANGES-v0.4.7.md"
+
       - name: Create ZIP archive
         run: |
           $version = if ("${{ github.event.inputs.version }}") { "${{ github.event.inputs.version }}" } else { "${{ github.ref_name }}" }
@@ -93,38 +101,7 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
-          body: |
-            ## parp-tools WoW Viewer
-
-            Build `${{ github.event.inputs.version || github.ref_name }}` of the active WoW world/model viewer and debugging surface in this repo.
-
-            Author: `github.com/akspa0/parp-tools`
-
-            Special thanks to WoWdev.wiki, Exploration Reboot, The Alpha Project, and everyone in the Pre-Alpha Restoration Project discord!
-
-            Current support target: WoW Alpha `0.5.3` through Cataclysm `4.0.0.11927`.
-
-            ### Release Notes
-            - Better PM4 data display in the WoW-styled info tooltip path for clearer quick inspection during world exploration.
-            - PM4 workbench tab behavior is more stable for `Overlay`, `Selection`, and `Correlation` flows.
-            - New user guidance now emphasizes opening a base game folder first (`File > Open Game Folder (MPQ)`) before relying on standalone file open.
-            - Support remains documented for `0.5.3` through `4.0.0.11927`, with additional later-era paths still under validation.
-
-            ### Quick Start
-            1. Extract the ZIP
-            2. Run `ParpToolsWoWViewer.exe`
-            3. In-app, use `File > Open Game Folder (MPQ)` and select your client path
-            4. Choose the build in the version dialog, then load maps from the left sidebar
-
-            ### Requirements
-            - Windows x64
-            - OpenGL 3.3+ capable GPU
-            - WoW game data (MPQ archives)
-
-            ### What's Included
-            - Self-contained .NET 10 runtime (no install needed)
-            - WoWDBDefs definitions for DBC parsing
-            - Pure C# MPQ reader (no StormLib dependency)
+          body_path: gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md
           files: parp-tools-wow-viewer-*-win-x64.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

@@ -1,5 +1,18 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 06, 2026 - v0.4.7 release prep now packages the current fixed-shell and performance train coherently
+
+- followed the request to stop treating the repo docs and release workflows like they were still on the older `v0.4.6.1` tooltip-focused snapshot
+- active `src/MdxViewer` release-prep behavior after this slice:
+   - both viewer project files now report `0.4.7`, including the cross-platform publish target used by the matrix release workflow
+   - packaged release output now carries the repo README, viewer README, user guide, and a concise `v0.4.7` changes file so the ZIP itself explains the release delta from `v0.4.6.1`
+   - the checked-in `docs/releases/v0.4.7.md` note is now the single release-body source for both GitHub Actions workflow copies
+   - the shipped docs now describe the real active shell and workflow state: fixed sidebars by default, stacked right-sidebar sections, current performance work, PM4 ranking repair, and continued `wow-viewer` extraction
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+- important boundary:
+   - this is release-prep/documentation alignment only; it does not by itself convert the recent build-validated UI or streaming slices into runtime signoff
+
 ## Apr 06, 2026 - Viewer right-sidebar tabs were removed; tool groups now stack vertically
 
 - followed direct live feedback that the replacement right-sidebar tabs still behaved badly and should be rendered like the left sidebar instead

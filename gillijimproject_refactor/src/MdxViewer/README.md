@@ -51,14 +51,14 @@ Optional launch flags:
 
 You can also pass a loose file path after the flags.
 
-## v0.4.6.1 release snapshot
+## v0.4.7 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.6.1` is the current release target in this tree.
-- The previously broken fullscreen minimap/top-right Designer Island case is now fixed in the active branch and has runtime user confirmation on the fixed development minimap dataset.
-- PM4 overlay decoding and placement are now much closer to correct on the development map after the latest runtime fixes.
-- PM4 hover data display now uses a better WoW-styled info-tooltip path with clearer PM4 context for quick inspection.
-- Other recent viewer slices such as taxi override workflow, object-culling tuning, and WMO baked-light prototyping should still be treated as build-validated unless a narrower runtime note says otherwise.
-- Current render-performance work has started reducing duplicate scene walks and eager WMO doodad expansion, but a real render-layer/submission path is still the next major renderer seam.
+- `parp-tools WoW Viewer` `0.4.7` is the current release target in this tree.
+- The viewer now starts on the fixed-shell path again, with static left/right sidebars as the primary workflow and dock panels kept as an opt-in fallback.
+- The broken right-sidebar tab host is gone; viewer workflows now stack as sequential `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics` sections.
+- PM4 object matching no longer ranks against the entire loaded scene first; the active matcher now stays local-first and geometry-first, which is the concrete fix for the recent OilPlatform collapse.
+- Current performance work now includes tile-batched terrain submission, world-object chunk-bucket broad-phase culling, tighter near-field or WDL streaming policy, and continued `wow-viewer` runtime pass-planning extraction.
+- Other recent viewer slices in this train should still be treated as build-validated unless a narrower runtime note says otherwise.
 
 ## New User Quick Start (UI)
 
@@ -68,7 +68,7 @@ For first-time users, use this flow:
 2. Choose your game folder root (the one containing `Data/`).
 3. Pick the explicit client build in the build-selection dialog.
 4. Load a world map from the left sidebar.
-5. Use the right sidebar inspector for PM4 workbench, world objects, and map/debug controls.
+5. Use the right sidebar sections for `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics`.
 
 Important:
 
@@ -189,7 +189,7 @@ Practical rule:
 ### UI and inspection workflows
 
 - fixed left/right sidebars are the startup default; dock panels are opt-in from the `View` menu
-- PM4 workbench tabs (`Overlay`, `Selection`, `Correlation`) now keep their selected state instead of snapping back during normal clicking
+- the viewer-mode right sidebar now uses stacked collapsible sections instead of the older tab host
 - `Tab` hide-chrome mode
 - floating log viewer
 - floating perf window
