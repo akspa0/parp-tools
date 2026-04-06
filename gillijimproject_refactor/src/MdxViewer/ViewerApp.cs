@@ -82,6 +82,15 @@ public partial class ViewerApp : IDisposable
         Publish,
     }
 
+    private enum FixedBottomDrawerTab
+    {
+        Workspace,
+        Terrain,
+        Pm4,
+        World,
+        Diagnostics,
+    }
+
     private readonly record struct PlacementEditKey(Terrain.ObjectType ObjectType, int TileX, int TileY, int EntryIndex, int UniqueId);
 
     private readonly record struct ShellPanelDefinition(
@@ -198,7 +207,7 @@ public partial class ViewerApp : IDisposable
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
     private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
     private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
-    private const int CurrentShellPanelLayoutVersion = 2;
+    private const int CurrentShellPanelLayoutVersion = 3;
     private const int MinimapTeleportConfirmClicks = 3;
     private const float MinimapClickMovementThresholdPixels = 3f;
     private static readonly TimeSpan MinimapTeleportConfirmWindow = TimeSpan.FromSeconds(3);
@@ -242,6 +251,7 @@ public partial class ViewerApp : IDisposable
     private bool _showModelInfo = true;
     private bool _showTerrainControls = true;
     private bool _showWorkspaceBarsPanel = true;
+    private bool _showBottomDrawer;
     private bool _hideUiChrome;
     private bool _showDemoWindow = false;
     private bool _showLogViewer = false;
@@ -250,7 +260,9 @@ public partial class ViewerApp : IDisposable
     private bool _showRenderQualityWindow = false;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
-    private bool _useDockspaceUi = true;
+    private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
+    private FixedBottomDrawerTab? _pendingRightSidebarSection;
+    private bool _useDockspaceUi = false;
     private Vector2 _dockspaceHostPosition;
     private Vector2 _dockspaceHostSize;
     private AssetCatalogView? _catalogView;
@@ -427,13 +439,22 @@ public partial class ViewerApp : IDisposable
     private const float SidebarCompactMinWidth = 180f;
     private const float SidebarMaxWidth = 720f;
     private const float SidebarSplitterWidth = 8f;
+    private const float DefaultBottomDrawerHeight = 280f;
+    private const float BottomDrawerMinHeight = 220f;
+    private const float BottomDrawerCompactMinHeight = 160f;
+    private const float BottomDrawerMaxHeight = 520f;
+    private const float BottomDrawerSplitterHeight = 8f;
     private const float SceneViewportPreferredMinWidth = 420f;
     private const float SceneViewportHardMinWidth = 240f;
+    private const float SceneViewportPreferredMinHeight = 280f;
+    private const float SceneViewportHardMinHeight = 160f;
     private float _leftSidebarWidth = DefaultSidebarWidth;
     private float _rightSidebarWidth = DefaultSidebarWidth;
+    private float _bottomDrawerHeight = DefaultBottomDrawerHeight;
     private bool _suppressLeftSidebarForLayout;
     private bool _suppressRightSidebarForLayout;
     private bool _suppressMinimapForLayout;
+    private bool _suppressBottomDrawerForLayout;
     private const float MenuBarHeight = 22f;
     private const float ToolbarHeight = 32f;
     private const float StatusBarHeight = 24f;
@@ -446,6 +467,11 @@ public partial class ViewerApp : IDisposable
     private float GetTopChromeHeight()
     {
         return MenuBarHeight + GetActiveToolbarHeight();
+    }
+
+    private bool IsBottomDrawerVisible()
+    {
+        return false;
     }
 
     /// <summary>When true, load all tiles at startup instead of AOI streaming. Default: false (stream tiles as camera moves).</summary>
@@ -933,18 +959,10 @@ public partial class ViewerApp : IDisposable
         bool pPressed = kb.IsKeyPressed(Key.P);
         if (!ImGui.GetIO().WantTextInput && pPressed && !_pKeyWasPressed)
         {
-            if (!_useDockspaceUi)
-            {
-                _useDockspaceUi = true;
-                _showWorkspaceBarsPanel = true;
-            }
-            else
-            {
-                _showWorkspaceBarsPanel = !_showWorkspaceBarsPanel;
-            }
-
-            if (_showWorkspaceBarsPanel)
-                FocusShellPanel(ShellPanelId.WorkspaceBars);
+            _showRightSidebar = true;
+            _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
+            if (_workspaceMode == WorkspaceMode.Editor)
+                SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
         }
         _pKeyWasPressed = pPressed;
 
@@ -952,7 +970,7 @@ public partial class ViewerApp : IDisposable
         if (!ImGui.GetIO().WantTextInput && iPressed && !_iKeyWasPressed)
         {
             _showRightSidebar = !_showRightSidebar;
-            if (_showRightSidebar && _useDockspaceUi)
+            if (_showRightSidebar)
                 FocusShellPanel(ShellPanelId.Inspector);
         }
         _iKeyWasPressed = iPressed;
@@ -1271,18 +1289,14 @@ void main() {
         {
             DrawMenuBar();
 
-            if (!_useDockspaceUi)
-                DrawToolbar();
-
-            if (_useDockspaceUi)
-                DrawDockspaceHost();
+            DrawToolbar();
 
             if (HasAnyShellPanelsInLane(ShellPanelLane.Left))
                 DrawLeftSidebar();
             if (HasAnyShellPanelsInLane(ShellPanelLane.Right))
                 DrawRightSidebar();
-            if (!_useDockspaceUi)
-                DrawFixedSidebarSplitters();
+
+            DrawFixedSidebarSplitters();
 
             DrawStatusBar();
 
@@ -1316,13 +1330,13 @@ void main() {
             if (_showCaptureAutomationWindow)
                 DrawCaptureAutomationWindow();
 
-
-        _forceApplyShellPanelLayout = false;
             // PM4 alignment (advanced fallback)
             if (_showPm4AlignmentWindow)
                 DrawPm4AlignmentWindow();
 
         }
+
+        _forceApplyShellPanelLayout = false;
 
         // Fullscreen minimap overlay (M key toggle)
         if (_fullscreenMinimap && (_worldScene != null || _vlmTerrainManager != null))
@@ -1441,11 +1455,11 @@ void main() {
                 ImGui.Separator();
 
                 ImGui.MenuItem("Left Sidebar", "", ref _showLeftSidebar);
-                ImGui.MenuItem("Right Sidebar", "", ref _showRightSidebar);
-                ImGui.MenuItem("Dockable Panels", "", ref _useDockspaceUi);
-                ImGui.MenuItem("Workspace Bars", "P", ref _showWorkspaceBarsPanel);
-                if (ImGui.MenuItem("Reset Panel Layout"))
-                    ResetShellPanelLayoutToQuadrants();
+                ImGui.MenuItem("Right Sidebar", "I", ref _showRightSidebar);
+                if (ImGui.MenuItem("Focus PM4 Tools", "P"))
+                    OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+                if (ImGui.MenuItem("Reset Shell Layout"))
+                    ResetShellLayoutToDefaults();
                 ImGui.Separator();
                 ImGui.MenuItem("File Browser", "", ref _showFileBrowser);
                 ImGui.MenuItem("Model Info", "", ref _showModelInfo);
@@ -10329,7 +10343,7 @@ void main() {
             ShellPanelId.WorldObjects => _showRightSidebar && _worldScene != null,
             ShellPanelId.ModelInfo => _showRightSidebar && _showModelInfo && !string.IsNullOrWhiteSpace(_modelInfo),
             ShellPanelId.Minimap => _showMinimapWindow,
-            ShellPanelId.WorkspaceBars => _useDockspaceUi && _showWorkspaceBarsPanel,
+            ShellPanelId.WorkspaceBars => false,
             _ => false,
         };
     }
@@ -10364,6 +10378,56 @@ void main() {
 
     private void FocusShellPanel(ShellPanelId panelId)
     {
+        if (!_useDockspaceUi)
+        {
+            switch (panelId)
+            {
+                case ShellPanelId.Navigator:
+                    _showLeftSidebar = true;
+                    return;
+                case ShellPanelId.Inspector:
+                    _showRightSidebar = true;
+                    return;
+                case ShellPanelId.WorkspaceBars:
+                    _showRightSidebar = true;
+                    _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
+                    _pendingRightSidebarSection = FixedBottomDrawerTab.Workspace;
+                    return;
+                case ShellPanelId.Pm4Workbench:
+                    _showRightSidebar = true;
+                    _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
+                    _pendingRightSidebarSection = FixedBottomDrawerTab.Pm4;
+                    if (_workspaceMode == WorkspaceMode.Editor)
+                        SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
+                    return;
+                case ShellPanelId.TerrainControls:
+                    _showRightSidebar = true;
+                    _activeBottomDrawerTab = FixedBottomDrawerTab.Terrain;
+                    _pendingRightSidebarSection = FixedBottomDrawerTab.Terrain;
+                    if (_workspaceMode == WorkspaceMode.Editor)
+                        SetEditorWorkspaceTask(EditorWorkspaceTask.Terrain);
+                    return;
+                case ShellPanelId.WorldObjects:
+                    _showRightSidebar = true;
+                    _activeBottomDrawerTab = FixedBottomDrawerTab.World;
+                    _pendingRightSidebarSection = FixedBottomDrawerTab.World;
+                    if (_workspaceMode == WorkspaceMode.Editor)
+                        SetEditorWorkspaceTask(EditorWorkspaceTask.Objects);
+                    return;
+                case ShellPanelId.RuntimeStats:
+                case ShellPanelId.ModelInfo:
+                    _showRightSidebar = true;
+                    _activeBottomDrawerTab = FixedBottomDrawerTab.Diagnostics;
+                    _pendingRightSidebarSection = FixedBottomDrawerTab.Diagnostics;
+                    if (_workspaceMode == WorkspaceMode.Editor)
+                        SetEditorWorkspaceTask(EditorWorkspaceTask.Inspect);
+                    return;
+                case ShellPanelId.Minimap:
+                    _showMinimapWindow = true;
+                    return;
+            }
+        }
+
         if (panelId == ShellPanelId.WorkspaceBars)
         {
             _showWorkspaceBarsPanel = true;
@@ -10397,14 +10461,19 @@ void main() {
         }
     }
 
-    private void ResetShellPanelLayoutToQuadrants()
+    private void ResetShellLayoutToDefaults()
     {
         _savedShellPanelLayouts.Clear();
         _pendingShellPanelLayoutRestore.Clear();
         _showLeftSidebar = true;
         _showRightSidebar = true;
-        _useDockspaceUi = true;
-        _forceApplyShellPanelLayout = true;
+        _showBottomDrawer = false;
+        _leftSidebarWidth = DefaultSidebarWidth;
+        _rightSidebarWidth = DefaultSidebarWidth;
+        _bottomDrawerHeight = DefaultBottomDrawerHeight;
+        _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
+        _useDockspaceUi = false;
+        _forceApplyShellPanelLayout = false;
         SaveViewerSettings();
     }
 
@@ -10692,7 +10761,6 @@ void main() {
         _suppressLeftSidebarForLayout = false;
         _suppressRightSidebarForLayout = false;
         _suppressMinimapForLayout = false;
-
         if (_hideUiChrome || displaySize.X <= 0f)
             return;
 
@@ -10716,6 +10784,21 @@ void main() {
             float requiredMinimapWidth = GetShellPanelDefinition(ShellPanelId.Minimap).CompactMinWidth;
             _suppressMinimapForLayout = displaySize.X < SceneViewportHardMinWidth + requiredMinimapWidth;
         }
+    }
+
+    private float ClampFixedBottomDrawerHeight(float height, float displayHeight)
+    {
+        GetFixedBottomDrawerHeightRange(displayHeight, out float minHeight, out float maxHeight);
+        return Math.Clamp(height, minHeight, maxHeight);
+    }
+
+    private void GetFixedBottomDrawerHeightRange(float displayHeight, out float minHeight, out float maxHeight)
+    {
+        float availableHeight = MathF.Max(0f, displayHeight - GetTopChromeHeight() - StatusBarHeight);
+        float preferredMaxHeight = availableHeight - SceneViewportPreferredMinHeight;
+        float hardMaxHeight = availableHeight - SceneViewportHardMinHeight;
+        maxHeight = MathF.Min(BottomDrawerMaxHeight, MathF.Max(BottomDrawerCompactMinHeight, MathF.Max(preferredMaxHeight, hardMaxHeight)));
+        minHeight = MathF.Min(BottomDrawerMinHeight, maxHeight);
     }
 
     private void ClampFixedSidebarLayout(float displayWidth)
@@ -10807,6 +10890,7 @@ void main() {
 
             if (IsShellPanelActive(ShellPanelId.Inspector))
                 width -= _rightSidebarWidth;
+
         }
 
         width = MathF.Max(width, 0f);
@@ -10928,10 +11012,20 @@ void main() {
                 : TextureFilteringMode.Trilinear;
             _enableMultisample = settings.EnableMultisample;
             _showMinimapWindow = settings.ShowMinimapWindow;
-            _useDockspaceUi = settings.UseDockspaceUi;
+            _useDockspaceUi = false;
             _showLeftSidebar = settings.ShowLeftSidebar;
             _showRightSidebar = settings.ShowRightSidebar;
             _showWorkspaceBarsPanel = settings.ShowWorkspaceBarsPanel;
+            _showBottomDrawer = false;
+            _leftSidebarWidth = float.IsFinite(settings.LeftSidebarWidth)
+                ? settings.LeftSidebarWidth
+                : DefaultSidebarWidth;
+            _rightSidebarWidth = float.IsFinite(settings.RightSidebarWidth)
+                ? settings.RightSidebarWidth
+                : DefaultSidebarWidth;
+            _bottomDrawerHeight = float.IsFinite(settings.BottomDrawerHeight)
+                ? settings.BottomDrawerHeight
+                : DefaultBottomDrawerHeight;
             _minimapZoom = float.IsFinite(settings.MinimapZoom)
                 ? Math.Clamp(settings.MinimapZoom, 1f, 32f)
                 : 4f;
@@ -11061,10 +11155,14 @@ void main() {
                 EnableMultisample = _enableMultisample,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
-                UseDockspaceUi = _useDockspaceUi,
+                UseDockspaceUi = false,
                 ShowLeftSidebar = _showLeftSidebar,
                 ShowRightSidebar = _showRightSidebar,
                 ShowWorkspaceBarsPanel = _showWorkspaceBarsPanel,
+                ShowBottomDrawer = false,
+                LeftSidebarWidth = _leftSidebarWidth,
+                RightSidebarWidth = _rightSidebarWidth,
+                BottomDrawerHeight = _bottomDrawerHeight,
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
@@ -11228,11 +11326,15 @@ void main() {
         public bool EnableMultisample { get; set; } = true;
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; } = true;
-        public bool UseDockspaceUi { get; set; } = true;
+        public bool UseDockspaceUi { get; set; }
         public bool ShowLeftSidebar { get; set; } = true;
         public bool ShowRightSidebar { get; set; } = true;
         public bool ShowWorkspaceBarsPanel { get; set; } = true;
+        public bool ShowBottomDrawer { get; set; } = true;
         public int ShellPanelLayoutVersion { get; set; } = CurrentShellPanelLayoutVersion;
+        public float LeftSidebarWidth { get; set; } = DefaultSidebarWidth;
+        public float RightSidebarWidth { get; set; } = DefaultSidebarWidth;
+        public float BottomDrawerHeight { get; set; } = DefaultBottomDrawerHeight;
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }

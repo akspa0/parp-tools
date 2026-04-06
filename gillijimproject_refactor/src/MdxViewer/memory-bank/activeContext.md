@@ -1,5 +1,60 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 06, 2026 - Viewer right-sidebar tabs were removed; tool groups now stack vertically
+
+- followed direct live feedback that the replacement right-sidebar tabs still behaved badly and should be rendered like the left sidebar instead
+- active `src/MdxViewer` behavior after this slice:
+   - viewer-mode right-sidebar tools are now stacked collapsing sections instead of a tab bar
+   - PM4 open/focus routes now force the PM4 section open once, rather than trying to keep a persistent selected tab
+   - editor task changes still route through the top toolbar, but now use the same one-shot right-sidebar section hinting path under the hood
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the next honest check is a live retest of the stacked-section sidebar under normal world browsing and PM4 use
+
+## Apr 06, 2026 - Two-sidebar regroup landed after the bottom drawer failed in live use
+
+- followed direct live feedback that the new bottom drawer tabs were not working and that the shell should instead consolidate the tools into the existing static sidebars
+- active `src/MdxViewer` behavior after this slice:
+   - the left sidebar now stays focused on navigation and world overview instead of repeating editor-task routing
+   - the right sidebar is now the single viewer tool host, with viewer-mode tabs for `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics`
+   - editor mode still uses the top-toolbar task chooser, but the left sidebar no longer mirrors that task list and the right sidebar renders only the selected editor-task workflow
+   - PM4 open/focus helpers now drive the right sidebar instead of the removed bottom drawer path
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the next honest check is a live viewer retest to see whether the new two-sidebar grouping actually feels coherent under real use
+
+## Apr 06, 2026 - Fixed-shell cutover landed: top toolbar restored, right side becomes a tool shelf, and detailed workflows now live in a bottom drawer
+
+- followed direct runtime-direction feedback that the dockspace and freeform panel model still did not feel sane for the active viewer, even after recent panel and persistence cleanup
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now defaults to the fixed shell again and reserves scene space for a real bottom drawer instead of treating dockspace as the primary surface
+   - `P` now toggles the bottom drawer, `I` still toggles the right sidebar, and PM4 focus helpers route into the bottom drawer instead of forcing dock mode
+   - `ViewerApp_Sidebars.cs` now uses the right sidebar as a compact selection/tool shelf and exposes grouped bottom-drawer tabs for `Workspace`, `Terrain`, `PM4`, `World`, and `Diagnostics`
+   - viewer settings now persist left sidebar width, right sidebar width, and bottom drawer height so the static shell keeps its own sizing across restarts
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - the next honest check is a live viewer retest to see whether the new fixed-frame shell is actually more coherent than the dockspace path on the active development map
+
+## Apr 06, 2026 - PM4 object match suggestions now stay local and use shared geometry ranking before WMO/M2 family tie-breaks
+
+- followed runtime feedback that the current PM4 hover/selection suggestion surface had degraded into nearly every PM4 object reporting the same OilPlatform WMO as its likely match
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/WorldScene.cs` now keeps PM4 object match candidates inside the same local `±1` tile neighborhood already used by the PM4/WMO placement correlation report, with a wider fallback only when that local neighborhood is empty
+   - PM4 object match ordering now starts from `WowViewer.Core.PM4.Services.Pm4CorrelationMath.CompareCandidateScores(...)` instead of letting the viewer-local WMO/M2 evidence rank dominate first
+   - linked-anchor gap and the old evidence-rank heuristic still participate, but only as late tie-breaks after the shared geometric ordering
+- validation completed:
+   - editor diagnostics were clean for `src/MdxViewer/Terrain/WorldScene.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+- important boundary:
+   - this is compile validation only
+   - the next honest check is a real viewer retest of the PM4 hover/selection tooltip on the active development map
+
 ## Apr 05, 2026 - The active terrain path now holds a ranked 16-tile detailed footprint, and terrain-world object loads drain faster without breaking unique-asset ownership
 
 - followed direct user feedback that the active terrain path should feel closer to the retail engine and stop looking like only a tiny handful of ADTs are detailed at once

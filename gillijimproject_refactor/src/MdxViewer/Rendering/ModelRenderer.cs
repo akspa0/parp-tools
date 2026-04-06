@@ -185,7 +185,9 @@ public class MdxRenderer : IModelRenderer
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
                 FormatProfileRegistry.M2Profile3018303.ProfileId,
                 StringComparison.Ordinal);
-        (_effectiveBoundsMin, _effectiveBoundsMax) = ComputeRenderableBounds(_mdx);
+        (_effectiveBoundsMin, _effectiveBoundsMax) = _isM2AdapterModel
+            ? GetDeclaredModelBounds(_mdx)
+            : ComputeRenderableBounds(_mdx);
         string? m2AnimationSetting = Environment.GetEnvironmentVariable("PARP_M2_ENABLE_ANIMATION");
         bool disableM2Animation = !string.IsNullOrWhiteSpace(m2AnimationSetting)
             && (string.Equals(m2AnimationSetting, "0", StringComparison.OrdinalIgnoreCase)
@@ -367,6 +369,13 @@ public class MdxRenderer : IModelRenderer
         if (TryComputeRawRenderableBounds(mdx, out Vector3 rawMin, out Vector3 rawMax))
             return (rawMin, rawMax);
 
+        return (
+            new Vector3(_GetBoundsMinX(mdx), _GetBoundsMinY(mdx), _GetBoundsMinZ(mdx)),
+            new Vector3(_GetBoundsMaxX(mdx), _GetBoundsMaxY(mdx), _GetBoundsMaxZ(mdx)));
+    }
+
+    private static (Vector3 min, Vector3 max) GetDeclaredModelBounds(MdxFile mdx)
+    {
         return (
             new Vector3(_GetBoundsMinX(mdx), _GetBoundsMinY(mdx), _GetBoundsMinZ(mdx)),
             new Vector3(_GetBoundsMaxX(mdx), _GetBoundsMaxY(mdx), _GetBoundsMaxZ(mdx)));
@@ -2260,7 +2269,6 @@ void main() {
         return GetTextureAlphaKind(textureId) switch
         {
             TextureAlphaKind.Binary => MdlTexOp.Transparent,
-            TextureAlphaKind.Translucent => MdlTexOp.Blend,
             _ => declaredBlendMode,
         };
     }

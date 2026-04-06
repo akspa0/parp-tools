@@ -17,7 +17,11 @@ public partial class ViewerApp
     {
         FocusShellPanel(ShellPanelId.Pm4Workbench);
         _pendingPm4WorkbenchTab = tab;
-        _useDockspaceUi = true;
+        _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
+        _pendingRightSidebarSection = FixedBottomDrawerTab.Pm4;
+        _showRightSidebar = true;
+        if (_workspaceMode == WorkspaceMode.Editor)
+            SetEditorWorkspaceTask(EditorWorkspaceTask.Pm4Evidence);
     }
 
     private void DrawPm4WorkbenchInspector()

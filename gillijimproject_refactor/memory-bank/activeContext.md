@@ -2,6 +2,64 @@
 
 # Active Context
 
+## Apr 06, 2026 - The right sidebar no longer uses tabs; viewer tools are stacked as sequential sections
+
+- followed fresh live feedback that the replacement right-sidebar tabs were still behaving like a broken tab host and effectively pinning the view back to the inspect surface
+- active `src/MdxViewer` shell behavior after this slice:
+	- the viewer-mode right sidebar no longer uses a tab bar
+	- `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics` now render as stacked collapsing sections in one continuous sidebar flow, matching the left-sidebar style more closely
+	- PM4 and editor-task focus helpers now drive one-shot section expansion in the right sidebar instead of trying to select a persistent tab state
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+	- this is compile validation only
+	- no fresh live retest has been captured yet for whether the stacked sections feel right in normal viewer usage
+
+## Apr 06, 2026 - The active shell is now two-sidebar first; the broken bottom drawer path was removed from layout
+
+- followed immediate runtime feedback that the new bottom drawer was not functioning correctly and that the shell felt better as two static sidebars with consolidated panel ownership
+- active `src/MdxViewer` behavior after this slice:
+	- the bottom drawer is no longer part of the active layout path or viewport reservation math
+	- the left sidebar is back to navigation-only ownership instead of duplicating workspace task routing
+	- the right sidebar is now the single consolidated tool surface:
+		- in `Viewer` mode it shows selection summary once and groups the remaining tools into fixed tabs (`Inspect`, `Terrain`, `PM4`, `World`, `Diagnostics`)
+		- in `Editor` mode it shows the current editor-task surface only, with task routing still owned by the top toolbar instead of the left sidebar
+	- PM4 focus/open flows now route into the right sidebar instead of trying to revive the removed drawer path
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+	- this is compile validation only
+	- no fresh live retest has been captured yet for whether the new two-sidebar grouping feels sane across the active world and PM4 workflows
+
+## Apr 06, 2026 - The active shell is now fixed-frame first: top options bar, left navigator, right tool shelf, and a resizable bottom drawer
+
+- followed direct user feedback that the dockable-panel path still felt structurally wrong even after multiple cleanup passes, and that the viewer should instead use a hard-coded WoWEdit-style frame with static regions that scale predictably
+- active `src/MdxViewer` shell behavior after this slice:
+	- the viewer now defaults back to the fixed shell path instead of dockspace mode, with the top toolbar always visible again as the primary options bar
+	- `P` now toggles the new bottom drawer instead of reopening the old `Workspace Bars` panel concept, and `I` still toggles the right sidebar
+	- the right sidebar now behaves as a compact selection/tool shelf instead of trying to host every workflow inline; detailed terrain, PM4, world, and diagnostics content moved into a real bottom drawer
+	- the new bottom drawer is resizable, persists its height along with left and right sidebar widths, and groups tools into static tabs: `Workspace`, `Terrain`, `PM4`, `World`, and `Diagnostics`
+	- PM4 open/focus flows now route into that bottom drawer instead of forcing dockspace back on
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+- important boundary:
+	- this is compile validation only
+	- no fresh runtime retest has been captured yet for whether the new fixed shell feels materially better in live use on the active world scenes
+
+## Apr 06, 2026 - PM4 object match suggestions no longer rank against the whole loaded scene with a WMO-first bias
+
+- followed direct runtime feedback that the active PM4 hover/selection matcher had become unusable because essentially every PM4 object was surfacing the same OilPlatform WMO as its top suggestion
+- active `src/MdxViewer` behavior after this slice:
+	- `Terrain/WorldScene.cs` now restricts PM4 object match candidates to the same local tile neighborhood (`±1` tile) already used by the PM4/WMO placement correlation report instead of scoring against every loaded placement in the scene
+	- PM4 object match ranking now uses the shared `WowViewer.Core.PM4.Services.Pm4CorrelationMath.CompareCandidateScores(...)` geometry comparator first, so same-tile state, footprint overlap, planar overlap, footprint area similarity, and footprint distance drive the order before any coarse evidence-family tie-break
+	- the older `GetPm4ObjectMatchEvidenceRank(...)` path is now only a late tie-break after shared geometric ranking and optional linked-anchor gap, which removes the previous non-zero-family WMO-first dominance that could pin many unrelated PM4 objects to one nearby WMO
+- validation completed:
+	- editor diagnostics were clean for `src/MdxViewer/Terrain/WorldScene.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing workspace warnings only
+- important boundary:
+	- this is still compile validation only in this chat
+	- no fresh real-data viewer retest has been captured yet for whether the top-match list now stops collapsing to OilPlatform on the active development map
+
 ## Apr 05, 2026 - Active terrain AOI now targets a 16-tile detailed near field, and terrain-world object streaming is less stingy while still staying unique-asset based
 
 - followed the user's direct correction that the detailed ADT footprint should feel more like the real game engine and less like a tiny high-detail cross that pops constantly at the edges

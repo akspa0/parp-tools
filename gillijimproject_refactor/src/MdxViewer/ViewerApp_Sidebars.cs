@@ -345,12 +345,6 @@ public partial class ViewerApp
     {
         bool hasWorldLoaded = _worldScene != null || _terrainManager != null || _vlmTerrainManager != null;
 
-        if (_workspaceMode == WorkspaceMode.Editor)
-        {
-            DrawEditorWorkspaceNavigator(hasWorldLoaded);
-            return;
-        }
-
         if (hasWorldLoaded)
         {
             ImGui.SetNextItemOpen(true, ImGuiCond.Once);
@@ -632,52 +626,90 @@ public partial class ViewerApp
             }
 
             if (_workspaceMode == WorkspaceMode.Editor)
-            {
                 DrawEditorWorkspaceInspector();
-            }
             else
-            {
-                bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
-                bool hasSelectedObject = DrawSelectedObjectSummaryContent();
-                if (hasSelectedObject)
-                    ImGui.Spacing();
-
-                if (_worldScene != null)
-                {
-                    bool defaultOpenPm4Workbench = _worldScene.ShowPm4Overlay || hasSelectedPm4 || _pm4ObjectCollection.Count > 0;
-                    ImGui.SetNextItemOpen(defaultOpenPm4Workbench, ImGuiCond.Once);
-                    if (ImGui.CollapsingHeader("PM4 Workbench"))
-                        DrawPm4WorkbenchInspector();
-                }
-
-                ImGui.SetNextItemOpen(!string.IsNullOrEmpty(_modelInfo), ImGuiCond.Once);
-                if (_showModelInfo && ImGui.CollapsingHeader("Model Info"))
-                    DrawModelInfoContent();
-
-                ImGui.SetNextItemOpen(false, ImGuiCond.Once);
-                if (ImGui.CollapsingHeader("Camera"))
-                    DrawCameraControlsContent();
-
-                if (_showTerrainControls && (_terrainManager != null || _vlmTerrainManager != null))
-                {
-                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                    if (ImGui.CollapsingHeader("Terrain Controls"))
-                        DrawTerrainControlsPanelContent();
-                }
-
-                if ((_terrainManager != null || _vlmTerrainManager != null || _worldScene != null) && ImGui.CollapsingHeader("Runtime Stats"))
-                    DrawRuntimeStatsPanelContent();
-
-                if (_worldScene != null)
-                {
-                    ImGui.SetNextItemOpen(true, ImGuiCond.Once);
-                    if (ImGui.CollapsingHeader("World Objects"))
-                        DrawWorldObjectsPanelContent();
-                }
-            }
+                DrawViewerToolSidebar();
         }
         ImGui.End();
         ImGui.PopStyleVar();
+    }
+
+    private void DrawViewerToolSidebar()
+    {
+        DrawViewerSelectionSummary();
+        ImGui.Separator();
+
+        DrawRightSidebarSection(FixedBottomDrawerTab.Workspace, "Inspect", DrawViewerInspectSidebarContent, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.Terrain, "Terrain", DrawTerrainControlsPanelContent, _terrainManager != null || _vlmTerrainManager != null, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.Pm4, "PM4", DrawPm4WorkbenchInspector, _worldScene != null, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.World, "World", DrawWorldObjectsPanelContent, _worldScene != null, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.Diagnostics, "Diagnostics", DrawViewerDiagnosticsSidebarContent, defaultOpen: true);
+    }
+
+    private void DrawViewerSelectionSummary()
+    {
+        bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
+        bool hasSelectedObject = DrawSelectedObjectSummaryContent();
+        if (!hasSelectedObject)
+        {
+            if (hasSelectedPm4)
+            {
+                ImGui.TextDisabled("A PM4 object is selected. Use the PM4 section for evidence and correlation.");
+                if (ImGui.Button("Open PM4 Tools"))
+                    OpenPm4Workbench(Pm4WorkbenchTab.Selection);
+            }
+            else
+            {
+                ImGui.TextDisabled("Select a world object to inspect its identity here.");
+            }
+        }
+    }
+
+    private void DrawRightSidebarSection(FixedBottomDrawerTab section, string label, Action drawContent, bool enabled = true, bool defaultOpen = false)
+    {
+        if (!enabled)
+            return;
+
+        bool shouldForceOpen = _pendingRightSidebarSection == section;
+        ImGui.SetNextItemOpen(shouldForceOpen || defaultOpen, shouldForceOpen ? ImGuiCond.Always : ImGuiCond.Once);
+        if (ImGui.CollapsingHeader(label, defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+        {
+            _activeBottomDrawerTab = section;
+            if (shouldForceOpen)
+                _pendingRightSidebarSection = null;
+            drawContent();
+        }
+    }
+
+    private void DrawViewerInspectSidebarContent()
+    {
+        DrawCameraControlsContent();
+
+        if (!string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            ImGui.Separator();
+            DrawModelInfoPanelContent();
+        }
+    }
+
+    private void DrawViewerDiagnosticsSidebarContent()
+    {
+        DrawRuntimeStatsPanelContent();
+        ImGui.Separator();
+        ImGui.Text("Utility Panels");
+        if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
+            _showMinimapWindow = !_showMinimapWindow;
+
+        ImGui.SameLine();
+        if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+            _showLogViewer = !_showLogViewer;
+
+        if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+            _showPerfWindow = !_showPerfWindow;
+
+        ImGui.SameLine();
+        if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
+            _showRenderQualityWindow = !_showRenderQualityWindow;
     }
 
     private void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight)
@@ -1500,7 +1532,7 @@ public partial class ViewerApp
         if (ImGui.Button("Open Chunk Clipboard"))
             _showChunkClipboardWindow = true;
         ImGui.SameLine();
-        ImGui.TextDisabled("Chunk copy/paste now lives in its own dockable panel.");
+        ImGui.TextDisabled("Chunk copy/paste stays available as a temporary pop-out panel.");
     }
 
     private bool SetIgnoreTerrainHolesGlobally(bool enabled)

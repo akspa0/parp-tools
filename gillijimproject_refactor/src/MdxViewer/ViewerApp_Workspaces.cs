@@ -44,6 +44,16 @@ public partial class ViewerApp
             SetWorkspaceMode(WorkspaceMode.Editor);
 
         _editorWorkspaceTask = task;
+        _activeBottomDrawerTab = task switch
+        {
+            EditorWorkspaceTask.Terrain => FixedBottomDrawerTab.Terrain,
+            EditorWorkspaceTask.Objects => FixedBottomDrawerTab.World,
+            EditorWorkspaceTask.Pm4Evidence => FixedBottomDrawerTab.Pm4,
+            EditorWorkspaceTask.Inspect => FixedBottomDrawerTab.Workspace,
+            EditorWorkspaceTask.Publish => FixedBottomDrawerTab.Diagnostics,
+            _ => _activeBottomDrawerTab,
+        };
+        _pendingRightSidebarSection = _activeBottomDrawerTab;
     }
 
     private bool HasWorldEditingContext()
@@ -163,13 +173,6 @@ public partial class ViewerApp
 
     private void DrawEditorWorkspaceInspector()
     {
-        ImGui.TextColored(new Vector4(0.75f, 0.88f, 1f, 1f), $"{GetWorkspaceModeLabel(_workspaceMode)} Workspace");
-        ImGui.SameLine();
-        ImGui.TextDisabled(GetEditorWorkspaceTaskLabel(_editorWorkspaceTask));
-        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
-        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
-        ImGui.Separator();
-
         switch (_editorWorkspaceTask)
         {
             case EditorWorkspaceTask.Terrain:

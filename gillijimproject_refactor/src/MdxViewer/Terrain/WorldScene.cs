@@ -2103,7 +2103,9 @@ public class WorldScene : ISceneRenderer
         IReadOnlyList<Pm4PlacementMatchState> placements,
         int maxMatchesPerObject)
     {
-        List<Pm4PlacementMatchEvaluation> rankedCandidates = placements
+        List<Pm4PlacementMatchEvaluation> evaluatedCandidates = placements
+            .Where(placement => Math.Abs(placement.TileX - pm4Object.TileX) <= 1
+                && Math.Abs(placement.TileY - pm4Object.TileY) <= 1)
             .Select(placement => new
             {
                 Placement = placement,
@@ -2120,20 +2122,48 @@ public class WorldScene : ISceneRenderer
                     placement.FootprintArea),
                 AnchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, placement.PlacementPosition),
             })
-            .OrderBy(candidate => GetPm4ObjectMatchEvidenceRank(pm4Object, candidate.Placement))
-            .ThenByDescending(candidate => candidate.Placement.SameTile(pm4Object.TileX, pm4Object.TileY))
-            .ThenBy(candidate => pm4Object.Object.LinkedPositionRefCount > 0 ? candidate.AnchorPlanarGap : float.MaxValue)
-            .ThenByDescending(candidate => candidate.Metrics.PlanarOverlapRatio)
-            .ThenByDescending(candidate => candidate.Metrics.VolumeOverlapRatio)
-            .ThenBy(candidate => candidate.Metrics.PlanarGap)
-            .ThenBy(candidate => candidate.Metrics.VerticalGap)
-            .ThenBy(candidate => candidate.Metrics.CenterDistance)
-            .ThenByDescending(candidate => candidate.Metrics.FootprintOverlapRatio)
-            .ThenBy(candidate => candidate.Metrics.FootprintDistance)
             .Select(candidate => new Pm4PlacementMatchEvaluation(
                 candidate.Placement,
                 candidate.AnchorPlanarGap,
                 candidate.Metrics))
+            .ToList();
+
+        if (evaluatedCandidates.Count == 0)
+        {
+            evaluatedCandidates = placements
+                .Select(placement => new
+                {
+                    Placement = placement,
+                    Metrics = CorePm4CorrelationMath.EvaluateMetrics(
+                        pm4Object.BoundsMin,
+                        pm4Object.BoundsMax,
+                        pm4Object.Center,
+                        pm4Object.FootprintHull,
+                        pm4Object.FootprintArea,
+                        placement.WorldBoundsMin,
+                        placement.WorldBoundsMax,
+                        placement.Center,
+                        placement.FootprintHull,
+                        placement.FootprintArea),
+                    AnchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, placement.PlacementPosition),
+                })
+                .Select(candidate => new Pm4PlacementMatchEvaluation(
+                    candidate.Placement,
+                    candidate.AnchorPlanarGap,
+                    candidate.Metrics))
+                .ToList();
+        }
+
+        List<Pm4PlacementMatchEvaluation> rankedCandidates = evaluatedCandidates
+            .OrderBy(candidate => new CorePm4CorrelationCandidateScore(
+                    candidate.Placement.SameTile(pm4Object.TileX, pm4Object.TileY),
+                    candidate.Metrics,
+                    candidate.Placement.WorldBoundsMin,
+                    candidate.Placement.WorldBoundsMax,
+                    candidate.Placement.Center),
+                Comparer<CorePm4CorrelationCandidateScore>.Create(CorePm4CorrelationMath.CompareCandidateScores))
+            .ThenBy(candidate => pm4Object.Object.LinkedPositionRefCount > 0 ? candidate.AnchorPlanarGap : float.MaxValue)
+            .ThenBy(candidate => GetPm4ObjectMatchEvidenceRank(pm4Object, candidate.Placement))
             .ToList();
 
         int nearCandidateCount = rankedCandidates.Count(static candidate =>
