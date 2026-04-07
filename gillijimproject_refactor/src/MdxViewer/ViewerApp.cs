@@ -10900,7 +10900,7 @@ void main() {
                 _hasExplicitWmoMliqRotationOverride = false;
                 WmoRenderer.MliqRotationQuarterTurns = 0;
                 ViewerLog.Important(ViewerLog.Category.Wmo,
-                    "[ViewerSettings] Migrated legacy WMO MLIQ 270° default to neutral override; 3.3.5 now uses a build-aware baseline.");
+                    "[ViewerSettings] Migrated legacy WMO MLIQ 270° default to neutral override; WMO liquid rotation is now resolved from the asset version path.");
             }
             else
             {

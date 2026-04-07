@@ -2,6 +2,21 @@
 
 # Active Context
 
+## Apr 07, 2026 - Shared WMO liquid family resolution replaced the old build-only `MLIQ` baseline path
+
+- followed the request to differentiate WMO liquid handling by actual asset version instead of keeping the active viewer on a hardcoded `3.3.5.12340 => 270°` baseline
+- active shared/runtime behavior after this slice:
+	- `wow-viewer/src/core/WowViewer.Core/Wmo/WmoLiquidLayoutResolver.cs` now owns WMO liquid coordinate-family resolution with asset version first and build string only as a fallback hint
+	- the shared resolver currently returns a neutral baseline rotation, so `MdxViewer` no longer adds an automatic `+270°` quarter-turn for 3.3.5 assets
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/WmoRenderer.cs` now consumes that shared resolver for baseline rotation instead of its old local build-string switch
+	- `wow-viewer/tools/converter/WowViewer.Tool.Converter` `detect` now exposes the same WMO liquid family and baseline rotation for `Wmo` and `WmoGroup` inputs
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-restore` passed with 270 tests succeeded and no failures
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore` passed with existing warnings only
+- important boundary:
+	- this is not runtime signoff yet; no real-data viewer retest has been captured for representative 0.5.3 and 3.3.5 WMO liquid scenes
+	- the larger converter-modernization request is still open; only the shared WMO liquid policy and the modern `detect` surface were updated in this slice
+
 ## Apr 06, 2026 - Taxi routes can now drive a ride camera, and the viewer can stream direct mp4/mov capture through ffmpeg
 
 - followed the request to turn the animated taxi actor into a teaser-making workflow instead of just a debugging overlay

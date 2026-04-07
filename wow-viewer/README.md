@@ -404,6 +404,7 @@ Current non-PM4 converter slice:
 	- `export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]`
 - This is intentionally narrow for now:
 	- it reports shared file-family classification and version using `WowFileDetector`
+	- for `Wmo` and `WmoGroup` inputs, `detect` now also reports the shared WMO liquid coordinate family and baseline rotation from `WmoLiquidLayoutResolver`, with asset version taking precedence over build fallback
 	- it now also exports shared root-plus-`_tex0` per-chunk layer and decoded-alpha data as JSON through `AdtTextureReader`
 	- it is still not yet a broader terrain conversion workflow
 - Smoke-test commands that should now work on the fixed development dataset:

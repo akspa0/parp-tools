@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 07, 2026 - Shared WMO liquid family resolution now drives `MdxViewer` baseline handling and the modern converter detect surface
+
+- followed the request to stop treating 3.3.5 WMO `MLIQ` orientation as one hardcoded build-only rule when the parsed WMO already carries its own format version
+- landed behavior:
+	- added `wow-viewer/src/core/WowViewer.Core/Wmo/WmoLiquidLayoutResolver.cs` with asset-version-first WMO liquid family resolution and build-string fallback only when version is unknown
+	- added `wow-viewer/tests/WowViewer.Core.Tests/WmoLiquidLayoutResolverTests.cs` to lock the new classification and neutral baseline behavior
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/WmoRenderer.cs` now uses the shared resolver instead of the older `3.3.5.12340 => 270°` baseline rule
+	- `wow-viewer/tools/converter/WowViewer.Tool.Converter` `detect` output now reports WMO liquid family and baseline rotation for `Wmo` and `WmoGroup` inputs
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --no-restore` passed with 270 tests succeeded and no failures
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore` passed with existing warnings only
+- proof boundary:
+	- this is compile plus automated-library-test validation only
+	- no focused real-data viewer retest has been captured yet for 0.5.3 versus 3.3.5 WMO liquid orientation
+	- the broader legacy converter migration is still incomplete; this slice only moved the shared liquid-policy seam and the modern `detect` surface
+
 ### Apr 06, 2026 - Added taxi ride camera plus ffmpeg-backed direct mp4/mov capture
 
 - followed the request to make taxi routes usable as an in-app teaser capture workflow

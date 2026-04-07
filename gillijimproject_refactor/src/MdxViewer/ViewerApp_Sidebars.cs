@@ -2181,6 +2181,6 @@ public partial class ViewerApp
             ImGui.EndCombo();
         }
 
-        ImGui.TextDisabled("Adds on top of the build-aware WMO MLIQ baseline. Changes are live.");
+        ImGui.TextDisabled("Adds on top of the version-aware WMO MLIQ baseline. Changes are live.");
     }
 }

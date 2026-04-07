@@ -7,6 +7,7 @@ using MdxViewer.Logging;
 using MdxViewer.Terrain;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Wmo;
 using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Rendering;
@@ -91,7 +92,7 @@ public class WmoRenderer : ISceneRenderer
     private static uint _liquidShader;
     private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
     private static int _liquidShaderRefCount;
-    // Additional user-configurable quarter-turns applied after the build-aware baseline.
+    // Additional user-configurable quarter-turns applied after the shared WMO family baseline.
     private static int _mliqRotationQuarterTurns;
     private static int _mliqRotationRevision;
     private int _builtMliqRotationRevision = -1;
@@ -305,7 +306,7 @@ public class WmoRenderer : ISceneRenderer
 
     private int GetBaselineMliqRotationQuarterTurns()
     {
-        return string.Equals(_buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase) ? 3 : 0;
+        return WmoLiquidLayoutResolver.GetBaselineRotationQuarterTurns(_wmo.Version, _buildVersion);
     }
 
     /// <summary>

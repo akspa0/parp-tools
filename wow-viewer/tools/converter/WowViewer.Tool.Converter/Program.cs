@@ -5,6 +5,7 @@ using WowViewer.Core.IO;
 using WowViewer.Core.IO.Files;
 using WowViewer.Core.IO.Maps;
 using WowViewer.Core.PM4;
+using WowViewer.Core.Wmo;
 using WowViewer.Tools.Shared;
 
 if (args.Length == 0 || args.Contains("--help") || args.Contains("-h"))
@@ -46,6 +47,13 @@ static void RunDetect(string[] args)
 	Console.WriteLine($"Input: {detection.SourcePath}");
 	Console.WriteLine($"Kind: {detection.Kind}");
 	Console.WriteLine($"Version: {detection.Version?.ToString() ?? "n/a"}");
+	if (detection.Kind is WowFileKind.Wmo or WowFileKind.WmoGroup)
+	{
+		WmoLiquidCoordinateFamily family = WmoLiquidLayoutResolver.ResolveCoordinateFamily(detection.Version);
+		int baselineQuarterTurns = WmoLiquidLayoutResolver.GetBaselineRotationQuarterTurns(detection.Version);
+		Console.WriteLine($"WMO liquid family: {family}");
+		Console.WriteLine($"WMO MLIQ baseline rotation: {baselineQuarterTurns * 90}°");
+	}
 	Console.WriteLine($"Owns families: {string.Join(", ", IoBoundaries.OwnedFamilies)}");
 	Console.WriteLine($"PM4 source-of-truth: canonical={Pm4Boundary.CanonicalOwner}, seed={Pm4Boundary.LibrarySeed}, legacy={Pm4Boundary.LegacyReference}");
 	Console.WriteLine($"Planned hosts: {ToolHosts.Planned.Length}");

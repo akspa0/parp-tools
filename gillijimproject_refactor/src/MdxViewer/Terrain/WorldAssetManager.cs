@@ -5,6 +5,7 @@ using MdxViewer.DataSources;
 using MdxViewer.Logging;
 using MdxViewer.Rendering;
 using Silk.NET.OpenGL;
+using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Runtime.M2;
 using WoWMapConverter.Core.Converters;
 
@@ -26,6 +27,30 @@ public readonly record struct WmoMeshSummary(
     int IndexCount,
     int TriangleCount,
     int BatchCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices,
+    WmoGroupMeshSummary[] GroupSummaries)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
+public readonly record struct WmoGroupMeshSummary(
+    int GroupIndex,
+    int VertexCount,
+    int IndexCount,
+    int TriangleCount,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
+    Vector3[] FootprintSampleVertices)
+{
+    public int FootprintSampleCount => FootprintSampleVertices?.Length ?? 0;
+}
+
+public readonly record struct MdxCollisionMeshSummary(
+    int VertexCount,
+    int TriangleIndexCount,
+    int TriangleCount,
     Vector3 BoundsMin,
     Vector3 BoundsMax,
     Vector3[] FootprintSampleVertices)
@@ -54,6 +79,7 @@ public class WorldAssetManager : IDisposable
     private readonly Dictionary<string, IModelRenderer?> _mdxModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoRenderer?> _wmoModels = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WmoMeshSummary> _wmoMeshSummaries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, MdxCollisionMeshSummary?> _mdxCollisionSummaries = new(StringComparer.OrdinalIgnoreCase);
 
     // LRU tracking — keys ordered by last access time (most recent at end)
     private readonly LinkedList<string> _mdxLru = new();
@@ -348,6 +374,75 @@ public class WorldAssetManager : IDisposable
         summary = BuildWmoMeshSummary(wmo);
         _wmoMeshSummaries[normalizedKey] = summary;
         return true;
+    }
+
+    public bool TryGetMdxCollisionSummary(string normalizedKey, out MdxCollisionMeshSummary summary)
+    {
+        normalizedKey = NormalizeKey(normalizedKey);
+
+        if (_mdxCollisionSummaries.TryGetValue(normalizedKey, out MdxCollisionMeshSummary? cachedSummary))
+        {
+            if (cachedSummary.HasValue)
+            {
+                summary = cachedSummary.Value;
+                return true;
+            }
+
+            summary = default;
+            return false;
+        }
+
+        string resolvedModelPath = ResolveCanonicalModelPath(normalizedKey);
+        byte[]? data = ReadFileData(resolvedModelPath);
+        if ((data == null || data.Length == 0) && !resolvedModelPath.Equals(normalizedKey, StringComparison.OrdinalIgnoreCase))
+            data = ReadFileData(normalizedKey);
+
+        if (data == null || data.Length < 4 || WarcraftNetM2Adapter.IsMd20(data) || WarcraftNetM2Adapter.IsMd21(data))
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
+
+        if (!(data[0] == (byte)'M' && data[1] == (byte)'D' && data[2] == (byte)'L' && data[3] == (byte)'X'))
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
+
+        try
+        {
+            using var stream = new MemoryStream(data, writable: false);
+            var collisionFile = MdxCollisionReader.Read(stream, resolvedModelPath);
+            if (collisionFile.Collision is null)
+            {
+                _mdxCollisionSummaries[normalizedKey] = null;
+                summary = default;
+                return false;
+            }
+
+            Vector3 boundsMin = collisionFile.Collision.BoundsMin ?? Vector3.Zero;
+            Vector3 boundsMax = collisionFile.Collision.BoundsMax ?? Vector3.Zero;
+            if (collisionFile.Collision.VertexCount > 0 && collisionFile.Collision.BoundsMin is null)
+                ComputeVectorBounds(collisionFile.Collision.Vertices, out boundsMin, out boundsMax);
+
+            summary = new MdxCollisionMeshSummary(
+                collisionFile.Collision.VertexCount,
+                collisionFile.Collision.TriangleIndexCount,
+                collisionFile.Collision.TriangleCount,
+                boundsMin,
+                boundsMax,
+                BuildSampleVertices(collisionFile.Collision.Vertices, 256));
+            _mdxCollisionSummaries[normalizedKey] = summary;
+            return true;
+        }
+        catch
+        {
+            _mdxCollisionSummaries[normalizedKey] = null;
+            summary = default;
+            return false;
+        }
     }
 
     /// <summary>
@@ -1198,6 +1293,7 @@ public class WorldAssetManager : IDisposable
         int indexCount = 0;
         int batchCount = 0;
         Vector3[] footprintSampleVertices = BuildWmoFootprintSamples(wmo.Groups);
+        WmoGroupMeshSummary[] groupSummaries = BuildWmoGroupMeshSummaries(wmo.Groups);
         ComputeWmoGeometryBounds(wmo, out Vector3 boundsMin, out Vector3 boundsMax);
 
         foreach (WmoV14ToV17Converter.WmoGroupData group in wmo.Groups)
@@ -1216,7 +1312,31 @@ public class WorldAssetManager : IDisposable
             BatchCount: batchCount,
             BoundsMin: boundsMin,
             BoundsMax: boundsMax,
-            FootprintSampleVertices: footprintSampleVertices);
+            FootprintSampleVertices: footprintSampleVertices,
+            GroupSummaries: groupSummaries);
+    }
+
+    private static WmoGroupMeshSummary[] BuildWmoGroupMeshSummaries(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
+    {
+        if (groups.Count == 0)
+            return Array.Empty<WmoGroupMeshSummary>();
+
+        var summaries = new WmoGroupMeshSummary[groups.Count];
+        for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+        {
+            WmoV14ToV17Converter.WmoGroupData group = groups[groupIndex];
+            ComputeVectorBounds(group.Vertices, out Vector3 boundsMin, out Vector3 boundsMax);
+            summaries[groupIndex] = new WmoGroupMeshSummary(
+                GroupIndex: groupIndex,
+                VertexCount: group.Vertices.Count,
+                IndexCount: group.Indices.Count,
+                TriangleCount: group.Indices.Count / 3,
+                BoundsMin: boundsMin,
+                BoundsMax: boundsMax,
+                FootprintSampleVertices: BuildSampleVertices(group.Vertices, 128));
+        }
+
+        return summaries;
     }
 
     private static void ComputeWmoGeometryBounds(WmoV14ToV17Converter.WmoV14Data wmo, out Vector3 boundsMin, out Vector3 boundsMax)
@@ -1250,8 +1370,6 @@ public class WorldAssetManager : IDisposable
 
     private static Vector3[] BuildWmoFootprintSamples(IReadOnlyList<WmoV14ToV17Converter.WmoGroupData> groups)
     {
-        const int maxSamples = 256;
-
         int totalVertexCount = 0;
         for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             totalVertexCount += groups[groupIndex].Vertices.Count;
@@ -1259,6 +1377,7 @@ public class WorldAssetManager : IDisposable
         if (totalVertexCount <= 0)
             return Array.Empty<Vector3>();
 
+        const int maxSamples = 256;
         int stride = Math.Max(1, totalVertexCount / maxSamples);
         var samples = new List<Vector3>(Math.Min(totalVertexCount, maxSamples));
         int globalVertexIndex = 0;
@@ -1287,6 +1406,41 @@ public class WorldAssetManager : IDisposable
         }
 
         return samples.ToArray();
+    }
+
+    private static Vector3[] BuildSampleVertices(IReadOnlyList<Vector3> vertices, int maxSamples)
+    {
+        if (vertices.Count == 0 || maxSamples <= 0)
+            return Array.Empty<Vector3>();
+
+        int stride = Math.Max(1, vertices.Count / maxSamples);
+        var samples = new List<Vector3>(Math.Min(vertices.Count, maxSamples));
+        for (int index = 0; index < vertices.Count && samples.Count < maxSamples; index += stride)
+            samples.Add(vertices[index]);
+
+        return samples.ToArray();
+    }
+
+    private static void ComputeVectorBounds(IReadOnlyList<Vector3> vertices, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (vertices.Count == 0)
+        {
+            boundsMin = Vector3.Zero;
+            boundsMax = Vector3.Zero;
+            return;
+        }
+
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        for (int index = 0; index < vertices.Count; index++)
+        {
+            Vector3 vertex = vertices[index];
+            min = Vector3.Min(min, vertex);
+            max = Vector3.Max(max, vertex);
+        }
+
+        boundsMin = min;
+        boundsMax = max;
     }
 
     /// <summary>

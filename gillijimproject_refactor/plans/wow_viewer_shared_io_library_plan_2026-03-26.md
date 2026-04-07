@@ -665,6 +665,7 @@ Create one first-party shared format stack in `wow-viewer` that:
 - shared WMO root semantic summary for `MOHD`-reported counts, selected top-level entry counts, string-table counts, flags, and bounds is now real
 - shared WMO group semantic summary for `MOGP` headers and top-level geometry or metadata subchunk counts is now real
 - shared WMO `MLIQ` semantic summary for dimensions, height range, tile visibility, and basic family inference is now real
+- shared WMO liquid coordinate-family resolution for runtime and modern `detect` output is now real, with asset version preferred over build fallback and a neutral shared baseline
 - shared WMO `MOBA` batch semantic summary for entry counts, index coverage, material-id coverage, and flagged-batch counts is now real
 - shared WMO `MOPY` face-material semantic summary for face counts, material-id coverage, hidden-face counts, and flagged-face counts is now real
 - shared WMO `MOTV` UV semantic summary for primary UV ranges and extra-set counts is now real
