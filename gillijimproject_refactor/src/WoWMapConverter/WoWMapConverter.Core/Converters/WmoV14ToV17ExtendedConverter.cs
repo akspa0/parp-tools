@@ -6,35 +6,22 @@ namespace WoWMapConverter.Core.Converters;
 
 /// <summary>
 /// Extended Converter for WMO v14/v15 hybrids or variants.
-/// Implements stricter checks and corrected output logic based on Ghidra verification.
+/// The legacy dedicated writer is not trusted for Noggit-compatible output.
+/// For now this mode reuses the maintained converter path instead of emitting a
+/// second custom v17 layout.
 /// </summary>
 public class WmoV14ToV17ExtendedConverter
 {
     public List<string> Convert(string inputPath, string outputPath)
     {
-        Console.WriteLine($"[INFO] Converting {Path.GetFileName(inputPath)} to v17 (Extended Mode)...");
-        var data = AlphaArchiveReader.ReadWithMpqFallback(inputPath);
-        if (data == null)
-            throw new FileNotFoundException($"WMO not found: {inputPath}");
-        return ConvertFromBytes(data, outputPath);
+        Console.WriteLine("[WARN] Extended WMO conversion mode is experimental; falling back to the maintained converter path for output generation.");
+        return new WmoV14ToV17Converter().Convert(inputPath, outputPath);
     }
     
     public List<string> ConvertFromBytes(byte[] wmoData, string outputPath)
     {
-        using var ms = new MemoryStream(wmoData);
-        using var reader = new BinaryReader(ms);
-
-        var data = ParseWmoV14(reader);
-        
-        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-
-        WriteRootFile(data, outputPath);
-        
-        WriteGroupFiles(data, outputPath);
-
-        Console.WriteLine($"[SUCCESS] Converted to v17: {outputPath}");
-        
-        return data.Textures;
+        Console.WriteLine("[WARN] Extended WMO conversion mode is experimental; falling back to the maintained converter path for output generation.");
+        return new WmoV14ToV17Converter().ConvertFromBytes(wmoData, outputPath);
     }
 
     private WmoV14ToV17Converter.WmoV14Data ParseWmoV14(BinaryReader reader)

@@ -1,5 +1,24 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 07, 2026 - The first pre-alpha UI slice is a theme scaffold, not a shell rewrite
+
+- `src/MdxViewer/ViewerApp_Themes.cs` now owns centralized ImGui theme application for the active viewer
+- the viewer can switch between `Modern Slate` and `Pre-Alpha Brass`, with the selected theme saved in `viewer_settings.json`
+- the unified viewer settings section now exposes theme switching so later shell work has a stable palette/chrome seam to build on
+- important boundary:
+   - this does not yet move windows into a historical layout and does not add any paperdoll or spell/POI consumer panel
+
+## Apr 07, 2026 - Future spell/paperdoll/`WorldSafeLocs` work should start in shared wow-viewer services, with `MdxViewer` as a later consumer
+
+- the new cross-cutting roadmap is captured in `gillijimproject_refactor/plans/wow_viewer_spell_paperdoll_poi_and_converter_plan_2026-04-07.md`
+- active viewer-specific guardrails from that plan:
+   - use `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` as the extraction seed for character-display and item-display logic; do not keep deepening it as the long-term owner
+   - treat future spell browsing and paperdoll UI as consumers of shared `wow-viewer` DBC/runtime services rather than new viewer-local parser ownership
+   - `WorldSafeLocs` graveyards should stay a sibling lazy-loaded overlay to the existing area/taxi overlay model, but the shared reader belongs in `wow-viewer` first
+   - do not spend the next slice imitating the 2001 UI before the underlying spell/character/POI services exist
+- important boundary:
+   - this is sequencing guidance only; no new viewer consumer has landed yet
+
 ## Apr 07, 2026 - ADT investigation now has a real MCNK-flag overlay surface, including impassable weak-corner markers
 
 - followed the request to make MCNK chunk flags such as `Impassable` visible on the terrain itself instead of only as implicit file metadata

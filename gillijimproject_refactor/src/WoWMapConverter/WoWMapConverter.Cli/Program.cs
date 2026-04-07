@@ -274,6 +274,7 @@ public static class Program
             List<string> textures;
             if (extended)
             {
+                Console.WriteLine("[WARN] Extended output generation currently falls back to the maintained converter path.");
                 var converter = new WmoV14ToV17ExtendedConverter();
                 textures = converter.Convert(inputPath, outputPath);
             }
@@ -2076,7 +2077,7 @@ public static class Program
         Console.WriteLine("WMO Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input WMO v14 file");
         Console.WriteLine("  --output, -o <path>     Output WMO v17 path (creates root + _XXX.wmo groups)");
-        Console.WriteLine("  --extended              Use extended converter (for v15/hybrid variants)");
+        Console.WriteLine("  --extended              Experimental parser mode; output currently falls back to the maintained converter path");
         Console.WriteLine();
         Console.WriteLine("MDX Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input MDX file");

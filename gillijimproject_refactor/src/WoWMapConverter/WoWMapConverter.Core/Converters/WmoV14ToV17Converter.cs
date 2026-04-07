@@ -1114,7 +1114,11 @@ public class WmoV14ToV17Converter
             reader.BaseStream.Position = chunkEnd;
         }
 
-        // Only rebuild batches if we didn't parse them from MOBA
+        bool rebuiltSequentialIndices = NormalizeParsedIndices(group, data.Version, groupIndex);
+
+        // Only rebuild batches if we didn't parse them from MOBA.
+        // Index normalization must happen first because v14 face-local MOVT data can make
+        // the parsed MOIN look count-valid while still pointing at the wrong surface-local vertices.
         if (group.Batches.Count == 0)
         {
             Console.WriteLine("[DEBUG] No native MOBA batches, rebuilding from MOPY...");
@@ -1122,24 +1126,9 @@ public class WmoV14ToV17Converter
         }
         else
         {
-            Console.WriteLine($"[DEBUG] Using {group.Batches.Count} native MOBA batches");
+            Console.WriteLine($"[DEBUG] Using {group.Batches.Count} native MOBA batches{(rebuiltSequentialIndices ? " after v14 index normalization" : string.Empty)}");
             // Calculate bounding boxes AND fix potentially invalid vertex ranges (v14 doesn't have unknown_box)
             RecalculateBatchData(group);
-        }
-        
-        // v14 FIX: Validate and regenerate indices if needed
-        // v14 MOVT contains nFaces*3 vertices (sequential per face, not indexed)
-        // If MOIN is empty/invalid, generate sequential indices (0,1,2, 3,4,5...)
-        int expectedIndices = group.FaceMaterials.Count * 3;
-        if (group.Indices.Count != expectedIndices)
-        {
-            Console.WriteLine($"[FIX] v14 Index Mismatch: MOIN has {group.Indices.Count} indices but expected {expectedIndices} (nFaces={group.FaceMaterials.Count} * 3)");
-            Console.WriteLine($"      Regenerating sequential indices 0,1,2, 3,4,5, ... {expectedIndices-1}");
-            group.Indices = new List<ushort>(expectedIndices);
-            for (int i = 0; i < expectedIndices; i++)
-            {
-                group.Indices.Add((ushort)i);
-            }
         }
         
         // DISABLED: Mesh repair breaks batch data (minIndex/maxIndex become invalid)
@@ -1149,6 +1138,44 @@ public class WmoV14ToV17Converter
         group.Name = GetGroupName(data.GroupNamesRaw, (int)group.NameOffset);
 
         data.Groups.Add(group);
+    }
+
+    private bool NormalizeParsedIndices(WmoGroupData group, uint version, int groupIndex)
+    {
+        int expectedIndices = group.FaceMaterials.Count * 3;
+        if (expectedIndices == 0)
+            return false;
+
+        bool shouldForceSequentialIndices = false;
+        string? reason = null;
+
+        // Alpha v14 group geometry commonly stores MOVT as face-local vertices laid out one triangle after another.
+        // In that shape, MOIN can have the right count but still behave like surface-local references instead of a
+        // reusable shared-vertex index buffer. That produces the "correct silhouette, scrambled surfaces" failure.
+        if (version == 14 && group.Vertices.Count == expectedIndices)
+        {
+            shouldForceSequentialIndices = true;
+            reason = $"v14 face-local MOVT layout detected ({group.Vertices.Count} vertices for {group.FaceMaterials.Count} faces)";
+        }
+        else if (group.Indices.Count != expectedIndices)
+        {
+            shouldForceSequentialIndices = true;
+            reason = $"index count mismatch ({group.Indices.Count} parsed vs {expectedIndices} expected)";
+        }
+
+        if (!shouldForceSequentialIndices)
+            return false;
+
+        Console.WriteLine($"[FIX] Group {groupIndex}: rebuilding sequential indices because {reason}.");
+        Console.WriteLine($"      Writing 0,1,2, 3,4,5, ... {expectedIndices - 1}");
+
+        group.Indices = new List<ushort>(expectedIndices);
+        for (int i = 0; i < expectedIndices; i++)
+        {
+            group.Indices.Add((ushort)i);
+        }
+
+        return true;
     }
     
     /// <summary>
@@ -2167,7 +2194,12 @@ public class WmoV14ToV17Converter
             {
                 foreach (var b in group.Batches)
                 {
-                    // 24 bytes per batch (v17)
+                    // 24 bytes per batch (v17/v14-compatible layout):
+                    // unknown0, materialId, bbox[12], firstIndex, indexCount,
+                    // firstVertex, lastVertex, flags, unknown3.
+                    w.Write((byte)0);
+                    w.Write(b.MaterialId);
+
                     if (b.BoundingBoxRaw != null && b.BoundingBoxRaw.Length == 12)
                         w.Write(b.BoundingBoxRaw);
                     else
@@ -2178,7 +2210,7 @@ public class WmoV14ToV17Converter
                     w.Write(b.FirstVertex);
                     w.Write(b.LastVertex);
                     w.Write(b.Flags);
-                    w.Write(b.MaterialId);
+                    w.Write((byte)0);
                 }
             }
         });

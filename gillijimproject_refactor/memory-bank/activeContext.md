@@ -2,6 +2,29 @@
 
 # Active Context
 
+## Apr 07, 2026 - `MdxViewer` now has a persisted UI theme scaffold, including a pre-alpha-inspired chrome option
+
+- followed the user-selected UI order `3,2,1` by landing theme infrastructure first instead of jumping straight into a full shell rewrite
+- active viewer behavior after this slice:
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp_Themes.cs` now owns centralized ImGui theme application instead of keeping style colors hardcoded in startup
+	- the active viewer can now switch between the existing `Modern Slate` chrome and a new `Pre-Alpha Brass` chrome that uses square borders and brass/navy styling as the first pre-alpha-inspired pass
+	- the selected theme is saved in `viewer_settings.json` and applied at startup through `LoadViewerSettings()` + `ApplyActiveUiTheme()`
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp_Sidebars.cs` now exposes theme selection in the unified viewer settings section
+- important boundary:
+	- this is theme and chrome infrastructure only; no paperdoll panel, no historical shell layout rewrite, and no shared spell/character services landed in this slice
+
+## Apr 07, 2026 - Planned next wow-viewer expansion is shared DBC-first: spell browsing, paperdoll composition, `WorldSafeLocs` POIs, and converter unification
+
+- captured the new roadmap in `gillijimproject_refactor/plans/wow_viewer_spell_paperdoll_poi_and_converter_plan_2026-04-07.md`
+- active planning direction after this note:
+	- new shared DBC/DB2 readers and resolvers for `Spell`, `WorldSafeLocs`, `CreatureDisplayInfo`, `CreatureDisplayInfoExtra`, and `ItemDisplayInfo` belong in `wow-viewer/src/core/WowViewer.Core.IO/Dbc`
+	- higher-level spell-asset bundles, character/paperdoll composition, and POI caching belong in `wow-viewer` runtime/services, not in viewer panel code
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` is the best current extraction seed for character-display and gear-texture composition; do not treat it as the final architecture
+	- `wow-viewer/tools/converter/WowViewer.Tool.Converter` remains the canonical front door for version-aware conversion; the open WMO/model/terrain converter mess should converge into one detect -> plan -> convert surface instead of preserving old executable sprawl
+	- `WorldSafeLocs` shared ownership can start now, but active `MdxViewer` graveyard overlay wiring should still be treated as a later consumer slice once current viewer render/input cleanup stops thrashing
+- important boundary:
+	- this is planning and routing only; no shared spell reader, paperdoll runtime, `WorldSafeLocs` reader, or unified converter plan surface has landed yet
+
 ## Apr 07, 2026 - Shared WMO liquid family resolution replaced the old build-only `MLIQ` baseline path
 
 - followed the request to differentiate WMO liquid handling by actual asset version instead of keeping the active viewer on a hardcoded `3.3.5.12340 => 270°` baseline

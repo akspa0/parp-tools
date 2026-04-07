@@ -1,5 +1,31 @@
 # Progress
 
+### Apr 07, 2026 - Landed the first pre-alpha UI slice as a persisted `MdxViewer` theme system
+
+- followed the requested `3,2,1` order by doing theme infrastructure before paperdoll or shell rewrite work
+- landed a new `src/MdxViewer/ViewerApp_Themes.cs` partial that centralizes ImGui theme application and adds a `Pre-Alpha Brass` option beside the current `Modern Slate` baseline
+- wired theme persistence through `src/MdxViewer/ViewerApp.cs` viewer settings load/save so the selected theme survives restarts
+- exposed the selector in `src/MdxViewer/ViewerApp_Sidebars.cs` under unified viewer settings
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 07, 2026 with existing workspace warnings only
+- proof boundary:
+	- this is still chrome-only; paperdoll, old-shell layout work, and shared spell/character services remain open
+
+### Apr 07, 2026 - Planned the next wow-viewer data/tool tranche around spells, paperdoll, `WorldSafeLocs`, and converter cutover
+
+- followed the request to stop treating spell visualization, character composition, graveyard POIs, and version conversion as disconnected wishlist items
+- recorded the concrete implementation plan in `gillijimproject_refactor/plans/wow_viewer_spell_paperdoll_poi_and_converter_plan_2026-04-07.md`
+- locked the intended first three vertical slices:
+	- shared `WorldSafeLocs` reader plus inspect/report surface
+	- shared character-display resolver extraction from `MdxViewer` `ReplaceableTextureResolver`
+	- shared spell inspect plus linked asset-bundle report surface
+- also locked the converter direction:
+	- expand `wow-viewer` `detect` into a single detect -> plan -> convert surface
+	- merge overlapping WMO/model/terrain conversion behavior into `WowViewer.Tool.Converter` over shared services instead of preserving historical executable sprawl
+- proof boundary:
+	- this is continuity and planning only
+	- no implementation, tests, or runtime validation landed in this slice yet
+
 ### Apr 07, 2026 - ADT investigation now exposes raw MCNK flags, with in-world chunk overlays and diagonal weak-corner markers
 
 - followed the request to make impassable and related MCNK chunk flags visible in the active viewer instead of only inferable from raw file inspection

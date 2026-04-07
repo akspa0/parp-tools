@@ -690,22 +690,15 @@ public partial class ViewerApp : IDisposable
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
-        _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Enable(EnableCap.CullFace);
 
         _loadingScreen = new Rendering.LoadingScreen(_gl);
 
-        // Style ImGui
-        var style = ImGui.GetStyle();
-        style.WindowRounding = 4f;
-        style.FrameRounding = 2f;
-        style.Colors[(int)ImGuiCol.WindowBg] = new Vector4(0.12f, 0.12f, 0.14f, 0.95f);
-        style.Colors[(int)ImGuiCol.MenuBarBg] = new Vector4(0.15f, 0.15f, 0.18f, 1.0f);
-
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
+        ApplyActiveUiTheme();
         LoadCameraShotPoints();
         DetectRenderQualityCapabilities();
         ApplyRenderQualitySettings(refreshTextures: false);
@@ -4207,6 +4200,8 @@ void main() {
             ImGui.SameLine();
             bool isExtended = _wmoConvertExtended;
             if (ImGui.RadioButton("Extended", isExtended)) _wmoConvertExtended = true;
+            if (_wmoConvertExtended)
+                ImGui.TextWrapped("Extended mode is experimental. Output generation currently falls back to the maintained converter path.");
 
             ImGui.Spacing();
             ImGui.Separator();
@@ -11017,6 +11012,10 @@ void main() {
             if (settings == null)
                 return;
 
+            _uiTheme = Enum.IsDefined(typeof(UiThemeKind), settings.UiTheme)
+                ? (UiThemeKind)settings.UiTheme
+                : UiThemeKind.ModernSlate;
+
             int savedWmoMliqRotation = ((settings.WmoMliqRotationQuarterTurns % 4) + 4) % 4;
             if (settings.HasExplicitWmoMliqRotationOverride)
             {
@@ -11188,6 +11187,7 @@ void main() {
 
             var settings = new ViewerSettings
             {
+                UiTheme = (int)_uiTheme,
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
                 HasExplicitWmoMliqRotationOverride = _hasExplicitWmoMliqRotationOverride,
                 LastGameFolderPath = _lastGameFolderPath,
@@ -11413,6 +11413,7 @@ void main() {
 
     private sealed class ViewerSettings
     {
+        public int UiTheme { get; set; } = (int)UiThemeKind.ModernSlate;
         public int WmoMliqRotationQuarterTurns { get; set; }
         public bool HasExplicitWmoMliqRotationOverride { get; set; }
         public string? LastGameFolderPath { get; set; }

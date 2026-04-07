@@ -807,6 +807,8 @@ public partial class ViewerApp
         ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
         ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
         ImGui.Separator();
+        DrawUiThemeSettingsContent();
+        ImGui.Separator();
         DrawCameraControlsContent();
 
         if (_terrainManager != null || _vlmTerrainManager != null)
