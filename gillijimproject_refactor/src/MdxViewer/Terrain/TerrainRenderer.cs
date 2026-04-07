@@ -1446,7 +1446,7 @@ vec4 SampleDiffuse(int hasTex, sampler2D s, vec2 uv)
 
 void main() {
     float texScale = 8.0 / 33.333;
-    vec2 diffuseUV = (uUseWorldUV == 1) ? (vWorldPos.xy * texScale) : (vTexCoord * 8.0);
+    vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
     float a1Raw = (uHasAlpha1 == 1) ? texture(uAlpha1, vTexCoord).r : ((uImplicitAlpha1 == 1) ? 1.0 : 0.0);
     float a2Raw = (uHasAlpha2 == 1) ? texture(uAlpha2, vTexCoord).r : ((uImplicitAlpha2 == 1) ? 1.0 : 0.0);
@@ -1645,7 +1645,7 @@ bool HasLayer(uint idx) {
 
 void main() {
     float texScale = 8.0 / 33.333;
-    vec2 diffuseUV = (uUseWorldUV == 1) ? (vWorldPos.xy * texScale) : (vTexCoord * 8.0);
+    vec2 diffuseUV = (uUseWorldUV == 1) ? (vec2(-vWorldPos.y, -vWorldPos.x) * texScale) : (vTexCoord * 8.0);
 
     vec4 alphaShadow = texture(uAlphaShadowArray, vec3(vTexCoord, float(vChunkSlice)));
     bool has0 = HasLayer(vTexIdx.x);

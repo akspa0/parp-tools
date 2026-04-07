@@ -1,5 +1,6 @@
 using System.Numerics;
 using ImGuiNET;
+using MdxViewer.Rendering;
 using MdxViewer.Terrain;
 using WowViewer.Core.Runtime.World;
 using WowViewer.Core.Runtime.World.Visibility;
@@ -8,6 +9,30 @@ namespace MdxViewer;
 
 public partial class ViewerApp
 {
+    [Flags]
+    private enum McnkOverlayFlags
+    {
+        None = 0,
+        HasShadows = 0x1,
+        Impassable = 0x2,
+        River = 0x4,
+        Ocean = 0x8,
+        HasMagma = 0x10,
+        HasSlime = 0x20,
+        HasMccv = 0x40,
+        HasBakedShadows = 0x20000,
+    }
+
+    private readonly record struct McnkOverlayChunkInfo(
+        int TileX,
+        int TileY,
+        int ChunkX,
+        int ChunkY,
+        Vector3 WorldPosition,
+        Vector3 BoundsMin,
+        Vector3 BoundsMax,
+        McnkOverlayFlags Flags);
+
     private static readonly string[] WorldObjectVisibilityProfileLabels =
     [
         "Quality",
@@ -24,6 +49,11 @@ public partial class ViewerApp
     }
 
     private VisualInvestigationMode _visualInvestigationMode = VisualInvestigationMode.Auto;
+    private bool _showMcnkFlagOverlay;
+    private bool _showMcnkWeakCorners = true;
+    private McnkOverlayFlags _mcnkOverlayFlags = McnkOverlayFlags.Impassable;
+    private int _lastMcnkOverlayChunkCount;
+    private int _lastMcnkWeakCornerCount;
     private readonly int[] _litFocusTrackOrder =
     {
         LitLoader.TrackDirectColor,
@@ -135,12 +165,16 @@ public partial class ViewerApp
         ImGui.TextDisabled(usingHoveredChunk ? "Target: hovered chunk" : "Target: camera chunk");
         ImGui.Text($"Tile ({chunkInfo.TileX}, {chunkInfo.TileY})  Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         ImGui.TextDisabled($"AreaId: {chunkData.AreaId}  Layers: {chunkData.Layers.Length}  Holes: 0x{chunkData.HoleMask:X4}");
+        ImGui.TextDisabled($"MCNK Flags: 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
         ImGui.TextDisabled($"Alpha maps: {chunkData.AlphaMaps.Count}  Shadow: {(chunkData.ShadowMap != null ? "yes" : "no")}  MCCV: {(chunkData.MccvColors != null ? "yes" : "no")}");
         ImGui.TextDisabled($"World origin: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
 
         string summary = BuildTerrainChunkTextureSummary(chunkInfo, chunkData, tileTextures);
         if (ImGui.SmallButton("Copy Chunk Texture Summary"))
             CopyTextToClipboard(summary, "chunk texture summary");
+
+        ImGui.Separator();
+        DrawMcnkFlagOverlayControls();
 
         ImGui.Separator();
         for (int layerIndex = 0; layerIndex < chunkData.Layers.Length; layerIndex++)
@@ -544,6 +578,7 @@ public partial class ViewerApp
         ImGui.SetWindowFontScale(1.0f);
         ImGui.TextColored(new Vector4(0.60f, 0.88f, 0.62f, 1.0f), "ADT chunk");
         ImGui.TextColored(new Vector4(0.86f, 0.88f, 0.94f, 1.0f), $"Layers: {chunkData.Layers.Length}  AreaId: {chunkData.AreaId}");
+        ImGui.TextColored(new Vector4(0.95f, 0.78f, 0.62f, 1.0f), $"MCNK: 0x{(uint)chunkData.McnkFlags:X8}  {DescribeMcnkFlags(chunkData.McnkFlags)}");
         ImGui.TextColored(new Vector4(0.72f, 0.78f, 0.90f, 1.0f), $"World: ({chunkData.WorldPosition.X:F1}, {chunkData.WorldPosition.Y:F1}, {chunkData.WorldPosition.Z:F1})");
         ImGui.Separator();
 
@@ -659,6 +694,7 @@ public partial class ViewerApp
         var builder = new System.Text.StringBuilder();
         builder.AppendLine($"Tile ({chunkInfo.TileX}, {chunkInfo.TileY}) Chunk ({chunkInfo.ChunkX}, {chunkInfo.ChunkY})");
         builder.AppendLine($"AreaId={chunkData.AreaId} Layers={chunkData.Layers.Length} Holes=0x{chunkData.HoleMask:X4} AlphaMaps={chunkData.AlphaMaps.Count}");
+        builder.AppendLine($"McnkFlags=0x{(uint)chunkData.McnkFlags:X8} ({DescribeMcnkFlags(chunkData.McnkFlags)})");
 
         for (int layerIndex = 0; layerIndex < chunkData.Layers.Length; layerIndex++)
         {
@@ -674,6 +710,273 @@ public partial class ViewerApp
         }
 
         return builder.ToString().TrimEnd();
+    }
+
+    private void DrawMcnkFlagOverlayControls()
+    {
+        ImGui.Text("MCNK Flag Overlay");
+        ImGui.TextDisabled("Highlight loaded terrain chunks by raw MCNK header flags.");
+
+        bool showOverlay = _showMcnkFlagOverlay;
+        if (ImGui.Checkbox("Show MCNK Flag Overlay", ref showOverlay))
+            _showMcnkFlagOverlay = showOverlay;
+
+        ImGui.SameLine();
+        bool showWeakCorners = _showMcnkWeakCorners;
+        if (ImGui.Checkbox("Highlight Diagonal Weak Corners", ref showWeakCorners))
+            _showMcnkWeakCorners = showWeakCorners;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Marks loaded 2x2 chunk blocks where impassable chunks only touch diagonally and leave the shared corner exposed.");
+
+        DrawMcnkFlagToggle(McnkOverlayFlags.Impassable, "Impassable");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.River, "River");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.Ocean, "Ocean");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.HasMagma, "Magma");
+
+        DrawMcnkFlagToggle(McnkOverlayFlags.HasSlime, "Slime");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.HasShadows, "Shadows");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.HasMccv, "MCCV");
+        ImGui.SameLine();
+        DrawMcnkFlagToggle(McnkOverlayFlags.HasBakedShadows, "BakedShadows");
+
+        ImGui.TextDisabled($"Loaded flagged chunks: {_lastMcnkOverlayChunkCount}  Weak corners: {_lastMcnkWeakCornerCount}");
+    }
+
+    private void DrawMcnkFlagToggle(McnkOverlayFlags flag, string label)
+    {
+        bool enabled = (_mcnkOverlayFlags & flag) != 0;
+        if (ImGui.Checkbox(label, ref enabled))
+        {
+            if (enabled)
+                _mcnkOverlayFlags |= flag;
+            else
+                _mcnkOverlayFlags &= ~flag;
+        }
+    }
+
+    private bool ShouldDrawMcnkFlagOverlay(TerrainRenderer? renderer)
+    {
+        return renderer != null && _showMcnkFlagOverlay && _mcnkOverlayFlags != McnkOverlayFlags.None;
+    }
+
+    private void BatchMcnkFlagOverlayGeometry(Terrain.BoundingBoxRenderer overlayRenderer)
+    {
+        _lastMcnkOverlayChunkCount = 0;
+        _lastMcnkWeakCornerCount = 0;
+
+        TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
+        if (!ShouldDrawMcnkFlagOverlay(renderer) || renderer == null)
+            return;
+
+        var loadedChunks = new Dictionary<(int globalChunkX, int globalChunkY), McnkOverlayChunkInfo>();
+
+        if (_terrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _terrainManager.LoadedTiles)
+            {
+                if (!_terrainManager.TryGetTileLoadResult(tileX, tileY, out TileLoadResult result))
+                    continue;
+
+                CollectMcnkFlagOverlayGeometry(renderer, overlayRenderer, result, loadedChunks);
+            }
+        }
+        else if (_vlmTerrainManager != null)
+        {
+            foreach (var (tileX, tileY) in _vlmTerrainManager.LoadedTiles)
+            {
+                if (!_vlmTerrainManager.TryGetTileLoadResult(tileX, tileY, out TileLoadResult result))
+                    continue;
+
+                CollectMcnkFlagOverlayGeometry(renderer, overlayRenderer, result, loadedChunks);
+            }
+        }
+
+        if (_showMcnkWeakCorners && (_mcnkOverlayFlags & McnkOverlayFlags.Impassable) != 0)
+            _lastMcnkWeakCornerCount = BatchMcnkWeakCornerMarkers(overlayRenderer, loadedChunks);
+    }
+
+    private void CollectMcnkFlagOverlayGeometry(
+        TerrainRenderer renderer,
+        Terrain.BoundingBoxRenderer overlayRenderer,
+        TileLoadResult result,
+        Dictionary<(int globalChunkX, int globalChunkY), McnkOverlayChunkInfo> loadedChunks)
+    {
+        for (int i = 0; i < result.Chunks.Count; i++)
+        {
+            TerrainChunkData chunk = result.Chunks[i];
+            if (!renderer.TryGetChunkInfo(chunk.TileX, chunk.TileY, chunk.ChunkX, chunk.ChunkY, out TerrainRenderer.TerrainChunkInfo info))
+                continue;
+
+            var rawFlags = (McnkOverlayFlags)(uint)chunk.McnkFlags;
+            loadedChunks[(chunk.TileX * 16 + chunk.ChunkX, chunk.TileY * 16 + chunk.ChunkY)] = new McnkOverlayChunkInfo(
+                chunk.TileX,
+                chunk.TileY,
+                chunk.ChunkX,
+                chunk.ChunkY,
+                chunk.WorldPosition,
+                info.BoundsMin,
+                info.BoundsMax,
+                rawFlags);
+
+            McnkOverlayFlags matchedFlags = rawFlags & _mcnkOverlayFlags;
+            if (matchedFlags == McnkOverlayFlags.None)
+                continue;
+
+            Vector3 color = ResolveMcnkOverlayColor(matchedFlags);
+            float alpha = (matchedFlags & McnkOverlayFlags.Impassable) != 0 ? 0.26f : 0.18f;
+            BatchChunkTopFaceOverlay(overlayRenderer, chunk, color, alpha);
+            BatchChunkTopOutline(overlayRenderer, chunk, Vector3.Clamp(color * 1.18f, Vector3.Zero, Vector3.One));
+            _lastMcnkOverlayChunkCount++;
+        }
+    }
+
+    private int BatchMcnkWeakCornerMarkers(
+        Terrain.BoundingBoxRenderer overlayRenderer,
+        IReadOnlyDictionary<(int globalChunkX, int globalChunkY), McnkOverlayChunkInfo> loadedChunks)
+    {
+        int weakCornerCount = 0;
+        float chunkStep = WoWConstants.ChunkSize / 16f;
+        Vector3 weakCornerColor = new(1.0f, 0.96f, 0.18f);
+
+        foreach (var pair in loadedChunks)
+        {
+            var anchorKey = pair.Key;
+            McnkOverlayChunkInfo c00 = pair.Value;
+            if (!loadedChunks.TryGetValue((anchorKey.globalChunkX + 1, anchorKey.globalChunkY), out McnkOverlayChunkInfo c10)
+                || !loadedChunks.TryGetValue((anchorKey.globalChunkX, anchorKey.globalChunkY + 1), out McnkOverlayChunkInfo c01)
+                || !loadedChunks.TryGetValue((anchorKey.globalChunkX + 1, anchorKey.globalChunkY + 1), out McnkOverlayChunkInfo c11))
+            {
+                continue;
+            }
+
+            bool c00Impassable = (c00.Flags & McnkOverlayFlags.Impassable) != 0;
+            bool c10Impassable = (c10.Flags & McnkOverlayFlags.Impassable) != 0;
+            bool c01Impassable = (c01.Flags & McnkOverlayFlags.Impassable) != 0;
+            bool c11Impassable = (c11.Flags & McnkOverlayFlags.Impassable) != 0;
+
+            bool weakDiagonalA = c00Impassable && c11Impassable && !c10Impassable && !c01Impassable;
+            bool weakDiagonalB = c10Impassable && c01Impassable && !c00Impassable && !c11Impassable;
+            if (!weakDiagonalA && !weakDiagonalB)
+                continue;
+
+            float markerZ = MathF.Max(MathF.Max(c00.BoundsMax.Z, c10.BoundsMax.Z), MathF.Max(c01.BoundsMax.Z, c11.BoundsMax.Z)) + 2.5f;
+            Vector3 markerPosition = new(c00.WorldPosition.X - chunkStep, c00.WorldPosition.Y - chunkStep, markerZ);
+            overlayRenderer.BatchPin(markerPosition, 6.0f, 0.85f, weakCornerColor);
+            weakCornerCount++;
+        }
+
+        return weakCornerCount;
+    }
+
+    private static void BatchChunkTopFaceOverlay(Terrain.BoundingBoxRenderer overlayRenderer, TerrainChunkData chunk, Vector3 color, float alpha)
+    {
+        int[] indices = BuildChunkIndices(chunk.HoleMask);
+        if (indices.Length < 3)
+            return;
+
+        const float surfaceLift = 0.18f;
+        var positions = new Vector3[145];
+        for (int i = 0; i < positions.Length; i++)
+            positions[i] = GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, surfaceLift);
+
+        for (int t = 0; t + 2 < indices.Length; t += 3)
+        {
+            overlayRenderer.BatchTriangle(
+                positions[indices[t + 0]],
+                positions[indices[t + 1]],
+                positions[indices[t + 2]],
+                color,
+                alpha);
+        }
+    }
+
+    private static void BatchChunkTopOutline(Terrain.BoundingBoxRenderer overlayRenderer, TerrainChunkData chunk, Vector3 color)
+    {
+        const float outlineLift = 0.24f;
+        var positions = new Vector3[145];
+        for (int i = 0; i < positions.Length; i++)
+            positions[i] = GetChunkVertexWorldPosition(chunk, chunk.Heights, i) + new Vector3(0f, 0f, outlineLift);
+
+        for (int outerCol = 0; outerCol < 8; outerCol++)
+            overlayRenderer.BatchLine(positions[OuterIndex(0, outerCol)], positions[OuterIndex(0, outerCol + 1)], color);
+
+        for (int outerRow = 0; outerRow < 8; outerRow++)
+            overlayRenderer.BatchLine(positions[OuterIndex(outerRow, 8)], positions[OuterIndex(outerRow + 1, 8)], color);
+
+        for (int outerCol = 8; outerCol > 0; outerCol--)
+            overlayRenderer.BatchLine(positions[OuterIndex(8, outerCol)], positions[OuterIndex(8, outerCol - 1)], color);
+
+        for (int outerRow = 8; outerRow > 0; outerRow--)
+            overlayRenderer.BatchLine(positions[OuterIndex(outerRow, 0)], positions[OuterIndex(outerRow - 1, 0)], color);
+    }
+
+    private static string DescribeMcnkFlags(int rawFlags)
+    {
+        McnkOverlayFlags flags = (McnkOverlayFlags)(uint)rawFlags;
+        if (flags == McnkOverlayFlags.None)
+            return "none";
+
+        var labels = new List<string>();
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.HasShadows, "HasShadows");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.Impassable, "Impassable");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.River, "River");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.Ocean, "Ocean");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.HasMagma, "Magma");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.HasSlime, "Slime");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.HasMccv, "HasMccv");
+        AppendMcnkFlagLabel(labels, flags, McnkOverlayFlags.HasBakedShadows, "HasBakedShadows");
+
+        uint unknownMask = (uint)rawFlags & ~(uint)(McnkOverlayFlags.HasShadows
+            | McnkOverlayFlags.Impassable
+            | McnkOverlayFlags.River
+            | McnkOverlayFlags.Ocean
+            | McnkOverlayFlags.HasMagma
+            | McnkOverlayFlags.HasSlime
+            | McnkOverlayFlags.HasMccv
+            | McnkOverlayFlags.HasBakedShadows);
+        if (unknownMask != 0)
+            labels.Add($"Unknown=0x{unknownMask:X8}");
+
+        return string.Join(", ", labels);
+    }
+
+    private static void AppendMcnkFlagLabel(List<string> labels, McnkOverlayFlags flags, McnkOverlayFlags flag, string label)
+    {
+        if ((flags & flag) != 0)
+            labels.Add(label);
+    }
+
+    private static Vector3 ResolveMcnkOverlayColor(McnkOverlayFlags flags)
+    {
+        Vector3 sum = Vector3.Zero;
+        int count = 0;
+
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.HasShadows, new Vector3(0.62f, 0.36f, 0.82f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.Impassable, new Vector3(0.98f, 0.22f, 0.18f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.River, new Vector3(0.18f, 0.84f, 0.96f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.Ocean, new Vector3(0.12f, 0.42f, 0.95f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.HasMagma, new Vector3(1.0f, 0.48f, 0.08f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.HasSlime, new Vector3(0.36f, 0.95f, 0.28f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.HasMccv, new Vector3(0.95f, 0.86f, 0.18f));
+        AddColorIfPresent(ref sum, ref count, flags, McnkOverlayFlags.HasBakedShadows, new Vector3(0.78f, 0.78f, 0.78f));
+
+        return count > 0
+            ? Vector3.Clamp(sum / count, Vector3.Zero, Vector3.One)
+            : new Vector3(1.0f, 1.0f, 1.0f);
+    }
+
+    private static void AddColorIfPresent(ref Vector3 sum, ref int count, McnkOverlayFlags activeFlags, McnkOverlayFlags flag, Vector3 color)
+    {
+        if ((activeFlags & flag) == 0)
+            return;
+
+        sum += color;
+        count++;
     }
 
     private bool TryGetFocusedWlLiquidBody(out WlLiquidBody? body, out bool usingHoveredBody)

@@ -297,6 +297,20 @@ internal static class AssetProbe
             $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
         Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
 
+        var animator = new MdxAnimator(runtimeModel);
+        Console.WriteLine(
+            $"[M2-DIAG-ANIM] sequences={animator.Sequences.Count} bones={animator.BoneCount} hasAnimation={animator.HasAnimation}");
+
+        int maxSequenceSummaries = Math.Min(animator.Sequences.Count, 8);
+        for (int sequenceIndex = 0; sequenceIndex < maxSequenceSummaries; sequenceIndex++)
+        {
+            animator.SetSequence(sequenceIndex);
+            var sequence = animator.Sequences[sequenceIndex];
+            var stats = animator.GetTrackDebugStatsForCurrentSequence();
+            Console.WriteLine(
+                $"[M2-DIAG-SEQ] seq={sequenceIndex} name={sequence.Name} range={sequence.Time.Start}-{sequence.Time.End} tIn={stats.TranslationKeysInSequence}/{stats.TranslationKeysTotal} rIn={stats.RotationKeysInSequence}/{stats.RotationKeysTotal} sIn={stats.ScalingKeysInSequence}/{stats.ScalingKeysTotal} min={stats.MinKeyTime} max={stats.MaxKeyTime}");
+        }
+
         int maxGeosetSummaries = Math.Min(runtimeModel.Geosets.Count, 12);
         for (int geosetIndex = 0; geosetIndex < maxGeosetSummaries; geosetIndex++)
         {

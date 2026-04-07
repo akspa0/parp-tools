@@ -7576,7 +7576,10 @@ public class WorldScene : ISceneRenderer
                     frame.WdlMs = MeasureDurationMs(() =>
                     {
                         if (ShowWdlTerrain && _wdlTerrain != null)
-                            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller);
+                        {
+                            bool renderWdlAsOpaqueFallback = _terrainManager.LoadedTileCount == 0;
+                            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller, renderWdlAsOpaqueFallback);
+                        }
                     });
                 },
                 () =>

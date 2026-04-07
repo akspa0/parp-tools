@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 07, 2026 - ADT investigation now exposes raw MCNK flags, with in-world chunk overlays and diagonal weak-corner markers
+
+- followed the request to make impassable and related MCNK chunk flags visible in the active viewer instead of only inferable from raw file inspection
+- landed behavior:
+	- `src/MdxViewer/ViewerApp_Investigation.cs` now shows raw `MCNK` flag hex plus named flag labels in both the ADT investigation panel and the hovered-chunk tooltip
+	- the same investigation surface now exposes a `Show MCNK Flag Overlay` toggle plus per-flag filters for impassable, river, ocean, magma, slime, shadow, MCCV, and baked-shadow chunks
+	- `src/MdxViewer/ViewerApp.cs` now routes that overlay through the existing editor `BoundingBoxRenderer`, drawing chunk-top fills and outlines for loaded chunks whose raw flags match the selected overlay mask
+	- diagonal impassable-only `2x2` chunk patterns now emit a visible weak-corner marker so the shared exposed corner is obvious in-world
+	- `src/MdxViewer/Terrain/VlmTerrainManager.cs` now exposes loaded tile coordinates so the same overlay path can work against VLM terrain sessions too
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 07, 2026 with existing workspace warnings only
+- proof boundary:
+	- this is compile validation only
+	- no automated tests were added or run
+	- no live viewer retest has been captured yet on the development map, so chunk coloring, tooltip readability, and weak-corner marker visibility are still unproven in a real session
+
 ### Apr 07, 2026 - Shared WMO liquid family resolution now drives `MdxViewer` baseline handling and the modern converter detect surface
 
 - followed the request to stop treating 3.3.5 WMO `MLIQ` orientation as one hardcoded build-only rule when the parsed WMO already carries its own format version

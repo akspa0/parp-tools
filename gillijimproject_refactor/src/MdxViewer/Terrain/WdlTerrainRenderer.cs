@@ -120,7 +120,7 @@ public class WdlTerrainRenderer : IDisposable
     /// Render all visible WDL tiles.
     /// </summary>
     public unsafe void Render(Matrix4x4 view, Matrix4x4 proj, Vector3 cameraPos,
-        TerrainLighting lighting, FrustumCuller? frustum = null)
+        TerrainLighting lighting, FrustumCuller? frustum = null, bool opaqueFallback = false)
     {
         if (_tileMeshes.Count == 0) return;
 
@@ -144,12 +144,21 @@ public class WdlTerrainRenderer : IDisposable
         _shader.SetFloat("uDistanceHazeOpacityFloor", DistanceHazeOpacityFloor);
         _shader.SetVec3("uCameraPos", cameraPos);
         _shader.SetInt("uMinimapTexture", 0);
+        _shader.SetInt("uForceOpaque", opaqueFallback ? 1 : 0);
 
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
-        _gl.Enable(EnableCap.Blend);
-        _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-        _gl.DepthMask(false);
+        if (opaqueFallback)
+        {
+            _gl.Disable(EnableCap.Blend);
+            _gl.DepthMask(true);
+        }
+        else
+        {
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _gl.DepthMask(false);
+        }
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
 
         // Push WDL slightly behind real terrain to prevent z-fighting at tile edges
@@ -438,6 +447,7 @@ uniform vec3 uCameraPos;
 uniform float uOpacity;
 uniform sampler2D uMinimapTexture;
 uniform int uUseMinimapTexture;
+uniform int uForceOpaque;
 
 out vec4 FragColor;
 
@@ -475,7 +485,9 @@ void main() {
     float hazeEnd = max(hazeStart + 1.0, uFogEnd * uDistanceHazeEndFactor);
     float haze = smoothstep(hazeStart, hazeEnd, dist);
     vec3 finalColor = mix(litColor, uFogColor, haze * uDistanceHazeColorBlend);
-    float finalOpacity = uOpacity * mix(1.0, uDistanceHazeOpacityFloor, haze);
+    float finalOpacity = uForceOpaque != 0
+        ? uOpacity
+        : uOpacity * mix(1.0, uDistanceHazeOpacityFloor, haze);
 
     FragColor = vec4(finalColor, finalOpacity);
 }

@@ -175,6 +175,11 @@ public partial class ViewerApp : IDisposable
     private Vector3 _lastWorldSceneCameraPosition;
     private float _lastWorldSceneCameraYaw = 180f;
     private float _lastWorldSceneCameraPitch = -20f;
+    private string? _pendingDataSourceWorldReloadVirtualPath;
+    private string? _pendingDataSourceWorldReloadLocalPath;
+    private Vector3? _pendingDataSourceWorldReloadCameraPosition;
+    private float _pendingDataSourceWorldReloadCameraYaw = 180f;
+    private float _pendingDataSourceWorldReloadCameraPitch = -20f;
     private readonly Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap = new(StringComparer.OrdinalIgnoreCase);
 
     // Map discovery
@@ -1871,8 +1876,9 @@ void main() {
 
                 if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
                 {
-                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion);
+                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion, deferWorldReload: true);
                     AttachLooseMapOverlay(overlayPath);
+                    RestoreWorldAfterDataSourceReload();
                 }
             }
             else
@@ -3536,11 +3542,14 @@ void main() {
 
     private void DrawEditorOverlays(Matrix4x4 view, Matrix4x4 proj)
     {
-        if (!_chunkClipboardShowOverlay)
-            return;
-
         var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (renderer == null)
+            return;
+
+        bool drawChunkClipboardOverlay = _chunkClipboardShowOverlay
+            && (_selectedChunks.Count > 0 || _chunkClipboardLockedTargetKey != null || _chunkClipboardCopiedKey != null);
+        bool drawMcnkOverlay = ShouldDrawMcnkFlagOverlay(renderer);
+        if (!drawChunkClipboardOverlay && !drawMcnkOverlay)
             return;
 
         _editorOverlayBb ??= new Terrain.BoundingBoxRenderer(_gl);
@@ -3548,30 +3557,46 @@ void main() {
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(false);
-        _editorOverlayBb.BeginBatch();
 
         float overlayTime = (float)(System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
 
-        if (_selectedChunks.Count > 0)
+        if (drawMcnkOverlay)
         {
-            foreach (var (tx, ty, cx, cy) in _selectedChunks)
-            {
-                if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
-                    _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
-            }
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _editorOverlayBb.BeginSolidBatch();
+            _editorOverlayBb.BeginBatch();
+            BatchMcnkFlagOverlayGeometry(_editorOverlayBb);
+            _editorOverlayBb.FlushSolidBatch(view, proj);
+            _gl.Disable(EnableCap.Blend);
         }
 
-        if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
-            _editorOverlayBb.BatchHighlightedBoxMinMax(
-                lockedInfo.BoundsMin,
-                lockedInfo.BoundsMax,
-                overlayTime,
-                new Vector3(1f, 1f, 1f),
-                new Vector3(1f, 0.8f, 0.1f),
-                new Vector3(0.1f, 0.9f, 1f));
+        if (drawChunkClipboardOverlay)
+        {
+            if (!drawMcnkOverlay)
+                _editorOverlayBb.BeginBatch();
 
-        if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
-            _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+            if (_selectedChunks.Count > 0)
+            {
+                foreach (var (tx, ty, cx, cy) in _selectedChunks)
+                {
+                    if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
+                        _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
+                }
+            }
+
+            if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
+                _editorOverlayBb.BatchHighlightedBoxMinMax(
+                    lockedInfo.BoundsMin,
+                    lockedInfo.BoundsMax,
+                    overlayTime,
+                    new Vector3(1f, 1f, 1f),
+                    new Vector3(1f, 0.8f, 0.1f),
+                    new Vector3(0.1f, 0.9f, 1f));
+
+            if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
+                _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+        }
 
         _editorOverlayBb.FlushBatch(view, proj);
 
@@ -6209,12 +6234,14 @@ void main() {
         WarmDiscoveredWdlPreviews();
     }
 
-    private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null)
+    private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null, bool deferWorldReload = false)
     {
         try
         {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
+            StageCurrentWorldForDataSourceReload();
+            ClearActiveSceneForDataSourceReload();
             _lastGameFolderPath = Path.GetFullPath(gamePath);
             _standaloneSkinPathCache.Clear();
             _loggedStandaloneMissingSkinPaths.Clear();
@@ -6275,6 +6302,9 @@ void main() {
             RefreshDiscoveredMaps();
 
             RefreshFileList();
+
+            if (!deferWorldReload)
+                RestoreWorldAfterDataSourceReload();
         }
         catch (Exception ex)
         {
@@ -6465,6 +6495,77 @@ void main() {
 
         string wdtPath = Path.Combine(mapDirectory, mapName + ".wdt");
         return File.Exists(wdtPath) ? wdtPath : null;
+    }
+
+    private void StageCurrentWorldForDataSourceReload()
+    {
+        _pendingDataSourceWorldReloadVirtualPath = null;
+        _pendingDataSourceWorldReloadLocalPath = null;
+        _pendingDataSourceWorldReloadCameraPosition = null;
+
+        if (_worldScene == null || _terrainManager == null)
+            return;
+
+        string? virtualWdtPath = !string.IsNullOrWhiteSpace(_lastVirtualPath)
+            && string.Equals(Path.GetExtension(_lastVirtualPath), ".wdt", StringComparison.OrdinalIgnoreCase)
+            ? _lastVirtualPath
+            : null;
+        string? localWdtPath = TryGetLoadedLocalWdtPath();
+
+        if (string.IsNullOrWhiteSpace(virtualWdtPath) && string.IsNullOrWhiteSpace(localWdtPath))
+            return;
+
+        _pendingDataSourceWorldReloadVirtualPath = virtualWdtPath;
+        _pendingDataSourceWorldReloadLocalPath = localWdtPath;
+        _pendingDataSourceWorldReloadCameraPosition = _camera.Position;
+        _pendingDataSourceWorldReloadCameraYaw = _camera.Yaw;
+        _pendingDataSourceWorldReloadCameraPitch = _camera.Pitch;
+    }
+
+    private void ClearActiveSceneForDataSourceReload()
+    {
+        InvalidatePm4DerivedReports();
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _renderer = null;
+        _loadedWmo = null;
+        _loadedMdx = null;
+        _loadedM2Runtime = null;
+    }
+
+    private void RestoreWorldAfterDataSourceReload()
+    {
+        string? virtualPath = _pendingDataSourceWorldReloadVirtualPath;
+        string? localPath = _pendingDataSourceWorldReloadLocalPath;
+        Vector3? cameraPosition = _pendingDataSourceWorldReloadCameraPosition;
+        float cameraYaw = _pendingDataSourceWorldReloadCameraYaw;
+        float cameraPitch = _pendingDataSourceWorldReloadCameraPitch;
+
+        _pendingDataSourceWorldReloadVirtualPath = null;
+        _pendingDataSourceWorldReloadLocalPath = null;
+        _pendingDataSourceWorldReloadCameraPosition = null;
+
+        if (cameraPosition == null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(virtualPath) && _dataSource != null)
+            LoadFileFromDataSource(virtualPath);
+
+        if (_worldScene == null && !string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
+            LoadWdtTerrain(localPath);
+
+        if (_worldScene == null)
+            return;
+
+        _camera.Position = cameraPosition.Value;
+        _camera.Yaw = cameraYaw;
+        _camera.Pitch = cameraPitch;
+        _statusMessage = $"Reloaded world for client: {_terrainManager?.MapName ?? Path.GetFileNameWithoutExtension(virtualPath ?? localPath ?? string.Empty)}";
     }
 
     private string? TryGetLoadedLocalWdtPath()
@@ -8198,8 +8299,6 @@ void main() {
             {
                 resolvedVirtualPath = ResolveStandaloneCanonicalModelPath(virtualPath);
                 data = ReadStandaloneFileData(resolvedVirtualPath);
-                    _lastWorldSceneWdtPath = TryGetLoadedLocalWdtPath();
-                    ApplySavedTaxiActorModelOverridesForCurrentMap();
                 if ((data == null || data.Length == 0) && !resolvedVirtualPath.Equals(virtualPath, StringComparison.OrdinalIgnoreCase))
                     data = ReadStandaloneFileData(virtualPath);
             }
@@ -8946,6 +9045,7 @@ void main() {
             ? "No save path selected."
             : _selectedPlacementSaveTargetPath!;
         ImGui.TextWrapped($"Save target: {targetLabel}");
+        ImGui.TextDisabled("Writes an ADT copy to disk. The loaded source files are not overwritten in place.");
 
         if (ImGui.Button("Choose Save Path"))
             ChooseSelectedPlacementSavePath();
@@ -9234,7 +9334,7 @@ void main() {
                 _selectedPlacementDirty = false;
             }
 
-            _selectedPlacementSaveStatus = $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s).";
+            _selectedPlacementSaveStatus = BuildPlacementSaveCompletionStatus(groups, savedEditCount, savedSourceCount);
         }
         catch (Exception ex)
         {
@@ -9244,6 +9344,34 @@ void main() {
 
         SyncSelectedPlacementEditState();
         RefreshSelectedWorldObjectInfo();
+    }
+
+    private string BuildPlacementSaveCompletionStatus(
+        IReadOnlyList<(string SourcePath, List<StagedPlacementEdit> Edits)> groups,
+        int savedEditCount,
+        int savedSourceCount)
+    {
+        List<string> outputPaths = groups
+            .Select(group => _placementSaveTargetsBySourcePath[group.SourcePath])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (outputPaths.Count == 1)
+        {
+            return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s) to {outputPaths[0]}. Source ADTs were left untouched.";
+        }
+
+        if (outputPaths.All(IsProjectManagedOutputPath) && !string.IsNullOrWhiteSpace(_editorProjectOutputDir))
+        {
+            string projectOutputDir = Path.Combine(_editorProjectOutputDir, "lk-split");
+            return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s) into {projectOutputDir}. Source ADTs were left untouched.";
+        }
+
+        string previewPaths = string.Join("; ", outputPaths.Take(2));
+        if (outputPaths.Count > 2)
+            previewPaths += $"; +{outputPaths.Count - 2} more";
+
+        return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s). Output ADT copies: {previewPaths}. Source ADTs were left untouched.";
     }
 
     private List<(string SourcePath, List<StagedPlacementEdit> Edits)> BuildPendingPlacementSaveGroups(string? sourcePathFilter)

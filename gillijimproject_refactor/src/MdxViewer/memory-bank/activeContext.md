@@ -1,5 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 07, 2026 - ADT investigation now has a real MCNK-flag overlay surface, including impassable weak-corner markers
+
+- followed the request to make MCNK chunk flags such as `Impassable` visible on the terrain itself instead of only as implicit file metadata
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp_Investigation.cs` now shows raw `MCNK` flag hex and named labels in both the ADT investigation panel and the hovered chunk tooltip
+   - the same investigation UI now exposes `Show MCNK Flag Overlay`, per-flag chunk filters, and a diagonal weak-corner toggle for impassable-only corner cases
+   - `ViewerApp.cs` now reuses the existing editor `BoundingBoxRenderer` path to draw chunk-top fills and outlines for loaded chunks whose raw flags match the selected filter mask
+   - diagonal-only impassable `2x2` chunk configurations now emit a visible world-space marker at the exposed shared corner
+   - `Terrain/VlmTerrainManager.cs` now exposes loaded tile coordinates so the same overlay logic can enumerate VLM-loaded terrain too
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 07, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no automated tests were added or run
+   - the next honest check is a live retest on the development map to tune overlay opacity, confirm tooltip readability, and verify the weak-corner markers line up with the actual chunk topology
+
 ## Apr 06, 2026 - Taxi teaser workflow now exists: ride camera plus direct ffmpeg video capture
 
 - followed the request to let the user jump into the animated taxi actor and record teaser footage directly from the viewer
