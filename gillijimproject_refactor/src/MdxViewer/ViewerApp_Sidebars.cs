@@ -14,6 +14,30 @@ namespace MdxViewer;
 /// </summary>
 public partial class ViewerApp
 {
+    private static int CountEnabled(params bool[] values)
+    {
+        int count = 0;
+        foreach (bool value in values)
+        {
+            if (value)
+                count++;
+        }
+
+        return count;
+    }
+
+    private static float MeasureToolbarCheckboxWidth(string label)
+    {
+        var style = ImGui.GetStyle();
+        return ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize(label).X;
+    }
+
+    private static float MeasureToolbarSeparatorWidth()
+    {
+        var style = ImGui.GetStyle();
+        return ImGui.CalcTextSize("|").X + style.ItemSpacing.X * 2f;
+    }
+
     private bool HasLoadedContent()
     {
         return _terrainManager != null
@@ -22,6 +46,194 @@ public partial class ViewerApp
             || _loadedWmo != null
             || _loadedMdx != null
             || !string.IsNullOrWhiteSpace(_loadedFilePath);
+    }
+
+    private void DrawToolbarPopupButton(string label, string summary, string popupId, Action drawContent)
+    {
+        string buttonLabel = string.IsNullOrWhiteSpace(summary)
+            ? label
+            : $"{label} {summary}";
+
+        if (ImGui.Button(buttonLabel))
+            ImGui.OpenPopup(popupId);
+
+        if (ImGui.BeginPopup(popupId))
+        {
+            drawContent();
+            ImGui.EndPopup();
+        }
+    }
+
+    private float GetDirectTerrainToolbarWidth(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
+    {
+        float width = 0f;
+        width += MeasureToolbarCheckboxWidth("Base");
+        width += MeasureToolbarCheckboxWidth("L1");
+        width += MeasureToolbarCheckboxWidth("L2");
+        width += MeasureToolbarCheckboxWidth("L3");
+        width += MeasureToolbarCheckboxWidth("Holes");
+        width += MeasureToolbarSeparatorWidth();
+        width += MeasureToolbarCheckboxWidth("Chunks");
+        width += MeasureToolbarCheckboxWidth("Tiles");
+        width += MeasureToolbarSeparatorWidth();
+        width += MeasureToolbarCheckboxWidth("Alpha");
+        width += MeasureToolbarCheckboxWidth("Shadows");
+        width += MeasureToolbarCheckboxWidth("MCCV");
+        width += MeasureToolbarCheckboxWidth("Contours");
+
+        if (liquidRenderer != null || _worldScene != null)
+        {
+            width += MeasureToolbarSeparatorWidth();
+            if (liquidRenderer != null)
+                width += MeasureToolbarCheckboxWidth("Liquid");
+            if (_worldScene != null)
+            {
+                width += MeasureToolbarCheckboxWidth("WL*");
+                width += MeasureToolbarCheckboxWidth("WDL");
+                width += MeasureToolbarCheckboxWidth("BBs");
+                width += MeasureToolbarCheckboxWidth("PM4");
+            }
+        }
+
+        return width;
+    }
+
+    private void DrawDirectTerrainToolbarControls(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
+    {
+        bool l0 = renderer.ShowLayer0;
+        if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
+        ImGui.SameLine();
+        bool l1 = renderer.ShowLayer1;
+        if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
+        ImGui.SameLine();
+        bool l2 = renderer.ShowLayer2;
+        if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
+        ImGui.SameLine();
+        bool l3 = renderer.ShowLayer3;
+        if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
+
+        ImGui.SameLine();
+        bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
+            ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
+            ?? false);
+        if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
+        {
+            if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
+            {
+                _statusMessage = terrainHolesEnabled
+                    ? "Terrain hole masking enabled."
+                    : "Terrain hole masking disabled.";
+            }
+        }
+
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+        ImGui.SameLine();
+
+        bool chunkGrid = renderer.ShowChunkGrid;
+        if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
+        ImGui.SameLine();
+        bool tileGrid = renderer.ShowTileGrid;
+        if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
+
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+        ImGui.SameLine();
+
+        bool alphaMask = renderer.ShowAlphaMask;
+        if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
+        ImGui.SameLine();
+        bool shadowMap = renderer.ShowShadowMap;
+        if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
+        ImGui.SameLine();
+        bool useMccv = renderer.UseMccv;
+        if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
+        ImGui.SameLine();
+        bool contours = renderer.ShowContours;
+        if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
+
+        if (liquidRenderer != null || _worldScene != null)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
+            ImGui.SameLine();
+        }
+
+        if (liquidRenderer != null)
+        {
+            bool showLiquid = liquidRenderer.ShowLiquid;
+            if (ImGui.Checkbox("Liquid", ref showLiquid))
+                liquidRenderer.ShowLiquid = showLiquid;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"Liquid terrain meshes: {liquidRenderer.MeshCount}");
+        }
+
+        if (_worldScene != null)
+        {
+            if (liquidRenderer != null)
+                ImGui.SameLine();
+
+            int wlCount = liquidRenderer?.WlMeshCount ?? 0;
+            bool showWlTop = _worldScene.ShowWlLiquids;
+            if (ImGui.Checkbox("WL*", ref showWlTop))
+                _worldScene.ShowWlLiquids = showWlTop;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"World liquid overlays: {wlCount}");
+
+            ImGui.SameLine();
+            bool showWdl = _worldScene.ShowWdlTerrain;
+            if (ImGui.Checkbox("WDL", ref showWdl))
+                _worldScene.ShowWdlTerrain = showWdl;
+
+            ImGui.SameLine();
+            bool showBB = _worldScene.ShowBoundingBoxes;
+            if (ImGui.Checkbox("BBs", ref showBB))
+                _worldScene.ShowBoundingBoxes = showBB;
+
+            ImGui.SameLine();
+            bool showPm4 = _worldScene.ShowPm4Overlay;
+            if (ImGui.Checkbox("PM4", ref showPm4))
+                _worldScene.ShowPm4Overlay = showPm4;
+            if (_worldScene.IsPm4Loading)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
+            }
+            else if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(_worldScene.Pm4Status);
+            }
+        }
+    }
+
+    private void DrawCenteredTerrainToolbarWindow(TerrainRenderer renderer, LiquidRenderer? liquidRenderer)
+    {
+        float laneX = 0f;
+        float laneWidth = ImGui.GetIO().DisplaySize.X;
+        if (TryGetSceneViewportRect(out float viewportX, out _, out float viewportWidth, out _))
+        {
+            laneX = viewportX;
+            laneWidth = viewportWidth;
+        }
+
+        if (laneWidth <= 10f)
+            return;
+
+        ImGui.SetNextWindowPos(new Vector2(laneX, MenuBarHeight));
+        ImGui.SetNextWindowSize(new Vector2(laneWidth, ToolbarHeight));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(8, 6));
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(6, 0));
+        if (ImGui.Begin("##CenteredTerrainToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBackground))
+        {
+            float contentWidth = GetDirectTerrainToolbarWidth(renderer, liquidRenderer);
+            float startX = MathF.Max(8f, (laneWidth - contentWidth) * 0.5f);
+            ImGui.SetCursorPosX(startX);
+            DrawDirectTerrainToolbarControls(renderer, liquidRenderer);
+        }
+        ImGui.End();
+        ImGui.PopStyleVar(2);
     }
 
     private void DrawToolbar()
@@ -35,117 +247,13 @@ public partial class ViewerApp
             ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings))
         {
             DrawWorkspaceToolbarControls();
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-            ImGui.SameLine();
 
             TerrainRenderer? renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             LiquidRenderer? liquidRenderer = _terrainManager?.LiquidRenderer ?? _vlmTerrainManager?.LiquidRenderer;
 
             if (renderer != null)
             {
-                bool l0 = renderer.ShowLayer0;
-                if (ImGui.Checkbox("Base", ref l0)) renderer.ShowLayer0 = l0;
-                ImGui.SameLine();
-                bool l1 = renderer.ShowLayer1;
-                if (ImGui.Checkbox("L1", ref l1)) renderer.ShowLayer1 = l1;
-                ImGui.SameLine();
-                bool l2 = renderer.ShowLayer2;
-                if (ImGui.Checkbox("L2", ref l2)) renderer.ShowLayer2 = l2;
-                ImGui.SameLine();
-                bool l3 = renderer.ShowLayer3;
-                if (ImGui.Checkbox("L3", ref l3)) renderer.ShowLayer3 = l3;
-
-                ImGui.SameLine();
-                bool terrainHolesEnabled = !(_terrainManager?.IgnoreTerrainHolesGlobally
-                    ?? _vlmTerrainManager?.IgnoreTerrainHolesGlobally
-                    ?? false);
-                if (ImGui.Checkbox("Holes", ref terrainHolesEnabled))
-                {
-                    if (SetIgnoreTerrainHolesGlobally(!terrainHolesEnabled))
-                    {
-                        _statusMessage = terrainHolesEnabled
-                            ? "Terrain hole masking enabled."
-                            : "Terrain hole masking disabled.";
-                    }
-                }
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Toggle terrain hole masking on or off.");
-
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                ImGui.SameLine();
-
-                bool chunkGrid = renderer.ShowChunkGrid;
-                if (ImGui.Checkbox("Chunks", ref chunkGrid)) renderer.ShowChunkGrid = chunkGrid;
-                ImGui.SameLine();
-                bool tileGrid = renderer.ShowTileGrid;
-                if (ImGui.Checkbox("Tiles", ref tileGrid)) renderer.ShowTileGrid = tileGrid;
-
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                ImGui.SameLine();
-
-                bool alphaMask = renderer.ShowAlphaMask;
-                if (ImGui.Checkbox("Alpha", ref alphaMask)) renderer.ShowAlphaMask = alphaMask;
-                ImGui.SameLine();
-                bool shadowMap = renderer.ShowShadowMap;
-                if (ImGui.Checkbox("Shadows", ref shadowMap)) renderer.ShowShadowMap = shadowMap;
-                ImGui.SameLine();
-                bool useMccv = renderer.UseMccv;
-                if (ImGui.Checkbox("MCCV", ref useMccv)) renderer.UseMccv = useMccv;
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Toggle MCCV terrain vertex-color tinting.");
-                ImGui.SameLine();
-                bool contours = renderer.ShowContours;
-                if (ImGui.Checkbox("Contours", ref contours)) renderer.ShowContours = contours;
-
-                if (liquidRenderer != null)
-                {
-                    ImGui.SameLine();
-                    bool showLiquid = liquidRenderer.ShowLiquid;
-                    if (ImGui.Checkbox($"Liquid Terrain ({liquidRenderer.MeshCount})", ref showLiquid))
-                        liquidRenderer.ShowLiquid = showLiquid;
-                }
-
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    int wlCount = liquidRenderer?.WlMeshCount ?? 0;
-                    bool showWlTop = _worldScene.ShowWlLiquids;
-                    if (ImGui.Checkbox($"WL* ({wlCount})", ref showWlTop))
-                        _worldScene.ShowWlLiquids = showWlTop;
-                }
-
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    bool showWdl = _worldScene.ShowWdlTerrain;
-                    if (ImGui.Checkbox("WDL", ref showWdl))
-                        _worldScene.ShowWdlTerrain = showWdl;
-                }
-
-                if (_worldScene != null)
-                {
-                    ImGui.SameLine();
-                    ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-                    ImGui.SameLine();
-                    bool showBB = _worldScene.ShowBoundingBoxes;
-                    if (ImGui.Checkbox("BBs", ref showBB))
-                        _worldScene.ShowBoundingBoxes = showBB;
-
-                    ImGui.SameLine();
-                    bool showPm4 = _worldScene.ShowPm4Overlay;
-                    if (ImGui.Checkbox("PM4", ref showPm4))
-                        _worldScene.ShowPm4Overlay = showPm4;
-                    if (_worldScene.IsPm4Loading)
-                    {
-                        ImGui.SameLine();
-                        ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), "loading");
-                    }
-                    if (_worldScene.ShowPm4Overlay && ImGui.IsItemHovered())
-                        ImGui.SetTooltip(_worldScene.Pm4Status);
-                }
+                DrawCenteredTerrainToolbarWindow(renderer, liquidRenderer);
             }
             else
             {
@@ -336,7 +444,15 @@ public partial class ViewerApp
         ImGui.SetNextWindowSize(new Vector2(_leftSidebarWidth, sidebarHeight), ImGuiCond.Always);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##LeftSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            DrawFixedSidebarWidthControl(
+                "Navigator Width",
+                ref _leftSidebarWidth,
+                isLeftSidebar: true,
+                io.DisplaySize.X,
+                "Resize the fixed navigator without relying on the edge splitter.");
             DrawNavigatorPanelContent();
+        }
         ImGui.End();
         ImGui.PopStyleVar();
     }
@@ -408,21 +524,19 @@ public partial class ViewerApp
                     ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
             }
 
-            float mapSize = MathF.Max(180f, MathF.Min(ImGui.GetContentRegionAvail().X, 280f));
+            float mapSize = ComputeMinimapSquareSize(ImGui.GetContentRegionAvail().X, 280f, 180f);
             var cursorPos = ImGui.GetCursorScreenPos();
-            if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
-            {
-                float wheel = ImGui.GetIO().MouseWheel;
-                if (wheel != 0)
-                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
-            }
-
-            MinimapHelpers.RenderMinimapContent(
-                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
-                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
-                out float viewMinTx, out float viewMinTy, out float cellSize);
-
-            HandleMinimapInteraction("##sidebarMinimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+            DrawInteractiveMinimapSurface(
+                "##sidebarMinimapInteraction",
+                cursorPos,
+                mapSize,
+                existingTiles,
+                isTileLoaded,
+                mapName,
+                MinimapTeleportMode.Armed,
+                out _,
+                out _,
+                out _);
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 4f);
         }
 
@@ -667,19 +781,12 @@ public partial class ViewerApp
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(6, 6));
         if (ImGui.Begin("##RightSidebar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
         {
-            GetFixedSidebarWidthRange(isLeftSidebar: false, io.DisplaySize.X, out float minInspectorWidth, out float maxInspectorWidth);
-            if (maxInspectorWidth > minInspectorWidth)
-            {
-                float inspectorWidth = _rightSidebarWidth;
-                ImGui.SetNextItemWidth(-1f);
-                if (ImGui.SliderFloat("Inspector Width", ref inspectorWidth, minInspectorWidth, maxInspectorWidth, "%.0f px"))
-                    _rightSidebarWidth = ClampFixedSidebarWidth(inspectorWidth, isLeftSidebar: false, io.DisplaySize.X);
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Resize the fixed inspector without relying on the edge splitter.");
-
-                ImGui.Separator();
-            }
+            DrawFixedSidebarWidthControl(
+                "Inspector Width",
+                ref _rightSidebarWidth,
+                isLeftSidebar: false,
+                io.DisplaySize.X,
+                "Resize the fixed inspector without relying on the edge splitter.");
 
             DrawUnifiedToolSidebar();
         }
@@ -829,6 +936,26 @@ public partial class ViewerApp
             if (_pendingFocusedShellPanel == panel.Id)
                 _pendingFocusedShellPanel = null;
         }
+    }
+
+    private void DrawFixedSidebarWidthControl(string label, ref float width, bool isLeftSidebar, float displayWidth, string tooltip)
+    {
+        GetFixedSidebarWidthRange(isLeftSidebar, displayWidth, out float minWidth, out float maxWidth);
+        if (maxWidth <= minWidth)
+            return;
+
+        float updatedWidth = width;
+        ImGui.SetNextItemWidth(-1f);
+        if (ImGui.SliderFloat(label, ref updatedWidth, minWidth, maxWidth, "%.0f px"))
+            width = ClampFixedSidebarWidth(updatedWidth, isLeftSidebar, displayWidth);
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
+
+        if (ImGui.IsItemDeactivatedAfterEdit())
+            SaveViewerSettings();
+
+        ImGui.Separator();
     }
 
     private void DrawShellPanelContent(ShellPanelId panelId)
@@ -1305,6 +1432,80 @@ public partial class ViewerApp
         if (!hasTaxiSelection)
             ImGui.EndDisabled();
 
+        bool hasSelectedTaxiRoute = _worldScene.SelectedTaxiRouteId >= 0;
+        bool rideCameraAttachedToSelection = _taxiRideCameraEnabled
+            && hasSelectedTaxiRoute
+            && _taxiRideCameraRouteId == _worldScene.SelectedTaxiRouteId;
+        bool rideCameraActive = _taxiRideCameraEnabled && _taxiRideCameraRouteId >= 0;
+
+        bool canToggleRideCamera = hasSelectedTaxiRoute || _taxiRideCameraEnabled;
+        if (!canToggleRideCamera)
+            ImGui.BeginDisabled();
+        if (ImGui.Button(rideCameraActive ? "Detach Ride Camera" : "Ride Selected Route"))
+        {
+            if (rideCameraActive)
+                StopTaxiRideCamera("Ride camera detached.");
+            else
+                TryAttachTaxiRideCameraToSelectedRoute();
+        }
+        if (!canToggleRideCamera)
+            ImGui.EndDisabled();
+
+        if (_taxiRideCameraEnabled)
+            ImGui.TextDisabled($"Ride Camera: {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}");
+
+        int taxiRideCameraMode = (int)_taxiRideCameraMode;
+        string[] taxiRideCameraLabels = { "Cockpit", "Chase" };
+        if (ImGui.Combo("Ride Camera Mode", ref taxiRideCameraMode, taxiRideCameraLabels, taxiRideCameraLabels.Length))
+            _taxiRideCameraMode = (TaxiRideCameraMode)taxiRideCameraMode;
+
+        if (_taxiRideCameraMode == TaxiRideCameraMode.Cockpit)
+        {
+            float cockpitHeight = _taxiRideCockpitHeight;
+            if (ImGui.SliderFloat("Ride Camera Height", ref cockpitHeight, 2f, 30f, "%.1f"))
+                _taxiRideCockpitHeight = cockpitHeight;
+        }
+        else
+        {
+            float chaseDistance = _taxiRideChaseDistance;
+            if (ImGui.SliderFloat("Ride Chase Distance", ref chaseDistance, 8f, 120f, "%.1f"))
+                _taxiRideChaseDistance = chaseDistance;
+
+            float chaseHeight = _taxiRideChaseHeight;
+            if (ImGui.SliderFloat("Ride Chase Height", ref chaseHeight, 2f, 40f, "%.1f"))
+                _taxiRideChaseHeight = chaseHeight;
+        }
+
+        float rideLookAhead = _taxiRideLookAhead;
+        if (ImGui.SliderFloat("Ride Look Ahead", ref rideLookAhead, 8f, 80f, "%.1f"))
+            _taxiRideLookAhead = rideLookAhead;
+
+        int videoFps = _videoCaptureFps;
+        if (ImGui.SliderInt("Ride Video FPS", ref videoFps, 12, 60))
+            _videoCaptureFps = videoFps;
+
+        bool videoIncludeUi = _videoCaptureIncludeUi;
+        if (ImGui.Checkbox("Ride Video Includes UI", ref videoIncludeUi))
+            _videoCaptureIncludeUi = videoIncludeUi;
+
+        if (_activeVideoRecording == null)
+        {
+            if (!hasSelectedTaxiRoute)
+                ImGui.BeginDisabled();
+            if (ImGui.Button("Record Selected Route Video"))
+                TryStartTaxiRideVideoCapture();
+            if (!hasSelectedTaxiRoute)
+                ImGui.EndDisabled();
+        }
+        else
+        {
+            if (ImGui.Button("Stop Route Video"))
+                StopVideoRecording();
+
+            ImGui.SameLine();
+            ImGui.TextDisabled(Path.GetFileName(_activeVideoRecording.OutputPath));
+        }
+
         bool showTaxiActors = _worldScene.ShowTaxiActors;
         if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
             _worldScene.ShowTaxiActors = showTaxiActors;
@@ -1318,43 +1519,112 @@ public partial class ViewerApp
             _worldScene.TaxiActorScaleMultiplier = scaleMultiplier;
 
         ImGui.Separator();
+        string[] taxiGroupingLabels = { "None", "From Node", "To Node" };
         ImGui.Text($"Routes ({_worldScene.TaxiLoader.Routes.Count})");
-        if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
+        ImGui.SetNextItemWidth(140f);
+        ImGui.Combo("Group By", ref _taxiRouteListGroupingMode, taxiGroupingLabels, taxiGroupingLabels.Length);
+
+        string taxiRouteFilter = _taxiRouteFilter;
+        if (ImGui.InputText("Search Routes", ref taxiRouteFilter, 256))
+            _taxiRouteFilter = taxiRouteFilter;
+
+        var routeEntries = new List<(TaxiPathLoader.TaxiRoute Route, string FromName, string ToName, string Label, string GroupKey)>();
+        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiLoader.Routes)
         {
-            float rowHeight = GetUniformListRowHeight();
-            int routeCount = _worldScene.TaxiLoader.Routes.Count;
-            GetVisibleListRange(routeCount, rowHeight, out int startIndex, out int endIndex);
-            if (startIndex > 0)
-                ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-            for (int i = startIndex; i < endIndex; i++)
+            string fromName = _worldScene.GetTaxiNode(route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
+            string toName = _worldScene.GetTaxiNode(route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
+            string label = $"{GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
+            string searchText = $"{route.PathId} {fromName} {toName} {label}";
+            if (!string.IsNullOrWhiteSpace(_taxiRouteFilter)
+                && !searchText.Contains(_taxiRouteFilter, StringComparison.OrdinalIgnoreCase))
             {
-                TaxiPathLoader.TaxiRoute route = _worldScene.TaxiLoader.Routes[i];
-                bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
-                string label = $"{GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
-                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
-                {
-                    SelectTaxiRoute(route.PathId, toggle: true);
-                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                        FocusSelectedTaxi();
-                }
-
-                if (ImGui.IsItemHovered())
-                {
-                    TaxiPathLoader.TaxiNode? fromNode = _worldScene.GetTaxiNode(route.FromNodeId);
-                    TaxiPathLoader.TaxiNode? toNode = _worldScene.GetTaxiNode(route.ToNodeId);
-                    ImGui.BeginTooltip();
-                    ImGui.Text($"Cost: {route.Cost}");
-                    ImGui.Text($"From: {fromNode?.Name ?? $"#{route.FromNodeId}"}");
-                    ImGui.Text($"To: {toNode?.Name ?? $"#{route.ToNodeId}"}");
-                    ImGui.Text($"Waypoints: {route.Waypoints.Count}");
-                    ImGui.Text("Single-click selects the route. Double-click focuses the camera.");
-                    ImGui.EndTooltip();
-                }
+                continue;
             }
 
-            if (endIndex < routeCount)
-                ImGui.Dummy(new Vector2(0, (routeCount - endIndex) * rowHeight));
+            string groupKey = _taxiRouteListGroupingMode switch
+            {
+                1 => fromName,
+                2 => toName,
+                _ => string.Empty,
+            };
+
+            routeEntries.Add((route, fromName, toName, label, groupKey));
+        }
+
+        routeEntries.Sort((left, right) =>
+        {
+            if (_taxiRouteListGroupingMode != 0)
+            {
+                int groupCompare = StringComparer.OrdinalIgnoreCase.Compare(left.GroupKey, right.GroupKey);
+                if (groupCompare != 0)
+                    return groupCompare;
+            }
+
+            int primaryCompare = _taxiRouteListGroupingMode switch
+            {
+                1 => StringComparer.OrdinalIgnoreCase.Compare(left.ToName, right.ToName),
+                2 => StringComparer.OrdinalIgnoreCase.Compare(left.FromName, right.FromName),
+                _ => 0,
+            };
+            if (primaryCompare != 0)
+                return primaryCompare;
+
+            return left.Route.PathId.CompareTo(right.Route.PathId);
+        });
+
+        if (routeEntries.Count != _worldScene.TaxiLoader.Routes.Count)
+            ImGui.TextDisabled($"Showing {routeEntries.Count} of {_worldScene.TaxiLoader.Routes.Count} routes");
+
+        if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
+        {
+            if (routeEntries.Count == 0)
+            {
+                ImGui.TextDisabled(string.IsNullOrWhiteSpace(_taxiRouteFilter)
+                    ? "No taxi routes are available."
+                    : "No taxi routes match the current search.");
+            }
+            else
+            {
+                Dictionary<string, int>? groupCounts = null;
+                string currentGroupKey = string.Empty;
+                if (_taxiRouteListGroupingMode != 0)
+                {
+                    groupCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var entry in routeEntries)
+                        groupCounts[entry.GroupKey] = groupCounts.TryGetValue(entry.GroupKey, out int count) ? count + 1 : 1;
+                }
+
+                for (int i = 0; i < routeEntries.Count; i++)
+                {
+                    var entry = routeEntries[i];
+                    if (_taxiRouteListGroupingMode != 0 && !string.Equals(currentGroupKey, entry.GroupKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentGroupKey = entry.GroupKey;
+                        if (i > 0)
+                            ImGui.Separator();
+                        ImGui.TextDisabled($"{currentGroupKey} ({groupCounts![currentGroupKey]})");
+                    }
+
+                    bool isSelected = _worldScene.SelectedTaxiRouteId == entry.Route.PathId;
+                    if (ImGui.Selectable(entry.Label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                    {
+                        SelectTaxiRoute(entry.Route.PathId, toggle: true);
+                        if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            FocusSelectedTaxi();
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Cost: {entry.Route.Cost}");
+                        ImGui.Text($"From: {entry.FromName}");
+                        ImGui.Text($"To: {entry.ToName}");
+                        ImGui.Text($"Waypoints: {entry.Route.Waypoints.Count}");
+                        ImGui.Text("Single-click selects the route. Double-click focuses the camera.");
+                        ImGui.EndTooltip();
+                    }
+                }
+            }
 
             ImGui.EndChild();
         }
@@ -1625,7 +1895,15 @@ public partial class ViewerApp
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Toggle low-detail WDL background terrain for testing terrain overlap issues.");
 
+            bool layoutObjectPreviewMode = _layoutObjectPreviewMode;
+            if (ImGui.Checkbox("Pretextured Layout Mode", ref layoutObjectPreviewMode))
+                SetLayoutObjectPreviewMode(layoutObjectPreviewMode);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Keep large textured WMOs visible, suppress doodads, and force Performance object detail for fast zone layout passes.");
+
             bool showObjects = _worldScene.ObjectsVisible;
+            if (_layoutObjectPreviewMode)
+                ImGui.BeginDisabled();
             if (ImGui.Checkbox("Show Scene Objects", ref showObjects))
                 _worldScene.ObjectsVisible = showObjects;
 
@@ -1641,8 +1919,14 @@ public partial class ViewerApp
             if (ImGui.Combo("Object Detail", ref visibilityProfileIndex, WorldObjectVisibilityProfileLabels, WorldObjectVisibilityProfileLabels.Length))
                 _worldScene.ObjectVisibilityProfile = (WorldObjectVisibilityProfile)visibilityProfileIndex;
 
+            if (_layoutObjectPreviewMode)
+                ImGui.EndDisabled();
+
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Quality keeps more far objects alive. Performance culls tiny projected objects and skips low-value off-view loads.");
+
+            if (_layoutObjectPreviewMode)
+                ImGui.TextDisabled("Layout mode keeps WMOs only and turns off doodads until you disable the preset.");
         }
 
         if (renderer.ShowContours)

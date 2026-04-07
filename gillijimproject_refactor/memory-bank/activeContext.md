@@ -2,6 +2,24 @@
 
 # Active Context
 
+## Apr 06, 2026 - Taxi routes can now drive a ride camera, and the viewer can stream direct mp4/mov capture through ffmpeg
+
+- followed the request to turn the animated taxi actor into a teaser-making workflow instead of just a debugging overlay
+- active `src/MdxViewer` behavior after this slice:
+	- `Terrain/WorldScene.cs` now exposes live taxi actor pose data for the currently animated route actor, using the same per-frame sampled path position and forward vector already used for actor rendering
+	- `ViewerApp_CaptureAutomation.cs` now adds a taxi ride camera with two modes:
+		- `Cockpit`, which places the camera on the animated actor
+		- `Chase`, which follows behind the actor with configurable distance, height, and look-ahead
+	- the same capture partial now supports direct video capture to `.mp4` or `.mov` by streaming raw framebuffer frames into `ffmpeg` instead of only saving PNG stills
+	- `ViewerApp_Sidebars.cs` now adds taxi-sidebar controls for ride-camera attach or detach, ride-camera mode and offsets, and one-click route video capture from the selected taxi route
+	- `ViewerApp.cs` now updates the ride camera in the normal update loop, disables free-fly movement while attached, records video frames from the same no-UI or with-UI capture seam as still screenshots, and persists video-capture settings in viewer settings
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+	- this is compile validation only
+	- no automated tests were added or run
+	- no live taxi-route runtime retest has been captured yet for ride-camera feel, ffmpeg encode success inside a real viewer session, or output quality on an actual teaser-length capture
+
 ## Apr 06, 2026 - Detailed ADT residency now follows fog distance, and WDL far terrain can sample minimap tiles instead of flat height tint only
 
 - followed the new viewer direction to stop keeping one fixed detailed ADT footprint regardless of visibility conditions and to make the WDL fallback less obviously fake at distance

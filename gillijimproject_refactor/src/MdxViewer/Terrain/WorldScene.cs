@@ -493,6 +493,14 @@ internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
 /// Uses <see cref="WorldAssetManager"/> to ensure each model is loaded exactly once.
 /// Instances are lightweight structs holding only a model key + transform.
 /// </summary>
+public readonly record struct TaxiActorPose(
+    int RouteId,
+    Vector3 Position,
+    Vector3 Forward,
+    float YawRadians,
+    float Scale,
+    string ModelPath);
+
 public class WorldScene : ISceneRenderer
 {
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
@@ -2471,6 +2479,7 @@ public class WorldScene : ISceneRenderer
     private int _selectedTaxiRouteId = -1;
     private readonly Dictionary<int, string> _taxiActorModelOverrideByPath = new();
     private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
+    private readonly Dictionary<int, TaxiActorPose> _taxiActorPoseByPath = new();
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
     private bool _showTaxiActors = true;
@@ -2553,6 +2562,20 @@ public class WorldScene : ISceneRenderer
         return string.IsNullOrWhiteSpace(mountNode?.MountModelPath)
             ? null
             : mountNode.MountModelPath.Replace('/', '\\');
+    }
+
+    public bool TryGetTaxiActorPose(int pathId, out TaxiActorPose pose)
+        => _taxiActorPoseByPath.TryGetValue(pathId, out pose);
+
+    public bool TryGetSelectedTaxiActorPose(out TaxiActorPose pose)
+    {
+        if (_selectedTaxiRouteId < 0)
+        {
+            pose = default;
+            return false;
+        }
+
+        return _taxiActorPoseByPath.TryGetValue(_selectedTaxiRouteId, out pose);
     }
 
     public bool TryGetTaxiRouteSelectionPoint(int pathId, out Vector3 point)
@@ -5403,6 +5426,7 @@ public class WorldScene : ISceneRenderer
         var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
         _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
         _taxiActorTravelByPath.Clear();
+        _taxiActorPoseByPath.Clear();
         _taxiActorClockInitialized = false;
     }
 
@@ -5413,6 +5437,7 @@ public class WorldScene : ISceneRenderer
         bool hasTaxiSelection = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0;
         if (!_showTaxi || !_showTaxiActors || _taxiLoader == null || !hasTaxiSelection)
         {
+            _taxiActorPoseByPath.Clear();
             _taxiActorClockInitialized = false;
             return;
         }
@@ -5463,12 +5488,24 @@ public class WorldScene : ISceneRenderer
             SampleRoute(route.Waypoints, travel, out Vector3 actorPosition, out Vector3 actorDirection);
             actorPosition.Z += TaxiActorHoverOffset;
 
-            float yawRadians = actorDirection.LengthSquared() > 0.0001f
-                ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
+            Vector3 actorForward = actorDirection.LengthSquared() > 0.0001f
+                ? Vector3.Normalize(actorDirection)
+                : Vector3.UnitY;
+
+            float yawRadians = actorForward.LengthSquared() > 0.0001f
+                ? MathF.Atan2(actorForward.X, actorForward.Y) + MathF.PI
                 : 0f;
             string modelPath = actorModelPath.Replace('/', '\\');
             string key = WorldAssetManager.NormalizeKey(modelPath);
             _assets.QueueMdxLoad(key);
+
+            _taxiActorPoseByPath[route.PathId] = new TaxiActorPose(
+                route.PathId,
+                actorPosition,
+                actorForward,
+                yawRadians,
+                scale,
+                modelPath);
 
             var transform = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationZ(yawRadians)
@@ -5512,6 +5549,9 @@ public class WorldScene : ISceneRenderer
 
         foreach (int stalePathId in _taxiActorTravelByPath.Keys.Except(activePathIds).ToList())
             _taxiActorTravelByPath.Remove(stalePathId);
+
+        foreach (int stalePathId in _taxiActorPoseByPath.Keys.Except(activePathIds).ToList())
+            _taxiActorPoseByPath.Remove(stalePathId);
     }
 
     private TaxiPathLoader.TaxiNode? ResolveTaxiActorNode(TaxiPathLoader.TaxiRoute route)

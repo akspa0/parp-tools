@@ -23,6 +23,7 @@ using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
@@ -461,7 +462,7 @@ public partial class ViewerApp : IDisposable
 
     private float GetActiveToolbarHeight()
     {
-        return _useDockspaceUi ? 0f : ToolbarHeight;
+        return _hideUiChrome ? 0f : ToolbarHeight;
     }
 
     private float GetTopChromeHeight()
@@ -490,6 +491,14 @@ public partial class ViewerApp : IDisposable
     private string _taxiActorModelOverrideInput = "";
     private int _taxiActorModelOverrideInputRouteId = -1;
     private int _taxiActorModelOverrideTargetRouteId = -1;
+    private string _taxiRouteFilter = "";
+    private int _taxiRouteListGroupingMode = 1;
+    private bool _layoutObjectPreviewMode;
+    private bool _layoutObjectPreviewStateCaptured;
+    private bool _layoutObjectPreviewSavedObjectsVisible = true;
+    private bool _layoutObjectPreviewSavedWmosVisible = true;
+    private bool _layoutObjectPreviewSavedDoodadsVisible = true;
+    private WorldObjectVisibilityProfile _layoutObjectPreviewSavedVisibilityProfile = WorldObjectVisibilityProfile.Performance;
     private string _sqlAlphaCoreRoot = "";
     private SqlWorldPopulationService? _sqlPopulationService;
     private bool _sqlIncludeCreatures = true;
@@ -877,6 +886,7 @@ public partial class ViewerApp : IDisposable
         _imGui.Update((float)dt);
         FlushPendingImGuiMouseButtonEvents();
         HandleKeyboardInput((float)dt);
+        UpdateTaxiRideCamera();
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
@@ -1022,6 +1032,9 @@ public partial class ViewerApp : IDisposable
                 _spaceWasPressed = spacePressed;
             }
         }
+
+        if (_taxiRideCameraEnabled)
+            return;
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
         bool shift = kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight);
@@ -1188,12 +1201,14 @@ public partial class ViewerApp : IDisposable
                 _gl.Viewport(_window.FramebufferSize);
         }
 
+        CaptureVideoFrameIfNeeded(includeUi: false, dt);
         CompleteCaptureIfReady(includeUi: false);
 
         // Render ImGui overlay
         DrawUI();
         _imGui.Render();
 
+        CaptureVideoFrameIfNeeded(includeUi: true, dt);
         CompleteCaptureIfReady(includeUi: true);
     }
 
@@ -8565,6 +8580,7 @@ void main() {
             _terrainManager = _worldScene.Terrain;
             _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
             _renderer = _worldScene;
+            ApplyLayoutObjectPreviewModeToScene();
             ApplySavedPm4AlignmentToScene();
             // Full-load mode: load all tiles synchronously during loading screen
             if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
@@ -10921,6 +10937,15 @@ void main() {
             _minimapPanOffset = new Vector2(
                 float.IsFinite(settings.MinimapPanOffsetX) ? settings.MinimapPanOffsetX : 0f,
                 float.IsFinite(settings.MinimapPanOffsetY) ? settings.MinimapPanOffsetY : 0f);
+            _captureOutputDir = string.IsNullOrWhiteSpace(settings.CaptureOutputDir)
+                ? Path.Combine(OutputDir, "captures")
+                : settings.CaptureOutputDir;
+            _videoEncoderExecutable = string.IsNullOrWhiteSpace(settings.VideoEncoderExecutable)
+                ? "ffmpeg"
+                : settings.VideoEncoderExecutable;
+            _videoCaptureFps = Math.Clamp(settings.VideoCaptureFps, 12, 60);
+            _videoCaptureIncludeUi = settings.VideoCaptureIncludeUi;
+            _videoCaptureContainerIndex = Math.Clamp(settings.VideoCaptureContainerIndex, 0, 1);
             _savedDetailedAdtTileCountOverride = Math.Clamp(settings.DetailedAdtTileCountOverride, 0, Terrain.TerrainManager.MaxManualDetailedTileCount);
             _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
             _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
@@ -11057,6 +11082,11 @@ void main() {
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
+                CaptureOutputDir = _captureOutputDir,
+                VideoEncoderExecutable = _videoEncoderExecutable,
+                VideoCaptureFps = _videoCaptureFps,
+                VideoCaptureIncludeUi = _videoCaptureIncludeUi,
+                VideoCaptureContainerIndex = _videoCaptureContainerIndex,
                 DetailedAdtTileCountOverride = _savedDetailedAdtTileCountOverride,
                 Pm4TranslationX = _pm4SavedOverlayTranslation.X,
                 Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
@@ -11157,6 +11187,48 @@ void main() {
 
     private bool _disposed;
 
+    private void SetLayoutObjectPreviewMode(bool enabled)
+    {
+        if (_layoutObjectPreviewMode == enabled)
+            return;
+
+        _layoutObjectPreviewMode = enabled;
+        ApplyLayoutObjectPreviewModeToScene();
+    }
+
+    private void ApplyLayoutObjectPreviewModeToScene()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_layoutObjectPreviewMode)
+        {
+            if (!_layoutObjectPreviewStateCaptured)
+            {
+                _layoutObjectPreviewSavedObjectsVisible = _worldScene.ObjectsVisible;
+                _layoutObjectPreviewSavedWmosVisible = _worldScene.WmosVisible;
+                _layoutObjectPreviewSavedDoodadsVisible = _worldScene.DoodadsVisible;
+                _layoutObjectPreviewSavedVisibilityProfile = _worldScene.ObjectVisibilityProfile;
+                _layoutObjectPreviewStateCaptured = true;
+            }
+
+            _worldScene.ObjectsVisible = true;
+            _worldScene.WmosVisible = true;
+            _worldScene.DoodadsVisible = false;
+            _worldScene.ObjectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
+            return;
+        }
+
+        if (_layoutObjectPreviewStateCaptured)
+        {
+            _worldScene.ObjectsVisible = _layoutObjectPreviewSavedObjectsVisible;
+            _worldScene.WmosVisible = _layoutObjectPreviewSavedWmosVisible;
+            _worldScene.DoodadsVisible = _layoutObjectPreviewSavedDoodadsVisible;
+            _worldScene.ObjectVisibilityProfile = _layoutObjectPreviewSavedVisibilityProfile;
+            _layoutObjectPreviewStateCaptured = false;
+        }
+    }
+
     private void OnClose()
     {
         Dispose();
@@ -11166,6 +11238,9 @@ void main() {
     {
         if (_disposed) return;
         _disposed = true;
+
+        StopVideoRecording("Stopped video recording during shutdown.");
+        StopTaxiRideCamera();
 
         ISceneRenderer? renderer = _renderer;
         WorldScene? worldScene = _worldScene;
@@ -11231,6 +11306,11 @@ void main() {
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }
+        public string CaptureOutputDir { get; set; } = Path.Combine(OutputDir, "captures");
+        public string VideoEncoderExecutable { get; set; } = "ffmpeg";
+        public int VideoCaptureFps { get; set; } = 30;
+        public bool VideoCaptureIncludeUi { get; set; }
+        public int VideoCaptureContainerIndex { get; set; }
         public int DetailedAdtTileCountOverride { get; set; }
         public float Pm4TranslationX { get; set; }
         public float Pm4TranslationY { get; set; }

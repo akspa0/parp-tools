@@ -1,5 +1,21 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 06, 2026 - Taxi teaser workflow now exists: ride camera plus direct ffmpeg video capture
+
+- followed the request to let the user jump into the animated taxi actor and record teaser footage directly from the viewer
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/WorldScene.cs` now keeps a live `TaxiActorPose` cache per active route actor so viewer UI and capture code can follow the exact animated actor transform already used for rendering
+   - `ViewerApp_CaptureAutomation.cs` now supports direct video capture to `.mp4` or `.mov` by streaming raw RGBA frames into `ffmpeg`, using either the no-UI scene viewport or the full with-UI framebuffer
+   - the same partial now owns a taxi ride camera with `Cockpit` and `Chase` modes plus adjustable chase distance, chase height, cockpit height, and look-ahead
+   - `ViewerApp_Sidebars.cs` now exposes those ride-camera controls and a `Record Selected Route Video` action inside the existing Taxi section
+   - `ViewerApp.cs` now updates the ride camera each frame, disables free-fly WASD motion while the ride camera is attached, and persists the video-capture configuration in viewer settings
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+   - this is build validation only
+   - no automated tests were added or run
+   - no live viewer retest has been captured yet for taxi actor framing, long-route drift, or actual encoded output quality from a real teaser capture
+
 ## Apr 06, 2026 - The detailed ADT window is now fog-driven, and WDL fallback terrain can paint with minimap tiles
 
 - followed the request to let distant terrain stay cheap while looking less like raw colored geometry

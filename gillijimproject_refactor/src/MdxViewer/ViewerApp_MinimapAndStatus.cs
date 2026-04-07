@@ -13,6 +13,12 @@ public partial class ViewerApp
     private const float MinimapTileCount = 64f;
     private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
 
+    private enum MinimapTeleportMode
+    {
+        Armed,
+        Immediate,
+    }
+
     private bool TryGetActiveMinimapState(
         out List<(int tx, int ty)>? existingTiles,
         out Func<int, int, bool>? isTileLoaded,
@@ -46,7 +52,7 @@ public partial class ViewerApp
         return false;
     }
 
-    private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
+    private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize, MinimapTeleportMode teleportMode)
     {
         ImGui.SetCursorScreenPos(cursorPos);
         ImGui.InvisibleButton(interactionId, new Vector2(mapSize, mapSize));
@@ -77,7 +83,10 @@ public partial class ViewerApp
                 if (totalDelta.Length() <= MinimapClickMovementThresholdPixels
                     && TryGetMinimapClickTarget(mousePos, cursorPos, cellSize, viewMinTx, viewMinTy, out float clickTileX, out float clickTileY))
                 {
-                    RegisterMinimapTeleportClick(clickTileX, clickTileY);
+                    if (teleportMode == MinimapTeleportMode.Immediate)
+                        TeleportCameraToMinimapTile(clickTileX, clickTileY, closeFullscreenAfterTeleport: true);
+                    else
+                        RegisterMinimapTeleportClick(clickTileX, clickTileY);
                 }
 
                 _minimapDragging = false;
@@ -87,6 +96,61 @@ public partial class ViewerApp
         {
             _minimapDragging = false;
         }
+    }
+
+    private void TeleportCameraToMinimapTile(float clickTileX, float clickTileY, bool closeFullscreenAfterTeleport)
+    {
+        int tileX = (int)MathF.Floor(clickTileX);
+        int tileY = (int)MathF.Floor(clickTileY);
+        float worldX = WoWConstants.MapOrigin - clickTileX * MinimapWorldTileSize;
+        float worldY = WoWConstants.MapOrigin - clickTileY * MinimapWorldTileSize;
+        _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
+        _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
+
+        if (closeFullscreenAfterTeleport && _fullscreenMinimap)
+        {
+            _fullscreenMinimap = false;
+            _minimapDragging = false;
+        }
+
+        ClearPendingMinimapTeleport();
+    }
+
+    private static float ComputeMinimapSquareSize(float availableWidth, float availableHeight, float minimumSize)
+    {
+        return MathF.Max(minimumSize, MathF.Min(availableWidth, availableHeight));
+    }
+
+    private void DrawInteractiveMinimapSurface(
+        string interactionId,
+        Vector2 cursorPos,
+        float mapSize,
+        List<(int tx, int ty)> existingTiles,
+        Func<int, int, bool> isTileLoaded,
+        string? mapName,
+        MinimapTeleportMode teleportMode,
+        out float viewMinTx,
+        out float viewMinTy,
+        out float cellSize)
+    {
+        var io = ImGui.GetIO();
+        if (ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
+        {
+            float wheel = io.MouseWheel;
+            if (wheel != 0)
+                _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+        }
+
+        float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
+        float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
+        ClampMinimapPanOffset();
+
+        MinimapHelpers.RenderMinimapContent(
+            cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+            camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+            out viewMinTx, out viewMinTy, out cellSize);
+
+        HandleMinimapInteraction(interactionId, cursorPos, mapSize, viewMinTx, viewMinTy, cellSize, teleportMode);
     }
 
     private static bool TryGetMinimapClickTarget(Vector2 mousePos, Vector2 cursorPos, float cellSize, float viewMinTx, float viewMinTy, out float clickTileX, out float clickTileY)
@@ -151,16 +215,7 @@ public partial class ViewerApp
             return;
         }
 
-        float worldX = WoWConstants.MapOrigin - clickTileX * MinimapWorldTileSize;
-        float worldY = WoWConstants.MapOrigin - clickTileY * MinimapWorldTileSize;
-        _camera.Position = new Vector3(worldX, worldY, _camera.Position.Z);
-        _statusMessage = $"Minimap teleported camera to tile ({tileX},{tileY}).";
-        if (_fullscreenMinimap)
-        {
-            _fullscreenMinimap = false;
-            _minimapDragging = false;
-        }
-        ClearPendingMinimapTeleport();
+        TeleportCameraToMinimapTile(clickTileX, clickTileY, closeFullscreenAfterTeleport: _fullscreenMinimap);
     }
 
     private void ToggleFullscreenMinimap()
@@ -337,20 +392,17 @@ public partial class ViewerApp
         float mapSize = MathF.Max(64f, MathF.Min(mapAvailableWidth, mapAvailableHeight));
 
         var cursorPos = ImGui.GetCursorScreenPos();
-
-        if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
-        {
-            float wheel = io.MouseWheel;
-            if (wheel != 0)
-                _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
-        }
-
-        MinimapHelpers.RenderMinimapContent(
-            cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
-            camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
-            out float viewMinTx, out float viewMinTy, out float cellSize);
-
-        HandleMinimapInteraction("##minimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+        DrawInteractiveMinimapSurface(
+            "##minimapInteraction",
+            cursorPos,
+            mapSize,
+            existingTiles,
+            isTileLoaded,
+            mapName,
+            MinimapTeleportMode.Armed,
+            out _,
+            out _,
+            out _);
 
         ImGui.SetCursorPosY(controlsHeight + mapSize + 2f);
 
@@ -362,9 +414,15 @@ public partial class ViewerApp
         if (!TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName)) return;
 
         var io = ImGui.GetIO();
-        float mapSize = MathF.Min(io.DisplaySize.X * 0.8f, io.DisplaySize.Y * 0.8f);
-        float padding = (io.DisplaySize.X - mapSize) * 0.5f;
-        float topPadding = (io.DisplaySize.Y - mapSize) * 0.5f;
+        const float horizontalMargin = 24f;
+        const float verticalMargin = 24f;
+        const float footerHeight = 60f;
+        float mapSize = ComputeMinimapSquareSize(
+            io.DisplaySize.X - horizontalMargin * 2f,
+            io.DisplaySize.Y - verticalMargin * 2f - footerHeight,
+            minimumSize: 128f);
+        float padding = MathF.Max(horizontalMargin, (io.DisplaySize.X - mapSize) * 0.5f);
+        float topPadding = MathF.Max(verticalMargin, (io.DisplaySize.Y - footerHeight - mapSize) * 0.5f);
 
         ImGui.SetNextWindowPos(Vector2.Zero);
         ImGui.SetNextWindowSize(io.DisplaySize);
@@ -378,23 +436,20 @@ public partial class ViewerApp
             ImGui.SetCursorPos(new Vector2(padding, topPadding));
             var cursorPos = ImGui.GetCursorScreenPos();
 
-            if (ImGui.IsWindowHovered())
-            {
-                float wheel = io.MouseWheel;
-                if (wheel != 0)
-                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
-            }
-
             float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
             float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
-            ClampMinimapPanOffset();
 
-            MinimapHelpers.RenderMinimapContent(
-                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
-                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
-                out float viewMinTx, out float viewMinTy, out float cellSize);
-
-            HandleMinimapInteraction("##fullscreenMinimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+            DrawInteractiveMinimapSurface(
+                "##fullscreenMinimapInteraction",
+                cursorPos,
+                mapSize,
+                existingTiles,
+                isTileLoaded,
+                mapName,
+                MinimapTeleportMode.Immediate,
+                out _,
+                out _,
+                out _);
 
             ImGui.SetCursorPos(new Vector2(padding, topPadding + mapSize + 10));
             int ctX = (int)MathF.Floor(camTileX);
@@ -409,7 +464,7 @@ public partial class ViewerApp
                         : "Minimap ready");
             }
             ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Triple-click same tile to teleport");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "  |  Press M to close  |  Scroll to zoom  |  Drag to pan  |  Click tile to teleport");
 
             if (_minimapPanOffset != Vector2.Zero)
             {

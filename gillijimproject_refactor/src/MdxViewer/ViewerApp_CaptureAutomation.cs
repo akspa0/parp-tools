@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Diagnostics;
 using System.Text.Json;
 using ImGuiNET;
 using Silk.NET.Maths;
@@ -7,6 +8,7 @@ using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using MdxViewer.Rendering;
+using MdxViewer.Terrain;
 
 namespace MdxViewer;
 
@@ -21,6 +23,27 @@ public partial class ViewerApp
     private string _newCameraShotName = "";
     private string _captureOutputDir = Path.Combine(OutputDir, "captures");
     private bool _captureFilterCurrentMapAndBuild = true;
+    private string _videoEncoderExecutable = "ffmpeg";
+    private int _videoCaptureFps = 30;
+    private bool _videoCaptureIncludeUi;
+    private int _videoCaptureContainerIndex;
+    private bool _taxiRideCameraEnabled;
+    private int _taxiRideCameraRouteId = -1;
+    private TaxiRideCameraMode _taxiRideCameraMode = TaxiRideCameraMode.Cockpit;
+    private float _taxiRideChaseDistance = 42f;
+    private float _taxiRideChaseHeight = 16f;
+    private float _taxiRideLookAhead = 28f;
+    private float _taxiRideCockpitHeight = 10f;
+    private ActiveVideoRecording? _activeVideoRecording;
+
+    private enum TaxiRideCameraMode
+    {
+        Cockpit = 0,
+        Chase = 1,
+    }
+
+    private static readonly string[] VideoContainerExtensions = { ".mp4", ".mov" };
+    private static readonly string[] VideoContainerLabels = { "MP4 (H.264)", "MOV (H.264)" };
 
     private sealed class CameraShotPoint
     {
@@ -42,6 +65,19 @@ public partial class ViewerApp
         public bool IncludeUi { get; set; }
         public bool Applied { get; set; }
         public bool ExitAfterCapture { get; set; }
+    }
+
+    private sealed class ActiveVideoRecording
+    {
+        public required Process EncoderProcess { get; init; }
+        public required Stream EncoderInput { get; init; }
+        public required string OutputPath { get; init; }
+        public required bool IncludeUi { get; init; }
+        public required int Width { get; init; }
+        public required int Height { get; init; }
+        public required double FrameIntervalSeconds { get; init; }
+        public double FrameAccumulatorSeconds { get; set; }
+        public byte[] FrameBuffer { get; set; } = Array.Empty<byte>();
     }
 
     private sealed class CameraShotPointDocument
@@ -76,7 +112,34 @@ public partial class ViewerApp
         if (ImGui.InputText("Output Folder", ref outputDir, 1024))
             _captureOutputDir = outputDir;
 
+        string ffmpegExecutable = _videoEncoderExecutable;
+        if (ImGui.InputText("ffmpeg Executable", ref ffmpegExecutable, 1024))
+            _videoEncoderExecutable = ffmpegExecutable;
+
         ImGui.Checkbox("Filter list to current map+build", ref _captureFilterCurrentMapAndBuild);
+
+        int videoFps = _videoCaptureFps;
+        if (ImGui.SliderInt("Video FPS", ref videoFps, 12, 60))
+            _videoCaptureFps = videoFps;
+
+        ImGui.Combo("Video Container", ref _videoCaptureContainerIndex, VideoContainerLabels, VideoContainerLabels.Length);
+        ImGui.Checkbox("Video Includes UI", ref _videoCaptureIncludeUi);
+
+        if (_activeVideoRecording == null)
+        {
+            if (ImGui.Button("Start Video Recording"))
+                TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi);
+        }
+        else
+        {
+            if (ImGui.Button("Stop Video Recording"))
+                StopVideoRecording();
+        }
+
+        if (_activeVideoRecording != null)
+            ImGui.TextDisabled($"Recording: {Path.GetFileName(_activeVideoRecording.OutputPath)}");
+        else
+            ImGui.TextDisabled("Direct video capture uses ffmpeg to write mp4/mov from the current framebuffer.");
 
         if (ImGui.Button("Capture Current (No UI)"))
             QueueCurrentCameraCapture(includeUi: false);
@@ -365,35 +428,320 @@ public partial class ViewerApp
             _window.Close();
     }
 
+    private bool TryStartTaxiRideVideoCapture()
+    {
+        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
+        {
+            _statusMessage = "Select a taxi route before starting ride capture.";
+            return false;
+        }
+
+        if (!TryAttachTaxiRideCameraToSelectedRoute())
+            return false;
+
+        return TryStartCurrentViewVideoRecording(_videoCaptureIncludeUi, GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId));
+    }
+
+    private bool TryStartCurrentViewVideoRecording(bool includeUi, string? label = null)
+    {
+        if (_activeVideoRecording != null)
+        {
+            _statusMessage = "A video recording is already in progress.";
+            return false;
+        }
+
+        if (!TryGetCaptureRegion(includeUi, out _, out _, out int width, out int height))
+        {
+            _statusMessage = includeUi
+                ? "Unable to resolve the current framebuffer size for video capture."
+                : "Unable to resolve the scene viewport for no-UI video capture.";
+            return false;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            _statusMessage = "Video capture dimensions were invalid.";
+            return false;
+        }
+
+        string encoderExecutable = string.IsNullOrWhiteSpace(_videoEncoderExecutable)
+            ? "ffmpeg"
+            : _videoEncoderExecutable.Trim();
+
+        string extension = VideoContainerExtensions[Math.Clamp(_videoCaptureContainerIndex, 0, VideoContainerExtensions.Length - 1)];
+        string safeMap = MakeSafePathSegment(GetCurrentCaptureMapName());
+        string safeBuild = MakeSafePathSegment(GetCurrentCaptureBuildVersion());
+        string safeLabel = MakeSafePathSegment(string.IsNullOrWhiteSpace(label) ? "current_view" : label);
+        string captureMode = includeUi ? "with_ui" : "no_ui";
+        string outputPath = Path.Combine(
+            string.IsNullOrWhiteSpace(_captureOutputDir) ? Path.Combine(OutputDir, "captures") : _captureOutputDir,
+            safeMap,
+            safeBuild,
+            $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeLabel}_{captureMode}{extension}");
+
+        string? outputDirectory = Path.GetDirectoryName(outputPath);
+        if (!string.IsNullOrWhiteSpace(outputDirectory))
+            Directory.CreateDirectory(outputDirectory);
+
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = encoderExecutable,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                CreateNoWindow = true,
+                WorkingDirectory = Environment.CurrentDirectory,
+            };
+
+            startInfo.ArgumentList.Add("-y");
+            startInfo.ArgumentList.Add("-f");
+            startInfo.ArgumentList.Add("rawvideo");
+            startInfo.ArgumentList.Add("-pixel_format");
+            startInfo.ArgumentList.Add("rgba");
+            startInfo.ArgumentList.Add("-video_size");
+            startInfo.ArgumentList.Add($"{width}x{height}");
+            startInfo.ArgumentList.Add("-framerate");
+            startInfo.ArgumentList.Add(_videoCaptureFps.ToString());
+            startInfo.ArgumentList.Add("-i");
+            startInfo.ArgumentList.Add("-");
+            startInfo.ArgumentList.Add("-vf");
+            startInfo.ArgumentList.Add("vflip");
+            startInfo.ArgumentList.Add("-an");
+            startInfo.ArgumentList.Add("-c:v");
+            startInfo.ArgumentList.Add("libx264");
+            startInfo.ArgumentList.Add("-preset");
+            startInfo.ArgumentList.Add("veryfast");
+            startInfo.ArgumentList.Add("-pix_fmt");
+            startInfo.ArgumentList.Add("yuv420p");
+            startInfo.ArgumentList.Add(outputPath);
+
+            Process process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("ffmpeg did not start.");
+
+            _activeVideoRecording = new ActiveVideoRecording
+            {
+                EncoderProcess = process,
+                EncoderInput = process.StandardInput.BaseStream,
+                OutputPath = outputPath,
+                IncludeUi = includeUi,
+                Width = width,
+                Height = height,
+                FrameIntervalSeconds = 1.0 / Math.Max(1, _videoCaptureFps),
+                FrameAccumulatorSeconds = 0.0,
+                FrameBuffer = new byte[width * height * 4],
+            };
+
+            _statusMessage = $"Started video recording: {outputPath}";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Failed to start video recording: {ex.Message}";
+            return false;
+        }
+    }
+
+    private void StopVideoRecording(string? statusOverride = null)
+    {
+        if (_activeVideoRecording == null)
+            return;
+
+        ActiveVideoRecording recording = _activeVideoRecording;
+        _activeVideoRecording = null;
+
+        bool success = false;
+        string statusMessage = statusOverride ?? $"Saved video: {recording.OutputPath}";
+
+        try
+        {
+            recording.EncoderInput.Flush();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            recording.EncoderInput.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (!recording.EncoderProcess.WaitForExit(10000))
+                recording.EncoderProcess.Kill(entireProcessTree: true);
+
+            success = recording.EncoderProcess.ExitCode == 0;
+            if (!success && statusOverride == null)
+                statusMessage = $"Video encode failed for {recording.OutputPath} (exit {recording.EncoderProcess.ExitCode}).";
+        }
+        catch (Exception ex)
+        {
+            statusMessage = statusOverride ?? $"Failed to finish video recording: {ex.Message}";
+        }
+        finally
+        {
+            recording.EncoderProcess.Dispose();
+        }
+
+        if (!success && statusOverride == null && File.Exists(recording.OutputPath))
+        {
+            try
+            {
+                File.Delete(recording.OutputPath);
+            }
+            catch
+            {
+            }
+        }
+
+        _statusMessage = statusMessage;
+    }
+
+    private void CaptureVideoFrameIfNeeded(bool includeUi, double dt)
+    {
+        if (_activeVideoRecording == null || _activeVideoRecording.IncludeUi != includeUi)
+            return;
+
+        ActiveVideoRecording recording = _activeVideoRecording;
+        recording.FrameAccumulatorSeconds += Math.Max(0.0, dt);
+        if (recording.FrameAccumulatorSeconds + 1e-6 < recording.FrameIntervalSeconds)
+        {
+            _activeVideoRecording = recording;
+            return;
+        }
+
+        if (!TryGetCaptureRegion(includeUi, out int readX, out int readY, out int width, out int height))
+        {
+            StopVideoRecording(includeUi
+                ? "Video recording stopped because the framebuffer was unavailable."
+                : "Video recording stopped because the scene viewport was unavailable.");
+            return;
+        }
+
+        if (width != recording.Width || height != recording.Height)
+        {
+            StopVideoRecording("Video recording stopped because the capture size changed during recording.");
+            return;
+        }
+
+        int framesToWrite = Math.Max(1, (int)(recording.FrameAccumulatorSeconds / recording.FrameIntervalSeconds));
+        recording.FrameAccumulatorSeconds -= framesToWrite * recording.FrameIntervalSeconds;
+
+        byte[] pixels = recording.FrameBuffer.Length == recording.Width * recording.Height * 4
+            ? recording.FrameBuffer
+            : new byte[recording.Width * recording.Height * 4];
+        recording.FrameBuffer = pixels;
+
+        if (!TryReadFramebufferRgba(readX, readY, recording.Width, recording.Height, pixels))
+        {
+            StopVideoRecording("Video recording stopped because framebuffer capture failed.");
+            return;
+        }
+
+        try
+        {
+            for (int frameIndex = 0; frameIndex < framesToWrite; frameIndex++)
+                recording.EncoderInput.Write(pixels, 0, pixels.Length);
+            _activeVideoRecording = recording;
+        }
+        catch (Exception ex)
+        {
+            StopVideoRecording($"Video recording stopped because ffmpeg write failed: {ex.Message}");
+        }
+    }
+
+    private bool TryAttachTaxiRideCameraToSelectedRoute()
+    {
+        if (_worldScene == null || _worldScene.SelectedTaxiRouteId < 0)
+        {
+            _statusMessage = "Select a taxi route before enabling the ride camera.";
+            return false;
+        }
+
+        _worldScene.ShowTaxi = true;
+        _worldScene.ShowTaxiActors = true;
+        _taxiRideCameraRouteId = _worldScene.SelectedTaxiRouteId;
+        _taxiRideCameraEnabled = true;
+        _statusMessage = $"Ride camera attached to {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
+        return true;
+    }
+
+    private void StopTaxiRideCamera(string? statusMessage = null)
+    {
+        _taxiRideCameraEnabled = false;
+        _taxiRideCameraRouteId = -1;
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+            _statusMessage = statusMessage;
+    }
+
+    private void UpdateTaxiRideCamera()
+    {
+        if (!_taxiRideCameraEnabled)
+            return;
+
+        if (_worldScene == null)
+        {
+            StopTaxiRideCamera("Ride camera detached because the world scene is no longer active.");
+            return;
+        }
+
+        if (!_worldScene.TryGetTaxiActorPose(_taxiRideCameraRouteId, out TaxiActorPose pose))
+            return;
+
+        Vector3 forward = pose.Forward.LengthSquared() > 0.0001f
+            ? Vector3.Normalize(pose.Forward)
+            : _camera.Forward;
+        Vector3 horizontalForward = new Vector3(forward.X, forward.Y, 0f);
+        if (horizontalForward.LengthSquared() > 0.0001f)
+            horizontalForward = Vector3.Normalize(horizontalForward);
+        else
+            horizontalForward = new Vector3(_camera.Forward.X, _camera.Forward.Y, 0f);
+
+        if (horizontalForward.LengthSquared() <= 0.0001f)
+            horizontalForward = Vector3.UnitY;
+
+        float scale = Math.Max(0.25f, pose.Scale);
+        if (_taxiRideCameraMode == TaxiRideCameraMode.Cockpit)
+        {
+            Vector3 eyePosition = pose.Position + Vector3.UnitZ * (_taxiRideCockpitHeight * scale);
+            Vector3 lookTarget = eyePosition + forward * Math.Max(20f, _taxiRideLookAhead);
+            ApplyLookCamera(eyePosition, lookTarget);
+            return;
+        }
+
+        Vector3 chaseFocus = pose.Position + Vector3.UnitZ * Math.Max(6f, _taxiRideCockpitHeight * 0.65f * scale);
+        Vector3 chasePosition = chaseFocus - horizontalForward * _taxiRideChaseDistance + Vector3.UnitZ * _taxiRideChaseHeight;
+        Vector3 chaseTarget = pose.Position + forward * Math.Max(20f, _taxiRideLookAhead) + Vector3.UnitZ * 4f;
+        ApplyLookCamera(chasePosition, chaseTarget);
+    }
+
+    private void ApplyLookCamera(Vector3 position, Vector3 target)
+    {
+        Vector3 delta = target - position;
+        if (delta.LengthSquared() <= 0.0001f)
+            return;
+
+        _camera.Position = position;
+        _camera.Yaw = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
+
+        float horizontalLength = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
+        _camera.Pitch = Math.Clamp(MathF.Atan2(delta.Z, MathF.Max(0.0001f, horizontalLength)) * 180f / MathF.PI, -89f, 89f);
+    }
+
     private unsafe bool TryCaptureFramebufferToPng(string outputPath, bool includeUi)
     {
         try
         {
-            int readX = 0;
-            int readY = 0;
-            int width;
-            int height;
-
-            if (includeUi || !TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
-            {
-                Vector2D<int> framebufferSize = _window.FramebufferSize;
-                width = framebufferSize.X;
-                height = framebufferSize.Y;
-            }
-            else
-            {
-                width = (int)sceneWidth;
-                height = (int)sceneHeight;
-            }
-
-            if (width <= 0 || height <= 0)
+            if (!TryGetCaptureRegion(includeUi, out int readX, out int readY, out int width, out int height))
                 return false;
 
             byte[] pixels = new byte[width * height * 4];
-            fixed (byte* ptr = pixels)
-            {
-                _gl.ReadPixels(readX, readY, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
-            }
+            if (!TryReadFramebufferRgba(readX, readY, width, height, pixels))
+                return false;
 
             ForceOpaqueAlpha(pixels);
 
@@ -411,6 +759,37 @@ public partial class ViewerApp
             _statusMessage = $"Capture failed: {ex.Message}";
             return false;
         }
+    }
+
+    private bool TryGetCaptureRegion(bool includeUi, out int readX, out int readY, out int width, out int height)
+    {
+        readX = 0;
+        readY = 0;
+
+        if (!includeUi && TryGetSceneFramebufferViewport(out readX, out readY, out uint sceneWidth, out uint sceneHeight))
+        {
+            width = (int)sceneWidth;
+            height = (int)sceneHeight;
+            return width > 0 && height > 0;
+        }
+
+        Vector2D<int> framebufferSize = _window.FramebufferSize;
+        width = framebufferSize.X;
+        height = framebufferSize.Y;
+        return width > 0 && height > 0;
+    }
+
+    private unsafe bool TryReadFramebufferRgba(int readX, int readY, int width, int height, byte[] pixels)
+    {
+        if (width <= 0 || height <= 0 || pixels.Length < width * height * 4)
+            return false;
+
+        fixed (byte* ptr = pixels)
+        {
+            _gl.ReadPixels(readX, readY, (uint)width, (uint)height, PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
+        }
+
+        return true;
     }
 
     private static void ForceOpaqueAlpha(byte[] rgbaPixels)

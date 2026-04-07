@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 06, 2026 - Added taxi ride camera plus ffmpeg-backed direct mp4/mov capture
+
+- followed the request to make taxi routes usable as an in-app teaser capture workflow
+- landed behavior:
+	- `WorldScene.cs` now publishes the live taxi actor pose that the animated route actor already uses internally
+	- `ViewerApp_CaptureAutomation.cs` now supports direct video recording through `ffmpeg`, targeting `.mp4` or `.mov` from either the scene viewport or the full UI framebuffer
+	- the same capture partial now owns a taxi ride camera with `Cockpit` and `Chase` modes plus configurable offsets
+	- `ViewerApp_Sidebars.cs` now adds route-level ride-camera and route-video controls directly in the taxi section, so a selected route can be followed and recorded without leaving that workflow surface
+	- `ViewerApp.cs` now updates the ride camera during the normal update loop, suppresses free-fly motion while attached, and persists the video capture settings payload in viewer settings
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed with existing warnings only
+- proof boundary:
+	- this is build validation only
+	- no automated tests were added or run
+	- no live runtime recording smoke test has been captured yet, so direct ffmpeg output and ride-camera feel are still unproven in a real viewer session
+
 ### Apr 06, 2026 - Fog distance now drives the detailed ADT footprint, and WDL far terrain can use minimap textures
 
 - followed the request to make the detailed ADT loader react to fog distance and to make distant WDL terrain less obviously placeholder at low cost
