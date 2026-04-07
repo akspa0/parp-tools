@@ -544,6 +544,7 @@ public partial class ViewerApp : IDisposable
     private float _cameraSpeed = 50f;
     // Field of view in degrees (adjustable via UI)
     private float _fovDegrees = 60f;
+    private int _savedDetailedAdtTileCountOverride;
 
     private bool _autoFrameModelOnLoad = true;
     private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
@@ -1688,28 +1689,6 @@ void main() {
                     }
 
                     ImGui.EndMenu();
-                }
-
-                ImGui.EndMenu();
-            }
-
-            if (ImGui.BeginMenu("Workspace"))
-            {
-                if (ImGui.MenuItem("Viewer Mode", "", _workspaceMode == WorkspaceMode.Viewer))
-                    SetWorkspaceMode(WorkspaceMode.Viewer);
-
-                if (ImGui.MenuItem("Editor Mode", "", _workspaceMode == WorkspaceMode.Editor))
-                    SetWorkspaceMode(WorkspaceMode.Editor);
-
-                ImGui.Separator();
-
-                foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
-                {
-                    if (ImGui.MenuItem(GetEditorWorkspaceTaskLabel(task), "", _editorWorkspaceTask == task))
-                    {
-                        SetWorkspaceMode(WorkspaceMode.Editor);
-                        SetEditorWorkspaceTask(task);
-                    }
                 }
 
                 ImGui.EndMenu();
@@ -5310,29 +5289,6 @@ void main() {
             ImGui.TextDisabled("Area POIs: none found");
         }
 
-        // Taxi paths toggle — lazy-loaded on first request
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
-        {
-            bool showTaxi = _worldScene.ShowTaxi;
-            if (ImGui.Checkbox($"Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
-                _worldScene.ShowTaxi = showTaxi;
-            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Show All"))
-                    _worldScene.ClearTaxiSelection();
-            }
-        }
-        else if (!_worldScene.TaxiLoadAttempted)
-        {
-            if (ImGui.Button("Load Taxi Paths"))
-                _worldScene.ShowTaxi = true; // triggers lazy load
-        }
-        else if (_worldScene.TaxiLoadAttempted && (_worldScene.TaxiLoader == null || _worldScene.TaxiLoader.Routes.Count == 0))
-        {
-            ImGui.TextDisabled("Taxi Paths: none found");
-        }
-
         // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
         if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)
         {
@@ -5855,93 +5811,6 @@ void main() {
             ImGui.TreePop();
         }
 
-        // Taxi Nodes list — click to select/filter
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Nodes.Count > 0 &&
-            ImGui.TreeNode($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})"))
-        {
-            if (ImGui.BeginChild("##TaxiNodeList", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                int nodeCount = _worldScene.TaxiLoader.Nodes.Count;
-                GetVisibleListRange(nodeCount, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var node = _worldScene.TaxiLoader.Nodes[i];
-                    bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
-                    string label = $"[{node.Id}] {node.Name}";
-                    if (ImGui.Selectable(label, isSelected))
-                    {
-                        SelectTaxiNode(node.Id, toggle: true);
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
-                        int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
-                        ImGui.Text($"Routes: {routeCount}");
-                        ImGui.Text("Click to filter routes. Use the taxi controls to focus the camera.");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < nodeCount)
-                    ImGui.Dummy(new Vector2(0, (nodeCount - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
-        }
-
-        // Taxi Routes list — click to select/filter
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0 &&
-            ImGui.TreeNode($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})"))
-        {
-            if (ImGui.BeginChild("##TaxiRouteList", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                int routeCount = _worldScene.TaxiLoader.Routes.Count;
-                GetVisibleListRange(routeCount, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var route = _worldScene.TaxiLoader.Routes[i];
-                    bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
-                    string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-                    string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
-                    string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
-                    if (ImGui.Selectable(label, isSelected))
-                    {
-                        SelectTaxiRoute(route.PathId, toggle: true);
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Cost: {route.Cost}");
-                        ImGui.Text($"Waypoints: {route.Waypoints.Count}");
-                        if (route.Waypoints.Count > 0)
-                        {
-                            var first = route.Waypoints[0];
-                            var last = route.Waypoints[^1];
-                            ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
-                            ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
-                        }
-                        ImGui.Text("Click to select this route. Use the viewport route handle or taxi controls to focus it.");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < routeCount)
-                    ImGui.Dummy(new Vector2(0, (routeCount - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
-        }
     }
 
     private void LoadSqlSpawnsForCurrentMap()
@@ -8670,7 +8539,7 @@ void main() {
             if (isAlpha)
             {
                 // Alpha WDT: monolithic file with embedded ADTs
-                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver, _dbcBuild,
+                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver, _dbcBuild, _minimapRenderer,
                     onStatus: OnLoadStatus);
                 wdtType = "Alpha WDT";
             }
@@ -8688,12 +8557,13 @@ void main() {
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
                 var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild, _dbcProvider, _dbdDir);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
-                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild,
+                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild, _minimapRenderer,
                     onStatus: OnLoadStatus);
                 wdtType = "Standard WDT";
             }
 
             _terrainManager = _worldScene.Terrain;
+            _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
             _renderer = _worldScene;
             ApplySavedPm4AlignmentToScene();
             // Full-load mode: load all tiles synchronously during loading screen
@@ -9608,7 +9478,7 @@ void main() {
 
         Vector2 pointer = new(localX, localY);
 
-        const float handlePickRadiusPixels = 22f;
+        const float handlePickRadiusPixels = 36f;
         float bestHandleDistSq = handlePickRadiusPixels * handlePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -9633,7 +9503,7 @@ void main() {
         if (pathId >= 0)
             return true;
 
-        const float linePickRadiusPixels = 12f;
+        const float linePickRadiusPixels = 24f;
         float bestLineDistSq = linePickRadiusPixels * linePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -11051,6 +10921,7 @@ void main() {
             _minimapPanOffset = new Vector2(
                 float.IsFinite(settings.MinimapPanOffsetX) ? settings.MinimapPanOffsetX : 0f,
                 float.IsFinite(settings.MinimapPanOffsetY) ? settings.MinimapPanOffsetY : 0f);
+            _savedDetailedAdtTileCountOverride = Math.Clamp(settings.DetailedAdtTileCountOverride, 0, Terrain.TerrainManager.MaxManualDetailedTileCount);
             _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
             _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
             _pm4SavedOverlayScale = new Vector3(settings.Pm4ScaleX, settings.Pm4ScaleY, settings.Pm4ScaleZ);
@@ -11186,6 +11057,7 @@ void main() {
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
+                DetailedAdtTileCountOverride = _savedDetailedAdtTileCountOverride,
                 Pm4TranslationX = _pm4SavedOverlayTranslation.X,
                 Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
                 Pm4TranslationZ = _pm4SavedOverlayTranslation.Z,
@@ -11359,6 +11231,7 @@ void main() {
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }
+        public int DetailedAdtTileCountOverride { get; set; }
         public float Pm4TranslationX { get; set; }
         public float Pm4TranslationY { get; set; }
         public float Pm4TranslationZ { get; set; }

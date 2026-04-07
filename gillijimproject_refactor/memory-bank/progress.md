@@ -1,5 +1,21 @@
 # Progress
 
+### Apr 06, 2026 - Fog distance now drives the detailed ADT footprint, and WDL far terrain can use minimap textures
+
+- followed the request to make the detailed ADT loader react to fog distance and to make distant WDL terrain less obviously placeholder at low cost
+- landed behavior:
+	- `TerrainManager.cs` now computes detailed and retained ADT targets from the active terrain fog end distance instead of keeping one fixed `16`-tile near field in all cases
+	- AOI refresh now also responds to fog-driven target changes, so changing fog does not wait for a tile-boundary crossing before the detailed footprint updates
+	- `WdlTerrainRenderer.cs` now samples per-tile minimap textures via the existing `MinimapRenderer`, while preserving a height-color fallback for missing or not-yet-uploaded minimap tiles
+	- `WorldScene.cs` and `ViewerApp.cs` now pass the viewer-owned minimap renderer into the WDL far-terrain path so the new textured fallback reuses the current cache and MD5/path-resolution logic
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed with existing warnings only
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started and reached configured game-folder loading before termination
+- proof boundary:
+	- this is compile plus startup-smoke validation only
+	- no automated tests were added or run
+	- no live visual or performance retest has been captured yet for textured WDL orientation, ADT/WDL handoff quality, or whether the fog-driven footprint actually improves the heavy-map frame time the user cares about
+
 ### Apr 06, 2026 - v0.4.7 release prep aligned version metadata, packaged docs, and GitHub Actions notes
 
 - followed the release request to cut the current train as `v0.4.7`

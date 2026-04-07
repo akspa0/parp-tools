@@ -353,12 +353,28 @@ public partial class ViewerApp
         }
 
         ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
-        if (_showFileBrowser && ImGui.CollapsingHeader("File Browser"))
-            DrawFileBrowserContent();
+        if (_showFileBrowser && ImGui.CollapsingHeader("File Browser", hasWorldLoaded ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+            DrawFileBrowserContent(hasWorldLoaded ? 260f : 0f);
 
-        ImGui.SetNextItemOpen(!hasWorldLoaded, ImGuiCond.Once);
         if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
+
+        if (_worldScene != null)
+        {
+            bool defaultOpen = _worldScene.ShowTaxi
+                || _worldScene.SelectedTaxiNodeId >= 0
+                || _worldScene.SelectedTaxiRouteId >= 0;
+            ImGui.SetNextItemOpen(defaultOpen, ImGuiCond.Once);
+            if (ImGui.CollapsingHeader("Taxi", defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+                DrawSelectedTaxiControls();
+        }
+
+        if (hasWorldLoaded)
+        {
+            ImGui.SetNextItemOpen(true, ImGuiCond.Once);
+            if (ImGui.CollapsingHeader("Runtime Stats", ImGuiTreeNodeFlags.DefaultOpen))
+                DrawRuntimeStatsPanelContent();
+        }
     }
 
     private void DrawWorldOverviewContent()
@@ -371,6 +387,44 @@ public partial class ViewerApp
                 : "World");
 
         ImGui.Text(sceneLabel);
+
+        if (TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName))
+        {
+            float camTileX = (WoWConstants.MapOrigin - _camera.Position.X) / MinimapWorldTileSize;
+            float camTileY = (WoWConstants.MapOrigin - _camera.Position.Y) / MinimapWorldTileSize;
+            ClampMinimapPanOffset();
+            int ctX = (int)MathF.Floor(camTileX);
+            int ctY = (int)MathF.Floor(camTileY);
+
+            ImGui.TextDisabled($"Tile: ({ctX}, {ctY})  Loaded: {loadedTileCount}");
+            if (_minimapRenderer != null && (_minimapRenderer.IsBusy || _minimapRenderer.UploadedTileCount > 0 || _minimapRenderer.FailedTileCount > 0))
+            {
+                float progress = _minimapRenderer.LoadingProgress;
+                string overlay = _minimapRenderer.IsBusy
+                    ? $"Minimap {progress * 100f:F0}%  {_minimapRenderer.PendingTileCount} pending"
+                    : $"Minimap ready  {_minimapRenderer.UploadedTileCount} tiles";
+                ImGui.ProgressBar(progress, new Vector2(MathF.Min(220f, ImGui.GetContentRegionAvail().X), 0f), overlay);
+                if (_minimapRenderer.FailedTileCount > 0)
+                    ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
+            }
+
+            float mapSize = MathF.Max(180f, MathF.Min(ImGui.GetContentRegionAvail().X, 280f));
+            var cursorPos = ImGui.GetCursorScreenPos();
+            if (ImGui.IsWindowHovered() && ImGui.IsMouseHoveringRect(cursorPos, cursorPos + new Vector2(mapSize, mapSize)))
+            {
+                float wheel = ImGui.GetIO().MouseWheel;
+                if (wheel != 0)
+                    _minimapZoom = Math.Clamp(_minimapZoom - wheel * 0.5f, 1f, 32f);
+            }
+
+            MinimapHelpers.RenderMinimapContent(
+                cursorPos, mapSize, existingTiles, isTileLoaded, _minimapRenderer, mapName,
+                camTileX, camTileY, _minimapZoom, _minimapPanOffset, _camera, _worldScene,
+                out float viewMinTx, out float viewMinTy, out float cellSize);
+
+            HandleMinimapInteraction("##sidebarMinimapInteraction", cursorPos, mapSize, viewMinTx, viewMinTy, cellSize);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + mapSize + 4f);
+        }
 
         if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
         {
@@ -385,12 +439,12 @@ public partial class ViewerApp
         if (_worldScene != null && (_worldScene.ShowPm4Overlay || _worldScene.Pm4LoadAttempted))
             ImGui.TextDisabled($"PM4: {_worldScene.Pm4VisibleObjectCount}/{_worldScene.Pm4ObjectCount} visible objects");
 
-        if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
-            _showMinimapWindow = !_showMinimapWindow;
-
-        ImGui.SameLine();
         if (ImGui.Button(_fullscreenMinimap ? "Exit Full Minimap" : "Full Minimap"))
             ToggleFullscreenMinimap();
+
+        ImGui.SameLine();
+        if (ImGui.Button(_showMinimapWindow ? "Hide Pop-out" : "Pop Out"))
+            _showMinimapWindow = !_showMinimapWindow;
 
         if (_pendingMinimapTeleportTile.HasValue)
             ImGui.TextDisabled($"Teleport armed: ({_pendingMinimapTeleportTile.Value.tileX}, {_pendingMinimapTeleportTile.Value.tileY}) {_pendingMinimapTeleportClickCount}/{MinimapTeleportConfirmClicks}");
@@ -483,7 +537,7 @@ public partial class ViewerApp
         }
     }
 
-    private void DrawFileBrowserContent()
+    private void DrawFileBrowserContent(float reservedFooterHeight = 0f)
     {
         if (_dataSource == null || !_dataSource.IsLoaded)
         {
@@ -551,9 +605,11 @@ public partial class ViewerApp
         ImGui.Text($"{_filteredFiles.Count} files");
         ImGui.Separator();
 
-        float remainingH = ImGui.GetContentRegionAvail().Y;
+        float remainingH = ImGui.GetContentRegionAvail().Y - reservedFooterHeight;
         if (_discoveredMaps.Count > 0)
             remainingH = MathF.Max(remainingH - 360f, 100f);
+        else
+            remainingH = MathF.Max(remainingH, 100f);
         if (ImGui.BeginChild("FileList", new Vector2(0, remainingH), true))
         {
             float rowHeight = GetUniformListRowHeight();
@@ -625,25 +681,54 @@ public partial class ViewerApp
                 ImGui.Separator();
             }
 
-            if (_workspaceMode == WorkspaceMode.Editor)
-                DrawEditorWorkspaceInspector();
-            else
-                DrawViewerToolSidebar();
+            DrawUnifiedToolSidebar();
         }
         ImGui.End();
         ImGui.PopStyleVar();
     }
 
-    private void DrawViewerToolSidebar()
+    private void DrawUnifiedToolSidebar()
+    {
+        DrawRightSidebarSection(FixedBottomDrawerTab.Workspace, "Viewer Settings", DrawUnifiedViewerSettingsSidebarContent, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.World, "Selection", DrawUnifiedSelectionSidebarContent, defaultOpen: true);
+        DrawRightSidebarSection(FixedBottomDrawerTab.Pm4, "World Tools", DrawUnifiedWorldToolsSidebarContent, _worldScene != null, defaultOpen: false);
+        DrawRightSidebarSection(FixedBottomDrawerTab.Diagnostics, "Utilities", DrawViewerDiagnosticsSidebarContent, defaultOpen: false);
+    }
+
+    private void DrawUnifiedViewerSettingsSidebarContent()
+    {
+        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+        ImGui.Separator();
+        DrawCameraControlsContent();
+
+        if (_terrainManager != null || _vlmTerrainManager != null)
+        {
+            ImGui.Separator();
+            DrawTerrainControlsAdjustmentContent();
+        }
+    }
+
+    private void DrawUnifiedSelectionSidebarContent()
     {
         DrawViewerSelectionSummary();
-        ImGui.Separator();
 
-        DrawRightSidebarSection(FixedBottomDrawerTab.Workspace, "Inspect", DrawViewerInspectSidebarContent, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.Terrain, "Terrain", DrawTerrainControlsPanelContent, _terrainManager != null || _vlmTerrainManager != null, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.Pm4, "PM4", DrawPm4WorkbenchInspector, _worldScene != null, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.World, "World", DrawWorldObjectsPanelContent, _worldScene != null, defaultOpen: true);
-        DrawRightSidebarSection(FixedBottomDrawerTab.Diagnostics, "Diagnostics", DrawViewerDiagnosticsSidebarContent, defaultOpen: true);
+        if (!string.IsNullOrWhiteSpace(_modelInfo))
+        {
+            ImGui.Separator();
+            DrawModelInfoPanelContent();
+        }
+    }
+
+    private void DrawUnifiedWorldToolsSidebarContent()
+    {
+        DrawWorldObjectsPanelContent();
+
+        if (_worldScene != null)
+        {
+            ImGui.Separator();
+            DrawPm4WorkbenchInspector();
+        }
     }
 
     private void DrawViewerSelectionSummary()
@@ -694,8 +779,9 @@ public partial class ViewerApp
 
     private void DrawViewerDiagnosticsSidebarContent()
     {
-        DrawRuntimeStatsPanelContent();
-        ImGui.Separator();
+        if (_worldScene != null && !string.IsNullOrWhiteSpace(_worldScene.RendererOptimizationHint))
+            ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
+
         ImGui.Text("Utility Panels");
         if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
             _showMinimapWindow = !_showMinimapWindow;
@@ -778,15 +864,9 @@ public partial class ViewerApp
 
     private void DrawSelectionPanelContent()
     {
-        if (_workspaceMode == WorkspaceMode.Editor)
-        {
-            ImGui.TextColored(new Vector4(0.75f, 0.88f, 1f, 1f), $"{GetWorkspaceModeLabel(_workspaceMode)} Workspace");
-            ImGui.SameLine();
-            ImGui.TextDisabled(GetEditorWorkspaceTaskLabel(_editorWorkspaceTask));
-            ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
-            ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
-            ImGui.Separator();
-        }
+        ImGui.TextDisabled($"Target: {GetWorkspaceTargetSummary()}");
+        ImGui.TextDisabled($"Save: {GetWorkspaceSaveStatusSummary()}");
+        ImGui.Separator();
 
         bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
         bool hasSelectedObject = DrawSelectedObjectSummaryContent();
@@ -813,16 +893,48 @@ public partial class ViewerApp
         ImGui.SliderFloat("Camera Speed", ref _cameraSpeed, 1f, 500f, "%.0f");
         ImGui.Text("Hold Shift for 5x boost");
         ImGui.SliderFloat("FOV", ref _fovDegrees, 20f, 90f, "%.0f°");
+
+        if (_terrainManager != null && !_terrainManager.Adapter.IsWmoBased)
+        {
+            ImGui.Separator();
+
+            bool autoAdtBudget = _terrainManager.DetailedTileCountOverride <= 0;
+            int adtDetailTiles = autoAdtBudget
+                ? _terrainManager.EffectiveDetailedTileCount
+                : _terrainManager.DetailedTileCountOverride;
+
+            if (ImGui.SliderInt("ADT Detail Tiles", ref adtDetailTiles, 1, TerrainManager.MaxManualDetailedTileCount))
+            {
+                _terrainManager.DetailedTileCountOverride = adtDetailTiles;
+                _savedDetailedAdtTileCountOverride = _terrainManager.DetailedTileCountOverride;
+            }
+
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                SaveViewerSettings();
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Auto"))
+            {
+                _terrainManager.DetailedTileCountOverride = 0;
+                _savedDetailedAdtTileCountOverride = 0;
+                SaveViewerSettings();
+            }
+
+            ImGui.TextDisabled(autoAdtBudget
+                ? $"Auto from fog: {_terrainManager.EffectiveDetailedTileCount} detailed / {_terrainManager.EffectiveRetainedTileCount} retained"
+                : $"Manual override: {_terrainManager.DetailedTileCountOverride} detailed / {_terrainManager.EffectiveRetainedTileCount} retained");
+        }
     }
 
     private bool DrawSelectedObjectSummaryContent()
     {
         bool hasSelectedPm4 = _worldScene?.HasSelectedPm4Object == true;
-        if (string.IsNullOrEmpty(_selectedObjectInfo) || hasSelectedPm4)
+        if (string.IsNullOrEmpty(_selectedObjectInfo)
+            || hasSelectedPm4
+            || _selectedObjectType.StartsWith("Taxi", StringComparison.OrdinalIgnoreCase))
             return false;
 
         ImGui.TextWrapped(_selectedObjectInfo);
-        DrawSelectedTaxiControls();
         DrawSelectedWmoControls();
         DrawSelectedSqlGameObjectAnimationControls();
         return true;
@@ -1146,23 +1258,111 @@ public partial class ViewerApp
         if (_worldScene == null)
             return;
 
-        bool hasTaxiSelection = _worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0;
-        if (!hasTaxiSelection)
+        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
+        {
+            bool showTaxi = _worldScene.ShowTaxi;
+            if (ImGui.Checkbox($"Show Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
+                _worldScene.ShowTaxi = showTaxi;
+
+            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Show All"))
+                {
+                    _worldScene.ClearTaxiSelection();
+                    ClearSelectedTaxiInfo();
+                }
+            }
+        }
+        else if (!_worldScene.TaxiLoadAttempted)
+        {
+            if (ImGui.Button("Load Taxi Paths"))
+                _worldScene.ShowTaxi = true;
+
+            ImGui.TextDisabled("Load taxi paths to enable viewport picking, route browsing, and actor overrides.");
             return;
+        }
+        else
+        {
+            ImGui.TextDisabled("Taxi Paths: none found");
+            return;
+        }
+
+        bool hasTaxiSelection = _worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0;
+        if (hasTaxiSelection && !string.IsNullOrWhiteSpace(_selectedObjectInfo))
+        {
+            ImGui.Separator();
+            ImGui.TextWrapped(_selectedObjectInfo);
+        }
 
         ImGui.Separator();
-        ImGui.Text("Taxi Route Controls");
+        ImGui.Text("Taxi Controls");
 
+        if (!hasTaxiSelection)
+            ImGui.BeginDisabled();
         if (ImGui.Button("Focus Selected Taxi"))
             FocusSelectedTaxi();
+        if (!hasTaxiSelection)
+            ImGui.EndDisabled();
 
         bool showTaxiActors = _worldScene.ShowTaxiActors;
         if (ImGui.Checkbox("Show Animated Taxi Actor", ref showTaxiActors))
             _worldScene.ShowTaxiActors = showTaxiActors;
 
         float speedMultiplier = _worldScene.TaxiActorSpeedMultiplier;
-        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, 0.1f, 8f, "%.2fx"))
+        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, 0.01f, 8f, "%.3fx"))
             _worldScene.TaxiActorSpeedMultiplier = speedMultiplier;
+
+        float scaleMultiplier = _worldScene.TaxiActorScaleMultiplier;
+        if (ImGui.SliderFloat("Taxi Actor Scale", ref scaleMultiplier, 0.05f, 5f, "%.2fx"))
+            _worldScene.TaxiActorScaleMultiplier = scaleMultiplier;
+
+        ImGui.Separator();
+        ImGui.Text($"Routes ({_worldScene.TaxiLoader.Routes.Count})");
+        if (ImGui.BeginChild("##TaxiRouteSidebarList", new Vector2(0, 220f), true))
+        {
+            float rowHeight = GetUniformListRowHeight();
+            int routeCount = _worldScene.TaxiLoader.Routes.Count;
+            GetVisibleListRange(routeCount, rowHeight, out int startIndex, out int endIndex);
+            if (startIndex > 0)
+                ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
+
+            for (int i = startIndex; i < endIndex; i++)
+            {
+                TaxiPathLoader.TaxiRoute route = _worldScene.TaxiLoader.Routes[i];
+                bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
+                string label = $"{GetTaxiRouteDisplayLabel(route.PathId)} ({route.Waypoints.Count} pts)";
+                if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                {
+                    SelectTaxiRoute(route.PathId, toggle: true);
+                    if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                        FocusSelectedTaxi();
+                }
+
+                if (ImGui.IsItemHovered())
+                {
+                    TaxiPathLoader.TaxiNode? fromNode = _worldScene.GetTaxiNode(route.FromNodeId);
+                    TaxiPathLoader.TaxiNode? toNode = _worldScene.GetTaxiNode(route.ToNodeId);
+                    ImGui.BeginTooltip();
+                    ImGui.Text($"Cost: {route.Cost}");
+                    ImGui.Text($"From: {fromNode?.Name ?? $"#{route.FromNodeId}"}");
+                    ImGui.Text($"To: {toNode?.Name ?? $"#{route.ToNodeId}"}");
+                    ImGui.Text($"Waypoints: {route.Waypoints.Count}");
+                    ImGui.Text("Single-click selects the route. Double-click focuses the camera.");
+                    ImGui.EndTooltip();
+                }
+            }
+
+            if (endIndex < routeCount)
+                ImGui.Dummy(new Vector2(0, (routeCount - endIndex) * rowHeight));
+
+            ImGui.EndChild();
+        }
+
+        if (_worldScene.SelectedTaxiNodeId >= 0)
+            ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
+        else if (_worldScene.SelectedTaxiRouteId >= 0)
+            ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
 
         if (TryGetTaxiActorOverrideRouteId(out int routeId))
         {
@@ -1270,14 +1470,9 @@ public partial class ViewerApp
             }
         }
         else if (_worldScene.SelectedTaxiNodeId >= 0)
-        {
-            ImGui.TextDisabled($"Selected taxi node: {_worldScene.SelectedTaxiNodeId}");
             ImGui.TextDisabled("No connected routes were found for this taxi node.");
-        }
-        else if (_worldScene.SelectedTaxiRouteId >= 0)
-        {
-            ImGui.TextDisabled($"Selected taxi route: {_worldScene.SelectedTaxiRouteId}");
-        }
+        else
+            ImGui.TextDisabled("Select a taxi route from the list or click one in the viewport to configure the animated actor.");
     }
 
     private void DrawSelectedWmoControls()

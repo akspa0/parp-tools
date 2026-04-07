@@ -2,6 +2,22 @@
 
 # Active Context
 
+## Apr 06, 2026 - Detailed ADT residency now follows fog distance, and WDL far terrain can sample minimap tiles instead of flat height tint only
+
+- followed the new viewer direction to stop keeping one fixed detailed ADT footprint regardless of visibility conditions and to make the WDL fallback less obviously fake at distance
+- active `src/MdxViewer` terrain behavior after this slice:
+	- `src/MdxViewer/Terrain/TerrainManager.cs` no longer hardcodes one `16`-tile detailed AOI for every fog setup
+	- the terrain AOI now derives its detailed-target and retention counts from the active terrain fog end distance, clamped into a smaller near-field window when fog is short and expanding back toward the previous larger footprint when fog allows it
+	- AOI reevaluation now also happens when the fog-driven streaming target changes, not only when the camera crosses a tile boundary or near-corner bias changes
+	- `src/MdxViewer/Terrain/WdlTerrainRenderer.cs` now supports sampling the existing minimap tile cache/loader through `MinimapRenderer`, with a height-color fallback when a tile texture is missing or not uploaded yet
+	- `src/MdxViewer/Terrain/WorldScene.cs` and `src/MdxViewer/ViewerApp.cs` now thread the existing viewer minimap renderer into the WDL far-terrain path instead of creating a separate minimap decode stack
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started and reached game-folder loading before termination
+- important boundary:
+	- this is compile plus startup-smoke validation only
+	- no live real-data retest has been captured yet for minimap texture orientation on WDL tiles, visual handoff quality between detailed ADT and WDL, or actual FPS impact on the target dense maps
+
 ## Apr 06, 2026 - v0.4.7 release prep now ships aligned docs and concise change notes through GitHub Actions
 
 - followed the release request to package the current performance and UI train as `v0.4.7` instead of leaving the repo and release workflow stuck on the older `v0.4.6.1` snapshot

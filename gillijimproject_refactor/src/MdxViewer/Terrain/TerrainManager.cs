@@ -37,12 +37,16 @@ public class TerrainManager : ISceneRenderer
     private readonly List<(int tx, int ty, float priority)> _tilesToLoadScratch = new();
     private readonly HashSet<(int tileX, int tileY)> _ignoreTerrainHolesTiles = new();
 
-    // AOI: keep a 16-tile high-detail near field and rely on WDL for distance terrain.
-    // Candidates come from a 5x5 neighborhood around the camera tile, then get ranked so
-    // the center, nearby ring, and forward-biased edge tiles stay resident first.
-    private const int DetailedTileCandidateRadius = 2;
-    private const int TargetDetailedTileCount = 16;
-    private const int TargetRetainedTileCount = 20;
+    // AOI: keep a fog-driven high-detail near field and rely on textured WDL for distance terrain.
+    // Shorter fog should shrink the detailed ADT footprint instead of always holding the same
+    // 16-tile window resident.
+    private const int MinDetailedTileCandidateRadius = 1;
+    private const int MaxDetailedTileCandidateRadius = 2;
+    private const int MinDetailedTileCount = 6;
+    private const int MaxDetailedTileCount = 16;
+    private const int MinRetainedTileCount = 10;
+    private const int MaxRetainedTileCount = 20;
+    public const int MaxManualDetailedTileCount = ((MaxDetailedTileCandidateRadius * 2) + 1) * ((MaxDetailedTileCandidateRadius * 2) + 1);
     private const int MaxGpuUploadsPerFrame = 6;
     private const double MaxGpuUploadBudgetMs = 7.0;
     private const int MaxConcurrentMpqReads = 4; // Limit concurrent MPQ reads to avoid frame drops
@@ -62,6 +66,12 @@ public class TerrainManager : ISceneRenderer
     private int _lastCameraTileY = -1;
     private int _lastCornerBiasX;
     private int _lastCornerBiasY;
+    private int _lastDetailedTileCandidateRadius = -1;
+    private int _lastTargetDetailedTileCount = -1;
+    private int _lastTargetRetainedTileCount = -1;
+    private int _detailedTileCountOverride;
+    private int _effectiveDetailedTileCount = MaxDetailedTileCount;
+    private int _effectiveRetainedTileCount = MaxRetainedTileCount;
     private Vector3 _cameraPos;
     private Vector3 _lastCameraPos;
     private Vector2 _cameraHeading;
@@ -83,6 +93,22 @@ public class TerrainManager : ISceneRenderer
     public TerrainRenderer Renderer => _terrainRenderer;
     public LiquidRenderer LiquidRenderer => _liquidRenderer;
     public string MapName { get; }
+    public int DetailedTileCountOverride
+    {
+        get => _detailedTileCountOverride;
+        set
+        {
+            int clamped = Math.Clamp(value, 0, MaxManualDetailedTileCount);
+            if (_detailedTileCountOverride == clamped)
+                return;
+
+            _detailedTileCountOverride = clamped;
+            InvalidateStreamingTargets();
+        }
+    }
+
+    public int EffectiveDetailedTileCount => _effectiveDetailedTileCount;
+    public int EffectiveRetainedTileCount => _effectiveRetainedTileCount;
     public bool IgnoreTerrainHolesGlobally
     {
         get => _ignoreTerrainHolesGlobally;
@@ -355,6 +381,14 @@ public class TerrainManager : ISceneRenderer
         float tileFracX = tileCoordX - tileX;
         float tileFracY = tileCoordY - tileY;
 
+        ComputeStreamingTargets(
+            _terrainRenderer.Lighting.FogEnd,
+            out int detailedTileCandidateRadius,
+            out int targetDetailedTileCount,
+            out int targetRetainedTileCount);
+        _effectiveDetailedTileCount = targetDetailedTileCount;
+        _effectiveRetainedTileCount = targetRetainedTileCount;
+
         int cornerBiasX = tileFracX <= CornerLoadBand ? -1 : tileFracX >= 1f - CornerLoadBand ? 1 : 0;
         int cornerBiasY = tileFracY <= CornerLoadBand ? -1 : tileFracY >= 1f - CornerLoadBand ? 1 : 0;
 
@@ -363,13 +397,19 @@ public class TerrainManager : ISceneRenderer
         if (tileX == _lastCameraTileX
             && tileY == _lastCameraTileY
             && cornerBiasX == _lastCornerBiasX
-            && cornerBiasY == _lastCornerBiasY)
+            && cornerBiasY == _lastCornerBiasY
+            && detailedTileCandidateRadius == _lastDetailedTileCandidateRadius
+            && targetDetailedTileCount == _lastTargetDetailedTileCount
+            && targetRetainedTileCount == _lastTargetRetainedTileCount)
             return;
 
         _lastCameraTileX = tileX;
         _lastCameraTileY = tileY;
         _lastCornerBiasX = cornerBiasX;
         _lastCornerBiasY = cornerBiasY;
+        _lastDetailedTileCandidateRadius = detailedTileCandidateRadius;
+        _lastTargetDetailedTileCount = targetDetailedTileCount;
+        _lastTargetRetainedTileCount = targetRetainedTileCount;
 
         int headDx = 0;
         int headDy = 0;
@@ -380,9 +420,9 @@ public class TerrainManager : ISceneRenderer
         }
 
         var rankedCandidates = new List<(int tx, int ty, float score, int chebyshev, int manhattan)>();
-        for (int dy = -DetailedTileCandidateRadius; dy <= DetailedTileCandidateRadius; dy++)
+        for (int dy = -detailedTileCandidateRadius; dy <= detailedTileCandidateRadius; dy++)
         {
-            for (int dx = -DetailedTileCandidateRadius; dx <= DetailedTileCandidateRadius; dx++)
+            for (int dx = -detailedTileCandidateRadius; dx <= detailedTileCandidateRadius; dx++)
             {
                 int tx = tileX + dx;
                 int ty = tileY + dy;
@@ -422,7 +462,7 @@ public class TerrainManager : ISceneRenderer
         var desiredTiles = new HashSet<(int, int)>();
         foreach (var candidate in rankedCandidates)
         {
-            if (desiredTiles.Count >= TargetDetailedTileCount)
+            if (desiredTiles.Count >= targetDetailedTileCount)
                 break;
 
             desiredTiles.Add((candidate.tx, candidate.ty));
@@ -431,7 +471,7 @@ public class TerrainManager : ISceneRenderer
         var unloadKeepTiles = new HashSet<(int, int)>();
         foreach (var candidate in rankedCandidates)
         {
-            if (unloadKeepTiles.Count >= TargetRetainedTileCount)
+            if (unloadKeepTiles.Count >= targetRetainedTileCount)
                 break;
 
             unloadKeepTiles.Add((candidate.tx, candidate.ty));
@@ -512,6 +552,52 @@ public class TerrainManager : ISceneRenderer
                 }
             });
         }
+    }
+
+    private void InvalidateStreamingTargets()
+    {
+        _lastDetailedTileCandidateRadius = -1;
+        _lastTargetDetailedTileCount = -1;
+        _lastTargetRetainedTileCount = -1;
+    }
+
+    private void ComputeStreamingTargets(
+        float fogEnd,
+        out int detailedTileCandidateRadius,
+        out int targetDetailedTileCount,
+        out int targetRetainedTileCount)
+    {
+        if (_detailedTileCountOverride > 0)
+        {
+            targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, 1, MaxManualDetailedTileCount);
+            detailedTileCandidateRadius = targetDetailedTileCount <= 9
+                ? MinDetailedTileCandidateRadius
+                : MaxDetailedTileCandidateRadius;
+            targetRetainedTileCount = Math.Clamp(
+                targetDetailedTileCount + 4,
+                targetDetailedTileCount,
+                MaxManualDetailedTileCount);
+            return;
+        }
+
+        float fogTileDistance = fogEnd > 0f
+            ? fogEnd / WoWConstants.ChunkSize
+            : 1.5f;
+
+        fogTileDistance = Math.Clamp(fogTileDistance, 1.25f, 4.0f);
+        targetDetailedTileCount = Math.Clamp(
+            (int)MathF.Round(fogTileDistance * 4.0f),
+            MinDetailedTileCount,
+            MaxDetailedTileCount);
+
+        detailedTileCandidateRadius = targetDetailedTileCount <= 8
+            ? MinDetailedTileCandidateRadius
+            : MaxDetailedTileCandidateRadius;
+
+        targetRetainedTileCount = Math.Clamp(
+            targetDetailedTileCount + 4,
+            MinRetainedTileCount,
+            MaxRetainedTileCount);
     }
 
     /// <summary>

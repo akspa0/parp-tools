@@ -1,5 +1,20 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 06, 2026 - The detailed ADT window is now fog-driven, and WDL fallback terrain can paint with minimap tiles
+
+- followed the request to let distant terrain stay cheap while looking less like raw colored geometry
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/TerrainManager.cs` now derives detailed and retained ADT residency from the current terrain fog end distance instead of always using one fixed `16`-tile footprint
+   - AOI refresh now triggers when that fog-driven target changes, so edited or LIT-driven fog distances can immediately reshape the detailed terrain window without waiting for the next tile crossing
+   - `Terrain/WdlTerrainRenderer.cs` now supports texturing WDL tiles from the existing minimap cache/loader and falls back to the old height-color shading when no minimap tile is ready
+   - `Terrain/WorldScene.cs` and `ViewerApp.cs` now route the viewer-owned `MinimapRenderer` into the WDL path so the far-terrain texturing reuses the current tile lookup, MD5 translate handling, and disk cache
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started and reached game-folder loading before termination
+- important boundary:
+   - this is compile plus startup-smoke validation only
+   - the next honest check is a live retest on the fixed development map to confirm minimap tile orientation on WDL, handoff quality near the fog line, and whether the smaller fog-driven detailed footprint actually helps the target scenes
+
 ## Apr 06, 2026 - v0.4.7 release prep now packages the current fixed-shell and performance train coherently
 
 - followed the request to stop treating the repo docs and release workflows like they were still on the older `v0.4.6.1` tooltip-focused snapshot

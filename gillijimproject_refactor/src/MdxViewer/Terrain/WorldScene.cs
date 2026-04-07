@@ -693,6 +693,7 @@ public class WorldScene : ISceneRenderer
     private readonly WorldRenderFrame _renderFrame = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
+    private readonly MinimapRenderer? _minimapRenderer;
     private HoveredAssetInfo? _hoveredAssetInfo;
     private TerrainAssetLoadPolicy _assetLoadPolicy = StreamingTerrainAssetLoadPolicy;
     private bool _wireframeRevealEnabled;
@@ -2474,6 +2475,7 @@ public class WorldScene : ISceneRenderer
     private bool _taxiActorClockInitialized;
     private bool _showTaxiActors = true;
     private float _taxiActorSpeedMultiplier = 1.0f;
+    private float _taxiActorScaleMultiplier = 1.0f;
     private const float TaxiActorBaseUnitsPerSecond = 650f;
     private const float TaxiActorHoverOffset = 12f;
     public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
@@ -2484,6 +2486,12 @@ public class WorldScene : ISceneRenderer
     {
         get => _taxiActorSpeedMultiplier;
         set => _taxiActorSpeedMultiplier = Math.Max(0f, value);
+    }
+
+    public float TaxiActorScaleMultiplier
+    {
+        get => _taxiActorScaleMultiplier;
+        set => _taxiActorScaleMultiplier = Math.Max(0f, value);
     }
 
     public bool IsTaxiRouteVisible(TaxiPathLoader.TaxiRoute route)
@@ -5437,6 +5445,8 @@ public class WorldScene : ISceneRenderer
                 scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
             }
 
+            scale *= _taxiActorScaleMultiplier;
+
             float routeLength = GetRouteLength(route.Waypoints);
             if (routeLength <= 1f)
                 continue;
@@ -5603,11 +5613,13 @@ public class WorldScene : ISceneRenderer
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         string? buildVersion = null,
+        MinimapRenderer? minimapRenderer = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _minimapRenderer = minimapRenderer;
         _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -5626,11 +5638,13 @@ public class WorldScene : ISceneRenderer
     public WorldScene(GL gl, TerrainManager terrainManager, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         string? buildVersion = null,
+        MinimapRenderer? minimapRenderer = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _minimapRenderer = minimapRenderer;
         _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -5673,7 +5687,7 @@ public class WorldScene : ISceneRenderer
             if (_dataSource != null)
             {
                 onStatus?.Invoke("Loading WDL terrain...");
-                _wdlTerrain = new WdlTerrainRenderer(_gl);
+                _wdlTerrain = new WdlTerrainRenderer(_gl, _minimapRenderer);
                 if (!_wdlTerrain.Load(_dataSource, _terrainManager.MapName))
                 {
                     _wdlTerrain.Dispose();
@@ -7642,8 +7656,8 @@ public class WorldScene : ISceneRenderer
 
                         if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
                         {
-                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 42f : 30f;
-                            float headSize = route.PathId == _selectedTaxiRouteId ? 6f : 4f;
+                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 48f : 38f;
+                            float headSize = route.PathId == _selectedTaxiRouteId ? 8f : 6f;
                             _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
                                 route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
                         }

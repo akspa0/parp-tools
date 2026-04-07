@@ -13,6 +13,39 @@ public partial class ViewerApp
     private const float MinimapTileCount = 64f;
     private const float MinimapWorldTileSize = WoWConstants.ChunkSize;
 
+    private bool TryGetActiveMinimapState(
+        out List<(int tx, int ty)>? existingTiles,
+        out Func<int, int, bool>? isTileLoaded,
+        out int loadedTileCount,
+        out string? mapName)
+    {
+        existingTiles = null;
+        isTileLoaded = null;
+        loadedTileCount = 0;
+        mapName = null;
+
+        if (_terrainManager != null)
+        {
+            var adapter = _terrainManager.Adapter;
+            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
+            isTileLoaded = _terrainManager.IsTileLoaded;
+            loadedTileCount = _terrainManager.LoadedTileCount;
+            mapName = _terrainManager.MapName;
+            return true;
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
+            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
+            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
+            mapName = _vlmTerrainManager.MapName;
+            return true;
+        }
+
+        return false;
+    }
+
     private void HandleMinimapInteraction(string interactionId, Vector2 cursorPos, float mapSize, float viewMinTx, float viewMinTy, float cellSize)
     {
         ImGui.SetCursorScreenPos(cursorPos);
@@ -163,14 +196,8 @@ public partial class ViewerApp
                 ImGui.TextColored(new Vector4(1f, 0.9f, 0.5f, 1f), $"  Area: {_currentAreaName}");
             }
 
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.72f, 0.84f, 1f, 1f), $"  Workspace: {GetWorkspaceModeLabel(_workspaceMode)}");
-
-            if (_workspaceMode == WorkspaceMode.Editor)
+            if (_worldScene != null || _terrainManager != null || _vlmTerrainManager != null)
             {
-                ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.72f, 1f, 0.82f, 1f), $"  Task: {GetEditorWorkspaceTaskLabel(_editorWorkspaceTask)}");
-
                 ImGui.SameLine();
                 ImGui.TextColored(new Vector4(1f, 0.9f, 0.65f, 1f), $"  Target: {GetWorkspaceTargetSummary()}");
 
@@ -215,29 +242,7 @@ public partial class ViewerApp
 
     private void DrawMinimapWindow()
     {
-        List<(int tx, int ty)>? existingTiles = null;
-        Func<int, int, bool>? isTileLoaded = null;
-        int loadedTileCount = 0;
-        string? mapName = null;
-        bool hasWorldLoaded = false;
-
-        if (_terrainManager != null)
-        {
-            var adapter = _terrainManager.Adapter;
-            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
-            isTileLoaded = _terrainManager.IsTileLoaded;
-            loadedTileCount = _terrainManager.LoadedTileCount;
-            mapName = _terrainManager.MapName;
-            hasWorldLoaded = true;
-        }
-        else if (_vlmTerrainManager != null)
-        {
-            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
-            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
-            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
-            mapName = _vlmTerrainManager.MapName;
-            hasWorldLoaded = true;
-        }
+        bool hasWorldLoaded = TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName);
 
         var io = ImGui.GetIO();
         var panel = GetShellPanelDefinition(ShellPanelId.Minimap);
@@ -354,27 +359,7 @@ public partial class ViewerApp
 
     private void DrawFullscreenMinimap()
     {
-        List<(int tx, int ty)>? existingTiles = null;
-        Func<int, int, bool>? isTileLoaded = null;
-        int loadedTileCount = 0;
-        string? mapName = null;
-
-        if (_terrainManager != null)
-        {
-            var adapter = _terrainManager.Adapter;
-            existingTiles = adapter.ExistingTiles.Select(idx => (idx / 64, idx % 64)).ToList();
-            isTileLoaded = _terrainManager.IsTileLoaded;
-            loadedTileCount = _terrainManager.LoadedTileCount;
-            mapName = _terrainManager.MapName;
-        }
-        else if (_vlmTerrainManager != null)
-        {
-            existingTiles = _vlmTerrainManager.Loader.TileCoords.ToList();
-            isTileLoaded = _vlmTerrainManager.IsTileLoaded;
-            loadedTileCount = _vlmTerrainManager.LoadedTileCount;
-            mapName = _vlmTerrainManager.MapName;
-        }
-        else return;
+        if (!TryGetActiveMinimapState(out var existingTiles, out var isTileLoaded, out int loadedTileCount, out string? mapName)) return;
 
         var io = ImGui.GetIO();
         float mapSize = MathF.Min(io.DisplaySize.X * 0.8f, io.DisplaySize.Y * 0.8f);

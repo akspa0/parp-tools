@@ -20,10 +20,16 @@ public class WdlTerrainRenderer : IDisposable
 {
     private readonly GL _gl;
     private readonly ShaderProgram _shader;
+    private readonly MinimapRenderer? _minimapRenderer;
+    private string? _mapName;
 
     private const float TileFadeOutDurationSeconds = 0.18f;
     private const float TileFadeInDurationSeconds = 0.32f;
     private const float TileShowDelaySeconds = 0.12f;
+    private const float DistanceHazeStartFactor = 0.45f;
+    private const float DistanceHazeEndFactor = 0.96f;
+    private const float DistanceHazeColorBlend = 0.92f;
+    private const float DistanceHazeOpacityFloor = 0.18f;
 
     // Per-tile GPU mesh data
     private readonly Dictionary<int, WdlTileMesh> _tileMeshes = new(); // tileIndex → mesh
@@ -37,10 +43,11 @@ public class WdlTerrainRenderer : IDisposable
     public int VisibleTiles => _tileAlphas.Values.Count(static alpha => alpha > 0.01f);
     public int HiddenTiles => _tileAlphas.Values.Count(static alpha => alpha <= 0.01f);
 
-    public WdlTerrainRenderer(GL gl)
+    public WdlTerrainRenderer(GL gl, MinimapRenderer? minimapRenderer = null)
     {
         _gl = gl;
         _shader = CreateShader();
+        _minimapRenderer = minimapRenderer;
         _lastFadeTimestamp = Stopwatch.GetTimestamp();
     }
 
@@ -49,6 +56,8 @@ public class WdlTerrainRenderer : IDisposable
     /// </summary>
     public bool Load(IDataSource dataSource, string mapDirectory)
     {
+        _mapName = mapDirectory;
+
         if (!WdlDataSourceResolver.TryReadWdlBytes(dataSource, mapDirectory, out byte[]? wdlBytes, out string? resolvedPath)
             || wdlBytes == null
             || wdlBytes.Length == 0)
@@ -129,7 +138,12 @@ public class WdlTerrainRenderer : IDisposable
         _shader.SetVec3("uFogColor", lighting.FogColor);
         _shader.SetFloat("uFogStart", lighting.FogStart);
         _shader.SetFloat("uFogEnd", lighting.FogEnd);
+        _shader.SetFloat("uDistanceHazeStartFactor", DistanceHazeStartFactor);
+        _shader.SetFloat("uDistanceHazeEndFactor", DistanceHazeEndFactor);
+        _shader.SetFloat("uDistanceHazeColorBlend", DistanceHazeColorBlend);
+        _shader.SetFloat("uDistanceHazeOpacityFloor", DistanceHazeOpacityFloor);
         _shader.SetVec3("uCameraPos", cameraPos);
+        _shader.SetInt("uMinimapTexture", 0);
 
         _gl.Disable(EnableCap.CullFace);
         _gl.Enable(EnableCap.DepthTest);
@@ -151,7 +165,14 @@ public class WdlTerrainRenderer : IDisposable
             if (frustum != null && !frustum.TestAABB(mesh.BoundsMin, mesh.BoundsMax))
                 continue;
 
+            uint minimapTexture = 0;
+            if (_minimapRenderer != null && !string.IsNullOrWhiteSpace(_mapName))
+                minimapTexture = _minimapRenderer.GetTileTexture(_mapName, mesh.TileY, mesh.TileX);
+
             _shader.SetFloat("uOpacity", alpha);
+            _shader.SetInt("uUseMinimapTexture", minimapTexture != 0 ? 1 : 0);
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, minimapTexture);
             _gl.BindVertexArray(mesh.Vao);
             _gl.DrawElements(PrimitiveType.Triangles, mesh.IndexCount, DrawElementsType.UnsignedInt, null);
         }
@@ -159,6 +180,7 @@ public class WdlTerrainRenderer : IDisposable
         _gl.Disable(EnableCap.PolygonOffsetFill);
         _gl.DepthMask(true);
         _gl.Disable(EnableCap.Blend);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
         _gl.BindVertexArray(0);
     }
 
@@ -228,8 +250,8 @@ public class WdlTerrainRenderer : IDisposable
         float tileWorldY = WoWConstants.MapOrigin - tileY * WoWConstants.ChunkSize;
         float cellSize = WoWConstants.ChunkSize / innerEdge;
 
-        // Vertex data: position(3) + normal(3) = 6 floats per vertex
-        float[] vertices = new float[totalVerts * 6];
+        // Vertex data: position(3) + normal(3) + uv(2) = 8 floats per vertex
+        float[] vertices = new float[totalVerts * 8];
         var boundsMin = new Vector3(float.MaxValue);
         var boundsMax = new Vector3(float.MinValue);
 
@@ -242,8 +264,10 @@ public class WdlTerrainRenderer : IDisposable
                 float x = tileWorldX - r * cellSize;
                 float y = tileWorldY - c * cellSize;
                 float z = tile.Heights[vi]; // Use flat Heights array
+                float u = c / (float)innerEdge;
+                float v = r / (float)innerEdge;
 
-                int offset = vi * 6;
+                int offset = vi * 8;
                 vertices[offset + 0] = x;
                 vertices[offset + 1] = y;
                 vertices[offset + 2] = z;
@@ -251,6 +275,8 @@ public class WdlTerrainRenderer : IDisposable
                 vertices[offset + 3] = 0;
                 vertices[offset + 4] = 0;
                 vertices[offset + 5] = 1;
+                vertices[offset + 6] = u;
+                vertices[offset + 7] = v;
 
                 boundsMin = Vector3.Min(boundsMin, new Vector3(x, y, z));
                 boundsMax = Vector3.Max(boundsMax, new Vector3(x, y, z));
@@ -267,14 +293,18 @@ public class WdlTerrainRenderer : IDisposable
                 float x = tileWorldX - (r + 0.5f) * cellSize;
                 float y = tileWorldY - (c + 0.5f) * cellSize;
                 float z = tile.Heights[vi]; // Use flat Heights array
+                float u = (c + 0.5f) / innerEdge;
+                float v = (r + 0.5f) / innerEdge;
 
-                int offset = vi * 6;
+                int offset = vi * 8;
                 vertices[offset + 0] = x;
                 vertices[offset + 1] = y;
                 vertices[offset + 2] = z;
                 vertices[offset + 3] = 0;
                 vertices[offset + 4] = 0;
                 vertices[offset + 5] = 1;
+                vertices[offset + 6] = u;
+                vertices[offset + 7] = v;
 
                 boundsMin = Vector3.Min(boundsMin, new Vector3(x, y, z));
                 boundsMax = Vector3.Max(boundsMax, new Vector3(x, y, z));
@@ -309,9 +339,9 @@ public class WdlTerrainRenderer : IDisposable
         for (int i = 0; i < indices.Count; i += 3)
         {
             int i0 = (int)indices[i], i1 = (int)indices[i + 1], i2 = (int)indices[i + 2];
-            var v0 = new Vector3(vertices[i0 * 6], vertices[i0 * 6 + 1], vertices[i0 * 6 + 2]);
-            var v1 = new Vector3(vertices[i1 * 6], vertices[i1 * 6 + 1], vertices[i1 * 6 + 2]);
-            var v2 = new Vector3(vertices[i2 * 6], vertices[i2 * 6 + 1], vertices[i2 * 6 + 2]);
+            var v0 = new Vector3(vertices[i0 * 8], vertices[i0 * 8 + 1], vertices[i0 * 8 + 2]);
+            var v1 = new Vector3(vertices[i1 * 8], vertices[i1 * 8 + 1], vertices[i1 * 8 + 2]);
+            var v2 = new Vector3(vertices[i2 * 8], vertices[i2 * 8 + 1], vertices[i2 * 8 + 2]);
             var normal = Vector3.Cross(v1 - v0, v2 - v0);
             normals[i0] += normal;
             normals[i1] += normal;
@@ -321,9 +351,9 @@ public class WdlTerrainRenderer : IDisposable
         {
             var n = Vector3.Normalize(normals[i]);
             if (float.IsNaN(n.X)) n = Vector3.UnitZ;
-            vertices[i * 6 + 3] = n.X;
-            vertices[i * 6 + 4] = n.Y;
-            vertices[i * 6 + 5] = n.Z;
+            vertices[i * 8 + 3] = n.X;
+            vertices[i * 8 + 4] = n.Y;
+            vertices[i * 8 + 5] = n.Z;
         }
 
         // Upload to GPU
@@ -341,13 +371,16 @@ public class WdlTerrainRenderer : IDisposable
         fixed (uint* ptr = idxArray)
             _gl.BufferData(BufferTargetARB.ElementArrayBuffer, (nuint)(idxArray.Length * sizeof(uint)), ptr, BufferUsageARB.StaticDraw);
 
-        uint stride = 6 * sizeof(float);
+        uint stride = 8 * sizeof(float);
         // Position (location 0)
         _gl.EnableVertexAttribArray(0);
         _gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, stride, (void*)0);
         // Normal (location 1)
         _gl.EnableVertexAttribArray(1);
         _gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, stride, (void*)(3 * sizeof(float)));
+        // UV (location 2)
+        _gl.EnableVertexAttribArray(2);
+        _gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)(6 * sizeof(float)));
 
         _gl.BindVertexArray(0);
 
@@ -355,7 +388,8 @@ public class WdlTerrainRenderer : IDisposable
         {
             Vao = vao, Vbo = vbo, Ebo = ebo,
             IndexCount = (uint)idxArray.Length,
-            BoundsMin = boundsMin, BoundsMax = boundsMax
+            BoundsMin = boundsMin, BoundsMax = boundsMax,
+            TileX = tileX, TileY = tileY
         };
     }
 
@@ -367,16 +401,19 @@ public class WdlTerrainRenderer : IDisposable
 #version 330 core
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec2 aTexCoord;
 
 uniform mat4 uView;
 uniform mat4 uProj;
 
 out vec3 vNormal;
 out vec3 vFragPos;
+out vec2 vTexCoord;
 
 void main() {
     vFragPos = aPos;
     vNormal = aNormal;
+    vTexCoord = aTexCoord;
     gl_Position = uProj * uView * vec4(aPos, 1.0);
 }
 ";
@@ -385,6 +422,7 @@ void main() {
 #version 330 core
 in vec3 vNormal;
 in vec3 vFragPos;
+in vec2 vTexCoord;
 
 uniform vec3 uLightDir;
 uniform vec3 uLightColor;
@@ -392,23 +430,37 @@ uniform vec3 uAmbientColor;
 uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
+uniform float uDistanceHazeStartFactor;
+uniform float uDistanceHazeEndFactor;
+uniform float uDistanceHazeColorBlend;
+uniform float uDistanceHazeOpacityFloor;
 uniform vec3 uCameraPos;
 uniform float uOpacity;
+uniform sampler2D uMinimapTexture;
+uniform int uUseMinimapTexture;
 
 out vec4 FragColor;
 
-void main() {
-    // Height-based coloring: green lowlands, brown hills, gray peaks
-    float height = vFragPos.z;
-    vec3 baseColor;
+vec3 ComputeHeightColor(float height) {
     if (height < 50.0) {
-        baseColor = mix(vec3(0.2, 0.35, 0.15), vec3(0.3, 0.5, 0.2), clamp(height / 50.0, 0.0, 1.0));
-    } else if (height < 200.0) {
+        return mix(vec3(0.2, 0.35, 0.15), vec3(0.3, 0.5, 0.2), clamp(height / 50.0, 0.0, 1.0));
+    }
+
+    if (height < 200.0) {
         float t = (height - 50.0) / 150.0;
-        baseColor = mix(vec3(0.3, 0.5, 0.2), vec3(0.5, 0.4, 0.25), t);
-    } else {
-        float t = clamp((height - 200.0) / 300.0, 0.0, 1.0);
-        baseColor = mix(vec3(0.5, 0.4, 0.25), vec3(0.6, 0.6, 0.55), t);
+        return mix(vec3(0.3, 0.5, 0.2), vec3(0.5, 0.4, 0.25), t);
+    }
+
+    float t = clamp((height - 200.0) / 300.0, 0.0, 1.0);
+    return mix(vec3(0.5, 0.4, 0.25), vec3(0.6, 0.6, 0.55), t);
+}
+
+void main() {
+    float height = vFragPos.z;
+    vec3 baseColor = ComputeHeightColor(height);
+    if (uUseMinimapTexture != 0) {
+        vec3 minimapColor = texture(uMinimapTexture, vTexCoord).rgb;
+        baseColor = mix(baseColor, minimapColor, 0.9);
     }
 
     // Lighting
@@ -416,12 +468,16 @@ void main() {
     float diff = max(dot(norm, normalize(uLightDir)), 0.0);
     vec3 litColor = baseColor * (uAmbientColor + uLightColor * diff);
 
-    // Fog
+    // WDL-only haze: start the fade earlier than the main fog and let distant tiles
+    // keep a faint silhouette by reducing opacity instead of snapping to solid dark terrain.
     float dist = length(vFragPos - uCameraPos);
-    float fogFactor = clamp((uFogEnd - dist) / (uFogEnd - uFogStart), 0.0, 1.0);
-    vec3 finalColor = mix(uFogColor, litColor, fogFactor);
+    float hazeStart = max(0.0, uFogStart * uDistanceHazeStartFactor);
+    float hazeEnd = max(hazeStart + 1.0, uFogEnd * uDistanceHazeEndFactor);
+    float haze = smoothstep(hazeStart, hazeEnd, dist);
+    vec3 finalColor = mix(litColor, uFogColor, haze * uDistanceHazeColorBlend);
+    float finalOpacity = uOpacity * mix(1.0, uDistanceHazeOpacityFloor, haze);
 
-    FragColor = vec4(finalColor, uOpacity);
+    FragColor = vec4(finalColor, finalOpacity);
 }
 ";
 
@@ -450,5 +506,6 @@ void main() {
         public uint Vao, Vbo, Ebo;
         public uint IndexCount;
         public Vector3 BoundsMin, BoundsMax;
+        public int TileX, TileY;
     }
 }
