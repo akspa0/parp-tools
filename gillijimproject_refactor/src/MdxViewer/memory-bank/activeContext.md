@@ -1,5 +1,23 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 08, 2026 - World object path-family filters now exist in the active viewer, and the filter primitive has started moving out of `WorldScene` into shared `wow-viewer` runtime
+
+- followed the approved minimap-tooling direction to make object-family filtering path-based instead of per-instance only
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now persists world-object path filters per map in `viewer_settings.json` and reapplies them when a terrain-backed world scene is loaded
+   - `ViewerApp_Sidebars.cs` now exposes an `Object Path Filters` editor in the world-object surface with enable or disable, manual prefix entry, family scope (`WMO`, `MDX`, or both), remove or clear actions, and quick-add buttons built from the currently selected object's asset-path prefixes
+   - quick-add currently uses the selected world object's resolved asset path and adds family-specific prefix filters so users can hide whole folder families of WMOs or MDXs when preparing minimap or capture passes
+   - `Terrain/WorldScene.cs` still owns the active visibility decision, but it now consumes a shared `WowViewer.Core.Runtime.World.ObjectPathFilterEntry` contract instead of keeping the filter primitive local only
+   - `wow-viewer/src/core/WowViewer.Core.Runtime/World/ObjectPathFilterEntry.cs` is now the first extracted seam from this path-filter work, with normalization and family-aware prefix matching logic intended to be reusable by future `wow-viewer` CLI minimap tooling
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-restore --filter ObjectPathFilterEntryTests` passed on Apr 08, 2026
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this lands filter UI, persistence, and the first shared extraction seam only
+   - there is still no deterministic one-PNG-per-ADT minimap export queue yet
+   - there is still no `wow-viewer` CLI minimap command surface yet
+   - the staged follow-up for the remaining minimap work now lives in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md` and `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md`
+
 ## Apr 08, 2026 - Terrain viewer fog and detail budgets now support larger aerial captures, but there is still no dedicated per-ADT minimap export workflow
 
 - followed the request to push past the old `5000` fog-distance ceiling so the viewer can hold a much larger aerial slice in one frame

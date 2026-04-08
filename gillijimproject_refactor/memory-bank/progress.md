@@ -1,5 +1,18 @@
 # Progress
 
+### Apr 08, 2026 - Added a dedicated minimap-generation continuity and prompt surface for the next wow-viewer migration slices
+
+- followed the request to stop leaving the remaining minimap work implicit after the first path-filter slice landed
+- recorded the integrated execution plan in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`
+- added `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` with ordered prompts for:
+	- deterministic one-PNG-per-ADT capture queue
+	- wow-viewer CLI minimap command surface
+	- runtime-owned minimap-generation extraction
+- updated `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`, `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`, `.github/copilot-instructions.md`, `wow-viewer/README.md`, and the relevant continuity files so fresh chats can discover the new route automatically
+- proof boundary:
+	- this is workflow-surface and continuity work only
+	- no additional minimap implementation or runtime validation landed in this slice
+
 ### Apr 07, 2026 - Standalone WMO inspection now keeps groups loaded on camera move and uses explicit highlighted labels
 
 - followed the request to replace the bad standalone-WMO sidebar workflow with an in-scene group inspection surface

@@ -1,5 +1,17 @@
 # Active Context
 
+## Apr 08, 2026 - Minimap generation now has a dedicated staged wow-viewer plan surface instead of living only as ad hoc viewer follow-up work
+
+- recorded the integrated continuity and execution surface in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`
+- added `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` plus ordered prompts for:
+	- deterministic one-PNG-per-ADT capture queue in the active viewer host
+	- wow-viewer CLI minimap command design and implementation
+	- runtime-owned minimap-generation extraction out of `ViewerApp` and `WorldScene`
+- updated the existing tool-suite and world-runtime prompt routers so future chats can route minimap work without overloading the generic `WorldScene` split prompt set
+- important boundary:
+	- this is planning and workflow continuity only
+	- no new minimap-generation implementation landed in this slice beyond the already-recorded filter and large-range viewer groundwork
+
 # Active Context
 
 ## Apr 07, 2026 - Standalone WMO viewing now keeps groups loaded during camera movement and uses explicit highlighted labels instead of text soup

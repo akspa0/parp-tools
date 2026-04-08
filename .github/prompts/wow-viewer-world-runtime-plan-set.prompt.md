@@ -28,6 +28,10 @@ Route the current request to the correct ordered prompt in `.github/prompts/wow-
 - `wow-viewer-world-runtime/04-world-scene-host-thinning.prompt.md`
 - `wow-viewer-world-runtime/05-wow-viewer-app-runtime-consumer.prompt.md`
 
+## Companion Prompt
+
+- `wow-viewer-minimap-generation-plan-set.prompt.md`
+
 ## Routing Rules
 
 - Use `01-negative-asset-lookup-suppression.prompt.md` when the problem is repeated `.skin` lookup churn, failed MDX retry spam, noisy asset logs, negative lookup caching, or unknown performance degradation from repeated asset misses.
@@ -35,6 +39,7 @@ Route the current request to the correct ordered prompt in `.github/prompts/wow-
 - Use `03-world-pass-service-extraction.prompt.md` when the problem is explicit terrain or WMO or MDX or overlay runtime service ownership, pass sequencing, or a world-pass coordinator inside `WowViewer.Core.Runtime`.
 - Use `04-world-scene-host-thinning.prompt.md` when the problem is reducing `WorldScene` to a thin host over runtime services without yet claiming a full app cutover.
 - Use `05-wow-viewer-app-runtime-consumer.prompt.md` when the problem is making `wow-viewer/src/viewer/WowViewer.App` consume the extracted world-runtime seams after the earlier slices are already real.
+- Use `wow-viewer-minimap-generation-plan-set.prompt.md` instead when the main ask is deterministic per-ADT minimap capture, wow-viewer CLI minimap jobs, or minimap-specific extraction sequencing that only touches `WorldScene` as one dependency.
 
 ## Deliverables
 

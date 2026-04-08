@@ -185,6 +185,7 @@ public partial class ViewerApp : IDisposable
     private float _pendingDataSourceWorldReloadCameraYaw = 180f;
     private float _pendingDataSourceWorldReloadCameraPitch = -20f;
     private readonly Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SavedObjectPathFilterMap> _savedObjectPathFiltersByMap = new(StringComparer.OrdinalIgnoreCase);
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
@@ -267,6 +268,7 @@ public partial class ViewerApp : IDisposable
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
     private bool _showRenderQualityWindow = false;
+    private bool _openAboutPopup;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
     private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
@@ -504,6 +506,9 @@ public partial class ViewerApp : IDisposable
     private string _taxiActorModelOverrideInput = "";
     private int _taxiActorModelOverrideInputRouteId = -1;
     private int _taxiActorModelOverrideTargetRouteId = -1;
+    private string _objectPathFilterInput = "";
+    private bool _objectPathFilterInputAppliesToWmo = true;
+    private bool _objectPathFilterInputAppliesToMdx = true;
     private string _taxiRouteFilter = "";
     private int _taxiRouteListGroupingMode = 1;
     private bool _layoutObjectPreviewMode;
@@ -5604,6 +5609,8 @@ void main() {
         if (ImGui.Checkbox("Show Selected Object Bounds", ref showSelectedObjectBounds))
             _worldScene.ShowSelectedObjectBounds = showSelectedObjectBounds;
 
+        DrawObjectPathFilterControls();
+
         ImGui.Separator();
         ImGui.Text("UniqueId Archaeology");
 
@@ -6752,6 +6759,114 @@ void main() {
 
         foreach ((int routeId, string modelPath) in overridesByRoute)
             _worldScene.SetTaxiActorModelOverride(routeId, modelPath);
+    }
+
+    private void PersistObjectPathFiltersForCurrentMap()
+    {
+        if (_worldScene == null)
+            return;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return;
+
+        List<SavedObjectPathFilterEntry> savedEntries = _worldScene.ObjectPathFilters
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix) && (entry.AppliesToWmo || entry.AppliesToMdx))
+            .OrderBy(entry => entry.PathPrefix, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => new SavedObjectPathFilterEntry
+            {
+                PathPrefix = entry.PathPrefix,
+                AppliesToWmo = entry.AppliesToWmo,
+                AppliesToMdx = entry.AppliesToMdx,
+            })
+            .ToList();
+
+        if (savedEntries.Count == 0 && _worldScene.ObjectPathFiltersEnabled)
+        {
+            _savedObjectPathFiltersByMap.Remove(currentMapName);
+            SaveViewerSettings();
+            return;
+        }
+
+        _savedObjectPathFiltersByMap[currentMapName] = new SavedObjectPathFilterMap
+        {
+            MapName = currentMapName,
+            Enabled = _worldScene.ObjectPathFiltersEnabled,
+            Filters = savedEntries,
+        };
+
+        SaveViewerSettings();
+    }
+
+    private void ApplySavedObjectPathFiltersForCurrentMap()
+    {
+        if (_worldScene == null)
+            return;
+
+        _worldScene.ClearObjectPathFilters();
+        _worldScene.ObjectPathFiltersEnabled = true;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return;
+
+        if (!_savedObjectPathFiltersByMap.TryGetValue(currentMapName, out SavedObjectPathFilterMap? savedMap))
+            return;
+
+        _worldScene.ObjectPathFiltersEnabled = savedMap.Enabled;
+        foreach (SavedObjectPathFilterEntry filter in savedMap.Filters)
+            _worldScene.AddObjectPathFilter(filter.PathPrefix, filter.AppliesToWmo, filter.AppliesToMdx);
+    }
+
+    private bool TryGetSelectedWorldObjectModelPath(out string modelPath, out bool isWmo)
+    {
+        modelPath = string.Empty;
+        isWmo = false;
+
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return false;
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        if (string.IsNullOrWhiteSpace(selected.ModelPath))
+            return false;
+
+        modelPath = selected.ModelPath.Trim().Replace('/', '\\').Trim('\\');
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return false;
+
+        isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
+        return true;
+    }
+
+    private static List<string> BuildObjectPathFilterPrefixCandidates(string modelPath)
+    {
+        var prefixes = new List<string>();
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return prefixes;
+
+        string normalizedPath = modelPath.Trim().Replace('/', '\\').Trim('\\');
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return prefixes;
+
+        string[] segments = normalizedPath.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+            return prefixes;
+
+        string currentPrefix = string.Empty;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            currentPrefix = string.IsNullOrEmpty(currentPrefix)
+                ? segments[i]
+                : $"{currentPrefix}\\{segments[i]}";
+
+            if (i < segments.Length - 1 || !Path.HasExtension(segments[i]) || segments.Length == 1)
+                prefixes.Add(currentPrefix);
+        }
+
+        if (!prefixes.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase))
+            prefixes.Add(normalizedPath);
+
+        return prefixes;
     }
 
     private bool TryApplySelectedBrowserAssetToTaxiOverride()
@@ -8750,6 +8865,7 @@ void main() {
             _renderer = _worldScene;
             ApplyLayoutObjectPreviewModeToScene();
             ApplySavedPm4AlignmentToScene();
+            ApplySavedObjectPathFiltersForCurrentMap();
             // Full-load mode: load all tiles synchronously during loading screen
             if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
             {
@@ -11216,6 +11332,38 @@ void main() {
                             }
                         }
 
+                        _savedObjectPathFiltersByMap.Clear();
+                        if (settings.ObjectPathFilters != null)
+                        {
+                            foreach (SavedObjectPathFilterMap savedMap in settings.ObjectPathFilters)
+                            {
+                                if (string.IsNullOrWhiteSpace(savedMap.MapName))
+                                    continue;
+
+                                List<SavedObjectPathFilterEntry> savedEntries = savedMap.Filters
+                                    .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix) && (entry.AppliesToWmo || entry.AppliesToMdx))
+                                    .Select(entry => new SavedObjectPathFilterEntry
+                                    {
+                                        PathPrefix = entry.PathPrefix.Trim().Replace('/', '\\').Trim('\\'),
+                                        AppliesToWmo = entry.AppliesToWmo,
+                                        AppliesToMdx = entry.AppliesToMdx,
+                                    })
+                                    .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix))
+                                    .OrderBy(entry => entry.PathPrefix, StringComparer.OrdinalIgnoreCase)
+                                    .ToList();
+
+                                if (savedEntries.Count == 0 && savedMap.Enabled)
+                                    continue;
+
+                                _savedObjectPathFiltersByMap[savedMap.MapName] = new SavedObjectPathFilterMap
+                                {
+                                    MapName = savedMap.MapName,
+                                    Enabled = savedMap.Enabled,
+                                    Filters = savedEntries,
+                                };
+                            }
+                        }
+
                         _savedShellPanelLayouts.Clear();
                         _pendingShellPanelLayoutRestore.Clear();
                         _forceApplyShellPanelLayout = settings.ShellPanelLayoutVersion != CurrentShellPanelLayoutVersion;
@@ -11319,6 +11467,23 @@ void main() {
                     .ThenBy(selection => selection.TileY)
                     .ThenBy(selection => selection.Ck24)
                     .ThenBy(selection => selection.ObjectPartId)
+                    .ToList(),
+                ObjectPathFilters = _savedObjectPathFiltersByMap.Values
+                    .OrderBy(entry => entry.MapName, StringComparer.OrdinalIgnoreCase)
+                    .Select(entry => new SavedObjectPathFilterMap
+                    {
+                        MapName = entry.MapName,
+                        Enabled = entry.Enabled,
+                        Filters = entry.Filters
+                            .OrderBy(filter => filter.PathPrefix, StringComparer.OrdinalIgnoreCase)
+                            .Select(filter => new SavedObjectPathFilterEntry
+                            {
+                                PathPrefix = filter.PathPrefix,
+                                AppliesToWmo = filter.AppliesToWmo,
+                                AppliesToMdx = filter.AppliesToMdx,
+                            })
+                            .ToList(),
+                    })
                     .ToList(),
                 ShellPanelLayouts = _savedShellPanelLayouts.Values
                     .OrderBy(layout => layout.PanelId)
@@ -11529,6 +11694,7 @@ void main() {
         public float Pm4YawDegrees { get; set; }
         public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
         public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
+        public List<SavedObjectPathFilterMap> ObjectPathFilters { get; set; } = new();
         public List<SavedShellPanelLayout> ShellPanelLayouts { get; set; } = new();
     }
 
@@ -11553,6 +11719,20 @@ void main() {
         public string ModelName { get; set; } = "";
         public string ModelPath { get; set; } = "";
         public string EvidenceSource { get; set; } = "";
+    }
+
+    private sealed class SavedObjectPathFilterMap
+    {
+        public string MapName { get; set; } = "";
+        public bool Enabled { get; set; } = true;
+        public List<SavedObjectPathFilterEntry> Filters { get; set; } = new();
+    }
+
+    private sealed class SavedObjectPathFilterEntry
+    {
+        public string PathPrefix { get; set; } = "";
+        public bool AppliesToWmo { get; set; }
+        public bool AppliesToMdx { get; set; }
     }
 
     private sealed class KnownGoodClientPath

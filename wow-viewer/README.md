@@ -608,6 +608,8 @@ Current Copilot continuity surface:
 - Use `.github/prompts/wow-viewer-editor-plan-set.prompt.md` when the ask is the broader viewer-to-editor transition, including PM4 `MPRL`-assisted terrain conform, saved object choices, moved-object persistence, map save ownership, or viewer-vs-editor workspace routing.
 - Use `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md` when the ask is planning the first true terrain or object editing or dirty-map or save pipeline slice.
 - Use `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md` when the ask is planning viewer and editor workspace presets, editor task clustering, and panel reorganization.
+- Use `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` when the ask is deterministic one-PNG-per-ADT capture, path-family-filtered minimap output, wow-viewer CLI minimap generation, or minimap-driven `WorldScene` extraction sequencing.
+- Minimap-generation continuity now also lives in `../gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`.
 - editor continuity is now also recorded in `../gillijimproject_refactor/plans/wow_viewer_editor_plan_2026-04-03.md`.
 - Shared non-PM4 continuity is now also recorded in `../gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`.
 - Forward-maintenance rule:

@@ -541,6 +541,7 @@ public class WorldScene : ISceneRenderer
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
     private bool _objectFogEnabled = true;
+    private bool _objectPathFiltersEnabled = true;
     private bool _limitHoveredAssetRange = true;
     private bool _useDynamicHoveredAssetRange = false;
     private bool _showSelectedObjectBounds = true;
@@ -712,6 +713,7 @@ public class WorldScene : ISceneRenderer
     private int _uniqueIdFilterMin = -1;
     private int _uniqueIdFilterMax = -1;
     private (int tileX, int tileY)? _uniqueIdFilterTile;
+    private readonly List<ObjectPathFilterEntry> _objectPathFilters = new();
 
     // PM4 debug overlay
     private const int Pm4MaxLinesTotal = int.MaxValue;
@@ -853,6 +855,8 @@ public class WorldScene : ISceneRenderer
     public bool ObjectsVisible { get => _objectsVisible; set => _objectsVisible = value; }
     public bool WmosVisible { get => _wmosVisible; set => _wmosVisible = value; }
     public bool DoodadsVisible { get => _doodadsVisible; set => _doodadsVisible = value; }
+    public bool ObjectPathFiltersEnabled { get => _objectPathFiltersEnabled; set => _objectPathFiltersEnabled = value; }
+    public IReadOnlyList<ObjectPathFilterEntry> ObjectPathFilters => _objectPathFilters;
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
     public float HoveredAssetMaxDistance
     {
@@ -909,6 +913,38 @@ public class WorldScene : ISceneRenderer
         _uniqueIdFilterEnabled = false;
         _uniqueIdFilterMin = -1;
         _uniqueIdFilterMax = -1;
+    }
+
+    public bool AddObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
+    {
+        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
+        if (string.IsNullOrWhiteSpace(normalizedPrefix) || (!appliesToWmo && !appliesToMdx))
+            return false;
+
+        ObjectPathFilterEntry entry = new(normalizedPrefix, appliesToWmo, appliesToMdx);
+        if (_objectPathFilters.Contains(entry))
+            return false;
+
+        _objectPathFilters.Add(entry);
+        _objectPathFilters.Sort(static (left, right) => string.Compare(left.PathPrefix, right.PathPrefix, StringComparison.OrdinalIgnoreCase));
+        return true;
+    }
+
+    public bool RemoveObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
+    {
+        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
+        if (string.IsNullOrWhiteSpace(normalizedPrefix))
+            return false;
+
+        return _objectPathFilters.RemoveAll(entry =>
+            string.Equals(entry.PathPrefix, normalizedPrefix, StringComparison.OrdinalIgnoreCase)
+            && entry.AppliesToWmo == appliesToWmo
+            && entry.AppliesToMdx == appliesToMdx) > 0;
+    }
+
+    public void ClearObjectPathFilters()
+    {
+        _objectPathFilters.Clear();
     }
 
     public bool TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount)
@@ -7260,6 +7296,9 @@ public class WorldScene : ISceneRenderer
 
     private bool ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst)
     {
+        if (ShouldHideObjectInstanceByPathFilter(inst))
+            return true;
+
         if (!_uniqueIdFilterEnabled
             || _uniqueIdFilterMin < 0
             || _uniqueIdFilterMax < 0
@@ -7272,6 +7311,25 @@ public class WorldScene : ISceneRenderer
         int minUniqueId = Math.Min(_uniqueIdFilterMin, _uniqueIdFilterMax);
         int maxUniqueId = Math.Max(_uniqueIdFilterMin, _uniqueIdFilterMax);
         return inst.UniqueId < minUniqueId || inst.UniqueId > maxUniqueId;
+    }
+
+    private bool ShouldHideObjectInstanceByPathFilter(in ObjectInstance inst)
+    {
+        if (!_objectPathFiltersEnabled || _objectPathFilters.Count == 0 || string.IsNullOrWhiteSpace(inst.ModelPath))
+            return false;
+
+        string normalizedPath = ObjectPathFilterEntry.NormalizePrefix(inst.ModelPath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return false;
+
+        for (int i = 0; i < _objectPathFilters.Count; i++)
+        {
+            ObjectPathFilterEntry entry = _objectPathFilters[i];
+            if (entry.MatchesModelPath(normalizedPath))
+                return true;
+        }
+
+        return false;
     }
 
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)

@@ -9,6 +9,12 @@
   - `MdxViewer` currently consumes that seam successfully
   - slice 01 (negative lookup suppression) has meaningful compatibility-path progress in `MdxViewer`, but the full runtime extraction sequence is still open
 
+## Companion Plan
+
+- minimap-generation-specific sequencing now lives in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`
+- use `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` when the main ask is deterministic per-ADT capture, wow-viewer CLI minimap jobs, or minimap-specific extraction seams that only touch `WorldScene` as one dependency
+- keep this plan focused on the broader staged world-runtime split when minimap output is not the primary problem
+
 ## Apr 03, 2026 Status Snapshot
 
 - slice 01 (negative asset lookup suppression): partial
