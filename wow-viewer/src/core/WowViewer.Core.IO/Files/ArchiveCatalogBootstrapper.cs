@@ -95,6 +95,8 @@ public static class ArchiveCatalogBootstrapper
         }
 
         IReadOnlyList<string> knownFiles = archiveCatalog.GetAllKnownFiles();
+        IReadOnlyList<string> validatedExternalEntries = FilterEntriesToKnownFiles(knownFiles, externalEntries);
+        IReadOnlyList<string> validatedCachedEntries = FilterEntriesToKnownFiles(knownFiles, cachedEntries);
 
         if (options.PersistListfileCache &&
             !string.IsNullOrWhiteSpace(options.ListfileCacheKey) &&
@@ -105,14 +107,14 @@ public static class ArchiveCatalogBootstrapper
                 options.ListfileCacheKey,
                 roots,
                 internalFiles,
-                externalEntries);
+                validatedExternalEntries);
         }
 
         return new ArchiveCatalogBootstrapResult(
             internalFiles,
             knownFiles,
-            externalEntries,
-            cachedEntries,
+            validatedExternalEntries,
+            validatedCachedEntries,
             options.ListfileCacheKey,
             cachePath);
     }
@@ -140,5 +142,31 @@ public static class ArchiveCatalogBootstrapper
         }
 
         return entries;
+    }
+
+    private static IReadOnlyList<string> FilterEntriesToKnownFiles(
+        IReadOnlyList<string> knownFiles,
+        IReadOnlyList<string> candidateEntries)
+    {
+        if (knownFiles.Count == 0 || candidateEntries.Count == 0)
+            return Array.Empty<string>();
+
+        HashSet<string> knownFileSet = new(knownFiles, StringComparer.OrdinalIgnoreCase);
+        List<string> validated = [];
+        HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string entry in candidateEntries)
+        {
+            string normalized = entry.Replace('/', '\\').Trim();
+            if (string.IsNullOrWhiteSpace(normalized))
+                continue;
+
+            if (!knownFileSet.Contains(normalized) || !seen.Add(normalized))
+                continue;
+
+            validated.Add(normalized);
+        }
+
+        return validated;
     }
 }

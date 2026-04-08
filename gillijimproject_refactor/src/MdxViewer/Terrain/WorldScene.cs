@@ -551,7 +551,7 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 5000f; // Hard ceiling for very small doodads when fog allows farther visibility
+    private const float DoodadCullDistance = 16000f; // Hard ceiling for very small doodads when fog allows farther visibility
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
@@ -570,7 +570,7 @@ public class WorldScene : ISceneRenderer
     private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
-    private const float MaxWorldObjectViewDistance = 8192f;
+    private const float MaxWorldObjectViewDistance = 20000f;
     private const float MaxWorldObjectViewDistanceSq = MaxWorldObjectViewDistance * MaxWorldObjectViewDistance;
 
     private readonly record struct TerrainAssetLoadPolicy(
@@ -857,7 +857,7 @@ public class WorldScene : ISceneRenderer
     public float HoveredAssetMaxDistance
     {
         get => _hoveredAssetMaxDistance;
-        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, 5000f);
+        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, MaxWorldObjectViewDistance);
     }
     public float EffectiveHoveredAssetMaxDistance => ComputeEffectiveHoveredAssetMaxDistance();
     public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
@@ -8844,7 +8844,7 @@ public class WorldScene : ISceneRenderer
         if (!_useDynamicHoveredAssetRange)
             return _hoveredAssetMaxDistance;
 
-        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, 2000f);
+        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, MaxWorldObjectViewDistance);
         return Math.Min(_hoveredAssetMaxDistance, fogDrivenDistance);
     }
 

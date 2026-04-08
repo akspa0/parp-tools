@@ -39,13 +39,13 @@ public class TerrainManager : ISceneRenderer
 
     // AOI: keep a fog-driven high-detail near field and rely on textured WDL for distance terrain.
     // Shorter fog should shrink the detailed ADT footprint instead of always holding the same
-    // 16-tile window resident.
+    // high-detail footprint resident.
     private const int MinDetailedTileCandidateRadius = 1;
-    private const int MaxDetailedTileCandidateRadius = 2;
+    private const int MaxDetailedTileCandidateRadius = 4;
     private const int MinDetailedTileCount = 6;
-    private const int MaxDetailedTileCount = 16;
+    private const int MaxDetailedTileCount = 25;
     private const int MinRetainedTileCount = 10;
-    private const int MaxRetainedTileCount = 20;
+    private const int MaxRetainedTileCount = 36;
     public const int MaxManualDetailedTileCount = ((MaxDetailedTileCandidateRadius * 2) + 1) * ((MaxDetailedTileCandidateRadius * 2) + 1);
     private const int MaxGpuUploadsPerFrame = 6;
     private const double MaxGpuUploadBudgetMs = 7.0;
@@ -570,9 +570,7 @@ public class TerrainManager : ISceneRenderer
         if (_detailedTileCountOverride > 0)
         {
             targetDetailedTileCount = Math.Clamp(_detailedTileCountOverride, 1, MaxManualDetailedTileCount);
-            detailedTileCandidateRadius = targetDetailedTileCount <= 9
-                ? MinDetailedTileCandidateRadius
-                : MaxDetailedTileCandidateRadius;
+            detailedTileCandidateRadius = ComputeDetailedTileCandidateRadius(targetDetailedTileCount);
             targetRetainedTileCount = Math.Clamp(
                 targetDetailedTileCount + 4,
                 targetDetailedTileCount,
@@ -584,20 +582,31 @@ public class TerrainManager : ISceneRenderer
             ? fogEnd / WoWConstants.ChunkSize
             : 1.5f;
 
-        fogTileDistance = Math.Clamp(fogTileDistance, 1.25f, 4.0f);
+        fogTileDistance = Math.Clamp(fogTileDistance, 1.25f, 6.25f);
         targetDetailedTileCount = Math.Clamp(
             (int)MathF.Round(fogTileDistance * 4.0f),
             MinDetailedTileCount,
             MaxDetailedTileCount);
 
-        detailedTileCandidateRadius = targetDetailedTileCount <= 8
-            ? MinDetailedTileCandidateRadius
-            : MaxDetailedTileCandidateRadius;
+        detailedTileCandidateRadius = ComputeDetailedTileCandidateRadius(targetDetailedTileCount);
 
         targetRetainedTileCount = Math.Clamp(
             targetDetailedTileCount + 4,
             MinRetainedTileCount,
             MaxRetainedTileCount);
+    }
+
+    private static int ComputeDetailedTileCandidateRadius(int tileCount)
+    {
+        if (tileCount <= 0)
+            return MinDetailedTileCandidateRadius;
+
+        int sideLength = (int)MathF.Ceiling(MathF.Sqrt(tileCount));
+        if ((sideLength & 1) == 0)
+            sideLength++;
+
+        int radius = (sideLength - 1) / 2;
+        return Math.Clamp(radius, MinDetailedTileCandidateRadius, MaxDetailedTileCandidateRadius);
     }
 
     /// <summary>

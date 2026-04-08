@@ -1,5 +1,34 @@
 # Progress
 
+### Apr 07, 2026 - Standalone WMO inspection now keeps groups loaded on camera move and uses explicit highlighted labels
+
+- followed the request to replace the bad standalone-WMO sidebar workflow with an in-scene group inspection surface
+- landed behavior:
+	- `src/MdxViewer/Rendering/WmoRenderer.cs` now exposes render-group bounds, names, colors, and visibility helpers for standalone WMOs
+	- `src/MdxViewer/ViewerApp.cs` now calls a new standalone WMO overlay path immediately after the WMO render pass
+	- `src/MdxViewer/Rendering/WmoRenderer.cs` now disables runtime group culling for standalone inspection WMOs, so camera movement no longer unloads visible groups
+	- `src/MdxViewer/ViewerApp_WmoGroups.cs` now draws color-coded group boxes and mouse-driven select/toggle/isolate interactions for standalone WMOs while rendering large in-scene labels only for explicitly highlighted groups
+	- `src/MdxViewer/ViewerApp_Sidebars.cs` now adds a compact standalone WMO group control block with overlay toggles plus `Hide/Show`, `Highlight Label` or `Remove Label`, `Isolate`, `Show All`, `Clear Labels`, `Clear Selection`, and `Frame` actions for the current group
+	- `src/MdxViewer/ViewerApp.cs` WMO converter dialog now uses an explicit output-folder field with browse support and no longer exposes the dead `Extended` mode
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now removes the dead `--extended` / `--mode` path from `convert-wmo` and keeps the maintained converter as the only active CLI route
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 07, 2026 with existing workspace warnings only
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 07, 2026 with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run
+	- no live standalone-WMO runtime retest has been captured yet, so highlighted-label readability and interaction feel are still unproven in a real session
+
+### Apr 07, 2026 - Fixed the active `MdxViewer` UI-to-scene input leak at the event/capture seam
+
+- moved scene mouse-wheel handling out of the raw Silk input callback and into the per-frame update path after ImGui capture state is refreshed
+- added a consistent scene keyboard gate so UI text/keyboard focus blocks chunk clipboard shortcuts, chrome hotkeys, minimap toggle, animation stepping, and free-fly movement
+- tightened scene mouse blocking so hovered or active ImGui UI capture wins by default instead of only blocking non-viewport sidebars
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug -nologo '-clp:ErrorsOnly;Summary'` passed on Apr 07, 2026 with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run
+	- no live interaction retest has been captured yet for the original scroll/keyboard leakage bug
+
 ### Apr 07, 2026 - Landed the first pre-alpha UI slice as a persisted `MdxViewer` theme system
 
 - followed the requested `3,2,1` order by doing theme infrastructure before paperdoll or shell rewrite work

@@ -108,6 +108,36 @@ public sealed class ArchiveCatalogBootstrapperTests
         }
     }
 
+    [Fact]
+    public void Bootstrap_FiltersExternalEntriesToArchiveBackedKnownFiles()
+    {
+        string tempFile = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllLines(tempFile,
+            [
+                "42;World\\Maps\\Azeroth\\Azeroth_0_0_tex0.adt",
+                "43;Creature\\Wolf\\wolf.mdx",
+            ]);
+
+            FilteringFakeArchiveCatalog archiveCatalog = new(
+                internalFiles: [],
+                knownFiles: ["World\\Maps\\Azeroth\\Azeroth_0_0_tex0.adt"]);
+
+            ArchiveCatalogBootstrapResult result = ArchiveCatalogBootstrapper.Bootstrap(
+                archiveCatalog,
+                ["I:/fake/game"],
+                tempFile);
+
+            Assert.Equal(["World\\Maps\\Azeroth\\Azeroth_0_0_tex0.adt"], result.ExternalListfileEntries);
+            Assert.DoesNotContain("Creature\\Wolf\\wolf.mdx", result.AllFiles);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
     private sealed class FakeArchiveCatalog : IArchiveCatalog
     {
         private readonly IReadOnlyList<string> _internalFiles;
@@ -151,6 +181,42 @@ public sealed class ArchiveCatalogBootstrapperTests
         }
 
         public bool FileExists(string virtualPath) => false;
+
+        public byte[]? ReadFile(string virtualPath) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class FilteringFakeArchiveCatalog : IArchiveCatalog
+    {
+        private readonly IReadOnlyList<string> _internalFiles;
+        private readonly IReadOnlySet<string> _knownFiles;
+
+        public FilteringFakeArchiveCatalog(IReadOnlyList<string> internalFiles, IReadOnlyList<string> knownFiles)
+        {
+            _internalFiles = internalFiles;
+            _knownFiles = new HashSet<string>(knownFiles, StringComparer.OrdinalIgnoreCase);
+        }
+
+        public void LoadArchives(IEnumerable<string> searchPaths)
+        {
+        }
+
+        public void LoadListfile(string path)
+        {
+        }
+
+        public void LoadListfileEntries(IEnumerable<string> entries)
+        {
+        }
+
+        public IReadOnlyList<string> ExtractInternalListfiles() => _internalFiles;
+
+        public IReadOnlyList<string> GetAllKnownFiles() => _knownFiles.ToArray();
+
+        public bool FileExists(string virtualPath) => _knownFiles.Contains(virtualPath);
 
         public byte[]? ReadFile(string virtualPath) => null;
 

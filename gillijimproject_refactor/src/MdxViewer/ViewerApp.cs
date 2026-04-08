@@ -164,10 +164,14 @@ public partial class ViewerApp : IDisposable
         new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
         new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
     };
+    private const float MaxTerrainFogDistance = 20000f;
+    private const float MinTerrainFarPlane = 6000f;
+    private const float TerrainFarPlanePadding = 1024f;
+    private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
+
     private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
-    private bool _openAboutPopup;
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
     private int _currentMapId = -1; // MapID of the currently loaded world
@@ -211,8 +215,6 @@ public partial class ViewerApp : IDisposable
     private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
-    private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
-    private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
     private const int CurrentShellPanelLayoutVersion = 3;
     private const int MinimapTeleportConfirmClicks = 3;
     private const float MinimapClickMovementThresholdPixels = 3f;
@@ -251,6 +253,7 @@ public partial class ViewerApp : IDisposable
     private float _lastMouseX, _lastMouseY;
     private bool _mouseDown;
     private bool _mouseOverViewport;
+    private float _pendingSceneMouseWheelDelta;
 
     // UI state
     private bool _showFileBrowser = true;
@@ -392,6 +395,11 @@ public partial class ViewerApp : IDisposable
     private ChunkClipboardSet? _chunkClipboardSet;
     private bool _chunkClipboardShowOverlay = true;
     private Terrain.BoundingBoxRenderer? _editorOverlayBb;
+    private bool _standaloneWmoGroupOverlayEnabled = true;
+    private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
+    private int _hoveredStandaloneWmoGroupIndex = -1;
+    private int _selectedStandaloneWmoGroupIndex = -1;
+    private readonly HashSet<int> _highlightedStandaloneWmoGroupIndices = new();
 
     private sealed class HeightmapMetadata
     {
@@ -614,7 +622,6 @@ public partial class ViewerApp : IDisposable
     // WMO Converter state
     private bool _showWmoConverterDialog = false;
     private int _wmoConvertDirection = 0; // 0 = Alpha(v14/v16)→LK(v17), 1 = LK(v17)→Alpha(v14)
-    private bool _wmoConvertExtended = false;
     private string _wmoConvertSourcePath = "";
     private string _wmoConvertOutputPath = "";
     private bool _wmoConvertCopyTextures = true;
@@ -758,12 +765,7 @@ public partial class ViewerApp : IDisposable
             };
             mouse.Scroll += (_, scroll) =>
             {
-                if (CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
-                {
-                    // Free-fly: scroll moves camera forward/back
-                    float speed = 5f * scroll.Y;
-                    _camera.Move(speed, 0, 0, 1f);
-                }
+                _pendingSceneMouseWheelDelta += scroll.Y;
             };
         }
 
@@ -883,6 +885,7 @@ public partial class ViewerApp : IDisposable
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         _imGui.Update((float)dt);
         FlushPendingImGuiMouseButtonEvents();
+        HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
         UpdateTaxiRideCamera();
         _minimapRenderer?.ProcessPendingLoads(
@@ -933,20 +936,45 @@ public partial class ViewerApp : IDisposable
     private bool _rightArrowWasPressed = false;
     private bool _spaceWasPressed = false;
 
+    private void HandleSceneMouseWheelInput()
+    {
+        if (MathF.Abs(_pendingSceneMouseWheelDelta) <= float.Epsilon)
+            return;
+
+        float scrollDelta = _pendingSceneMouseWheelDelta;
+        _pendingSceneMouseWheelDelta = 0f;
+
+        if (!CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+            return;
+
+        _camera.Move(5f * scrollDelta, 0f, 0f, 1f);
+    }
+
+    private bool CanSceneConsumeKeyboardInput()
+    {
+        return !IsSceneKeyboardCaptureBlocked();
+    }
+
+    private bool IsSceneKeyboardCaptureBlocked()
+    {
+        ImGuiIOPtr io = ImGui.GetIO();
+        return io.WantCaptureKeyboard || io.WantTextInput;
+    }
+
     private void HandleKeyboardInput(float dt)
     {
         if (_input.Keyboards.Count == 0) return;
         var kb = _input.Keyboards[0];
+        bool canSceneConsumeKeyboard = CanSceneConsumeKeyboardInput();
 
-        if (_chunkToolEnabled && !ImGui.GetIO().WantCaptureKeyboard)
+        bool ctrlDown = kb.IsKeyPressed(Key.ControlLeft) || kb.IsKeyPressed(Key.ControlRight);
+        bool cDown = kb.IsKeyPressed(Key.C);
+        bool vDown = kb.IsKeyPressed(Key.V);
+        bool ctrlCDown = ctrlDown && cDown;
+        bool ctrlVDown = ctrlDown && vDown;
+
+        if (_chunkToolEnabled && canSceneConsumeKeyboard)
         {
-            bool ctrlDown = kb.IsKeyPressed(Key.ControlLeft) || kb.IsKeyPressed(Key.ControlRight);
-            bool cDown = kb.IsKeyPressed(Key.C);
-            bool vDown = kb.IsKeyPressed(Key.V);
-
-            bool ctrlCDown = ctrlDown && cDown;
-            bool ctrlVDown = ctrlDown && vDown;
-
             var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             if (terrainRenderer != null)
             {
@@ -956,18 +984,18 @@ public partial class ViewerApp : IDisposable
                 if (ctrlVDown && !_chunkClipboardCtrlVWasPressed)
                     ExecuteChunkClipboardPaste(terrainRenderer);
             }
-
-            _chunkClipboardCtrlCWasPressed = ctrlCDown;
-            _chunkClipboardCtrlVWasPressed = ctrlVDown;
         }
 
+        _chunkClipboardCtrlCWasPressed = ctrlCDown;
+        _chunkClipboardCtrlVWasPressed = ctrlVDown;
+
         bool tabPressed = kb.IsKeyPressed(Key.Tab);
-        if (!ImGui.GetIO().WantTextInput && tabPressed && !_tabKeyWasPressed)
+        if (canSceneConsumeKeyboard && tabPressed && !_tabKeyWasPressed)
             _hideUiChrome = !_hideUiChrome;
         _tabKeyWasPressed = tabPressed;
 
         bool pPressed = kb.IsKeyPressed(Key.P);
-        if (!ImGui.GetIO().WantTextInput && pPressed && !_pKeyWasPressed)
+        if (canSceneConsumeKeyboard && pPressed && !_pKeyWasPressed)
         {
             _showRightSidebar = true;
             _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
@@ -977,7 +1005,7 @@ public partial class ViewerApp : IDisposable
         _pKeyWasPressed = pPressed;
 
         bool iPressed = kb.IsKeyPressed(Key.I);
-        if (!ImGui.GetIO().WantTextInput && iPressed && !_iKeyWasPressed)
+        if (canSceneConsumeKeyboard && iPressed && !_iKeyWasPressed)
         {
             _showRightSidebar = !_showRightSidebar;
             if (_showRightSidebar)
@@ -987,7 +1015,7 @@ public partial class ViewerApp : IDisposable
 
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
-        if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
+        if (canSceneConsumeKeyboard && mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
             ToggleFullscreenMinimap();
         _mKeyWasPressed = mPressed;
 
@@ -1005,7 +1033,7 @@ public partial class ViewerApp : IDisposable
                 
                 // Left arrow: step backward
                 bool leftPressed = kb.IsKeyPressed(Key.Left);
-                if (leftPressed && !_leftArrowWasPressed)
+                if (canSceneConsumeKeyboard && leftPressed && !_leftArrowWasPressed)
                 {
                     animator.IsPlaying = false;
                     animator.StepToPrevKeyframe();
@@ -1014,7 +1042,7 @@ public partial class ViewerApp : IDisposable
                 
                 // Right arrow: step forward
                 bool rightPressed = kb.IsKeyPressed(Key.Right);
-                if (rightPressed && !_rightArrowWasPressed)
+                if (canSceneConsumeKeyboard && rightPressed && !_rightArrowWasPressed)
                 {
                     animator.IsPlaying = false;
                     animator.StepToNextKeyframe();
@@ -1023,7 +1051,7 @@ public partial class ViewerApp : IDisposable
                 
                 // Spacebar: toggle play/pause
                 bool spacePressed = kb.IsKeyPressed(Key.Space);
-                if (spacePressed && !_spaceWasPressed)
+                if (canSceneConsumeKeyboard && spacePressed && !_spaceWasPressed)
                 {
                     animator.IsPlaying = !animator.IsPlaying;
                 }
@@ -1031,7 +1059,7 @@ public partial class ViewerApp : IDisposable
             }
         }
 
-        if (_taxiRideCameraEnabled)
+        if (_taxiRideCameraEnabled || !canSceneConsumeKeyboard)
             return;
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
@@ -1119,7 +1147,7 @@ public partial class ViewerApp : IDisposable
                 ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
                 : (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
-            float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+            float farPlane = GetSceneFarPlane();
             var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
             // Update terrain AOI before rendering
@@ -1187,6 +1215,7 @@ public partial class ViewerApp : IDisposable
                 float fogEnd = farPlane;
                 wmoR.RenderWithTransform(Matrix4x4.Identity, view, proj,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
+                DrawStandaloneWmoGroupOverlay(wmoR, view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
             }
             else
             {
@@ -3621,7 +3650,7 @@ void main() {
 
         float aspect = vpW / Math.Max(vpH, 1f);
         var view = _camera.GetViewMatrix();
-        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        float farPlane = GetSceneFarPlane();
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
         float localX = mouseX - vpX;
@@ -3688,6 +3717,27 @@ void main() {
         }
 
         return false;
+    }
+
+    private float GetSceneFarPlane()
+    {
+        if (_terrainManager != null)
+        {
+            return Math.Clamp(
+                MathF.Max(_terrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
+                MinTerrainFarPlane,
+                MaxTerrainFarPlane);
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            return Math.Clamp(
+                MathF.Max(_vlmTerrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
+                MinTerrainFarPlane,
+                MaxTerrainFarPlane);
+        }
+
+        return 10000f;
     }
 
     private bool TrySampleTerrainHeightLoaded(TerrainRenderer renderer, float worldX, float worldY, out float height, out TerrainRenderer.TerrainChunkInfo info)
@@ -4193,15 +4243,7 @@ void main() {
             ImGui.SameLine();
             ImGui.RadioButton("LK WMO → Alpha WMO", ref _wmoConvertDirection, 1);
             ImGui.Spacing();
-
-            ImGui.Text("Mode:");
-            bool isBasic = !_wmoConvertExtended;
-            if (ImGui.RadioButton("Basic", isBasic)) _wmoConvertExtended = false;
-            ImGui.SameLine();
-            bool isExtended = _wmoConvertExtended;
-            if (ImGui.RadioButton("Extended", isExtended)) _wmoConvertExtended = true;
-            if (_wmoConvertExtended)
-                ImGui.TextWrapped("Extended mode is experimental. Output generation currently falls back to the maintained converter path.");
+            ImGui.TextWrapped("The maintained converter path is now the only active path in this dialog.");
 
             ImGui.Spacing();
             ImGui.Separator();
@@ -4213,6 +4255,8 @@ void main() {
                 && string.IsNullOrEmpty(_wmoConvertSourcePath))
             {
                 _wmoConvertSourcePath = _loadedFilePath;
+                if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                    _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
             }
 
             ImGui.Text("Source WMO:");
@@ -4223,19 +4267,41 @@ void main() {
             {
                 string? initDir = !string.IsNullOrEmpty(_wmoConvertSourcePath) ? Path.GetDirectoryName(_wmoConvertSourcePath) : null;
                 var picked = ShowFileDialogSTA("Select WMO file", "WMO Files (*.wmo)|*.wmo|All Files (*.*)|*.*", initDir);
-                if (picked != null) _wmoConvertSourcePath = picked;
+                if (picked != null)
+                {
+                    _wmoConvertSourcePath = picked;
+                    if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                        _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
+                }
             }
 
-            string outputBaseDir = (_wmoConvertDirection == 0) ? WmoV14ToV17OutputDir : WmoV17ToV14OutputDir;
+            if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
+
+            ImGui.Text("Output Folder:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##wmo_out_dir", ref _wmoConvertOutputPath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##wmo_out_dir"))
+            {
+                string? picked = ShowFolderDialogSTA(
+                    "Select output directory for converted WMO files",
+                    GetDefaultWmoConverterOutputDirectory(),
+                    showNewFolderButton: true);
+                if (picked != null)
+                    _wmoConvertOutputPath = picked;
+            }
+
             string outputRootPath = "";
-            if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath))
+            if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath)
+                && !string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
             {
                 string baseName = Path.GetFileNameWithoutExtension(_wmoConvertSourcePath);
                 string suffix = (_wmoConvertDirection == 0) ? ".v17.wmo" : ".v14.wmo";
-                outputRootPath = Path.Combine(outputBaseDir, baseName + suffix);
+                outputRootPath = Path.Combine(Path.GetFullPath(_wmoConvertOutputPath), baseName + suffix);
             }
 
-            ImGui.Text("Output Root Path:");
+            ImGui.Text("Resolved Output File:");
             ImGui.SetNextItemWidth(-1);
             ImGui.BeginDisabled();
             ImGui.InputText("##wmo_out", ref outputRootPath, 512);
@@ -4260,7 +4326,6 @@ void main() {
                 string srcPath = _wmoConvertSourcePath;
                 string outPath = outputRootPath;
                 int direction = _wmoConvertDirection;
-                bool extendedMode = _wmoConvertExtended;
                 bool copyTextures = _wmoConvertCopyTextures;
                 var dataSource = _dataSource;
 
@@ -4274,18 +4339,11 @@ void main() {
 
                         List<string> textures = new();
                         List<string> writtenFiles = new();
+                        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".");
                         if (direction == 0)
                         {
-                            if (extendedMode)
-                            {
-                                var converter = new WmoV14ToV17ExtendedConverter();
-                                textures = converter.Convert(srcPath, outPath);
-                            }
-                            else
-                            {
-                                var converter = new WmoV14ToV17Converter();
-                                textures = converter.Convert(srcPath, outPath);
-                            }
+                            var converter = new WmoV14ToV17Converter();
+                            textures = converter.Convert(srcPath, outPath);
 
                             writtenFiles.Add(outPath);
                             string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".";
@@ -4763,6 +4821,21 @@ void main() {
             _projectOutputRootDir = ProjectsDir;
 
         return Path.GetFullPath(_projectOutputRootDir);
+    }
+
+    private string GetDefaultWmoConverterOutputDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+            return Path.GetFullPath(_wmoConvertOutputPath);
+
+        if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath))
+        {
+            string? sourceDir = Path.GetDirectoryName(Path.GetFullPath(_wmoConvertSourcePath));
+            if (!string.IsNullOrWhiteSpace(sourceDir))
+                return sourceDir;
+        }
+
+        return GetProjectOutputRootDirectory();
     }
 
     private void HandleProjectOutputRootChanged()
@@ -5521,7 +5594,7 @@ void main() {
                 _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
 
             float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
-            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, 2000f, "%.2f yd"))
+            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, MaxTerrainFogDistance, "%.2f yd"))
                 _worldScene.HoveredAssetMaxDistance = hoverPickRange;
 
             ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F2} yd");
@@ -8552,7 +8625,8 @@ void main() {
         int totalVerts = wmo.Groups.Sum(g => g.Vertices.Count);
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 
-        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild);
+        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild,
+            enableRuntimeGroupVisibility: false);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -9835,7 +9909,6 @@ void main() {
     {
         if (_worldScene == null) return;
 
-        var size = _window.Size;
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
             return;
 
@@ -9844,7 +9917,7 @@ void main() {
 
         float aspect = vpW / Math.Max(vpH, 1f);
         var view = _camera.GetViewMatrix();
-        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        float farPlane = GetSceneFarPlane();
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
         // Convert viewport-local mouse coords to NDC (-1..1)
@@ -10252,7 +10325,10 @@ void main() {
 
     private bool IsSceneMouseCaptureBlocked(float x, float y)
     {
-        return ImGui.GetIO().WantCaptureMouse && !IsPointInSceneViewport(x, y);
+        if (!ImGui.GetIO().WantCaptureMouse)
+            return false;
+
+        return !ShouldBypassDockspaceMouseCapture(x, y);
     }
 
     private bool ShouldBypassDockspaceMouseCapture(float x, float y)

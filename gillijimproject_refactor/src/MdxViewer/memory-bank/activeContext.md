@@ -1,5 +1,56 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 08, 2026 - Terrain viewer fog and detail budgets now support larger aerial captures, but there is still no dedicated per-ADT minimap export workflow
+
+- followed the request to push past the old `5000` fog-distance ceiling so the viewer can hold a much larger aerial slice in one frame
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now derives the terrain scene far plane from the active terrain fog end instead of hard-coding `5000`, and reuses the same far-plane helper for terrain chunk picking and world object picking
+   - `ViewerApp_Sidebars.cs` now exposes terrain fog controls up to `20000` while keeping `Fog Start` and `Fog End` coherent when edited directly
+   - `Terrain/TerrainManager.cs` now supports a `9x9` manual detailed-ADT candidate footprint (`81` tiles max override) and a larger fog-driven auto budget instead of topping out at the older `5x5`/`25` ceiling logic inherited from the smaller-range viewer assumptions
+   - `Terrain/WorldScene.cs` now raises the hard small-doodad and max world-object view caps so object rendering and pick range do not silently stop around the old `5000` era while terrain keeps extending farther
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is build validation only
+   - no live runtime retest has been captured yet for long-range aerial rendering, WDL fallback quality, or object density/performance at the new limits
+   - there is still no dedicated capture-automation flow yet for deterministic one-PNG-per-ADT minimap export, shadow presets, or object/class filtering
+
+## Apr 08, 2026 - MPQ startup file counts now reflect archive-backed names instead of the raw cross-version community listfile
+
+- followed the report that the startup `MpqData` summary was effectively counting the whole community listfile instead of the loaded client's actual archive contents
+- active shared/viewer behavior after this slice:
+   - `wow-viewer/src/core/WowViewer.Core.IO/Files/MpqArchiveCatalog.cs` now only adds listfile names to the known-file universe when their MPQ hash is actually present in one of the loaded archives, so cross-version community rows no longer inflate the active client file browser and summary counts
+   - `wow-viewer/src/core/WowViewer.Core.IO/Files/ArchiveCatalogBootstrapper.cs` now filters supplemental and cached listfile entries against the archive-backed known-file set before reporting or persisting them
+   - `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDataSource.cs` no longer re-injects raw external listfile rows into the viewer file set, and the startup log now reports validated supplemental entries separately from the merged archive-backed catalog count
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter ArchiveCatalogBootstrapperTests` passed on Apr 08, 2026
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is startup/catalog correctness and build validation only; no live viewer retest has been captured yet for before/after startup counts against a representative 3.3.5 dataset
+
+## Apr 07, 2026 - Standalone WMOs now keep groups loaded while moving the camera and only show large labels for explicitly highlighted groups
+
+- followed the request to make WMO groups inspectable in the scene itself with visual boxes and direct interaction
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/WmoRenderer.cs` now exposes standalone WMO render-group names, bounds, centers, colors, and visibility helpers so the viewer host can reason about groups without re-parsing the file, and disables runtime group culling for standalone inspection WMOs so camera movement does not unload groups
+   - `ViewerApp.cs` now invokes a standalone WMO group overlay right after the WMO render pass
+   - `ViewerApp_WmoGroups.cs` now owns color-coded group box drawing and mouse-driven select/toggle/isolate behavior for standalone WMOs while rendering large in-scene labels only for explicitly highlighted groups
+   - `ViewerApp_Sidebars.cs` now exposes compact standalone WMO group controls with overlay toggles and `Hide/Show`, `Highlight Label` or `Remove Label`, `Isolate`, `Show All`, `Clear Labels`, `Clear Selection`, and `Frame` actions for the current group
+   - `ViewerApp.cs` WMO converter dialog now uses an explicit output-folder field with browse support and no longer exposes the dead `Extended` mode
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 07, 2026 with existing workspace warnings only
+- important boundary:
+   - this is build validation only
+   - no live standalone-WMO session retest has been captured yet for highlighted-label readability, picking accuracy, or overall usability on large WMOs
+
+## Apr 07, 2026 - The current viewer input fix is in `ViewerApp.cs`, not in theme/layout code
+
+- scene mouse-wheel movement is now queued from Silk input and applied after `_imGui.Update()` so panel scrolling no longer races ahead of ImGui capture state
+- scene keyboard controls now use one shared gate based on `WantCaptureKeyboard || WantTextInput`
+- scene mouse blocking now treats active ImGui mouse capture as authoritative except for the existing dockspace-central-node bypass case
+- important boundary:
+   - this slice is compile-validated only; a live manual retest of the original leakage report is still pending
+
 ## Apr 07, 2026 - The first pre-alpha UI slice is a theme scaffold, not a shell rewrite
 
 - `src/MdxViewer/ViewerApp_Themes.cs` now owns centralized ImGui theme application for the active viewer

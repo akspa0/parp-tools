@@ -221,15 +221,12 @@ public class MpqDataSource : IDataSource
         foreach (var file in knownFiles)
             _fileSet.Add(file);
         if (knownFiles.Count > 0)
-            ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {knownFiles.Count} previously known files.");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {knownFiles.Count} archive-backed catalog files.");
 
-        // 3. Optionally add user-provided external listfile entries
+        // 3. Report supplemental listfile names that were validated against the loaded archives.
         if (bootstrap.ExternalListfileEntries.Count > 0)
         {
-            foreach (string file in bootstrap.ExternalListfileEntries)
-                _fileSet.Add(file);
-
-            ViewerLog.Info(ViewerLog.Category.MpqData, $"Added {bootstrap.ExternalListfileEntries.Count} listfile entries.");
+            ViewerLog.Info(ViewerLog.Category.MpqData, $"Validated {bootstrap.ExternalListfileEntries.Count} supplemental listfile entries against loaded archives.");
         }
 
         // 4. Scan loose files on disk

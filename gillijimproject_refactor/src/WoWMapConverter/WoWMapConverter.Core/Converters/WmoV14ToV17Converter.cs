@@ -1704,6 +1704,9 @@ public class WmoV14ToV17Converter
         var outputDir = Path.GetDirectoryName(outputPath) ?? ".";
         Directory.CreateDirectory(outputDir);
 
+        byte[] groupNameTable = BuildGroupNameTable(data);
+        RebuiltDoodadNameTable doodadNameTable = RebuildDoodadNameTable(data);
+
         using var stream = File.Create(outputPath);
         using var writer = new BinaryWriter(stream);
 
@@ -1724,7 +1727,7 @@ public class WmoV14ToV17Converter
             w.Write((uint)data.Groups.Count);
             w.Write((uint)data.Portals.Count);   // portals
             w.Write((uint)data.Lights.Count);    // lights
-            w.Write((uint)data.DoodadDefs.Count); // models (doodad count, per wowdev: "nModels: number of M2 models imported")
+            w.Write((uint)doodadNameTable.EntryCount); // models (number of names in MODN)
             w.Write((uint)data.DoodadDefs.Count); // doodads (doodad definitions)
             w.Write((uint)Math.Max(1, data.DoodadSets.Count)); // doodad sets (at least 1)
             w.Write(data.AmbientColor);
@@ -1810,12 +1813,7 @@ public class WmoV14ToV17Converter
         // MOGN
         WriteChunk(writer, "MOGN", w =>
         {
-            foreach (var name in data.GroupNames)
-            {
-                var bytes = Encoding.UTF8.GetBytes(name);
-                w.Write(bytes);
-                w.Write((byte)0);
-            }
+            w.Write(groupNameTable);
         });
 
         // MOGI (v17 is 32 bytes)
@@ -1930,34 +1928,7 @@ public class WmoV14ToV17Converter
         // MODN (doodad names - raw string table with MDX→M2 remapping)
         WriteChunk(writer, "MODN", w =>
         {
-            if (data.DoodadNamesRaw.Length > 0)
-            {
-                // Parse string table and remap .mdx → .m2
-                var names = ParseStringTable(data.DoodadNamesRaw);
-                var remappedBuilder = new MemoryStream();
-                var remappedWriter = new BinaryWriter(remappedBuilder, Encoding.UTF8);
-                
-                int mdxCount = 0;
-                foreach (var name in names)
-                {
-                    var remapped = name;
-                    if (name.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Remap .mdx to .m2 for LK compatibility
-                        remapped = name.Substring(0, name.Length - 4) + ".m2";
-                        mdxCount++;
-                    }
-                    
-                    // Write null-terminated string
-                    remappedWriter.Write(Encoding.UTF8.GetBytes(remapped));
-                    remappedWriter.Write((byte)0);
-                }
-                
-                if (mdxCount > 0)
-                    Console.WriteLine($"[DEBUG] Remapped {mdxCount} MDX doodad paths to M2");
-                
-                w.Write(remappedBuilder.ToArray());
-            }
+            w.Write(doodadNameTable.Payload);
         });
 
         // MODD (doodad defs - 40 bytes each)
@@ -1965,7 +1936,7 @@ public class WmoV14ToV17Converter
         {
             foreach (var dd in data.DoodadDefs)
             {
-                w.Write(dd.NameIndex); // 24-bit index + 8-bit flags
+                w.Write(RemapDoodadNameReference(dd.NameIndex, doodadNameTable.OffsetMap));
                 WriteVector3(w, dd.Position);
                 w.Write(dd.Orientation.X);
                 w.Write(dd.Orientation.Y);
@@ -2308,6 +2279,94 @@ public class WmoV14ToV17Converter
         return result;
     }
 
+    private byte[] BuildGroupNameTable(WmoV14Data data)
+    {
+        if (data.GroupNamesRaw.Length > 0)
+            return data.GroupNamesRaw;
+
+        var builder = new RebuiltStringTableBuilder();
+        for (int i = 0; i < data.Groups.Count; i++)
+        {
+            string name = data.Groups[i].Name
+                ?? (i < data.GroupNames.Count ? data.GroupNames[i] : $"group_{i}");
+            uint nameOffset = builder.Add(name);
+
+            var group = data.Groups[i];
+            group.NameOffset = nameOffset;
+            group.DescriptiveNameOffset = nameOffset;
+            data.Groups[i] = group;
+
+            if (i < data.GroupInfos.Count)
+            {
+                var info = data.GroupInfos[i];
+                info.NameOffset = (int)nameOffset;
+                data.GroupInfos[i] = info;
+            }
+        }
+
+        return builder.ToArray();
+    }
+
+    private RebuiltDoodadNameTable RebuildDoodadNameTable(WmoV14Data data)
+    {
+        var builder = new RebuiltStringTableBuilder();
+        var offsetMap = new Dictionary<uint, uint>();
+        int remappedMdxCount = 0;
+
+        if (data.DoodadNamesRaw.Length == 0)
+            return new RebuiltDoodadNameTable(Array.Empty<byte>(), offsetMap, 0);
+
+        foreach ((uint originalOffset, string originalValue) in EnumerateStringTableEntries(data.DoodadNamesRaw))
+        {
+            string remappedValue = RemapDoodadPath(originalValue);
+            if (!string.Equals(remappedValue, originalValue, StringComparison.OrdinalIgnoreCase))
+                remappedMdxCount++;
+
+            offsetMap[originalOffset] = builder.Add(remappedValue);
+        }
+
+        if (remappedMdxCount > 0)
+            Console.WriteLine($"[DEBUG] Remapped {remappedMdxCount} MDX doodad paths to M2");
+
+        return new RebuiltDoodadNameTable(builder.ToArray(), offsetMap, builder.EntryCount);
+    }
+
+    private static IEnumerable<(uint Offset, string Value)> EnumerateStringTableEntries(byte[] data)
+    {
+        int start = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] != 0)
+                continue;
+
+            if (i > start)
+            {
+                yield return ((uint)start, Encoding.UTF8.GetString(data, start, i - start));
+            }
+
+            start = i + 1;
+        }
+
+        if (start < data.Length)
+            yield return ((uint)start, Encoding.UTF8.GetString(data, start, data.Length - start));
+    }
+
+    private static string RemapDoodadPath(string path)
+    {
+        if (path.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase))
+            return path.Substring(0, path.Length - 4) + ".m2";
+
+        return path;
+    }
+
+    private static uint RemapDoodadNameReference(uint originalReference, IReadOnlyDictionary<uint, uint> offsetMap)
+    {
+        uint flags = originalReference & 0xFF000000u;
+        uint originalOffset = originalReference & 0x00FFFFFFu;
+        uint mappedOffset = offsetMap.TryGetValue(originalOffset, out uint value) ? value : originalOffset;
+        return flags | (mappedOffset & 0x00FFFFFFu);
+    }
+
     private List<Vector3> GenerateNormals(WmoGroupData group)
     {
         var normals = new Vector3[group.Vertices.Count];
@@ -2451,6 +2510,31 @@ public class WmoV14ToV17Converter
         public ushort IndexCount, FirstVertex, LastVertex;
         public byte Flags, MaterialId;
     }
+
+    private sealed class RebuiltStringTableBuilder
+    {
+        private readonly List<byte> _bytes = new();
+        private readonly Dictionary<string, uint> _offsets = new(StringComparer.OrdinalIgnoreCase);
+
+        public int EntryCount => _offsets.Count;
+
+        public uint Add(string value)
+        {
+            value ??= string.Empty;
+            if (_offsets.TryGetValue(value, out uint existingOffset))
+                return existingOffset;
+
+            uint offset = (uint)_bytes.Count;
+            _bytes.AddRange(Encoding.UTF8.GetBytes(value));
+            _bytes.Add(0);
+            _offsets[value] = offset;
+            return offset;
+        }
+
+        public byte[] ToArray() => _bytes.ToArray();
+    }
+
+    private readonly record struct RebuiltDoodadNameTable(byte[] Payload, Dictionary<uint, uint> OffsetMap, int EntryCount);
 
     public struct WmoDoodadSet
     {

@@ -1280,6 +1280,12 @@ public partial class ViewerApp
             DrawWmoLiquidRotationControls("standalone");
         }
 
+        if (_renderer is WmoRenderer standaloneWmoRenderer)
+        {
+            ImGui.Separator();
+            DrawStandaloneWmoGroupControls(standaloneWmoRenderer);
+        }
+
         if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
         {
             ImGui.Separator();
@@ -1882,12 +1888,23 @@ public partial class ViewerApp
         ImGui.SameLine();
         ImGui.Text(timeLabel);
 
-        float fogStart = lighting.FogStart;
-        float fogEnd = lighting.FogEnd;
-        if (ImGui.SliderFloat("Fog Start", ref fogStart, 0f, 2000f))
+        float fogStart = Math.Clamp(lighting.FogStart, 0f, MaxTerrainFogDistance - 1f);
+        float fogEnd = Math.Clamp(lighting.FogEnd, 100f, MaxTerrainFogDistance);
+        bool fogStartChanged = ImGui.SliderFloat("Fog Start", ref fogStart, 0f, MaxTerrainFogDistance - 1f);
+        bool fogEndChanged = ImGui.SliderFloat("Fog End", ref fogEnd, 100f, MaxTerrainFogDistance);
+        if (fogStartChanged || fogEndChanged)
+        {
+            if (fogEnd <= fogStart)
+            {
+                if (fogEndChanged && !fogStartChanged)
+                    fogStart = Math.Max(0f, fogEnd - 1f);
+                else
+                    fogEnd = Math.Min(MaxTerrainFogDistance, fogStart + 1f);
+            }
+
             lighting.FogStart = fogStart;
-        if (ImGui.SliderFloat("Fog End", ref fogEnd, 100f, 5000f))
             lighting.FogEnd = fogEnd;
+        }
 
         if (_worldScene != null)
         {

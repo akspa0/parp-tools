@@ -23,6 +23,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     private static readonly uint[] CryptTable = BuildCryptTable();
 
     private readonly List<MpqArchive> _archives = [];
+    private readonly HashSet<ulong> _archiveFileHashes = [];
     private readonly HashSet<ulong> _knownFileHashes = [];
     private readonly Dictionary<ulong, string> _hashToName = [];
     private readonly Dictionary<string, ScannedFileEntry> _scannedFiles = new(StringComparer.OrdinalIgnoreCase);
@@ -353,6 +354,7 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
                 if (archive is not null)
                 {
                     _archives.Add(archive);
+                    IndexArchiveKnownFileHashes(archive);
                 }
             }
             catch
@@ -465,9 +467,39 @@ public sealed class MpqArchiveCatalog : IArchiveCatalog
     {
         string normalized = NormalizeVirtualPath(name);
         ulong hash = ((ulong)HashString(normalized, HashNameA) << 32) | HashString(normalized, HashNameB);
+        if (!_archiveFileHashes.Contains(hash))
+        {
+            return;
+        }
+
         if (_knownFileHashes.Add(hash))
         {
-            _hashToName[hash] = name;
+            _hashToName[hash] = normalized;
+        }
+    }
+
+    private void IndexArchiveKnownFileHashes(MpqArchive archive)
+    {
+        foreach (HashEntry entry in archive.HashTable)
+        {
+            if (entry.BlockIndex == HashEntryEmpty || entry.BlockIndex == HashEntryDeleted)
+            {
+                continue;
+            }
+
+            if (entry.BlockIndex >= archive.BlockTable.Length)
+            {
+                continue;
+            }
+
+            BlockEntry block = archive.BlockTable[entry.BlockIndex];
+            if ((block.Flags & FlagExists) == 0 || block.FileSize == 0)
+            {
+                continue;
+            }
+
+            ulong hash = ((ulong)entry.Name1 << 32) | entry.Name2;
+            _archiveFileHashes.Add(hash);
         }
     }
 

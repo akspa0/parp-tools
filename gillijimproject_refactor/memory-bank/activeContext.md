@@ -2,6 +2,28 @@
 
 # Active Context
 
+## Apr 07, 2026 - Standalone WMO viewing now keeps groups loaded during camera movement and uses explicit highlighted labels instead of text soup
+
+- followed the request to stop relying on the giant standalone-WMO visibility checkbox list and add scene-native group inspection instead
+- active viewer behavior after this slice:
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/WmoRenderer.cs` now exposes standalone WMO render-group metadata needed by the viewer host and disables camera-driven runtime group culling for standalone inspection WMOs, so moving the camera no longer unloads groups out from under the user
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` now draws a standalone WMO group overlay immediately after the WMO render pass, using the existing `BoundingBoxRenderer` path for color-coded group bounds
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp_WmoGroups.cs` now keeps boxes visible for all groups but only renders large in-scene labels for groups the user explicitly highlights; left-click selects, shift-click toggles label highlighting, ctrl-click toggles visibility, and right-click isolates
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp_Sidebars.cs` now exposes compact standalone WMO group controls with `Hide/Show`, `Highlight Label` or `Remove Label`, `Isolate`, `Show All`, `Clear Labels`, `Clear Selection`, and `Frame` actions so users do not have to work from the full generic visibility list alone
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` WMO conversion dialog now uses an explicit output-folder field with folder browsing and the maintained converter path only, instead of the old deep default export folder plus dead `Extended` mode
+- important boundary:
+	- this is build validation only; no live viewer retest has been captured yet for dense multi-group WMOs, highlighted-label readability, or the click/hover feel in a real session
+
+## Apr 07, 2026 - `MdxViewer` input routing now defers scene wheel handling until after ImGui update and blocks scene keyboard controls when UI owns focus
+
+- followed the user-selected next slice after the theme scaffold by fixing the active viewer's UI-to-scene input leakage instead of adding more UI surface first
+- active viewer behavior after this slice:
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` no longer moves the camera directly from the raw mouse-wheel callback; wheel deltas are queued and applied in `OnUpdate()` after ImGui refreshes capture state
+	- scene keyboard controls now use one consistent gate (`WantCaptureKeyboard || WantTextInput`) for chunk clipboard shortcuts, shell hotkeys, minimap toggle, animation stepping, and free-fly movement
+	- scene mouse blocking now respects any real ImGui mouse capture by default, with dockspace bypass still limited to the existing dockspace-central-node case
+- important boundary:
+	- this is compile-validated only; no live viewer interaction retest has been captured yet for scroll-over-panel, typing-in-input, or overlapping floating-window cases
+
 ## Apr 07, 2026 - `MdxViewer` now has a persisted UI theme scaffold, including a pre-alpha-inspired chrome option
 
 - followed the user-selected UI order `3,2,1` by landing theme infrastructure first instead of jumping straight into a full shell rewrite
