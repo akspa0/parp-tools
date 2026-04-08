@@ -1,5 +1,17 @@
 # Active Context
 
+## Apr 08, 2026 - `v0.4.7.1` release prep now packages the current viewer fixes while keeping the next runtime extraction anchored on `WorldScene` to `wow-viewer`
+
+- followed the request to merge and publish the current viewer state as `v0.4.7.1` instead of leaving the shipped docs and workflow metadata on the earlier `v0.4.7` snapshot
+- active release snapshot after this continuity update:
+	- `gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` and `MdxViewer.CrossPlatform.csproj` now report `0.4.7.1`
+	- the release workflow now packages `src/MdxViewer/docs/releases/v0.4.7.1.md` and ships `CHANGES-v0.4.7.1.md` in the archive
+	- repo/viewer docs now foreground the repaired taxi workflow, direct route capture hardening, sticky world-object selection, standalone WMO group inspection, and the larger-range terrain/world-object follow-ups already landed in the active viewer host
+	- the next engineering slice is still the staged world-runtime split from `gillijimproject_refactor/src/MdxViewer/Terrain/WorldScene.cs` into `wow-viewer`, using `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md` as the active plan surface
+- important boundary:
+	- this is continuity and release-alignment work only
+	- it does not claim the `WorldScene` extraction is complete or that the recent viewer fixes are broadly runtime-signed-off
+
 ## Apr 08, 2026 - Minimap generation now has a dedicated staged wow-viewer plan surface instead of living only as ad hoc viewer follow-up work
 
 - recorded the integrated continuity and execution surface in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`

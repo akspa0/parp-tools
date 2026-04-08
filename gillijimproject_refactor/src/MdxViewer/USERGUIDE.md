@@ -26,6 +26,13 @@ The normal startup flow is in-app and explicit:
 3. Load worlds from the left sidebar
 4. Use the right sidebar sections for `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics`
 
+### v0.4.7.1 patch highlights
+
+- Taxi controls are back in the active right-sidebar object workflow instead of being stranded behind older navigation-only paths.
+- Taxi ride capture now supports smoother actor heading, freelook while attached to the actor, and direct ffmpeg-backed route recording from the same sidebar surface.
+- World-object selection is now sticky across camera movement and scene rebuilds, so inspection does not drop the current object just because the scene refreshed.
+- Standalone WMO group inspection keeps groups loaded while moving the camera and uses explicit highlighted labels instead of labeling everything at once.
+
 ### Command-Line Options
 
 | Flag | Description |
@@ -129,6 +136,14 @@ When DBC data is available in the game directory, the viewer provides:
 - **Taxi Paths** — Flight path visualization from TaxiPath/TaxiPathNode DBC data
 - **Zone Lighting** — Ambient, fog, and sky colors driven by Light.dbc + LightData.dbc
 
+### 7.1 Taxi ride workflow
+
+- Select a taxi route from the active taxi controls in the right sidebar.
+- Enable the route actor and attach the ride camera in either `Cockpit` or `Chase` mode.
+- Use right mouse drag while attached to freelook around the moving actor instead of forcing a rigid camera heading.
+- `Record Selected Route Video` streams frames directly to ffmpeg for `.mp4` or `.mov` output.
+- Practical requirement: the ffmpeg executable path must be valid in the capture controls before route video recording can succeed.
+
 ### 8. Debug & Visualization Tools
 
 Toggle these from the UI panel:
@@ -147,6 +162,7 @@ Use the live viewer capture tools when debugging renderer regressions, especiall
 - **Shot Points** — `Tools -> Capture Automation...` lets you save named camera positions with map name, build version, yaw, pitch, and FOV.
 - **Batch Evidence Loop** — The capture window can filter saved shots to the current map/build and queue a whole set of before/after screenshots for the same viewpoints.
 - **Output Path** — Captures are written under `output/captures/<map>/<build>/...` by default.
+- **Taxi Route Video** — The taxi sidebar can record the selected route directly through ffmpeg, using the same capture settings and output root.
 - **Recommended Regression Workflow** — Save stable shot points for problematic assets or zones, run `No UI` captures before a change, repeat after the change, and compare the resulting PNGs against probe output.
 
 ---

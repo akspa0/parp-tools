@@ -763,9 +763,16 @@ public partial class ViewerApp : IDisposable
 
                 if (_mouseDown && !IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
                 {
-                    _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
-                    _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
-                    _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
+                    if (_taxiRideCameraEnabled)
+                    {
+                        AdjustTaxiRideFreeLook(-dx * 0.5f, -dy * 0.5f);
+                    }
+                    else
+                    {
+                        _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
+                        _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
+                        _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
+                    }
                 }
             };
             mouse.Scroll += (_, scroll) =>
@@ -5401,6 +5408,15 @@ void main() {
         {
             ImGui.TextDisabled("Area POIs: none found");
         }
+
+        ImGui.Separator();
+
+        bool defaultOpenTaxi = _worldScene.ShowTaxi
+            || _worldScene.SelectedTaxiNodeId >= 0
+            || _worldScene.SelectedTaxiRouteId >= 0
+            || _taxiRideCameraEnabled;
+        if (ImGui.CollapsingHeader("Taxi", defaultOpenTaxi ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+            DrawSelectedTaxiControls();
 
         // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
         if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)

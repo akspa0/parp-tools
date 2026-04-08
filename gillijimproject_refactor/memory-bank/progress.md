@@ -1,5 +1,17 @@
 # Progress
 
+### Apr 08, 2026 - Prepared the `v0.4.7.1` viewer release snapshot and locked the next migration seam back onto `WorldScene` to `wow-viewer`
+
+- followed the request to package the current viewer fixes as `v0.4.7.1`
+- landed release-alignment updates:
+	- bumped `src/MdxViewer/MdxViewer.csproj` and `src/MdxViewer/MdxViewer.CrossPlatform.csproj` to `0.4.7.1`
+	- added checked-in release notes at `src/MdxViewer/docs/releases/v0.4.7.1.md` and updated the GitHub Actions release workflow to ship that note as both the GitHub release body and `CHANGES-v0.4.7.1.md` in the archive
+	- refreshed repo/viewer READMEs plus `src/MdxViewer/USERGUIDE.md` so the release snapshot now reflects the repaired taxi workflow, route capture hardening, sticky world-object selection, standalone WMO highlighted-group inspection, and the larger-range terrain follow-ups already in the active viewer host
+	- refreshed continuity notes so future chats keep the next architecture step on the staged `WorldScene` to `wow-viewer` runtime split instead of treating `v0.4.7.1` as closure on that work
+- proof boundary:
+		- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+	- this is release and continuity prep, not broad runtime signoff for the affected viewer systems
+
 ### Apr 08, 2026 - Added a dedicated minimap-generation continuity and prompt surface for the next wow-viewer migration slices
 
 - followed the request to stop leaving the remaining minimap work implicit after the first path-filter slice landed

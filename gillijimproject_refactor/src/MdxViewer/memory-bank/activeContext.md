@@ -1,5 +1,44 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 08, 2026 - v0.4.7.1 release prep now packages the taxi, recording, sticky-selection, and standalone-WMO follow-ups while keeping the next architectural move on the `WorldScene` to `wow-viewer` split
+
+- followed the request to cut the current viewer state as `v0.4.7.1` instead of leaving the release metadata and shipped docs on the older `v0.4.7` snapshot
+- active `src/MdxViewer` release snapshot after this slice:
+   - both viewer project files now report `0.4.7.1`, and the GitHub Actions release workflow now ships the checked-in `docs/releases/v0.4.7.1.md` note plus `CHANGES-v0.4.7.1.md` in the archive
+   - shipped docs now call out the restored taxi inspector path, smoother taxi actor facing, freelook ride camera, odd-size ffmpeg capture repair, sticky world-object targeting, larger aerial detail budgets, and standalone WMO highlighted-group workflow
+   - `Terrain/WorldScene.cs` now keeps stable scene-object identity for selected WMOs and MDXs so selection can survive instance-list rebuilds caused by camera movement or streaming refresh
+   - the next real architecture slice remains the staged `WorldScene` to `wow-viewer` runtime extraction tracked in `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is release-prep and documentation alignment for the current viewer state
+   - it does not convert the recent taxi, recording, selection, or standalone-WMO slices into broad runtime signoff
+
+## Apr 08, 2026 - Taxi route, node, actor-override, and ride-camera controls were restored to the active world-object inspector path
+
+- the taxi workflow code was still present, but the active world-object inspector path had stopped calling it after the sidebar regrouping work
+- `src/MdxViewer/ViewerApp.cs` now exposes a `Taxi` collapsing section inside `DrawWorldObjectsContentCore()` again, so the active right-sidebar/object-workspace flow once more includes route browsing, node selection context, actor overrides, ride camera controls, and route video capture without depending only on the navigator path
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no live viewer retest has been captured yet for the restored taxi section in the current shell
+
+## Apr 08, 2026 - Taxi actor heading changes are now smoothed, and the ride camera supports mouse freelook instead of forcing a rigid look-at every frame
+
+- `src/MdxViewer/Terrain/WorldScene.cs` now derives taxi actor heading from a short route-distance sampling window and temporally smooths the resulting forward vector, so route heading changes stop snapping as abruptly at point-to-point joins
+- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now treats the taxi ride camera as an orbit/freelook camera over the moving actor instead of overwriting a fixed look target each frame
+- `src/MdxViewer/ViewerApp.cs` now routes right-mouse drag into taxi ride freelook offsets while the ride camera is attached, instead of fighting the ride camera by writing directly to the free-fly yaw/pitch state
+- follow-up repair on Apr 08, 2026:
+   - direct video capture now pads odd framebuffer sizes before `libx264` / `yuv420p` output, which fixes the immediate ffmpeg exit path that previously surfaced only as a broken-pipe write failure in live viewer sessions
+   - the same capture path now captures ffmpeg stderr so future encode failures surface the encoder reason instead of only `The pipe has been ended`
+   - taxi actor transforms now use the sampled route tangent as the actual render-forward basis again, with temporal smoothing retained, instead of the earlier mirrored yaw conversion that left the mount visibly misaligned with the path direction
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no live runtime retest has been captured yet for turn smoothness, taxi actor nose alignment on real routes, freelook feel, or encoded output success after the odd-size fix
+
 ## Apr 08, 2026 - World object path-family filters now exist in the active viewer, and the filter primitive has started moving out of `WorldScene` into shared `wow-viewer` runtime
 
 - followed the approved minimap-tooling direction to make object-family filtering path-based instead of per-instance only

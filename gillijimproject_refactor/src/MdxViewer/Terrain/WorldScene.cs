@@ -25,12 +25,12 @@ using CorePm4LinkedPositionRefSummary = WowViewer.Core.PM4.Models.Pm4LinkedPosit
 using CorePm4MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
 using CorePm4MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using CorePm4MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
-using CorePm4ObjectGroupKey = WowViewer.Core.PM4.Models.Pm4ObjectGroupKey;
 using CorePm4CoordinateModeResolution = WowViewer.Core.PM4.Models.Pm4CoordinateModeResolution;
-using CorePm4PlacementSolution = WowViewer.Core.PM4.Models.Pm4PlacementSolution;
-using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
+using CorePm4ObjectGroupKey = WowViewer.Core.PM4.Models.Pm4ObjectGroupKey;
 using CorePm4PlacementContract = WowViewer.Core.PM4.Services.Pm4PlacementContract;
 using CorePm4PlacementMath = WowViewer.Core.PM4.Services.Pm4PlacementMath;
+using CorePm4PlacementSolution = WowViewer.Core.PM4.Models.Pm4PlacementSolution;
+using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
 using CorePm4DecodeAuditReport = WowViewer.Core.PM4.Models.Pm4DecodeAuditReport;
 using CorePm4ExplorationSnapshot = WowViewer.Core.PM4.Models.Pm4ExplorationSnapshot;
@@ -503,6 +503,19 @@ public readonly record struct TaxiActorPose(
 
 public class WorldScene : ISceneRenderer
 {
+    private const float TaxiActorHeadingSampleWindow = 18f;
+    private const float TaxiActorHeadingSmoothingHz = 8f;
+
+    private readonly record struct SelectedSceneObjectKey(
+        ObjectType ObjectType,
+        int UniqueId,
+        int PlacementEntryIndex,
+        int TileX,
+        int TileY,
+        bool HasTileCoordinate,
+        string ModelKey,
+        Vector3 PlacementPosition);
+
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
 
     private static float DecodeRawMprlPackedAngleRadians(MprlEntry positionRef)
@@ -834,6 +847,7 @@ public class WorldScene : ISceneRenderer
     // Object selection
     private ObjectType _selectedObjectType = ObjectType.None;
     private int _selectedObjectIndex = -1;
+    private SelectedSceneObjectKey? _selectedSceneObjectKey;
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
@@ -2700,12 +2714,7 @@ public class WorldScene : ISceneRenderer
     }
 
     /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
-    public ObjectInstance? SelectedInstance => _selectedObjectType switch
-    {
-        ObjectType.Wmo when _selectedObjectIndex >= 0 && _selectedObjectIndex < _wmoInstances.Count => _wmoInstances[_selectedObjectIndex],
-        ObjectType.Mdx when _selectedObjectIndex >= 0 && _selectedObjectIndex < _mdxInstances.Count => _mdxInstances[_selectedObjectIndex],
-        _ => null
-    };
+    public ObjectInstance? SelectedInstance => TryGetSelectedSceneInstance(out ObjectInstance instance) ? instance : null;
 
     public bool TryGetSelectedPlacementSourceData(out string sourcePath, out byte[] sourceBytes)
     {
@@ -2897,6 +2906,7 @@ public class WorldScene : ISceneRenderer
     private readonly Dictionary<int, string> _taxiActorModelOverrideByPath = new();
     private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
     private readonly Dictionary<int, TaxiActorPose> _taxiActorPoseByPath = new();
+    private readonly Dictionary<int, Vector3> _taxiActorSmoothedForwardByPath = new();
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
     private bool _showTaxiActors = true;
@@ -5844,6 +5854,7 @@ public class WorldScene : ISceneRenderer
         _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
         _taxiActorTravelByPath.Clear();
         _taxiActorPoseByPath.Clear();
+        _taxiActorSmoothedForwardByPath.Clear();
         _taxiActorClockInitialized = false;
     }
 
@@ -5855,6 +5866,7 @@ public class WorldScene : ISceneRenderer
         if (!_showTaxi || !_showTaxiActors || _taxiLoader == null || !hasTaxiSelection)
         {
             _taxiActorPoseByPath.Clear();
+            _taxiActorSmoothedForwardByPath.Clear();
             _taxiActorClockInitialized = false;
             return;
         }
@@ -5905,13 +5917,35 @@ public class WorldScene : ISceneRenderer
             SampleRoute(route.Waypoints, travel, out Vector3 actorPosition, out Vector3 actorDirection);
             actorPosition.Z += TaxiActorHoverOffset;
 
-            Vector3 actorForward = actorDirection.LengthSquared() > 0.0001f
-                ? Vector3.Normalize(actorDirection)
-                : Vector3.UnitY;
+            Vector3 sampledForward = SampleSmoothedTaxiRouteDirection(route.Waypoints, travel, routeLength);
+            Vector3 actorForward = sampledForward;
+            if (_taxiActorSmoothedForwardByPath.TryGetValue(route.PathId, out Vector3 previousForward)
+                && previousForward.LengthSquared() > 0.0001f)
+            {
+                float blend = 1f - MathF.Exp(-TaxiActorHeadingSmoothingHz * Math.Max(0f, deltaSeconds));
+                if (blend <= 0f)
+                {
+                    actorForward = previousForward;
+                }
+                else if (blend < 0.999f)
+                {
+                    Vector3 blendedForward = Vector3.Lerp(previousForward, sampledForward, blend);
+                    actorForward = blendedForward.LengthSquared() > 0.0001f
+                        ? Vector3.Normalize(blendedForward)
+                        : sampledForward;
+                }
+            }
 
-            float yawRadians = actorForward.LengthSquared() > 0.0001f
-                ? MathF.Atan2(actorForward.X, actorForward.Y) + MathF.PI
-                : 0f;
+            if (actorForward.LengthSquared() <= 0.0001f)
+            {
+                actorForward = actorDirection.LengthSquared() > 0.0001f
+                    ? Vector3.Normalize(actorDirection)
+                    : Vector3.UnitX;
+            }
+
+            _taxiActorSmoothedForwardByPath[route.PathId] = actorForward;
+
+            float yawRadians = ComputeTaxiActorYawRadians(actorForward);
             string modelPath = actorModelPath.Replace('/', '\\');
             string key = WorldAssetManager.NormalizeKey(modelPath);
             _assets.QueueMdxLoad(key);
@@ -5969,6 +6003,9 @@ public class WorldScene : ISceneRenderer
 
         foreach (int stalePathId in _taxiActorPoseByPath.Keys.Except(activePathIds).ToList())
             _taxiActorPoseByPath.Remove(stalePathId);
+
+        foreach (int stalePathId in _taxiActorSmoothedForwardByPath.Keys.Except(activePathIds).ToList())
+            _taxiActorSmoothedForwardByPath.Remove(stalePathId);
     }
 
     private TaxiPathLoader.TaxiNode? ResolveTaxiActorNode(TaxiPathLoader.TaxiRoute route)
@@ -6048,6 +6085,53 @@ public class WorldScene : ISceneRenderer
         direction = waypoints[^1] - waypoints[^2];
         if (direction.LengthSquared() > 0.0001f)
             direction = Vector3.Normalize(direction);
+    }
+
+    private static Vector3 SampleSmoothedTaxiRouteDirection(List<Vector3> waypoints, float distance, float routeLength)
+    {
+        if (waypoints.Count < 2)
+            return Vector3.UnitX;
+
+        float sampleWindow = MathF.Min(TaxiActorHeadingSampleWindow, MathF.Max(1f, routeLength * 0.1f));
+        float behindDistance = WrapTaxiRouteDistance(distance - sampleWindow * 0.5f, routeLength);
+        float aheadDistance = WrapTaxiRouteDistance(distance + sampleWindow * 0.5f, routeLength);
+
+        SampleRoute(waypoints, behindDistance, out Vector3 behindPosition, out Vector3 behindDirection);
+        SampleRoute(waypoints, aheadDistance, out Vector3 aheadPosition, out Vector3 aheadDirection);
+
+        Vector3 tangent = aheadPosition - behindPosition;
+        if (tangent.LengthSquared() > 0.0001f)
+            return Vector3.Normalize(tangent);
+
+        Vector3 fallback = aheadDirection.LengthSquared() > 0.0001f ? aheadDirection : behindDirection;
+        if (fallback.LengthSquared() > 0.0001f)
+            return Vector3.Normalize(fallback);
+
+        return Vector3.UnitX;
+    }
+
+    private static float WrapTaxiRouteDistance(float distance, float routeLength)
+    {
+        if (routeLength <= 0f)
+            return 0f;
+
+        while (distance < 0f)
+            distance += routeLength;
+
+        while (distance >= routeLength)
+            distance -= routeLength;
+
+        return distance;
+    }
+
+    private static float ComputeTaxiActorYawRadians(Vector3 actorForward)
+    {
+        Vector3 horizontalForward = new Vector3(actorForward.X, actorForward.Y, 0f);
+        if (horizontalForward.LengthSquared() <= 0.0001f)
+            return 0f;
+
+        horizontalForward = Vector3.Normalize(horizontalForward);
+        return MathF.Atan2(horizontalForward.Y, horizontalForward.X);
     }
 
     private void LazyLoadAreaTriggers()
@@ -6541,7 +6625,122 @@ public class WorldScene : ISceneRenderer
             _wmoInstances.AddRange(list);
         _wmoInstances.AddRange(_externalWmoInstances);
 
+        RestoreSelectedSceneObjectAfterRebuild();
+
         _instancesDirty = false;
+    }
+
+    private bool TryGetSelectedSceneInstance(out ObjectInstance instance)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        if (TryGetSceneObjectByIndex(_selectedObjectType, _selectedObjectIndex, out instance))
+        {
+            if (!_selectedSceneObjectKey.HasValue || !IsSameSceneObject(instance, _selectedSceneObjectKey.Value))
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(_selectedObjectType, instance);
+
+            return true;
+        }
+
+        if (_selectedSceneObjectKey.HasValue
+            && TryResolveSelectedSceneObject(_selectedSceneObjectKey.Value, out ObjectType resolvedType, out int resolvedIndex, out instance))
+        {
+            _selectedObjectType = resolvedType;
+            _selectedObjectIndex = resolvedIndex;
+            return true;
+        }
+
+        instance = default;
+        return false;
+    }
+
+    private void RestoreSelectedSceneObjectAfterRebuild()
+    {
+        if (!_selectedSceneObjectKey.HasValue)
+            return;
+
+        if (TryResolveSelectedSceneObject(_selectedSceneObjectKey.Value, out ObjectType resolvedType, out int resolvedIndex, out _))
+        {
+            _selectedObjectType = resolvedType;
+            _selectedObjectIndex = resolvedIndex;
+            return;
+        }
+
+        _selectedObjectIndex = -1;
+    }
+
+    private bool TryResolveSelectedSceneObject(SelectedSceneObjectKey key, out ObjectType objectType, out int objectIndex, out ObjectInstance instance)
+    {
+        List<ObjectInstance> instances = key.ObjectType switch
+        {
+            ObjectType.Wmo => _wmoInstances,
+            ObjectType.Mdx => _mdxInstances,
+            _ => []
+        };
+
+        for (int index = 0; index < instances.Count; index++)
+        {
+            ObjectInstance candidate = instances[index];
+            if (!IsSameSceneObject(candidate, key))
+                continue;
+
+            objectType = key.ObjectType;
+            objectIndex = index;
+            instance = candidate;
+            return true;
+        }
+
+        objectType = ObjectType.None;
+        objectIndex = -1;
+        instance = default;
+        return false;
+    }
+
+    private bool TryGetSceneObjectByIndex(ObjectType objectType, int objectIndex, out ObjectInstance instance)
+    {
+        switch (objectType)
+        {
+            case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
+                instance = _wmoInstances[objectIndex];
+                return true;
+            case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
+                instance = _mdxInstances[objectIndex];
+                return true;
+            default:
+                instance = default;
+                return false;
+        }
+    }
+
+    private static SelectedSceneObjectKey CreateSelectedSceneObjectKey(ObjectType objectType, ObjectInstance instance)
+    {
+        return new SelectedSceneObjectKey(
+            objectType,
+            instance.UniqueId,
+            instance.PlacementEntryIndex,
+            instance.TileX,
+            instance.TileY,
+            instance.HasTileCoordinate,
+            instance.ModelKey,
+            instance.PlacementPosition);
+    }
+
+    private static bool IsSameSceneObject(ObjectInstance candidate, SelectedSceneObjectKey key)
+    {
+        if (candidate.UniqueId != key.UniqueId || candidate.PlacementEntryIndex != key.PlacementEntryIndex)
+            return false;
+
+        if (candidate.HasTileCoordinate != key.HasTileCoordinate)
+            return false;
+
+        if (candidate.HasTileCoordinate)
+            return candidate.TileX == key.TileX && candidate.TileY == key.TileY;
+
+        if (!string.Equals(candidate.ModelKey, key.ModelKey, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return Vector3.DistanceSquared(candidate.PlacementPosition, key.PlacementPosition) < 0.0001f;
     }
 
     private IModelRenderer? TryGetQueuedMdx(string modelKey)
@@ -8725,11 +8924,14 @@ public class WorldScene : ISceneRenderer
         {
             _selectedObjectType = bestType;
             _selectedObjectIndex = bestIndex;
+            if (TryGetSceneObjectByIndex(bestType, bestIndex, out ObjectInstance selectedInstance))
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(bestType, selectedInstance);
             return;
         }
 
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+        _selectedSceneObjectKey = null;
     }
 
     public bool SelectSceneObject(ObjectType objectType, int objectIndex)
@@ -8742,10 +8944,12 @@ public class WorldScene : ISceneRenderer
             case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _wmoInstances[objectIndex]);
                 return true;
             case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _mdxInstances[objectIndex]);
                 return true;
             default:
                 return false;
@@ -8886,6 +9090,7 @@ public class WorldScene : ISceneRenderer
     {
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+        _selectedSceneObjectKey = null;
     }
 
     public void ClearPm4ObjectSelection()

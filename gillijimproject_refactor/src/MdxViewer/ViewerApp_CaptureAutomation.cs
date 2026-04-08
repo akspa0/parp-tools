@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using ImGuiNET;
 using Silk.NET.Maths;
@@ -34,6 +35,8 @@ public partial class ViewerApp
     private float _taxiRideChaseHeight = 16f;
     private float _taxiRideLookAhead = 28f;
     private float _taxiRideCockpitHeight = 10f;
+    private float _taxiRideFreeLookYawOffset;
+    private float _taxiRideFreeLookPitchOffset;
     private ActiveVideoRecording? _activeVideoRecording;
 
     private enum TaxiRideCameraMode
@@ -71,6 +74,7 @@ public partial class ViewerApp
     {
         public required Process EncoderProcess { get; init; }
         public required Stream EncoderInput { get; init; }
+        public required StringBuilder EncoderErrorOutput { get; init; }
         public required string OutputPath { get; init; }
         public required bool IncludeUi { get; init; }
         public required int Width { get; init; }
@@ -93,24 +97,22 @@ public partial class ViewerApp
             return;
         }
 
-        string currentMapName = GetCurrentCaptureMapName();
-        string currentBuildVersion = GetCurrentCaptureBuildVersion();
-        ImGui.TextDisabled($"Current map/build: {currentMapName} [{currentBuildVersion}]");
-        ImGui.TextDisabled($"Camera: pos=({_camera.Position.X:F2}, {_camera.Position.Y:F2}, {_camera.Position.Z:F2}) yaw={_camera.Yaw:F2} pitch={_camera.Pitch:F2} fov={_fovDegrees:F1}");
         ImGui.TextDisabled(BuildSceneBookmarkText(CreateCameraShotPoint("current")));
 
         if (ImGui.Button("Copy Current Scene Bookmark"))
             CopyTextToClipboard(BuildSceneBookmarkText(CreateCameraShotPoint("current")), "scene bookmark");
 
-        ImGui.SameLine();
         if (ImGui.Button("Log Current Scene Bookmark"))
             LogSceneBookmark(CreateCameraShotPoint("current"));
 
         ImGui.Separator();
 
         string outputDir = _captureOutputDir;
-        if (ImGui.InputText("Output Folder", ref outputDir, 1024))
+        if (ImGui.InputText("Output Directory", ref outputDir, 1024))
             _captureOutputDir = outputDir;
+
+        string currentMapName = GetCurrentCaptureMapName();
+        string currentBuildVersion = GetCurrentCaptureBuildVersion();
 
         string ffmpegExecutable = _videoEncoderExecutable;
         if (ImGui.InputText("ffmpeg Executable", ref ffmpegExecutable, 1024))
@@ -490,9 +492,12 @@ public partial class ViewerApp
                 FileName = encoderExecutable,
                 UseShellExecute = false,
                 RedirectStandardInput = true,
+                RedirectStandardError = true,
                 CreateNoWindow = true,
                 WorkingDirectory = Environment.CurrentDirectory,
             };
+
+            StringBuilder encoderErrorOutput = new();
 
             startInfo.ArgumentList.Add("-y");
             startInfo.ArgumentList.Add("-f");
@@ -506,7 +511,7 @@ public partial class ViewerApp
             startInfo.ArgumentList.Add("-i");
             startInfo.ArgumentList.Add("-");
             startInfo.ArgumentList.Add("-vf");
-            startInfo.ArgumentList.Add("vflip");
+            startInfo.ArgumentList.Add(BuildVideoCaptureFilter(width, height));
             startInfo.ArgumentList.Add("-an");
             startInfo.ArgumentList.Add("-c:v");
             startInfo.ArgumentList.Add("libx264");
@@ -518,11 +523,14 @@ public partial class ViewerApp
 
             Process process = Process.Start(startInfo)
                 ?? throw new InvalidOperationException("ffmpeg did not start.");
+            process.ErrorDataReceived += (_, args) => AppendVideoEncoderError(encoderErrorOutput, args.Data);
+            process.BeginErrorReadLine();
 
             _activeVideoRecording = new ActiveVideoRecording
             {
                 EncoderProcess = process,
                 EncoderInput = process.StandardInput.BaseStream,
+                EncoderErrorOutput = encoderErrorOutput,
                 OutputPath = outputPath,
                 IncludeUi = includeUi,
                 Width = width,
@@ -577,6 +585,10 @@ public partial class ViewerApp
             success = recording.EncoderProcess.ExitCode == 0;
             if (!success && statusOverride == null)
                 statusMessage = $"Video encode failed for {recording.OutputPath} (exit {recording.EncoderProcess.ExitCode}).";
+
+            string encoderError = GetVideoEncoderErrorSummary(recording);
+            if (!string.IsNullOrWhiteSpace(encoderError) && (!success || statusOverride != null))
+                statusMessage = $"{statusMessage} ffmpeg: {encoderError}";
         }
         catch (Exception ex)
         {
@@ -584,6 +596,14 @@ public partial class ViewerApp
         }
         finally
         {
+            try
+            {
+                recording.EncoderProcess.CancelErrorRead();
+            }
+            catch
+            {
+            }
+
             recording.EncoderProcess.Dispose();
         }
 
@@ -628,6 +648,12 @@ public partial class ViewerApp
             return;
         }
 
+        if (recording.EncoderProcess.HasExited)
+        {
+            StopVideoRecording("Video recording stopped because ffmpeg exited before the first frame was accepted.");
+            return;
+        }
+
         int framesToWrite = Math.Max(1, (int)(recording.FrameAccumulatorSeconds / recording.FrameIntervalSeconds));
         recording.FrameAccumulatorSeconds -= framesToWrite * recording.FrameIntervalSeconds;
 
@@ -666,6 +692,8 @@ public partial class ViewerApp
         _worldScene.ShowTaxiActors = true;
         _taxiRideCameraRouteId = _worldScene.SelectedTaxiRouteId;
         _taxiRideCameraEnabled = true;
+        _taxiRideFreeLookYawOffset = 0f;
+        _taxiRideFreeLookPitchOffset = 0f;
         _statusMessage = $"Ride camera attached to {GetTaxiRouteDisplayLabel(_taxiRideCameraRouteId)}.";
         return true;
     }
@@ -674,8 +702,24 @@ public partial class ViewerApp
     {
         _taxiRideCameraEnabled = false;
         _taxiRideCameraRouteId = -1;
+        _taxiRideFreeLookYawOffset = 0f;
+        _taxiRideFreeLookPitchOffset = 0f;
         if (!string.IsNullOrWhiteSpace(statusMessage))
             _statusMessage = statusMessage;
+    }
+
+    private void AdjustTaxiRideFreeLook(float deltaYawDegrees, float deltaPitchDegrees)
+    {
+        if (!_taxiRideCameraEnabled)
+            return;
+
+        _taxiRideFreeLookYawOffset += deltaYawDegrees;
+        while (_taxiRideFreeLookYawOffset > 180f)
+            _taxiRideFreeLookYawOffset -= 360f;
+        while (_taxiRideFreeLookYawOffset < -180f)
+            _taxiRideFreeLookYawOffset += 360f;
+
+        _taxiRideFreeLookPitchOffset = Math.Clamp(_taxiRideFreeLookPitchOffset + deltaPitchDegrees, -75f, 75f);
     }
 
     private void UpdateTaxiRideCamera()
@@ -704,32 +748,47 @@ public partial class ViewerApp
         if (horizontalForward.LengthSquared() <= 0.0001f)
             horizontalForward = Vector3.UnitY;
 
+        float baseYawDegrees = MathF.Atan2(horizontalForward.Y, horizontalForward.X) * 180f / MathF.PI;
+        float desiredYawDegrees = baseYawDegrees + _taxiRideFreeLookYawOffset;
+        Vector3 orbitForward = GetDirectionFromYawPitch(desiredYawDegrees, 0f);
+        Vector3 lookForward = GetDirectionFromYawPitch(desiredYawDegrees, _taxiRideFreeLookPitchOffset);
+
         float scale = Math.Max(0.25f, pose.Scale);
         if (_taxiRideCameraMode == TaxiRideCameraMode.Cockpit)
         {
             Vector3 eyePosition = pose.Position + Vector3.UnitZ * (_taxiRideCockpitHeight * scale);
-            Vector3 lookTarget = eyePosition + forward * Math.Max(20f, _taxiRideLookAhead);
-            ApplyLookCamera(eyePosition, lookTarget);
+            ApplyDirectionalRideCamera(eyePosition, lookForward);
             return;
         }
 
         Vector3 chaseFocus = pose.Position + Vector3.UnitZ * Math.Max(6f, _taxiRideCockpitHeight * 0.65f * scale);
-        Vector3 chasePosition = chaseFocus - horizontalForward * _taxiRideChaseDistance + Vector3.UnitZ * _taxiRideChaseHeight;
-        Vector3 chaseTarget = pose.Position + forward * Math.Max(20f, _taxiRideLookAhead) + Vector3.UnitZ * 4f;
-        ApplyLookCamera(chasePosition, chaseTarget);
+        Vector3 chasePosition = chaseFocus - orbitForward * _taxiRideChaseDistance + Vector3.UnitZ * _taxiRideChaseHeight;
+        ApplyDirectionalRideCamera(chasePosition, lookForward);
     }
 
-    private void ApplyLookCamera(Vector3 position, Vector3 target)
+    private void ApplyDirectionalRideCamera(Vector3 position, Vector3 forward)
     {
-        Vector3 delta = target - position;
-        if (delta.LengthSquared() <= 0.0001f)
+        if (forward.LengthSquared() <= 0.0001f)
             return;
 
-        _camera.Position = position;
-        _camera.Yaw = MathF.Atan2(delta.Y, delta.X) * 180f / MathF.PI;
+        Vector3 direction = Vector3.Normalize(forward);
 
-        float horizontalLength = MathF.Sqrt(delta.X * delta.X + delta.Y * delta.Y);
-        _camera.Pitch = Math.Clamp(MathF.Atan2(delta.Z, MathF.Max(0.0001f, horizontalLength)) * 180f / MathF.PI, -89f, 89f);
+        _camera.Position = position;
+        _camera.Yaw = MathF.Atan2(direction.Y, direction.X) * 180f / MathF.PI;
+
+        float horizontalLength = MathF.Sqrt(direction.X * direction.X + direction.Y * direction.Y);
+        _camera.Pitch = Math.Clamp(MathF.Atan2(direction.Z, MathF.Max(0.0001f, horizontalLength)) * 180f / MathF.PI, -89f, 89f);
+    }
+
+    private static Vector3 GetDirectionFromYawPitch(float yawDegrees, float pitchDegrees)
+    {
+        float yawRadians = yawDegrees * MathF.PI / 180f;
+        float pitchRadians = pitchDegrees * MathF.PI / 180f;
+        float cosPitch = MathF.Cos(pitchRadians);
+        return Vector3.Normalize(new Vector3(
+            cosPitch * MathF.Cos(yawRadians),
+            cosPitch * MathF.Sin(yawRadians),
+            MathF.Sin(pitchRadians)));
     }
 
     private unsafe bool TryCaptureFramebufferToPng(string outputPath, bool includeUi)
@@ -796,6 +855,49 @@ public partial class ViewerApp
     {
         for (int index = 3; index < rgbaPixels.Length; index += 4)
             rgbaPixels[index] = 255;
+    }
+
+    private static string BuildVideoCaptureFilter(int width, int height)
+    {
+        if ((width & 1) == 0 && (height & 1) == 0)
+            return "vflip";
+
+        return "vflip,pad=ceil(iw/2)*2:ceil(ih/2)*2";
+    }
+
+    private static void AppendVideoEncoderError(StringBuilder output, string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        lock (output)
+        {
+            if (output.Length >= 4096)
+                return;
+
+            if (output.Length > 0)
+                output.AppendLine();
+
+            output.Append(line.Trim());
+        }
+    }
+
+    private static string GetVideoEncoderErrorSummary(ActiveVideoRecording recording)
+    {
+        lock (recording.EncoderErrorOutput)
+        {
+            if (recording.EncoderErrorOutput.Length == 0)
+                return string.Empty;
+
+            string[] lines = recording.EncoderErrorOutput
+                .ToString()
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            if (lines.Length == 0)
+                return string.Empty;
+
+            return string.Join(" | ", lines.TakeLast(Math.Min(3, lines.Length)));
+        }
     }
 
     private void LoadCameraShotPoints()
