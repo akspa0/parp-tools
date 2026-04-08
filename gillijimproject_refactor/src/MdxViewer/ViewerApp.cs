@@ -23,6 +23,7 @@ using WowViewer.Core.IO.Maps;
 using WowViewer.Core.IO.Mdx;
 using WowViewer.Core.Maps;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Runtime.World.Visibility;
 using ObjectInstance = WowViewer.Core.Runtime.World.WorldObjectInstance;
 using WoWMapConverter.Core.Converters;
 using WoWMapConverter.Core.VLM;
@@ -163,10 +164,14 @@ public partial class ViewerApp : IDisposable
         new("Cataclysm (4.x) - 4.0.0.11927", "4.0.0.11927"),
         new("Cataclysm (4.x) - 4.0.1.12304", "4.0.1.12304")
     };
+    private const float MaxTerrainFogDistance = 20000f;
+    private const float MinTerrainFarPlane = 6000f;
+    private const float TerrainFarPlanePadding = 1024f;
+    private const float MaxTerrainFarPlane = MaxTerrainFogDistance + TerrainFarPlanePadding;
+
     private readonly List<ClientBuildOption> _clientBuildOptions = new();
     private string? _lastVirtualPath; // Virtual path of last loaded file (for DBC lookup)
     private string _statusMessage = "No data source loaded. Use File > Open Game Folder (MPQ) first, then Open File for standalone assets.";
-    private bool _openAboutPopup;
     private AreaTableService? _areaTableService;
     private string _currentAreaName = "";
     private int _currentMapId = -1; // MapID of the currently loaded world
@@ -174,7 +179,13 @@ public partial class ViewerApp : IDisposable
     private Vector3 _lastWorldSceneCameraPosition;
     private float _lastWorldSceneCameraYaw = 180f;
     private float _lastWorldSceneCameraPitch = -20f;
+    private string? _pendingDataSourceWorldReloadVirtualPath;
+    private string? _pendingDataSourceWorldReloadLocalPath;
+    private Vector3? _pendingDataSourceWorldReloadCameraPosition;
+    private float _pendingDataSourceWorldReloadCameraYaw = 180f;
+    private float _pendingDataSourceWorldReloadCameraPitch = -20f;
     private readonly Dictionary<string, Dictionary<int, string>> _savedTaxiActorModelOverridesByMap = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SavedObjectPathFilterMap> _savedObjectPathFiltersByMap = new(StringComparer.OrdinalIgnoreCase);
 
     // Map discovery
     private List<MapDefinition> _discoveredMaps = new();
@@ -205,8 +216,6 @@ public partial class ViewerApp : IDisposable
     private static readonly string ProjectsDir = Path.Combine(OutputDir, "projects");
     private static readonly string SettingsDir = Path.Combine(OutputDir, "settings");
     private static readonly string ViewerSettingsPath = Path.Combine(SettingsDir, "viewer_settings.json");
-    private static readonly string WmoV14ToV17OutputDir = Path.Combine(ExportDir, "WMOv14_to_v17_output");
-    private static readonly string WmoV17ToV14OutputDir = Path.Combine(ExportDir, "WMOv17_to_v14_output");
     private const int CurrentShellPanelLayoutVersion = 3;
     private const int MinimapTeleportConfirmClicks = 3;
     private const float MinimapClickMovementThresholdPixels = 3f;
@@ -245,6 +254,7 @@ public partial class ViewerApp : IDisposable
     private float _lastMouseX, _lastMouseY;
     private bool _mouseDown;
     private bool _mouseOverViewport;
+    private float _pendingSceneMouseWheelDelta;
 
     // UI state
     private bool _showFileBrowser = true;
@@ -258,6 +268,7 @@ public partial class ViewerApp : IDisposable
     private bool _showMinimapWindow = false;
     private bool _showPerfWindow = false;
     private bool _showRenderQualityWindow = false;
+    private bool _openAboutPopup;
     private WorkspaceMode _workspaceMode = WorkspaceMode.Viewer;
     private EditorWorkspaceTask _editorWorkspaceTask = EditorWorkspaceTask.Terrain;
     private FixedBottomDrawerTab _activeBottomDrawerTab = FixedBottomDrawerTab.Workspace;
@@ -386,6 +397,11 @@ public partial class ViewerApp : IDisposable
     private ChunkClipboardSet? _chunkClipboardSet;
     private bool _chunkClipboardShowOverlay = true;
     private Terrain.BoundingBoxRenderer? _editorOverlayBb;
+    private bool _standaloneWmoGroupOverlayEnabled = true;
+    private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
+    private int _hoveredStandaloneWmoGroupIndex = -1;
+    private int _selectedStandaloneWmoGroupIndex = -1;
+    private readonly HashSet<int> _highlightedStandaloneWmoGroupIndices = new();
 
     private sealed class HeightmapMetadata
     {
@@ -461,7 +477,7 @@ public partial class ViewerApp : IDisposable
 
     private float GetActiveToolbarHeight()
     {
-        return _useDockspaceUi ? 0f : ToolbarHeight;
+        return _hideUiChrome ? 0f : ToolbarHeight;
     }
 
     private float GetTopChromeHeight()
@@ -490,6 +506,17 @@ public partial class ViewerApp : IDisposable
     private string _taxiActorModelOverrideInput = "";
     private int _taxiActorModelOverrideInputRouteId = -1;
     private int _taxiActorModelOverrideTargetRouteId = -1;
+    private string _objectPathFilterInput = "";
+    private bool _objectPathFilterInputAppliesToWmo = true;
+    private bool _objectPathFilterInputAppliesToMdx = true;
+    private string _taxiRouteFilter = "";
+    private int _taxiRouteListGroupingMode = 1;
+    private bool _layoutObjectPreviewMode;
+    private bool _layoutObjectPreviewStateCaptured;
+    private bool _layoutObjectPreviewSavedObjectsVisible = true;
+    private bool _layoutObjectPreviewSavedWmosVisible = true;
+    private bool _layoutObjectPreviewSavedDoodadsVisible = true;
+    private WorldObjectVisibilityProfile _layoutObjectPreviewSavedVisibilityProfile = WorldObjectVisibilityProfile.Performance;
     private string _sqlAlphaCoreRoot = "";
     private SqlWorldPopulationService? _sqlPopulationService;
     private bool _sqlIncludeCreatures = true;
@@ -544,6 +571,7 @@ public partial class ViewerApp : IDisposable
     private float _cameraSpeed = 50f;
     // Field of view in degrees (adjustable via UI)
     private float _fovDegrees = 60f;
+    private int _savedDetailedAdtTileCountOverride;
 
     private bool _autoFrameModelOnLoad = true;
     private static readonly string[] WmoLiquidRotationLabels = { "0°", "90°", "180°", "270°" };
@@ -599,7 +627,6 @@ public partial class ViewerApp : IDisposable
     // WMO Converter state
     private bool _showWmoConverterDialog = false;
     private int _wmoConvertDirection = 0; // 0 = Alpha(v14/v16)→LK(v17), 1 = LK(v17)→Alpha(v14)
-    private bool _wmoConvertExtended = false;
     private string _wmoConvertSourcePath = "";
     private string _wmoConvertOutputPath = "";
     private bool _wmoConvertCopyTextures = true;
@@ -675,22 +702,15 @@ public partial class ViewerApp : IDisposable
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
-        _gl.ClearColor(0.05f, 0.05f, 0.1f, 1.0f); // Dark blue-black default
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.Enable(EnableCap.CullFace);
 
         _loadingScreen = new Rendering.LoadingScreen(_gl);
 
-        // Style ImGui
-        var style = ImGui.GetStyle();
-        style.WindowRounding = 4f;
-        style.FrameRounding = 2f;
-        style.Colors[(int)ImGuiCol.WindowBg] = new Vector4(0.12f, 0.12f, 0.14f, 0.95f);
-        style.Colors[(int)ImGuiCol.MenuBarBg] = new Vector4(0.15f, 0.15f, 0.18f, 1.0f);
-
         TryAutoPopulateAlphaCoreRoot();
         LoadViewerSettings();
+        ApplyActiveUiTheme();
         LoadCameraShotPoints();
         DetectRenderQualityCapabilities();
         ApplyRenderQualitySettings(refreshTextures: false);
@@ -743,19 +763,21 @@ public partial class ViewerApp : IDisposable
 
                 if (_mouseDown && !IsSceneMouseCaptureBlocked(_lastMouseX, _lastMouseY))
                 {
-                    _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
-                    _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
-                    _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
+                    if (_taxiRideCameraEnabled)
+                    {
+                        AdjustTaxiRideFreeLook(-dx * 0.5f, -dy * 0.5f);
+                    }
+                    else
+                    {
+                        _camera.Yaw -= dx * 0.5f;   // Drag left = look left, Drag right = look right
+                        _camera.Pitch -= dy * 0.5f; // Drag up = look up, Drag down = look down
+                        _camera.Pitch = Math.Clamp(_camera.Pitch, -89f, 89f);
+                    }
                 }
             };
             mouse.Scroll += (_, scroll) =>
             {
-                if (CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
-                {
-                    // Free-fly: scroll moves camera forward/back
-                    float speed = 5f * scroll.Y;
-                    _camera.Move(speed, 0, 0, 1f);
-                }
+                _pendingSceneMouseWheelDelta += scroll.Y;
             };
         }
 
@@ -875,7 +897,9 @@ public partial class ViewerApp : IDisposable
         SyncImGuiWindowMetrics(_window.Size, _window.FramebufferSize);
         _imGui.Update((float)dt);
         FlushPendingImGuiMouseButtonEvents();
+        HandleSceneMouseWheelInput();
         HandleKeyboardInput((float)dt);
+        UpdateTaxiRideCamera();
         _minimapRenderer?.ProcessPendingLoads(
             maxLoads: (_fullscreenMinimap || _showMinimapWindow) ? 4 : 1,
             maxBudgetMs: (_fullscreenMinimap || _showMinimapWindow) ? 6.0 : 1.5);
@@ -924,20 +948,45 @@ public partial class ViewerApp : IDisposable
     private bool _rightArrowWasPressed = false;
     private bool _spaceWasPressed = false;
 
+    private void HandleSceneMouseWheelInput()
+    {
+        if (MathF.Abs(_pendingSceneMouseWheelDelta) <= float.Epsilon)
+            return;
+
+        float scrollDelta = _pendingSceneMouseWheelDelta;
+        _pendingSceneMouseWheelDelta = 0f;
+
+        if (!CanSceneConsumeMouse(_lastMouseX, _lastMouseY))
+            return;
+
+        _camera.Move(5f * scrollDelta, 0f, 0f, 1f);
+    }
+
+    private bool CanSceneConsumeKeyboardInput()
+    {
+        return !IsSceneKeyboardCaptureBlocked();
+    }
+
+    private bool IsSceneKeyboardCaptureBlocked()
+    {
+        ImGuiIOPtr io = ImGui.GetIO();
+        return io.WantCaptureKeyboard || io.WantTextInput;
+    }
+
     private void HandleKeyboardInput(float dt)
     {
         if (_input.Keyboards.Count == 0) return;
         var kb = _input.Keyboards[0];
+        bool canSceneConsumeKeyboard = CanSceneConsumeKeyboardInput();
 
-        if (_chunkToolEnabled && !ImGui.GetIO().WantCaptureKeyboard)
+        bool ctrlDown = kb.IsKeyPressed(Key.ControlLeft) || kb.IsKeyPressed(Key.ControlRight);
+        bool cDown = kb.IsKeyPressed(Key.C);
+        bool vDown = kb.IsKeyPressed(Key.V);
+        bool ctrlCDown = ctrlDown && cDown;
+        bool ctrlVDown = ctrlDown && vDown;
+
+        if (_chunkToolEnabled && canSceneConsumeKeyboard)
         {
-            bool ctrlDown = kb.IsKeyPressed(Key.ControlLeft) || kb.IsKeyPressed(Key.ControlRight);
-            bool cDown = kb.IsKeyPressed(Key.C);
-            bool vDown = kb.IsKeyPressed(Key.V);
-
-            bool ctrlCDown = ctrlDown && cDown;
-            bool ctrlVDown = ctrlDown && vDown;
-
             var terrainRenderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
             if (terrainRenderer != null)
             {
@@ -947,18 +996,18 @@ public partial class ViewerApp : IDisposable
                 if (ctrlVDown && !_chunkClipboardCtrlVWasPressed)
                     ExecuteChunkClipboardPaste(terrainRenderer);
             }
-
-            _chunkClipboardCtrlCWasPressed = ctrlCDown;
-            _chunkClipboardCtrlVWasPressed = ctrlVDown;
         }
 
+        _chunkClipboardCtrlCWasPressed = ctrlCDown;
+        _chunkClipboardCtrlVWasPressed = ctrlVDown;
+
         bool tabPressed = kb.IsKeyPressed(Key.Tab);
-        if (!ImGui.GetIO().WantTextInput && tabPressed && !_tabKeyWasPressed)
+        if (canSceneConsumeKeyboard && tabPressed && !_tabKeyWasPressed)
             _hideUiChrome = !_hideUiChrome;
         _tabKeyWasPressed = tabPressed;
 
         bool pPressed = kb.IsKeyPressed(Key.P);
-        if (!ImGui.GetIO().WantTextInput && pPressed && !_pKeyWasPressed)
+        if (canSceneConsumeKeyboard && pPressed && !_pKeyWasPressed)
         {
             _showRightSidebar = true;
             _activeBottomDrawerTab = FixedBottomDrawerTab.Pm4;
@@ -968,7 +1017,7 @@ public partial class ViewerApp : IDisposable
         _pKeyWasPressed = pPressed;
 
         bool iPressed = kb.IsKeyPressed(Key.I);
-        if (!ImGui.GetIO().WantTextInput && iPressed && !_iKeyWasPressed)
+        if (canSceneConsumeKeyboard && iPressed && !_iKeyWasPressed)
         {
             _showRightSidebar = !_showRightSidebar;
             if (_showRightSidebar)
@@ -978,7 +1027,7 @@ public partial class ViewerApp : IDisposable
 
         // M key toggles fullscreen minimap (only when terrain is loaded)
         bool mPressed = kb.IsKeyPressed(Key.M);
-        if (mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
+        if (canSceneConsumeKeyboard && mPressed && !_mKeyWasPressed && (_terrainManager != null || _vlmTerrainManager != null))
             ToggleFullscreenMinimap();
         _mKeyWasPressed = mPressed;
 
@@ -996,7 +1045,7 @@ public partial class ViewerApp : IDisposable
                 
                 // Left arrow: step backward
                 bool leftPressed = kb.IsKeyPressed(Key.Left);
-                if (leftPressed && !_leftArrowWasPressed)
+                if (canSceneConsumeKeyboard && leftPressed && !_leftArrowWasPressed)
                 {
                     animator.IsPlaying = false;
                     animator.StepToPrevKeyframe();
@@ -1005,7 +1054,7 @@ public partial class ViewerApp : IDisposable
                 
                 // Right arrow: step forward
                 bool rightPressed = kb.IsKeyPressed(Key.Right);
-                if (rightPressed && !_rightArrowWasPressed)
+                if (canSceneConsumeKeyboard && rightPressed && !_rightArrowWasPressed)
                 {
                     animator.IsPlaying = false;
                     animator.StepToNextKeyframe();
@@ -1014,13 +1063,16 @@ public partial class ViewerApp : IDisposable
                 
                 // Spacebar: toggle play/pause
                 bool spacePressed = kb.IsKeyPressed(Key.Space);
-                if (spacePressed && !_spaceWasPressed)
+                if (canSceneConsumeKeyboard && spacePressed && !_spaceWasPressed)
                 {
                     animator.IsPlaying = !animator.IsPlaying;
                 }
                 _spaceWasPressed = spacePressed;
             }
         }
+
+        if (_taxiRideCameraEnabled || !canSceneConsumeKeyboard)
+            return;
 
         // Free-fly: WASD moves the camera position, Shift = 5x boost
         bool shift = kb.IsKeyPressed(Key.ShiftLeft) || kb.IsKeyPressed(Key.ShiftRight);
@@ -1107,7 +1159,7 @@ public partial class ViewerApp : IDisposable
                 ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
                 : (float)size.X / Math.Max(size.Y, 1);
             var view = _camera.GetViewMatrix();
-            float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+            float farPlane = GetSceneFarPlane();
             var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
             // Update terrain AOI before rendering
@@ -1175,6 +1227,7 @@ public partial class ViewerApp : IDisposable
                 float fogEnd = farPlane;
                 wmoR.RenderWithTransform(Matrix4x4.Identity, view, proj,
                     fogColor, fogStart, fogEnd, _camera.Position, lightDir, lightColor, ambientColor);
+                DrawStandaloneWmoGroupOverlay(wmoR, view, proj, sceneViewportX, sceneViewportY, sceneViewportWidth, sceneViewportHeight);
             }
             else
             {
@@ -1187,12 +1240,14 @@ public partial class ViewerApp : IDisposable
                 _gl.Viewport(_window.FramebufferSize);
         }
 
+        CaptureVideoFrameIfNeeded(includeUi: false, dt);
         CompleteCaptureIfReady(includeUi: false);
 
         // Render ImGui overlay
         DrawUI();
         _imGui.Render();
 
+        CaptureVideoFrameIfNeeded(includeUi: true, dt);
         CompleteCaptureIfReady(includeUi: true);
     }
 
@@ -1693,28 +1748,6 @@ void main() {
                 ImGui.EndMenu();
             }
 
-            if (ImGui.BeginMenu("Workspace"))
-            {
-                if (ImGui.MenuItem("Viewer Mode", "", _workspaceMode == WorkspaceMode.Viewer))
-                    SetWorkspaceMode(WorkspaceMode.Viewer);
-
-                if (ImGui.MenuItem("Editor Mode", "", _workspaceMode == WorkspaceMode.Editor))
-                    SetWorkspaceMode(WorkspaceMode.Editor);
-
-                ImGui.Separator();
-
-                foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
-                {
-                    if (ImGui.MenuItem(GetEditorWorkspaceTaskLabel(task), "", _editorWorkspaceTask == task))
-                    {
-                        SetWorkspaceMode(WorkspaceMode.Editor);
-                        SetEditorWorkspaceTask(task);
-                    }
-                }
-
-                ImGui.EndMenu();
-            }
-
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About"))
@@ -1877,8 +1910,9 @@ void main() {
 
                 if (!string.IsNullOrWhiteSpace(overlayPath) && Directory.Exists(overlayPath))
                 {
-                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion);
+                    LoadMpqDataSource(savedBasePath, null, savedBuildVersion, deferWorldReload: true);
                     AttachLooseMapOverlay(overlayPath);
+                    RestoreWorldAfterDataSourceReload();
                 }
             }
             else
@@ -3542,11 +3576,14 @@ void main() {
 
     private void DrawEditorOverlays(Matrix4x4 view, Matrix4x4 proj)
     {
-        if (!_chunkClipboardShowOverlay)
-            return;
-
         var renderer = _terrainManager?.Renderer ?? _vlmTerrainManager?.Renderer;
         if (renderer == null)
+            return;
+
+        bool drawChunkClipboardOverlay = _chunkClipboardShowOverlay
+            && (_selectedChunks.Count > 0 || _chunkClipboardLockedTargetKey != null || _chunkClipboardCopiedKey != null);
+        bool drawMcnkOverlay = ShouldDrawMcnkFlagOverlay(renderer);
+        if (!drawChunkClipboardOverlay && !drawMcnkOverlay)
             return;
 
         _editorOverlayBb ??= new Terrain.BoundingBoxRenderer(_gl);
@@ -3554,30 +3591,46 @@ void main() {
         _gl.Enable(EnableCap.DepthTest);
         _gl.DepthFunc(DepthFunction.Lequal);
         _gl.DepthMask(false);
-        _editorOverlayBb.BeginBatch();
 
         float overlayTime = (float)(System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency);
 
-        if (_selectedChunks.Count > 0)
+        if (drawMcnkOverlay)
         {
-            foreach (var (tx, ty, cx, cy) in _selectedChunks)
-            {
-                if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
-                    _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
-            }
+            _gl.Enable(EnableCap.Blend);
+            _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            _editorOverlayBb.BeginSolidBatch();
+            _editorOverlayBb.BeginBatch();
+            BatchMcnkFlagOverlayGeometry(_editorOverlayBb);
+            _editorOverlayBb.FlushSolidBatch(view, proj);
+            _gl.Disable(EnableCap.Blend);
         }
 
-        if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
-            _editorOverlayBb.BatchHighlightedBoxMinMax(
-                lockedInfo.BoundsMin,
-                lockedInfo.BoundsMax,
-                overlayTime,
-                new Vector3(1f, 1f, 1f),
-                new Vector3(1f, 0.8f, 0.1f),
-                new Vector3(0.1f, 0.9f, 1f));
+        if (drawChunkClipboardOverlay)
+        {
+            if (!drawMcnkOverlay)
+                _editorOverlayBb.BeginBatch();
 
-        if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
-            _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+            if (_selectedChunks.Count > 0)
+            {
+                foreach (var (tx, ty, cx, cy) in _selectedChunks)
+                {
+                    if (renderer.TryGetChunkInfo(tx, ty, cx, cy, out var sel))
+                        _editorOverlayBb.BatchBoxMinMax(sel.BoundsMin, sel.BoundsMax, new Vector3(0f, 1f, 1f));
+                }
+            }
+
+            if (_chunkClipboardLockedTargetKey is { } locked && renderer.TryGetChunkInfo(locked.tileX, locked.tileY, locked.chunkX, locked.chunkY, out var lockedInfo))
+                _editorOverlayBb.BatchHighlightedBoxMinMax(
+                    lockedInfo.BoundsMin,
+                    lockedInfo.BoundsMax,
+                    overlayTime,
+                    new Vector3(1f, 1f, 1f),
+                    new Vector3(1f, 0.8f, 0.1f),
+                    new Vector3(0.1f, 0.9f, 1f));
+
+            if (_chunkClipboardCopiedKey is (int copiedTx, int copiedTy, int copiedCx, int copiedCy) copied && renderer.TryGetChunkInfo(copiedTx, copiedTy, copiedCx, copiedCy, out var copiedInfo))
+                _editorOverlayBb.BatchBoxMinMax(copiedInfo.BoundsMin, copiedInfo.BoundsMax, new Vector3(1f, 1f, 0f));
+        }
 
         _editorOverlayBb.FlushBatch(view, proj);
 
@@ -3609,7 +3662,7 @@ void main() {
 
         float aspect = vpW / Math.Max(vpH, 1f);
         var view = _camera.GetViewMatrix();
-        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        float farPlane = GetSceneFarPlane();
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
         float localX = mouseX - vpX;
@@ -3676,6 +3729,27 @@ void main() {
         }
 
         return false;
+    }
+
+    private float GetSceneFarPlane()
+    {
+        if (_terrainManager != null)
+        {
+            return Math.Clamp(
+                MathF.Max(_terrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
+                MinTerrainFarPlane,
+                MaxTerrainFarPlane);
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            return Math.Clamp(
+                MathF.Max(_vlmTerrainManager.Lighting.FogEnd + TerrainFarPlanePadding, MinTerrainFarPlane),
+                MinTerrainFarPlane,
+                MaxTerrainFarPlane);
+        }
+
+        return 10000f;
     }
 
     private bool TrySampleTerrainHeightLoaded(TerrainRenderer renderer, float worldX, float worldY, out float height, out TerrainRenderer.TerrainChunkInfo info)
@@ -4181,13 +4255,7 @@ void main() {
             ImGui.SameLine();
             ImGui.RadioButton("LK WMO → Alpha WMO", ref _wmoConvertDirection, 1);
             ImGui.Spacing();
-
-            ImGui.Text("Mode:");
-            bool isBasic = !_wmoConvertExtended;
-            if (ImGui.RadioButton("Basic", isBasic)) _wmoConvertExtended = false;
-            ImGui.SameLine();
-            bool isExtended = _wmoConvertExtended;
-            if (ImGui.RadioButton("Extended", isExtended)) _wmoConvertExtended = true;
+            ImGui.TextWrapped("The maintained converter path is now the only active path in this dialog.");
 
             ImGui.Spacing();
             ImGui.Separator();
@@ -4199,6 +4267,8 @@ void main() {
                 && string.IsNullOrEmpty(_wmoConvertSourcePath))
             {
                 _wmoConvertSourcePath = _loadedFilePath;
+                if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                    _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
             }
 
             ImGui.Text("Source WMO:");
@@ -4209,19 +4279,41 @@ void main() {
             {
                 string? initDir = !string.IsNullOrEmpty(_wmoConvertSourcePath) ? Path.GetDirectoryName(_wmoConvertSourcePath) : null;
                 var picked = ShowFileDialogSTA("Select WMO file", "WMO Files (*.wmo)|*.wmo|All Files (*.*)|*.*", initDir);
-                if (picked != null) _wmoConvertSourcePath = picked;
+                if (picked != null)
+                {
+                    _wmoConvertSourcePath = picked;
+                    if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                        _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
+                }
             }
 
-            string outputBaseDir = (_wmoConvertDirection == 0) ? WmoV14ToV17OutputDir : WmoV17ToV14OutputDir;
+            if (string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+                _wmoConvertOutputPath = GetDefaultWmoConverterOutputDirectory();
+
+            ImGui.Text("Output Folder:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##wmo_out_dir", ref _wmoConvertOutputPath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##wmo_out_dir"))
+            {
+                string? picked = ShowFolderDialogSTA(
+                    "Select output directory for converted WMO files",
+                    GetDefaultWmoConverterOutputDirectory(),
+                    showNewFolderButton: true);
+                if (picked != null)
+                    _wmoConvertOutputPath = picked;
+            }
+
             string outputRootPath = "";
-            if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath))
+            if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath)
+                && !string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
             {
                 string baseName = Path.GetFileNameWithoutExtension(_wmoConvertSourcePath);
                 string suffix = (_wmoConvertDirection == 0) ? ".v17.wmo" : ".v14.wmo";
-                outputRootPath = Path.Combine(outputBaseDir, baseName + suffix);
+                outputRootPath = Path.Combine(Path.GetFullPath(_wmoConvertOutputPath), baseName + suffix);
             }
 
-            ImGui.Text("Output Root Path:");
+            ImGui.Text("Resolved Output File:");
             ImGui.SetNextItemWidth(-1);
             ImGui.BeginDisabled();
             ImGui.InputText("##wmo_out", ref outputRootPath, 512);
@@ -4246,7 +4338,6 @@ void main() {
                 string srcPath = _wmoConvertSourcePath;
                 string outPath = outputRootPath;
                 int direction = _wmoConvertDirection;
-                bool extendedMode = _wmoConvertExtended;
                 bool copyTextures = _wmoConvertCopyTextures;
                 var dataSource = _dataSource;
 
@@ -4260,18 +4351,11 @@ void main() {
 
                         List<string> textures = new();
                         List<string> writtenFiles = new();
+                        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".");
                         if (direction == 0)
                         {
-                            if (extendedMode)
-                            {
-                                var converter = new WmoV14ToV17ExtendedConverter();
-                                textures = converter.Convert(srcPath, outPath);
-                            }
-                            else
-                            {
-                                var converter = new WmoV14ToV17Converter();
-                                textures = converter.Convert(srcPath, outPath);
-                            }
+                            var converter = new WmoV14ToV17Converter();
+                            textures = converter.Convert(srcPath, outPath);
 
                             writtenFiles.Add(outPath);
                             string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".";
@@ -4749,6 +4833,21 @@ void main() {
             _projectOutputRootDir = ProjectsDir;
 
         return Path.GetFullPath(_projectOutputRootDir);
+    }
+
+    private string GetDefaultWmoConverterOutputDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_wmoConvertOutputPath))
+            return Path.GetFullPath(_wmoConvertOutputPath);
+
+        if (!string.IsNullOrWhiteSpace(_wmoConvertSourcePath))
+        {
+            string? sourceDir = Path.GetDirectoryName(Path.GetFullPath(_wmoConvertSourcePath));
+            if (!string.IsNullOrWhiteSpace(sourceDir))
+                return sourceDir;
+        }
+
+        return GetProjectOutputRootDirectory();
     }
 
     private void HandleProjectOutputRootChanged()
@@ -5310,28 +5409,14 @@ void main() {
             ImGui.TextDisabled("Area POIs: none found");
         }
 
-        // Taxi paths toggle — lazy-loaded on first request
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0)
-        {
-            bool showTaxi = _worldScene.ShowTaxi;
-            if (ImGui.Checkbox($"Taxi Paths ({_worldScene.TaxiLoader.Routes.Count})", ref showTaxi))
-                _worldScene.ShowTaxi = showTaxi;
-            if (_worldScene.ShowTaxi && (_worldScene.SelectedTaxiNodeId >= 0 || _worldScene.SelectedTaxiRouteId >= 0))
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Show All"))
-                    _worldScene.ClearTaxiSelection();
-            }
-        }
-        else if (!_worldScene.TaxiLoadAttempted)
-        {
-            if (ImGui.Button("Load Taxi Paths"))
-                _worldScene.ShowTaxi = true; // triggers lazy load
-        }
-        else if (_worldScene.TaxiLoadAttempted && (_worldScene.TaxiLoader == null || _worldScene.TaxiLoader.Routes.Count == 0))
-        {
-            ImGui.TextDisabled("Taxi Paths: none found");
-        }
+        ImGui.Separator();
+
+        bool defaultOpenTaxi = _worldScene.ShowTaxi
+            || _worldScene.SelectedTaxiNodeId >= 0
+            || _worldScene.SelectedTaxiRouteId >= 0
+            || _taxiRideCameraEnabled;
+        if (ImGui.CollapsingHeader("Taxi", defaultOpenTaxi ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
+            DrawSelectedTaxiControls();
 
         // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
         if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)
@@ -5530,7 +5615,7 @@ void main() {
                 _worldScene.UseDynamicHoveredAssetRange = useDynamicHoverRange;
 
             float hoverPickRange = _worldScene.HoveredAssetMaxDistance;
-            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, 2000f, "%.2f yd"))
+            if (ImGui.SliderFloat("Hover/Pick Range", ref hoverPickRange, 100f, MaxTerrainFogDistance, "%.2f yd"))
                 _worldScene.HoveredAssetMaxDistance = hoverPickRange;
 
             ImGui.TextDisabled($"Effective range: {_worldScene.EffectiveHoveredAssetMaxDistance:F2} yd");
@@ -5539,6 +5624,8 @@ void main() {
         bool showSelectedObjectBounds = _worldScene.ShowSelectedObjectBounds;
         if (ImGui.Checkbox("Show Selected Object Bounds", ref showSelectedObjectBounds))
             _worldScene.ShowSelectedObjectBounds = showSelectedObjectBounds;
+
+        DrawObjectPathFilterControls();
 
         ImGui.Separator();
         ImGui.Text("UniqueId Archaeology");
@@ -5855,93 +5942,6 @@ void main() {
             ImGui.TreePop();
         }
 
-        // Taxi Nodes list — click to select/filter
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Nodes.Count > 0 &&
-            ImGui.TreeNode($"Taxi Nodes ({_worldScene.TaxiLoader.Nodes.Count})"))
-        {
-            if (ImGui.BeginChild("##TaxiNodeList", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                int nodeCount = _worldScene.TaxiLoader.Nodes.Count;
-                GetVisibleListRange(nodeCount, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var node = _worldScene.TaxiLoader.Nodes[i];
-                    bool isSelected = _worldScene.SelectedTaxiNodeId == node.Id;
-                    string label = $"[{node.Id}] {node.Name}";
-                    if (ImGui.Selectable(label, isSelected))
-                    {
-                        SelectTaxiNode(node.Id, toggle: true);
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Position: ({node.Position.X:F1}, {node.Position.Y:F1}, {node.Position.Z:F1})");
-                        int routeCount = _worldScene.TaxiLoader.Routes.Count(r => r.FromNodeId == node.Id || r.ToNodeId == node.Id);
-                        ImGui.Text($"Routes: {routeCount}");
-                        ImGui.Text("Click to filter routes. Use the taxi controls to focus the camera.");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < nodeCount)
-                    ImGui.Dummy(new Vector2(0, (nodeCount - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
-        }
-
-        // Taxi Routes list — click to select/filter
-        if (_worldScene.TaxiLoader != null && _worldScene.TaxiLoader.Routes.Count > 0 &&
-            ImGui.TreeNode($"Taxi Routes ({_worldScene.TaxiLoader.Routes.Count})"))
-        {
-            if (ImGui.BeginChild("##TaxiRouteList", new Vector2(0, 220f), true))
-            {
-                float rowHeight = GetUniformListRowHeight();
-                int routeCount = _worldScene.TaxiLoader.Routes.Count;
-                GetVisibleListRange(routeCount, rowHeight, out int startIndex, out int endIndex);
-                if (startIndex > 0)
-                    ImGui.Dummy(new Vector2(0, startIndex * rowHeight));
-
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    var route = _worldScene.TaxiLoader.Routes[i];
-                    bool isSelected = _worldScene.SelectedTaxiRouteId == route.PathId;
-                    string fromName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.FromNodeId)?.Name ?? $"#{route.FromNodeId}";
-                    string toName = _worldScene.TaxiLoader.Nodes.FirstOrDefault(n => n.Id == route.ToNodeId)?.Name ?? $"#{route.ToNodeId}";
-                    string label = $"[{route.PathId}] {fromName} → {toName} ({route.Waypoints.Count} pts)";
-                    if (ImGui.Selectable(label, isSelected))
-                    {
-                        SelectTaxiRoute(route.PathId, toggle: true);
-                    }
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.BeginTooltip();
-                        ImGui.Text($"Cost: {route.Cost}");
-                        ImGui.Text($"Waypoints: {route.Waypoints.Count}");
-                        if (route.Waypoints.Count > 0)
-                        {
-                            var first = route.Waypoints[0];
-                            var last = route.Waypoints[^1];
-                            ImGui.Text($"Start: ({first.X:F0}, {first.Y:F0}, {first.Z:F0})");
-                            ImGui.Text($"End: ({last.X:F0}, {last.Y:F0}, {last.Z:F0})");
-                        }
-                        ImGui.Text("Click to select this route. Use the viewport route handle or taxi controls to focus it.");
-                        ImGui.EndTooltip();
-                    }
-                }
-
-                if (endIndex < routeCount)
-                    ImGui.Dummy(new Vector2(0, (routeCount - endIndex) * rowHeight));
-
-                ImGui.EndChild();
-            }
-            ImGui.TreePop();
-        }
     }
 
     private void LoadSqlSpawnsForCurrentMap()
@@ -6325,12 +6325,14 @@ void main() {
         WarmDiscoveredWdlPreviews();
     }
 
-    private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null)
+    private void LoadMpqDataSource(string gamePath, string? listfilePath, string? explicitBuildVersion = null, bool deferWorldReload = false)
     {
         try
         {
             string? resolvedListfilePath = ResolveListfilePath(listfilePath);
             _statusMessage = $"Loading MPQ archives from {gamePath}...";
+            StageCurrentWorldForDataSourceReload();
+            ClearActiveSceneForDataSourceReload();
             _lastGameFolderPath = Path.GetFullPath(gamePath);
             _standaloneSkinPathCache.Clear();
             _loggedStandaloneMissingSkinPaths.Clear();
@@ -6391,6 +6393,9 @@ void main() {
             RefreshDiscoveredMaps();
 
             RefreshFileList();
+
+            if (!deferWorldReload)
+                RestoreWorldAfterDataSourceReload();
         }
         catch (Exception ex)
         {
@@ -6583,6 +6588,77 @@ void main() {
         return File.Exists(wdtPath) ? wdtPath : null;
     }
 
+    private void StageCurrentWorldForDataSourceReload()
+    {
+        _pendingDataSourceWorldReloadVirtualPath = null;
+        _pendingDataSourceWorldReloadLocalPath = null;
+        _pendingDataSourceWorldReloadCameraPosition = null;
+
+        if (_worldScene == null || _terrainManager == null)
+            return;
+
+        string? virtualWdtPath = !string.IsNullOrWhiteSpace(_lastVirtualPath)
+            && string.Equals(Path.GetExtension(_lastVirtualPath), ".wdt", StringComparison.OrdinalIgnoreCase)
+            ? _lastVirtualPath
+            : null;
+        string? localWdtPath = TryGetLoadedLocalWdtPath();
+
+        if (string.IsNullOrWhiteSpace(virtualWdtPath) && string.IsNullOrWhiteSpace(localWdtPath))
+            return;
+
+        _pendingDataSourceWorldReloadVirtualPath = virtualWdtPath;
+        _pendingDataSourceWorldReloadLocalPath = localWdtPath;
+        _pendingDataSourceWorldReloadCameraPosition = _camera.Position;
+        _pendingDataSourceWorldReloadCameraYaw = _camera.Yaw;
+        _pendingDataSourceWorldReloadCameraPitch = _camera.Pitch;
+    }
+
+    private void ClearActiveSceneForDataSourceReload()
+    {
+        InvalidatePm4DerivedReports();
+        _worldScene?.Dispose();
+        _worldScene = null;
+        _terrainManager?.Dispose();
+        _terrainManager = null;
+        _vlmTerrainManager?.Dispose();
+        _vlmTerrainManager = null;
+        ResetSqlSpawnStreamingState(clearSceneSpawns: false);
+        _renderer = null;
+        _loadedWmo = null;
+        _loadedMdx = null;
+        _loadedM2Runtime = null;
+    }
+
+    private void RestoreWorldAfterDataSourceReload()
+    {
+        string? virtualPath = _pendingDataSourceWorldReloadVirtualPath;
+        string? localPath = _pendingDataSourceWorldReloadLocalPath;
+        Vector3? cameraPosition = _pendingDataSourceWorldReloadCameraPosition;
+        float cameraYaw = _pendingDataSourceWorldReloadCameraYaw;
+        float cameraPitch = _pendingDataSourceWorldReloadCameraPitch;
+
+        _pendingDataSourceWorldReloadVirtualPath = null;
+        _pendingDataSourceWorldReloadLocalPath = null;
+        _pendingDataSourceWorldReloadCameraPosition = null;
+
+        if (cameraPosition == null)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(virtualPath) && _dataSource != null)
+            LoadFileFromDataSource(virtualPath);
+
+        if (_worldScene == null && !string.IsNullOrWhiteSpace(localPath) && File.Exists(localPath))
+            LoadWdtTerrain(localPath);
+
+        if (_worldScene == null)
+            return;
+
+        _camera.Position = cameraPosition.Value;
+        _camera.Yaw = cameraYaw;
+        _camera.Pitch = cameraPitch;
+        _statusMessage = $"Reloaded world for client: {_terrainManager?.MapName ?? Path.GetFileNameWithoutExtension(virtualPath ?? localPath ?? string.Empty)}";
+    }
+
     private string? TryGetLoadedLocalWdtPath()
     {
         if (string.IsNullOrWhiteSpace(_loadedFilePath))
@@ -6699,6 +6775,114 @@ void main() {
 
         foreach ((int routeId, string modelPath) in overridesByRoute)
             _worldScene.SetTaxiActorModelOverride(routeId, modelPath);
+    }
+
+    private void PersistObjectPathFiltersForCurrentMap()
+    {
+        if (_worldScene == null)
+            return;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return;
+
+        List<SavedObjectPathFilterEntry> savedEntries = _worldScene.ObjectPathFilters
+            .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix) && (entry.AppliesToWmo || entry.AppliesToMdx))
+            .OrderBy(entry => entry.PathPrefix, StringComparer.OrdinalIgnoreCase)
+            .Select(entry => new SavedObjectPathFilterEntry
+            {
+                PathPrefix = entry.PathPrefix,
+                AppliesToWmo = entry.AppliesToWmo,
+                AppliesToMdx = entry.AppliesToMdx,
+            })
+            .ToList();
+
+        if (savedEntries.Count == 0 && _worldScene.ObjectPathFiltersEnabled)
+        {
+            _savedObjectPathFiltersByMap.Remove(currentMapName);
+            SaveViewerSettings();
+            return;
+        }
+
+        _savedObjectPathFiltersByMap[currentMapName] = new SavedObjectPathFilterMap
+        {
+            MapName = currentMapName,
+            Enabled = _worldScene.ObjectPathFiltersEnabled,
+            Filters = savedEntries,
+        };
+
+        SaveViewerSettings();
+    }
+
+    private void ApplySavedObjectPathFiltersForCurrentMap()
+    {
+        if (_worldScene == null)
+            return;
+
+        _worldScene.ClearObjectPathFilters();
+        _worldScene.ObjectPathFiltersEnabled = true;
+
+        string? currentMapName = GetCurrentSessionMapName();
+        if (string.IsNullOrWhiteSpace(currentMapName))
+            return;
+
+        if (!_savedObjectPathFiltersByMap.TryGetValue(currentMapName, out SavedObjectPathFilterMap? savedMap))
+            return;
+
+        _worldScene.ObjectPathFiltersEnabled = savedMap.Enabled;
+        foreach (SavedObjectPathFilterEntry filter in savedMap.Filters)
+            _worldScene.AddObjectPathFilter(filter.PathPrefix, filter.AppliesToWmo, filter.AppliesToMdx);
+    }
+
+    private bool TryGetSelectedWorldObjectModelPath(out string modelPath, out bool isWmo)
+    {
+        modelPath = string.Empty;
+        isWmo = false;
+
+        if (_worldScene == null || !_worldScene.SelectedInstance.HasValue)
+            return false;
+
+        ObjectInstance selected = _worldScene.SelectedInstance.Value;
+        if (string.IsNullOrWhiteSpace(selected.ModelPath))
+            return false;
+
+        modelPath = selected.ModelPath.Trim().Replace('/', '\\').Trim('\\');
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return false;
+
+        isWmo = modelPath.EndsWith(".wmo", StringComparison.OrdinalIgnoreCase);
+        return true;
+    }
+
+    private static List<string> BuildObjectPathFilterPrefixCandidates(string modelPath)
+    {
+        var prefixes = new List<string>();
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return prefixes;
+
+        string normalizedPath = modelPath.Trim().Replace('/', '\\').Trim('\\');
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return prefixes;
+
+        string[] segments = normalizedPath.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+            return prefixes;
+
+        string currentPrefix = string.Empty;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            currentPrefix = string.IsNullOrEmpty(currentPrefix)
+                ? segments[i]
+                : $"{currentPrefix}\\{segments[i]}";
+
+            if (i < segments.Length - 1 || !Path.HasExtension(segments[i]) || segments.Length == 1)
+                prefixes.Add(currentPrefix);
+        }
+
+        if (!prefixes.Contains(normalizedPath, StringComparer.OrdinalIgnoreCase))
+            prefixes.Add(normalizedPath);
+
+        return prefixes;
     }
 
     private bool TryApplySelectedBrowserAssetToTaxiOverride()
@@ -8314,8 +8498,6 @@ void main() {
             {
                 resolvedVirtualPath = ResolveStandaloneCanonicalModelPath(virtualPath);
                 data = ReadStandaloneFileData(resolvedVirtualPath);
-                    _lastWorldSceneWdtPath = TryGetLoadedLocalWdtPath();
-                    ApplySavedTaxiActorModelOverridesForCurrentMap();
                 if ((data == null || data.Length == 0) && !resolvedVirtualPath.Equals(virtualPath, StringComparison.OrdinalIgnoreCase))
                     data = ReadStandaloneFileData(virtualPath);
             }
@@ -8574,7 +8756,8 @@ void main() {
         int totalVerts = wmo.Groups.Sum(g => g.Vertices.Count);
         int totalTris = wmo.Groups.Sum(g => g.Indices.Count / 3);
 
-        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild);
+        _renderer = new WmoRenderer(_gl, wmo, dir, _dataSource, _texResolver, _dbcBuild,
+            enableRuntimeGroupVisibility: false);
 
         if (_autoFrameModelOnLoad)
             FrameCurrentModel();
@@ -8670,7 +8853,7 @@ void main() {
             if (isAlpha)
             {
                 // Alpha WDT: monolithic file with embedded ADTs
-                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver, _dbcBuild,
+                _worldScene = new WorldScene(_gl, wdtPath, _dataSource, _texResolver, _dbcBuild, _minimapRenderer,
                     onStatus: OnLoadStatus);
                 wdtType = "Alpha WDT";
             }
@@ -8688,14 +8871,17 @@ void main() {
                 string mapName = Path.GetFileNameWithoutExtension(wdtPath);
                 var adapter = new Terrain.StandardTerrainAdapter(wdtRawBytes, mapName, _dataSource, _dbcBuild, _dbcProvider, _dbdDir);
                 var tm = new Terrain.TerrainManager(_gl, adapter, mapName, _dataSource);
-                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild,
+                _worldScene = new WorldScene(_gl, tm, _dataSource, _texResolver, _dbcBuild, _minimapRenderer,
                     onStatus: OnLoadStatus);
                 wdtType = "Standard WDT";
             }
 
             _terrainManager = _worldScene.Terrain;
+            _terrainManager.DetailedTileCountOverride = _savedDetailedAdtTileCountOverride;
             _renderer = _worldScene;
+            ApplyLayoutObjectPreviewModeToScene();
             ApplySavedPm4AlignmentToScene();
+            ApplySavedObjectPathFiltersForCurrentMap();
             // Full-load mode: load all tiles synchronously during loading screen
             if (FullLoadMode && !_terrainManager.Adapter.IsWmoBased)
             {
@@ -9060,6 +9246,7 @@ void main() {
             ? "No save path selected."
             : _selectedPlacementSaveTargetPath!;
         ImGui.TextWrapped($"Save target: {targetLabel}");
+        ImGui.TextDisabled("Writes an ADT copy to disk. The loaded source files are not overwritten in place.");
 
         if (ImGui.Button("Choose Save Path"))
             ChooseSelectedPlacementSavePath();
@@ -9348,7 +9535,7 @@ void main() {
                 _selectedPlacementDirty = false;
             }
 
-            _selectedPlacementSaveStatus = $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s).";
+            _selectedPlacementSaveStatus = BuildPlacementSaveCompletionStatus(groups, savedEditCount, savedSourceCount);
         }
         catch (Exception ex)
         {
@@ -9358,6 +9545,34 @@ void main() {
 
         SyncSelectedPlacementEditState();
         RefreshSelectedWorldObjectInfo();
+    }
+
+    private string BuildPlacementSaveCompletionStatus(
+        IReadOnlyList<(string SourcePath, List<StagedPlacementEdit> Edits)> groups,
+        int savedEditCount,
+        int savedSourceCount)
+    {
+        List<string> outputPaths = groups
+            .Select(group => _placementSaveTargetsBySourcePath[group.SourcePath])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (outputPaths.Count == 1)
+        {
+            return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s) to {outputPaths[0]}. Source ADTs were left untouched.";
+        }
+
+        if (outputPaths.All(IsProjectManagedOutputPath) && !string.IsNullOrWhiteSpace(_editorProjectOutputDir))
+        {
+            string projectOutputDir = Path.Combine(_editorProjectOutputDir, "lk-split");
+            return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s) into {projectOutputDir}. Source ADTs were left untouched.";
+        }
+
+        string previewPaths = string.Join("; ", outputPaths.Take(2));
+        if (outputPaths.Count > 2)
+            previewPaths += $"; +{outputPaths.Count - 2} more";
+
+        return $"Saved {savedEditCount} staged placement move(s) across {savedSourceCount} ADT source(s). Output ADT copies: {previewPaths}. Source ADTs were left untouched.";
     }
 
     private List<(string SourcePath, List<StagedPlacementEdit> Edits)> BuildPendingPlacementSaveGroups(string? sourcePathFilter)
@@ -9608,7 +9823,7 @@ void main() {
 
         Vector2 pointer = new(localX, localY);
 
-        const float handlePickRadiusPixels = 22f;
+        const float handlePickRadiusPixels = 36f;
         float bestHandleDistSq = handlePickRadiusPixels * handlePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -9633,7 +9848,7 @@ void main() {
         if (pathId >= 0)
             return true;
 
-        const float linePickRadiusPixels = 12f;
+        const float linePickRadiusPixels = 24f;
         float bestLineDistSq = linePickRadiusPixels * linePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -9826,7 +10041,6 @@ void main() {
     {
         if (_worldScene == null) return;
 
-        var size = _window.Size;
         if (!TryGetSceneViewportRect(out float vpX, out float vpY, out float vpW, out float vpH))
             return;
 
@@ -9835,7 +10049,7 @@ void main() {
 
         float aspect = vpW / Math.Max(vpH, 1f);
         var view = _camera.GetViewMatrix();
-        float farPlane = (_terrainManager != null || _vlmTerrainManager != null) ? 5000f : 10000f;
+        float farPlane = GetSceneFarPlane();
         var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
 
         // Convert viewport-local mouse coords to NDC (-1..1)
@@ -10243,7 +10457,10 @@ void main() {
 
     private bool IsSceneMouseCaptureBlocked(float x, float y)
     {
-        return ImGui.GetIO().WantCaptureMouse && !IsPointInSceneViewport(x, y);
+        if (!ImGui.GetIO().WantCaptureMouse)
+            return false;
+
+        return !ShouldBypassDockspaceMouseCapture(x, y);
     }
 
     private bool ShouldBypassDockspaceMouseCapture(float x, float y)
@@ -11003,6 +11220,10 @@ void main() {
             if (settings == null)
                 return;
 
+            _uiTheme = Enum.IsDefined(typeof(UiThemeKind), settings.UiTheme)
+                ? (UiThemeKind)settings.UiTheme
+                : UiThemeKind.ModernSlate;
+
             int savedWmoMliqRotation = ((settings.WmoMliqRotationQuarterTurns % 4) + 4) % 4;
             if (settings.HasExplicitWmoMliqRotationOverride)
             {
@@ -11014,7 +11235,7 @@ void main() {
                 _hasExplicitWmoMliqRotationOverride = false;
                 WmoRenderer.MliqRotationQuarterTurns = 0;
                 ViewerLog.Important(ViewerLog.Category.Wmo,
-                    "[ViewerSettings] Migrated legacy WMO MLIQ 270° default to neutral override; 3.3.5 now uses a build-aware baseline.");
+                    "[ViewerSettings] Migrated legacy WMO MLIQ 270° default to neutral override; WMO liquid rotation is now resolved from the asset version path.");
             }
             else
             {
@@ -11051,6 +11272,16 @@ void main() {
             _minimapPanOffset = new Vector2(
                 float.IsFinite(settings.MinimapPanOffsetX) ? settings.MinimapPanOffsetX : 0f,
                 float.IsFinite(settings.MinimapPanOffsetY) ? settings.MinimapPanOffsetY : 0f);
+            _captureOutputDir = string.IsNullOrWhiteSpace(settings.CaptureOutputDir)
+                ? Path.Combine(OutputDir, "captures")
+                : settings.CaptureOutputDir;
+            _videoEncoderExecutable = string.IsNullOrWhiteSpace(settings.VideoEncoderExecutable)
+                ? "ffmpeg"
+                : settings.VideoEncoderExecutable;
+            _videoCaptureFps = Math.Clamp(settings.VideoCaptureFps, 12, 60);
+            _videoCaptureIncludeUi = settings.VideoCaptureIncludeUi;
+            _videoCaptureContainerIndex = Math.Clamp(settings.VideoCaptureContainerIndex, 0, 1);
+            _savedDetailedAdtTileCountOverride = Math.Clamp(settings.DetailedAdtTileCountOverride, 0, Terrain.TerrainManager.MaxManualDetailedTileCount);
             _pm4SavedOverlayTranslation = new Vector3(settings.Pm4TranslationX, settings.Pm4TranslationY, settings.Pm4TranslationZ);
             _pm4SavedOverlayRotationDegrees = new Vector3(settings.Pm4RotationX, settings.Pm4RotationY, settings.Pm4RotationZ);
             _pm4SavedOverlayScale = new Vector3(settings.Pm4ScaleX, settings.Pm4ScaleY, settings.Pm4ScaleZ);
@@ -11117,6 +11348,38 @@ void main() {
                             }
                         }
 
+                        _savedObjectPathFiltersByMap.Clear();
+                        if (settings.ObjectPathFilters != null)
+                        {
+                            foreach (SavedObjectPathFilterMap savedMap in settings.ObjectPathFilters)
+                            {
+                                if (string.IsNullOrWhiteSpace(savedMap.MapName))
+                                    continue;
+
+                                List<SavedObjectPathFilterEntry> savedEntries = savedMap.Filters
+                                    .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix) && (entry.AppliesToWmo || entry.AppliesToMdx))
+                                    .Select(entry => new SavedObjectPathFilterEntry
+                                    {
+                                        PathPrefix = entry.PathPrefix.Trim().Replace('/', '\\').Trim('\\'),
+                                        AppliesToWmo = entry.AppliesToWmo,
+                                        AppliesToMdx = entry.AppliesToMdx,
+                                    })
+                                    .Where(entry => !string.IsNullOrWhiteSpace(entry.PathPrefix))
+                                    .OrderBy(entry => entry.PathPrefix, StringComparer.OrdinalIgnoreCase)
+                                    .ToList();
+
+                                if (savedEntries.Count == 0 && savedMap.Enabled)
+                                    continue;
+
+                                _savedObjectPathFiltersByMap[savedMap.MapName] = new SavedObjectPathFilterMap
+                                {
+                                    MapName = savedMap.MapName,
+                                    Enabled = savedMap.Enabled,
+                                    Filters = savedEntries,
+                                };
+                            }
+                        }
+
                         _savedShellPanelLayouts.Clear();
                         _pendingShellPanelLayoutRestore.Clear();
                         _forceApplyShellPanelLayout = settings.ShellPanelLayoutVersion != CurrentShellPanelLayoutVersion;
@@ -11164,6 +11427,7 @@ void main() {
 
             var settings = new ViewerSettings
             {
+                UiTheme = (int)_uiTheme,
                 WmoMliqRotationQuarterTurns = WmoRenderer.MliqRotationQuarterTurns,
                 HasExplicitWmoMliqRotationOverride = _hasExplicitWmoMliqRotationOverride,
                 LastGameFolderPath = _lastGameFolderPath,
@@ -11186,6 +11450,12 @@ void main() {
                 MinimapZoom = _minimapZoom,
                 MinimapPanOffsetX = _minimapPanOffset.X,
                 MinimapPanOffsetY = _minimapPanOffset.Y,
+                CaptureOutputDir = _captureOutputDir,
+                VideoEncoderExecutable = _videoEncoderExecutable,
+                VideoCaptureFps = _videoCaptureFps,
+                VideoCaptureIncludeUi = _videoCaptureIncludeUi,
+                VideoCaptureContainerIndex = _videoCaptureContainerIndex,
+                DetailedAdtTileCountOverride = _savedDetailedAdtTileCountOverride,
                 Pm4TranslationX = _pm4SavedOverlayTranslation.X,
                 Pm4TranslationY = _pm4SavedOverlayTranslation.Y,
                 Pm4TranslationZ = _pm4SavedOverlayTranslation.Z,
@@ -11213,6 +11483,23 @@ void main() {
                     .ThenBy(selection => selection.TileY)
                     .ThenBy(selection => selection.Ck24)
                     .ThenBy(selection => selection.ObjectPartId)
+                    .ToList(),
+                ObjectPathFilters = _savedObjectPathFiltersByMap.Values
+                    .OrderBy(entry => entry.MapName, StringComparer.OrdinalIgnoreCase)
+                    .Select(entry => new SavedObjectPathFilterMap
+                    {
+                        MapName = entry.MapName,
+                        Enabled = entry.Enabled,
+                        Filters = entry.Filters
+                            .OrderBy(filter => filter.PathPrefix, StringComparer.OrdinalIgnoreCase)
+                            .Select(filter => new SavedObjectPathFilterEntry
+                            {
+                                PathPrefix = filter.PathPrefix,
+                                AppliesToWmo = filter.AppliesToWmo,
+                                AppliesToMdx = filter.AppliesToMdx,
+                            })
+                            .ToList(),
+                    })
                     .ToList(),
                 ShellPanelLayouts = _savedShellPanelLayouts.Values
                     .OrderBy(layout => layout.PanelId)
@@ -11285,6 +11572,48 @@ void main() {
 
     private bool _disposed;
 
+    private void SetLayoutObjectPreviewMode(bool enabled)
+    {
+        if (_layoutObjectPreviewMode == enabled)
+            return;
+
+        _layoutObjectPreviewMode = enabled;
+        ApplyLayoutObjectPreviewModeToScene();
+    }
+
+    private void ApplyLayoutObjectPreviewModeToScene()
+    {
+        if (_worldScene == null)
+            return;
+
+        if (_layoutObjectPreviewMode)
+        {
+            if (!_layoutObjectPreviewStateCaptured)
+            {
+                _layoutObjectPreviewSavedObjectsVisible = _worldScene.ObjectsVisible;
+                _layoutObjectPreviewSavedWmosVisible = _worldScene.WmosVisible;
+                _layoutObjectPreviewSavedDoodadsVisible = _worldScene.DoodadsVisible;
+                _layoutObjectPreviewSavedVisibilityProfile = _worldScene.ObjectVisibilityProfile;
+                _layoutObjectPreviewStateCaptured = true;
+            }
+
+            _worldScene.ObjectsVisible = true;
+            _worldScene.WmosVisible = true;
+            _worldScene.DoodadsVisible = false;
+            _worldScene.ObjectVisibilityProfile = WorldObjectVisibilityProfile.Performance;
+            return;
+        }
+
+        if (_layoutObjectPreviewStateCaptured)
+        {
+            _worldScene.ObjectsVisible = _layoutObjectPreviewSavedObjectsVisible;
+            _worldScene.WmosVisible = _layoutObjectPreviewSavedWmosVisible;
+            _worldScene.DoodadsVisible = _layoutObjectPreviewSavedDoodadsVisible;
+            _worldScene.ObjectVisibilityProfile = _layoutObjectPreviewSavedVisibilityProfile;
+            _layoutObjectPreviewStateCaptured = false;
+        }
+    }
+
     private void OnClose()
     {
         Dispose();
@@ -11294,6 +11623,9 @@ void main() {
     {
         if (_disposed) return;
         _disposed = true;
+
+        StopVideoRecording("Stopped video recording during shutdown.");
+        StopTaxiRideCamera();
 
         ISceneRenderer? renderer = _renderer;
         WorldScene? worldScene = _worldScene;
@@ -11338,6 +11670,7 @@ void main() {
 
     private sealed class ViewerSettings
     {
+        public int UiTheme { get; set; } = (int)UiThemeKind.ModernSlate;
         public int WmoMliqRotationQuarterTurns { get; set; }
         public bool HasExplicitWmoMliqRotationOverride { get; set; }
         public string? LastGameFolderPath { get; set; }
@@ -11359,6 +11692,12 @@ void main() {
         public float MinimapZoom { get; set; } = 4f;
         public float MinimapPanOffsetX { get; set; }
         public float MinimapPanOffsetY { get; set; }
+        public string CaptureOutputDir { get; set; } = Path.Combine(OutputDir, "captures");
+        public string VideoEncoderExecutable { get; set; } = "ffmpeg";
+        public int VideoCaptureFps { get; set; } = 30;
+        public bool VideoCaptureIncludeUi { get; set; }
+        public int VideoCaptureContainerIndex { get; set; }
+        public int DetailedAdtTileCountOverride { get; set; }
         public float Pm4TranslationX { get; set; }
         public float Pm4TranslationY { get; set; }
         public float Pm4TranslationZ { get; set; }
@@ -11371,6 +11710,7 @@ void main() {
         public float Pm4YawDegrees { get; set; }
         public List<SavedTaxiActorOverride> TaxiActorModelOverrides { get; set; } = new();
         public List<SavedPm4ObjectMatchSelection> Pm4ObjectMatchSelections { get; set; } = new();
+        public List<SavedObjectPathFilterMap> ObjectPathFilters { get; set; } = new();
         public List<SavedShellPanelLayout> ShellPanelLayouts { get; set; } = new();
     }
 
@@ -11395,6 +11735,20 @@ void main() {
         public string ModelName { get; set; } = "";
         public string ModelPath { get; set; } = "";
         public string EvidenceSource { get; set; } = "";
+    }
+
+    private sealed class SavedObjectPathFilterMap
+    {
+        public string MapName { get; set; } = "";
+        public bool Enabled { get; set; } = true;
+        public List<SavedObjectPathFilterEntry> Filters { get; set; } = new();
+    }
+
+    private sealed class SavedObjectPathFilterEntry
+    {
+        public string PathPrefix { get; set; } = "";
+        public bool AppliesToWmo { get; set; }
+        public bool AppliesToMdx { get; set; }
     }
 
     private sealed class KnownGoodClientPath

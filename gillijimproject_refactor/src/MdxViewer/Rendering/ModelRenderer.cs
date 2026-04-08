@@ -98,6 +98,7 @@ public class MdxRenderer : IModelRenderer
     private static int _uFogColor, _uFogStart, _uFogEnd, _uCameraPos, _uAlphaThreshold;
     private static int _uLightDir, _uLightColor, _uAmbientColor;
     private static int _uSphereEnvMap;
+    private static int _uFlipTexU;
     private static int _uUvSet;
     private static int _uUseUvTransform, _uUvTranslation, _uUvScale, _uUvRotationRow0, _uUvRotationRow1;
     private static int _uBones; // Bone matrix array uniform location
@@ -110,6 +111,7 @@ public class MdxRenderer : IModelRenderer
     private readonly Dictionary<int, uint> _textures = new(); // textureIndex → GL texture
     private readonly Dictionary<int, string> _textureCacheKeys = new();
     private readonly Dictionary<int, TextureAlphaKind> _textureAlphaKinds = new();
+    private bool _flipTextureUForCurrentDraw;
     private bool _wireframe;
     private MdxAnimator? _animator;
     private DateTime _lastFrameTime = DateTime.UtcNow;
@@ -1305,6 +1307,7 @@ uniform float uAlphaThreshold;
 uniform int uPremultiplyAlpha;
 uniform int uUnshaded;
 uniform int uSphereEnvMap;
+uniform int uFlipTexU;
 uniform int uUvSet;
 uniform int uUseUvTransform;
 uniform vec2 uUvTranslation;
@@ -1339,6 +1342,10 @@ void main() {
         texCoord = vec2(
             dot(centered, uUvRotationRow0),
             dot(centered, uUvRotationRow1)) + vec2(0.5, 0.5) + uUvTranslation;
+    }
+
+    if (uFlipTexU == 1) {
+        texCoord.x = 1.0 - texCoord.x;
     }
 
     vec4 texColor;

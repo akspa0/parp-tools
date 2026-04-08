@@ -25,12 +25,12 @@ using CorePm4LinkedPositionRefSummary = WowViewer.Core.PM4.Models.Pm4LinkedPosit
 using CorePm4MprlEntry = WowViewer.Core.PM4.Models.Pm4MprlEntry;
 using CorePm4MslkEntry = WowViewer.Core.PM4.Models.Pm4MslkEntry;
 using CorePm4MsurEntry = WowViewer.Core.PM4.Models.Pm4MsurEntry;
-using CorePm4ObjectGroupKey = WowViewer.Core.PM4.Models.Pm4ObjectGroupKey;
 using CorePm4CoordinateModeResolution = WowViewer.Core.PM4.Models.Pm4CoordinateModeResolution;
-using CorePm4PlacementSolution = WowViewer.Core.PM4.Models.Pm4PlacementSolution;
-using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
+using CorePm4ObjectGroupKey = WowViewer.Core.PM4.Models.Pm4ObjectGroupKey;
 using CorePm4PlacementContract = WowViewer.Core.PM4.Services.Pm4PlacementContract;
 using CorePm4PlacementMath = WowViewer.Core.PM4.Services.Pm4PlacementMath;
+using CorePm4PlacementSolution = WowViewer.Core.PM4.Models.Pm4PlacementSolution;
+using Pm4PlanarTransform = WowViewer.Core.PM4.Models.Pm4PlanarTransform;
 using CorePm4DocumentReader = WowViewer.Core.PM4.Services.Pm4ResearchReader;
 using CorePm4DecodeAuditReport = WowViewer.Core.PM4.Models.Pm4DecodeAuditReport;
 using CorePm4ExplorationSnapshot = WowViewer.Core.PM4.Models.Pm4ExplorationSnapshot;
@@ -493,8 +493,29 @@ internal readonly record struct Pm4ConnectorKey(int X, int Y, int Z);
 /// Uses <see cref="WorldAssetManager"/> to ensure each model is loaded exactly once.
 /// Instances are lightweight structs holding only a model key + transform.
 /// </summary>
+public readonly record struct TaxiActorPose(
+    int RouteId,
+    Vector3 Position,
+    Vector3 Forward,
+    float YawRadians,
+    float Scale,
+    string ModelPath);
+
 public class WorldScene : ISceneRenderer
 {
+    private const float TaxiActorHeadingSampleWindow = 18f;
+    private const float TaxiActorHeadingSmoothingHz = 8f;
+
+    private readonly record struct SelectedSceneObjectKey(
+        ObjectType ObjectType,
+        int UniqueId,
+        int PlacementEntryIndex,
+        int TileX,
+        int TileY,
+        bool HasTileCoordinate,
+        string ModelKey,
+        Vector3 PlacementPosition);
+
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
 
     private static float DecodeRawMprlPackedAngleRadians(MprlEntry positionRef)
@@ -533,6 +554,7 @@ public class WorldScene : ISceneRenderer
     private bool _wmosVisible = true;
     private bool _doodadsVisible = true;
     private bool _objectFogEnabled = true;
+    private bool _objectPathFiltersEnabled = true;
     private bool _limitHoveredAssetRange = true;
     private bool _useDynamicHoveredAssetRange = false;
     private bool _showSelectedObjectBounds = true;
@@ -543,7 +565,7 @@ public class WorldScene : ISceneRenderer
 
     // Frustum culling
     private readonly FrustumCuller _frustumCuller = new();
-    private const float DoodadCullDistance = 5000f; // Hard ceiling for very small doodads when fog allows farther visibility
+    private const float DoodadCullDistance = 16000f; // Hard ceiling for very small doodads when fog allows farther visibility
     private const float DoodadCullDistanceSq = DoodadCullDistance * DoodadCullDistance;
     private const float DoodadSmallThreshold = 10f; // AABB diagonal below this = "small" (relaxed — only cull tiny objects)
     private const float FadeStartFraction = 0.80f;  // Fade begins at 80% of cull distance
@@ -562,7 +584,7 @@ public class WorldScene : ISceneRenderer
     private const float HoverInfoMaxScreenRadius = 96f;
     private const float WireframeRevealBrushPixels = 96f;
     private const float WireframeRevealMaxScreenRadius = 220f;
-    private const float MaxWorldObjectViewDistance = 8192f;
+    private const float MaxWorldObjectViewDistance = 20000f;
     private const float MaxWorldObjectViewDistanceSq = MaxWorldObjectViewDistance * MaxWorldObjectViewDistance;
 
     private readonly record struct TerrainAssetLoadPolicy(
@@ -693,6 +715,7 @@ public class WorldScene : ISceneRenderer
     private readonly WorldRenderFrame _renderFrame = new();
     private readonly List<int> _wireframeRevealWmoIndices = new();
     private readonly List<int> _wireframeRevealMdxIndices = new();
+    private readonly MinimapRenderer? _minimapRenderer;
     private HoveredAssetInfo? _hoveredAssetInfo;
     private TerrainAssetLoadPolicy _assetLoadPolicy = StreamingTerrainAssetLoadPolicy;
     private bool _wireframeRevealEnabled;
@@ -703,6 +726,7 @@ public class WorldScene : ISceneRenderer
     private int _uniqueIdFilterMin = -1;
     private int _uniqueIdFilterMax = -1;
     private (int tileX, int tileY)? _uniqueIdFilterTile;
+    private readonly List<ObjectPathFilterEntry> _objectPathFilters = new();
 
     // PM4 debug overlay
     private const int Pm4MaxLinesTotal = int.MaxValue;
@@ -823,6 +847,7 @@ public class WorldScene : ISceneRenderer
     // Object selection
     private ObjectType _selectedObjectType = ObjectType.None;
     private int _selectedObjectIndex = -1;
+    private SelectedSceneObjectKey? _selectedSceneObjectKey;
     public ObjectType SelectedObjectType => _selectedObjectType;
     public int SelectedObjectIndex => _selectedObjectIndex;
     public bool WireframeRevealEnabled => _wireframeRevealEnabled;
@@ -844,11 +869,13 @@ public class WorldScene : ISceneRenderer
     public bool ObjectsVisible { get => _objectsVisible; set => _objectsVisible = value; }
     public bool WmosVisible { get => _wmosVisible; set => _wmosVisible = value; }
     public bool DoodadsVisible { get => _doodadsVisible; set => _doodadsVisible = value; }
+    public bool ObjectPathFiltersEnabled { get => _objectPathFiltersEnabled; set => _objectPathFiltersEnabled = value; }
+    public IReadOnlyList<ObjectPathFilterEntry> ObjectPathFilters => _objectPathFilters;
     public bool ShowSelectedObjectBounds { get => _showSelectedObjectBounds; set => _showSelectedObjectBounds = value; }
     public float HoveredAssetMaxDistance
     {
         get => _hoveredAssetMaxDistance;
-        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, 5000f);
+        set => _hoveredAssetMaxDistance = Math.Clamp(value, 10f, MaxWorldObjectViewDistance);
     }
     public float EffectiveHoveredAssetMaxDistance => ComputeEffectiveHoveredAssetMaxDistance();
     public bool UniqueIdFilterEnabled { get => _uniqueIdFilterEnabled; set => _uniqueIdFilterEnabled = value; }
@@ -900,6 +927,38 @@ public class WorldScene : ISceneRenderer
         _uniqueIdFilterEnabled = false;
         _uniqueIdFilterMin = -1;
         _uniqueIdFilterMax = -1;
+    }
+
+    public bool AddObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
+    {
+        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
+        if (string.IsNullOrWhiteSpace(normalizedPrefix) || (!appliesToWmo && !appliesToMdx))
+            return false;
+
+        ObjectPathFilterEntry entry = new(normalizedPrefix, appliesToWmo, appliesToMdx);
+        if (_objectPathFilters.Contains(entry))
+            return false;
+
+        _objectPathFilters.Add(entry);
+        _objectPathFilters.Sort(static (left, right) => string.Compare(left.PathPrefix, right.PathPrefix, StringComparison.OrdinalIgnoreCase));
+        return true;
+    }
+
+    public bool RemoveObjectPathFilter(string pathPrefix, bool appliesToWmo, bool appliesToMdx)
+    {
+        string normalizedPrefix = ObjectPathFilterEntry.NormalizePrefix(pathPrefix);
+        if (string.IsNullOrWhiteSpace(normalizedPrefix))
+            return false;
+
+        return _objectPathFilters.RemoveAll(entry =>
+            string.Equals(entry.PathPrefix, normalizedPrefix, StringComparison.OrdinalIgnoreCase)
+            && entry.AppliesToWmo == appliesToWmo
+            && entry.AppliesToMdx == appliesToMdx) > 0;
+    }
+
+    public void ClearObjectPathFilters()
+    {
+        _objectPathFilters.Clear();
     }
 
     public bool TryGetUniqueIdFilterRange(out int minUniqueId, out int maxUniqueId, out int instanceCount)
@@ -1899,6 +1958,7 @@ public class WorldScene : ISceneRenderer
         int resolvedMaxMatches = Math.Max(1, maxMatchesPerObject);
         List<Pm4ObjectMatchState> pm4Objects = BuildPm4ObjectMatchStates();
         List<Pm4PlacementMatchState> placements = BuildPm4PlacementMatchStates();
+        List<Pm4AssetProfileState> assetProfiles = BuildPm4AssetProfileStates(placements);
 
         int objectsWithCandidates = 0;
         int objectsWithNearCandidates = 0;
@@ -1906,7 +1966,7 @@ public class WorldScene : ISceneRenderer
 
         foreach (Pm4ObjectMatchState pm4Object in pm4Objects)
         {
-            Pm4ObjectMatchObject report = BuildPm4ObjectMatchObject(pm4Object, placements, resolvedMaxMatches);
+            Pm4ObjectMatchObject report = BuildPm4ObjectMatchObject(pm4Object, placements, assetProfiles, resolvedMaxMatches);
             if (report.CandidateCount > 0)
                 objectsWithCandidates++;
 
@@ -1948,7 +2008,8 @@ public class WorldScene : ISceneRenderer
 
         Pm4ObjectMatchState pm4Object = BuildPm4ObjectMatchState(objectKey.tileX, objectKey.tileY, objectKey, obj);
         List<Pm4PlacementMatchState> placements = BuildPm4PlacementMatchStates();
-        objectMatch = BuildPm4ObjectMatchObject(pm4Object, placements, Math.Max(1, maxMatchesPerObject));
+        List<Pm4AssetProfileState> assetProfiles = BuildPm4AssetProfileStates(placements);
+        objectMatch = BuildPm4ObjectMatchObject(pm4Object, placements, assetProfiles, Math.Max(1, maxMatchesPerObject));
         return true;
     }
 
@@ -1992,7 +2053,8 @@ public class WorldScene : ISceneRenderer
 
         Vector2[] footprintHull = BuildPm4BoundsFootprintHull(boundsMin, boundsMax);
         float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
-        return new Pm4ObjectMatchState(tileX, tileY, objectKey, obj, placementAnchor, boundsMin, boundsMax, center, footprintHull, footprintArea);
+        Pm4ShapeSignature shapeSignature = BuildPm4ShapeSignature(boundsMin, boundsMax, footprintHull);
+        return new Pm4ObjectMatchState(tileX, tileY, objectKey, obj, placementAnchor, boundsMin, boundsMax, center, footprintHull, footprintArea, shapeSignature);
     }
 
     private List<Pm4PlacementMatchState> BuildPm4PlacementMatchStates()
@@ -2011,24 +2073,83 @@ public class WorldScene : ISceneRenderer
                 Vector3 worldBoundsMax = instance.BoundsMax;
                 Vector2[] footprintHull = BuildPm4BoundsFootprintHull(worldBoundsMin, worldBoundsMax);
                 float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                Vector3 localBoundsMin = instance.LocalBoundsMin;
+                Vector3 localBoundsMax = instance.LocalBoundsMax;
+                Vector2[] localFootprintHull = instance.BoundsResolved
+                    ? BuildPm4BoundsFootprintHull(localBoundsMin, localBoundsMax)
+                    : BuildPm4BoundsFootprintHull(worldBoundsMin, worldBoundsMax);
                 int meshGroupCount = 0;
                 int meshVertexCount = 0;
                 int meshTriangleCount = 0;
                 int footprintSampleCount = 0;
                 float worldFootprintArea = footprintArea;
                 string evidenceSource = "modf-bounds";
+                var geometryVariants = new List<Pm4PlacementGeometryVariant>();
 
                 if (hasMeshSummary)
                 {
                     TransformBounds(meshSummary.BoundsMin, meshSummary.BoundsMax, instance.Transform, out worldBoundsMin, out worldBoundsMax);
                     footprintHull = CorePm4CorrelationMath.BuildTransformedFootprintHull(meshSummary.FootprintSampleVertices, instance.Transform);
                     footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                    localBoundsMin = meshSummary.BoundsMin;
+                    localBoundsMax = meshSummary.BoundsMax;
+                    localFootprintHull = meshSummary.FootprintSampleVertices.Length > 0
+                        ? CorePm4CorrelationMath.BuildFootprintHull(meshSummary.FootprintSampleVertices)
+                        : BuildPm4BoundsFootprintHull(localBoundsMin, localBoundsMax);
                     meshGroupCount = meshSummary.GroupCount;
                     meshVertexCount = meshSummary.VertexCount;
                     meshTriangleCount = meshSummary.TriangleCount;
                     footprintSampleCount = meshSummary.FootprintSampleCount;
                     worldFootprintArea = footprintArea;
                     evidenceSource = "wmo-mesh";
+                }
+
+                geometryVariants.Add(new Pm4PlacementGeometryVariant(
+                    BuildPm4AssetProfileKey("wmo", instance.ModelKey, evidenceSource, null),
+                    evidenceSource,
+                    worldBoundsMin,
+                    worldBoundsMax,
+                    footprintHull,
+                    footprintArea,
+                    meshGroupCount,
+                    meshVertexCount,
+                    meshTriangleCount,
+                    footprintSampleCount,
+                    worldFootprintArea,
+                    BuildPm4ShapeSignature(localBoundsMin, localBoundsMax, localFootprintHull),
+                    null));
+
+                if (hasMeshSummary && meshSummary.GroupSummaries.Length > 1)
+                {
+                    foreach (WmoGroupMeshSummary groupSummary in meshSummary.GroupSummaries)
+                    {
+                        if (groupSummary.VertexCount <= 0 || groupSummary.TriangleCount <= 0)
+                            continue;
+
+                        TransformBounds(groupSummary.BoundsMin, groupSummary.BoundsMax, instance.Transform, out Vector3 groupWorldBoundsMin, out Vector3 groupWorldBoundsMax);
+                        Vector2[] groupFootprintHull = groupSummary.FootprintSampleVertices.Length > 0
+                            ? CorePm4CorrelationMath.BuildTransformedFootprintHull(groupSummary.FootprintSampleVertices, instance.Transform)
+                            : BuildPm4BoundsFootprintHull(groupWorldBoundsMin, groupWorldBoundsMax);
+                        float groupFootprintArea = CorePm4CorrelationMath.ComputeFootprintArea(groupFootprintHull);
+                        Vector2[] groupLocalFootprintHull = groupSummary.FootprintSampleVertices.Length > 0
+                            ? CorePm4CorrelationMath.BuildFootprintHull(groupSummary.FootprintSampleVertices)
+                            : BuildPm4BoundsFootprintHull(groupSummary.BoundsMin, groupSummary.BoundsMax);
+                        byte? correlatedGroupKey = groupSummary.GroupIndex <= byte.MaxValue ? (byte)groupSummary.GroupIndex : null;
+                        geometryVariants.Add(new Pm4PlacementGeometryVariant(
+                            BuildPm4AssetProfileKey("wmo", instance.ModelKey, "wmo-group-mesh", correlatedGroupKey),
+                            "wmo-group-mesh",
+                            groupWorldBoundsMin,
+                            groupWorldBoundsMax,
+                            groupFootprintHull,
+                            groupFootprintArea,
+                            1,
+                            groupSummary.VertexCount,
+                            groupSummary.TriangleCount,
+                            groupSummary.FootprintSampleCount,
+                            groupFootprintArea,
+                            BuildPm4ShapeSignature(groupSummary.BoundsMin, groupSummary.BoundsMax, groupLocalFootprintHull),
+                            correlatedGroupKey));
+                    }
                 }
 
                 ushort flags = modfByUniqueId.TryGetValue(instance.UniqueId, out ModfPlacement rawPlacement)
@@ -2043,6 +2164,7 @@ public class WorldScene : ISceneRenderer
                     instance.ModelName,
                     instance.ModelPath,
                     instance.ModelKey,
+                    geometryVariants[0].AssetProfileKey,
                     true,
                     evidenceSource,
                     flags,
@@ -2057,7 +2179,8 @@ public class WorldScene : ISceneRenderer
                     meshVertexCount,
                     meshTriangleCount,
                     footprintSampleCount,
-                    worldFootprintArea));
+                    worldFootprintArea,
+                    geometryVariants));
             }
         }
 
@@ -2069,6 +2192,53 @@ public class WorldScene : ISceneRenderer
                 Vector3 worldBoundsMax = instance.BoundsMax;
                 Vector2[] footprintHull = BuildPm4BoundsFootprintHull(worldBoundsMin, worldBoundsMax);
                 float footprintArea = CorePm4CorrelationMath.ComputeFootprintArea(footprintHull);
+                Vector3 localBoundsMin = instance.BoundsResolved ? instance.LocalBoundsMin : worldBoundsMin;
+                Vector3 localBoundsMax = instance.BoundsResolved ? instance.LocalBoundsMax : worldBoundsMax;
+                Vector2[] localFootprintHull = BuildPm4BoundsFootprintHull(localBoundsMin, localBoundsMax);
+                var geometryVariants = new List<Pm4PlacementGeometryVariant>
+                {
+                    new(
+                        BuildPm4AssetProfileKey("m2", instance.ModelKey, "instance-bounds", null),
+                        "instance-bounds",
+                        worldBoundsMin,
+                        worldBoundsMax,
+                        footprintHull,
+                        footprintArea,
+                        0,
+                        0,
+                        0,
+                        0,
+                        footprintArea,
+                        BuildPm4ShapeSignature(localBoundsMin, localBoundsMax, localFootprintHull),
+                        null)
+                };
+
+                if (_assets.TryGetMdxCollisionSummary(instance.ModelKey, out MdxCollisionMeshSummary collisionSummary))
+                {
+                    TransformBounds(collisionSummary.BoundsMin, collisionSummary.BoundsMax, instance.Transform, out Vector3 collisionWorldBoundsMin, out Vector3 collisionWorldBoundsMax);
+                    Vector2[] collisionFootprintHull = collisionSummary.FootprintSampleVertices.Length > 0
+                        ? CorePm4CorrelationMath.BuildTransformedFootprintHull(collisionSummary.FootprintSampleVertices, instance.Transform)
+                        : BuildPm4BoundsFootprintHull(collisionWorldBoundsMin, collisionWorldBoundsMax);
+                    float collisionFootprintArea = CorePm4CorrelationMath.ComputeFootprintArea(collisionFootprintHull);
+                    Vector2[] collisionLocalFootprintHull = collisionSummary.FootprintSampleVertices.Length > 0
+                        ? CorePm4CorrelationMath.BuildFootprintHull(collisionSummary.FootprintSampleVertices)
+                        : BuildPm4BoundsFootprintHull(collisionSummary.BoundsMin, collisionSummary.BoundsMax);
+                    geometryVariants.Add(new Pm4PlacementGeometryVariant(
+                        BuildPm4AssetProfileKey("m2", instance.ModelKey, "mdx-collision", null),
+                        "mdx-collision",
+                        collisionWorldBoundsMin,
+                        collisionWorldBoundsMax,
+                        collisionFootprintHull,
+                        collisionFootprintArea,
+                        0,
+                        collisionSummary.VertexCount,
+                        collisionSummary.TriangleCount,
+                        collisionSummary.FootprintSampleCount,
+                        collisionFootprintArea,
+                        BuildPm4ShapeSignature(collisionSummary.BoundsMin, collisionSummary.BoundsMax, collisionLocalFootprintHull),
+                        null));
+                }
+
                 states.Add(new Pm4PlacementMatchState(
                     tileEntry.Key.Item1,
                     tileEntry.Key.Item2,
@@ -2077,6 +2247,7 @@ public class WorldScene : ISceneRenderer
                     instance.ModelName,
                     instance.ModelPath,
                     instance.ModelKey,
+                    geometryVariants[0].AssetProfileKey,
                     true,
                     "instance-bounds",
                     0,
@@ -2091,66 +2262,93 @@ public class WorldScene : ISceneRenderer
                     0,
                     0,
                     0,
-                    footprintArea));
+                    footprintArea,
+                    geometryVariants));
             }
         }
 
         return states;
     }
 
+    private static List<Pm4AssetProfileState> BuildPm4AssetProfileStates(IReadOnlyList<Pm4PlacementMatchState> placements)
+    {
+        Dictionary<string, Pm4AssetProfileState> profiles = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (Pm4PlacementMatchState placement in placements)
+        {
+            for (int index = 0; index < placement.GeometryVariants.Count; index++)
+            {
+                Pm4PlacementGeometryVariant variant = placement.GeometryVariants[index];
+                if (string.IsNullOrWhiteSpace(variant.AssetProfileKey))
+                    continue;
+
+                var profile = new Pm4AssetProfileState(
+                    variant.AssetProfileKey,
+                    placement.Kind,
+                    placement.ModelName,
+                    placement.ModelPath,
+                    placement.ModelKey,
+                    variant.EvidenceSource,
+                    variant.CorrelatedGroupKey,
+                    variant.MeshGroupCount,
+                    variant.MeshVertexCount,
+                    variant.MeshTriangleCount,
+                    variant.FootprintSampleCount,
+                    variant.ShapeSignature);
+
+                if (!profiles.TryGetValue(variant.AssetProfileKey, out Pm4AssetProfileState existingProfile)
+                    || ComparePm4AssetProfileRichness(profile, existingProfile) < 0)
+                {
+                    profiles[variant.AssetProfileKey] = profile;
+                }
+            }
+        }
+
+        return profiles.Values.ToList();
+    }
+
     private static Pm4ObjectMatchObject BuildPm4ObjectMatchObject(
         Pm4ObjectMatchState pm4Object,
         IReadOnlyList<Pm4PlacementMatchState> placements,
+        IReadOnlyList<Pm4AssetProfileState> assetProfiles,
         int maxMatchesPerObject)
     {
+        HashSet<string>? preferredAssetProfileKeys = ResolvePreferredPm4AssetProfileKeys(pm4Object, assetProfiles, maxMatchesPerObject);
+
         List<Pm4PlacementMatchEvaluation> evaluatedCandidates = placements
             .Where(placement => Math.Abs(placement.TileX - pm4Object.TileX) <= 1
                 && Math.Abs(placement.TileY - pm4Object.TileY) <= 1)
-            .Select(placement => new
-            {
-                Placement = placement,
-                Metrics = CorePm4CorrelationMath.EvaluateMetrics(
-                    pm4Object.BoundsMin,
-                    pm4Object.BoundsMax,
-                    pm4Object.Center,
-                    pm4Object.FootprintHull,
-                    pm4Object.FootprintArea,
-                    placement.WorldBoundsMin,
-                    placement.WorldBoundsMax,
-                    placement.Center,
-                    placement.FootprintHull,
-                    placement.FootprintArea),
-                AnchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, placement.PlacementPosition),
-            })
-            .Select(candidate => new Pm4PlacementMatchEvaluation(
-                candidate.Placement,
-                candidate.AnchorPlanarGap,
-                candidate.Metrics))
+            .Select(placement => EvaluatePm4PlacementMatch(pm4Object, placement, preferredAssetProfileKeys))
+            .Where(static candidate => candidate.HasValue)
+            .Select(static candidate => candidate!.Value)
             .ToList();
 
         if (evaluatedCandidates.Count == 0)
         {
             evaluatedCandidates = placements
-                .Select(placement => new
-                {
-                    Placement = placement,
-                    Metrics = CorePm4CorrelationMath.EvaluateMetrics(
-                        pm4Object.BoundsMin,
-                        pm4Object.BoundsMax,
-                        pm4Object.Center,
-                        pm4Object.FootprintHull,
-                        pm4Object.FootprintArea,
-                        placement.WorldBoundsMin,
-                        placement.WorldBoundsMax,
-                        placement.Center,
-                        placement.FootprintHull,
-                        placement.FootprintArea),
-                    AnchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, placement.PlacementPosition),
-                })
-                .Select(candidate => new Pm4PlacementMatchEvaluation(
-                    candidate.Placement,
-                    candidate.AnchorPlanarGap,
-                    candidate.Metrics))
+                .Select(placement => EvaluatePm4PlacementMatch(pm4Object, placement, preferredAssetProfileKeys))
+                .Where(static candidate => candidate.HasValue)
+                .Select(static candidate => candidate!.Value)
+                .ToList();
+        }
+
+        if (evaluatedCandidates.Count == 0)
+        {
+            evaluatedCandidates = placements
+                .Where(placement => Math.Abs(placement.TileX - pm4Object.TileX) <= 1
+                    && Math.Abs(placement.TileY - pm4Object.TileY) <= 1)
+                .Select(placement => EvaluatePm4PlacementMatch(pm4Object, placement, null))
+                .Where(static candidate => candidate.HasValue)
+                .Select(static candidate => candidate!.Value)
+                .ToList();
+        }
+
+        if (evaluatedCandidates.Count == 0)
+        {
+            evaluatedCandidates = placements
+                .Select(placement => EvaluatePm4PlacementMatch(pm4Object, placement, null))
+                .Where(static candidate => candidate.HasValue)
+                .Select(static candidate => candidate!.Value)
                 .ToList();
         }
 
@@ -2234,6 +2432,242 @@ public class WorldScene : ISceneRenderer
             candidates);
     }
 
+    private static HashSet<string>? ResolvePreferredPm4AssetProfileKeys(
+        Pm4ObjectMatchState pm4Object,
+        IReadOnlyList<Pm4AssetProfileState> assetProfiles,
+        int maxMatchesPerObject)
+    {
+        if (assetProfiles.Count == 0)
+            return null;
+
+        int shortlistSize = Math.Clamp(maxMatchesPerObject * 6, 12, 48);
+        List<Pm4AssetProfileMatchEvaluation> rankedProfiles = assetProfiles
+            .Select(profile => new Pm4AssetProfileMatchEvaluation(profile, EvaluatePm4AssetProfileMetrics(pm4Object, profile)))
+            .OrderBy(evaluation => evaluation, Comparer<Pm4AssetProfileMatchEvaluation>.Create((left, right) => ComparePm4AssetProfiles(pm4Object, left, right)))
+            .Take(shortlistSize)
+            .ToList();
+
+        if (rankedProfiles.Count == 0)
+            return null;
+
+        HashSet<string> preferredKeys = new(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < rankedProfiles.Count; index++)
+            preferredKeys.Add(rankedProfiles[index].Profile.AssetProfileKey);
+
+        return preferredKeys;
+    }
+
+    private static CorePm4CorrelationMetrics EvaluatePm4AssetProfileMetrics(Pm4ObjectMatchState pm4Object, Pm4AssetProfileState profile)
+    {
+        return CorePm4CorrelationMath.EvaluateMetrics(
+            pm4Object.ShapeSignature.BoundsMin,
+            pm4Object.ShapeSignature.BoundsMax,
+            Vector3.Zero,
+            pm4Object.ShapeSignature.FootprintHull,
+            pm4Object.ShapeSignature.FootprintArea,
+            profile.ShapeSignature.BoundsMin,
+            profile.ShapeSignature.BoundsMax,
+            Vector3.Zero,
+            profile.ShapeSignature.FootprintHull,
+            profile.ShapeSignature.FootprintArea);
+    }
+
+    private static int ComparePm4AssetProfiles(
+        Pm4ObjectMatchState pm4Object,
+        Pm4AssetProfileMatchEvaluation left,
+        Pm4AssetProfileMatchEvaluation right)
+    {
+        bool leftGroupMatch = left.Profile.CorrelatedGroupKey.HasValue && left.Profile.CorrelatedGroupKey.Value == pm4Object.Object.DominantGroupKey;
+        bool rightGroupMatch = right.Profile.CorrelatedGroupKey.HasValue && right.Profile.CorrelatedGroupKey.Value == pm4Object.Object.DominantGroupKey;
+        int compareGroupMatch = rightGroupMatch.CompareTo(leftGroupMatch);
+        if (compareGroupMatch != 0)
+            return compareGroupMatch;
+
+        int compareScore = CorePm4CorrelationMath.CompareCandidateScores(
+            new CorePm4CorrelationCandidateScore(false, left.Metrics, left.Profile.ShapeSignature.BoundsMin, left.Profile.ShapeSignature.BoundsMax, Vector3.Zero),
+            new CorePm4CorrelationCandidateScore(false, right.Metrics, right.Profile.ShapeSignature.BoundsMin, right.Profile.ShapeSignature.BoundsMax, Vector3.Zero));
+        if (compareScore != 0)
+            return compareScore;
+
+        int compareEvidence = GetPlacementGeometryEvidenceRank(left.Profile.EvidenceSource).CompareTo(GetPlacementGeometryEvidenceRank(right.Profile.EvidenceSource));
+        if (compareEvidence != 0)
+            return compareEvidence;
+
+        return right.Profile.MeshTriangleCount.CompareTo(left.Profile.MeshTriangleCount);
+    }
+
+    private static int ComparePm4AssetProfileRichness(Pm4AssetProfileState left, Pm4AssetProfileState right)
+    {
+        int compareEvidence = GetPlacementGeometryEvidenceRank(left.EvidenceSource).CompareTo(GetPlacementGeometryEvidenceRank(right.EvidenceSource));
+        if (compareEvidence != 0)
+            return compareEvidence;
+
+        int compareTriangles = right.MeshTriangleCount.CompareTo(left.MeshTriangleCount);
+        if (compareTriangles != 0)
+            return compareTriangles;
+
+        return right.FootprintSampleCount.CompareTo(left.FootprintSampleCount);
+    }
+
+    private static Pm4PlacementMatchEvaluation? EvaluatePm4PlacementMatch(
+        Pm4ObjectMatchState pm4Object,
+        Pm4PlacementMatchState placement,
+        ISet<string>? preferredAssetProfileKeys)
+    {
+        if (!TryResolveBestPlacementGeometryVariant(pm4Object, placement, preferredAssetProfileKeys, out Pm4PlacementMatchState effectivePlacement, out CorePm4CorrelationMetrics metrics))
+            return null;
+
+        float anchorPlanarGap = ComputePm4ObjectAnchorPlanarGap(pm4Object.PlacementAnchor, effectivePlacement.PlacementPosition);
+        return new Pm4PlacementMatchEvaluation(effectivePlacement, anchorPlanarGap, metrics);
+    }
+
+    private static bool TryResolveBestPlacementGeometryVariant(
+        Pm4ObjectMatchState pm4Object,
+        Pm4PlacementMatchState placement,
+        ISet<string>? preferredAssetProfileKeys,
+        out Pm4PlacementMatchState resolvedPlacement,
+        out CorePm4CorrelationMetrics metrics)
+    {
+        IReadOnlyList<Pm4PlacementGeometryVariant> variants = placement.GeometryVariants;
+        List<Pm4PlacementGeometryVariant>? filteredVariants = null;
+        if (preferredAssetProfileKeys != null)
+        {
+            filteredVariants = variants
+                .Where(variant => preferredAssetProfileKeys.Contains(variant.AssetProfileKey))
+                .ToList();
+            if (filteredVariants.Count > 0)
+                variants = filteredVariants;
+        }
+
+        if (variants.Count == 0)
+        {
+            metrics = CorePm4CorrelationMath.EvaluateMetrics(
+                pm4Object.BoundsMin,
+                pm4Object.BoundsMax,
+                pm4Object.Center,
+                pm4Object.FootprintHull,
+                pm4Object.FootprintArea,
+                placement.WorldBoundsMin,
+                placement.WorldBoundsMax,
+                placement.Center,
+                placement.FootprintHull,
+                placement.FootprintArea);
+            resolvedPlacement = placement;
+            return preferredAssetProfileKeys == null;
+        }
+
+        bool sameTile = placement.SameTile(pm4Object.TileX, pm4Object.TileY);
+        Pm4PlacementGeometryVariant bestVariant = variants[0];
+        CorePm4CorrelationMetrics bestMetrics = EvaluatePlacementVariantMetrics(pm4Object, bestVariant);
+
+        for (int index = 1; index < variants.Count; index++)
+        {
+            Pm4PlacementGeometryVariant candidateVariant = variants[index];
+            CorePm4CorrelationMetrics candidateMetrics = EvaluatePlacementVariantMetrics(pm4Object, candidateVariant);
+            if (ComparePlacementGeometryVariants(pm4Object, sameTile, candidateVariant, candidateMetrics, bestVariant, bestMetrics) < 0)
+            {
+                bestVariant = candidateVariant;
+                bestMetrics = candidateMetrics;
+            }
+        }
+
+        metrics = bestMetrics;
+        resolvedPlacement = placement with
+        {
+            AssetProfileKey = bestVariant.AssetProfileKey,
+            EvidenceSource = bestVariant.EvidenceSource,
+            WorldBoundsMin = bestVariant.WorldBoundsMin,
+            WorldBoundsMax = bestVariant.WorldBoundsMax,
+            FootprintHull = bestVariant.FootprintHull,
+            FootprintArea = bestVariant.FootprintArea,
+            MeshGroupCount = bestVariant.MeshGroupCount,
+            MeshVertexCount = bestVariant.MeshVertexCount,
+            MeshTriangleCount = bestVariant.MeshTriangleCount,
+            FootprintSampleCount = bestVariant.FootprintSampleCount,
+            WorldFootprintArea = bestVariant.WorldFootprintArea
+        };
+        return true;
+    }
+
+    private static Pm4ShapeSignature BuildPm4ShapeSignature(Vector3 boundsMin, Vector3 boundsMax, IReadOnlyList<Vector2> footprintHull)
+    {
+        Vector2[] resolvedFootprintHull = footprintHull.Count > 0
+            ? footprintHull.ToArray()
+            : BuildPm4BoundsFootprintHull(boundsMin, boundsMax);
+        Vector3 center = (boundsMin + boundsMax) * 0.5f;
+        float scale = MathF.Max(MathF.Max(boundsMax.X - boundsMin.X, boundsMax.Y - boundsMin.Y), boundsMax.Z - boundsMin.Z);
+        if (!float.IsFinite(scale) || scale <= 0.001f)
+            scale = 1f;
+
+        Vector3 normalizedBoundsMin = (boundsMin - center) / scale;
+        Vector3 normalizedBoundsMax = (boundsMax - center) / scale;
+        Vector2 planarCenter = new(center.X, center.Y);
+        Vector2[] normalizedFootprintHull = new Vector2[resolvedFootprintHull.Length];
+        for (int index = 0; index < resolvedFootprintHull.Length; index++)
+            normalizedFootprintHull[index] = (resolvedFootprintHull[index] - planarCenter) / scale;
+
+        float normalizedFootprintArea = CorePm4CorrelationMath.ComputeFootprintArea(normalizedFootprintHull);
+        return new Pm4ShapeSignature(normalizedBoundsMin, normalizedBoundsMax, normalizedFootprintHull, normalizedFootprintArea);
+    }
+
+    private static string BuildPm4AssetProfileKey(string kind, string modelKey, string evidenceSource, byte? correlatedGroupKey)
+    {
+        string groupKey = correlatedGroupKey.HasValue
+            ? correlatedGroupKey.Value.ToString(CultureInfo.InvariantCulture)
+            : "-";
+        return $"{kind}|{modelKey}|{evidenceSource}|{groupKey}";
+    }
+
+    private static CorePm4CorrelationMetrics EvaluatePlacementVariantMetrics(Pm4ObjectMatchState pm4Object, Pm4PlacementGeometryVariant variant)
+    {
+        return CorePm4CorrelationMath.EvaluateMetrics(
+            pm4Object.BoundsMin,
+            pm4Object.BoundsMax,
+            pm4Object.Center,
+            pm4Object.FootprintHull,
+            pm4Object.FootprintArea,
+            variant.WorldBoundsMin,
+            variant.WorldBoundsMax,
+            variant.Center,
+            variant.FootprintHull,
+            variant.FootprintArea);
+    }
+
+    private static int ComparePlacementGeometryVariants(
+        Pm4ObjectMatchState pm4Object,
+        bool sameTile,
+        Pm4PlacementGeometryVariant leftVariant,
+        CorePm4CorrelationMetrics leftMetrics,
+        Pm4PlacementGeometryVariant rightVariant,
+        CorePm4CorrelationMetrics rightMetrics)
+    {
+        bool leftGroupMatch = leftVariant.CorrelatedGroupKey.HasValue && leftVariant.CorrelatedGroupKey.Value == pm4Object.Object.DominantGroupKey;
+        bool rightGroupMatch = rightVariant.CorrelatedGroupKey.HasValue && rightVariant.CorrelatedGroupKey.Value == pm4Object.Object.DominantGroupKey;
+        int compareGroupMatch = rightGroupMatch.CompareTo(leftGroupMatch);
+        if (compareGroupMatch != 0)
+            return compareGroupMatch;
+
+        int compareScore = CorePm4CorrelationMath.CompareCandidateScores(
+            new CorePm4CorrelationCandidateScore(sameTile, leftMetrics, leftVariant.WorldBoundsMin, leftVariant.WorldBoundsMax, leftVariant.Center),
+            new CorePm4CorrelationCandidateScore(sameTile, rightMetrics, rightVariant.WorldBoundsMin, rightVariant.WorldBoundsMax, rightVariant.Center));
+        if (compareScore != 0)
+            return compareScore;
+
+        return GetPlacementGeometryEvidenceRank(leftVariant.EvidenceSource).CompareTo(GetPlacementGeometryEvidenceRank(rightVariant.EvidenceSource));
+    }
+
+    private static int GetPlacementGeometryEvidenceRank(string evidenceSource)
+    {
+        return evidenceSource.ToLowerInvariant() switch
+        {
+            "wmo-group-mesh" => 0,
+            "mdx-collision" => 1,
+            "wmo-mesh" => 2,
+            "modf-bounds" => 3,
+            _ => 4,
+        };
+    }
+
     private static int GetPm4ObjectMatchEvidenceRank(Pm4ObjectMatchState pm4Object, Pm4PlacementMatchState placement)
     {
         bool zeroOrRootObject = pm4Object.Object.Ck24 == 0 || pm4Object.Object.LinkGroupObjectId == 0;
@@ -2245,13 +2679,19 @@ public class WorldScene : ISceneRenderer
             return 0;
         }
 
-        if (placement.Kind == "wmo" && string.Equals(placement.EvidenceSource, "wmo-mesh", StringComparison.OrdinalIgnoreCase))
+        if (placement.Kind == "wmo" && string.Equals(placement.EvidenceSource, "wmo-group-mesh", StringComparison.OrdinalIgnoreCase))
             return 0;
 
-        if (placement.Kind == "wmo")
+        if (string.Equals(placement.EvidenceSource, "mdx-collision", StringComparison.OrdinalIgnoreCase))
             return 1;
 
-        return 2;
+        if (placement.Kind == "wmo" && string.Equals(placement.EvidenceSource, "wmo-mesh", StringComparison.OrdinalIgnoreCase))
+            return 2;
+
+        if (placement.Kind == "wmo")
+            return 3;
+
+        return 4;
     }
 
     private static float ComputePm4ObjectAnchorPlanarGap(Vector3 anchor, Vector3 placementPosition)
@@ -2274,12 +2714,7 @@ public class WorldScene : ISceneRenderer
     }
 
     /// <summary>Get the currently selected object instance, or null if nothing selected.</summary>
-    public ObjectInstance? SelectedInstance => _selectedObjectType switch
-    {
-        ObjectType.Wmo when _selectedObjectIndex >= 0 && _selectedObjectIndex < _wmoInstances.Count => _wmoInstances[_selectedObjectIndex],
-        ObjectType.Mdx when _selectedObjectIndex >= 0 && _selectedObjectIndex < _mdxInstances.Count => _mdxInstances[_selectedObjectIndex],
-        _ => null
-    };
+    public ObjectInstance? SelectedInstance => TryGetSelectedSceneInstance(out ObjectInstance instance) ? instance : null;
 
     public bool TryGetSelectedPlacementSourceData(out string sourcePath, out byte[] sourceBytes)
     {
@@ -2470,10 +2905,13 @@ public class WorldScene : ISceneRenderer
     private int _selectedTaxiRouteId = -1;
     private readonly Dictionary<int, string> _taxiActorModelOverrideByPath = new();
     private readonly Dictionary<int, float> _taxiActorTravelByPath = new();
+    private readonly Dictionary<int, TaxiActorPose> _taxiActorPoseByPath = new();
+    private readonly Dictionary<int, Vector3> _taxiActorSmoothedForwardByPath = new();
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
     private bool _showTaxiActors = true;
     private float _taxiActorSpeedMultiplier = 1.0f;
+    private float _taxiActorScaleMultiplier = 1.0f;
     private const float TaxiActorBaseUnitsPerSecond = 650f;
     private const float TaxiActorHoverOffset = 12f;
     public int SelectedTaxiNodeId { get => _selectedTaxiNodeId; set { _selectedTaxiNodeId = value; _selectedTaxiRouteId = -1; } }
@@ -2484,6 +2922,12 @@ public class WorldScene : ISceneRenderer
     {
         get => _taxiActorSpeedMultiplier;
         set => _taxiActorSpeedMultiplier = Math.Max(0f, value);
+    }
+
+    public float TaxiActorScaleMultiplier
+    {
+        get => _taxiActorScaleMultiplier;
+        set => _taxiActorScaleMultiplier = Math.Max(0f, value);
     }
 
     public bool IsTaxiRouteVisible(TaxiPathLoader.TaxiRoute route)
@@ -2545,6 +2989,20 @@ public class WorldScene : ISceneRenderer
         return string.IsNullOrWhiteSpace(mountNode?.MountModelPath)
             ? null
             : mountNode.MountModelPath.Replace('/', '\\');
+    }
+
+    public bool TryGetTaxiActorPose(int pathId, out TaxiActorPose pose)
+        => _taxiActorPoseByPath.TryGetValue(pathId, out pose);
+
+    public bool TryGetSelectedTaxiActorPose(out TaxiActorPose pose)
+    {
+        if (_selectedTaxiRouteId < 0)
+        {
+            pose = default;
+            return false;
+        }
+
+        return _taxiActorPoseByPath.TryGetValue(_selectedTaxiRouteId, out pose);
     }
 
     public bool TryGetTaxiRouteSelectionPoint(int pathId, out Vector3 point)
@@ -5395,6 +5853,8 @@ public class WorldScene : ISceneRenderer
         var dbcd = new DBCD.DBCD(_dbcProvider, new DBCD.Providers.FilesystemDBDProvider(_dbdDir));
         _taxiLoader.Load(dbcd, _dbcBuild, _mapId);
         _taxiActorTravelByPath.Clear();
+        _taxiActorPoseByPath.Clear();
+        _taxiActorSmoothedForwardByPath.Clear();
         _taxiActorClockInitialized = false;
     }
 
@@ -5405,6 +5865,8 @@ public class WorldScene : ISceneRenderer
         bool hasTaxiSelection = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0;
         if (!_showTaxi || !_showTaxiActors || _taxiLoader == null || !hasTaxiSelection)
         {
+            _taxiActorPoseByPath.Clear();
+            _taxiActorSmoothedForwardByPath.Clear();
             _taxiActorClockInitialized = false;
             return;
         }
@@ -5437,6 +5899,8 @@ public class WorldScene : ISceneRenderer
                 scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
             }
 
+            scale *= _taxiActorScaleMultiplier;
+
             float routeLength = GetRouteLength(route.Waypoints);
             if (routeLength <= 1f)
                 continue;
@@ -5453,12 +5917,46 @@ public class WorldScene : ISceneRenderer
             SampleRoute(route.Waypoints, travel, out Vector3 actorPosition, out Vector3 actorDirection);
             actorPosition.Z += TaxiActorHoverOffset;
 
-            float yawRadians = actorDirection.LengthSquared() > 0.0001f
-                ? MathF.Atan2(actorDirection.X, actorDirection.Y) + MathF.PI
-                : 0f;
+            Vector3 sampledForward = SampleSmoothedTaxiRouteDirection(route.Waypoints, travel, routeLength);
+            Vector3 actorForward = sampledForward;
+            if (_taxiActorSmoothedForwardByPath.TryGetValue(route.PathId, out Vector3 previousForward)
+                && previousForward.LengthSquared() > 0.0001f)
+            {
+                float blend = 1f - MathF.Exp(-TaxiActorHeadingSmoothingHz * Math.Max(0f, deltaSeconds));
+                if (blend <= 0f)
+                {
+                    actorForward = previousForward;
+                }
+                else if (blend < 0.999f)
+                {
+                    Vector3 blendedForward = Vector3.Lerp(previousForward, sampledForward, blend);
+                    actorForward = blendedForward.LengthSquared() > 0.0001f
+                        ? Vector3.Normalize(blendedForward)
+                        : sampledForward;
+                }
+            }
+
+            if (actorForward.LengthSquared() <= 0.0001f)
+            {
+                actorForward = actorDirection.LengthSquared() > 0.0001f
+                    ? Vector3.Normalize(actorDirection)
+                    : Vector3.UnitX;
+            }
+
+            _taxiActorSmoothedForwardByPath[route.PathId] = actorForward;
+
+            float yawRadians = ComputeTaxiActorYawRadians(actorForward);
             string modelPath = actorModelPath.Replace('/', '\\');
             string key = WorldAssetManager.NormalizeKey(modelPath);
             _assets.QueueMdxLoad(key);
+
+            _taxiActorPoseByPath[route.PathId] = new TaxiActorPose(
+                route.PathId,
+                actorPosition,
+                actorForward,
+                yawRadians,
+                scale,
+                modelPath);
 
             var transform = Matrix4x4.CreateScale(scale)
                 * Matrix4x4.CreateRotationZ(yawRadians)
@@ -5502,6 +6000,12 @@ public class WorldScene : ISceneRenderer
 
         foreach (int stalePathId in _taxiActorTravelByPath.Keys.Except(activePathIds).ToList())
             _taxiActorTravelByPath.Remove(stalePathId);
+
+        foreach (int stalePathId in _taxiActorPoseByPath.Keys.Except(activePathIds).ToList())
+            _taxiActorPoseByPath.Remove(stalePathId);
+
+        foreach (int stalePathId in _taxiActorSmoothedForwardByPath.Keys.Except(activePathIds).ToList())
+            _taxiActorSmoothedForwardByPath.Remove(stalePathId);
     }
 
     private TaxiPathLoader.TaxiNode? ResolveTaxiActorNode(TaxiPathLoader.TaxiRoute route)
@@ -5583,6 +6087,53 @@ public class WorldScene : ISceneRenderer
             direction = Vector3.Normalize(direction);
     }
 
+    private static Vector3 SampleSmoothedTaxiRouteDirection(List<Vector3> waypoints, float distance, float routeLength)
+    {
+        if (waypoints.Count < 2)
+            return Vector3.UnitX;
+
+        float sampleWindow = MathF.Min(TaxiActorHeadingSampleWindow, MathF.Max(1f, routeLength * 0.1f));
+        float behindDistance = WrapTaxiRouteDistance(distance - sampleWindow * 0.5f, routeLength);
+        float aheadDistance = WrapTaxiRouteDistance(distance + sampleWindow * 0.5f, routeLength);
+
+        SampleRoute(waypoints, behindDistance, out Vector3 behindPosition, out Vector3 behindDirection);
+        SampleRoute(waypoints, aheadDistance, out Vector3 aheadPosition, out Vector3 aheadDirection);
+
+        Vector3 tangent = aheadPosition - behindPosition;
+        if (tangent.LengthSquared() > 0.0001f)
+            return Vector3.Normalize(tangent);
+
+        Vector3 fallback = aheadDirection.LengthSquared() > 0.0001f ? aheadDirection : behindDirection;
+        if (fallback.LengthSquared() > 0.0001f)
+            return Vector3.Normalize(fallback);
+
+        return Vector3.UnitX;
+    }
+
+    private static float WrapTaxiRouteDistance(float distance, float routeLength)
+    {
+        if (routeLength <= 0f)
+            return 0f;
+
+        while (distance < 0f)
+            distance += routeLength;
+
+        while (distance >= routeLength)
+            distance -= routeLength;
+
+        return distance;
+    }
+
+    private static float ComputeTaxiActorYawRadians(Vector3 actorForward)
+    {
+        Vector3 horizontalForward = new Vector3(actorForward.X, actorForward.Y, 0f);
+        if (horizontalForward.LengthSquared() <= 0.0001f)
+            return 0f;
+
+        horizontalForward = Vector3.Normalize(horizontalForward);
+        return MathF.Atan2(horizontalForward.Y, horizontalForward.X);
+    }
+
     private void LazyLoadAreaTriggers()
     {
         _areaTriggerLoadAttempted = true;
@@ -5603,11 +6154,13 @@ public class WorldScene : ISceneRenderer
     public WorldScene(GL gl, string wdtPath, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         string? buildVersion = null,
+        MinimapRenderer? minimapRenderer = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _minimapRenderer = minimapRenderer;
         _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -5626,11 +6179,13 @@ public class WorldScene : ISceneRenderer
     public WorldScene(GL gl, TerrainManager terrainManager, IDataSource? dataSource,
         ReplaceableTextureResolver? texResolver = null,
         string? buildVersion = null,
+        MinimapRenderer? minimapRenderer = null,
         Action<string>? onStatus = null)
     {
         _gl = gl;
         _dataSource = dataSource;
         _dbcBuild = buildVersion;
+        _minimapRenderer = minimapRenderer;
         _pm4OverlayCacheService = Pm4OverlayCacheService.CreateForDataSource(dataSource);
         _assets = new WorldAssetManager(gl, dataSource, texResolver, buildVersion);
         _bbRenderer = new BoundingBoxRenderer(gl);
@@ -5673,7 +6228,7 @@ public class WorldScene : ISceneRenderer
             if (_dataSource != null)
             {
                 onStatus?.Invoke("Loading WDL terrain...");
-                _wdlTerrain = new WdlTerrainRenderer(_gl);
+                _wdlTerrain = new WdlTerrainRenderer(_gl, _minimapRenderer);
                 if (!_wdlTerrain.Load(_dataSource, _terrainManager.MapName))
                 {
                     _wdlTerrain.Dispose();
@@ -6070,7 +6625,122 @@ public class WorldScene : ISceneRenderer
             _wmoInstances.AddRange(list);
         _wmoInstances.AddRange(_externalWmoInstances);
 
+        RestoreSelectedSceneObjectAfterRebuild();
+
         _instancesDirty = false;
+    }
+
+    private bool TryGetSelectedSceneInstance(out ObjectInstance instance)
+    {
+        if (_instancesDirty)
+            RebuildInstanceLists();
+
+        if (TryGetSceneObjectByIndex(_selectedObjectType, _selectedObjectIndex, out instance))
+        {
+            if (!_selectedSceneObjectKey.HasValue || !IsSameSceneObject(instance, _selectedSceneObjectKey.Value))
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(_selectedObjectType, instance);
+
+            return true;
+        }
+
+        if (_selectedSceneObjectKey.HasValue
+            && TryResolveSelectedSceneObject(_selectedSceneObjectKey.Value, out ObjectType resolvedType, out int resolvedIndex, out instance))
+        {
+            _selectedObjectType = resolvedType;
+            _selectedObjectIndex = resolvedIndex;
+            return true;
+        }
+
+        instance = default;
+        return false;
+    }
+
+    private void RestoreSelectedSceneObjectAfterRebuild()
+    {
+        if (!_selectedSceneObjectKey.HasValue)
+            return;
+
+        if (TryResolveSelectedSceneObject(_selectedSceneObjectKey.Value, out ObjectType resolvedType, out int resolvedIndex, out _))
+        {
+            _selectedObjectType = resolvedType;
+            _selectedObjectIndex = resolvedIndex;
+            return;
+        }
+
+        _selectedObjectIndex = -1;
+    }
+
+    private bool TryResolveSelectedSceneObject(SelectedSceneObjectKey key, out ObjectType objectType, out int objectIndex, out ObjectInstance instance)
+    {
+        List<ObjectInstance> instances = key.ObjectType switch
+        {
+            ObjectType.Wmo => _wmoInstances,
+            ObjectType.Mdx => _mdxInstances,
+            _ => []
+        };
+
+        for (int index = 0; index < instances.Count; index++)
+        {
+            ObjectInstance candidate = instances[index];
+            if (!IsSameSceneObject(candidate, key))
+                continue;
+
+            objectType = key.ObjectType;
+            objectIndex = index;
+            instance = candidate;
+            return true;
+        }
+
+        objectType = ObjectType.None;
+        objectIndex = -1;
+        instance = default;
+        return false;
+    }
+
+    private bool TryGetSceneObjectByIndex(ObjectType objectType, int objectIndex, out ObjectInstance instance)
+    {
+        switch (objectType)
+        {
+            case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
+                instance = _wmoInstances[objectIndex];
+                return true;
+            case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
+                instance = _mdxInstances[objectIndex];
+                return true;
+            default:
+                instance = default;
+                return false;
+        }
+    }
+
+    private static SelectedSceneObjectKey CreateSelectedSceneObjectKey(ObjectType objectType, ObjectInstance instance)
+    {
+        return new SelectedSceneObjectKey(
+            objectType,
+            instance.UniqueId,
+            instance.PlacementEntryIndex,
+            instance.TileX,
+            instance.TileY,
+            instance.HasTileCoordinate,
+            instance.ModelKey,
+            instance.PlacementPosition);
+    }
+
+    private static bool IsSameSceneObject(ObjectInstance candidate, SelectedSceneObjectKey key)
+    {
+        if (candidate.UniqueId != key.UniqueId || candidate.PlacementEntryIndex != key.PlacementEntryIndex)
+            return false;
+
+        if (candidate.HasTileCoordinate != key.HasTileCoordinate)
+            return false;
+
+        if (candidate.HasTileCoordinate)
+            return candidate.TileX == key.TileX && candidate.TileY == key.TileY;
+
+        if (!string.Equals(candidate.ModelKey, key.ModelKey, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return Vector3.DistanceSquared(candidate.PlacementPosition, key.PlacementPosition) < 0.0001f;
     }
 
     private IModelRenderer? TryGetQueuedMdx(string modelKey)
@@ -6825,6 +7495,9 @@ public class WorldScene : ISceneRenderer
 
     private bool ShouldHideObjectInstanceByUniqueId(in ObjectInstance inst)
     {
+        if (ShouldHideObjectInstanceByPathFilter(inst))
+            return true;
+
         if (!_uniqueIdFilterEnabled
             || _uniqueIdFilterMin < 0
             || _uniqueIdFilterMax < 0
@@ -6837,6 +7510,25 @@ public class WorldScene : ISceneRenderer
         int minUniqueId = Math.Min(_uniqueIdFilterMin, _uniqueIdFilterMax);
         int maxUniqueId = Math.Max(_uniqueIdFilterMin, _uniqueIdFilterMax);
         return inst.UniqueId < minUniqueId || inst.UniqueId > maxUniqueId;
+    }
+
+    private bool ShouldHideObjectInstanceByPathFilter(in ObjectInstance inst)
+    {
+        if (!_objectPathFiltersEnabled || _objectPathFilters.Count == 0 || string.IsNullOrWhiteSpace(inst.ModelPath))
+            return false;
+
+        string normalizedPath = ObjectPathFilterEntry.NormalizePrefix(inst.ModelPath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return false;
+
+        for (int i = 0; i < _objectPathFilters.Count; i++)
+        {
+            ObjectPathFilterEntry entry = _objectPathFilters[i];
+            if (entry.MatchesModelPath(normalizedPath))
+                return true;
+        }
+
+        return false;
     }
 
     private static (int tileX, int tileY) ComputeTileCoordinates(Vector3 rendererPosition)
@@ -7141,7 +7833,10 @@ public class WorldScene : ISceneRenderer
                     frame.WdlMs = MeasureDurationMs(() =>
                     {
                         if (ShowWdlTerrain && _wdlTerrain != null)
-                            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller);
+                        {
+                            bool renderWdlAsOpaqueFallback = _terrainManager.LoadedTileCount == 0;
+                            _wdlTerrain.Render(view, proj, camPos, _terrainManager.Lighting, _frustumCuller, renderWdlAsOpaqueFallback);
+                        }
                     });
                 },
                 () =>
@@ -7642,8 +8337,8 @@ public class WorldScene : ISceneRenderer
 
                         if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
                         {
-                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 42f : 30f;
-                            float headSize = route.PathId == _selectedTaxiRouteId ? 6f : 4f;
+                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 48f : 38f;
+                            float headSize = route.PathId == _selectedTaxiRouteId ? 8f : 6f;
                             _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
                                 route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
                         }
@@ -8229,11 +8924,14 @@ public class WorldScene : ISceneRenderer
         {
             _selectedObjectType = bestType;
             _selectedObjectIndex = bestIndex;
+            if (TryGetSceneObjectByIndex(bestType, bestIndex, out ObjectInstance selectedInstance))
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(bestType, selectedInstance);
             return;
         }
 
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+        _selectedSceneObjectKey = null;
     }
 
     public bool SelectSceneObject(ObjectType objectType, int objectIndex)
@@ -8246,10 +8944,12 @@ public class WorldScene : ISceneRenderer
             case ObjectType.Wmo when objectIndex >= 0 && objectIndex < _wmoInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _wmoInstances[objectIndex]);
                 return true;
             case ObjectType.Mdx when objectIndex >= 0 && objectIndex < _mdxInstances.Count:
                 _selectedObjectType = objectType;
                 _selectedObjectIndex = objectIndex;
+                _selectedSceneObjectKey = CreateSelectedSceneObjectKey(objectType, _mdxInstances[objectIndex]);
                 return true;
             default:
                 return false;
@@ -8390,6 +9090,7 @@ public class WorldScene : ISceneRenderer
     {
         _selectedObjectType = ObjectType.None;
         _selectedObjectIndex = -1;
+        _selectedSceneObjectKey = null;
     }
 
     public void ClearPm4ObjectSelection()
@@ -8406,7 +9107,7 @@ public class WorldScene : ISceneRenderer
         if (!_useDynamicHoveredAssetRange)
             return _hoveredAssetMaxDistance;
 
-        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, 2000f);
+        float fogDrivenDistance = Math.Clamp(_lastHoverPickFogEnd * 0.4f, 533.33f, MaxWorldObjectViewDistance);
         return Math.Min(_hoveredAssetMaxDistance, fogDrivenDistance);
     }
 
@@ -8924,7 +9625,8 @@ public class WorldScene : ISceneRenderer
 
         Pm4ObjectMatchState pm4Object = BuildPm4ObjectMatchState(objectKey.tileX, objectKey.tileY, objectKey, obj);
         List<Pm4PlacementMatchState> placements = BuildPm4PlacementMatchStates();
-        objectMatch = BuildPm4ObjectMatchObject(pm4Object, placements, Math.Max(1, maxMatchesPerObject));
+        List<Pm4AssetProfileState> assetProfiles = BuildPm4AssetProfileStates(placements);
+        objectMatch = BuildPm4ObjectMatchObject(pm4Object, placements, assetProfiles, Math.Max(1, maxMatchesPerObject));
         return true;
     }
 
@@ -10243,6 +10945,7 @@ internal readonly record struct Pm4PlacementMatchState(
     string ModelName,
     string ModelPath,
     string ModelKey,
+    string AssetProfileKey,
     bool AssetResolved,
     string EvidenceSource,
     ushort PlacementFlags,
@@ -10257,16 +10960,53 @@ internal readonly record struct Pm4PlacementMatchState(
     int MeshVertexCount,
     int MeshTriangleCount,
     int FootprintSampleCount,
-    float WorldFootprintArea)
+    float WorldFootprintArea,
+    IReadOnlyList<Pm4PlacementGeometryVariant> GeometryVariants)
 {
     public Vector3 Center => (WorldBoundsMin + WorldBoundsMax) * 0.5f;
 
     public bool SameTile(int tileX, int tileY) => TileX == tileX && TileY == tileY;
 }
 
+internal readonly record struct Pm4PlacementGeometryVariant(
+    string AssetProfileKey,
+    string EvidenceSource,
+    Vector3 WorldBoundsMin,
+    Vector3 WorldBoundsMax,
+    IReadOnlyList<Vector2> FootprintHull,
+    float FootprintArea,
+    int MeshGroupCount,
+    int MeshVertexCount,
+    int MeshTriangleCount,
+    int FootprintSampleCount,
+    float WorldFootprintArea,
+    Pm4ShapeSignature ShapeSignature,
+    byte? CorrelatedGroupKey)
+{
+    public Vector3 Center => (WorldBoundsMin + WorldBoundsMax) * 0.5f;
+}
+
 internal readonly record struct Pm4PlacementMatchEvaluation(
     Pm4PlacementMatchState Placement,
     float AnchorPlanarGap,
+    CorePm4CorrelationMetrics Metrics);
+
+internal readonly record struct Pm4AssetProfileState(
+    string AssetProfileKey,
+    string Kind,
+    string ModelName,
+    string ModelPath,
+    string ModelKey,
+    string EvidenceSource,
+    byte? CorrelatedGroupKey,
+    int MeshGroupCount,
+    int MeshVertexCount,
+    int MeshTriangleCount,
+    int FootprintSampleCount,
+    Pm4ShapeSignature ShapeSignature);
+
+internal readonly record struct Pm4AssetProfileMatchEvaluation(
+    Pm4AssetProfileState Profile,
     CorePm4CorrelationMetrics Metrics);
 
 internal readonly record struct Pm4ObjectMatchState(
@@ -10278,6 +11018,13 @@ internal readonly record struct Pm4ObjectMatchState(
     Vector3 BoundsMin,
     Vector3 BoundsMax,
     Vector3 Center,
+    IReadOnlyList<Vector2> FootprintHull,
+    float FootprintArea,
+    Pm4ShapeSignature ShapeSignature);
+
+internal readonly record struct Pm4ShapeSignature(
+    Vector3 BoundsMin,
+    Vector3 BoundsMax,
     IReadOnlyList<Vector2> FootprintHull,
     float FootprintArea);
 

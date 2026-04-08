@@ -44,6 +44,7 @@ public class VlmTerrainManager : ISceneRenderer
 
     public int LoadedTileCount => _loadedTiles.Count;
     public int LoadedChunkCount => _terrainRenderer.LoadedChunkCount;
+    public IEnumerable<(int tileX, int tileY)> LoadedTiles => _loadedTiles.Keys;
     public bool IsTileLoaded(int tileX, int tileY) => _loadedTiles.ContainsKey((tileX, tileY));
     public TerrainLighting Lighting => _terrainRenderer.Lighting;
     public TerrainRenderer Renderer => _terrainRenderer;

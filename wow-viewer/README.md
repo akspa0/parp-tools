@@ -404,6 +404,7 @@ Current non-PM4 converter slice:
 	- `export-tex-json --input <file.adt|file_tex0.adt> [--output <report.json>]`
 - This is intentionally narrow for now:
 	- it reports shared file-family classification and version using `WowFileDetector`
+	- for `Wmo` and `WmoGroup` inputs, `detect` now also reports the shared WMO liquid coordinate family and baseline rotation from `WmoLiquidLayoutResolver`, with asset version taking precedence over build fallback
 	- it now also exports shared root-plus-`_tex0` per-chunk layer and decoded-alpha data as JSON through `AdtTextureReader`
 	- it is still not yet a broader terrain conversion workflow
 - Smoke-test commands that should now work on the fixed development dataset:
@@ -607,6 +608,8 @@ Current Copilot continuity surface:
 - Use `.github/prompts/wow-viewer-editor-plan-set.prompt.md` when the ask is the broader viewer-to-editor transition, including PM4 `MPRL`-assisted terrain conform, saved object choices, moved-object persistence, map save ownership, or viewer-vs-editor workspace routing.
 - Use `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md` when the ask is planning the first true terrain or object editing or dirty-map or save pipeline slice.
 - Use `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md` when the ask is planning viewer and editor workspace presets, editor task clustering, and panel reorganization.
+- Use `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` when the ask is deterministic one-PNG-per-ADT capture, path-family-filtered minimap output, wow-viewer CLI minimap generation, or minimap-driven `WorldScene` extraction sequencing.
+- Minimap-generation continuity now also lives in `../gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md`.
 - editor continuity is now also recorded in `../gillijimproject_refactor/plans/wow_viewer_editor_plan_2026-04-03.md`.
 - Shared non-PM4 continuity is now also recorded in `../gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`.
 - Forward-maintenance rule:

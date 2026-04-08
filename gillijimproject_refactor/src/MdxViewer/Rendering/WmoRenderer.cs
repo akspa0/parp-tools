@@ -7,6 +7,7 @@ using MdxViewer.Logging;
 using MdxViewer.Terrain;
 using Silk.NET.OpenGL;
 using WowViewer.Core.Runtime.M2;
+using WowViewer.Core.Wmo;
 using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Rendering;
@@ -26,6 +27,7 @@ public class WmoRenderer : ISceneRenderer
     private readonly string? _buildVersion;
     private readonly bool _deferInitialDoodadLoads;
     private readonly bool _deferInitialMaterialTextureLoads;
+    private readonly bool _enableRuntimeGroupVisibility;
 
     // Shared static shader program — prevents race condition when multiple WmoRenderers
     // exist and one is disposed (same fix as MdxRenderer)
@@ -91,7 +93,7 @@ public class WmoRenderer : ISceneRenderer
     private static uint _liquidShader;
     private static int _uLiqModel, _uLiqView, _uLiqProj, _uLiqColor;
     private static int _liquidShaderRefCount;
-    // Additional user-configurable quarter-turns applied after the build-aware baseline.
+    // Additional user-configurable quarter-turns applied after the shared WMO family baseline.
     private static int _mliqRotationQuarterTurns;
     private static int _mliqRotationRevision;
     private int _builtMliqRotationRevision = -1;
@@ -114,7 +116,8 @@ public class WmoRenderer : ISceneRenderer
 
     public WmoRenderer(GL gl, WmoV14ToV17Converter.WmoV14Data wmo, string modelDir,
         IDataSource? dataSource = null, ReplaceableTextureResolver? texResolver = null, string? buildVersion = null,
-        bool deferInitialDoodadLoads = false, bool deferInitialMaterialTextureLoads = false)
+        bool deferInitialDoodadLoads = false, bool deferInitialMaterialTextureLoads = false,
+        bool enableRuntimeGroupVisibility = true)
     {
         var initStopwatch = Stopwatch.StartNew();
         _gl = gl;
@@ -125,6 +128,7 @@ public class WmoRenderer : ISceneRenderer
         _buildVersion = buildVersion;
         _deferInitialDoodadLoads = deferInitialDoodadLoads;
         _deferInitialMaterialTextureLoads = deferInitialMaterialTextureLoads;
+        _enableRuntimeGroupVisibility = enableRuntimeGroupVisibility;
         _groupPortalNeighbors = new List<PortalNeighbor>[_wmo.Groups.Count];
         _groupPortalRefs = new List<int>[_wmo.Groups.Count];
         _portalCenters = new Vector3[_wmo.Portals.Count];
@@ -156,10 +160,83 @@ public class WmoRenderer : ISceneRenderer
     public Vector3 BoundsMin => _wmo.BoundsMin;
     /// <summary>MOHD bounding box max in WMO local space.</summary>
     public Vector3 BoundsMax => _wmo.BoundsMax;
+    public int GroupRenderCount => _groups.Count;
 
     // Sub-object visibility: WMO groups + doodad toggle
     // Layout: [0..N-1] = WMO groups, [N] = "Doodads" toggle, [N+1..] = individual doodad models
     public int SubObjectCount => _groups.Count + 1 + _doodadInstances.Count;
+
+    public int GetRenderGroupId(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count ? _groups[renderGroupIndex].GroupIndex : -1;
+
+    public string GetRenderGroupName(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return string.Empty;
+
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        string name = (groupIndex < _wmo.Groups.Count ? _wmo.Groups[groupIndex].Name : null) ?? $"Group {groupIndex}";
+        return $"[{groupIndex}] {name}";
+    }
+
+    public bool GetRenderGroupManualVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].ManualVisible;
+
+    public bool GetRenderGroupRuntimeVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].RuntimeVisible;
+
+    public bool GetRenderGroupEffectiveVisible(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count && _groups[renderGroupIndex].IsVisible;
+
+    public void SetRenderGroupVisible(int renderGroupIndex, bool visible)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return;
+
+        _groups[renderGroupIndex].ManualVisible = visible;
+    }
+
+    public void SetAllRenderGroupsVisible(bool visible)
+    {
+        for (int i = 0; i < _groups.Count; i++)
+            _groups[i].ManualVisible = visible;
+    }
+
+    public void IsolateRenderGroup(int renderGroupIndex)
+    {
+        for (int i = 0; i < _groups.Count; i++)
+            _groups[i].ManualVisible = i == renderGroupIndex;
+    }
+
+    public void GetRenderGroupBounds(int renderGroupIndex, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+        {
+            boundsMin = boundsMax = Vector3.Zero;
+            return;
+        }
+
+        var group = _wmo.Groups[_groups[renderGroupIndex].GroupIndex];
+        boundsMin = group.BoundsMin;
+        boundsMax = group.BoundsMax;
+    }
+
+    public Vector3 GetRenderGroupCenter(int renderGroupIndex)
+        => renderGroupIndex >= 0 && renderGroupIndex < _groups.Count
+            ? _groups[renderGroupIndex].GroupCenter
+            : Vector3.Zero;
+
+    public Vector3 GetRenderGroupDebugColor(int renderGroupIndex)
+    {
+        if (renderGroupIndex < 0 || renderGroupIndex >= _groups.Count)
+            return new Vector3(0.8f, 0.8f, 0.8f);
+
+        int groupIndex = _groups[renderGroupIndex].GroupIndex;
+        return new Vector3(
+            ((groupIndex * 67 + 13) % 255) / 255f,
+            ((groupIndex * 131 + 7) % 255) / 255f,
+            ((groupIndex * 43 + 29) % 255) / 255f);
+    }
 
     public string GetSubObjectName(int index)
     {
@@ -305,7 +382,7 @@ public class WmoRenderer : ISceneRenderer
 
     private int GetBaselineMliqRotationQuarterTurns()
     {
-        return string.Equals(_buildVersion, "3.3.5.12340", StringComparison.OrdinalIgnoreCase) ? 3 : 0;
+        return WmoLiquidLayoutResolver.GetBaselineRotationQuarterTurns(_wmo.Version, _buildVersion);
     }
 
     /// <summary>
@@ -813,6 +890,16 @@ void main() {
 
         if (_wmo.Groups.Count == 0)
             return;
+
+        if (!_enableRuntimeGroupVisibility)
+        {
+            for (int groupIndex = 0; groupIndex < _runtimeVisibleGroups.Length; groupIndex++)
+                _runtimeVisibleGroups[groupIndex] = true;
+
+            ApplyRuntimeVisibilityToBuffers();
+            CollectVisibleDoodadDefs();
+            return;
+        }
 
         if (!Matrix4x4.Invert(modelMatrix, out var inverseModel))
         {

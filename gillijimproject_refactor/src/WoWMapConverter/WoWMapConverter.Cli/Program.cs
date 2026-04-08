@@ -210,8 +210,6 @@ public static class Program
     {
         string? inputPath = null;
         string? outputPath = null;
-        bool extended = false;
-        string? mode = null;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -226,32 +224,13 @@ public static class Program
                     if (i + 1 < args.Length) outputPath = args[++i];
                     break;
                 case "--mode":
-                    if (i + 1 < args.Length) mode = args[++i];
-                    break;
                 case "--extended":
-                    extended = true;
-                    break;
+                    Console.Error.WriteLine("Error: convert-wmo no longer supports alternate modes. The maintained converter path is always used.");
+                    return 1;
                 default:
                     if (!args[i].StartsWith("-") && inputPath == null)
                         inputPath = args[i];
                     break;
-            }
-        }
-
-        if (!string.IsNullOrEmpty(mode))
-        {
-            mode = mode.Trim().ToLowerInvariant();
-            switch (mode)
-            {
-                case "basic":
-                    extended = false;
-                    break;
-                case "extended":
-                    extended = true;
-                    break;
-                default:
-                    Console.Error.WriteLine($"Error: invalid --mode '{mode}'. Expected: basic|extended");
-                    return 1;
             }
         }
 
@@ -267,21 +246,11 @@ public static class Program
         Console.WriteLine("=======================");
         Console.WriteLine($"Input:  {Path.GetFullPath(inputPath)}");
         Console.WriteLine($"Output: {Path.GetFullPath(outputPath)}");
-        Console.WriteLine($"Mode:   {(extended ? "extended" : "basic")}");
 
         try
         {
-            List<string> textures;
-            if (extended)
-            {
-                var converter = new WmoV14ToV17ExtendedConverter();
-                textures = converter.Convert(inputPath, outputPath);
-            }
-            else
-            {
-                var converter = new WmoV14ToV17Converter();
-                textures = converter.Convert(inputPath, outputPath);
-            }
+            var converter = new WmoV14ToV17Converter();
+            List<string> textures = converter.Convert(inputPath, outputPath);
             
             // Auto-copy textures
             CopyTextures(inputPath, outputPath, textures);
@@ -2076,7 +2045,7 @@ public static class Program
         Console.WriteLine("WMO Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input WMO v14 file");
         Console.WriteLine("  --output, -o <path>     Output WMO v17 path (creates root + _XXX.wmo groups)");
-        Console.WriteLine("  --extended              Use extended converter (for v15/hybrid variants)");
+        Console.WriteLine("                          Uses the maintained converter path only");
         Console.WriteLine();
         Console.WriteLine("MDX Conversion Options:");
         Console.WriteLine("  --input, -i <path>      Input MDX file");

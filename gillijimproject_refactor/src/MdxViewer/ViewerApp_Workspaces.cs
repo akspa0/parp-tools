@@ -81,45 +81,9 @@ public partial class ViewerApp
 
     private void DrawWorkspaceToolbarControls()
     {
-        ImGui.TextDisabled("Workspace");
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Viewer", _workspaceMode == WorkspaceMode.Viewer))
-            SetWorkspaceMode(WorkspaceMode.Viewer);
-
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Editor", _workspaceMode == WorkspaceMode.Editor))
-            SetWorkspaceMode(WorkspaceMode.Editor);
-
-        if (_workspaceMode == WorkspaceMode.Editor)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1f), "|");
-            ImGui.SameLine();
-            ImGui.TextDisabled("Task");
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(170f);
-            if (ImGui.BeginCombo("##EditorWorkspaceTask", GetEditorWorkspaceTaskLabel(_editorWorkspaceTask)))
-            {
-                foreach (EditorWorkspaceTask task in Enum.GetValues<EditorWorkspaceTask>())
-                {
-                    bool isAvailable = IsEditorTaskAvailable(task);
-                    if (!isAvailable)
-                        ImGui.BeginDisabled();
-
-                    bool isSelected = task == _editorWorkspaceTask;
-                    if (ImGui.Selectable(GetEditorWorkspaceTaskLabel(task), isSelected))
-                        SetEditorWorkspaceTask(task);
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-
-                    if (!isAvailable)
-                        ImGui.EndDisabled();
-                }
-
-                ImGui.EndCombo();
-            }
-        }
+        ImGui.TextDisabled("Unified workspace");
+        ImGui.TextWrapped(GetWorkspaceTargetSummary());
+        ImGui.TextDisabled(GetWorkspaceSaveStatusSummary());
     }
 
     private void DrawEditorWorkspaceNavigator(bool hasWorldLoaded)
@@ -423,31 +387,26 @@ public partial class ViewerApp
 
     private string GetWorkspaceSaveStatusSummary()
     {
-        if (_workspaceMode == WorkspaceMode.Viewer)
-            return "Read-only viewer workspace.";
-
-        if (_workspaceMode == WorkspaceMode.Editor)
+        int pendingEditCount = GetPendingPlacementEditCount();
+        if (pendingEditCount > 0)
         {
-            int pendingEditCount = GetPendingPlacementEditCount();
-            if (pendingEditCount > 0)
-            {
-                int pendingSourceCount = GetPendingPlacementSourceCount();
-                int missingTargets = GetPendingPlacementSourceCountMissingTargets();
-                string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
-                return missingTargets > 0
-                    ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."
-                    : pendingSummary;
-            }
-
-            if (HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
-                return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
-
-            if (HasWorldEditingContext())
-                return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
-
-            return "Editor workspace loaded without a world save target.";
+            int pendingSourceCount = GetPendingPlacementSourceCount();
+            int missingTargets = GetPendingPlacementSourceCountMissingTargets();
+            string pendingSummary = $"{pendingEditCount} pending placement move(s) across {pendingSourceCount} ADT source(s) in {DescribeEditorProjectOutputDirectory()}.";
+            return missingTargets > 0
+                ? $"{pendingSummary} {missingTargets} source(s) still need an output .adt path."
+                : pendingSummary;
         }
 
-        return "Unknown save state.";
+        if (HasWorldEditingContext() && !string.IsNullOrWhiteSpace(_selectedPlacementSaveTargetPath))
+            return $"Staged placement save target: {_selectedPlacementSaveTargetPath}. Source files stay untouched.";
+
+        if (HasWorldEditingContext())
+            return $"Staged placement saves are available for translation-only ADT object moves in {DescribeEditorProjectOutputDirectory()}. No general map save pipeline yet.";
+
+        if (_renderer != null || _dataSource != null)
+            return "Inspection only. Load a world scene to stage placement saves.";
+
+        return "No active world save target.";
     }
 }

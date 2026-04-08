@@ -1,5 +1,179 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 08, 2026 - v0.4.7.1 release prep now packages the taxi, recording, sticky-selection, and standalone-WMO follow-ups while keeping the next architectural move on the `WorldScene` to `wow-viewer` split
+
+- followed the request to cut the current viewer state as `v0.4.7.1` instead of leaving the release metadata and shipped docs on the older `v0.4.7` snapshot
+- active `src/MdxViewer` release snapshot after this slice:
+   - both viewer project files now report `0.4.7.1`, and the GitHub Actions release workflow now ships the checked-in `docs/releases/v0.4.7.1.md` note plus `CHANGES-v0.4.7.1.md` in the archive
+   - shipped docs now call out the restored taxi inspector path, smoother taxi actor facing, freelook ride camera, odd-size ffmpeg capture repair, sticky world-object targeting, larger aerial detail budgets, and standalone WMO highlighted-group workflow
+   - `Terrain/WorldScene.cs` now keeps stable scene-object identity for selected WMOs and MDXs so selection can survive instance-list rebuilds caused by camera movement or streaming refresh
+   - the next real architecture slice remains the staged `WorldScene` to `wow-viewer` runtime extraction tracked in `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md`
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is release-prep and documentation alignment for the current viewer state
+   - it does not convert the recent taxi, recording, selection, or standalone-WMO slices into broad runtime signoff
+
+## Apr 08, 2026 - Taxi route, node, actor-override, and ride-camera controls were restored to the active world-object inspector path
+
+- the taxi workflow code was still present, but the active world-object inspector path had stopped calling it after the sidebar regrouping work
+- `src/MdxViewer/ViewerApp.cs` now exposes a `Taxi` collapsing section inside `DrawWorldObjectsContentCore()` again, so the active right-sidebar/object-workspace flow once more includes route browsing, node selection context, actor overrides, ride camera controls, and route video capture without depending only on the navigator path
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no live viewer retest has been captured yet for the restored taxi section in the current shell
+
+## Apr 08, 2026 - Taxi actor heading changes are now smoothed, and the ride camera supports mouse freelook instead of forcing a rigid look-at every frame
+
+- `src/MdxViewer/Terrain/WorldScene.cs` now derives taxi actor heading from a short route-distance sampling window and temporally smooths the resulting forward vector, so route heading changes stop snapping as abruptly at point-to-point joins
+- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now treats the taxi ride camera as an orbit/freelook camera over the moving actor instead of overwriting a fixed look target each frame
+- `src/MdxViewer/ViewerApp.cs` now routes right-mouse drag into taxi ride freelook offsets while the ride camera is attached, instead of fighting the ride camera by writing directly to the free-fly yaw/pitch state
+- follow-up repair on Apr 08, 2026:
+   - direct video capture now pads odd framebuffer sizes before `libx264` / `yuv420p` output, which fixes the immediate ffmpeg exit path that previously surfaced only as a broken-pipe write failure in live viewer sessions
+   - the same capture path now captures ffmpeg stderr so future encode failures surface the encoder reason instead of only `The pipe has been ended`
+   - taxi actor transforms now use the sampled route tangent as the actual render-forward basis again, with temporal smoothing retained, instead of the earlier mirrored yaw conversion that left the mount visibly misaligned with the path direction
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no live runtime retest has been captured yet for turn smoothness, taxi actor nose alignment on real routes, freelook feel, or encoded output success after the odd-size fix
+
+## Apr 08, 2026 - World object path-family filters now exist in the active viewer, and the filter primitive has started moving out of `WorldScene` into shared `wow-viewer` runtime
+
+- followed the approved minimap-tooling direction to make object-family filtering path-based instead of per-instance only
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now persists world-object path filters per map in `viewer_settings.json` and reapplies them when a terrain-backed world scene is loaded
+   - `ViewerApp_Sidebars.cs` now exposes an `Object Path Filters` editor in the world-object surface with enable or disable, manual prefix entry, family scope (`WMO`, `MDX`, or both), remove or clear actions, and quick-add buttons built from the currently selected object's asset-path prefixes
+   - quick-add currently uses the selected world object's resolved asset path and adds family-specific prefix filters so users can hide whole folder families of WMOs or MDXs when preparing minimap or capture passes
+   - `Terrain/WorldScene.cs` still owns the active visibility decision, but it now consumes a shared `WowViewer.Core.Runtime.World.ObjectPathFilterEntry` contract instead of keeping the filter primitive local only
+   - `wow-viewer/src/core/WowViewer.Core.Runtime/World/ObjectPathFilterEntry.cs` is now the first extracted seam from this path-filter work, with normalization and family-aware prefix matching logic intended to be reusable by future `wow-viewer` CLI minimap tooling
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --no-restore --filter ObjectPathFilterEntryTests` passed on Apr 08, 2026
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore -nologo -clp:Summary` passed on Apr 08, 2026 with existing warnings only
+- important boundary:
+   - this lands filter UI, persistence, and the first shared extraction seam only
+   - there is still no deterministic one-PNG-per-ADT minimap export queue yet
+   - there is still no `wow-viewer` CLI minimap command surface yet
+   - the staged follow-up for the remaining minimap work now lives in `gillijimproject_refactor/plans/wow_viewer_minimap_generation_plan_2026-04-08.md` and `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md`
+
+## Apr 08, 2026 - Terrain viewer fog and detail budgets now support larger aerial captures, but there is still no dedicated per-ADT minimap export workflow
+
+- followed the request to push past the old `5000` fog-distance ceiling so the viewer can hold a much larger aerial slice in one frame
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now derives the terrain scene far plane from the active terrain fog end instead of hard-coding `5000`, and reuses the same far-plane helper for terrain chunk picking and world object picking
+   - `ViewerApp_Sidebars.cs` now exposes terrain fog controls up to `20000` while keeping `Fog Start` and `Fog End` coherent when edited directly
+   - `Terrain/TerrainManager.cs` now supports a `9x9` manual detailed-ADT candidate footprint (`81` tiles max override) and a larger fog-driven auto budget instead of topping out at the older `5x5`/`25` ceiling logic inherited from the smaller-range viewer assumptions
+   - `Terrain/WorldScene.cs` now raises the hard small-doodad and max world-object view caps so object rendering and pick range do not silently stop around the old `5000` era while terrain keeps extending farther
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is build validation only
+   - no live runtime retest has been captured yet for long-range aerial rendering, WDL fallback quality, or object density/performance at the new limits
+   - there is still no dedicated capture-automation flow yet for deterministic one-PNG-per-ADT minimap export, shadow presets, or object/class filtering
+
+## Apr 08, 2026 - MPQ startup file counts now reflect archive-backed names instead of the raw cross-version community listfile
+
+- followed the report that the startup `MpqData` summary was effectively counting the whole community listfile instead of the loaded client's actual archive contents
+- active shared/viewer behavior after this slice:
+   - `wow-viewer/src/core/WowViewer.Core.IO/Files/MpqArchiveCatalog.cs` now only adds listfile names to the known-file universe when their MPQ hash is actually present in one of the loaded archives, so cross-version community rows no longer inflate the active client file browser and summary counts
+   - `wow-viewer/src/core/WowViewer.Core.IO/Files/ArchiveCatalogBootstrapper.cs` now filters supplemental and cached listfile entries against the archive-backed known-file set before reporting or persisting them
+   - `gillijimproject_refactor/src/MdxViewer/DataSources/MpqDataSource.cs` no longer re-injects raw external listfile rows into the viewer file set, and the startup log now reports validated supplemental entries separately from the merged archive-backed catalog count
+- validation completed:
+   - `dotnet test i:/parp/parp-tools/wow-viewer/tests/WowViewer.Core.Tests/WowViewer.Core.Tests.csproj -c Debug --filter ArchiveCatalogBootstrapperTests` passed on Apr 08, 2026
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 08, 2026 with existing workspace warnings only
+- important boundary:
+   - this is startup/catalog correctness and build validation only; no live viewer retest has been captured yet for before/after startup counts against a representative 3.3.5 dataset
+
+## Apr 07, 2026 - Standalone WMOs now keep groups loaded while moving the camera and only show large labels for explicitly highlighted groups
+
+- followed the request to make WMO groups inspectable in the scene itself with visual boxes and direct interaction
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/WmoRenderer.cs` now exposes standalone WMO render-group names, bounds, centers, colors, and visibility helpers so the viewer host can reason about groups without re-parsing the file, and disables runtime group culling for standalone inspection WMOs so camera movement does not unload groups
+   - `ViewerApp.cs` now invokes a standalone WMO group overlay right after the WMO render pass
+   - `ViewerApp_WmoGroups.cs` now owns color-coded group box drawing and mouse-driven select/toggle/isolate behavior for standalone WMOs while rendering large in-scene labels only for explicitly highlighted groups
+   - `ViewerApp_Sidebars.cs` now exposes compact standalone WMO group controls with overlay toggles and `Hide/Show`, `Highlight Label` or `Remove Label`, `Isolate`, `Show All`, `Clear Labels`, `Clear Selection`, and `Frame` actions for the current group
+   - `ViewerApp.cs` WMO converter dialog now uses an explicit output-folder field with browse support and no longer exposes the dead `Extended` mode
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore -nologo "-clp:ErrorsOnly;Summary"` passed on Apr 07, 2026 with existing workspace warnings only
+- important boundary:
+   - this is build validation only
+   - no live standalone-WMO session retest has been captured yet for highlighted-label readability, picking accuracy, or overall usability on large WMOs
+
+## Apr 07, 2026 - The current viewer input fix is in `ViewerApp.cs`, not in theme/layout code
+
+- scene mouse-wheel movement is now queued from Silk input and applied after `_imGui.Update()` so panel scrolling no longer races ahead of ImGui capture state
+- scene keyboard controls now use one shared gate based on `WantCaptureKeyboard || WantTextInput`
+- scene mouse blocking now treats active ImGui mouse capture as authoritative except for the existing dockspace-central-node bypass case
+- important boundary:
+   - this slice is compile-validated only; a live manual retest of the original leakage report is still pending
+
+## Apr 07, 2026 - The first pre-alpha UI slice is a theme scaffold, not a shell rewrite
+
+- `src/MdxViewer/ViewerApp_Themes.cs` now owns centralized ImGui theme application for the active viewer
+- the viewer can switch between `Modern Slate` and `Pre-Alpha Brass`, with the selected theme saved in `viewer_settings.json`
+- the unified viewer settings section now exposes theme switching so later shell work has a stable palette/chrome seam to build on
+- important boundary:
+   - this does not yet move windows into a historical layout and does not add any paperdoll or spell/POI consumer panel
+
+## Apr 07, 2026 - Future spell/paperdoll/`WorldSafeLocs` work should start in shared wow-viewer services, with `MdxViewer` as a later consumer
+
+- the new cross-cutting roadmap is captured in `gillijimproject_refactor/plans/wow_viewer_spell_paperdoll_poi_and_converter_plan_2026-04-07.md`
+- active viewer-specific guardrails from that plan:
+   - use `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` as the extraction seed for character-display and item-display logic; do not keep deepening it as the long-term owner
+   - treat future spell browsing and paperdoll UI as consumers of shared `wow-viewer` DBC/runtime services rather than new viewer-local parser ownership
+   - `WorldSafeLocs` graveyards should stay a sibling lazy-loaded overlay to the existing area/taxi overlay model, but the shared reader belongs in `wow-viewer` first
+   - do not spend the next slice imitating the 2001 UI before the underlying spell/character/POI services exist
+- important boundary:
+   - this is sequencing guidance only; no new viewer consumer has landed yet
+
+## Apr 07, 2026 - ADT investigation now has a real MCNK-flag overlay surface, including impassable weak-corner markers
+
+- followed the request to make MCNK chunk flags such as `Impassable` visible on the terrain itself instead of only as implicit file metadata
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp_Investigation.cs` now shows raw `MCNK` flag hex and named labels in both the ADT investigation panel and the hovered chunk tooltip
+   - the same investigation UI now exposes `Show MCNK Flag Overlay`, per-flag chunk filters, and a diagonal weak-corner toggle for impassable-only corner cases
+   - `ViewerApp.cs` now reuses the existing editor `BoundingBoxRenderer` path to draw chunk-top fills and outlines for loaded chunks whose raw flags match the selected filter mask
+   - diagonal-only impassable `2x2` chunk configurations now emit a visible world-space marker at the exposed shared corner
+   - `Terrain/VlmTerrainManager.cs` now exposes loaded tile coordinates so the same overlay logic can enumerate VLM-loaded terrain too
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 07, 2026 with existing warnings only
+- important boundary:
+   - this is compile validation only
+   - no automated tests were added or run
+   - the next honest check is a live retest on the development map to tune overlay opacity, confirm tooltip readability, and verify the weak-corner markers line up with the actual chunk topology
+
+## Apr 06, 2026 - Taxi teaser workflow now exists: ride camera plus direct ffmpeg video capture
+
+- followed the request to let the user jump into the animated taxi actor and record teaser footage directly from the viewer
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/WorldScene.cs` now keeps a live `TaxiActorPose` cache per active route actor so viewer UI and capture code can follow the exact animated actor transform already used for rendering
+   - `ViewerApp_CaptureAutomation.cs` now supports direct video capture to `.mp4` or `.mov` by streaming raw RGBA frames into `ffmpeg`, using either the no-UI scene viewport or the full with-UI framebuffer
+   - the same partial now owns a taxi ride camera with `Cockpit` and `Chase` modes plus adjustable chase distance, chase height, cockpit height, and look-ahead
+   - `ViewerApp_Sidebars.cs` now exposes those ride-camera controls and a `Record Selected Route Video` action inside the existing Taxi section
+   - `ViewerApp.cs` now updates the ride camera each frame, disables free-fly WASD motion while the ride camera is attached, and persists the video-capture configuration in viewer settings
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+- important boundary:
+   - this is build validation only
+   - no automated tests were added or run
+   - no live viewer retest has been captured yet for taxi actor framing, long-route drift, or actual encoded output quality from a real teaser capture
+
+## Apr 06, 2026 - The detailed ADT window is now fog-driven, and WDL fallback terrain can paint with minimap tiles
+
+- followed the request to let distant terrain stay cheap while looking less like raw colored geometry
+- active `src/MdxViewer` behavior after this slice:
+   - `Terrain/TerrainManager.cs` now derives detailed and retained ADT residency from the current terrain fog end distance instead of always using one fixed `16`-tile footprint
+   - AOI refresh now triggers when that fog-driven target changes, so edited or LIT-driven fog distances can immediately reshape the detailed terrain window without waiting for the next tile crossing
+   - `Terrain/WdlTerrainRenderer.cs` now supports texturing WDL tiles from the existing minimap cache/loader and falls back to the old height-color shading when no minimap tile is ready
+   - `Terrain/WorldScene.cs` and `ViewerApp.cs` now route the viewer-owned `MinimapRenderer` into the WDL path so the far-terrain texturing reuses the current tile lookup, MD5 translate handling, and disk cache
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug --no-restore` passed on Apr 06, 2026 with existing warnings only
+   - `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj` smoke-started and reached game-folder loading before termination
+- important boundary:
+   - this is compile plus startup-smoke validation only
+   - the next honest check is a live retest on the fixed development map to confirm minimap tile orientation on WDL, handoff quality near the fog line, and whether the smaller fog-driven detailed footprint actually helps the target scenes
+
 ## Apr 06, 2026 - v0.4.7 release prep now packages the current fixed-shell and performance train coherently
 
 - followed the request to stop treating the repo docs and release workflows like they were still on the older `v0.4.6.1` tooltip-focused snapshot

@@ -10,7 +10,7 @@
 - Before changing viewer, terrain, or format code, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/memory-bank/data-paths.md`, and `gillijimproject_refactor/src/MdxViewer/memory-bank/activeContext.md`.
 - Before changing `wow-viewer` PM4, shared I/O, or migration workflow, read `gillijimproject_refactor/memory-bank/activeContext.md`, `gillijimproject_refactor/memory-bank/progress.md`, `gillijimproject_refactor/plans/wow_viewer_pm4_library_plan_2026-03-25.md`, `gillijimproject_refactor/plans/wow_viewer_shared_io_library_plan_2026-03-26.md`, and `wow-viewer/README.md`.
 - Before changing `wow-viewer` M2 runtime ownership, model rendering, skin handling, model lighting, shader or effect routing, or M2 performance work, also read `wow-viewer/docs/architecture/m2-native-client-research-2026-03-31.md`.
-- Before changing Copilot workflow assets for `wow-viewer`, also read `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`, `.github/prompts/wow-viewer-editor-plan-set.prompt.md`, `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md`, `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md`, `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`, `.github/prompts/wow-viewer-shared-io-implementation.prompt.md`, `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`, `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`, and `.github/prompts/m2-cross-build-native-investigation.prompt.md`.
+- Before changing Copilot workflow assets for `wow-viewer`, also read `.github/prompts/wow-viewer-tool-suite-plan-set.prompt.md`, `.github/prompts/wow-viewer-editor-plan-set.prompt.md`, `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md`, `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md`, `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md`, `.github/prompts/wow-viewer-pm4-library-implementation.prompt.md`, `.github/prompts/wow-viewer-shared-io-implementation.prompt.md`, `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md`, `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md`, and `.github/prompts/m2-cross-build-native-investigation.prompt.md`.
 - If the task touches 3.3.5 terrain texturing, also read `gillijimproject_refactor/src/MdxViewer/memory-bank/terrain_editing_plan_2026-02-14.md`.
 
 ## wow-viewer Skill Registry
@@ -23,6 +23,7 @@
 - Use `.github/prompts/wow-viewer-editor-plan-set.prompt.md` for broader editor-transition planning, including PM4 `MPRL`-assisted terrain conform, object-save ownership, map persistence, and viewer-vs-editor workspace routing.
 - Use `.github/prompts/wow-viewer-map-editing-foundation-plan.prompt.md` for planning the first true terrain or object editing or dirty-map or save pipeline slice.
 - Use `.github/prompts/wow-viewer-editor-ui-surface-plan.prompt.md` for planning viewer and editor workspace presets, editor task clustering, and panel reorganization.
+- Use `.github/prompts/wow-viewer-minimap-generation-plan-set.prompt.md` for staged minimap-generation work, including deterministic one-PNG-per-ADT capture, path-family filtering for minimap output, wow-viewer CLI minimap jobs, and minimap-driven `WorldScene` extraction sequencing.
 - Use `.github/prompts/wow-viewer-world-runtime-plan-set.prompt.md` for staged `WorldScene` split work, negative asset lookup suppression such as repeated `.skin` miss churn, explicit terrain/WMO/MDX/overlay runtime service extraction, or WorldScene-to-wow-viewer world-runtime cutover planning.
 - Use `.github/prompts/wow-viewer-m2-runtime-plan-set.prompt.md` for staged M2 runtime ownership, exact `%02d.skin` handling, active section classification, material/effect routing, animation/lighting state, scene batching, or M2 consumer-cutover planning.
 - Use `.github/prompts/m2-rendering-investigation.prompt.md` for diagnosing invisible M2 models, Ghidra-based native-client M2 render investigation on a live 3.3.5.12340 sandbox, adapter vertex/index validation against native ground truth, or renderer parity fixes for M2-family assets in `MdxViewer`.
@@ -39,6 +40,11 @@
 - Whenever a new `wow-viewer` skill, implementation prompt, or workflow asset is added, update `.github/copilot-instructions.md` so the new asset is named and routed here.
 - Keep `wow-viewer/README.md`, the relevant `gillijimproject_refactor/plans/wow_viewer_*` continuity plan, and the memory-bank files in sync with any new `wow-viewer` skill or prompt so future chats inherit the new path automatically.
 - Do not add a new `wow-viewer` skill without also deciding which existing skill or prompt should hand work to it.
+
+## wow-viewer Minimap Generation Guardrails
+- Treat deterministic one-PNG-per-ADT capture and future wow-viewer CLI minimap jobs as staged shared-service work, with `MdxViewer` only serving as the first compatibility host where real scene capture must be proven.
+- Keep minimap object suppression path-prefix-based and reusable across viewer and CLI; do not introduce a second viewer-only filter model.
+- Do not claim minimap generation is complete until real-data runs produce deterministic tile outputs, not just builds or synthetic library tests.
 
 ## Build And Validation
 - For new `wow-viewer` library or tool work, prefer `dotnet build i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug` and `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug`.

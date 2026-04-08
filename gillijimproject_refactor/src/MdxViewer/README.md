@@ -51,14 +51,23 @@ Optional launch flags:
 
 You can also pass a loose file path after the flags.
 
-## v0.4.7 release snapshot
+## v0.4.7.1 release snapshot
 
-- `parp-tools WoW Viewer` `0.4.7` is the current release target in this tree.
+- `parp-tools WoW Viewer` `0.4.7.1` is the current release target in this tree.
 - The viewer now starts on the fixed-shell path again, with static left/right sidebars as the primary workflow and dock panels kept as an opt-in fallback.
 - The broken right-sidebar tab host is gone; viewer workflows now stack as sequential `Inspect`, `Terrain`, `PM4`, `World`, and `Diagnostics` sections.
 - PM4 object matching no longer ranks against the entire loaded scene first; the active matcher now stays local-first and geometry-first, which is the concrete fix for the recent OilPlatform collapse.
-- Current performance work now includes tile-batched terrain submission, world-object chunk-bucket broad-phase culling, tighter near-field or WDL streaming policy, and continued `wow-viewer` runtime pass-planning extraction.
+- Current performance work now includes tile-batched terrain submission, world-object chunk-bucket broad-phase culling, tighter near-field or WDL streaming policy, larger aerial detail/fog budgets, and continued `wow-viewer` runtime pass-planning extraction.
+- Taxi workflows are back in the active world-object inspector path, route actors now turn more smoothly and face along the path correctly, and the ride camera supports freelook plus direct ffmpeg-backed route capture from the same sidebar workflow.
+- Direct route recording now pads odd framebuffer sizes before H.264 encode and surfaces ffmpeg stderr when the encoder exits early, which removes the earlier broken-pipe-only failure mode.
+- World-object targeting now survives camera movement and instance-list rebuilds, so selected WMOs and MDXs do not silently unselect while the scene streams or refreshes.
+- Standalone WMO inspection now keeps groups loaded while moving the camera and limits large in-scene labels to explicitly highlighted groups.
 - Other recent viewer slices in this train should still be treated as build-validated unless a narrower runtime note says otherwise.
+
+## Next engineering slice
+
+- The next architectural move is still the staged `WorldScene` to `wow-viewer` runtime split, using `gillijimproject_refactor/plans/wow_viewer_world_runtime_service_plan_2026-03-31.md` as the active continuity plan.
+- This patch release does not claim that migration is complete; it packages the current viewer fixes while keeping `wow-viewer` as the canonical owner for the next runtime extraction seam.
 
 ## New User Quick Start (UI)
 
@@ -197,7 +206,7 @@ Practical rule:
 - render-quality window
 - PM4/WMO correlation window
 - asset catalog window
-- taxi route selection, route override workflow, and return-to-world flow
+- taxi route selection, route override workflow, ride camera, route video capture, and return-to-world flow
 
 ### Export and utilities
 

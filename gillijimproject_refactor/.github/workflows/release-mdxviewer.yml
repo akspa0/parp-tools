@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v0.4.7)'
+        description: 'Version tag (e.g. v0.4.7.1)'
         required: true
 
 permissions:
@@ -88,7 +88,7 @@ jobs:
           Copy-Item "gillijimproject_refactor/README.md" "$pubDir/README.md"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/README.md" "$pubDir/MdxViewer.README.md"
           Copy-Item "gillijimproject_refactor/src/MdxViewer/USERGUIDE.md" "$pubDir/USERGUIDE.md"
-          Copy-Item "gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md" "$pubDir/CHANGES-v0.4.7.md"
+          Copy-Item "gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.1.md" "$pubDir/CHANGES-v0.4.7.1.md"
 
       - name: Create ZIP archive
         run: |
@@ -101,7 +101,7 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           name: parp-tools WoW Viewer ${{ github.event.inputs.version || github.ref_name }}
-          body_path: gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.md
+          body_path: gillijimproject_refactor/src/MdxViewer/docs/releases/v0.4.7.1.md
           files: parp-tools-wow-viewer-*-win-x64.zip
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
