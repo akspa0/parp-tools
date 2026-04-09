@@ -329,10 +329,10 @@ public partial class ViewerApp
         _fovDegrees = Math.Clamp(shot.FovDegrees, 20f, 90f);
     }
 
-    private void QueueCurrentCameraCapture(bool includeUi)
+    private void QueueCurrentCameraCapture(bool includeUi, bool exitAfterCapture = false)
     {
         CameraShotPoint shot = CreateCameraShotPoint($"current_{DateTime.UtcNow:yyyyMMdd_HHmmss}");
-        EnqueueShotCapture(shot, includeUi);
+        EnqueueShotCapture(shot, includeUi, exitAfterCapture);
     }
 
     private void EnqueueFilteredShotCaptures(bool includeUi)

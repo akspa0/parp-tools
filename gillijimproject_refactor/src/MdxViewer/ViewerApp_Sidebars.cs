@@ -476,16 +476,6 @@ public partial class ViewerApp
         if (_discoveredMaps.Count > 0 && ImGui.CollapsingHeader("World Maps"))
             DrawMapDiscoveryContent();
 
-        if (_worldScene != null)
-        {
-            bool defaultOpen = _worldScene.ShowTaxi
-                || _worldScene.SelectedTaxiNodeId >= 0
-                || _worldScene.SelectedTaxiRouteId >= 0;
-            ImGui.SetNextItemOpen(defaultOpen, ImGuiCond.Once);
-            if (ImGui.CollapsingHeader("Taxi", defaultOpen ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
-                DrawSelectedTaxiControls();
-        }
-
         if (hasWorldLoaded)
         {
             ImGui.SetNextItemOpen(true, ImGuiCond.Once);
@@ -525,7 +515,7 @@ public partial class ViewerApp
                     ImGui.TextDisabled($"Missing or failed tiles: {_minimapRenderer.FailedTileCount}");
             }
 
-            float mapSize = ComputeMinimapSquareSize(ImGui.GetContentRegionAvail().X, 280f, 180f);
+            float mapSize = ComputeMinimapSquareSize(ImGui.GetContentRegionAvail().X, 220f, 140f);
             var cursorPos = ImGui.GetCursorScreenPos();
             DrawInteractiveMinimapSurface(
                 "##sidebarMinimapInteraction",
@@ -893,19 +883,32 @@ public partial class ViewerApp
             ImGui.TextWrapped(_worldScene.RendererOptimizationHint);
 
         ImGui.Text("Utility Panels");
-        if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
-            _showMinimapWindow = !_showMinimapWindow;
+        DrawToolbarPopupButton("Utility Windows", $"{CountEnabled(_showMinimapWindow, _showLogViewer, _showPerfWindow, _showRenderQualityWindow)} open", "##UtilityWindowsPopup", () =>
+        {
+            if (ImGui.Button(_showMinimapWindow ? "Hide Minimap" : "Show Minimap"))
+            {
+                _showMinimapWindow = !_showMinimapWindow;
+                ImGui.CloseCurrentPopup();
+            }
 
-        ImGui.SameLine();
-        if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
-            _showLogViewer = !_showLogViewer;
+            if (ImGui.Button(_showLogViewer ? "Hide Log Viewer" : "Show Log Viewer"))
+            {
+                _showLogViewer = !_showLogViewer;
+                ImGui.CloseCurrentPopup();
+            }
 
-        if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
-            _showPerfWindow = !_showPerfWindow;
+            if (ImGui.Button(_showPerfWindow ? "Hide Perf" : "Show Perf"))
+            {
+                _showPerfWindow = !_showPerfWindow;
+                ImGui.CloseCurrentPopup();
+            }
 
-        ImGui.SameLine();
-        if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
-            _showRenderQualityWindow = !_showRenderQualityWindow;
+            if (ImGui.Button(_showRenderQualityWindow ? "Hide Render Quality" : "Show Render Quality"))
+            {
+                _showRenderQualityWindow = !_showRenderQualityWindow;
+                ImGui.CloseCurrentPopup();
+            }
+        });
     }
 
     private void DrawDockedShellPanelsForLane(ShellPanelLane lane, float sidebarHeight)
@@ -1388,8 +1391,14 @@ public partial class ViewerApp
         {
             ImGui.Separator();
             ImGui.Checkbox("Auto-frame on load", ref _autoFrameModelOnLoad);
-            if (ImGui.Button("Frame Model"))
-                FrameCurrentModel();
+            DrawToolbarPopupButton("Model Actions", string.Empty, "##ModelActionsPopup", () =>
+            {
+                if (ImGui.Button("Frame Model"))
+                {
+                    FrameCurrentModel();
+                    ImGui.CloseCurrentPopup();
+                }
+            });
         }
 
         if (_renderer is WmoRenderer wmoR && wmoR.DoodadSetCount > 0)
@@ -1460,22 +1469,28 @@ public partial class ViewerApp
                 float currentRel = currentAbs - seqStart;
 
                 bool isPlaying = animator.IsPlaying;
-                if (ImGui.Button(isPlaying ? "⏸ Pause" : "▶ Play"))
-                    animator.IsPlaying = !isPlaying;
-
-                ImGui.SameLine();
-                if (ImGui.Button("◀"))
+                DrawToolbarPopupButton("Animation Actions", isPlaying ? "playing" : "paused", "##AnimationActionsPopup", () =>
                 {
-                    animator.IsPlaying = false;
-                    animator.StepToPrevKeyframe();
-                }
+                    if (ImGui.Button(isPlaying ? "Pause" : "Play"))
+                    {
+                        animator.IsPlaying = !isPlaying;
+                        ImGui.CloseCurrentPopup();
+                    }
 
-                ImGui.SameLine();
-                if (ImGui.Button("▶"))
-                {
-                    animator.IsPlaying = false;
-                    animator.StepToNextKeyframe();
-                }
+                    if (ImGui.Button("Previous Key"))
+                    {
+                        animator.IsPlaying = false;
+                        animator.StepToPrevKeyframe();
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    if (ImGui.Button("Next Key"))
+                    {
+                        animator.IsPlaying = false;
+                        animator.StepToNextKeyframe();
+                        ImGui.CloseCurrentPopup();
+                    }
+                });
 
                 ImGui.SetNextItemWidth(-1);
                 if (ImGui.SliderFloat("##Timeline", ref currentRel, 0, duration, $"Frame: {currentAbs:F0} / {seqEnd:F0}"))
@@ -1656,8 +1671,9 @@ public partial class ViewerApp
             _worldScene.ShowTaxiActors = showTaxiActors;
 
         float speedMultiplier = _worldScene.TaxiActorSpeedMultiplier;
-        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, 0.01f, 8f, "%.3fx"))
+        if (ImGui.SliderFloat("Taxi Speed", ref speedMultiplier, WorldScene.TaxiActorMinSpeedSetting, WorldScene.TaxiActorMaxSpeedSetting, "%.2f"))
             _worldScene.TaxiActorSpeedMultiplier = speedMultiplier;
+        ImGui.TextDisabled("0.10 = 100% speed, 0.01 = 10%, 0.50 = 500%.");
 
         float scaleMultiplier = _worldScene.TaxiActorScaleMultiplier;
         if (ImGui.SliderFloat("Taxi Actor Scale", ref scaleMultiplier, 0.05f, 5f, "%.2fx"))
@@ -1815,6 +1831,7 @@ public partial class ViewerApp
 
             string resolvedActorModelPath = _worldScene.GetResolvedTaxiActorModelPath(routeId) ?? "not found";
             string? actorOverridePath = _worldScene.GetTaxiActorModelOverride(routeId);
+            IReadOnlyList<string> defaultTaxiActorModels = WorldScene.DefaultTaxiActorModelPaths;
             ImGui.TextWrapped($"Override Route: {GetTaxiRouteDisplayLabel(routeId)}");
             ImGui.TextWrapped($"Resolved Actor Model: {resolvedActorModelPath}");
             ImGui.TextDisabled($"Override: {actorOverridePath ?? "auto"}");
@@ -1822,6 +1839,29 @@ public partial class ViewerApp
             string actorModelPath = _taxiActorModelOverrideInput;
             if (ImGui.InputText("Actor Model Path", ref actorModelPath, 512))
                 _taxiActorModelOverrideInput = actorModelPath;
+
+            if (defaultTaxiActorModels.Count > 0)
+            {
+                if (ImGui.Button("Use Gryphon Default"))
+                {
+                    _taxiActorModelOverrideInput = defaultTaxiActorModels[0];
+                    _taxiActorModelOverrideInputRouteId = routeId;
+                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    RefreshSelectedTaxiInfo();
+                }
+            }
+
+            if (defaultTaxiActorModels.Count > 1)
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Use FelBat Default"))
+                {
+                    _taxiActorModelOverrideInput = defaultTaxiActorModels[1];
+                    _taxiActorModelOverrideInputRouteId = routeId;
+                    ApplyTaxiActorModelOverride(routeId, _taxiActorModelOverrideInput);
+                    RefreshSelectedTaxiInfo();
+                }
+            }
 
             if (ImGui.Button("Apply Model Override"))
             {
@@ -1834,8 +1874,7 @@ public partial class ViewerApp
             if (ImGui.Button("Clear Override"))
             {
                 ApplyTaxiActorModelOverride(routeId, null);
-                _taxiActorModelOverrideInput = string.Empty;
-                _taxiActorModelOverrideInputRouteId = routeId;
+                SyncTaxiActorModelOverrideInput(routeId);
                 RefreshSelectedTaxiInfo();
             }
 

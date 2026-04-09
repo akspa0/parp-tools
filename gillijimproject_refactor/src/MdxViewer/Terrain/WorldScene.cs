@@ -505,6 +505,14 @@ public class WorldScene : ISceneRenderer
 {
     private const float TaxiActorHeadingSampleWindow = 18f;
     private const float TaxiActorHeadingSmoothingHz = 8f;
+    public const float TaxiActorNormalSpeedSetting = 0.10f;
+    public const float TaxiActorMinSpeedSetting = 0.01f;
+    public const float TaxiActorMaxSpeedSetting = 0.50f;
+    private static readonly string[] TaxiActorDefaultModelCandidates =
+    {
+        @"Creature\Gryphon\Gryphon.mdx",
+        @"Creature\FelBat\BatTaxi.mdx",
+    };
 
     private readonly record struct SelectedSceneObjectKey(
         ObjectType ObjectType,
@@ -515,6 +523,8 @@ public class WorldScene : ISceneRenderer
         bool HasTileCoordinate,
         string ModelKey,
         Vector3 PlacementPosition);
+
+    public static IReadOnlyList<string> DefaultTaxiActorModelPaths => TaxiActorDefaultModelCandidates;
 
     private static float? JsonFiniteOrNull(float value) => float.IsFinite(value) ? value : null;
 
@@ -2910,7 +2920,7 @@ public class WorldScene : ISceneRenderer
     private long _lastTaxiActorTick;
     private bool _taxiActorClockInitialized;
     private bool _showTaxiActors = true;
-    private float _taxiActorSpeedMultiplier = 1.0f;
+    private float _taxiActorSpeedMultiplier = TaxiActorNormalSpeedSetting;
     private float _taxiActorScaleMultiplier = 1.0f;
     private const float TaxiActorBaseUnitsPerSecond = 650f;
     private const float TaxiActorHoverOffset = 12f;
@@ -2921,7 +2931,11 @@ public class WorldScene : ISceneRenderer
     public float TaxiActorSpeedMultiplier
     {
         get => _taxiActorSpeedMultiplier;
-        set => _taxiActorSpeedMultiplier = Math.Max(0f, value);
+        set
+        {
+            float normalized = float.IsFinite(value) ? value : TaxiActorNormalSpeedSetting;
+            _taxiActorSpeedMultiplier = Math.Clamp(normalized, TaxiActorMinSpeedSetting, TaxiActorMaxSpeedSetting);
+        }
     }
 
     public float TaxiActorScaleMultiplier
@@ -2983,12 +2997,27 @@ public class WorldScene : ISceneRenderer
 
         TaxiPathLoader.TaxiRoute? route = GetTaxiRoute(pathId);
         if (route == null)
-            return null;
+            return ResolveDefaultTaxiActorModelPath();
 
         TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
-        return string.IsNullOrWhiteSpace(mountNode?.MountModelPath)
-            ? null
-            : mountNode.MountModelPath.Replace('/', '\\');
+        if (!string.IsNullOrWhiteSpace(mountNode?.MountModelPath))
+            return mountNode.MountModelPath.Replace('/', '\\');
+
+        return ResolveDefaultTaxiActorModelPath();
+    }
+
+    private string ResolveDefaultTaxiActorModelPath()
+    {
+        if (_dataSource != null)
+        {
+            foreach (string candidate in TaxiActorDefaultModelCandidates)
+            {
+                if (_dataSource.FileExists(candidate))
+                    return candidate;
+            }
+        }
+
+        return TaxiActorDefaultModelCandidates[0];
     }
 
     public bool TryGetTaxiActorPose(int pathId, out TaxiActorPose pose)
@@ -5886,18 +5915,12 @@ public class WorldScene : ISceneRenderer
             if (!IsTaxiRouteVisible(route) || route.Waypoints.Count < 2)
                 continue;
 
-            string? actorModelPath = GetTaxiActorModelOverride(route.PathId);
-            float scale = 1.0f;
-
+            string? actorModelPath = GetResolvedTaxiActorModelPath(route.PathId);
             if (string.IsNullOrWhiteSpace(actorModelPath))
-            {
-                TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
-                if (mountNode == null || string.IsNullOrWhiteSpace(mountNode.MountModelPath))
-                    continue;
+                continue;
 
-                actorModelPath = mountNode.MountModelPath;
-                scale = mountNode.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
-            }
+            TaxiPathLoader.TaxiNode? mountNode = ResolveTaxiActorNode(route);
+            float scale = mountNode?.MountScale > 0.01f ? mountNode.MountScale : 1.0f;
 
             scale *= _taxiActorScaleMultiplier;
 
@@ -8309,7 +8332,7 @@ public class WorldScene : ISceneRenderer
                 {
                     var poiColor = new Vector3(1f, 0f, 1f);
                     foreach (var poi in _poiLoader.Entries)
-                        _bbRenderer.BatchPin(poi.Position, 40f, 6f, poiColor);
+                        _bbRenderer.BatchPin(poi.Position, 56f, 9f, poiColor);
                 }
 
                 // Taxi paths — filtered by selection
@@ -8319,13 +8342,19 @@ public class WorldScene : ISceneRenderer
                     var lineColor = new Vector3(0f, 1f, 1f);
                     var routeHandleColor = new Vector3(1f, 0.65f, 0f);
                     var selectedRouteColor = new Vector3(1f, 1f, 1f);
+                    var nodeBoxColor = new Vector3(1f, 0.92f, 0.35f);
+                    var routeBoxColor = new Vector3(1f, 0.78f, 0.28f);
                     int visibleRouteCount = _taxiLoader.Routes.Count(IsTaxiRouteVisible);
                     bool showRouteHandles = _selectedTaxiNodeId >= 0 || _selectedTaxiRouteId >= 0 || visibleRouteCount <= 32;
 
                     foreach (var node in _taxiLoader.Nodes)
                     {
                         if (!IsTaxiNodeVisible(node)) continue;
-                        _bbRenderer.BatchPin(node.Position, 50f, 8f, nodeColor);
+                        _bbRenderer.BatchPin(node.Position, 64f, 12f, nodeColor);
+                        _bbRenderer.BatchBoxMinMax(
+                            node.Position - new Vector3(36f, 36f, 18f),
+                            node.Position + new Vector3(36f, 36f, 96f),
+                            nodeBoxColor);
                     }
 
                     foreach (var route in _taxiLoader.Routes)
@@ -8337,10 +8366,14 @@ public class WorldScene : ISceneRenderer
 
                         if (showRouteHandles && TryGetTaxiRouteSelectionPoint(route, out Vector3 selectionPoint))
                         {
-                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 48f : 38f;
-                            float headSize = route.PathId == _selectedTaxiRouteId ? 8f : 6f;
+                            float pinHeight = route.PathId == _selectedTaxiRouteId ? 64f : 52f;
+                            float headSize = route.PathId == _selectedTaxiRouteId ? 12f : 10f;
                             _bbRenderer.BatchPin(selectionPoint, pinHeight, headSize,
                                 route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeHandleColor);
+                            _bbRenderer.BatchBoxMinMax(
+                                selectionPoint - new Vector3(34f, 34f, 20f),
+                                selectionPoint + new Vector3(34f, 34f, 72f),
+                                route.PathId == _selectedTaxiRouteId ? selectedRouteColor : routeBoxColor);
                         }
                     }
                 }
@@ -8455,7 +8488,9 @@ public class WorldScene : ISceneRenderer
                     }
                 }
 
+                _gl.LineWidth(5.0f);
                 _bbRenderer.FlushBatch(view, proj);
+                _gl.LineWidth(1.0f);
             }
                 })));
 
@@ -8958,59 +8993,81 @@ public class WorldScene : ISceneRenderer
 
     public bool TryPickSceneObjectByRay(Vector3 rayOrigin, Vector3 rayDir, out ObjectType objectType, out int objectIndex, out float distance)
     {
+        var hits = new List<SceneObjectPickHit>();
+        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: true);
+
+        if (hits.Count == 0)
+        {
+            objectType = ObjectType.None;
+            objectIndex = -1;
+            distance = float.MaxValue;
+            return false;
+        }
+
+        SceneObjectPickHit bestHit = hits[0];
+        objectType = bestHit.ObjectType;
+        objectIndex = bestHit.ObjectIndex;
+        distance = bestHit.Distance;
+        return true;
+    }
+
+    public bool TryPickSceneObjectsByRay(Vector3 rayOrigin, Vector3 rayDir, List<SceneObjectPickHit> hits)
+    {
+        ArgumentNullException.ThrowIfNull(hits);
+        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: false);
+        return hits.Count > 0;
+    }
+
+    private void CollectSceneObjectPickHits(Vector3 rayOrigin, Vector3 rayDir, List<SceneObjectPickHit> hits, bool logHits)
+    {
+        hits.Clear();
+
         if (_instancesDirty)
             RebuildInstanceLists();
 
-        float bestT = float.MaxValue;
-        ObjectType bestType = ObjectType.None;
-        int bestIndex = -1;
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(2f, 2f, 2f));
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(1f, 1f, 1f));
 
-        var hits = new List<(string type, int index, float dist, string name)>();
+        hits.Sort(static (left, right) => left.Distance.CompareTo(right.Distance));
 
-        // Test WMO bounding boxes
-        for (int i = 0; i < _wmoInstances.Count; i++)
+        if (!logHits || hits.Count == 0)
+            return;
+
+        ViewerLog.Debug(ViewerLog.Category.Terrain, $"[ObjectPick] Ray hit {hits.Count} objects:");
+        foreach (SceneObjectPickHit hit in hits.Take(5))
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  {hit.KindLabel}[{hit.ObjectIndex}] {hit.ModelName} @ dist={hit.Distance:F1}");
+        if (hits.Count > 5)
+            ViewerLog.Debug(ViewerLog.Category.Terrain, $"  ... and {hits.Count - 5} more");
+    }
+
+    private void AppendSceneObjectPickHits(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        List<SceneObjectPickHit> hits,
+        List<ObjectInstance> instances,
+        ObjectType objectType,
+        Vector3 padding)
+    {
+        for (int i = 0; i < instances.Count; i++)
         {
-            if (ShouldHideObjectInstanceByUniqueId(_wmoInstances[i]))
+            ObjectInstance instance = instances[i];
+            if (ShouldHideObjectInstanceByUniqueId(instance))
                 continue;
 
-            // Slightly inflate AABBs to make selection more forgiving for thin geometry.
-            Vector3 pad = new(2f, 2f, 2f);
-            if (TryRayIntersectInstanceBounds(rayOrigin, rayDir, _wmoInstances[i], pad, out float t) && IsHoverPickDistanceAllowed(t))
-            {
-                hits.Add(("WMO", i, t, _wmoInstances[i].ModelName));
-                if (t < bestT) { bestT = t; bestType = ObjectType.Wmo; bestIndex = i; }
-            }
-        }
-
-        // Test MDX bounding boxes
-        for (int i = 0; i < _mdxInstances.Count; i++)
-        {
-            if (ShouldHideObjectInstanceByUniqueId(_mdxInstances[i]))
+            if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, instance, padding, out float distance) || !IsHoverPickDistanceAllowed(distance))
                 continue;
 
-            Vector3 pad = new(1f, 1f, 1f);
-            if (TryRayIntersectInstanceBounds(rayOrigin, rayDir, _mdxInstances[i], pad, out float t) && IsHoverPickDistanceAllowed(t))
-            {
-                hits.Add(("MDX", i, t, _mdxInstances[i].ModelName));
-                if (t < bestT) { bestT = t; bestType = ObjectType.Mdx; bestIndex = i; }
-            }
+            hits.Add(new SceneObjectPickHit(
+                objectType,
+                i,
+                distance,
+                instance.ModelName,
+                instance.ModelPath,
+                instance.UniqueId,
+                instance.PlacementPosition,
+                instance.BoundsMin,
+                instance.BoundsMax));
         }
-
-        // Debug: log all hits sorted by distance
-        if (hits.Count > 0)
-        {
-            var sorted = hits.OrderBy(h => h.dist).ToList();
-            ViewerLog.Debug(ViewerLog.Category.Terrain, $"[ObjectPick] Ray hit {hits.Count} objects:");
-            foreach (var h in sorted.Take(5))
-                ViewerLog.Debug(ViewerLog.Category.Terrain, $"  {h.type}[{h.index}] {h.name} @ dist={h.dist:F1}");
-            if (sorted.Count > 5)
-                ViewerLog.Debug(ViewerLog.Category.Terrain, $"  ... and {sorted.Count - 5} more");
-        }
-
-        objectType = bestType;
-        objectIndex = bestIndex;
-        distance = bestT;
-        return bestType != ObjectType.None && bestIndex >= 0;
     }
 
     public bool SelectPm4ObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
@@ -11151,4 +11208,18 @@ public readonly struct HoveredAssetInfo
     public int SceneObjectIndex { get; }
     public string WlBodyKey { get; }
     public bool HasSceneObject => SceneObjectType is ObjectType.Mdx or ObjectType.Wmo && SceneObjectIndex >= 0;
+}
+
+public readonly record struct SceneObjectPickHit(
+    ObjectType ObjectType,
+    int ObjectIndex,
+    float Distance,
+    string ModelName,
+    string ModelPath,
+    int UniqueId,
+    Vector3 PlacementPosition,
+    Vector3 BoundsMin,
+    Vector3 BoundsMax)
+{
+    public string KindLabel => ObjectType == ObjectType.Wmo ? "WMO" : "MDX";
 }

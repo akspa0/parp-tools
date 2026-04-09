@@ -278,37 +278,4 @@ public partial class ViewerApp
             _highlightedStandaloneWmoGroupIndices.Remove(renderGroupIndex);
     }
 
-    private static float RayAabbIntersect(Vector3 origin, Vector3 dir, Vector3 boundsMin, Vector3 boundsMax)
-    {
-        float tMin = float.NegativeInfinity;
-        float tMax = float.PositiveInfinity;
-
-        for (int axis = 0; axis < 3; axis++)
-        {
-            float o = axis == 0 ? origin.X : axis == 1 ? origin.Y : origin.Z;
-            float d = axis == 0 ? dir.X : axis == 1 ? dir.Y : dir.Z;
-            float lo = axis == 0 ? boundsMin.X : axis == 1 ? boundsMin.Y : boundsMin.Z;
-            float hi = axis == 0 ? boundsMax.X : axis == 1 ? boundsMax.Y : boundsMax.Z;
-
-            if (MathF.Abs(d) < 1e-8f)
-            {
-                if (o < lo || o > hi)
-                    return -1f;
-            }
-            else
-            {
-                float t1 = (lo - o) / d;
-                float t2 = (hi - o) / d;
-                if (t1 > t2)
-                    (t1, t2) = (t2, t1);
-
-                tMin = MathF.Max(tMin, t1);
-                tMax = MathF.Min(tMax, t2);
-                if (tMin > tMax)
-                    return -1f;
-            }
-        }
-
-        return tMin >= 0f ? tMin : tMax >= 0f ? tMax : -1f;
-    }
 }

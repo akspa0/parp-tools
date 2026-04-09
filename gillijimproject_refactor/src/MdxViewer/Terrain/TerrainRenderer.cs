@@ -499,7 +499,7 @@ public class TerrainRenderer : IDisposable
         _shader.SetFloat("uFogEnd", _lighting.FogEnd);
         _shader.SetVec3("uCameraPos", cameraPos);
 
-        _gl.Disable(EnableCap.CullFace);
+        ApplySurfaceCulling();
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
 
         _shader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
@@ -672,7 +672,7 @@ public class TerrainRenderer : IDisposable
         _tileShader.SetFloat("uFogEnd", _lighting.FogEnd);
         _tileShader.SetVec3("uCameraPos", cameraPos);
 
-        _gl.Disable(EnableCap.CullFace);
+        ApplySurfaceCulling();
         _gl.PolygonMode(TriangleFace.FrontAndBack, _wireframe ? PolygonMode.Line : PolygonMode.Fill);
 
         _tileShader.SetInt("uShowChunkGrid", ShowChunkGrid ? 1 : 0);
@@ -757,6 +757,18 @@ public class TerrainRenderer : IDisposable
         _gl.DepthMask(true);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private void ApplySurfaceCulling()
+    {
+        if (_wireframe || !RenderQualitySettings.EnableTerrainBackfaceCulling)
+        {
+            _gl.Disable(EnableCap.CullFace);
+            return;
+        }
+
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(TriangleFace.Back);
     }
 
     private void UpdateTileFades()

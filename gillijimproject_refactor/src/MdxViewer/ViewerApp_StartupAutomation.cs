@@ -176,6 +176,12 @@ public partial class ViewerApp
 
     private void QueueNamedStartupCapture(string shotName, bool includeUi, bool exitAfterCapture)
     {
+        if (string.Equals(shotName, "current", StringComparison.OrdinalIgnoreCase))
+        {
+            QueueCurrentCameraCapture(includeUi, exitAfterCapture);
+            return;
+        }
+
         CameraShotPoint? shot = _cameraShotPoints.FirstOrDefault(candidate =>
             string.Equals(candidate.Name, shotName, StringComparison.OrdinalIgnoreCase));
 

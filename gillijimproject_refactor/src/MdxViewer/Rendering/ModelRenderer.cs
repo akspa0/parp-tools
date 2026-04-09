@@ -86,11 +86,13 @@ public class MdxRenderer : IModelRenderer
     private readonly IDataSource? _dataSource;
     private readonly ReplaceableTextureResolver? _texResolver;
     private readonly string? _modelVirtualPath; // Path within MPQ for DBC lookup
+    private readonly IReadOnlyList<string>? _explicitTextureVariations;
     private readonly bool _mdxDebugFocus;
     private readonly bool _isM2AdapterModel;
     private readonly bool _usesPreRelease301M2Profile;
     private readonly bool _enableM2Animation;
     private readonly bool _forceM2SolidDebug;
+    private int? _selectedReplaceableDisplayIndex;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -173,7 +175,7 @@ public class MdxRenderer : IModelRenderer
 
     public MdxRenderer(GL gl, MdxFile mdx, string modelDir, IDataSource? dataSource = null,
         ReplaceableTextureResolver? texResolver = null, string? modelVirtualPath = null, bool isM2AdapterModel = false,
-        string? buildVersion = null, bool deferInitialTextureLoads = false)
+        string? buildVersion = null, bool deferInitialTextureLoads = false, IReadOnlyList<string>? explicitTextureVariations = null)
     {
         var initStopwatch = Stopwatch.StartNew();
         _gl = gl;
@@ -182,6 +184,7 @@ public class MdxRenderer : IModelRenderer
         _dataSource = dataSource;
         _deferInitialTextureLoads = deferInitialTextureLoads;
         _isM2AdapterModel = isM2AdapterModel;
+        _explicitTextureVariations = explicitTextureVariations;
         _usesPreRelease301M2Profile = _isM2AdapterModel
             && string.Equals(
                 FormatProfileRegistry.ResolveModelProfile(buildVersion)?.ProfileId,
@@ -211,9 +214,11 @@ public class MdxRenderer : IModelRenderer
         _mdxDebugFocus = modelDebugName.Contains("kelthuzad", StringComparison.OrdinalIgnoreCase)
             || (!string.IsNullOrWhiteSpace(debugFilter)
                 && modelDebugName.Contains(debugFilter, StringComparison.OrdinalIgnoreCase));
+        InitializeReplaceableTextureVariantSelection();
 
         InitShaders();
         InitBuffers();
+        ApplyDefaultCharacterGeosetSelection();
 
         if (_isM2AdapterModel)
         {
@@ -334,6 +339,36 @@ public class MdxRenderer : IModelRenderer
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;
+    }
+
+    private void ApplyDefaultCharacterGeosetSelection()
+    {
+        if (_isM2AdapterModel || _texResolver == null || string.IsNullOrWhiteSpace(_modelVirtualPath) || _geosets.Count == 0)
+            return;
+
+        IReadOnlyCollection<uint>? wantedGroups = _texResolver.GetDefaultCharacterSelectionGroups(_modelVirtualPath);
+        if (wantedGroups == null || wantedGroups.Count == 0)
+            return;
+
+        HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
+        int hiddenCount = 0;
+
+        for (int i = 0; i < _geosets.Count; i++)
+        {
+            var buffers = _geosets[i];
+            uint selectionGroup = _mdx.Geosets[buffers.GeosetIndex].SelectionGroup;
+            bool visible = wantedGroupSet.Contains(selectionGroup);
+            buffers.Visible = visible;
+            if (!visible)
+                hiddenCount++;
+        }
+
+        if (hiddenCount > 0)
+        {
+            ViewerLog.Info(
+                ViewerLog.Category.Mdx,
+                $"[MDX] Applied default character geosets for {_modelVirtualPath}: visible={_geosets.Count - hiddenCount}/{_geosets.Count}, groups={string.Join(",", wantedGroupSet.OrderBy(static value => value))}");
+        }
     }
 
     public void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
@@ -1767,6 +1802,36 @@ void main() {
         MdxTextureDiagnosticLogger.Close();
     }
 
+    private void InitializeReplaceableTextureVariantSelection()
+    {
+        if (_texResolver == null || string.IsNullOrWhiteSpace(_modelVirtualPath) || _mdx.Textures.Count == 0)
+            return;
+
+        uint[] replaceableIds = _mdx.Textures
+            .Where(static texture => texture.ReplaceableId > 0)
+            .Select(static texture => texture.ReplaceableId)
+            .Distinct()
+            .ToArray();
+        if (replaceableIds.Length == 0)
+            return;
+
+        _selectedReplaceableDisplayIndex = _texResolver.SelectBestDisplayIndex(_modelVirtualPath, replaceableIds);
+        if (!_selectedReplaceableDisplayIndex.HasValue)
+            return;
+
+        string description = _texResolver.GetVariantDescription(_modelVirtualPath, _selectedReplaceableDisplayIndex.Value);
+        string modelName = Path.GetFileName(_modelVirtualPath);
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            ViewerLog.Debug(ViewerLog.Category.Mdx,
+                $"Replaceable display variant {_selectedReplaceableDisplayIndex.Value} selected for {modelName}");
+            return;
+        }
+
+        ViewerLog.Debug(ViewerLog.Category.Mdx,
+            $"Replaceable display variant {_selectedReplaceableDisplayIndex.Value} selected for {modelName}: {description}");
+    }
+
     private void QueueDeferredTextureLoads()
     {
         _pendingTextureLoads.Clear();
@@ -2347,10 +2412,14 @@ void main() {
     {
         string modelName = _modelVirtualPath != null ? Path.GetFileName(_modelVirtualPath) : "?";
 
+        string? explicitVariationPath = ResolveExplicitTextureVariation(replaceableId);
+        if (explicitVariationPath != null)
+            return explicitVariationPath;
+
         // Strategy 1: DBCD-based resolver (creatures with DBC entries)
         if (_texResolver != null && _modelVirtualPath != null)
         {
-            string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId);
+            string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId, _selectedReplaceableDisplayIndex ?? 0);
             if (resolved != null)
                 return resolved;
         }
@@ -2462,6 +2531,50 @@ void main() {
 
         ViewerLog.Info(ViewerLog.Category.Mdx, $"  Replaceable #{replaceableId} UNRESOLVED for {modelName} (tried DBC, naming, dir scan, defaults)");
         return null;
+    }
+
+    private string? ResolveExplicitTextureVariation(uint replaceableId)
+    {
+        if (_explicitTextureVariations == null || _explicitTextureVariations.Count == 0)
+            return null;
+
+        int variationIndex = replaceableId switch
+        {
+            1 or 11 => 0,
+            2 or 12 => 1,
+            3 or 13 => 2,
+            _ => -1
+        };
+        if (variationIndex < 0 || variationIndex >= _explicitTextureVariations.Count)
+            return null;
+
+        string variation = _explicitTextureVariations[variationIndex]?.Trim() ?? string.Empty;
+        if (string.IsNullOrEmpty(variation))
+            return null;
+
+        string candidate;
+        if (variation.Contains('\\') || variation.Contains('/'))
+        {
+            candidate = variation.Replace('/', '\\');
+            if (!candidate.EndsWith(".blp", StringComparison.OrdinalIgnoreCase)
+                && !candidate.EndsWith(".tga", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate += ".blp";
+            }
+        }
+        else
+        {
+            candidate = string.IsNullOrEmpty(_modelDir)
+                ? variation
+                : Path.Combine(_modelDir, variation);
+            if (!candidate.EndsWith(".blp", StringComparison.OrdinalIgnoreCase)
+                && !candidate.EndsWith(".tga", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate += ".blp";
+            }
+        }
+
+        return candidate;
     }
 
     private unsafe SharedTextureEntry? LoadTextureFromBlp(byte[] blpData, string name, bool clampS = false, bool clampT = false)

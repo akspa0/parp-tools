@@ -122,7 +122,8 @@ public class ScreenshotRenderer : IDisposable
         MdxRenderer? renderer = null;
         try
         {
-            renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver);
+            renderer = new MdxRenderer(_gl, mdx, modelDir, _dataSource, _texResolver,
+                explicitTextureVariations: entry.TextureVariations);
         }
         catch (Exception ex)
         {

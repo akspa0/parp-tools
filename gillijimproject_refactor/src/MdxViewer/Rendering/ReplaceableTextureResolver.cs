@@ -1,5 +1,6 @@
 using DBCD;
 using DBCD.Providers;
+using MdxViewer.Catalog;
 using MdxViewer.DataSources;
 using MdxViewer.Logging;
 
@@ -23,8 +24,13 @@ namespace MdxViewer.Rendering;
 /// </summary>
 public class ReplaceableTextureResolver
 {
+    private readonly Dictionary<CharacterSectionKey, CharacterSectionData> _characterSections = new();
+    private readonly Dictionary<CharacterVariationKey, int[]> _characterHairGeosets = new();
+    private readonly Dictionary<CharacterVariationKey, int[]> _characterFacialHairGeosets = new();
     // ModelID → list of TextureVariation arrays (one per DisplayInfo entry)
     private readonly Dictionary<int, List<string[]>> _displayVariations = new();
+    // Exact model path → list of fallback TextureVariation arrays sourced from alpha-core SQL.
+    private readonly Dictionary<string, List<string[]>> _fallbackDisplayVariationsByModelPath = new(StringComparer.OrdinalIgnoreCase);
     // Model path (lowercase, backslash) → ModelID
     private readonly Dictionary<string, int> _modelPathToId = new();
     // ModelID → model path (reverse lookup for building texture paths)
@@ -44,8 +50,30 @@ public class ReplaceableTextureResolver
     /// <summary>Set the data source for texture existence validation.</summary>
     public void SetDataSource(IDataSource? dataSource) => _dataSource = dataSource;
 
+    private readonly record struct CharacterSectionKey(int RaceId, int SexId, int BaseSection, int VariationIndex, int ColorIndex);
+    private readonly record struct CharacterVariationKey(int RaceId, int SexId, int VariationId);
+    private record CharacterSectionData(string[] TextureNames);
     private record ItemDisplayData(string[] ModelNames, string[] ModelTextures, string[] Textures);
     private record ExtraDisplayData(string BakeName, int[] ItemDisplayIds);
+
+    private static readonly uint[] DefaultCharacterSelectionGroups =
+    {
+        0,
+        101,
+        201,
+        301,
+        401,
+        501,
+        702,
+        801,
+        901,
+        1001,
+        1101,
+        1201,
+        1301,
+        1401,
+        1501,
+    };
 
     /// <summary>Known build strings for version alias resolution.</summary>
     private static readonly Dictionary<string, string> BuildAliases = new()
@@ -55,6 +83,21 @@ public class ReplaceableTextureResolver
         { "0.6.0", "0.6.0.3592" },
         { "2.4.3", "2.4.3.8606" },
         { "3.3.5", "3.3.5.12340" },
+    };
+
+    private static readonly Dictionary<string, int> CharacterRaceIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["human"] = 1,
+        ["orc"] = 2,
+        ["dwarf"] = 3,
+        ["nightelf"] = 4,
+        ["scourge"] = 5,
+        ["undead"] = 5,
+        ["tauren"] = 6,
+        ["gnome"] = 7,
+        ["troll"] = 8,
+        ["bloodelf"] = 10,
+        ["draenei"] = 11,
     };
 
     /// <summary>
@@ -71,14 +114,22 @@ public class ReplaceableTextureResolver
         try
         {
             LoadCreatureModelData(dbcd, build);
+            TryLoadCharSections(dbcd, build);
+            TryLoadCharHairGeosets(dbcd, build);
+            TryLoadCharacterFacialHairStyles(dbcd, build);
             LoadCreatureDisplayInfo(dbcd, build);
             TryLoadCreatureDisplayInfoExtra(dbcd, build);
             TryLoadItemDisplayInfo(dbcd, build);
+            TryLoadAlphaCoreCreatureDisplayFallback(build);
             _loaded = true;
 
             ViewerLog.Important(ViewerLog.Category.Dbc, $"=== DBC Texture Resolution Summary (build {build}) ===");
             ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureModelData:          {_modelPathToId.Count} model paths");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CharSections:              {_characterSections.Count} character variants");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CharHairGeosets:           {_characterHairGeosets.Count} character variants");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  CharacterFacialHairStyles: {_characterFacialHairGeosets.Count} character variants");
             ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureDisplayInfo:        {_displayVariations.Values.Sum(v => v.Count)} display entries for {_displayVariations.Count} unique models");
+            ViewerLog.Important(ViewerLog.Category.Dbc, $"  AlphaCore fallback:         {_fallbackDisplayVariationsByModelPath.Values.Sum(v => v.Count)} display entries for {_fallbackDisplayVariationsByModelPath.Count} exact model paths");
             ViewerLog.Important(ViewerLog.Category.Dbc, $"  CreatureDisplayInfoExtra:   {_extraDisplayInfo.Count} entries");
             ViewerLog.Important(ViewerLog.Category.Dbc, $"  ItemDisplayInfo:            {_itemDisplayInfo.Count} entries");
 
@@ -106,6 +157,120 @@ public class ReplaceableTextureResolver
         }
     }
 
+    private void TryLoadCharSections(DBCD.DBCD dbcd, string build)
+    {
+        IDBCDStorage? storage;
+        try { storage = LoadDbc(dbcd, "CharSections", build); }
+        catch { ViewerLog.Info(ViewerLog.Category.Dbc, "CharSections: not available"); return; }
+
+        int count = 0;
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+
+            int raceId = TryGetInt(row, "RaceID") ?? 0;
+            int sexId = TryGetInt(row, "SexID") ?? 0;
+            int baseSection = TryGetInt(row, "BaseSection") ?? 0;
+            int variationIndex = TryGetInt(row, "VariationIndex") ?? 0;
+            int colorIndex = TryGetInt(row, "ColorIndex") ?? 0;
+            string[] textureNames = ReadStringArray(row, "TextureName", 3);
+
+            if (raceId <= 0 || !textureNames.Any(static name => !string.IsNullOrWhiteSpace(name)))
+                continue;
+
+            var keyTuple = new CharacterSectionKey(raceId, sexId, baseSection, variationIndex, colorIndex);
+            var incoming = new CharacterSectionData(textureNames);
+
+            if (_characterSections.TryGetValue(keyTuple, out CharacterSectionData? existing))
+            {
+                int existingCount = existing.TextureNames.Count(static name => !string.IsNullOrWhiteSpace(name));
+                int incomingCount = incoming.TextureNames.Count(static name => !string.IsNullOrWhiteSpace(name));
+                if (incomingCount <= existingCount)
+                    continue;
+            }
+
+            _characterSections[keyTuple] = incoming;
+            count++;
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CharSections: {count} usable entries loaded ({_characterSections.Count} unique variants)");
+    }
+
+    private void TryLoadCharHairGeosets(DBCD.DBCD dbcd, string build)
+    {
+        IDBCDStorage? storage;
+        try { storage = LoadDbc(dbcd, "CharHairGeosets", build); }
+        catch { ViewerLog.Info(ViewerLog.Category.Dbc, "CharHairGeosets: not available"); return; }
+
+        int count = 0;
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+
+            int raceId = TryGetInt(row, "RaceID") ?? 0;
+            int sexId = TryGetInt(row, "SexID") ?? 0;
+            int variationId = TryGetInt(row, "VariationID") ?? 0;
+            int geosetId = TryGetInt(row, "GeosetID") ?? 0;
+            int scalpValue = TryGetInt(row, "Showscalp") ?? 0;
+            if (raceId <= 0)
+                continue;
+
+            int[] groups = new[] { geosetId, scalpValue }
+                .Where(static value => value > 0)
+                .Distinct()
+                .ToArray();
+            if (groups.Length == 0)
+                continue;
+
+            _characterHairGeosets[new CharacterVariationKey(raceId, sexId, variationId)] = groups;
+            count++;
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CharHairGeosets: {count} usable entries loaded ({_characterHairGeosets.Count} unique variants)");
+    }
+
+    private void TryLoadCharacterFacialHairStyles(DBCD.DBCD dbcd, string build)
+    {
+        IDBCDStorage? storage;
+        try { storage = LoadDbc(dbcd, "CharacterFacialHairStyles", build); }
+        catch { ViewerLog.Info(ViewerLog.Category.Dbc, "CharacterFacialHairStyles: not available"); return; }
+
+        int count = 0;
+        foreach (var key in storage.Keys)
+        {
+            var row = storage[key];
+
+            int raceId = TryGetInt(row, "RaceID") ?? 0;
+            int sexId = TryGetInt(row, "SexID") ?? 0;
+            int variationId = TryGetInt(row, "VariationID") ?? TryGetInt(row, "VariationId") ?? 0;
+            if (raceId <= 0)
+                continue;
+
+            int beard = TryGetInt(row, "BeardGeoset") ?? 0;
+            int moustache = TryGetInt(row, "MoustacheGeoset") ?? 0;
+            int sideburn = TryGetInt(row, "SideburnGeoset") ?? 0;
+
+            int[] groups =
+            {
+                beard > 0 ? 100 + beard : 0,
+                sideburn > 0 ? 200 + sideburn : 0,
+                moustache > 0 ? 300 + moustache : 0,
+            };
+
+            int[] distinctGroups = groups
+                .Where(static value => value > 0)
+                .Distinct()
+                .ToArray();
+            if (distinctGroups.Length == 0)
+                continue;
+
+            _characterFacialHairGeosets[new CharacterVariationKey(raceId, sexId, variationId)] = distinctGroups;
+            count++;
+        }
+
+        ViewerLog.Info(ViewerLog.Category.Dbc, $"CharacterFacialHairStyles: {count} usable entries loaded ({_characterFacialHairGeosets.Count} unique variants)");
+    }
+
     private void LoadCreatureModelData(DBCD.DBCD dbcd, string build)
     {
         var storage = LoadDbc(dbcd, "CreatureModelData", build);
@@ -122,21 +287,11 @@ public class ReplaceableTextureResolver
 
             if (string.IsNullOrEmpty(modelName)) continue;
 
-            string normalized = modelName.ToLowerInvariant().Replace('/', '\\');
-            _modelPathToId[normalized] = id;
-            _modelIdToPath[id] = normalized;
+            string normalized = modelName.ToLowerInvariant().Replace('/', '\\').Trim();
+            foreach (string lookupKey in EnumerateCreatureModelLookupKeys(normalized))
+                _modelPathToId.TryAdd(lookupKey, id);
 
-            // Also store with/without .mdx extension for flexible matching
-            // DBC ModelName may or may not include the extension
-            if (normalized.EndsWith(".mdx") || normalized.EndsWith(".mdl"))
-            {
-                string withoutExt = normalized[..^4];
-                _modelPathToId.TryAdd(withoutExt, id);
-            }
-            else
-            {
-                _modelPathToId.TryAdd(normalized + ".mdx", id);
-            }
+            _modelIdToPath[id] = normalized;
 
             string fileNameKey = Path.GetFileNameWithoutExtension(normalized);
             _modelFileNameToId.TryAdd(fileNameKey, id);
@@ -156,6 +311,38 @@ public class ReplaceableTextureResolver
                 samples++;
             }
         }
+    }
+
+    private static IEnumerable<string> EnumerateCreatureModelLookupKeys(string normalizedModelName)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedModelName))
+            yield break;
+
+        yield return normalizedModelName;
+
+        string withoutExt = normalizedModelName;
+        if (normalizedModelName.EndsWith(".mdx") || normalizedModelName.EndsWith(".mdl"))
+        {
+            withoutExt = normalizedModelName[..^4];
+            yield return withoutExt;
+        }
+        else
+        {
+            yield return normalizedModelName + ".mdx";
+            yield return normalizedModelName + ".mdl";
+        }
+
+        bool hasDirectory = normalizedModelName.Contains('\\') || normalizedModelName.Contains('/');
+        if (hasDirectory)
+            yield break;
+
+        string modelName = Path.GetFileNameWithoutExtension(normalizedModelName);
+        if (string.IsNullOrWhiteSpace(modelName))
+            yield break;
+
+        yield return $"creature\\{modelName}\\{modelName}";
+        yield return $"creature\\{modelName}\\{modelName}.mdx";
+        yield return $"creature\\{modelName}\\{modelName}.mdl";
     }
 
     private void LoadCreatureDisplayInfo(DBCD.DBCD dbcd, string build)
@@ -245,6 +432,57 @@ public class ReplaceableTextureResolver
         ViewerLog.Info(ViewerLog.Category.Dbc, $"ItemDisplayInfo: {count} entries loaded");
     }
 
+    private void TryLoadAlphaCoreCreatureDisplayFallback(string build)
+    {
+        if (!build.StartsWith("0.5.3", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        string? alphaCoreRoot = ResolveAlphaCoreRoot();
+        if (string.IsNullOrWhiteSpace(alphaCoreRoot))
+            return;
+
+        try
+        {
+            using var reader = new AlphaCoreDbReader(alphaCoreRoot);
+            var validation = reader.Validate();
+            if (!validation.success)
+            {
+                ViewerLog.Info(ViewerLog.Category.Dbc, $"Alpha-core fallback unavailable: {validation.message}");
+                return;
+            }
+
+            IReadOnlyList<AssetCatalogEntry> creatures = reader.LoadCreaturesAsync().GetAwaiter().GetResult();
+            int added = 0;
+
+            foreach (AssetCatalogEntry creature in creatures)
+            {
+                if (string.IsNullOrWhiteSpace(creature.ModelPath) || creature.TextureVariations.Length == 0)
+                    continue;
+
+                string normalizedPath = creature.ModelPath.Replace('/', '\\').ToLowerInvariant();
+                if (!_fallbackDisplayVariationsByModelPath.TryGetValue(normalizedPath, out List<string[]>? variants))
+                {
+                    variants = new List<string[]>();
+                    _fallbackDisplayVariationsByModelPath[normalizedPath] = variants;
+                }
+
+                string[] variationSet = BuildTextureVariationSet(creature.TextureVariations);
+                if (variants.Any(existing => existing.SequenceEqual(variationSet, StringComparer.OrdinalIgnoreCase)))
+                    continue;
+
+                variants.Add(variationSet);
+                added++;
+            }
+
+            ViewerLog.Info(ViewerLog.Category.Dbc,
+                $"Alpha-core fallback: {added} display variants across {_fallbackDisplayVariationsByModelPath.Count} model paths");
+        }
+        catch (Exception ex)
+        {
+            ViewerLog.Info(ViewerLog.Category.Dbc, $"Alpha-core fallback load failed: {ex.Message}");
+        }
+    }
+
     /// <summary>
     /// Resolve a replaceable texture ID to a BLP path for the given model.
     /// </summary>
@@ -253,6 +491,18 @@ public class ReplaceableTextureResolver
         if (!_loaded)
             return null;
 
+        string normalizedPath = modelPath.ToLowerInvariant().Replace('/', '\\');
+        string? characterResult = ResolveFromCharacterSections(normalizedPath, replaceableId);
+        if (characterResult != null)
+            return characterResult;
+
+        if (TryGetDisplayVariations(normalizedPath, null, out var fallbackVariants))
+        {
+            string? fallbackResult = ResolveFromDisplayVariations(0, normalizedPath, replaceableId, displayIndex, fallbackVariants);
+            if (fallbackResult != null)
+                return fallbackResult;
+        }
+
         int modelId = FindModelId(modelPath);
         if (modelId == 0)
         {
@@ -260,7 +510,7 @@ public class ReplaceableTextureResolver
         }
 
         // Try creature TextureVariation first (covers ReplaceableId 1-3 and 11-13)
-        string? result = ResolveFromCreatureDisplay(modelId, modelPath, replaceableId, displayIndex);
+        string? result = ResolveFromCreatureDisplay(modelId, normalizedPath, replaceableId, displayIndex);
         if (result != null) return result;
 
         // Try CreatureDisplayInfoExtra bake texture
@@ -274,22 +524,295 @@ public class ReplaceableTextureResolver
         return null;
     }
 
-    private string? ResolveFromCreatureDisplay(int modelId, string modelPath, uint replaceableId, int displayIndex)
+    public IReadOnlyCollection<uint>? GetDefaultCharacterSelectionGroups(string modelPath)
     {
-        if (!_displayVariations.TryGetValue(modelId, out var variants) || variants.Count == 0)
+        string normalizedPath = modelPath.Replace('/', '\\');
+        if (!TryParseCharacterModelPath(normalizedPath, out int raceId, out int sexId))
             return null;
 
-        // Map replaceable ID to texture variation index
-        int varIndex = replaceableId switch
+        HashSet<uint> groups = new(DefaultCharacterSelectionGroups);
+
+        if (_characterHairGeosets.TryGetValue(new CharacterVariationKey(raceId, sexId, 0), out int[]? hairGroups))
         {
-            1 => 0,  // Creature Skin 1 / Body
-            2 => 1,  // Creature Skin 2 / Object Skin
-            3 => 2,  // Creature Skin 3 / Weapon
-            11 => 0, // Creature Skin 1 (explicit)
-            12 => 1, // Creature Skin 2 (explicit)
-            13 => 2, // Creature Skin 3 (explicit)
-            _ => -1
+            foreach (int group in hairGroups)
+                groups.Add((uint)group);
+        }
+
+        if (_characterFacialHairGeosets.TryGetValue(new CharacterVariationKey(raceId, sexId, 0), out int[]? facialGroups))
+        {
+            foreach (int group in facialGroups)
+                groups.Add((uint)group);
+        }
+
+        return groups;
+    }
+
+    private string? ResolveFromCharacterSections(string modelPath, uint replaceableId)
+    {
+        if (!TryParseCharacterModelPath(modelPath, out int raceId, out int sexId))
+            return null;
+
+        string? resolved = replaceableId switch
+        {
+            1 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 0, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }),
+            8 => TryResolveCharacterSkinExtraTexture(modelPath, raceId, sexId, variationIndex: 0, colorIndex: 0),
+            6 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }),
+            7 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 2, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }),
+            10 => TryResolveCharacterSectionTexture(modelPath, raceId, sexId, baseSection: 4, variationIndex: 0, colorIndex: 0, textureIndices: new[] { 0 }),
+            _ => null,
         };
+
+        return resolved ?? ResolveFromCharacterDirectory(modelPath, replaceableId);
+    }
+
+    private string? TryResolveCharacterSkinExtraTexture(string modelPath, int raceId, int sexId, int variationIndex, int colorIndex)
+    {
+        if (!TryGetCharacterSection(raceId, sexId, 0, variationIndex, colorIndex, out CharacterSectionData section))
+            return null;
+
+        foreach (int textureIndex in new[] { 1, 2 })
+        {
+            string? resolved = TryResolveCharacterTextureCandidate(modelPath, section.TextureNames, textureIndex);
+            if (resolved != null)
+                return resolved;
+        }
+
+        return TryInferCharacterSkinExtraTexture(modelPath, section.TextureNames[0]);
+    }
+
+    private string? TryResolveCharacterSectionTexture(string modelPath, int raceId, int sexId, int baseSection, int variationIndex, int colorIndex, int[] textureIndices)
+    {
+        if (!TryGetCharacterSection(raceId, sexId, baseSection, variationIndex, colorIndex, out CharacterSectionData section))
+            return null;
+
+        foreach (int textureIndex in textureIndices)
+        {
+            string? resolved = TryResolveCharacterTextureCandidate(modelPath, section.TextureNames, textureIndex);
+            if (resolved != null)
+                return resolved;
+        }
+
+        return null;
+    }
+
+    private bool TryGetCharacterSection(int raceId, int sexId, int baseSection, int variationIndex, int colorIndex, out CharacterSectionData section)
+    {
+        if (TryGetCharacterSectionInternal(new CharacterSectionKey(raceId, sexId, baseSection, variationIndex, colorIndex), out section))
+            return true;
+
+        if (colorIndex != 0 && TryGetCharacterSectionInternal(new CharacterSectionKey(raceId, sexId, baseSection, variationIndex, 0), out section))
+            return true;
+
+        if (variationIndex != 0 && TryGetCharacterSectionInternal(new CharacterSectionKey(raceId, sexId, baseSection, 0, colorIndex), out section))
+            return true;
+
+        if (variationIndex != 0 && colorIndex != 0 && TryGetCharacterSectionInternal(new CharacterSectionKey(raceId, sexId, baseSection, 0, 0), out section))
+            return true;
+
+        section = null!;
+        return false;
+    }
+
+    private bool TryGetCharacterSectionInternal(CharacterSectionKey key, out CharacterSectionData section)
+    {
+        if (_characterSections.TryGetValue(key, out CharacterSectionData? existing) && existing != null)
+        {
+            section = existing;
+            return true;
+        }
+
+        section = null!;
+        return false;
+    }
+
+    private string? TryResolveCharacterTextureCandidate(string modelPath, string[] textureNames, int textureIndex)
+    {
+        if (textureIndex < 0 || textureIndex >= textureNames.Length)
+            return null;
+
+        string texName = textureNames[textureIndex].Trim();
+        if (string.IsNullOrEmpty(texName))
+            return null;
+
+        string candidate = BuildTexturePath(texName, modelPath);
+        if (_dataSource == null || TextureExistsInDataSource(candidate))
+            return candidate;
+
+        return null;
+    }
+
+    private string? TryInferCharacterSkinExtraTexture(string modelPath, string baseTextureName)
+    {
+        if (string.IsNullOrWhiteSpace(baseTextureName))
+            return null;
+
+        string basePath = BuildTexturePath(baseTextureName, modelPath);
+        string extension = Path.GetExtension(basePath);
+        if (string.IsNullOrEmpty(extension))
+            extension = ".blp";
+
+        string inferred = Path.ChangeExtension(basePath, null) + "_Extra" + extension;
+        if (_dataSource == null || TextureExistsInDataSource(inferred))
+            return inferred;
+
+        return null;
+    }
+
+    private string? ResolveFromCharacterDirectory(string modelPath, uint replaceableId)
+    {
+        if (_dataSource == null)
+            return null;
+
+        string modelDir = Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? string.Empty;
+        string modelBase = Path.GetFileNameWithoutExtension(modelPath) ?? string.Empty;
+        if (string.IsNullOrEmpty(modelDir) || string.IsNullOrEmpty(modelBase))
+            return null;
+
+        foreach (string candidate in EnumerateCharacterDirectoryCandidates(modelDir, modelBase, replaceableId))
+        {
+            if (TextureExistsInDataSource(candidate))
+                return candidate;
+        }
+
+        string modelDirLower = modelDir.ToLowerInvariant();
+        string modelBaseLower = modelBase.ToLowerInvariant();
+        var matches = _dataSource.GetFileList(".blp")
+            .Where(path =>
+            {
+                string normalized = path.Replace('/', '\\').ToLowerInvariant();
+                string fileDir = Path.GetDirectoryName(normalized) ?? string.Empty;
+                string fileName = Path.GetFileNameWithoutExtension(normalized);
+                if (!fileDir.Equals(modelDirLower, StringComparison.Ordinal))
+                    return false;
+
+                return replaceableId switch
+                {
+                    1 => fileName.StartsWith(modelBaseLower + "skin", StringComparison.Ordinal) && !fileName.Contains("extra", StringComparison.Ordinal),
+                    8 => fileName.StartsWith(modelBaseLower + "skin", StringComparison.Ordinal) && fileName.Contains("extra", StringComparison.Ordinal),
+                    _ => false,
+                };
+            })
+            .OrderBy(static path => path.Length)
+            .FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(matches) ? null : matches;
+    }
+
+    private static IEnumerable<string> EnumerateCharacterDirectoryCandidates(string modelDir, string modelBase, uint replaceableId)
+    {
+        switch (replaceableId)
+        {
+            case 1:
+                yield return Path.Combine(modelDir, modelBase + "Skin00_00.blp");
+                yield return Path.Combine(modelDir, modelBase + "Skin.blp");
+                break;
+
+            case 8:
+                yield return Path.Combine(modelDir, modelBase + "Skin00_00_Extra.blp");
+                yield return Path.Combine(modelDir, modelBase + "Skin_Extra.blp");
+                yield return Path.Combine(modelDir, modelBase + "SkinExtra.blp");
+                break;
+        }
+    }
+
+    private static bool TryParseCharacterModelPath(string modelPath, out int raceId, out int sexId)
+    {
+        raceId = 0;
+        sexId = 0;
+
+        string[] segments = modelPath.Split('\\', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length < 3 || !segments[0].Equals("character", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (!CharacterRaceIds.TryGetValue(segments[1], out raceId))
+            return false;
+
+        sexId = segments[2].Equals("female", StringComparison.OrdinalIgnoreCase) ? 1
+            : segments[2].Equals("male", StringComparison.OrdinalIgnoreCase) ? 0
+            : -1;
+
+        return sexId >= 0;
+    }
+
+    /// <summary>
+    /// Pick one creature display variant index that best satisfies all replaceable creature slots
+    /// used by a model. This keeps ReplaceableIds like 11/12/13 on the same display entry.
+    /// </summary>
+    public int? SelectBestDisplayIndex(string modelPath, IEnumerable<uint> replaceableIds)
+    {
+        if (!_loaded)
+            return null;
+
+        string normalizedPath = modelPath.ToLowerInvariant().Replace('/', '\\');
+        if (TryGetDisplayVariations(normalizedPath, null, out var fallbackVariants))
+            return SelectBestDisplayIndexFromVariants(normalizedPath, replaceableIds, fallbackVariants);
+
+        int modelId = FindModelId(modelPath);
+        if (modelId == 0)
+            return null;
+
+        if (!TryGetDisplayVariations(normalizedPath, modelId, out var variants))
+            return null;
+
+        return SelectBestDisplayIndexFromVariants(normalizedPath, replaceableIds, variants);
+    }
+
+    private int? SelectBestDisplayIndexFromVariants(string modelPath, IEnumerable<uint> replaceableIds, List<string[]> variants)
+    {
+        var relevantIds = replaceableIds
+            .Distinct()
+            .Where(static id => GetCreatureDisplayVariationIndex(id) >= 0)
+            .ToArray();
+        if (relevantIds.Length == 0)
+            return null;
+
+        int bestIndex = -1;
+        int bestResolvedCount = -1;
+        int bestNamedCount = -1;
+
+        for (int variantIndex = 0; variantIndex < variants.Count; variantIndex++)
+        {
+            string[] texNames = variants[variantIndex];
+            int resolvedCount = 0;
+            int namedCount = 0;
+
+            foreach (uint replaceableId in relevantIds)
+            {
+                string? candidate = BuildCreatureDisplayCandidatePath(modelPath, texNames, replaceableId);
+                if (string.IsNullOrEmpty(candidate))
+                    continue;
+
+                namedCount++;
+                if (TryResolveCreatureDisplayCandidate(modelPath, texNames, replaceableId, out _))
+                    resolvedCount++;
+            }
+
+            if (resolvedCount > bestResolvedCount
+                || (resolvedCount == bestResolvedCount && namedCount > bestNamedCount))
+            {
+                bestIndex = variantIndex;
+                bestResolvedCount = resolvedCount;
+                bestNamedCount = namedCount;
+            }
+        }
+
+        if (bestIndex < 0 || (bestResolvedCount <= 0 && bestNamedCount <= 0))
+            return null;
+
+        return bestIndex;
+    }
+
+    private string? ResolveFromCreatureDisplay(int modelId, string modelPath, uint replaceableId, int displayIndex)
+    {
+        if (!TryGetDisplayVariations(modelPath, modelId, out var variants))
+            return null;
+
+        return ResolveFromDisplayVariations(modelId, modelPath, replaceableId, displayIndex, variants);
+    }
+
+    private string? ResolveFromDisplayVariations(int modelId, string modelPath, uint replaceableId, int displayIndex, List<string[]> variants)
+    {
+        int varIndex = GetCreatureDisplayVariationIndex(replaceableId);
 
         if (varIndex < 0) return null;
 
@@ -310,28 +833,15 @@ public class ReplaceableTextureResolver
         foreach (int idx in indicesToTry)
         {
             var texNames = variants[idx];
-            if (varIndex >= texNames.Length) continue;
-
-            string texName = texNames[varIndex].Trim();
-            if (string.IsNullOrEmpty(texName)) continue;
-
-            string candidate = BuildTexturePath(texName, modelPath);
+            string? candidate = BuildCreatureDisplayCandidatePath(modelPath, texNames, replaceableId);
+            if (string.IsNullOrEmpty(candidate))
+                continue;
 
             // If we have a data source, validate the texture exists
             if (_dataSource != null)
             {
-                if (TextureExistsInDataSource(candidate))
-                    return candidate;
-
-                // For bare filenames, also try the model's directory explicitly
-                if (!texName.Contains('\\') && !texName.Contains('/') && !string.IsNullOrEmpty(modelDir))
-                {
-                    string inModelDir = Path.Combine(modelDir, texName.ToLowerInvariant());
-                    if (!inModelDir.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
-                        inModelDir += ".blp";
-                    if (TextureExistsInDataSource(inModelDir))
-                        return inModelDir;
-                }
+                if (TryResolveCreatureDisplayCandidate(modelPath, texNames, replaceableId, out string? resolved))
+                    return resolved;
 
                 // Remember first candidate as fallback
                 firstCandidate ??= candidate;
@@ -351,13 +861,93 @@ public class ReplaceableTextureResolver
         return null;
     }
 
+    private bool TryGetDisplayVariations(string normalizedModelPath, int? modelId, out List<string[]> variants)
+    {
+        if (_fallbackDisplayVariationsByModelPath.TryGetValue(normalizedModelPath, out variants!) && variants.Count > 0)
+            return true;
+
+        if (modelId.HasValue && modelId.Value != 0
+            && _displayVariations.TryGetValue(modelId.Value, out variants!)
+            && variants.Count > 0)
+        {
+            return true;
+        }
+
+        variants = null!;
+        return false;
+    }
+
+    private static int GetCreatureDisplayVariationIndex(uint replaceableId)
+    {
+        return replaceableId switch
+        {
+            1 => 0,
+            2 => 1,
+            3 => 2,
+            11 => 0,
+            12 => 1,
+            13 => 2,
+            _ => -1
+        };
+    }
+
+    private static string? BuildCreatureDisplayCandidatePath(string modelPath, string[] texNames, uint replaceableId)
+    {
+        int varIndex = GetCreatureDisplayVariationIndex(replaceableId);
+        if (varIndex < 0 || varIndex >= texNames.Length)
+            return null;
+
+        string texName = texNames[varIndex].Trim();
+        if (string.IsNullOrEmpty(texName))
+            return null;
+
+        return BuildTexturePath(texName, modelPath);
+    }
+
+    private bool TryResolveCreatureDisplayCandidate(string modelPath, string[] texNames, uint replaceableId, out string? resolvedPath)
+    {
+        resolvedPath = null;
+
+        string? candidate = BuildCreatureDisplayCandidatePath(modelPath, texNames, replaceableId);
+        if (string.IsNullOrEmpty(candidate))
+            return false;
+
+        if (_dataSource == null)
+        {
+            resolvedPath = candidate;
+            return true;
+        }
+
+        if (TextureExistsInDataSource(candidate))
+        {
+            resolvedPath = candidate;
+            return true;
+        }
+
+        int varIndex = GetCreatureDisplayVariationIndex(replaceableId);
+        string texName = texNames[varIndex].Trim();
+        string modelDir = (Path.GetDirectoryName(modelPath)?.Replace('/', '\\') ?? string.Empty).ToLowerInvariant();
+        if (!texName.Contains('\\') && !texName.Contains('/') && !string.IsNullOrEmpty(modelDir))
+        {
+            string inModelDir = Path.Combine(modelDir, texName.ToLowerInvariant());
+            if (!inModelDir.EndsWith(".blp", StringComparison.OrdinalIgnoreCase))
+                inModelDir += ".blp";
+
+            if (TextureExistsInDataSource(inModelDir))
+            {
+                resolvedPath = inModelDir;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Check if a texture path exists in the data source (case-insensitive, no file read).</summary>
     private bool TextureExistsInDataSource(string texPath)
     {
         if (_dataSource is MpqDataSource mpq)
         {
-            // Fast: check file set index (case-insensitive) then MPQ header
-            if (mpq.FindInFileSet(texPath) != null) return true;
             return mpq.FileExists(texPath);
         }
         if (_dataSource != null)
@@ -448,6 +1038,10 @@ public class ReplaceableTextureResolver
     public int GetVariantCount(string modelPath)
     {
         if (!_loaded) return 0;
+        string normalizedPath = modelPath.ToLowerInvariant().Replace('/', '\\');
+        if (_fallbackDisplayVariationsByModelPath.TryGetValue(normalizedPath, out var fallbackVariants))
+            return fallbackVariants.Count;
+
         int modelId = FindModelId(modelPath);
         if (modelId == 0 || !_displayVariations.TryGetValue(modelId, out var variants))
             return 0;
@@ -458,6 +1052,13 @@ public class ReplaceableTextureResolver
     public string GetVariantDescription(string modelPath, int displayIndex)
     {
         if (!_loaded) return "";
+        string normalizedPath = modelPath.ToLowerInvariant().Replace('/', '\\');
+        if (_fallbackDisplayVariationsByModelPath.TryGetValue(normalizedPath, out var fallbackVariants))
+        {
+            if (displayIndex >= fallbackVariants.Count) return "";
+            return string.Join(", ", fallbackVariants[displayIndex].Where(s => !string.IsNullOrEmpty(s)));
+        }
+
         int modelId = FindModelId(modelPath);
         if (modelId == 0 || !_displayVariations.TryGetValue(modelId, out var variants))
             return "";
@@ -574,6 +1175,37 @@ public class ReplaceableTextureResolver
         if (BuildAliases.TryGetValue(buildOrAlias, out var canonical))
             return canonical;
         return buildOrAlias;
+    }
+
+    private static string[] BuildTextureVariationSet(IReadOnlyList<string> source)
+    {
+        var result = new string[3];
+        for (int i = 0; i < Math.Min(source.Count, result.Length); i++)
+            result[i] = source[i]?.Trim() ?? string.Empty;
+        return result;
+    }
+
+    private static string? ResolveAlphaCoreRoot()
+    {
+        string[] candidateRoots =
+        {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "external", "alpha-core"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "..", "gillijimproject_refactor", "external", "alpha-core"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "external", "alpha-core"),
+        };
+
+        foreach (string candidate in candidateRoots)
+        {
+            string resolved = Path.GetFullPath(candidate);
+            if (Directory.Exists(resolved)
+                && File.Exists(Path.Combine(resolved, "etc", "databases", "dbc", "dbc.sql"))
+                && File.Exists(Path.Combine(resolved, "etc", "databases", "world", "world.sql")))
+            {
+                return resolved;
+            }
+        }
+
+        return null;
     }
 
     private static string? TryGetString(dynamic row, string fieldName)

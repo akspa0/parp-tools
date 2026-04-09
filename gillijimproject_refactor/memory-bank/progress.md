@@ -1,5 +1,52 @@
 # Progress
 
+### Apr 08, 2026 - Fixed the raw Alpha standalone character geoset-selection seam after the Tauren female texture repair
+
+- followed the remaining `Character/Tauren/Female/TaurenFemale.mdx` failure after the replaceable-texture fix and confirmed the model was still rendering mutually exclusive classic character geosets together
+- landed active viewer behavior:
+	- `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now loads `CharHairGeosets` and `CharacterFacialHairStyles` alongside `CharSections` and can return the default classic character geoset-selection set for raw `Character/...` models
+	- `src/MdxViewer/Rendering/ModelRenderer.cs` now applies that selection set for raw standalone character MDX loads so the renderer no longer leaves every classic character geoset variant visible at once
+	- `src/MdxViewer/AssetProbe.cs` now prints per-geoset `SelectionGroup` and `DefaultVisible` so live probes show the exact character visibility policy used for the render
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 08, 2026 with existing workspace warnings only
+	- `dotnet run --project .\MdxViewer.csproj -c Debug -- --probe-mdx "H:\053-client" "Character/Tauren/Female/TaurenFemale.mdx" --build 0.5.3.3368` still resolved `character\tauren\female\taurenfemaleSkin00_00.blp` and `...Skin00_00_Extra.blp`, and now also reported the filtered classic selection groups with the mutually exclusive alternates suppressed
+	- standalone viewer runtime capture at `i:/parp/parp-tools/output/tauren_capture_geoset/standalone/0.5.3.3368/standalone/0.5.3.3368/20260408_235429888_current_20260408_235429_no_ui.png` shows a coherent textured Tauren female default body instead of the earlier broken geoset state
+	- follow-up real-data probes on `Character/Human/Male/HumanMale.mdx`, `Character/SCOURGE/Female/ScourgeFemale.mdx`, `Character/Tauren/Male/TaurenMale.mdx`, and `Character/Troll/Female/TrollFemale.mdx` also loaded their expected default body textures and kept the same default-selection-group filtering instead of falling back to all visible geosets
+	- follow-up standalone runtime captures at `i:/parp/parp-tools/output/character_validation/human_male/standalone/0.5.3.3368/20260409_001239225_current_20260409_001239_no_ui.png`, `i:/parp/parp-tools/output/character_validation/scourge_female/standalone/0.5.3.3368/20260409_001319208_current_20260409_001319_no_ui.png`, `i:/parp/parp-tools/output/character_validation/tauren_male/standalone/0.5.3.3368/20260409_001510190_current_20260409_001510_no_ui.png`, and `i:/parp/parp-tools/output/character_validation/troll_female/standalone/0.5.3.3368/20260409_001548840_current_20260409_001548_no_ui.png` all show coherent default raw-character renders
+- proof boundary:
+	- no automated tests were added or run
+	- this is real-data standalone-character proof for several raw 0.5.3 default race or sex cases, not full closure on all character customization permutations
+
+### Apr 08, 2026 - Fixed the raw Alpha dragon replaceable-texture lookup seam at the resolver layer with real client data
+
+- followed the broken-classic-MDX-texturing report down to `Creature/Dragon/Dragon.mdx` on the real `H:\053-client` `0.5.3.3368` client instead of keeping the investigation at a generic material or shader level
+- landed active viewer behavior:
+	- `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now adds broader creature-model lookup aliases and a `0.5.3`-only exact-model-path fallback sourced from alpha-core SQL creature display data
+	- the resolver now prefers those fallback variants for `Resolve(...)`, `SelectBestDisplayIndex(...)`, `GetVariantCount(...)`, and `GetVariantDescription(...)` when the exact model path is known
+	- `src/MdxViewer/AssetProbe.cs` now supports `--build` and uses the live replaceable resolver path so standalone MDX probes report the chosen display variant and resolved texture paths
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 08, 2026 with existing workspace warnings only
+	- `dotnet run --project .\MdxViewer.csproj -c Debug --no-build -- --probe-mdx "H:\053-client" "Creature/Dragon/Dragon.mdx" --build 0.5.3.3368` changed from bogus `ReplaceableDisplayIndex=0/0 Description=Helm, Rider` plus missing decodes to concrete resolved textures including `creature\\dragon\\DragonSkin1Green.blp` and `creature\\dragon\\DragonSkin2Green.blp`
+	- standalone viewer runtime capture now works with `--capture-shot current`; a no-UI PNG was emitted at `i:/parp/parp-tools/output/dragon_capture/standalone/0.5.3.3368/20260408_232206684_current_20260408_232206_no_ui.png`, and the captured dragon render shows concrete green body textures instead of the earlier broken replaceable-texture state
+- proof boundary:
+	- no automated tests were added or run
+	- this is now resolver + standalone-viewer proof for the dragon case, but it is still not broad MDX render closure and does not resolve the separate foliage or tree backface issue
+
+### Apr 08, 2026 - Tightened taxi and POI interaction priority in the active viewer and reset taxi speed semantics around `0.10 = 100%`
+
+- followed the request to make taxi riding and world-overlay picking usable in dense scenes instead of letting nearby scene-object bounds steal clicks
+- landed active viewer behavior:
+	- `src/MdxViewer/Terrain/WorldScene.cs` now treats taxi speed settings as `0.01..0.50`, where `0.10` is normal speed and values above that are slower or faster relative to that baseline instead of the old direct multiplier semantics
+	- the same world-scene path now falls back to default taxi actor models (`Creature\Gryphon\Gryphon.mdx`, then `Creature\FelBat\BatTaxi.mdx`) when a route has no explicit override or mount-model resolution
+	- taxi route lines and overlay pins for taxi nodes, taxi route handles, and area POIs are now visually larger and thicker in-world
+	- `src/MdxViewer/ViewerApp.cs` now gives taxi nodes, taxi routes, and area POIs overlay-first pick priority before nearby WMO or MDX scene hits, adds viewport-picking for area POIs, and seeds the taxi actor override input from the resolved actor model path instead of leaving it blank when no explicit override exists
+	- `src/MdxViewer/ViewerApp_Sidebars.cs` now keeps taxi controls on the right-side inspector only, clamps the taxi speed slider to the shared `0.01..0.50` range, explains the new semantics in the UI, and adds one-click Gryphon or FelBat default actor buttons
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 08, 2026 with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run
+	- no live runtime retest has been captured yet for the new click feel, default-actor fallback behavior, or slow-speed taxi pacing on a real route
+
 ### Apr 08, 2026 - Prepared the `v0.4.7.1` viewer release snapshot and locked the next migration seam back onto `WorldScene` to `wow-viewer`
 
 - followed the request to package the current viewer fixes as `v0.4.7.1`

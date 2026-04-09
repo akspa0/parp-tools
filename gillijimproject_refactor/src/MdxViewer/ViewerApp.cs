@@ -503,6 +503,14 @@ public partial class ViewerApp : IDisposable
     private int _selectedObjectIndex = -1; // -1=none, 0..modf-1=WMO, modf..modf+mddf-1=MDX
     private string _selectedObjectType = "";
     private string _selectedObjectInfo = "";
+        private int _selectedAreaPoiId = -1;
+    private const float TaxiNodePickHalfWidth = 42f;
+    private const float TaxiNodePickBottomPadding = 18f;
+    private const float TaxiNodePickTopPadding = 96f;
+    private const float TaxiRouteHandlePickHalfWidth = 40f;
+    private const float TaxiRouteHandlePickBottomPadding = 20f;
+    private const float TaxiRouteHandlePickTopPadding = 72f;
+    private const float TaxiRouteSegmentPickHalfWidth = 28f;
     private string _taxiActorModelOverrideInput = "";
     private int _taxiActorModelOverrideInputRouteId = -1;
     private int _taxiActorModelOverrideTargetRouteId = -1;
@@ -1243,9 +1251,14 @@ public partial class ViewerApp : IDisposable
         CaptureVideoFrameIfNeeded(includeUi: false, dt);
         CompleteCaptureIfReady(includeUi: false);
 
-        // Render ImGui overlay
-        DrawUI();
-        _imGui.Render();
+        // Render ImGui overlay when the native ImGui context is live. Startup capture and
+        // teardown can briefly produce frames where the controller still exists but the
+        // underlying context is not available.
+        if (HasImGuiContext())
+        {
+            DrawUI();
+            _imGui.Render();
+        }
 
         CaptureVideoFrameIfNeeded(includeUi: true, dt);
         CompleteCaptureIfReady(includeUi: true);
@@ -1332,6 +1345,9 @@ void main() {
 
     private void DrawUI()
     {
+        if (!HasImGuiContext())
+            return;
+
         UpdateShellLayout(ImGui.GetIO().DisplaySize);
 
         ResetDockPanelStates();
@@ -1421,6 +1437,7 @@ void main() {
             DrawWmoConverterDialog();
 
         DrawSceneHoverAssetOverlay();
+        DrawClickSelectionOverlay();
     }
 
     private void DrawMenuBar()
@@ -5323,12 +5340,33 @@ void main() {
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("MdxViewer reads NPC/GameObject spawns from alpha-core SQL dumps (etc/databases/world + dbc).");
 
-        ImGui.SameLine();
-        if (ImGui.Button("Use Submodule Path"))
+        DrawToolbarPopupButton("SQL Actions", string.Empty, "##SqlWorldActionsPopup", () =>
         {
-            string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
-            _sqlAlphaCoreRoot = candidate;
-        }
+            if (ImGui.Button("Use Submodule Path"))
+            {
+                string candidate = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "..", "..", "external", "alpha-core"));
+                _sqlAlphaCoreRoot = candidate;
+                ImGui.CloseCurrentPopup();
+            }
+
+            bool canLoadSqlFromPopup = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
+            if (!canLoadSqlFromPopup)
+                ImGui.BeginDisabled();
+            if (ImGui.Button("Load SQL Spawns (Current Map)"))
+            {
+                LoadSqlSpawnsForCurrentMap();
+                ImGui.CloseCurrentPopup();
+            }
+            if (!canLoadSqlFromPopup)
+                ImGui.EndDisabled();
+
+            if (ImGui.Button("Clear SQL Spawns"))
+            {
+                ResetSqlSpawnStreamingState(clearSceneSpawns: true);
+                _sqlSpawnStatus = "Cleared SQL spawns.";
+                ImGui.CloseCurrentPopup();
+            }
+        });
         bool sqlSettingsChanged = false;
         sqlSettingsChanged |= ImGui.Checkbox("NPC Spawns", ref _sqlIncludeCreatures);
         ImGui.SameLine();
@@ -5340,22 +5378,6 @@ void main() {
         sqlSettingsChanged |= ImGui.SliderInt("Max SQL Spawns", ref _sqlMaxSpawns, 100, 20000);
         sqlSettingsChanged |= ImGui.SliderFloat("GO MDX Scale", ref _sqlGameObjectMdxScaleMultiplier, 0.10f, 3.00f, "%.2fx");
         _worldScene.SqlGameObjectMdxScaleMultiplier = _sqlGameObjectMdxScaleMultiplier;
-
-        bool canLoadSql = _currentMapId >= 0 && !string.IsNullOrWhiteSpace(_sqlAlphaCoreRoot);
-        if (!canLoadSql)
-            ImGui.BeginDisabled();
-        if (ImGui.Button("Load SQL Spawns (Current Map)"))
-            LoadSqlSpawnsForCurrentMap();
-        if (!canLoadSql)
-            ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        if (ImGui.Button("Clear SQL Spawns"))
-        {
-            ResetSqlSpawnStreamingState(clearSceneSpawns: true);
-            _sqlSpawnStatus = "Cleared SQL spawns.";
-        }
-
         if (sqlSettingsChanged && _sqlMapSpawnsCache != null)
         {
             _sqlForceStreamRefresh = true;
@@ -5372,13 +5394,20 @@ void main() {
         if (ImGui.IsItemHovered() && _worldScene.ShowPm4Overlay)
             ImGui.SetTooltip(_worldScene.Pm4Status);
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton("PM4 Workbench"))
-            OpenPm4Workbench(_worldScene.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
+        DrawToolbarPopupButton("PM4 Actions", string.Empty, "##Pm4OverlayActionsPopup", () =>
+        {
+            if (ImGui.Button("PM4 Workbench"))
+            {
+                OpenPm4Workbench(_worldScene.HasSelectedPm4Object ? Pm4WorkbenchTab.Selection : Pm4WorkbenchTab.Overlay);
+                ImGui.CloseCurrentPopup();
+            }
 
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Reload PM4"))
-            _worldScene.ReloadPm4Overlay();
+            if (ImGui.Button("Reload PM4"))
+            {
+                _worldScene.ReloadPm4Overlay();
+                ImGui.CloseCurrentPopup();
+            }
+        });
 
         if (_worldScene.IsPm4Loading)
             ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"PM4 loading... {_worldScene.Pm4Status}");
@@ -5401,8 +5430,14 @@ void main() {
         }
         else if (!_worldScene.PoiLoadAttempted)
         {
-            if (ImGui.Button("Load Area POIs"))
-                _worldScene.ShowPoi = true; // triggers lazy load
+            DrawToolbarPopupButton("POI Actions", "load", "##PoiActionsPopup", () =>
+            {
+                if (ImGui.Button("Load Area POIs"))
+                {
+                    _worldScene.ShowPoi = true;
+                    ImGui.CloseCurrentPopup();
+                }
+            });
         }
         else if (_worldScene.PoiLoadAttempted && (_worldScene.PoiLoader == null || _worldScene.PoiLoader.Entries.Count == 0))
         {
@@ -5411,12 +5446,16 @@ void main() {
 
         ImGui.Separator();
 
-        bool defaultOpenTaxi = _worldScene.ShowTaxi
-            || _worldScene.SelectedTaxiNodeId >= 0
-            || _worldScene.SelectedTaxiRouteId >= 0
-            || _taxiRideCameraEnabled;
-        if (ImGui.CollapsingHeader("Taxi", defaultOpenTaxi ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None))
-            DrawSelectedTaxiControls();
+        string taxiSummary = _worldScene.SelectedTaxiRouteId >= 0
+            ? $"route {_worldScene.SelectedTaxiRouteId}"
+            : _worldScene.SelectedTaxiNodeId >= 0
+                ? $"node {_worldScene.SelectedTaxiNodeId}"
+                : _taxiRideCameraEnabled
+                    ? "ride active"
+                    : _worldScene.ShowTaxi
+                        ? "visible"
+                        : string.Empty;
+        DrawToolbarPopupButton("Taxi Panel", taxiSummary, "##TaxiPanelPopup", DrawSelectedTaxiControls);
 
         // WL loose liquid files (WLW/WLQ/WLM) — lazy-loaded on first toggle
         if (_worldScene.WlLoader != null && _worldScene.WlLoader.HasData)
@@ -5436,30 +5475,40 @@ void main() {
                         visibleCount++;
                 }
 
-                if (ImGui.SmallButton("Show All"))
-                    liquidRenderer.SetAllWlBodiesVisible(true);
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Hide All"))
-                    liquidRenderer.SetAllWlBodiesVisible(false);
-                ImGui.SameLine();
                 bool hasSelected = !string.IsNullOrWhiteSpace(_wlLayerSelectedBodyKey);
-                if (!hasSelected)
-                    ImGui.BeginDisabled();
-                if (ImGui.SmallButton("Solo Selected"))
+                DrawToolbarPopupButton("WL Body Actions", string.Empty, "##WlBodyActionsPopup", () =>
                 {
-                    liquidRenderer.SetAllWlBodiesVisible(false);
-                    liquidRenderer.SetWlBodyVisible(_wlLayerSelectedBodyKey, true);
-                }
-                if (!hasSelected)
-                    ImGui.EndDisabled();
+                    if (ImGui.Button("Show All"))
+                    {
+                        liquidRenderer.SetAllWlBodiesVisible(true);
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    if (ImGui.Button("Hide All"))
+                    {
+                        liquidRenderer.SetAllWlBodiesVisible(false);
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    if (!hasSelected)
+                        ImGui.BeginDisabled();
+                    if (ImGui.Button("Solo Selected"))
+                    {
+                        liquidRenderer.SetAllWlBodiesVisible(false);
+                        liquidRenderer.SetWlBodyVisible(_wlLayerSelectedBodyKey, true);
+                        ImGui.CloseCurrentPopup();
+                    }
+                    if (!hasSelected)
+                        ImGui.EndDisabled();
+
+                    if (IsWlListIsolationActive && ImGui.Button("Clear List Isolation"))
+                    {
+                        _wlLayerListIsolationEnabled = false;
+                        ImGui.CloseCurrentPopup();
+                    }
+                });
 
                 ImGui.TextDisabled($"Visible: {visibleCount}/{_worldScene.WlLoader.Bodies.Count}");
-                if (IsWlListIsolationActive)
-                {
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton("Clear List Isolation"))
-                        _wlLayerListIsolationEnabled = false;
-                }
 
                 if (ImGui.BeginTable("##wl_layers", 4, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
                 {
@@ -5548,17 +5597,23 @@ void main() {
                 if (ImGui.SliderFloat("Plane Weld Tolerance", ref planeHeightTolerance, 0.05f, 4.00f, "%.2f"))
                     ts.PlaneHeightTolerance = planeHeightTolerance;
 
-                if (ImGui.Button("Apply + Reload WL"))
-                    _worldScene.ReloadWlLiquids();
-
-                ImGui.SameLine();
-                if (ImGui.Button("Print Current WL Transform"))
+                DrawToolbarPopupButton("WL Transform Actions", string.Empty, "##WlTransformActionsPopup", () =>
                 {
-                    ViewerLog.Important(ViewerLog.Category.Terrain,
-                        $"[WL Transform] Enabled={ts.Enabled} SwapXY={ts.SwapXYBeforeRotation} " +
-                        $"Rot=({ts.RotationDegrees.X:F1},{ts.RotationDegrees.Y:F1},{ts.RotationDegrees.Z:F1}) " +
-                        $"Trans=({ts.Translation.X:F1},{ts.Translation.Y:F1},{ts.Translation.Z:F1})");
-                }
+                    if (ImGui.Button("Apply + Reload WL"))
+                    {
+                        _worldScene.ReloadWlLiquids();
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    if (ImGui.Button("Print Current WL Transform"))
+                    {
+                        ViewerLog.Important(ViewerLog.Category.Terrain,
+                            $"[WL Transform] Enabled={ts.Enabled} SwapXY={ts.SwapXYBeforeRotation} " +
+                            $"Rot=({ts.RotationDegrees.X:F1},{ts.RotationDegrees.Y:F1},{ts.RotationDegrees.Z:F1}) " +
+                            $"Trans=({ts.Translation.X:F1},{ts.Translation.Y:F1},{ts.Translation.Z:F1})");
+                        ImGui.CloseCurrentPopup();
+                    }
+                });
 
                 ImGui.TextDisabled("Tune here, then share the printed values to hard-wire final config.");
                 ImGui.TreePop();
@@ -5586,10 +5641,14 @@ void main() {
         }
         else if (!_worldScene.LitLoadAttempted)
         {
-            if (ImGui.Button("Load LIT Lights"))
-                _worldScene.ShowLitLights = true;
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Load Alpha-era World\\<map>\\*.lit data for overlay and inspection, including lights.lit and alternate variants when present.");
+            DrawToolbarPopupButton("LIT Actions", "load", "##LitActionsPopup", () =>
+            {
+                if (ImGui.Button("Load LIT Lights"))
+                {
+                    _worldScene.ShowLitLights = true;
+                    ImGui.CloseCurrentPopup();
+                }
+            });
         }
         else
         {
@@ -5782,10 +5841,14 @@ void main() {
 
         if (!_worldScene.WlLoadAttempted)
         {
-            if (ImGui.Button("Load WL Liquids"))
-                _worldScene.ShowWlLiquids = true; // triggers lazy load
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Load loose WLW/WLQ/WLM liquid project files.\nContains water heightmaps including deleted bodies of water.");
+            DrawToolbarPopupButton("WL Actions", "load", "##WlActionsPopup", () =>
+            {
+                if (ImGui.Button("Load WL Liquids"))
+                {
+                    _worldScene.ShowWlLiquids = true;
+                    ImGui.CloseCurrentPopup();
+                }
+            });
         }
         else if (_worldScene.WlLoadAttempted && (_worldScene.WlLoader == null || !_worldScene.WlLoader.HasData))
         {
@@ -5803,10 +5866,14 @@ void main() {
         }
         else if (!_worldScene.AreaTriggerLoadAttempted)
         {
-            if (ImGui.Button("Load AreaTriggers"))
-                _worldScene.ShowAreaTriggers = true; // triggers lazy load
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Load AreaTrigger.dbc to visualize instance portals,\nevent markers, and script trigger zones.");
+            DrawToolbarPopupButton("AreaTrigger Actions", "load", "##AreaTriggerActionsPopup", () =>
+            {
+                if (ImGui.Button("Load AreaTriggers"))
+                {
+                    _worldScene.ShowAreaTriggers = true;
+                    ImGui.CloseCurrentPopup();
+                }
+            });
         }
         else if (_worldScene.AreaTriggerLoadAttempted && (_worldScene.AreaTriggerLoader == null || _worldScene.AreaTriggerLoader.Count == 0))
         {
@@ -5916,8 +5983,10 @@ void main() {
                 {
                     var poi = _worldScene.PoiLoader.Entries[i];
                     string label = $"[{poi.Id}] {poi.Name}";
-                    if (ImGui.Selectable(label, false, ImGuiSelectableFlags.AllowDoubleClick))
+                    bool isSelected = _selectedAreaPoiId == poi.Id;
+                    if (ImGui.Selectable(label, isSelected, ImGuiSelectableFlags.AllowDoubleClick))
                     {
+                        SelectAreaPoi(poi.Id, toggle: false);
                         if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                         {
                             _camera.Position = poi.Position + new System.Numerics.Vector3(0, 0, 50);
@@ -7880,7 +7949,8 @@ void main() {
             $"[ModelRouting] probe build={_dbcBuild ?? "unknown"} entrypoint={entrypoint} file={sourcePath} ext={ext} magic={GetModelMagicLabel(modelBytes)} md20Version={GetMd20VersionLabel(modelBytes)} container={container}");
     }
 
-    private void LoadModelFromBytesWithContainerProbe(byte[] modelBytes, string sourcePath, string dir, string entrypoint)
+    private void LoadModelFromBytesWithContainerProbe(byte[] modelBytes, string sourcePath, string dir, string entrypoint,
+        IReadOnlyList<string>? explicitTextureVariations = null)
     {
         var container = DetectModelContainer(modelBytes);
         string ext = Path.GetExtension(sourcePath).ToLowerInvariant();
@@ -7899,7 +7969,8 @@ void main() {
                 using (var br = new BinaryReader(ms))
                 {
                     var mdx = MdxFile.Load(br);
-                    LoadMdxModel(mdx, dir, sourcePath, sharedRuntimeInfo: sharedRuntimeInfo);
+                    LoadMdxModel(mdx, dir, sourcePath, sharedRuntimeInfo: sharedRuntimeInfo,
+                        explicitTextureVariations: explicitTextureVariations);
                 }
                 return;
 
@@ -8463,7 +8534,7 @@ void main() {
             }
             else
             {
-                LoadModelFromBytesWithContainerProbe(data, resolvedPath, dir, "Catalog");
+                LoadModelFromBytesWithContainerProbe(data, resolvedPath, dir, "Catalog", entry.TextureVariations);
             }
 
             _window.Title = $"{ViewerProductName} - {entry.Name} ({_loadedFileName})";
@@ -8559,7 +8630,8 @@ void main() {
         }
     }
 
-    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false, MdxRuntimeSharedInfo? sharedRuntimeInfo = null)
+    private void LoadMdxModel(MdxFile mdx, string dir, string? virtualPath = null, bool isM2AdapterModel = false,
+        MdxRuntimeSharedInfo? sharedRuntimeInfo = null, IReadOnlyList<string>? explicitTextureVariations = null)
     {
         _loadedWmo = null;
         _loadedMdx = mdx;
@@ -8591,7 +8663,8 @@ void main() {
         int pivotPointCount = sharedSummary?.PivotPointCount ?? mdx.PivotPoints.Count;
         CoreMdxCollisionSummary? collision = sharedSummary?.Collision;
 
-        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild);
+        _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild,
+            explicitTextureVariations: explicitTextureVariations);
 
         if (sharedRuntimeInfo != null)
         {
@@ -9034,6 +9107,7 @@ void main() {
         _worldScene.SelectedTaxiNodeId = nextNodeId;
         _worldScene.ClearSelection();
         _worldScene.ClearPm4ObjectSelection();
+        ClearSelectedAreaPoiInfo();
 
         if (nextNodeId < 0)
         {
@@ -9053,6 +9127,7 @@ void main() {
         _worldScene.SelectedTaxiRouteId = nextRouteId;
         _worldScene.ClearSelection();
         _worldScene.ClearPm4ObjectSelection();
+        ClearSelectedAreaPoiInfo();
 
         if (nextRouteId < 0)
         {
@@ -9131,6 +9206,54 @@ void main() {
         ClearSelectedTaxiInfo();
     }
 
+    private void SelectAreaPoi(int poiId, bool toggle)
+    {
+        if (_worldScene?.PoiLoader == null)
+            return;
+
+        int nextPoiId = toggle && _selectedAreaPoiId == poiId ? -1 : poiId;
+        _selectedAreaPoiId = nextPoiId;
+        _worldScene.ClearSelection();
+        _worldScene.ClearTaxiSelection();
+        _worldScene.ClearPm4ObjectSelection();
+
+        if (nextPoiId < 0)
+        {
+            ClearSelectedAreaPoiInfo();
+            return;
+        }
+
+        RefreshSelectedAreaPoiInfo();
+    }
+
+    private void RefreshSelectedAreaPoiInfo()
+    {
+        if (_worldScene?.PoiLoader == null || _selectedAreaPoiId < 0)
+        {
+            ClearSelectedAreaPoiInfo();
+            return;
+        }
+
+        AreaPoiLoader.AreaPoiEntry? poi = _worldScene.PoiLoader.Entries
+            .FirstOrDefault(entry => entry.Id == _selectedAreaPoiId);
+        if (poi == null)
+        {
+            ClearSelectedAreaPoiInfo();
+            return;
+        }
+
+        _selectedObjectIndex = -1;
+        _selectedObjectType = "Area POI";
+        _selectedObjectInfo =
+            $"Area POI [{poi.Id}] {poi.Name}\n" +
+            $"Position: ({poi.Position.X:F1}, {poi.Position.Y:F1}, {poi.Position.Z:F1})\n" +
+            $"WoW Position: ({poi.WoWPosition.X:F1}, {poi.WoWPosition.Y:F1}, {poi.WoWPosition.Z:F1})\n" +
+            $"Icon: {poi.Icon}\n" +
+            $"Importance: {poi.Importance}\n" +
+            $"Flags: 0x{poi.Flags:X}\n" +
+            $"Continent ID: {poi.ContinentId}";
+    }
+
     private void RefreshSelectedWorldObjectInfo()
     {
         if (_worldScene == null)
@@ -9144,6 +9267,8 @@ void main() {
             _selectedObjectInfo = "";
             return;
         }
+
+        _selectedAreaPoiId = -1;
 
         ObjectInstance inst = selected.Value;
         string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
@@ -9785,13 +9910,24 @@ void main() {
         _taxiActorModelOverrideTargetRouteId = -1;
     }
 
+    private void ClearSelectedAreaPoiInfo()
+    {
+        _selectedAreaPoiId = -1;
+        if (!string.Equals(_selectedObjectType, "Area POI", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _selectedObjectIndex = -1;
+        _selectedObjectType = "";
+        _selectedObjectInfo = "";
+    }
+
     private bool TryPickTaxiNodeAtMouse(float localX, float localY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj, out int nodeId)
     {
         nodeId = -1;
         if (_worldScene?.TaxiLoader == null || !_worldScene.ShowTaxi)
             return false;
 
-        const float pickRadiusPixels = 18f;
+        const float pickRadiusPixels = 48f;
         float bestDistanceSq = pickRadiusPixels * pickRadiusPixels;
 
         foreach (var node in _worldScene.TaxiLoader.Nodes)
@@ -9823,7 +9959,7 @@ void main() {
 
         Vector2 pointer = new(localX, localY);
 
-        const float handlePickRadiusPixels = 36f;
+        const float handlePickRadiusPixels = 72f;
         float bestHandleDistSq = handlePickRadiusPixels * handlePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -9848,7 +9984,7 @@ void main() {
         if (pathId >= 0)
             return true;
 
-        const float linePickRadiusPixels = 24f;
+        const float linePickRadiusPixels = 56f;
         float bestLineDistSq = linePickRadiusPixels * linePickRadiusPixels;
 
         foreach (var route in _worldScene.TaxiLoader.Routes)
@@ -9876,6 +10012,106 @@ void main() {
         return pathId >= 0;
     }
 
+    private bool TryPickTaxiNodeByRay(Vector3 rayOrigin, Vector3 rayDir, out int nodeId, out float hitDistance)
+    {
+        nodeId = -1;
+        hitDistance = float.MaxValue;
+        if (_worldScene?.TaxiLoader == null || !_worldScene.ShowTaxi)
+            return false;
+
+        foreach (TaxiPathLoader.TaxiNode node in _worldScene.TaxiLoader.Nodes)
+        {
+            if (!_worldScene.IsTaxiNodeVisible(node))
+                continue;
+
+            float localDistance = RayAabbIntersect(
+                rayOrigin,
+                rayDir,
+                node.Position - new Vector3(TaxiNodePickHalfWidth, TaxiNodePickHalfWidth, TaxiNodePickBottomPadding),
+                node.Position + new Vector3(TaxiNodePickHalfWidth, TaxiNodePickHalfWidth, TaxiNodePickTopPadding));
+            if (localDistance < 0f || localDistance >= hitDistance)
+                continue;
+
+            hitDistance = localDistance;
+            nodeId = node.Id;
+        }
+
+        return nodeId >= 0;
+    }
+
+    private bool TryPickTaxiRouteByRay(Vector3 rayOrigin, Vector3 rayDir, out int pathId, out float hitDistance)
+    {
+        pathId = -1;
+        hitDistance = float.MaxValue;
+        if (_worldScene?.TaxiLoader == null || !_worldScene.ShowTaxi)
+            return false;
+
+        foreach (TaxiPathLoader.TaxiRoute route in _worldScene.TaxiLoader.Routes)
+        {
+            if (!_worldScene.IsTaxiRouteVisible(route))
+                continue;
+
+            if (_worldScene.TryGetTaxiRouteSelectionPoint(route.PathId, out Vector3 selectionPoint))
+            {
+                float handleDistance = RayAabbIntersect(
+                    rayOrigin,
+                    rayDir,
+                    selectionPoint - new Vector3(TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickBottomPadding),
+                    selectionPoint + new Vector3(TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickHalfWidth, TaxiRouteHandlePickTopPadding));
+                if (handleDistance >= 0f && handleDistance < hitDistance)
+                {
+                    hitDistance = handleDistance;
+                    pathId = route.PathId;
+                }
+            }
+
+            if (route.Waypoints.Count < 2)
+                continue;
+
+            for (int index = 0; index < route.Waypoints.Count - 1; index++)
+            {
+                Vector3 segmentMin = Vector3.Min(route.Waypoints[index], route.Waypoints[index + 1])
+                    - new Vector3(TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth);
+                Vector3 segmentMax = Vector3.Max(route.Waypoints[index], route.Waypoints[index + 1])
+                    + new Vector3(TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth, TaxiRouteSegmentPickHalfWidth);
+                float segmentDistance = RayAabbIntersect(rayOrigin, rayDir, segmentMin, segmentMax);
+                if (segmentDistance < 0f || segmentDistance >= hitDistance)
+                    continue;
+
+                hitDistance = segmentDistance;
+                pathId = route.PathId;
+            }
+        }
+
+        return pathId >= 0;
+    }
+
+    private bool TryPickAreaPoiAtMouse(float localX, float localY, float viewportWidth, float viewportHeight, Matrix4x4 view, Matrix4x4 proj, out int poiId)
+    {
+        poiId = -1;
+        if (_worldScene?.PoiLoader == null || !_worldScene.ShowPoi)
+            return false;
+
+        const float pickRadiusPixels = 36f;
+        float bestDistanceSq = pickRadiusPixels * pickRadiusPixels;
+        Vector2 pointer = new(localX, localY);
+
+        foreach (AreaPoiLoader.AreaPoiEntry poi in _worldScene.PoiLoader.Entries)
+        {
+            if (!TryProjectWorldToViewport(poi.Position + new Vector3(0f, 0f, 56f), view, proj, viewportWidth, viewportHeight, out Vector2 projected))
+                continue;
+
+            float distSq = Vector2.DistanceSquared(projected, pointer);
+            if (distSq > bestDistanceSq)
+                continue;
+
+            bestDistanceSq = distSq;
+            poiId = poi.Id;
+        }
+
+        return poiId >= 0;
+    }
+
     private static float DistanceSquaredPointToSegment(Vector2 point, Vector2 start, Vector2 end)
     {
         Vector2 segment = end - start;
@@ -9887,6 +10123,37 @@ void main() {
         t = Math.Clamp(t, 0f, 1f);
         Vector2 closest = start + segment * t;
         return Vector2.DistanceSquared(point, closest);
+    }
+
+    private static float RayAabbIntersect(Vector3 origin, Vector3 dir, Vector3 boundsMin, Vector3 boundsMax)
+    {
+        float tmin = 0f;
+        float tmax = float.MaxValue;
+
+        if (!UpdateRayAabbInterval(origin.X, dir.X, boundsMin.X, boundsMax.X, ref tmin, ref tmax)
+            || !UpdateRayAabbInterval(origin.Y, dir.Y, boundsMin.Y, boundsMax.Y, ref tmin, ref tmax)
+            || !UpdateRayAabbInterval(origin.Z, dir.Z, boundsMin.Z, boundsMax.Z, ref tmin, ref tmax))
+        {
+            return -1f;
+        }
+
+        return tmin >= 0f ? tmin : tmax >= 0f ? tmax : -1f;
+    }
+
+    private static bool UpdateRayAabbInterval(float origin, float direction, float min, float max, ref float tmin, ref float tmax)
+    {
+        if (MathF.Abs(direction) < 0.0001f)
+            return origin >= min && origin <= max;
+
+        float invDir = 1f / direction;
+        float t1 = (min - origin) * invDir;
+        float t2 = (max - origin) * invDir;
+        if (t1 > t2)
+            (t1, t2) = (t2, t1);
+
+        tmin = MathF.Max(tmin, t1);
+        tmax = MathF.Min(tmax, t2);
+        return tmax >= tmin;
     }
 
     private void FocusSelectedTaxi()
@@ -9992,7 +10259,9 @@ void main() {
             return;
 
         _taxiActorModelOverrideInputRouteId = routeId;
-        _taxiActorModelOverrideInput = _worldScene.GetTaxiActorModelOverride(routeId) ?? "";
+        _taxiActorModelOverrideInput = _worldScene.GetTaxiActorModelOverride(routeId)
+            ?? _worldScene.GetResolvedTaxiActorModelPath(routeId)
+            ?? "";
     }
 
     private bool TryGetLoadedTaxiActorModelPath(out string modelPath)
@@ -10059,14 +10328,15 @@ void main() {
         float ndcY = 1f - (localY / vpH) * 2f; // flip Y
 
         var (rayOrigin, rayDir) = WorldScene.ScreenToRay(ndcX, ndcY, view, proj);
-        bool hasSceneHit = _worldScene.TryPickSceneObjectByRay(rayOrigin, rayDir, out Terrain.ObjectType sceneHitType, out int sceneHitIndex, out float sceneHitDistance);
-        bool hasPm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out float pm4HitDistance);
+        bool hasPm4Hit = _worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out var _, out _);
         var hoveredPm4Key = _worldScene.ShowPm4Overlay ? _worldScene.HoveredAssetInfo?.Pm4ObjectKey : null;
 
         if (addPm4ToCollection)
         {
+            ClearPendingClickSelection();
             _worldScene.ClearTaxiSelection();
             _worldScene.ClearSelection();
+            ClearSelectedAreaPoiInfo();
 
             var collectionPm4Key = hoveredPm4Key ?? pm4HitKey;
             if (collectionPm4Key.HasValue && _worldScene.SelectPm4Object(collectionPm4Key.Value))
@@ -10082,106 +10352,15 @@ void main() {
             return;
         }
 
-        var hoveredSceneInfo = _worldScene.HoveredAssetInfo;
-        if (hoveredSceneInfo.HasValue
-            && string.Equals(hoveredSceneInfo.Value.AssetKind, "WL liquid", StringComparison.OrdinalIgnoreCase)
-            && TryResolveHoveredWlLiquidBody(hoveredSceneInfo.Value, out WlLiquidBody? hoveredWlBody)
-            && hoveredWlBody != null)
-        {
-            _worldScene.ClearSelection();
-            _worldScene.ClearTaxiSelection();
-            _worldScene.ClearPm4ObjectSelection();
-            SetSelectedWlLiquidBody(
-                hoveredWlBody,
-                isolateInList: true,
-                focusInspectWorkspace: true,
-                statusMessage: $"WL inspect: selected '{hoveredWlBody.Name}' and isolated it in the inspect list.");
+        if (TryHandleSceneClickSelection(mouseX, mouseY, localX, localY, vpW, vpH, view, proj, rayOrigin, rayDir))
             return;
-        }
 
-        if (hoveredPm4Key.HasValue && _worldScene.SelectPm4Object(hoveredPm4Key.Value))
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            _worldScene.ClearTaxiSelection();
-            _worldScene.ClearSelection();
-            UpdateSelectedPm4ObjectInfo(hoveredPm4Key);
-            return;
-        }
-
-        bool selectedHoveredScene = hoveredSceneInfo.HasValue
-            && hoveredSceneInfo.Value.HasSceneObject
-            && _worldScene.SelectSceneObject(hoveredSceneInfo.Value.SceneObjectType, hoveredSceneInfo.Value.SceneObjectIndex);
-
-        if (selectedHoveredScene)
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            _worldScene.ClearTaxiSelection();
-            _worldScene.ClearPm4ObjectSelection();
-        }
-        else if (hasPm4Hit && pm4HitKey.HasValue && (!hasSceneHit || pm4HitDistance <= sceneHitDistance) && _worldScene.SelectPm4Object(pm4HitKey.Value))
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            _worldScene.ClearTaxiSelection();
-            _worldScene.ClearSelection();
-            UpdateSelectedPm4ObjectInfo(pm4HitKey);
-            return;
-        }
-
-        if (TryPickTaxiNodeAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiNodeId))
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            SelectTaxiNode(taxiNodeId, toggle: true);
-            return;
-        }
-
-        if (TryPickTaxiRouteAtMouse(localX, localY, vpW, vpH, view, proj, out int taxiRouteId))
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            SelectTaxiRoute(taxiRouteId, toggle: false);
-            return;
-        }
-
-        if (!selectedHoveredScene && hasSceneHit)
-        {
-            _worldScene.ClearTaxiSelection();
-            _worldScene.SelectObjectByRay(rayOrigin, rayDir);
-        }
-        else if (!selectedHoveredScene)
-        {
-            _worldScene.ClearSelection();
-        }
-
-        // Build info string from the selected instance's embedded metadata
-        var sel = _worldScene.SelectedInstance;
-        if (sel.HasValue)
-        {
-            ClearSelectedWlLiquidBody(clearListIsolation: true);
-            _worldScene.ClearPm4ObjectSelection();
-            var inst = sel.Value;
-            string type = _worldScene.SelectedObjectType == Terrain.ObjectType.Wmo ? "WMO" : "MDX";
-            int idx = _worldScene.SelectedObjectIndex;
-
-            // Convert renderer coords to WoW world coords
-            float wowX = WoWConstants.MapOrigin - inst.PlacementPosition.Y;
-            float wowY = WoWConstants.MapOrigin - inst.PlacementPosition.X;
-            float wowZ = inst.PlacementPosition.Z;
-
-            _selectedObjectType = type;
-            _selectedObjectInfo = $"{type} [{idx}] {inst.ModelName}\n" +
-                $"Path: {inst.ModelPath}\n" +
-                $"UniqueId: {inst.UniqueId}\n" +
-                $"Local: ({inst.PlacementPosition.X:F1}, {inst.PlacementPosition.Y:F1}, {inst.PlacementPosition.Z:F1})\n" +
-                $"WoW:   ({wowX:F1}, {wowY:F1}, {wowZ:F1})\n" +
-                $"Rotation: ({inst.PlacementRotation.X:F1}, {inst.PlacementRotation.Y:F1}, {inst.PlacementRotation.Z:F1})\n" +
-                $"Scale: {inst.PlacementScale:F3}\n" +
-                $"BB: ({inst.BoundsMin.X:F1},{inst.BoundsMin.Y:F1},{inst.BoundsMin.Z:F1}) - ({inst.BoundsMax.X:F1},{inst.BoundsMax.Y:F1},{inst.BoundsMax.Z:F1})";
-            return;
-        }
-
+        ClearPendingClickSelection();
         ClearSelectedWlLiquidBody(clearListIsolation: true);
         _worldScene.ClearSelection();
         _worldScene.ClearTaxiSelection();
         _worldScene.ClearPm4ObjectSelection();
+        ClearSelectedAreaPoiInfo();
         _selectedObjectIndex = -1;
         _selectedObjectType = "";
         _selectedObjectInfo = "";
@@ -11181,6 +11360,9 @@ void main() {
 
     private void SyncImGuiWindowMetrics(Vector2D<int> windowSize, Vector2D<int> framebufferSize)
     {
+        if (_imGui == null || !HasImGuiContext())
+            return;
+
         if (windowSize.X <= 0 || windowSize.Y <= 0 || framebufferSize.X <= 0 || framebufferSize.Y <= 0)
             return;
 
@@ -11201,6 +11383,9 @@ void main() {
         _lastSyncedImGuiWindowSize = windowSize;
         _lastSyncedImGuiFramebufferSize = framebufferSize;
     }
+
+    private static bool HasImGuiContext()
+        => ImGui.GetCurrentContext() != IntPtr.Zero;
 
     private void LoadViewerSettings()
     {
@@ -11251,6 +11436,10 @@ void main() {
                 ? (TextureFilteringMode)settings.TextureFilteringMode
                 : TextureFilteringMode.Trilinear;
             _enableMultisample = settings.EnableMultisample;
+            _enableTerrainBackfaceCulling = settings.EnableTerrainBackfaceCulling;
+            _enableWmoBackfaceCulling = settings.EnableWmoBackfaceCulling;
+            RenderQualitySettings.EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling;
+            RenderQualitySettings.EnableWmoBackfaceCulling = _enableWmoBackfaceCulling;
             _showMinimapWindow = settings.ShowMinimapWindow;
             _useDockspaceUi = false;
             _showLeftSidebar = settings.ShowLeftSidebar;
@@ -11437,6 +11626,8 @@ void main() {
                     : null,
                 TextureFilteringMode = (int)_textureFilteringMode,
                 EnableMultisample = _enableMultisample,
+                EnableTerrainBackfaceCulling = _enableTerrainBackfaceCulling,
+                EnableWmoBackfaceCulling = _enableWmoBackfaceCulling,
                 KnownGoodClientPaths = _knownGoodClientPaths,
                 ShowMinimapWindow = _showMinimapWindow,
                 UseDockspaceUi = false,
@@ -11678,6 +11869,8 @@ void main() {
         public string? LastSelectedBuildVersion { get; set; }
         public int TextureFilteringMode { get; set; } = (int)Rendering.TextureFilteringMode.Trilinear;
         public bool EnableMultisample { get; set; } = true;
+        public bool EnableTerrainBackfaceCulling { get; set; } = true;
+        public bool EnableWmoBackfaceCulling { get; set; }
         public List<KnownGoodClientPath> KnownGoodClientPaths { get; set; } = new();
         public bool ShowMinimapWindow { get; set; } = true;
         public bool UseDockspaceUi { get; set; }

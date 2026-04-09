@@ -398,7 +398,7 @@ public class WmoRenderer : ISceneRenderer
 
         // WMO render order: opaque shell → doodad opaque → liquids → doodad transparent → transparent shell.
         _gl.UseProgram(_shaderProgram);
-        _gl.Disable(EnableCap.CullFace);
+        ApplySurfaceCulling();
 
         var model = modelMatrix;
         _gl.UniformMatrix4(_uModel, 1, false, (float*)&model);
@@ -636,6 +636,18 @@ public class WmoRenderer : ISceneRenderer
         _gl.Uniform1(_uAlphaTest, 0.0f);
         _gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
         _gl.Enable(EnableCap.CullFace);
+    }
+
+    private void ApplySurfaceCulling()
+    {
+        if (_wireframe || !RenderQualitySettings.EnableWmoBackfaceCulling)
+        {
+            _gl.Disable(EnableCap.CullFace);
+            return;
+        }
+
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(TriangleFace.Back);
     }
 
     private static EGxBlend ResolveWmoBlendMode(uint rawBlendMode)

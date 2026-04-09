@@ -1,5 +1,22 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 08, 2026 - Standalone raw classic character models now use a default geoset-selection policy instead of drawing every mutually exclusive character variant together
+
+- followed the still-broken `Character/Tauren/Female/TaurenFemale.mdx` case after the texture resolver fix and confirmed the remaining seam was classic character geoset visibility
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/ReplaceableTextureResolver.cs` now also loads `CharHairGeosets` and `CharacterFacialHairStyles` and can produce a default selection-group set for raw classic character models from the same DBC context already used for character textures
+   - `Rendering/ModelRenderer.cs` now applies that default selection-group set during standalone raw-character MDX initialization, so mutually exclusive character variants no longer all render together by default
+   - `AssetProbe.cs` now reports `SelectionGroup` and `DefaultVisible` for each geoset so the non-UI probe can show the exact visibility policy used for a character render
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 08, 2026 with existing workspace warnings only
+   - `dotnet run --project .\MdxViewer.csproj -c Debug -- --probe-mdx "H:\053-client" "Character/Tauren/Female/TaurenFemale.mdx" --build 0.5.3.3368` reported the repaired textures plus the filtered classic geoset visibility set
+   - standalone runtime capture at `i:/parp/parp-tools/output/tauren_capture_geoset/standalone/0.5.3.3368/standalone/0.5.3.3368/20260408_235429888_current_20260408_235429_no_ui.png` shows a coherent textured Tauren female body instead of the earlier broken all-geosets-visible presentation
+   - follow-up real-data probes on `Character/Human/Male/HumanMale.mdx`, `Character/SCOURGE/Female/ScourgeFemale.mdx`, `Character/Tauren/Male/TaurenMale.mdx`, and `Character/Troll/Female/TrollFemale.mdx` also loaded their expected default body textures and preserved the same default geoset filtering shape instead of rendering every mutually exclusive variant
+   - follow-up standalone runtime captures at `i:/parp/parp-tools/output/character_validation/human_male/standalone/0.5.3.3368/20260409_001239225_current_20260409_001239_no_ui.png`, `i:/parp/parp-tools/output/character_validation/scourge_female/standalone/0.5.3.3368/20260409_001319208_current_20260409_001319_no_ui.png`, `i:/parp/parp-tools/output/character_validation/tauren_male/standalone/0.5.3.3368/20260409_001510190_current_20260409_001510_no_ui.png`, and `i:/parp/parp-tools/output/character_validation/troll_female/standalone/0.5.3.3368/20260409_001548840_current_20260409_001548_no_ui.png` show coherent default raw-character renders for those additional live 0.5.3 samples
+- important boundary:
+   - this is standalone raw-character proof for several live 0.5.3 default race or sex cases, not full closure on character customization breadth
+   - no broader customization UI or full character-composition system landed here
+
 ## Apr 08, 2026 - v0.4.7.1 release prep now packages the taxi, recording, sticky-selection, and standalone-WMO follow-ups while keeping the next architectural move on the `WorldScene` to `wow-viewer` split
 
 - followed the request to cut the current viewer state as `v0.4.7.1` instead of leaving the release metadata and shipped docs on the older `v0.4.7` snapshot

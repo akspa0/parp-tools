@@ -12,6 +12,8 @@ public enum TextureFilteringMode
 public static class RenderQualitySettings
 {
     public static TextureFilteringMode TextureFilteringMode { get; set; } = TextureFilteringMode.Trilinear;
+    public static bool EnableTerrainBackfaceCulling { get; set; } = true;
+    public static bool EnableWmoBackfaceCulling { get; set; }
 
     public static TextureMinFilter GetMinFilter(bool hasMipmaps)
         => TextureFilteringMode switch

@@ -29,13 +29,14 @@ internal static class AssetProbe
         {
             if (args.Length <= probeIndex + 2)
             {
-                Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--listfile <path>]");
+                Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--build <version>] [--listfile <path>]");
                 Environment.ExitCode = 1;
                 return true;
             }
 
             string mdxGamePath = args[probeIndex + 1];
             string mdxModelVirtualPath = args[probeIndex + 2];
+            string? mdxBuildVersion = TryGetOptionValue(args, "--build");
             string? mdxListfilePath = TryGetOptionValue(args, "--listfile");
 
             ViewerLog.Verbose = true;
@@ -43,7 +44,7 @@ internal static class AssetProbe
 
             try
             {
-                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath);
+                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath, mdxBuildVersion);
             }
             catch (Exception ex)
             {
@@ -340,10 +341,12 @@ internal static class AssetProbe
             }));
     }
 
-    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath)
+    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath, string? buildVersion)
     {
         Console.WriteLine($"[AssetProbe] Game path: {gamePath}");
         Console.WriteLine($"[AssetProbe] Model path: {modelVirtualPath}");
+        if (!string.IsNullOrWhiteSpace(buildVersion))
+            Console.WriteLine($"[AssetProbe] Build: {buildVersion}");
         if (!string.IsNullOrWhiteSpace(listfilePath))
             Console.WriteLine($"[AssetProbe] Listfile: {listfilePath}");
 
@@ -365,7 +368,12 @@ internal static class AssetProbe
             sharedMdxGeometry = TryReadSharedMdxGeometry(modelVirtualPath, modelBytes, out sharedMdxGeometryError);
         }
 
-        var mdx = MdxFile.Load(ms);
+    var mdx = MdxFile.Load(ms);
+    ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
+    int? replaceableDisplayIndex = TrySelectReplaceableDisplayIndex(replaceableResolver, modelVirtualPath, mdx);
+        HashSet<uint>? defaultCharacterSelectionGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelVirtualPath) is IReadOnlyCollection<uint> groups
+            ? new HashSet<uint>(groups)
+            : null;
 
         Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
         if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
@@ -391,6 +399,12 @@ internal static class AssetProbe
 
         Console.WriteLine($"[AssetProbe] Version={mdx.Version} Name={mdx.Model.Name}");
         Console.WriteLine($"[AssetProbe] Textures={mdx.Textures.Count} Materials={mdx.Materials.Count} Geosets={(sharedMdxGeometry?.GeosetCount ?? mdx.Geosets.Count)}");
+        if (replaceableDisplayIndex.HasValue && replaceableResolver != null)
+        {
+            int variantCount = replaceableResolver.GetVariantCount(modelVirtualPath);
+            string description = replaceableResolver.GetVariantDescription(modelVirtualPath, replaceableDisplayIndex.Value);
+            Console.WriteLine($"[AssetProbe] ReplaceableDisplayIndex={replaceableDisplayIndex.Value}/{Math.Max(variantCount - 1, 0)} Description={description}");
+        }
         Console.WriteLine();
 
         for (int i = 0; i < mdx.Textures.Count; i++)
@@ -398,7 +412,7 @@ internal static class AssetProbe
             var texture = mdx.Textures[i];
             Console.WriteLine($"Texture[{i}] ReplaceableId={texture.ReplaceableId} Flags=0x{texture.Flags:X8} Path='{texture.Path}'");
 
-            var probe = ProbeTexture(dataSource, modelVirtualPath, texture);
+            var probe = ProbeTexture(dataSource, modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex);
             if (probe == null)
             {
                 Console.WriteLine("  Decode: not found");
@@ -449,7 +463,7 @@ internal static class AssetProbe
             {
                 MdxGeosetGeometry geoset = geometryProbe.Geosets[geosetIndex];
                 Console.WriteLine(
-                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
             }
         }
         else
@@ -458,7 +472,7 @@ internal static class AssetProbe
             {
                 var geoset = mdx.Geosets[geosetIndex];
                 Console.WriteLine(
-                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
             }
         }
     }
@@ -474,9 +488,14 @@ internal static class AssetProbe
         return null;
     }
 
-    private static TextureProbeResult? ProbeTexture(IDataSource dataSource, string modelVirtualPath, MdlTexture texture)
+    private static TextureProbeResult? ProbeTexture(
+        IDataSource dataSource,
+        string modelVirtualPath,
+        MdlTexture texture,
+        ReplaceableTextureResolver? replaceableResolver,
+        int? replaceableDisplayIndex)
     {
-        foreach (string candidate in EnumerateTextureCandidates(modelVirtualPath, texture))
+        foreach (string candidate in EnumerateTextureCandidates(modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex))
         {
             byte[]? data = dataSource.ReadFile(candidate);
             if (data == null)
@@ -514,9 +533,24 @@ internal static class AssetProbe
         return null;
     }
 
-    private static IEnumerable<string> EnumerateTextureCandidates(string modelVirtualPath, MdlTexture texture)
+    private static IEnumerable<string> EnumerateTextureCandidates(
+        string modelVirtualPath,
+        MdlTexture texture,
+        ReplaceableTextureResolver? replaceableResolver,
+        int? replaceableDisplayIndex)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (texture.ReplaceableId > 0 && replaceableResolver != null)
+        {
+            string? resolvedReplaceable = replaceableResolver.Resolve(modelVirtualPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0);
+            if (!string.IsNullOrWhiteSpace(resolvedReplaceable))
+            {
+                string normalized = resolvedReplaceable.Replace('/', '\\').TrimStart('\\');
+                if (seen.Add(normalized))
+                    yield return normalized;
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(texture.Path))
         {
@@ -536,6 +570,56 @@ internal static class AssetProbe
                 }
             }
         }
+    }
+
+    private static ReplaceableTextureResolver? TryCreateReplaceableTextureResolver(MpqDataSource dataSource, string? buildVersion)
+    {
+        if (string.IsNullOrWhiteSpace(buildVersion))
+            return null;
+
+        string? dbdDir = ResolveDbdDefinitionsDir();
+        if (string.IsNullOrWhiteSpace(dbdDir))
+            return null;
+
+        var resolver = new ReplaceableTextureResolver();
+        resolver.SetDataSource(dataSource);
+        resolver.LoadFromDBC(new MpqDBCProvider(dataSource.ArchiveReader), dbdDir, buildVersion);
+        return resolver.IsLoaded ? resolver : null;
+    }
+
+    private static int? TrySelectReplaceableDisplayIndex(ReplaceableTextureResolver? replaceableResolver, string modelVirtualPath, MdxFile mdx)
+    {
+        if (replaceableResolver == null)
+            return null;
+
+        uint[] replaceableIds = mdx.Textures
+            .Where(static texture => texture.ReplaceableId > 0)
+            .Select(static texture => texture.ReplaceableId)
+            .Distinct()
+            .ToArray();
+        if (replaceableIds.Length == 0)
+            return null;
+
+        return replaceableResolver.SelectBestDisplayIndex(modelVirtualPath, replaceableIds);
+    }
+
+    private static string? ResolveDbdDefinitionsDir()
+    {
+        string[] dbdSearchPaths =
+        {
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "lib", "WoWDBDefs", "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "definitions"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WoWDBDefs", "definitions"),
+        };
+
+        foreach (var path in dbdSearchPaths)
+        {
+            string resolved = Path.GetFullPath(path);
+            if (Directory.Exists(resolved) && File.Exists(Path.Combine(resolved, "Map.dbd")))
+                return resolved;
+        }
+
+        return null;
     }
 
     private static TextureProbeResult DecodeTexture(
