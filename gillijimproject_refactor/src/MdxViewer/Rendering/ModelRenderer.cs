@@ -93,6 +93,8 @@ public class MdxRenderer : IModelRenderer
     private readonly bool _enableM2Animation;
     private readonly bool _forceM2SolidDebug;
     private int? _selectedReplaceableDisplayIndex;
+    private int _characterHairVariationId;
+    private int _characterFacialHairVariationId;
 
     // ── Shared shader program (all MdxRenderers use identical shader source) ──
     private static uint _shaderProgram;
@@ -346,6 +348,18 @@ public class MdxRenderer : IModelRenderer
         return true;
     }
 
+    public bool TryApplyCharacterCustomization(IReadOnlyCollection<uint>? wantedGroups, int? hairVariationId = null, int? facialHairVariationId = null, string? reasonLabel = null)
+    {
+        if (!TryApplyCharacterSelectionGroups(wantedGroups, reasonLabel))
+            return false;
+
+        if (!UpdateCharacterTextureVariationState(hairVariationId, facialHairVariationId))
+            return true;
+
+        ReloadCharacterTextures(reasonLabel);
+        return true;
+    }
+
     public void ToggleWireframe()
     {
         _wireframe = !_wireframe;
@@ -387,6 +401,32 @@ public class MdxRenderer : IModelRenderer
                 ViewerLog.Category.Mdx,
                 $"[MDX] Applied {reasonLabel ?? "character geosets"} for {_modelVirtualPath}: visible={_geosets.Count - hiddenCount}/{_geosets.Count}, groups={string.Join(",", wantedGroupSet.OrderBy(static value => value))}");
         }
+    }
+
+    private bool UpdateCharacterTextureVariationState(int? hairVariationId, int? facialHairVariationId)
+    {
+        int resolvedHairVariationId = hairVariationId ?? 0;
+        int resolvedFacialHairVariationId = facialHairVariationId ?? 0;
+        if (_characterHairVariationId == resolvedHairVariationId && _characterFacialHairVariationId == resolvedFacialHairVariationId)
+            return false;
+
+        _characterHairVariationId = resolvedHairVariationId;
+        _characterFacialHairVariationId = resolvedFacialHairVariationId;
+        return true;
+    }
+
+    private void ReloadCharacterTextures(string? reasonLabel)
+    {
+        ReleaseLoadedTextures();
+
+        if (_deferInitialTextureLoads)
+            QueueDeferredTextureLoads();
+        else
+            LoadTextures();
+
+        ViewerLog.Info(
+            ViewerLog.Category.Mdx,
+            $"[MDX] Reloaded character textures for {_modelVirtualPath}: hair={_characterHairVariationId}, facial={_characterFacialHairVariationId}, reason={reasonLabel ?? "character customization"}");
     }
 
     public void RenderWireframeOverlay(Matrix4x4 modelMatrix, Matrix4x4 view, Matrix4x4 proj,
@@ -1820,6 +1860,22 @@ void main() {
         MdxTextureDiagnosticLogger.Close();
     }
 
+    private void ReleaseLoadedTextures()
+    {
+        foreach (var kvp in _textures)
+        {
+            if (_textureCacheKeys.TryGetValue(kvp.Key, out var cacheKey))
+                ReleaseSharedTexture(cacheKey);
+            else
+                _gl.DeleteTexture(kvp.Value);
+        }
+
+        _textures.Clear();
+        _textureCacheKeys.Clear();
+        _textureAlphaKinds.Clear();
+        _pendingTextureLoads.Clear();
+    }
+
     private void InitializeReplaceableTextureVariantSelection()
     {
         if (_texResolver == null || string.IsNullOrWhiteSpace(_modelVirtualPath) || _mdx.Textures.Count == 0)
@@ -2437,7 +2493,7 @@ void main() {
         // Strategy 1: DBCD-based resolver (creatures with DBC entries)
         if (_texResolver != null && _modelVirtualPath != null)
         {
-            string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId, _selectedReplaceableDisplayIndex ?? 0);
+            string? resolved = _texResolver.Resolve(_modelVirtualPath, replaceableId, _selectedReplaceableDisplayIndex ?? 0, _characterHairVariationId, _characterFacialHairVariationId);
             if (resolved != null)
                 return resolved;
         }
@@ -2729,13 +2785,7 @@ void main() {
             _gl.DeleteBuffer(gb.Ebo);
         }
 
-        foreach (var kvp in _textures)
-        {
-            if (_textureCacheKeys.TryGetValue(kvp.Key, out var cacheKey))
-                ReleaseSharedTexture(cacheKey);
-            else
-                _gl.DeleteTexture(kvp.Value);
-        }
+        ReleaseLoadedTextures();
 
         // Don't delete the shared static shader program — other renderers still use it
     }

@@ -495,8 +495,13 @@ internal static class WarcraftNetM2Adapter
 
     private static int ResolveTextureCoordId(ParsedModelData model, int lookupIndex)
     {
-        // Keep the adapted runtime on conservative UV0 ownership for now.
-        // Richer coord-id routing regressed foliage-family assets into broken trunk/detail mapping.
+        if (lookupIndex >= 0 && lookupIndex < model.TextureCoordLookup.Count)
+        {
+            int coordId = model.TextureCoordLookup[lookupIndex].CoordId;
+            if (coordId >= 0)
+                    return coordId;
+        }
+
         return 0;
     }
 

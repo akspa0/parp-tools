@@ -12,6 +12,14 @@ using WoWMapConverter.Core.Converters;
 
 namespace MdxViewer.Rendering;
 
+public readonly record struct WmoDoodadInfo(
+    int Index,
+    string ModelPath,
+    int DoodadDefIndex,
+    Vector3 LocalPosition,
+    bool Visible,
+    bool IsLoaded);
+
 /// <summary>
 /// Renders a WMO (World Map Object) using OpenGL.
 /// Uses WoWMapConverter.Core's WmoV14Data model for geometry.
@@ -286,8 +294,50 @@ public class WmoRenderer : ISceneRenderer
     // DoodadSet management
     public int DoodadSetCount => _wmo.DoodadSets.Count;
     public int ActiveDoodadSet => _activeDoodadSet;
+    public int DoodadInstanceCount => _doodadInstances.Count;
     public string GetDoodadSetName(int index) =>
         index < _wmo.DoodadSets.Count ? (_wmo.DoodadSets[index].Name ?? $"Set {index}") : "";
+
+    public bool TryGetDoodadInfo(int index, out WmoDoodadInfo info)
+    {
+        if (index >= 0 && index < _doodadInstances.Count)
+        {
+            DoodadInstance doodad = _doodadInstances[index];
+            info = new WmoDoodadInfo(
+                index,
+                doodad.ModelPath,
+                doodad.DoodadDefIndex,
+                doodad.LocalPosition,
+                doodad.Visible,
+                doodad.Renderer != null);
+            return true;
+        }
+
+        info = default;
+        return false;
+    }
+
+    public bool TryGetDoodadBounds(int index, in Matrix4x4 modelMatrix, out Vector3 boundsMin, out Vector3 boundsMax)
+    {
+        if (index >= 0 && index < _doodadInstances.Count)
+        {
+            DoodadInstance doodad = _doodadInstances[index];
+            Matrix4x4 doodadWorld = doodad.Transform * modelMatrix;
+            if (doodad.Renderer is IModelRenderer modelRenderer)
+            {
+                TransformAabb(modelRenderer.BoundsMin, modelRenderer.BoundsMax, doodadWorld, out boundsMin, out boundsMax);
+                return true;
+            }
+
+            Vector3 worldPosition = Vector3.Transform(doodad.LocalPosition, modelMatrix);
+            boundsMin = worldPosition - new Vector3(2f);
+            boundsMax = worldPosition + new Vector3(2f);
+            return true;
+        }
+
+        boundsMin = boundsMax = Vector3.Zero;
+        return false;
+    }
 
     public void SetActiveDoodadSet(int index)
     {

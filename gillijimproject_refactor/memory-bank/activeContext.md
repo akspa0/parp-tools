@@ -1,5 +1,54 @@
 # Active Context
 
+## Apr 09, 2026 - MK Dataset rebrand surface and first harvest manifest command are now in place
+
+- followed the request to stop treating the terrain supervision pipeline as a generic `VLM Dataset` surface and start moving the user-facing workflow onto `MK Dataset` naming before deeper reconstruction work
+- active converter and viewer behavior after this slice:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/MkDatasetHarvester.cs` now scans an exported dataset root, audits per-tile source minimap or local/global heightmap or alpha-mask or object or chunk-layer coverage, and writes `mk_dataset_manifest.json`
+	- the same harvester can optionally generate 4096x4096 baked reference minimaps into `reference_minimaps/` using the existing `MinimapBakeService` instead of inventing a second bake path
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now exposes `mk-export`, `mk-decode`, `mk-bake`, `mk-bake-heightmap`, `mk-synth`, `mk-batch`, and the new `mk-harvest` command while keeping the old `vlm-*` names as compatibility aliases
+	- `src/MdxViewer/ViewerApp.cs`, `ViewerApp_MinimapAndStatus.cs`, `Terrain/VlmProjectLoader.cs`, and the active user docs now use `MK Dataset` wording for the visible menu, loader, status, and guide surface instead of continuing to foreground `VLM Project` in the UI
+	- `src/MdxViewer/ViewerApp.cs` now also exposes a dedicated `Harvest MK Dataset...` tools dialog with dataset-root browsing, manifest output selection, reference-minimap options, background execution, live logs, and a direct handoff from the `Generate MK Dataset` dialog via `Harvest Dataset`
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- mk-harvest` reached the new usage surface and printed the expected help text
+- important boundary:
+	- no real exported dataset root under `dataset/*.json` was available in the workspace during this slice, so `mk-harvest` is command-surface and build validated only, not yet real-data verified against a checked-in export
+	- the new viewer harvest dialog is also build validated only; no focused interactive UI retest was captured in this slice
+	- internal implementation namespaces and types still remain under `WoWMapConverter.Core.VLM` for continuity; this slice only moves the public workflow surface to `MK Dataset`
+
+## Apr 09, 2026 - Viewer now exposes exact hovered object paths plus WMO doodad asset inspection for examination work
+
+- followed the request to turn the earlier one-off asset-path idea into a reusable examination surface for WMOs and their MDX/M2 doodads instead of leaving exact paths trapped in transient hover overlays or raw selection text
+- active `src/MdxViewer` behavior after this slice:
+	- `ViewerApp_Investigation.cs` now surfaces the existing hovered world-object path as an interactive `Hovered Asset` panel inside the investigation toolbox, with copy-path, load-asset, and inspect-in-scene actions for hovered WMO and MDX/M2 placements
+	- `ViewerApp_Sidebars.cs` now exposes explicit selected-world-object asset actions and adds a `WMO Doodad Inspector` for both selected world WMOs and standalone loaded WMOs, including exact doodad model paths, visibility/load state, def index, and local position; selecting a doodad row now frames that doodad in-scene and the detail pane exposes an explicit `Frame Doodad` action
+	- `Rendering/WmoRenderer.cs` now exposes a narrow public doodad metadata seam (`WmoDoodadInfo` plus indexed lookup) plus doodad bounds lookup instead of forcing future examination work to read private renderer state
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug --no-restore` passed on Apr 09, 2026 with existing workspace warnings only
+	- `get_errors` returned clean for `Rendering/WmoRenderer.cs`, `ViewerApp.cs`, `ViewerApp_Sidebars.cs`, and `ViewerApp_Investigation.cs`
+- important boundary:
+	- no automated tests were added or run
+	- no live viewer runtime retest was captured yet for the new hover panel or WMO doodad inspector, so treat this as build-validated UI/tooling work rather than runtime signoff
+
+## Apr 09, 2026 - Raw classic character probe diagnostics now expose replaceable candidate paths, and the tested 0.5.3 Human/Tauren variation overrides are still primarily geoset swaps rather than proven hair-texture swaps
+
+- followed the next likely raw-character seam after the variation-id override landed: determine whether the remaining non-default cases were failing on hair or facial replaceable texture resolution or whether the tested assets simply did not expose those texture paths
+- active viewer/probe behavior after this slice:
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now exposes ordered replaceable-resolution candidates for raw-character debugging and broadens the character-directory fallback for replaceable ids `6`, `7`, and `10` from two fixed names to an explicit same-directory scan with candidate scoring
+	- the same resolver now reports diagnostic misses when there is no matching `CharSections` entry and when there are no matching same-directory character textures, so future raw-character probes do not silently collapse to `Decode: not found` without context
+	- `gillijimproject_refactor/src/MdxViewer/AssetProbe.cs` now prints the attempted replaceable candidates and their existence state before decode, so raw-character replaceable failures can be tied to actual file availability instead of only inferred from missing output textures
+- validation completed:
+	- isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-charprobe/"`; the default debug output remained file-locked by a live PowerShell process, so the isolated output was used for real-data probing instead of claiming the normal bin path was rebuilt
+	- `ParpToolsWoWViewer.exe --probe-mdx "H:\053-client" "Character/Human/Male/HumanMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` still reports the expected geoset swap `SelectionGroup=1 -> 2`, but replaceable id `6` now explicitly reports `char-section-hair[var=1]/missing-section` plus two missing same-directory hair-name candidates and still ends in `Decode: not found`
+	- `ParpToolsWoWViewer.exe --probe-mdx "H:\053-client" "Character/Tauren/Male/TaurenMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` still reports the expected geoset swap `SelectionGroup=2 -> 3`, but the raw model only surfaced replaceable ids `1` and `8` in this probe, which means the tested Tauren male hair-variation case is currently geoset-only in practice rather than a demonstrated replaceable-hair-texture swap
+	- `ParpToolsWoWViewer.exe --probe-mdx "H:\053-client" "Character/Human/Male/HumanMale.mdx" --build 0.5.3.3368 --character-facial-variation 1` also did not produce a new facial-hair replaceable slot in the tested raw model output, reinforcing that the current proof is still about selection-group switching more than confirmed texture-family swapping for these specific 0.5.3 assets
+- important boundary:
+	- no automated tests were added or run
+	- this slice materially improves real-data diagnostics and broadens fallback attempts, but it does not prove that every raw classic character variation should have a separate hair or facial replaceable texture on disk
+	- for the tested `HumanMale` and `TaurenMale` 0.5.3 raw-character cases, the strongest current evidence is still geoset-selection correctness, not broad closure on variation-specific hair/facial texture resolution
+
 ## Apr 09, 2026 - Standalone raw classic character MDX inspection now exposes narrow hair and facial variation overrides without claiming a full paperdoll system
 
 - followed the next approved character-model slice after the default geoset fix: add a narrow override surface so validation can move past only variation `0`

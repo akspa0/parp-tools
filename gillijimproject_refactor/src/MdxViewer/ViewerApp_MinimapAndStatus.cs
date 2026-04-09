@@ -330,7 +330,7 @@ public partial class ViewerApp
 
         if (!hasWorldLoaded)
         {
-            ImGui.TextWrapped("Load a world map or VLM project to activate the minimap.");
+            ImGui.TextWrapped("Load a world map or MK dataset project to activate the minimap.");
             ImGui.Spacing();
             ImGui.TextDisabled("Once a world is loaded, the minimap will show loaded tiles, support zoom and pan, and allow triple-click teleport.");
             ImGui.Spacing();

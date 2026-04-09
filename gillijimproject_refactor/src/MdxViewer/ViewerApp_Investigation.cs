@@ -108,6 +108,9 @@ public partial class ViewerApp
         ImGui.TextDisabled("Visibility admission and queued object loads use this multiplier. Default is 0.50x.");
         ImGui.TextDisabled("Balanced/Performance also use FOV-aware projected-size culling and stop queueing tiny off-view assets.");
         ImGui.TextDisabled("MDX 'batched' counts in the stats are shared-shader submissions, not true GPU instancing.");
+
+        ImGui.Separator();
+        DrawHoveredAssetInspectionContent();
     }
 
     private void DrawVisualInvestigationModeButton(VisualInvestigationMode mode, string label, string tooltip)
@@ -139,6 +142,50 @@ public partial class ViewerApp
             VisualInvestigationMode.M2 => "M2/MDX",
             _ => "Auto",
         };
+    }
+
+    private void DrawHoveredAssetInspectionContent()
+    {
+        if (_worldScene == null)
+            return;
+
+        ImGui.Text("Hovered Asset");
+
+        if (_visualInvestigationMode == VisualInvestigationMode.Adt)
+        {
+            ImGui.TextDisabled("Switch to Auto, WMO, or M2/MDX mode to inspect hovered asset paths.");
+            return;
+        }
+
+        if (_worldScene.HoveredAssetInfo is not HoveredAssetInfo info || !ShouldShowHoveredAssetInfoForInvestigation(info))
+        {
+            ImGui.TextDisabled("Hover a WMO or MDX/M2 placement to inspect its exact asset path.");
+            return;
+        }
+
+        ImGui.TextDisabled($"Kind: {info.AssetKind}");
+        ImGui.TextWrapped(info.DisplayName);
+
+        if (!string.IsNullOrWhiteSpace(info.SourcePath))
+            DrawAssetPathActions("Asset Path", info.SourcePath, "HoveredInvestigationAsset");
+
+        if (!string.IsNullOrWhiteSpace(info.DetailLine))
+            ImGui.TextDisabled(info.DetailLine);
+
+        ImGui.TextDisabled($"World: ({info.WorldPosition.X:F1}, {info.WorldPosition.Y:F1}, {info.WorldPosition.Z:F1})");
+
+        if (info.HasSceneObject)
+        {
+            if (ImGui.SmallButton("Inspect Hovered In Scene"))
+            {
+                if (TryInspectHoveredSceneAssetInSelection())
+                    _statusMessage = $"Selected hovered {info.AssetKind}: {info.DisplayName}";
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("This hovered target is not a selectable scene object.");
+        }
     }
 
     private void DrawTerrainChunkInvestigationPanel(bool defaultOpen)

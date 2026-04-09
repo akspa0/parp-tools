@@ -1068,9 +1068,73 @@ public partial class ViewerApp
             return false;
 
         ImGui.TextWrapped(_selectedObjectInfo);
+        if (TryGetSelectedWorldObjectModelPath(out string selectedModelPath, out _))
+        {
+            ImGui.Separator();
+            DrawAssetPathActions("Selected Asset", selectedModelPath, "SelectedWorldObject");
+        }
+
         DrawSelectedWmoControls();
         DrawSelectedSqlGameObjectAnimationControls();
         return true;
+    }
+
+    private void DrawWmoDoodadInspector(WmoRenderer wmoRenderer, ref int selectedDoodadIndex, string idSuffix, Func<WmoDoodadInfo, bool>? frameDoodad)
+    {
+        ImGui.Separator();
+        ImGui.Text("WMO Doodad Inspector");
+
+        int doodadCount = wmoRenderer.DoodadInstanceCount;
+        if (doodadCount <= 0)
+        {
+            selectedDoodadIndex = -1;
+            ImGui.TextDisabled("The active doodad set has no resolved doodads.");
+            return;
+        }
+
+        if (selectedDoodadIndex >= doodadCount)
+            selectedDoodadIndex = -1;
+
+        ImGui.TextDisabled($"Active set: {wmoRenderer.GetDoodadSetName(wmoRenderer.ActiveDoodadSet)}");
+        ImGui.TextDisabled($"Doodads: {doodadCount}");
+
+        float listHeight = MathF.Min(220f, MathF.Max(110f, GetUniformListRowHeight() * Math.Min(doodadCount, 7)));
+        if (ImGui.BeginChild($"##WmoDoodadInspector_{idSuffix}", new Vector2(0, listHeight), true))
+        {
+            for (int doodadIndex = 0; doodadIndex < doodadCount; doodadIndex++)
+            {
+                if (!wmoRenderer.TryGetDoodadInfo(doodadIndex, out WmoDoodadInfo doodad))
+                    continue;
+
+                string label = $"[{doodadIndex}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}";
+                if (!doodad.IsLoaded)
+                    label += " [deferred]";
+                if (!doodad.Visible)
+                    label += " [hidden]";
+
+                bool isSelected = doodadIndex == selectedDoodadIndex;
+                if (ImGui.Selectable($"{label}##{idSuffix}_{doodadIndex}", isSelected))
+                {
+                    selectedDoodadIndex = doodadIndex;
+                    frameDoodad?.Invoke(doodad);
+                }
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(doodad.ModelPath);
+            }
+        }
+        ImGui.EndChild();
+
+        if (selectedDoodadIndex < 0 || !wmoRenderer.TryGetDoodadInfo(selectedDoodadIndex, out WmoDoodadInfo selectedDoodad))
+            return;
+
+        if (frameDoodad != null && ImGui.SmallButton($"Frame Doodad##{idSuffix}_FrameDoodad"))
+            frameDoodad(selectedDoodad);
+
+        DrawAssetPathActions("Doodad Asset", selectedDoodad.ModelPath, $"{idSuffix}_DoodadAsset");
+        ImGui.TextDisabled($"Def Index: {selectedDoodad.DoodadDefIndex}");
+        ImGui.TextDisabled($"Visible: {(selectedDoodad.Visible ? "yes" : "no")}  Loaded: {(selectedDoodad.IsLoaded ? "yes" : "no")}");
+        ImGui.TextDisabled($"Local: ({selectedDoodad.LocalPosition.X:F1}, {selectedDoodad.LocalPosition.Y:F1}, {selectedDoodad.LocalPosition.Z:F1})");
     }
 
     private void DrawObjectPathFilterControls()
@@ -1428,8 +1492,19 @@ public partial class ViewerApp
 
         if (_renderer is WmoRenderer standaloneWmoRenderer)
         {
+            if (TryGetStandaloneWmoAssetPath(out string standaloneWmoAssetPath))
+            {
+                ImGui.Separator();
+                DrawAssetPathActions("WMO Asset", standaloneWmoAssetPath, "StandaloneWmoAsset");
+            }
+
             ImGui.Separator();
             DrawStandaloneWmoGroupControls(standaloneWmoRenderer);
+            DrawWmoDoodadInspector(
+                standaloneWmoRenderer,
+                ref _selectedStandaloneWmoDoodadIndex,
+                "StandaloneWmo",
+                doodad => TryFrameStandaloneWmoDoodad(standaloneWmoRenderer, doodad));
         }
 
         if (_renderer is MdxRenderer standaloneMdxRenderer)
@@ -2056,6 +2131,11 @@ public partial class ViewerApp
 
         ImGui.Text("Groups / Doodads:");
         DrawRendererVisibilityControls(wmoRenderer, "selected_wmo");
+        DrawWmoDoodadInspector(
+            wmoRenderer,
+            ref _selectedWorldWmoDoodadIndex,
+            "SelectedWmo",
+            doodad => TryFrameSelectedWorldWmoDoodad(wmoRenderer, doodad));
     }
 
     private void DrawRendererVisibilityControls(ISceneRenderer renderer, string idSuffix)

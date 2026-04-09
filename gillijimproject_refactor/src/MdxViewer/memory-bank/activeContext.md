@@ -1,5 +1,20 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 09, 2026 - Raw classic character probe diagnostics now show why tested 0.5.3 Human/Tauren overrides are not yet proven as hair/facial texture swaps
+
+- followed the next raw-character seam after the non-default variation-id UI/CLI slice: verify whether the remaining missing non-default appearance details were actually a resolver bug or whether the tested raw models simply did not expose those replaceable texture families
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/ReplaceableTextureResolver.cs` now exposes ordered replaceable-resolution candidates for raw-character debugging, broadens the same-directory fallback scan for replaceable ids `6`, `7`, and `10`, and emits explicit diagnostic misses when no matching `CharSections` entry or same-directory file exists
+   - `AssetProbe.cs` now prints those candidate paths with existence state before decode so raw-character replaceable failures no longer collapse into one opaque `Decode: not found` result
+- validation completed:
+   - isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-charprobe/"`; the normal debug bin remained locked by a live PowerShell process, so the isolated output was used for probing
+   - `--probe-mdx` on `Character/Human/Male/HumanMale.mdx` with `--character-hair-variation 1` still showed the expected geoset swap from `SelectionGroup=1` to `SelectionGroup=2`, but replaceable id `6` now explicitly reports `char-section-hair[var=1]/missing-section` plus missing same-directory hair-name candidates before decode failure
+   - `--probe-mdx` on `Character/Tauren/Male/TaurenMale.mdx` with `--character-hair-variation 1` still showed the expected geoset swap from `SelectionGroup=2` to `SelectionGroup=3`, but the tested raw model exposed only replaceable ids `1` and `8`, so this case remains geoset-only in current proof
+   - `--probe-mdx` on `Character/Human/Male/HumanMale.mdx` with `--character-facial-variation 1` also did not surface a new facial-hair replaceable slot in the tested raw output
+- important boundary:
+   - for the tested 0.5.3 raw-character cases here, the strongest current proof remains selection-group correctness rather than broad confirmation of variation-specific hair/facial texture swaps
+   - no automated tests were added or run
+
 ## Apr 09, 2026 - Standalone raw classic character inspection now has narrow non-default variation overrides for hair and facial-hair geosets
 
 - followed the next raw-character seam after default geoset repair: add a small override surface so standalone classic character validation is not locked to `VariationId 0`

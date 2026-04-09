@@ -20,6 +20,8 @@ public partial class ViewerApp
     private readonly List<CameraShotPoint> _cameraShotPoints = new();
     private readonly Queue<PendingCaptureRequest> _captureQueue = new();
     private PendingCaptureRequest? _activeCaptureRequest;
+    private MkHarvestViewerValidationCapturePlan? _pendingMkHarvestViewerValidationCapturePlan;
+    private ActiveMkHarvestViewerValidationBatch? _activeMkHarvestViewerValidationBatch;
     private int _selectedCameraShotIndex = -1;
     private string _newCameraShotName = "";
     private string _captureOutputDir = Path.Combine(OutputDir, "captures");
@@ -68,6 +70,58 @@ public partial class ViewerApp
         public bool IncludeUi { get; set; }
         public bool Applied { get; set; }
         public bool ExitAfterCapture { get; set; }
+        public bool WaitForSceneReady { get; set; }
+        public int? TargetTileX { get; set; }
+        public int? TargetTileY { get; set; }
+        public int RequiredSettledFrames { get; set; }
+        public int MaxFramesBeforeCapture { get; set; }
+        public int FramesSinceApplied { get; set; }
+        public int SettledFrames { get; set; }
+        public bool TimedOutWaitingForScene { get; set; }
+        public string? CaptureLabel { get; set; }
+        public bool IsMkHarvestViewerValidationCapture { get; set; }
+    }
+
+    private sealed class CaptureQueueOptions
+    {
+        public string? OutputPathOverride { get; init; }
+        public bool WaitForSceneReady { get; init; }
+        public int? TargetTileX { get; init; }
+        public int? TargetTileY { get; init; }
+        public int RequiredSettledFrames { get; init; } = 1;
+        public int MaxFramesBeforeCapture { get; init; } = 1;
+        public string? CaptureLabel { get; init; }
+        public bool IsMkHarvestViewerValidationCapture { get; init; }
+    }
+
+    private sealed class MkHarvestViewerValidationCaptureTile
+    {
+        public string TileName { get; set; } = string.Empty;
+        public int TileX { get; set; }
+        public int TileY { get; set; }
+        public string OutputPath { get; set; } = string.Empty;
+    }
+
+    private sealed class MkHarvestViewerValidationCapturePlan
+    {
+        public string DatasetRoot { get; set; } = string.Empty;
+        public string MapName { get; set; } = string.Empty;
+        public string OutputDirectory { get; set; } = string.Empty;
+        public int RequestedResolution { get; set; }
+        public bool RestoreWorldRequested { get; set; }
+        public List<MkHarvestViewerValidationCaptureTile> Tiles { get; set; } = new();
+    }
+
+    private sealed class ActiveMkHarvestViewerValidationBatch
+    {
+        public required Vector2D<int> PreviousWindowSize { get; init; }
+        public required bool PreviousHideUiChrome { get; init; }
+        public required int PreviousDetailedTileCountOverride { get; init; }
+        public required float PreviousFogStart { get; init; }
+        public required float PreviousFogEnd { get; init; }
+        public required bool PreviousObjectFogEnabled { get; init; }
+        public required int RequestedResolution { get; init; }
+        public int RemainingCaptures { get; set; }
     }
 
     private sealed class ActiveVideoRecording
@@ -364,16 +418,27 @@ public partial class ViewerApp
     }
 
     private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture = false)
+        => EnqueueShotCapture(shot, includeUi, exitAfterCapture, null);
+
+    private void EnqueueShotCapture(CameraShotPoint shot, bool includeUi, bool exitAfterCapture, CaptureQueueOptions? options)
     {
         if (string.IsNullOrWhiteSpace(_captureOutputDir))
             _captureOutputDir = Path.Combine(OutputDir, "captures");
 
-        string safeMap = MakeSafePathSegment(shot.MapName);
-        string safeBuild = MakeSafePathSegment(shot.BuildVersion);
-        string safeShotName = MakeSafePathSegment(shot.Name);
-        string mode = includeUi ? "with_ui" : "no_ui";
-        string fileName = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeShotName}_{mode}.png";
-        string outputPath = Path.Combine(_captureOutputDir, safeMap, safeBuild, fileName);
+        string outputPath;
+        if (!string.IsNullOrWhiteSpace(options?.OutputPathOverride))
+        {
+            outputPath = Path.GetFullPath(options.OutputPathOverride);
+        }
+        else
+        {
+            string safeMap = MakeSafePathSegment(shot.MapName);
+            string safeBuild = MakeSafePathSegment(shot.BuildVersion);
+            string safeShotName = MakeSafePathSegment(shot.Name);
+            string mode = includeUi ? "with_ui" : "no_ui";
+            string fileName = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeShotName}_{mode}.png";
+            outputPath = Path.Combine(_captureOutputDir, safeMap, safeBuild, fileName);
+        }
 
         _captureQueue.Enqueue(new PendingCaptureRequest
         {
@@ -392,8 +457,16 @@ public partial class ViewerApp
             OutputPath = outputPath,
             IncludeUi = includeUi,
             ExitAfterCapture = exitAfterCapture,
+            WaitForSceneReady = options?.WaitForSceneReady == true,
+            TargetTileX = options?.TargetTileX,
+            TargetTileY = options?.TargetTileY,
+            RequiredSettledFrames = Math.Max(1, options?.RequiredSettledFrames ?? 1),
+            MaxFramesBeforeCapture = Math.Max(1, options?.MaxFramesBeforeCapture ?? 1),
+            CaptureLabel = options?.CaptureLabel,
+            IsMkHarvestViewerValidationCapture = options?.IsMkHarvestViewerValidationCapture == true,
         });
 
+        string mode = includeUi ? "with_ui" : "no_ui";
         _statusMessage = $"Queued capture '{shot.Name}' ({mode}).";
     }
 
@@ -419,6 +492,9 @@ public partial class ViewerApp
         if (!request.Applied || request.IncludeUi != includeUi)
             return;
 
+        if (!IsCaptureRequestReady(request))
+            return;
+
         bool ok = TryCaptureFramebufferToPng(request.OutputPath, includeUi);
         _activeCaptureRequest = null;
 
@@ -426,8 +502,217 @@ public partial class ViewerApp
             ? $"Captured shot: {request.OutputPath}"
             : $"Capture failed: {request.OutputPath}";
 
+        if (request.IsMkHarvestViewerValidationCapture)
+        {
+            if (ok)
+                _mkHarvestViewerValidationCompleted++;
+            else
+                _mkHarvestViewerValidationFailed++;
+
+            string timeoutNote = request.TimedOutWaitingForScene ? " after scene-settle timeout" : string.Empty;
+            AppendMkHarvestLogLine(
+                $"{(ok ? "Captured" : "FAILED")} MdxViewer validation minimap {request.CaptureLabel ?? request.Shot.Name}{timeoutNote}: {request.OutputPath}");
+
+            if (_activeMkHarvestViewerValidationBatch != null)
+            {
+                _activeMkHarvestViewerValidationBatch.RemainingCaptures = Math.Max(0, _activeMkHarvestViewerValidationBatch.RemainingCaptures - 1);
+                if (_activeMkHarvestViewerValidationBatch.RemainingCaptures == 0 && _captureQueue.Count == 0)
+                {
+                    RestoreMkHarvestViewerValidationBatch(
+                        $"MdxViewer validation capture batch complete: {_mkHarvestViewerValidationCompleted} saved, {_mkHarvestViewerValidationFailed} failed.");
+                }
+            }
+        }
+
         if (request.ExitAfterCapture)
             _window.Close();
+    }
+
+    private bool IsCaptureRequestReady(PendingCaptureRequest request)
+    {
+        if (!request.WaitForSceneReady)
+            return true;
+
+        request.FramesSinceApplied++;
+
+        if (request.IsMkHarvestViewerValidationCapture && _activeMkHarvestViewerValidationBatch != null)
+        {
+            Vector2D<int> framebufferSize = _window.FramebufferSize;
+            if (framebufferSize.X < _activeMkHarvestViewerValidationBatch.RequestedResolution
+                || framebufferSize.Y < _activeMkHarvestViewerValidationBatch.RequestedResolution)
+            {
+                request.SettledFrames = 0;
+                if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                    return false;
+
+                request.TimedOutWaitingForScene = true;
+                return true;
+            }
+        }
+
+        if (request.TargetTileX is int targetTileX && request.TargetTileY is int targetTileY)
+        {
+            if (_terrainManager == null || !_terrainManager.IsTileLoaded(targetTileX, targetTileY) || _terrainManager.IsStreaming)
+            {
+                request.SettledFrames = 0;
+                if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                    return false;
+
+                request.TimedOutWaitingForScene = true;
+                return true;
+            }
+        }
+
+        request.SettledFrames++;
+        if (request.SettledFrames < request.RequiredSettledFrames)
+        {
+            if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                return false;
+
+            request.TimedOutWaitingForScene = true;
+        }
+
+        return true;
+    }
+
+    private void PromotePendingMkHarvestViewerValidationCapturePlan()
+    {
+        if (_pendingMkHarvestViewerValidationCapturePlan == null || _activeMkHarvestViewerValidationBatch != null)
+            return;
+
+        MkHarvestViewerValidationCapturePlan plan = _pendingMkHarvestViewerValidationCapturePlan;
+        if (_terrainManager == null)
+        {
+            if (!plan.RestoreWorldRequested && HasWorldReturnTarget())
+            {
+                string returnMapName = Path.GetFileNameWithoutExtension(_lastWorldSceneWdtPath!);
+                if (string.Equals(returnMapName, plan.MapName, StringComparison.OrdinalIgnoreCase))
+                {
+                    plan.RestoreWorldRequested = true;
+                    AppendMkHarvestLogLine($"Restoring world '{plan.MapName}' before running the MdxViewer validation capture batch.");
+                    ReturnToLastWorldScene();
+                    return;
+                }
+            }
+
+            AppendMkHarvestLogLine($"Skipping MdxViewer validation captures because world map '{plan.MapName}' is not currently loaded in the viewer.");
+            _pendingMkHarvestViewerValidationCapturePlan = null;
+            return;
+        }
+
+        if (!string.Equals(_terrainManager.MapName, plan.MapName, StringComparison.OrdinalIgnoreCase))
+        {
+            AppendMkHarvestLogLine(
+                $"Skipping MdxViewer validation captures because the current world '{_terrainManager.MapName}' does not match dataset map '{plan.MapName}'.");
+            _pendingMkHarvestViewerValidationCapturePlan = null;
+            return;
+        }
+
+        StartMkHarvestViewerValidationBatch(plan);
+        _pendingMkHarvestViewerValidationCapturePlan = null;
+    }
+
+    private void StartMkHarvestViewerValidationBatch(MkHarvestViewerValidationCapturePlan plan)
+    {
+        if (_terrainManager == null)
+            return;
+
+        int requestedResolution = Math.Clamp(plan.RequestedResolution, 512, 4096);
+        _activeMkHarvestViewerValidationBatch = new ActiveMkHarvestViewerValidationBatch
+        {
+            PreviousWindowSize = _window.Size,
+            PreviousHideUiChrome = _hideUiChrome,
+            PreviousDetailedTileCountOverride = _terrainManager.DetailedTileCountOverride,
+            PreviousFogStart = _terrainManager.Lighting.FogStart,
+            PreviousFogEnd = _terrainManager.Lighting.FogEnd,
+            PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
+            RequestedResolution = requestedResolution,
+            RemainingCaptures = plan.Tiles.Count,
+        };
+
+        _hideUiChrome = true;
+        _window.Size = new Vector2D<int>(requestedResolution, requestedResolution);
+        _terrainManager.DetailedTileCountOverride = Math.Min(25, TerrainManager.MaxManualDetailedTileCount);
+        _terrainManager.Lighting.FogStart = MaxTerrainFogDistance * 0.75f;
+        _terrainManager.Lighting.FogEnd = MaxTerrainFogDistance;
+        if (_worldScene != null)
+            _worldScene.ObjectFogEnabled = false;
+
+        foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
+        {
+            CameraShotPoint shot = BuildMkHarvestViewerValidationShot(plan.MapName, tile);
+            EnqueueShotCapture(
+                shot,
+                includeUi: false,
+                exitAfterCapture: false,
+                new CaptureQueueOptions
+                {
+                    OutputPathOverride = tile.OutputPath,
+                    WaitForSceneReady = true,
+                    TargetTileX = tile.TileX,
+                    TargetTileY = tile.TileY,
+                    RequiredSettledFrames = 6,
+                    MaxFramesBeforeCapture = 600,
+                    CaptureLabel = tile.TileName,
+                    IsMkHarvestViewerValidationCapture = true,
+                });
+        }
+
+        AppendMkHarvestLogLine(
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+    }
+
+    private CameraShotPoint BuildMkHarvestViewerValidationShot(string mapName, MkHarvestViewerValidationCaptureTile tile)
+    {
+        const float capturePitch = -89f;
+        const float captureYaw = 0f;
+        const float captureFovDegrees = 24f;
+
+        float centerX = WoWConstants.MapOrigin - ((tile.TileX + 0.5f) * WoWConstants.ChunkSize);
+        float centerY = WoWConstants.MapOrigin - ((tile.TileY + 0.5f) * WoWConstants.ChunkSize);
+        float desiredSpan = WoWConstants.ChunkSize * 1.10f;
+        float captureHeight = 256f + (desiredSpan / (2f * MathF.Tan((captureFovDegrees * MathF.PI / 180f) * 0.5f)));
+
+        return new CameraShotPoint
+        {
+            Name = $"{tile.TileName}_viewer_validation",
+            MapName = mapName,
+            BuildVersion = GetCurrentCaptureBuildVersion(),
+            PositionX = centerX,
+            PositionY = centerY,
+            PositionZ = captureHeight,
+            Yaw = captureYaw,
+            Pitch = capturePitch,
+            FovDegrees = captureFovDegrees,
+        };
+    }
+
+    private void RestoreMkHarvestViewerValidationBatch(string? statusMessage = null)
+    {
+        if (_activeMkHarvestViewerValidationBatch == null)
+            return;
+
+        ActiveMkHarvestViewerValidationBatch batch = _activeMkHarvestViewerValidationBatch;
+        _activeMkHarvestViewerValidationBatch = null;
+
+        _hideUiChrome = batch.PreviousHideUiChrome;
+        _window.Size = batch.PreviousWindowSize;
+
+        if (_terrainManager != null)
+        {
+            _terrainManager.DetailedTileCountOverride = batch.PreviousDetailedTileCountOverride;
+            _terrainManager.Lighting.FogStart = batch.PreviousFogStart;
+            _terrainManager.Lighting.FogEnd = batch.PreviousFogEnd;
+        }
+
+        if (_worldScene != null)
+            _worldScene.ObjectFogEnabled = batch.PreviousObjectFogEnabled;
+
+        if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            _statusMessage = statusMessage;
+            AppendMkHarvestLogLine(statusMessage);
+        }
     }
 
     private bool TryStartTaxiRideVideoCapture()

@@ -407,6 +407,8 @@ public partial class ViewerApp : IDisposable
     private bool _standaloneWmoOverlayIncludeHiddenGroups = true;
     private int _hoveredStandaloneWmoGroupIndex = -1;
     private int _selectedStandaloneWmoGroupIndex = -1;
+    private int _selectedStandaloneWmoDoodadIndex = -1;
+    private int _selectedWorldWmoDoodadIndex = -1;
     private readonly HashSet<int> _highlightedStandaloneWmoGroupIndices = new();
 
     private sealed class HeightmapMetadata
@@ -650,7 +652,7 @@ public partial class ViewerApp : IDisposable
     private string? _wmoConvertError = null;
     private bool _wmoConvertDone = false;
 
-    // VLM Dataset Generator state
+    // MK Dataset Generator state
     private bool _showVlmExportDialog = false;
     private string _vlmClientPath = "";
     private string _vlmMapName = "development";
@@ -660,6 +662,28 @@ public partial class ViewerApp : IDisposable
     private readonly List<string> _vlmExportLog = new();
     private bool _vlmExportScrollToBottom = false;
     private VlmExportResult? _vlmExportResult = null;
+
+    // MK Dataset harvest state
+    private bool _showMkHarvestDialog = false;
+    private string _mkHarvestDatasetRoot = "";
+    private string _mkHarvestManifestOutputPath = "";
+    private string _mkHarvestReferenceOutputDir = "";
+    private string _mkHarvestViewerValidationOutputDir = "";
+    private bool _mkHarvestGenerateReferenceMinimaps = true;
+    private bool _mkHarvestForceReferenceRegeneration = false;
+    private bool _mkHarvestGenerateViewerValidationMinimaps = true;
+    private bool _mkHarvestForceViewerValidationRegeneration = false;
+    private bool _mkHarvestApplyShadows = true;
+    private bool _mkHarvestInvertAlpha = true;
+    private float _mkHarvestShadowIntensity = 0.5f;
+    private int _mkHarvestViewerValidationResolution = 2048;
+    private bool _mkHarvestRunning = false;
+    private readonly List<string> _mkHarvestLog = new();
+    private bool _mkHarvestScrollToBottom = false;
+    private MkDatasetHarvestResult? _mkHarvestResult = null;
+    private int _mkHarvestViewerValidationQueued = 0;
+    private int _mkHarvestViewerValidationCompleted = 0;
+    private int _mkHarvestViewerValidationFailed = 0;
 
     // Terrain texture transfer state
     private bool _showTerrainTextureTransferDialog = false;
@@ -1110,6 +1134,7 @@ public partial class ViewerApp : IDisposable
 
     private unsafe void OnRender(double dt)
     {
+        PromotePendingMkHarvestViewerValidationCapturePlan();
         PrepareNextCaptureRequest();
 
         // FPS tracking
@@ -1429,6 +1454,8 @@ void main() {
             DrawListfileInputDialog();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
+        if (_showMkHarvestDialog)
+            DrawMkHarvestDialog();
         if (_showTerrainTextureTransferDialog)
             DrawTerrainTextureTransferDialog();
         if (_showAlphaFolderImportScope)
@@ -1509,7 +1536,7 @@ void main() {
                     ImGui.EndMenu();
                 }
 
-                if (ImGui.MenuItem("Open VLM Project..."))
+                if (ImGui.MenuItem("Open MK Dataset..."))
                     _wantOpenVlmProject = true;
 
                 ImGui.Separator();
@@ -1580,10 +1607,16 @@ void main() {
 
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("Generate VLM Dataset..."))
+                if (ImGui.MenuItem("Generate MK Dataset..."))
                 {
                     PrepareVlmExportDialogInputs();
                     _showVlmExportDialog = true;
+                }
+
+                if (ImGui.MenuItem("Harvest MK Dataset..."))
+                {
+                    PrepareMkHarvestDialogInputs();
+                    _showMkHarvestDialog = true;
                 }
 
                 if (ImGui.MenuItem("Terrain Texture Transfer..."))
@@ -1887,7 +1920,7 @@ void main() {
             _wantOpenVlmProject = false;
 
             string? vlmPath = ShowFolderDialogSTA(
-                "Select VLM Project folder (containing dataset/ with JSON files)",
+                "Select MK Dataset folder (containing dataset/ with JSON files)",
                 initialDir: null,
                 showNewFolderButton: false);
 
@@ -4562,9 +4595,9 @@ void main() {
             ImGui.GetIO().DisplaySize.X / 2 - 275,
             ImGui.GetIO().DisplaySize.Y / 2 - 250), ImGuiCond.FirstUseEver);
 
-        if (ImGui.Begin("Generate VLM Dataset", ref _showVlmExportDialog))
+        if (ImGui.Begin("Generate MK Dataset", ref _showVlmExportDialog))
         {
-            ImGui.TextWrapped("Export terrain data from a WoW client folder into a VLM dataset (JSON + PNG). " +
+            ImGui.TextWrapped("Export terrain data from a WoW client folder into an MK dataset (JSON + PNG). " +
                 "Supports Alpha 0.5.3 through Cataclysm 4.0.0.11927 (with additional later-era paths still under validation).");
             ImGui.Spacing();
 
@@ -4650,6 +4683,14 @@ void main() {
                         LoadVlmProject(_vlmExportResult.OutputDirectory);
                     _showVlmExportDialog = false;
                 }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Harvest Dataset"))
+                {
+                    _mkHarvestDatasetRoot = _vlmExportResult.OutputDirectory;
+                    PrepareMkHarvestDialogInputs();
+                    _showMkHarvestDialog = true;
+                }
             }
 
             // Progress log
@@ -4671,6 +4712,147 @@ void main() {
             }
             ImGui.EndChild();
         }
+        ImGui.End();
+    }
+
+    private void DrawMkHarvestDialog()
+    {
+        ImGui.SetNextWindowSize(new Vector2(620, 600), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(
+            ImGui.GetIO().DisplaySize.X / 2 - 310,
+            ImGui.GetIO().DisplaySize.Y / 2 - 300), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("Harvest MK Dataset", ref _showMkHarvestDialog))
+        {
+            ImGui.TextWrapped("Audit an existing MK dataset, build a tile-coverage manifest, optionally bake reference minimaps from exported layers, and queue deterministic high-resolution MdxViewer validation captures for the same tiles.");
+            ImGui.Spacing();
+
+            ImGui.Text("Dataset Root:");
+            ImGui.SetNextItemWidth(-80);
+            string previousDatasetRoot = _mkHarvestDatasetRoot;
+            ImGui.InputText("##mkHarvestDatasetRoot", ref _mkHarvestDatasetRoot, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##mkHarvestDatasetRoot"))
+            {
+                string? result = ShowFolderDialogSTA("Select MK Dataset Root", _mkHarvestDatasetRoot, showNewFolderButton: false);
+                if (!string.IsNullOrWhiteSpace(result))
+                    _mkHarvestDatasetRoot = result;
+            }
+
+            if (!string.Equals(previousDatasetRoot, _mkHarvestDatasetRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                string oldManifestDefault = GenerateMkHarvestManifestPath(previousDatasetRoot);
+                string oldReferenceDefault = GenerateMkReferenceMinimapDirectory(previousDatasetRoot);
+                if (string.IsNullOrWhiteSpace(_mkHarvestManifestOutputPath) || string.Equals(_mkHarvestManifestOutputPath, oldManifestDefault, StringComparison.OrdinalIgnoreCase))
+                    _mkHarvestManifestOutputPath = GenerateMkHarvestManifestPath(_mkHarvestDatasetRoot);
+                if (string.IsNullOrWhiteSpace(_mkHarvestReferenceOutputDir) || string.Equals(_mkHarvestReferenceOutputDir, oldReferenceDefault, StringComparison.OrdinalIgnoreCase))
+                    _mkHarvestReferenceOutputDir = GenerateMkReferenceMinimapDirectory(_mkHarvestDatasetRoot);
+            }
+
+            ImGui.Text("Manifest Output:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##mkHarvestManifestOutput", ref _mkHarvestManifestOutputPath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##mkHarvestManifestOutput"))
+            {
+                string? result = ShowSaveFileDialogSTA(
+                    "Save MK Dataset Manifest",
+                    "JSON Files (*.json)|*.json|All Files (*.*)|*.*",
+                    string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot) ? null : _mkHarvestDatasetRoot,
+                    Path.GetFileName(string.IsNullOrWhiteSpace(_mkHarvestManifestOutputPath) ? "mk_dataset_manifest.json" : _mkHarvestManifestOutputPath));
+                if (!string.IsNullOrWhiteSpace(result))
+                    _mkHarvestManifestOutputPath = result;
+            }
+
+            ImGui.Text("Reference Minimap Output:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##mkHarvestReferenceOutput", ref _mkHarvestReferenceOutputDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##mkHarvestReferenceOutput"))
+            {
+                string? result = ShowFolderDialogSTA("Select reference minimap output directory", _mkHarvestReferenceOutputDir, showNewFolderButton: true);
+                if (!string.IsNullOrWhiteSpace(result))
+                    _mkHarvestReferenceOutputDir = result;
+            }
+
+            ImGui.Text("MdxViewer Validation Output:");
+            ImGui.SetNextItemWidth(-80);
+            ImGui.InputText("##mkHarvestViewerValidationOutput", ref _mkHarvestViewerValidationOutputDir, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##mkHarvestViewerValidationOutput"))
+            {
+                string? result = ShowFolderDialogSTA("Select MdxViewer validation minimap output directory", _mkHarvestViewerValidationOutputDir, showNewFolderButton: true);
+                if (!string.IsNullOrWhiteSpace(result))
+                    _mkHarvestViewerValidationOutputDir = result;
+            }
+
+            ImGui.Spacing();
+            ImGui.Checkbox("Generate reference minimaps", ref _mkHarvestGenerateReferenceMinimaps);
+            ImGui.Checkbox("Force rebuild existing reference minimaps", ref _mkHarvestForceReferenceRegeneration);
+            ImGui.Checkbox("Generate MdxViewer validation minimaps", ref _mkHarvestGenerateViewerValidationMinimaps);
+            ImGui.Checkbox("Force rebuild existing MdxViewer validation minimaps", ref _mkHarvestForceViewerValidationRegeneration);
+            ImGui.Checkbox("Apply shadows in baked references", ref _mkHarvestApplyShadows);
+            ImGui.Checkbox("Invert alpha while baking references", ref _mkHarvestInvertAlpha);
+            ImGui.SetNextItemWidth(180f);
+            ImGui.SliderFloat("Shadow Intensity", ref _mkHarvestShadowIntensity, 0f, 1f, "%.2f");
+            ImGui.SetNextItemWidth(180f);
+            ImGui.SliderInt("Validation Resolution", ref _mkHarvestViewerValidationResolution, 512, 4096);
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Baked references come from exported layers. Validation minimaps are queued through the live MdxViewer world renderer with deterministic one-PNG-per-tile naming.");
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture temporarily hides chrome and resizes the viewer window to the requested square output size while the batch runs.");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            bool hasDatasetRoot = !string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot);
+            bool canHarvest = !_mkHarvestRunning && hasDatasetRoot;
+            if (!canHarvest) ImGui.BeginDisabled();
+            if (ImGui.Button("Harvest Dataset", new Vector2(150, 30)))
+                StartMkHarvest();
+            if (!canHarvest) ImGui.EndDisabled();
+
+            if (_mkHarvestRunning)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1f, 1f, 0f, 1f), "Harvesting...");
+            }
+            else if (_mkHarvestResult != null)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0f, 1f, 0f, 1f),
+                    $"Done: {_mkHarvestResult.TilesProcessed} tiles, {_mkHarvestResult.ReferenceMinimapsGenerated} refs built");
+
+                ImGui.SameLine();
+                if (ImGui.Button("Load Dataset"))
+                    LoadVlmProject(_mkHarvestDatasetRoot);
+            }
+
+            if (_mkHarvestViewerValidationQueued > 0)
+            {
+                ImGui.TextColored(new Vector4(0.7f, 0.85f, 1f, 1f),
+                    $"MdxViewer validation captures: {_mkHarvestViewerValidationCompleted}/{_mkHarvestViewerValidationQueued} complete, {_mkHarvestViewerValidationFailed} failed");
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Log:");
+            float logHeight = ImGui.GetContentRegionAvail().Y - 4;
+            if (ImGui.BeginChild("MkHarvestLog", new Vector2(-1, logHeight), true))
+            {
+                lock (_mkHarvestLog)
+                {
+                    foreach (string line in _mkHarvestLog)
+                        ImGui.TextWrapped(line);
+                }
+
+                if (_mkHarvestScrollToBottom)
+                {
+                    ImGui.SetScrollHereY(1.0f);
+                    _mkHarvestScrollToBottom = false;
+                }
+            }
+            ImGui.EndChild();
+        }
+
         ImGui.End();
     }
 
@@ -4848,6 +5030,157 @@ void main() {
             }
         }
         return Path.Combine(baseDir, $"{prefix}{version}");
+    }
+
+    private static string GenerateMkHarvestManifestPath(string? datasetRoot)
+    {
+        if (string.IsNullOrWhiteSpace(datasetRoot))
+            return string.Empty;
+
+        return Path.Combine(datasetRoot, "mk_dataset_manifest.json");
+    }
+
+    private static string GenerateMkReferenceMinimapDirectory(string? datasetRoot)
+    {
+        if (string.IsNullOrWhiteSpace(datasetRoot))
+            return string.Empty;
+
+        return Path.Combine(datasetRoot, "reference_minimaps");
+    }
+
+    private static string GenerateMkViewerValidationMinimapDirectory(string? datasetRoot)
+    {
+        if (string.IsNullOrWhiteSpace(datasetRoot))
+            return string.Empty;
+
+        return Path.Combine(datasetRoot, "viewer_validation_minimaps");
+    }
+
+    private void AppendMkHarvestLogLine(string message)
+    {
+        lock (_mkHarvestLog)
+        {
+            _mkHarvestLog.Add(message);
+            if (_mkHarvestLog.Count > 2000)
+                _mkHarvestLog.RemoveRange(0, _mkHarvestLog.Count - 1500);
+        }
+
+        _mkHarvestScrollToBottom = true;
+    }
+
+    private MkHarvestViewerValidationCapturePlan? BuildMkHarvestViewerValidationCapturePlan(
+        string datasetRoot,
+        string? outputDirectory,
+        bool forceRegenerate,
+        int requestedResolution,
+        out string? statusMessage)
+    {
+        statusMessage = null;
+
+        if (string.IsNullOrWhiteSpace(datasetRoot))
+        {
+            statusMessage = "Skipping MdxViewer validation captures because no dataset root was provided.";
+            return null;
+        }
+
+        string normalizedDatasetRoot = Path.GetFullPath(datasetRoot);
+        string datasetDirectory = Path.Combine(normalizedDatasetRoot, "dataset");
+        if (!Directory.Exists(datasetDirectory))
+        {
+            statusMessage = $"Skipping MdxViewer validation captures because {datasetDirectory} does not exist.";
+            return null;
+        }
+
+        string validationOutputDirectory = Path.GetFullPath(string.IsNullOrWhiteSpace(outputDirectory)
+            ? GenerateMkViewerValidationMinimapDirectory(normalizedDatasetRoot)
+            : outputDirectory);
+        Directory.CreateDirectory(validationOutputDirectory);
+
+        var plan = new MkHarvestViewerValidationCapturePlan
+        {
+            DatasetRoot = normalizedDatasetRoot,
+            OutputDirectory = validationOutputDirectory,
+            RequestedResolution = Math.Clamp(requestedResolution, 512, 4096)
+        };
+
+        int skippedFiles = 0;
+        foreach (string datasetFile in Directory.GetFiles(datasetDirectory, "*.json"))
+        {
+            string fileName = Path.GetFileName(datasetFile);
+            if (string.Equals(fileName, "texture_database.json", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string tileName = Path.GetFileNameWithoutExtension(datasetFile);
+            if (!TryParseMkDatasetTileCoordinates(tileName, out string mapName, out int tileX, out int tileY))
+            {
+                skippedFiles++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(plan.MapName))
+                plan.MapName = mapName;
+
+            string outputPath = Path.Combine(validationOutputDirectory, $"{tileName}_viewer_validation.png");
+            if (!forceRegenerate && File.Exists(outputPath))
+                continue;
+
+            plan.Tiles.Add(new MkHarvestViewerValidationCaptureTile
+            {
+                TileName = tileName,
+                TileX = tileX,
+                TileY = tileY,
+                OutputPath = outputPath,
+            });
+        }
+
+        plan.Tiles.Sort(static (left, right) =>
+        {
+            int mapCompare = string.Compare(left.TileName, right.TileName, StringComparison.OrdinalIgnoreCase);
+            if (mapCompare != 0)
+                return mapCompare;
+
+            int tileXCompare = left.TileX.CompareTo(right.TileX);
+            return tileXCompare != 0 ? tileXCompare : left.TileY.CompareTo(right.TileY);
+        });
+
+        if (string.IsNullOrWhiteSpace(plan.MapName))
+        {
+            statusMessage = "Skipping MdxViewer validation captures because no dataset tile names could be parsed.";
+            return null;
+        }
+
+        if (plan.Tiles.Count == 0)
+        {
+            statusMessage = skippedFiles > 0
+                ? $"No new MdxViewer validation captures were queued; {skippedFiles} dataset tile file(s) could not be parsed and the rest already had outputs."
+                : "No new MdxViewer validation captures were queued because outputs already exist for every dataset tile.";
+            return null;
+        }
+
+        if (skippedFiles > 0)
+            statusMessage = $"Queued {plan.Tiles.Count} MdxViewer validation capture(s); skipped {skippedFiles} dataset tile file(s) with unparseable names.";
+
+        return plan;
+    }
+
+    private static bool TryParseMkDatasetTileCoordinates(string tileName, out string mapName, out int tileX, out int tileY)
+    {
+        mapName = string.Empty;
+        tileX = 0;
+        tileY = 0;
+
+        string[] parts = tileName.Split('_');
+        if (parts.Length < 3
+            || !int.TryParse(parts[^2], out int fileX)
+            || !int.TryParse(parts[^1], out int fileY))
+        {
+            return false;
+        }
+
+        mapName = string.Join("_", parts[..^2]);
+        tileX = fileY;
+        tileY = fileX;
+        return !string.IsNullOrWhiteSpace(mapName);
     }
 
     private string GetProjectOutputRootDirectory()
@@ -5217,6 +5550,105 @@ void main() {
             finally
             {
                 _vlmExporting = false;
+            }
+        });
+    }
+
+    private void StartMkHarvest()
+    {
+        _mkHarvestRunning = true;
+        _mkHarvestResult = null;
+        lock (_mkHarvestLog) { _mkHarvestLog.Clear(); }
+        _mkHarvestViewerValidationQueued = 0;
+        _mkHarvestViewerValidationCompleted = 0;
+        _mkHarvestViewerValidationFailed = 0;
+
+        string datasetRoot = _mkHarvestDatasetRoot;
+        string? manifestOutputPath = string.IsNullOrWhiteSpace(_mkHarvestManifestOutputPath) ? null : _mkHarvestManifestOutputPath;
+        string? referenceOutputDir = string.IsNullOrWhiteSpace(_mkHarvestReferenceOutputDir) ? null : _mkHarvestReferenceOutputDir;
+        string? viewerValidationOutputDir = string.IsNullOrWhiteSpace(_mkHarvestViewerValidationOutputDir) ? null : _mkHarvestViewerValidationOutputDir;
+        bool generateReferenceMinimaps = _mkHarvestGenerateReferenceMinimaps;
+        bool forceRegenerate = _mkHarvestForceReferenceRegeneration;
+        bool generateViewerValidationMinimaps = _mkHarvestGenerateViewerValidationMinimaps;
+        bool forceViewerValidationRegeneration = _mkHarvestForceViewerValidationRegeneration;
+        bool applyShadows = _mkHarvestApplyShadows;
+        bool invertAlpha = _mkHarvestInvertAlpha;
+        float shadowIntensity = _mkHarvestShadowIntensity;
+        int viewerValidationResolution = _mkHarvestViewerValidationResolution;
+
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                var harvester = new MkDatasetHarvester();
+                var options = new MkDatasetHarvestOptions(
+                    DatasetRoot: datasetRoot,
+                    ManifestOutputPath: manifestOutputPath,
+                    GenerateReferenceMinimaps: generateReferenceMinimaps,
+                    ForceRegenerateReferenceMinimaps: forceRegenerate,
+                    ApplyShadows: applyShadows,
+                    ShadowIntensity: shadowIntensity,
+                    InvertAlpha: invertAlpha,
+                    ReferenceMinimapDirectory: referenceOutputDir);
+
+                var progress = new Progress<string>(msg =>
+                {
+                    lock (_mkHarvestLog)
+                    {
+                        _mkHarvestLog.Add(msg);
+                        if (_mkHarvestLog.Count > 2000)
+                            _mkHarvestLog.RemoveRange(0, _mkHarvestLog.Count - 1500);
+                    }
+
+                    _mkHarvestScrollToBottom = true;
+                });
+
+                MkDatasetHarvestResult result = harvester.HarvestAsync(options, progress)
+                    .GetAwaiter().GetResult();
+                _mkHarvestResult = result;
+
+                if (generateViewerValidationMinimaps)
+                {
+                    MkHarvestViewerValidationCapturePlan? validationPlan = BuildMkHarvestViewerValidationCapturePlan(
+                        datasetRoot,
+                        viewerValidationOutputDir,
+                        forceViewerValidationRegeneration,
+                        viewerValidationResolution,
+                        out string? validationMessage);
+
+                    if (!string.IsNullOrWhiteSpace(validationMessage))
+                        AppendMkHarvestLogLine(validationMessage);
+
+                    if (validationPlan != null)
+                    {
+                        _pendingMkHarvestViewerValidationCapturePlan = validationPlan;
+                        _mkHarvestViewerValidationQueued = validationPlan.Tiles.Count;
+                        AppendMkHarvestLogLine(
+                            $"Queued {validationPlan.Tiles.Count} MdxViewer validation capture(s) at {validationPlan.RequestedResolution}px into {validationPlan.OutputDirectory}.");
+                    }
+                }
+
+                lock (_mkHarvestLog)
+                {
+                    _mkHarvestLog.Add($"=== Harvest complete: {result.TilesProcessed} tiles, {result.TilesWithAlphaMasks} with alpha masks, {result.ReferenceMinimapsGenerated} reference minimaps generated ===");
+                    _mkHarvestLog.Add($"Manifest: {result.ManifestPath}");
+                }
+
+                _mkHarvestScrollToBottom = true;
+            }
+            catch (Exception ex)
+            {
+                lock (_mkHarvestLog)
+                {
+                    _mkHarvestLog.Add($"ERROR: {ex.Message}");
+                    _mkHarvestLog.Add(ex.StackTrace ?? string.Empty);
+                }
+
+                _mkHarvestScrollToBottom = true;
+            }
+            finally
+            {
+                _mkHarvestRunning = false;
             }
         });
     }
@@ -6492,6 +6924,29 @@ void main() {
             _vlmOutputDir = GenerateVlmOutputPath(_vlmClientPath, _vlmMapName);
     }
 
+    private void PrepareMkHarvestDialogInputs()
+    {
+        string? datasetRoot = null;
+        if (!string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot))
+            datasetRoot = _mkHarvestDatasetRoot;
+        else if (_vlmExportResult != null && !string.IsNullOrWhiteSpace(_vlmExportResult.OutputDirectory))
+            datasetRoot = _vlmExportResult.OutputDirectory;
+        else if (_vlmTerrainManager != null)
+            datasetRoot = _vlmTerrainManager.Loader.ProjectRoot;
+
+        if (!string.IsNullOrWhiteSpace(datasetRoot))
+            _mkHarvestDatasetRoot = datasetRoot;
+
+        if (string.IsNullOrWhiteSpace(_mkHarvestManifestOutputPath))
+            _mkHarvestManifestOutputPath = GenerateMkHarvestManifestPath(_mkHarvestDatasetRoot);
+
+        if (string.IsNullOrWhiteSpace(_mkHarvestReferenceOutputDir))
+            _mkHarvestReferenceOutputDir = GenerateMkReferenceMinimapDirectory(_mkHarvestDatasetRoot);
+
+        if (string.IsNullOrWhiteSpace(_mkHarvestViewerValidationOutputDir))
+            _mkHarvestViewerValidationOutputDir = GenerateMkViewerValidationMinimapDirectory(_mkHarvestDatasetRoot);
+    }
+
     private void PrepareTerrainTextureTransferDialogInputs()
     {
         string? overlayMapDir = TryResolveCurrentMapDirectory(preferLooseOverlay: true);
@@ -6804,6 +7259,113 @@ void main() {
 
         ImGui.SetClipboardText(text);
         _statusMessage = $"Copied {description} to clipboard.";
+    }
+
+    private static string NormalizeAssetPathForUi(string assetPath)
+        => string.IsNullOrWhiteSpace(assetPath)
+            ? string.Empty
+            : assetPath.Trim().Replace('/', '\\');
+
+    private bool CanLoadAssetFromDataSource(string assetPath)
+        => _dataSource != null
+            && !string.IsNullOrWhiteSpace(assetPath)
+            && !Path.IsPathRooted(assetPath);
+
+    private void FramePoint(Vector3 target, float radius = 2f)
+    {
+        float effectiveRadius = MathF.Max(radius, 1f);
+        float distance = MathF.Max(effectiveRadius * 4f, 12f);
+        Vector3 cameraPosition = target + new Vector3(-distance, 0f, effectiveRadius * 1.2f);
+        Vector3 lookDirection = Vector3.Normalize(target - cameraPosition);
+
+        _camera.Position = cameraPosition;
+        _camera.Yaw = MathF.Atan2(lookDirection.Y, lookDirection.X) * (180f / MathF.PI);
+        _camera.Pitch = MathF.Asin(Math.Clamp(lookDirection.Z, -1f, 1f)) * (180f / MathF.PI);
+    }
+
+    private bool TryFrameStandaloneWmoDoodad(WmoRenderer wmoRenderer, WmoDoodadInfo doodad)
+    {
+        if (wmoRenderer.TryGetDoodadBounds(doodad.Index, Matrix4x4.Identity, out Vector3 boundsMin, out Vector3 boundsMax))
+        {
+            FrameBounds(boundsMin, boundsMax, mdxMirrorX: false);
+            _statusMessage = $"Framed standalone WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
+            return true;
+        }
+
+        FramePoint(doodad.LocalPosition, radius: 2f);
+        _statusMessage = $"Framed standalone WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
+        return true;
+    }
+
+    private bool TryFrameSelectedWorldWmoDoodad(WmoRenderer wmoRenderer, WmoDoodadInfo doodad)
+    {
+        if (_worldScene?.SelectedInstance is not ObjectInstance selectedInstance)
+            return false;
+
+        if (wmoRenderer.TryGetDoodadBounds(doodad.Index, selectedInstance.Transform, out Vector3 boundsMin, out Vector3 boundsMax))
+        {
+            FrameBounds(boundsMin, boundsMax, mdxMirrorX: false);
+            _statusMessage = $"Framed world WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
+            return true;
+        }
+
+        Vector3 worldPosition = Vector3.Transform(doodad.LocalPosition, selectedInstance.Transform);
+        FramePoint(worldPosition, radius: 2f);
+        _statusMessage = $"Framed world WMO doodad [{doodad.Index}] {Path.GetFileNameWithoutExtension(doodad.ModelPath)}.";
+        return true;
+    }
+
+    private void DrawAssetPathActions(string label, string assetPath, string idSuffix)
+    {
+        string normalizedPath = NormalizeAssetPathForUi(assetPath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            ImGui.TextDisabled($"{label}: unavailable");
+            return;
+        }
+
+        ImGui.Text(label);
+        if (ImGui.SmallButton($"Copy Path##{idSuffix}"))
+            CopyTextToClipboard(normalizedPath, "asset path");
+
+        ImGui.SameLine();
+        bool canLoad = CanLoadAssetFromDataSource(normalizedPath);
+        if (!canLoad)
+            ImGui.BeginDisabled();
+        if (ImGui.SmallButton($"Load Asset##{idSuffix}"))
+            LoadFileFromDataSource(normalizedPath);
+        if (!canLoad)
+            ImGui.EndDisabled();
+
+        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 520f);
+        ImGui.TextDisabled(normalizedPath);
+        ImGui.PopTextWrapPos();
+    }
+
+    private bool TryGetStandaloneWmoAssetPath(out string assetPath)
+    {
+        assetPath = string.Empty;
+        if (_renderer is not WmoRenderer || string.IsNullOrWhiteSpace(_lastVirtualPath))
+            return false;
+
+        assetPath = NormalizeAssetPathForUi(_lastVirtualPath);
+        return !string.IsNullOrWhiteSpace(assetPath);
+    }
+
+    private bool TryInspectHoveredSceneAssetInSelection()
+    {
+        if (_worldScene?.HoveredAssetInfo is not HoveredAssetInfo info || !info.HasSceneObject)
+            return false;
+
+        if (!_worldScene.SelectSceneObject(info.SceneObjectType, info.SceneObjectIndex))
+            return false;
+
+        ClearSelectedWlLiquidBody(clearListIsolation: true);
+        _worldScene.ClearTaxiSelection();
+        _worldScene.ClearPm4ObjectSelection();
+        ClearSelectedAreaPoiInfo();
+        RefreshSelectedWorldObjectInfo();
+        return true;
     }
 
     private void ApplyTaxiActorModelOverride(int routeId, string? modelPath)
@@ -9129,7 +9691,11 @@ void main() {
         string reasonLabel = _standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0
             ? $"character geosets (hair={FormatStandaloneCharacterVariationLabel(_standaloneCharacterHairVariationOverride)}, facial={FormatStandaloneCharacterVariationLabel(_standaloneCharacterFacialHairVariationOverride)})"
             : "default character geosets";
-        mdxRenderer.TryApplyCharacterSelectionGroups(selectedGroups, reasonLabel);
+        mdxRenderer.TryApplyCharacterCustomization(
+            selectedGroups,
+            _standaloneCharacterHairVariationOverride >= 0 ? _standaloneCharacterHairVariationOverride : null,
+            _standaloneCharacterFacialHairVariationOverride >= 0 ? _standaloneCharacterFacialHairVariationOverride : null,
+            reasonLabel);
     }
 
     private static string FormatStandaloneCharacterVariationLabel(int variationId)
@@ -9151,7 +9717,7 @@ void main() {
 
     private void LoadVlmProject(string projectRoot)
     {
-        _statusMessage = $"Loading VLM project from {projectRoot}...";
+        _statusMessage = $"Loading MK dataset from {projectRoot}...";
 
         // Clean up any existing scene
         InvalidatePm4DerivedReports();
@@ -9175,7 +9741,7 @@ void main() {
             _camera.Pitch = -20f;
 
             var loader = _vlmTerrainManager.Loader;
-            _modelInfo = $"Type: VLM Project\n" +
+            _modelInfo = $"Type: MK Dataset\n" +
                          $"Map: {loader.MapName}\n" +
                          $"Path: {projectRoot}\n\n" +
                          $"Tiles: {loader.TileCoords.Count}\n" +
@@ -9187,13 +9753,13 @@ void main() {
             var vlmMapDef = _discoveredMaps.FirstOrDefault(m =>
                 string.Equals(m.Directory, loader.MapName, StringComparison.OrdinalIgnoreCase));
             _currentMapId = vlmMapDef?.Id ?? -1;
-            _statusMessage = $"Loaded VLM project: {loader.MapName} ({loader.TileCoords.Count} tiles)";
+            _statusMessage = $"Loaded MK dataset: {loader.MapName} ({loader.TileCoords.Count} tiles)";
         }
         catch (Exception ex)
         {
             ViewerLog.Trace($"[ViewerApp] VLM project load failed: {ex}");
-            _statusMessage = $"VLM load failed: {ex.Message}";
-            _modelInfo = $"VLM load error:\n{ex.Message}\n\nPath: {projectRoot}";
+            _statusMessage = $"MK dataset load failed: {ex.Message}";
+            _modelInfo = $"MK dataset load error:\n{ex.Message}\n\nPath: {projectRoot}";
             _vlmTerrainManager?.Dispose();
             _vlmTerrainManager = null;
         }

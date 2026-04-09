@@ -227,17 +227,17 @@ These converters handle the significant format differences between WoW versions,
 
 ---
 
-## VLM Dataset (Versioned Layered Map)
+## MK Dataset
 
-VLM is an open interchange format for WoW map data, designed primarily for:
+MK Dataset is the user-facing name for the open interchange format used for WoW map data, designed primarily for:
 
 1. **Machine Learning** — Structured, normalized terrain data suitable for training ML models (heightmaps, alpha maps, shadow maps, depth maps, liquid masks)
 2. **Preservation** — Archiving hobbyist map work in a non-proprietary format that doesn't depend on WoW client tools
 3. **Cross-version portability** — A common representation that can be imported/exported to any WoW version
 
-### What's in a VLM Dataset?
+### What's in an MK Dataset?
 
-A VLM dataset is a directory of standardized image and metadata files per map tile:
+An MK dataset is a directory of standardized image and metadata files per map tile:
 
 | Layer | Format | Description |
 |-------|--------|-------------|
@@ -249,26 +249,26 @@ A VLM dataset is a directory of standardized image and metadata files per map ti
 | **Minimap** | RGB PNG | Baked minimap tile images |
 | **Metadata** | JSON | Tile coordinates, texture references, area IDs, layer info |
 
-### VLM Commands
+### MK Commands
 
 ```bash
-# Export a WoW map to VLM dataset
-WoWMapConverter vlm-export --in path/to/game --map Azeroth --out vlm_output/
+# Export a WoW map to MK dataset
+WoWMapConverter mk-export --in path/to/game --map Azeroth --out mk_output/
 
-# Decode a VLM dataset back to viewable images
-WoWMapConverter vlm-decode --in vlm_output/ --out decoded/
+# Decode an MK dataset back to viewable images
+WoWMapConverter mk-decode --in mk_output/ --out decoded/
 
-# Bake VLM layers into composite images
-WoWMapConverter vlm-bake --in vlm_output/ --out baked/
+# Bake MK layers into composite images
+WoWMapConverter mk-bake --in mk_output/ --out baked/
 
 # Bake heightmaps only (for ML training data)
-WoWMapConverter vlm-bake-heightmap --in vlm_output/ --out heightmaps/
+WoWMapConverter mk-bake-heightmap --in mk_output/ --out heightmaps/
 
-# Synthesize new terrain from VLM data
-WoWMapConverter vlm-synth --in vlm_output/ --out synthesized/
+# Synthesize new terrain from MK data
+WoWMapConverter mk-synth --in mk_output/ --out synthesized/
 
 # Batch export multiple maps using a config file
-WoWMapConverter vlm-batch --config batch_config.json
+WoWMapConverter mk-batch --config batch_config.json
 ```
 
 ### Batch Export Config
@@ -278,21 +278,21 @@ For exporting multiple maps at once, create a JSON config file:
 ```json
 {
   "GamePath": "path/to/game",
-  "OutputRoot": "vlm_datasets/",
+  "OutputRoot": "mk_datasets/",
   "Maps": ["Azeroth", "Kalimdor", "development"],
   "Layers": ["heightmap", "alpha", "shadow", "liquid", "minimap"],
   "TileSize": 256
 }
 ```
 
-### Loading VLM in MdxViewer
+### Loading MK Dataset in MdxViewer
 
-MdxViewer can load VLM datasets directly for visualization:
+MdxViewer can load MK datasets directly for visualization:
 ```
-MdxViewer.exe path/to/vlm_dataset/
+MdxViewer.exe path/to/mk_dataset/
 ```
 
-The viewer detects the VLM project structure and renders the terrain from the dataset's heightmaps and textures, allowing you to visually inspect exported data.
+The viewer detects the MK dataset structure and renders the terrain from the dataset's heightmaps and textures, allowing you to visually inspect exported data.
 
 ---
 

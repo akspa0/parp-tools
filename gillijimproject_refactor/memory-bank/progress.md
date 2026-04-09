@@ -1,5 +1,37 @@
 # Progress
 
+### Apr 09, 2026 - Added the first MK Dataset harvest manifest command and moved the active UI or CLI surface off the old VLM wording
+
+- followed the new terrain-reconstruction direction by landing the first dataset-contract slice before any U-Net work: harvesting coverage, reference-minimap generation, and public naming cleanup
+- landed active behavior:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/MkDatasetHarvester.cs` now emits `mk_dataset_manifest.json` with per-tile coverage for source minimaps, local/global heightmaps, alpha masks, objects, chunk layers, and optional baked reference minimaps
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now routes `mk-harvest` plus `mk-export`, `mk-decode`, `mk-bake`, `mk-bake-heightmap`, `mk-synth`, and `mk-batch`, while preserving the old `vlm-*` commands as compatibility aliases
+	- `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`, `src/MdxViewer/Terrain/VlmProjectLoader.cs`, `docs/VLM_DATASET_EXPORTER.md`, `docs/VLM_Training_Guide.md`, `plans/vlm_dataset_reconstruction_plan_2026-03-31.md`, and `src/MdxViewer/USERGUIDE.md` now present the surface as `MK Dataset`
+	- `src/MdxViewer/ViewerApp.cs` now exposes a real `Harvest MK Dataset` dialog in the tools menu, with folder pickers, manifest-path selection, reference-minimap toggles, live logs, and a one-click handoff from the export dialog so harvesting does not depend on CLI use
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Apr 09, 2026 with existing warnings only
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing warnings only
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- mk-harvest` printed the expected usage text
+- proof boundary:
+	- no real checked-in dataset export was available for `mk-harvest`, so this is still build and command-surface proof, not real-data signoff for harvest manifests or baked references
+	- the new viewer harvest dialog is also build validated only; no interactive runtime capture or click-through was recorded yet
+	- no ML or segmentation code landed yet; the next slice is still real-data harvesting and curation, not model training closure
+
+### Apr 09, 2026 - Added raw-character replaceable candidate diagnostics and confirmed the tested 0.5.3 Human/Tauren variation overrides are still mostly geoset-only proofs
+
+- followed the next likely gap after the variation-id override slice: determine whether missing non-default raw-character renders were really blocked on replaceable hair/facial textures or whether the tested assets simply did not expose those texture families on disk
+- landed active viewer behavior:
+	- `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now exposes ordered replaceable-resolution candidates for probe/debug use, broadens the same-directory fallback for replaceable ids `6`, `7`, and `10`, and reports explicit diagnostic misses when no `CharSections` entry or same-directory texture match exists
+	- `src/MdxViewer/AssetProbe.cs` now prints those candidate paths with existence state before decode so raw-character replaceable failures are observable instead of inferred only from `Decode: not found`
+- validation completed:
+	- isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-charprobe/"`; the normal debug output path remained locked by a live PowerShell process, so it was not used for the probe run
+	- isolated real-data probe on `Character/Human/Male/HumanMale.mdx` with `--character-hair-variation 1` still showed the expected selection-group swap from `1` to `2`, but replaceable id `6` now explicitly reports `char-section-hair[var=1]/missing-section` plus missing same-directory hair-name candidates before ending in `Decode: not found`
+	- isolated real-data probe on `Character/Tauren/Male/TaurenMale.mdx` with `--character-hair-variation 1` still showed the expected selection-group swap from `2` to `3`, but the raw model exposed only replaceable ids `1` and `8` in this case, so the proof remains geoset-only for Tauren male hair variation
+	- isolated real-data probe on `Character/Human/Male/HumanMale.mdx` with `--character-facial-variation 1` likewise did not surface a new facial-hair replaceable slot in the tested raw model output
+- proof boundary:
+	- no automated tests were added or run
+	- this slice improves diagnostics and fallback attempts, but it does not prove broad variation-specific hair/facial texture ownership for the tested 0.5.3 raw-character assets
+
 ### Apr 09, 2026 - Added scriptable standalone raw-character variation overrides for classic hair and facial-hair geosets
 
 - followed the approved next step after default geoset repair: add a narrow override surface for raw classic character `VariationId` selection instead of leaving standalone validation locked to only variation `0`

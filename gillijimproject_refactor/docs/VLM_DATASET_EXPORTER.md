@@ -1,16 +1,18 @@
-# VLM Dataset Exporter - Reference
+# MK Dataset Exporter - Reference
+
+This document now describes the MK Dataset surface. Existing `vlm-*` commands remain as compatibility aliases, but new work should use `mk-*` naming.
 
 ## Quick Start
 
 ### Batch Export All Maps
 ```bash
 cd src/WoWMapConverter/WoWMapConverter.Cli
-dotnet run -- vlm-export --client "H:\053-client\" --batch-all --out "J:\vlm-datasets"
+dotnet run -- mk-export --client "H:\053-client\" --batch-all --out "J:\mk-datasets"
 ```
 
 ### Single Map Export
 ```bash
-dotnet run -- vlm-export --client "H:\053-client\" --map Azeroth --out "J:\vlm-datasets"
+dotnet run -- mk-export --client "H:\053-client\" --map Azeroth --out "J:\mk-datasets"
 ```
 
 ---

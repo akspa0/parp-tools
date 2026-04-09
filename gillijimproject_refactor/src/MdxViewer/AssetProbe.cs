@@ -430,7 +430,18 @@ internal static class AssetProbe
             var texture = mdx.Textures[i];
             Console.WriteLine($"Texture[{i}] ReplaceableId={texture.ReplaceableId} Flags=0x{texture.Flags:X8} Path='{texture.Path}'");
 
-            var probe = ProbeTexture(dataSource, modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex);
+            if (texture.ReplaceableId > 0 && replaceableResolver != null)
+            {
+                PrintReplaceableResolutionCandidates(
+                    replaceableResolver.GetReplaceableResolutionCandidates(
+                        modelVirtualPath,
+                        texture.ReplaceableId,
+                        replaceableDisplayIndex ?? 0,
+                        characterHairVariationId,
+                        characterFacialVariationId));
+            }
+
+            var probe = ProbeTexture(dataSource, modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex, characterHairVariationId, characterFacialVariationId);
             if (probe == null)
             {
                 Console.WriteLine("  Decode: not found");
@@ -522,14 +533,35 @@ internal static class AssetProbe
         return null;
     }
 
+    private static void PrintReplaceableResolutionCandidates(IReadOnlyList<ReplaceableTextureResolver.ReplaceableResolutionCandidate> candidates)
+    {
+        if (candidates.Count == 0)
+        {
+            Console.WriteLine("  ReplaceableCandidates: none");
+            return;
+        }
+
+        const int maxPrintedCandidates = 12;
+        for (int index = 0; index < candidates.Count && index < maxPrintedCandidates; index++)
+        {
+            var candidate = candidates[index];
+            Console.WriteLine($"  Candidate[{index}] Source={candidate.Source} Exists={candidate.Exists} Path={candidate.Path}");
+        }
+
+        if (candidates.Count > maxPrintedCandidates)
+            Console.WriteLine($"  Candidate[+] {candidates.Count - maxPrintedCandidates} more candidates omitted");
+    }
+
     private static TextureProbeResult? ProbeTexture(
         IDataSource dataSource,
         string modelVirtualPath,
         MdlTexture texture,
         ReplaceableTextureResolver? replaceableResolver,
-        int? replaceableDisplayIndex)
+        int? replaceableDisplayIndex,
+        int? characterHairVariationId,
+        int? characterFacialVariationId)
     {
-        foreach (string candidate in EnumerateTextureCandidates(modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex))
+        foreach (string candidate in EnumerateTextureCandidates(modelVirtualPath, texture, replaceableResolver, replaceableDisplayIndex, characterHairVariationId, characterFacialVariationId))
         {
             byte[]? data = dataSource.ReadFile(candidate);
             if (data == null)
@@ -571,16 +603,20 @@ internal static class AssetProbe
         string modelVirtualPath,
         MdlTexture texture,
         ReplaceableTextureResolver? replaceableResolver,
-        int? replaceableDisplayIndex)
+        int? replaceableDisplayIndex,
+        int? characterHairVariationId,
+        int? characterFacialVariationId)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         if (texture.ReplaceableId > 0 && replaceableResolver != null)
         {
-            string? resolvedReplaceable = replaceableResolver.Resolve(modelVirtualPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0);
-            if (!string.IsNullOrWhiteSpace(resolvedReplaceable))
+            foreach (var candidate in replaceableResolver.GetReplaceableResolutionCandidates(modelVirtualPath, texture.ReplaceableId, replaceableDisplayIndex ?? 0, characterHairVariationId, characterFacialVariationId))
             {
-                string normalized = resolvedReplaceable.Replace('/', '\\').TrimStart('\\');
+                if (!candidate.Exists)
+                    continue;
+
+                string normalized = candidate.Path.Replace('/', '\\').TrimStart('\\');
                 if (seen.Add(normalized))
                     yield return normalized;
             }
