@@ -232,6 +232,12 @@ public partial class ViewerApp : IDisposable
 
     // Model info
     private string _modelInfo = "";
+    private string? _standaloneCharacterCustomizationModelPath;
+    private readonly List<int> _standaloneCharacterHairVariationIds = new();
+    private readonly List<int> _standaloneCharacterFacialHairVariationIds = new();
+    private int _standaloneCharacterHairVariationOverride = -1;
+    private int _standaloneCharacterFacialHairVariationOverride = -1;
+    private bool _preserveStandaloneCharacterCustomizationOnNextLoad;
     private readonly Dictionary<string, string?> _standaloneSkinPathCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loggedStandaloneMissingSkinPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _reportedAreaDiagnostics = new(StringComparer.Ordinal);
@@ -8665,6 +8671,7 @@ void main() {
 
         _renderer = new MdxRenderer(_gl, mdx, dir, _dataSource, _texResolver, virtualPath, isM2AdapterModel, _dbcBuild,
             explicitTextureVariations: explicitTextureVariations);
+        RefreshStandaloneCharacterCustomizationState(virtualPath, isM2AdapterModel);
 
         if (sharedRuntimeInfo != null)
         {
@@ -9033,6 +9040,100 @@ void main() {
             _loadingScreen?.Disable();
         }
     }
+
+    private void RefreshStandaloneCharacterCustomizationState(string? modelPath, bool isM2AdapterModel)
+    {
+        if (isM2AdapterModel || _texResolver == null || string.IsNullOrWhiteSpace(modelPath))
+        {
+            ClearStandaloneCharacterCustomizationState(resetOverrides: true);
+            return;
+        }
+
+        string normalizedPath = modelPath.Replace('/', '\\');
+        if (_texResolver.GetDefaultCharacterSelectionGroups(normalizedPath) == null)
+        {
+            ClearStandaloneCharacterCustomizationState(resetOverrides: true);
+            return;
+        }
+
+        bool preserveExistingSelection = _preserveStandaloneCharacterCustomizationOnNextLoad
+            || string.Equals(_standaloneCharacterCustomizationModelPath, normalizedPath, StringComparison.OrdinalIgnoreCase);
+
+        _standaloneCharacterCustomizationModelPath = normalizedPath;
+        _standaloneCharacterHairVariationIds.Clear();
+        _standaloneCharacterHairVariationIds.AddRange(_texResolver.GetCharacterHairVariationIds(normalizedPath));
+        _standaloneCharacterFacialHairVariationIds.Clear();
+        _standaloneCharacterFacialHairVariationIds.AddRange(_texResolver.GetCharacterFacialHairVariationIds(normalizedPath));
+
+        if (!preserveExistingSelection)
+        {
+            _standaloneCharacterHairVariationOverride = -1;
+            _standaloneCharacterFacialHairVariationOverride = -1;
+        }
+
+        NormalizeStandaloneCharacterCustomizationSelection();
+        _preserveStandaloneCharacterCustomizationOnNextLoad = false;
+
+        if (_standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0)
+            ApplyStandaloneCharacterCustomizationOverrides();
+    }
+
+    private void ClearStandaloneCharacterCustomizationState(bool resetOverrides)
+    {
+        _standaloneCharacterCustomizationModelPath = null;
+        _standaloneCharacterHairVariationIds.Clear();
+        _standaloneCharacterFacialHairVariationIds.Clear();
+        _preserveStandaloneCharacterCustomizationOnNextLoad = false;
+
+        if (!resetOverrides)
+            return;
+
+        _standaloneCharacterHairVariationOverride = -1;
+        _standaloneCharacterFacialHairVariationOverride = -1;
+    }
+
+    private void PrepareStandaloneCharacterCustomizationForNextLoad(int? hairVariationId, int? facialHairVariationId)
+    {
+        _standaloneCharacterHairVariationOverride = hairVariationId is >= 0 ? hairVariationId.Value : -1;
+        _standaloneCharacterFacialHairVariationOverride = facialHairVariationId is >= 0 ? facialHairVariationId.Value : -1;
+        _preserveStandaloneCharacterCustomizationOnNextLoad = hairVariationId.HasValue || facialHairVariationId.HasValue;
+    }
+
+    private void NormalizeStandaloneCharacterCustomizationSelection()
+    {
+        if (_standaloneCharacterHairVariationOverride >= 0
+            && !_standaloneCharacterHairVariationIds.Contains(_standaloneCharacterHairVariationOverride))
+        {
+            _standaloneCharacterHairVariationOverride = -1;
+        }
+
+        if (_standaloneCharacterFacialHairVariationOverride >= 0
+            && !_standaloneCharacterFacialHairVariationIds.Contains(_standaloneCharacterFacialHairVariationOverride))
+        {
+            _standaloneCharacterFacialHairVariationOverride = -1;
+        }
+    }
+
+    private void ApplyStandaloneCharacterCustomizationOverrides()
+    {
+        if (_renderer is not MdxRenderer mdxRenderer || _texResolver == null || string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
+            return;
+
+        IReadOnlyCollection<uint>? selectedGroups = _texResolver.GetCharacterSelectionGroups(
+            _standaloneCharacterCustomizationModelPath,
+            _standaloneCharacterHairVariationOverride >= 0 ? _standaloneCharacterHairVariationOverride : null,
+            _standaloneCharacterFacialHairVariationOverride >= 0 ? _standaloneCharacterFacialHairVariationOverride : null);
+        if (selectedGroups == null)
+            return;
+
+        string reasonLabel = _standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0
+            ? $"character geosets (hair={FormatStandaloneCharacterVariationLabel(_standaloneCharacterHairVariationOverride)}, facial={FormatStandaloneCharacterVariationLabel(_standaloneCharacterFacialHairVariationOverride)})"
+            : "default character geosets";
+        mdxRenderer.TryApplyCharacterSelectionGroups(selectedGroups, reasonLabel);
+    }
+
+    private static string FormatStandaloneCharacterVariationLabel(int variationId)
+        => variationId >= 0 ? variationId.ToString() : "default";
 
     /// <summary>
     /// Force-present a loading screen frame. Replicates the Alpha client's

@@ -10,6 +10,8 @@ public partial class ViewerApp
         public string? BuildVersion { get; init; }
         public string? LooseMapOverlayPath { get; init; }
         public string? WorldPath { get; init; }
+        public int? CharacterHairVariationId { get; init; }
+        public int? CharacterFacialHairVariationId { get; init; }
         public string? CaptureShotName { get; init; }
         public string? CaptureOutputDir { get; init; }
         public bool CaptureIncludeUi { get; init; }
@@ -46,6 +48,8 @@ public partial class ViewerApp
         if (string.IsNullOrWhiteSpace(startupTarget))
             startupTarget = legacyPath;
 
+        PrepareStandaloneCharacterCustomizationForNextLoad(request.CharacterHairVariationId, request.CharacterFacialHairVariationId);
+
         if (!string.IsNullOrWhiteSpace(startupTarget))
             LoadStartupTarget(startupTarget);
 
@@ -66,6 +70,8 @@ public partial class ViewerApp
         string? buildVersion = null;
         string? looseMapOverlayPath = null;
         string? worldPath = null;
+        string? characterHairVariation = null;
+        string? characterFacialHairVariation = null;
         string? captureShotName = null;
         string? captureOutputDir = null;
         bool captureIncludeUi = false;
@@ -93,6 +99,16 @@ public partial class ViewerApp
 
                 case "--world":
                     if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out worldPath))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--character-hair-variation":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out characterHairVariation))
+                        return new StartupAutomationRequest();
+                    break;
+
+                case "--character-facial-variation":
+                    if (!TryReadStartupOptionValue(initialArgs, ref index, arg, out characterFacialHairVariation))
                         return new StartupAutomationRequest();
                     break;
 
@@ -130,12 +146,20 @@ public partial class ViewerApp
             }
         }
 
+        if (!TryParseOptionalVariationId(characterHairVariation, "--character-hair-variation", out int? characterHairVariationId))
+            return new StartupAutomationRequest();
+
+        if (!TryParseOptionalVariationId(characterFacialHairVariation, "--character-facial-variation", out int? characterFacialHairVariationId))
+            return new StartupAutomationRequest();
+
         return new StartupAutomationRequest
         {
             GamePath = NormalizeOptionalPath(gamePath),
             BuildVersion = NormalizeOptionalValue(buildVersion),
             LooseMapOverlayPath = NormalizeOptionalPath(looseMapOverlayPath),
             WorldPath = NormalizeOptionalValue(worldPath),
+            CharacterHairVariationId = characterHairVariationId,
+            CharacterFacialHairVariationId = characterFacialHairVariationId,
             CaptureShotName = NormalizeOptionalValue(captureShotName),
             CaptureOutputDir = NormalizeOptionalPath(captureOutputDir),
             CaptureIncludeUi = captureIncludeUi,
@@ -208,5 +232,21 @@ public partial class ViewerApp
             return null;
 
         return value.Trim();
+    }
+
+    private bool TryParseOptionalVariationId(string? rawValue, string optionName, out int? variationId)
+    {
+        variationId = null;
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return true;
+
+        if (int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed >= 0)
+        {
+            variationId = parsed;
+            return true;
+        }
+
+        _statusMessage = $"Invalid variation id for {optionName}: {rawValue}";
+        return false;
     }
 }

@@ -1,5 +1,22 @@
 # Progress
 
+### Apr 09, 2026 - Added scriptable standalone raw-character variation overrides for classic hair and facial-hair geosets
+
+- followed the approved next step after default geoset repair: add a narrow override surface for raw classic character `VariationId` selection instead of leaving standalone validation locked to only variation `0`
+- landed active viewer behavior:
+	- `src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now exposes available hair and facial-hair variation ids per raw classic character model and can return explicit selection-group sets for requested variation ids
+	- `src/MdxViewer/Rendering/ModelRenderer.cs` now exposes a targeted character-selection-group reapply path for the standalone MDX renderer
+	- `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_Sidebars.cs` now surface raw `VariationId` combos for hair and facial-hair in standalone classic character model inspection, plus a reset-to-default action
+	- `src/MdxViewer/ViewerApp_StartupAutomation.cs` and `src/MdxViewer/AssetProbe.cs` now accept `--character-hair-variation` and `--character-facial-variation`, so non-default raw-character cases can be validated by probe or startup capture without depending on manual UI interaction
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+	- `dotnet run --project "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj" -c Debug -- --probe-mdx "H:\053-client" "Character/Human/Male/HumanMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` now reports a real selected-group swap (`SelectionGroup=1 DefaultVisible=True SelectedVisible=False`, `SelectionGroup=2 DefaultVisible=False SelectedVisible=True`)
+	- `dotnet run --project "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj" -c Debug -- --probe-mdx "H:\053-client" "Character/Tauren/Male/TaurenMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` also reports a real selected-group swap (`SelectionGroup=2 DefaultVisible=True SelectedVisible=False`, `SelectionGroup=3 DefaultVisible=False SelectedVisible=True`)
+	- standalone runtime captures using the new startup option completed at `i:/parp/parp-tools/output/character_variation_validation/human_male_hair1/standalone/0.5.3.3368/20260409_003101393_current_20260409_003101_no_ui.png` and `i:/parp/parp-tools/output/character_variation_validation/tauren_male_hair1/standalone/0.5.3.3368/20260409_004126420_current_20260409_004126_no_ui.png`, showing the non-default override path runs through the real viewer and capture flow without breaking the render
+- proof boundary:
+	- no automated tests were added or run
+	- this is still only a narrow raw-character variation-id surface for standalone inspection, not full closure on classic character customization breadth
+
 ### Apr 08, 2026 - Fixed the raw Alpha standalone character geoset-selection seam after the Tauren female texture repair
 
 - followed the remaining `Character/Tauren/Female/TaurenFemale.mdx` failure after the replaceable-texture fix and confirmed the model was still rendering mutually exclusive classic character geosets together

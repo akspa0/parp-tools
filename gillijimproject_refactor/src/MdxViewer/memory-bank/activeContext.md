@@ -1,5 +1,22 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 09, 2026 - Standalone raw classic character inspection now has narrow non-default variation overrides for hair and facial-hair geosets
+
+- followed the next raw-character seam after default geoset repair: add a small override surface so standalone classic character validation is not locked to `VariationId 0`
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/ReplaceableTextureResolver.cs` now exposes available hair and facial-hair variation ids per raw classic character path and can build selection-group sets for explicit variation ids
+   - `Rendering/ModelRenderer.cs` now exposes a targeted character-selection-group reapply path so the standalone renderer can switch classic raw-character variation sets live
+   - `ViewerApp.cs` and `ViewerApp_Sidebars.cs` now add a `Character Variants` section for standalone classic character MDX inspection with raw DBC `VariationId` combos for hair and facial-hair plus reset-to-default
+   - `ViewerApp_StartupAutomation.cs` and `AssetProbe.cs` now accept `--character-hair-variation` and `--character-facial-variation`, so the same non-default path can be driven by startup capture or non-UI probe instead of only by clicking through the UI
+- validation completed:
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+   - `--probe-mdx` on `Character/Human/Male/HumanMale.mdx` with `--character-hair-variation 1` reported the selected-group swap from `SelectionGroup=1` to `SelectionGroup=2`
+   - `--probe-mdx` on `Character/Tauren/Male/TaurenMale.mdx` with `--character-hair-variation 1` reported the selected-group swap from `SelectionGroup=2` to `SelectionGroup=3`
+   - standalone startup captures with the new variation option completed at `i:/parp/parp-tools/output/character_variation_validation/human_male_hair1/standalone/0.5.3.3368/20260409_003101393_current_20260409_003101_no_ui.png` and `i:/parp/parp-tools/output/character_variation_validation/tauren_male_hair1/standalone/0.5.3.3368/20260409_004126420_current_20260409_004126_no_ui.png`, showing the non-default override path survives the real viewer startup or capture flow
+- important boundary:
+   - this is still a narrow standalone raw-character variation-id surface, not a full paperdoll, gear, or texture-composition system
+   - no automated tests were added or run
+
 ## Apr 08, 2026 - Standalone raw classic character models now use a default geoset-selection policy instead of drawing every mutually exclusive character variant together
 
 - followed the still-broken `Character/Tauren/Female/TaurenFemale.mdx` case after the texture resolver fix and confirmed the remaining seam was classic character geoset visibility

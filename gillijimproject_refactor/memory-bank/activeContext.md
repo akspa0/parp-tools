@@ -1,5 +1,22 @@
 # Active Context
 
+## Apr 09, 2026 - Standalone raw classic character MDX inspection now exposes narrow hair and facial variation overrides without claiming a full paperdoll system
+
+- followed the next approved character-model slice after the default geoset fix: add a narrow override surface so validation can move past only variation `0`
+- active viewer behavior after this slice:
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/ReplaceableTextureResolver.cs` now exposes available classic character hair and facial-hair variation ids per raw `Character/...` model and can build a selection-group set for explicit variation ids instead of only the default `0` case
+	- `gillijimproject_refactor/src/MdxViewer/Rendering/ModelRenderer.cs` now exposes a narrow character-selection-group reapply path so the standalone viewer can switch raw classic character variation sets on the live renderer without rebuilding a second render pipeline
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp.cs` and `ViewerApp_Sidebars.cs` now add a `Character Variants` section to standalone classic character MDX inspection, with raw DBC `VariationId` combos for hair and facial-hair plus reset-to-default
+	- `gillijimproject_refactor/src/MdxViewer/ViewerApp_StartupAutomation.cs` and `AssetProbe.cs` now also accept `--character-hair-variation <id>` and `--character-facial-variation <id>`, so non-default raw-character cases stay scriptable for probe and capture validation instead of being UI-only
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+	- `dotnet run --project "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj" -c Debug -- --probe-mdx "H:\053-client" "Character/Human/Male/HumanMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` now reports a real selected-group change from the default set, including `SelectionGroup=1 DefaultVisible=True SelectedVisible=False` and `SelectionGroup=2 DefaultVisible=False SelectedVisible=True`
+	- `dotnet run --project "i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj" -c Debug -- --probe-mdx "H:\053-client" "Character/Tauren/Male/TaurenMale.mdx" --build 0.5.3.3368 --character-hair-variation 1` also reports a real selected-group change, including `SelectionGroup=2 DefaultVisible=True SelectedVisible=False` and `SelectionGroup=3 DefaultVisible=False SelectedVisible=True`
+	- standalone runtime capture using the new startup option completed for `Character/Human/Male/HumanMale.mdx` at `i:/parp/parp-tools/output/character_variation_validation/human_male_hair1/standalone/0.5.3.3368/20260409_003101393_current_20260409_003101_no_ui.png` and for `Character/Tauren/Male/TaurenMale.mdx` at `i:/parp/parp-tools/output/character_variation_validation/tauren_male_hair1/standalone/0.5.3.3368/20260409_004126420_current_20260409_004126_no_ui.png`, proving the non-default override path survives actual viewer startup and capture without regressing render correctness
+- important boundary:
+	- no automated tests were added or run
+	- this is a narrow raw-character variation-id surface for standalone MDX inspection only; it is not a full character customization, gear, texture-composition, or saved paperdoll system
+
 ## Apr 08, 2026 - Raw Alpha character MDX viewing now applies classic default geoset selection instead of rendering every character variant at once
 
 - followed the remaining `Character/Tauren/Female/TaurenFemale.mdx` complaint after the texture fix and confirmed the next seam was classic character geoset selection, not another replaceable-texture miss

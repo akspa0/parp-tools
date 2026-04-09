@@ -525,6 +525,9 @@ public class ReplaceableTextureResolver
     }
 
     public IReadOnlyCollection<uint>? GetDefaultCharacterSelectionGroups(string modelPath)
+        => GetCharacterSelectionGroups(modelPath, hairVariationId: 0, facialHairVariationId: 0);
+
+    public IReadOnlyCollection<uint>? GetCharacterSelectionGroups(string modelPath, int? hairVariationId = null, int? facialHairVariationId = null)
     {
         string normalizedPath = modelPath.Replace('/', '\\');
         if (!TryParseCharacterModelPath(normalizedPath, out int raceId, out int sexId))
@@ -532,19 +535,41 @@ public class ReplaceableTextureResolver
 
         HashSet<uint> groups = new(DefaultCharacterSelectionGroups);
 
-        if (_characterHairGeosets.TryGetValue(new CharacterVariationKey(raceId, sexId, 0), out int[]? hairGroups))
-        {
-            foreach (int group in hairGroups)
-                groups.Add((uint)group);
-        }
-
-        if (_characterFacialHairGeosets.TryGetValue(new CharacterVariationKey(raceId, sexId, 0), out int[]? facialGroups))
-        {
-            foreach (int group in facialGroups)
-                groups.Add((uint)group);
-        }
+        AddCharacterVariationGroups(groups, _characterHairGeosets, new CharacterVariationKey(raceId, sexId, hairVariationId ?? 0));
+        AddCharacterVariationGroups(groups, _characterFacialHairGeosets, new CharacterVariationKey(raceId, sexId, facialHairVariationId ?? 0));
 
         return groups;
+    }
+
+    public IReadOnlyList<int> GetCharacterHairVariationIds(string modelPath)
+        => GetCharacterVariationIds(modelPath, _characterHairGeosets);
+
+    public IReadOnlyList<int> GetCharacterFacialHairVariationIds(string modelPath)
+        => GetCharacterVariationIds(modelPath, _characterFacialHairGeosets);
+
+    private IReadOnlyList<int> GetCharacterVariationIds(string modelPath, Dictionary<CharacterVariationKey, int[]> source)
+    {
+        string normalizedPath = modelPath.Replace('/', '\\');
+        if (!TryParseCharacterModelPath(normalizedPath, out int raceId, out int sexId))
+            return Array.Empty<int>();
+
+        return source.Keys
+            .Where(key => key.RaceId == raceId && key.SexId == sexId)
+            .Select(key => key.VariationId)
+            .Distinct()
+            .OrderBy(static value => value)
+            .ToArray();
+    }
+
+    private static void AddCharacterVariationGroups(HashSet<uint> groups, Dictionary<CharacterVariationKey, int[]> source, CharacterVariationKey key)
+    {
+        if (!source.TryGetValue(key, out int[]? variationGroups))
+            return;
+
+        foreach (int group in variationGroups)
+        {
+            groups.Add((uint)group);
+        }
     }
 
     private string? ResolveFromCharacterSections(string modelPath, uint replaceableId)

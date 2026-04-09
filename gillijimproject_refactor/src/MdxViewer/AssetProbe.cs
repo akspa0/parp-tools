@@ -29,7 +29,7 @@ internal static class AssetProbe
         {
             if (args.Length <= probeIndex + 2)
             {
-                Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--build <version>] [--listfile <path>]");
+                Console.Error.WriteLine("Usage: MdxViewer --probe-mdx <gamePath> <modelVirtualPath> [--build <version>] [--listfile <path>] [--character-hair-variation <id>] [--character-facial-variation <id>]");
                 Environment.ExitCode = 1;
                 return true;
             }
@@ -38,13 +38,24 @@ internal static class AssetProbe
             string mdxModelVirtualPath = args[probeIndex + 2];
             string? mdxBuildVersion = TryGetOptionValue(args, "--build");
             string? mdxListfilePath = TryGetOptionValue(args, "--listfile");
+            if (!TryParseOptionalVariationId(TryGetOptionValue(args, "--character-hair-variation"), "--character-hair-variation", out int? mdxHairVariationId))
+            {
+                Environment.ExitCode = 1;
+                return true;
+            }
+
+            if (!TryParseOptionalVariationId(TryGetOptionValue(args, "--character-facial-variation"), "--character-facial-variation", out int? mdxFacialVariationId))
+            {
+                Environment.ExitCode = 1;
+                return true;
+            }
 
             ViewerLog.Verbose = true;
             MdxFile.Verbose = true;
 
             try
             {
-                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath, mdxBuildVersion);
+                Run(mdxGamePath, mdxModelVirtualPath, mdxListfilePath, mdxBuildVersion, mdxHairVariationId, mdxFacialVariationId);
             }
             catch (Exception ex)
             {
@@ -341,7 +352,7 @@ internal static class AssetProbe
             }));
     }
 
-    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath, string? buildVersion)
+    private static void Run(string gamePath, string modelVirtualPath, string? listfilePath, string? buildVersion, int? characterHairVariationId, int? characterFacialVariationId)
     {
         Console.WriteLine($"[AssetProbe] Game path: {gamePath}");
         Console.WriteLine($"[AssetProbe] Model path: {modelVirtualPath}");
@@ -349,6 +360,10 @@ internal static class AssetProbe
             Console.WriteLine($"[AssetProbe] Build: {buildVersion}");
         if (!string.IsNullOrWhiteSpace(listfilePath))
             Console.WriteLine($"[AssetProbe] Listfile: {listfilePath}");
+        if (characterHairVariationId.HasValue || characterFacialVariationId.HasValue)
+        {
+            Console.WriteLine($"[AssetProbe] CharacterVariations: hair={characterHairVariationId?.ToString() ?? "default"} facial={characterFacialVariationId?.ToString() ?? "default"}");
+        }
 
         using var dataSource = new MpqDataSource(gamePath, listfilePath);
         byte[]? modelBytes = dataSource.ReadFile(modelVirtualPath) ?? dataSource.ReadFile(modelVirtualPath.Replace('/', '\\'));
@@ -369,11 +384,14 @@ internal static class AssetProbe
         }
 
     var mdx = MdxFile.Load(ms);
-    ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
-    int? replaceableDisplayIndex = TrySelectReplaceableDisplayIndex(replaceableResolver, modelVirtualPath, mdx);
+        ReplaceableTextureResolver? replaceableResolver = TryCreateReplaceableTextureResolver(dataSource, buildVersion);
+        int? replaceableDisplayIndex = TrySelectReplaceableDisplayIndex(replaceableResolver, modelVirtualPath, mdx);
         HashSet<uint>? defaultCharacterSelectionGroups = replaceableResolver?.GetDefaultCharacterSelectionGroups(modelVirtualPath) is IReadOnlyCollection<uint> groups
             ? new HashSet<uint>(groups)
             : null;
+        HashSet<uint>? selectedCharacterSelectionGroups = replaceableResolver?.GetCharacterSelectionGroups(modelVirtualPath, characterHairVariationId, characterFacialVariationId) is IReadOnlyCollection<uint> selectedGroups
+            ? new HashSet<uint>(selectedGroups)
+            : defaultCharacterSelectionGroups;
 
         Console.WriteLine($"[AssetProbe] SharedDetect kind={modelDetection.Kind} version={FormatVersion(modelDetection.Version)}");
         if (sharedMdxSummary is MdxSharedProbeResult sharedMdx)
@@ -463,7 +481,7 @@ internal static class AssetProbe
             {
                 MdxGeosetGeometry geoset = geometryProbe.Geosets[geosetIndex];
                 Console.WriteLine(
-                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} SelectedVisible={(selectedCharacterSelectionGroups == null ? "n/a" : selectedCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.VertexCount} Indices={geoset.IndexCount} Triangles={geoset.TriangleCount} UvSets={geoset.UvSetCount} PrimaryTexCoords={geoset.PrimaryUvCount} MatrixGroups={geoset.MatrixGroupCount} MatrixIndices={geoset.MatrixIndexCount}");
             }
         }
         else
@@ -472,9 +490,25 @@ internal static class AssetProbe
             {
                 var geoset = mdx.Geosets[geosetIndex];
                 Console.WriteLine(
-                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
+                    $"Geoset[{geosetIndex}] MaterialId={geoset.MaterialId} SelectionGroup={geoset.SelectionGroup} DefaultVisible={(defaultCharacterSelectionGroups == null ? "n/a" : defaultCharacterSelectionGroups.Contains(geoset.SelectionGroup))} SelectedVisible={(selectedCharacterSelectionGroups == null ? "n/a" : selectedCharacterSelectionGroups.Contains(geoset.SelectionGroup))} Vertices={geoset.Vertices.Count} Indices={geoset.Indices.Count} TexCoords={geoset.TexCoords.Count}");
             }
         }
+    }
+
+    private static bool TryParseOptionalVariationId(string? rawValue, string optionName, out int? variationId)
+    {
+        variationId = null;
+        if (string.IsNullOrWhiteSpace(rawValue))
+            return true;
+
+        if (int.TryParse(rawValue, out int parsed) && parsed >= 0)
+        {
+            variationId = parsed;
+            return true;
+        }
+
+        Console.Error.WriteLine($"[AssetProbe] Invalid variation id for {optionName}: {rawValue}");
+        return false;
     }
 
     private static string? TryGetOptionValue(string[] args, string optionName)

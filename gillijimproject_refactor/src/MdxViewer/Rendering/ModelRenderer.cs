@@ -332,9 +332,19 @@ public class MdxRenderer : IModelRenderer
 
     // Geoset visibility
     public int SubObjectCount => _geosets.Count;
+    public string? ModelVirtualPath => _modelVirtualPath;
     public string GetSubObjectName(int index) => index < _geosets.Count ? $"Geoset {_geosets[index].GeosetIndex}" : "";
     public bool GetSubObjectVisible(int index) => index < _geosets.Count && _geosets[index].Visible;
     public void SetSubObjectVisible(int index, bool visible) { if (index < _geosets.Count) _geosets[index].Visible = visible; }
+
+    public bool TryApplyCharacterSelectionGroups(IReadOnlyCollection<uint>? wantedGroups, string? reasonLabel = null)
+    {
+        if (_isM2AdapterModel || string.IsNullOrWhiteSpace(_modelVirtualPath) || _geosets.Count == 0 || wantedGroups == null || wantedGroups.Count == 0)
+            return false;
+
+        ApplyCharacterSelectionGroups(wantedGroups, reasonLabel);
+        return true;
+    }
 
     public void ToggleWireframe()
     {
@@ -348,6 +358,14 @@ public class MdxRenderer : IModelRenderer
 
         IReadOnlyCollection<uint>? wantedGroups = _texResolver.GetDefaultCharacterSelectionGroups(_modelVirtualPath);
         if (wantedGroups == null || wantedGroups.Count == 0)
+            return;
+
+        ApplyCharacterSelectionGroups(wantedGroups, reasonLabel: "default character geosets");
+    }
+
+    private void ApplyCharacterSelectionGroups(IReadOnlyCollection<uint> wantedGroups, string? reasonLabel)
+    {
+        if (_geosets.Count == 0)
             return;
 
         HashSet<uint> wantedGroupSet = wantedGroups as HashSet<uint> ?? new HashSet<uint>(wantedGroups);
@@ -367,7 +385,7 @@ public class MdxRenderer : IModelRenderer
         {
             ViewerLog.Info(
                 ViewerLog.Category.Mdx,
-                $"[MDX] Applied default character geosets for {_modelVirtualPath}: visible={_geosets.Count - hiddenCount}/{_geosets.Count}, groups={string.Join(",", wantedGroupSet.OrderBy(static value => value))}");
+                $"[MDX] Applied {reasonLabel ?? "character geosets"} for {_modelVirtualPath}: visible={_geosets.Count - hiddenCount}/{_geosets.Count}, groups={string.Join(",", wantedGroupSet.OrderBy(static value => value))}");
         }
     }
 

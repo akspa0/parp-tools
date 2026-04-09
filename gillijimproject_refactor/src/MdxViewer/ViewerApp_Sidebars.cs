@@ -1432,6 +1432,11 @@ public partial class ViewerApp
             DrawStandaloneWmoGroupControls(standaloneWmoRenderer);
         }
 
+        if (_renderer is MdxRenderer standaloneMdxRenderer)
+        {
+            DrawStandaloneCharacterVariationControls(standaloneMdxRenderer);
+        }
+
         if (_renderer is IModelRenderer modelRenderer && modelRenderer.Animator != null && modelRenderer.Animator.Sequences.Count > 0)
         {
             ImGui.Separator();
@@ -1538,6 +1543,88 @@ public partial class ViewerApp
 
             DrawRendererVisibilityControls(_renderer, "standalone");
         }
+    }
+
+    private void DrawStandaloneCharacterVariationControls(MdxRenderer renderer)
+    {
+        string? modelPath = renderer.ModelVirtualPath ?? _standaloneCharacterCustomizationModelPath;
+        if (string.IsNullOrWhiteSpace(modelPath) || _texResolver == null)
+            return;
+
+        string normalizedPath = modelPath.Replace('/', '\\');
+        if (!string.Equals(_standaloneCharacterCustomizationModelPath, normalizedPath, StringComparison.OrdinalIgnoreCase))
+            RefreshStandaloneCharacterCustomizationState(normalizedPath, isM2AdapterModel: false);
+
+        if (string.IsNullOrWhiteSpace(_standaloneCharacterCustomizationModelPath))
+            return;
+
+        bool hasHairOptions = _standaloneCharacterHairVariationIds.Count > 0;
+        bool hasFacialOptions = _standaloneCharacterFacialHairVariationIds.Count > 0;
+        if (!hasHairOptions && !hasFacialOptions)
+            return;
+
+        ImGui.Separator();
+        ImGui.Text("Character Variants:");
+        ImGui.TextDisabled("Raw DBC variation ids for standalone classic character MDX inspection.");
+
+        bool changed = false;
+        if (hasHairOptions)
+            changed |= DrawStandaloneCharacterVariationCombo("Hair VariationId", "##StandaloneCharacterHairVariation", _standaloneCharacterHairVariationIds, ref _standaloneCharacterHairVariationOverride);
+
+        if (hasFacialOptions)
+            changed |= DrawStandaloneCharacterVariationCombo("Facial VariationId", "##StandaloneCharacterFacialVariation", _standaloneCharacterFacialHairVariationIds, ref _standaloneCharacterFacialHairVariationOverride);
+
+        if ((_standaloneCharacterHairVariationOverride >= 0 || _standaloneCharacterFacialHairVariationOverride >= 0)
+            && ImGui.Button("Reset Character Variants"))
+        {
+            _standaloneCharacterHairVariationOverride = -1;
+            _standaloneCharacterFacialHairVariationOverride = -1;
+            changed = true;
+        }
+
+        if (changed)
+            ApplyStandaloneCharacterCustomizationOverrides();
+    }
+
+    private static bool DrawStandaloneCharacterVariationCombo(string label, string comboId, IReadOnlyList<int> variationIds, ref int selectedVariationId)
+    {
+        ImGui.Text(label);
+        ImGui.SetNextItemWidth(-1);
+
+        string preview = selectedVariationId >= 0
+            ? $"VariationId {selectedVariationId}"
+            : "Default (VariationId 0)";
+        bool changed = false;
+
+        if (ImGui.BeginCombo(comboId, preview))
+        {
+            bool defaultSelected = selectedVariationId < 0;
+            if (ImGui.Selectable("Default (VariationId 0)", defaultSelected))
+            {
+                selectedVariationId = -1;
+                changed = true;
+            }
+
+            if (defaultSelected)
+                ImGui.SetItemDefaultFocus();
+
+            foreach (int variationId in variationIds)
+            {
+                bool selected = selectedVariationId == variationId;
+                if (ImGui.Selectable($"VariationId {variationId}", selected))
+                {
+                    selectedVariationId = variationId;
+                    changed = true;
+                }
+
+                if (selected)
+                    ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        return changed;
     }
 
     private void DrawSelectedTaxiControls()
