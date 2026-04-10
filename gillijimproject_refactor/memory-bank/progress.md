@@ -1,19 +1,89 @@
 # Progress
 
-### Apr 09, 2026 - Added the first MK Dataset harvest manifest command and moved the active UI or CLI surface off the old VLM wording
+### Apr 09, 2026 - ML dataset finalize now skips baked 4k reference minimaps and uses doodad-free MdxViewer validation captures only
+
+- followed the correction that the ML dataset workflow should stop generating baked `reference_minimaps` and should only queue live viewer validation captures for rendered minimap output
+- landed active behavior:
+	- `src/MdxViewer/ViewerApp.cs` finalize UI now runs the harvester in manifest-only mode, removes the baked-reference controls from the active ML surface, and updates the status text to describe manifest + viewer-validation only
+	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now forces `WorldScene.DoodadsVisible = false` for the duration of MdxViewer validation capture batches and restores the previous doodad visibility afterward
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now treats baked-reference harvest flags as ignored legacy inputs on the ML-facing help surface instead of continuing to advertise 4k reference output
+- validation completed:
+	- `get_errors` reported no file-level errors on the touched viewer and CLI files
+- proof boundary:
+	- no automated tests were added or run
+	- no build or real-data validation has been captured yet for this slice in the current chat
+
+### Apr 10, 2026 - Fixed the Wrath Silverpine/Tirisfall lamp M2 texture-collapse seam in fallback skin parsing
+
+- followed the live M2 compatibility regression on `World\Generic\Human\Passive Doodads\Lamps\TirisfallStreetLamp01.m2` after narrowing the fault to fallback skin parsing rather than missing textures or renderer UV selection
+- landed active behavior:
+	- `src/MdxViewer/Rendering/WarcraftNetM2Adapter.cs` now honors the strict `SKIN` header layout during legacy fallback parsing, preserves `globalVertexOffset`, and stops inferring texture-unit stride from the end of the file when optional shadow-batch data is present
+	- this restores correct batch/material decoding for the Wrath lamp repro, so the adapter now emits `textureComboIndex=0/1/2` and distinct materials for the post top, post body, and glow pass instead of mapping every geoset to texture `0`
+- validation completed:
+	- isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-m2-texture-fix-6/"`
+	- real-data probe validation passed with `ParpToolsWoWViewer.exe --probe-m2-adapter "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" "World/Generic/Human/Passive Doodads/Lamps/TirisfallStreetLamp01.m2" --build 3.3.5.12340 --listfile "i:/parp/parp-tools/gillijimproject_refactor/test_data/community-listfile-withcapitals.csv"`; the probe now reports `[M2-BATCH]` entries for combo indices `0`, `1`, and `2` and `[M2-DIAG-MAT]` entries for `tex=0`, `tex=1`, and `tex=2`
+- proof boundary:
+	- no automated tests were added or run
+	- no standalone viewer capture or interactive world-runtime retest was captured in this slice, so treat this as adapter/probe proof for the named Wrath lamp repro only
+
+### Apr 09, 2026 - Chunk tool now supports invert-Z terrain edits and project-managed edited-heightmap export
+
+- followed the request to let the existing chunk manipulator invert selected terrain vertically and save the result somewhere reusable without overstating terrain persistence support
+- landed active behavior:
+	- `src/MdxViewer/ViewerApp.cs` now adds an invert-Z chunk edit over the current chunk target or active selection, tracks dirty chunk-tool tiles across invert/paste edits, and exports those edited tiles as `257x257` L16 heightmaps with metadata plus a manifest under the editor project output folder
+	- `src/MdxViewer/ViewerApp_Sidebars.cs` now exposes `Invert Z Chunk` / `Invert Z Selection`, `Save Edited Heightmaps`, dirty-count text, and last-output-folder status in the `Chunk Clipboard` window
+	- `src/MdxViewer/ViewerApp_Workspaces.cs` now reflects the new chunk-tool heightmap-output path in the workspace save summary
+- validation completed:
+	- `get_errors` reported no file-level errors on the touched viewer files
+	- isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-chunktool/"`; the default `bin/Debug` output remained locked by a live `ParpToolsWoWViewer` process, so the normal solution build could not be used as the proof target
+- proof boundary:
+	- no automated tests were added or run
+	- no real-data viewer runtime retest has been captured yet for invert-Z edit feel or heightmap roundtrip on an actual loaded map session
+	- this is still an output/export seam, not a general terrain ADT save pipeline
+
+### Apr 09, 2026 - Added packed alpha atlas export for ML datasets and a viewer terrain analysis window for local-vs-global heightmap inspection
+
+- followed the terrain-data complaint that alpha supervision was still spread across separate layer files even though the viewer already had a one-atlas export pattern, and the request to inspect per-tile vs map-global height scaling inside the viewer
+- landed active behavior:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` now writes `*_alpha_atlas.png` with RGB=`alpha1..3` and A=`shadow`, and `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` plus `VlmDatasetExporter.cs` now surface that file as `terrain_data.alpha_atlas`
+	- the existing stitched `alpha_masks` outputs remain in place for compatibility, so the atlas is an additive packed view instead of a destructive format swap
+	- `src/MdxViewer/ViewerApp_TerrainAnalysis.cs`, `ViewerApp.cs`, and `ViewerApp_Sidebars.cs` now add a floating `Terrain Analysis` window with per-tile-normalized heightmap preview, loaded-tile or whole-map normalized preview, and packed alpha/shadow atlas preview for the current tile
+- validation completed:
+	- `get_errors` reported no file-level errors on the touched viewer and converter files
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+- proof boundary:
+	- no automated tests were added or run
+	- no real-data viewer runtime retest has been captured yet for the new analysis window, and no real exported dataset root was re-opened to inspect the new `alpha_atlas` path on actual tile JSON
+
+### Apr 09, 2026 - Merged the viewer dataset flow into one `Build ML Dataset` dialog and kept deterministic validation capture inline
+
+- followed the complaint that `Harvest` should not be a separate viewer workflow and that the visible label should be `ML`, not `MK`
+- landed active behavior:
+	- `src/MdxViewer/ViewerApp.cs` now exposes `Build ML Dataset...` in the tools menu and uses `Build ML Dataset` as the dialog title instead of `Generate MK Dataset`
+	- the same dialog now includes an inline `ML Dataset Manifest + Validation` section, so export, manifest generation, baked references, and MdxViewer validation capture configuration live in one place instead of a second modal
+	- post-build manifest plus validation can auto-start after export in the same flow, while `src/MdxViewer/ViewerApp_CaptureAutomation.cs` still provides deterministic one-file-per-tile viewer-validation capture queueing with settle waits and batch state restore
+- validation completed:
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
+	- file diagnostics stayed clean for `src/MdxViewer/ViewerApp.cs`
+- proof boundary:
+	- no real viewer capture batch was run yet, so this is still build proof only for the merged dialog flow and deterministic queue wiring
+	- the active viewer and CLI surfaces now say `ML`, but internal type names still remain under `Mk*` and `VLM` for continuity
+	- alpha-mask completeness and shared-reader ownership are still open
+
+### Apr 09, 2026 - Added the first ML Dataset harvest manifest command and moved the active UI or CLI surface off the old VLM wording
 
 - followed the new terrain-reconstruction direction by landing the first dataset-contract slice before any U-Net work: harvesting coverage, reference-minimap generation, and public naming cleanup
 - landed active behavior:
-	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/MkDatasetHarvester.cs` now emits `mk_dataset_manifest.json` with per-tile coverage for source minimaps, local/global heightmaps, alpha masks, objects, chunk layers, and optional baked reference minimaps
-	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now routes `mk-harvest` plus `mk-export`, `mk-decode`, `mk-bake`, `mk-bake-heightmap`, `mk-synth`, and `mk-batch`, while preserving the old `vlm-*` commands as compatibility aliases
-	- `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`, `src/MdxViewer/Terrain/VlmProjectLoader.cs`, `docs/VLM_DATASET_EXPORTER.md`, `docs/VLM_Training_Guide.md`, `plans/vlm_dataset_reconstruction_plan_2026-03-31.md`, and `src/MdxViewer/USERGUIDE.md` now present the surface as `MK Dataset`
-	- `src/MdxViewer/ViewerApp.cs` now exposes a real `Harvest MK Dataset` dialog in the tools menu, with folder pickers, manifest-path selection, reference-minimap toggles, live logs, and a one-click handoff from the export dialog so harvesting does not depend on CLI use
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/MkDatasetHarvester.cs` now emits the default manifest file `ml_dataset_manifest.json` with per-tile coverage for source minimaps, local/global heightmaps, alpha masks, objects, chunk layers, and optional baked reference minimaps
+	- `src/WoWMapConverter/WoWMapConverter.Cli/Program.cs` now routes `ml-harvest` plus `ml-export`, `ml-decode`, `ml-bake`, `ml-bake-heightmap`, `ml-synth`, and `ml-batch`, while preserving `mk-*` and `vlm-*` commands as compatibility aliases
+	- `src/MdxViewer/ViewerApp.cs`, `src/MdxViewer/ViewerApp_MinimapAndStatus.cs`, `src/MdxViewer/Terrain/VlmProjectLoader.cs`, `docs/VLM_DATASET_EXPORTER.md`, `docs/VLM_Training_Guide.md`, `plans/vlm_dataset_reconstruction_plan_2026-03-31.md`, and `src/MdxViewer/USERGUIDE.md` now present the surface as `ML Dataset`
+	- `src/MdxViewer/ViewerApp.cs` now exposes one `Build ML Dataset` dialog with inline manifest/validation controls instead of a separate harvest modal
 - validation completed:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -c Debug` passed on Apr 09, 2026 with existing warnings only
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug` passed on Apr 09, 2026 with existing warnings only
-	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- mk-harvest` printed the expected usage text
+	- `dotnet run --project i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Cli/WoWMapConverter.Cli.csproj -- ml-harvest` printed the expected usage text
 - proof boundary:
-	- no real checked-in dataset export was available for `mk-harvest`, so this is still build and command-surface proof, not real-data signoff for harvest manifests or baked references
+	- no real checked-in dataset export was available for `ml-harvest`, so this is still build and command-surface proof, not real-data signoff for harvest manifests or baked references
 	- the new viewer harvest dialog is also build validated only; no interactive runtime capture or click-through was recorded yet
 	- no ML or segmentation code landed yet; the next slice is still real-data harvesting and curation, not model training closure
 

@@ -1,5 +1,45 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 09, 2026 - ML dataset finalize now stays manifest-only and MdxViewer validation capture batches hide doodads
+
+- followed the workflow correction that the active ML dataset surface should not generate baked 4k reference minimaps and should only emit live `MdxViewer` validation captures for rendered minimap output
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` no longer exposes baked-reference controls in the active `Build ML Dataset` finalize section and now always runs the harvester in manifest-only mode while leaving viewer validation capture optional
+   - the same finalize text now explicitly says that baked 4k reference minimaps are disabled on the ML dataset surface and that only viewer validation captures are produced
+   - `ViewerApp_CaptureAutomation.cs` validation capture batches now force `WorldScene.DoodadsVisible = false` during the batch and restore the previous doodad visibility afterward so saved validation minimaps are not cluttered by doodads
+- validation completed:
+   - `get_errors` returned clean for the touched viewer files
+- important boundary:
+   - no build or real-data validation has been captured yet for this slice in the current chat
+
+## Apr 10, 2026 - Wrath TirisfallStreetLamp01 fallback skin parsing now preserves the real batch/material texture assignments
+
+- followed the active M2 compatibility investigation on the real Wrath `World\Generic\Human\Passive Doodads\Lamps\TirisfallStreetLamp01.m2` lamp after proving the adapted texture table already contained the correct three textures and the remaining collapse was inside fallback `.skin` parsing
+- active `src/MdxViewer` behavior after this slice:
+   - `Rendering/WarcraftNetM2Adapter.cs` legacy `.skin` fallback parsing now honors the strict `SKIN` header layout for external skin files, captures `globalVertexOffset`, and uses the optional shadow-batch boundary instead of inferring batch stride from the end of the file
+   - the same path now reads the lamp's three batch records correctly as `textureComboIndex=0/1/2`, so adapted geosets/materials resolve to `SILVERPINELAMPPOSTTOP01.BLP`, `SILVERPINELAMPPOST01.BLP`, and `GLOWGREEN32.BLP` instead of collapsing every section to texture `0`
+- validation completed:
+   - isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-m2-texture-fix-6/"`
+   - real-data probe validation passed with `ParpToolsWoWViewer.exe --probe-m2-adapter "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" "World/Generic/Human/Passive Doodads/Lamps/TirisfallStreetLamp01.m2" --build 3.3.5.12340 --listfile "i:/parp/parp-tools/gillijimproject_refactor/test_data/community-listfile-withcapitals.csv"`; the probe now reports three `[M2-BATCH]` entries and three distinct `[M2-DIAG-MAT]` texture assignments
+- important boundary:
+   - no automated tests were added or run
+   - no interactive viewer capture was taken in this slice, so this is adapter/probe proof for the named Wrath lamp repro, not broad signoff for all later-era or animated M2 cases
+
+## Apr 09, 2026 - Chunk tool now supports invert-Z edits and project-managed edited-heightmap export without claiming terrain ADT save
+
+- followed the request to let the active chunk manipulator invert selected terrain vertically and save the outputs somewhere useful
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now lets the chunk tool invert the current chunk target or active multi-chunk selection by negating chunk height samples, rebuilding normals, and tracking dirty chunk-tool tiles/chunks
+   - the same chunk-tool path now exports edited tile state as reusable `257x257` L16 heightmaps with per-tile JSON metadata and a manifest under the timestamped editor project output folder (`chunk-tool-heightmaps/...`), while leaving source terrain files untouched
+   - `ViewerApp_Sidebars.cs` now exposes `Invert Z Chunk` / `Invert Z Selection`, `Save Edited Heightmaps`, dirty-count status, and last-output-folder text in the `Chunk Clipboard` window
+   - `ViewerApp_Workspaces.cs` now reports the chunk-tool heightmap-output surface in the workspace save summary alongside the existing staged placement-save language
+- validation completed:
+   - `get_errors` returned clean for the touched viewer files
+   - isolated build validation passed with `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.csproj -c Debug -p:OutDir="i:/parp/parp-tools/output/build-validation/mdxviewer-chunktool/"`
+- important boundary:
+   - the normal solution/bin build still fails when a live `ParpToolsWoWViewer` process locks the default output directory, so this slice is proven by the isolated-output build instead of the default `bin/Debug` target
+   - this is edited-heightmap export only; there is still no general terrain ADT save path for active terrain edits
+
 ## Apr 09, 2026 - Raw classic character probe diagnostics now show why tested 0.5.3 Human/Tauren overrides are not yet proven as hair/facial texture swaps
 
 - followed the next raw-character seam after the non-default variation-id UI/CLI slice: verify whether the remaining missing non-default appearance details were actually a resolver bug or whether the tested raw models simply did not expose those replaceable texture families

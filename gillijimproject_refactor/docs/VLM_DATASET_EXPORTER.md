@@ -1,18 +1,18 @@
-# MK Dataset Exporter - Reference
+# ML Dataset Exporter - Reference
 
-This document now describes the MK Dataset surface. Existing `vlm-*` commands remain as compatibility aliases, but new work should use `mk-*` naming.
+This document now describes the ML Dataset surface. Existing `mk-*` and `vlm-*` commands remain as compatibility aliases, but new work should use `ml-*` naming.
 
 ## Quick Start
 
 ### Batch Export All Maps
 ```bash
 cd src/WoWMapConverter/WoWMapConverter.Cli
-dotnet run -- mk-export --client "H:\053-client\" --batch-all --out "J:\mk-datasets"
+dotnet run -- ml-export --client "H:\053-client\" --batch-all --out "J:\ml-datasets"
 ```
 
 ### Single Map Export
 ```bash
-dotnet run -- mk-export --client "H:\053-client\" --map Azeroth --out "J:\mk-datasets"
+dotnet run -- ml-export --client "H:\053-client\" --map Azeroth --out "J:\ml-datasets"
 ```
 
 ---
@@ -27,6 +27,7 @@ J:\vlm-datasets\053_Azeroth_v30\
 │   ├── Azeroth_32_48_normal.png # Normal map from MCNR
 │   ├── Azeroth_32_48_heightmap.png      # Local heightmap
 │   └── Azeroth_32_48_heightmap_global.png # Global heightmap
+├── Azeroth_32_48_alpha_atlas.png # Packed alpha atlas (RGB=layers 1-3, A=shadow)
 ├── liquids/                    # Water data
 │   ├── Azeroth_32_48_liq_mask.png
 │   └── Azeroth_32_48_liq_height.png
@@ -45,6 +46,7 @@ J:\vlm-datasets\053_Azeroth_v30\
     "heightmap": "images/Azeroth_32_48_heightmap.png",
     "heightmap_local": "images/Azeroth_32_48_heightmap.png",
     "heightmap_global": "images/Azeroth_32_48_heightmap_global.png",
+    "alpha_atlas": "Azeroth_32_48_alpha_atlas.png",
     "normalmap": "images/Azeroth_32_48_normal.png",
     "height_min": 23.5,
     "height_max": 156.2,
@@ -77,6 +79,7 @@ After export, verify each tile has:
 - [ ] `images/{tile}.png` - Minimap
 - [ ] `images/{tile}_normal.png` - Normal map (NEW in V7.1)
 - [ ] `images/{tile}_heightmap.png` - Height ground truth
+- [ ] `{tile}_alpha_atlas.png` - Packed alpha/shadow atlas
 - [ ] `dataset/{tile}.json` - Metadata with `objects` array
 
 ### Sample Check Command

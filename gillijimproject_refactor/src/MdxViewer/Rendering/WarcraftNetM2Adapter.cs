@@ -405,6 +405,7 @@ internal static class WarcraftNetM2Adapter
         var sectionMaterialIds = Enumerable.Repeat(-1, skin.Submeshes.Count).ToArray();
         var batchMaterialIdsBySection = new Dictionary<int, List<int>>();
         string modelName = string.IsNullOrWhiteSpace(model.Name) ? "<unnamed>" : model.Name;
+        bool preferDirectTextureIndices = ShouldPreferDirectTextureIndices(model, skin);
 
         foreach (SkinTextureUnitData batch in skin.TextureUnits
             .OrderBy(static textureUnit => textureUnit.SkinSectionIndex)
@@ -422,15 +423,6 @@ internal static class WarcraftNetM2Adapter
                 renderFlagBits = model.RenderFlags[batch.MaterialIndex].Flags;
                 blendMode = model.RenderFlags[batch.MaterialIndex].BlendingMode;
             }
-
-            int textureId = ResolveTextureId(model, batch);
-            var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
-                ? model.Textures[textureId].Flags
-                : 0;
-            string texturePath = (textureId >= 0 && textureId < model.Textures.Count)
-                ? model.Textures[textureId].Filename
-                : string.Empty;
-            int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex);
 
             if (!batchMaterialIdsBySection.TryGetValue(batch.SkinSectionIndex, out List<int>? materialIdsForSection))
             {
@@ -458,31 +450,53 @@ internal static class WarcraftNetM2Adapter
                     sectionMaterialIds[batch.SkinSectionIndex] = materialId;
             }
 
-            material.Layers.Add(new MdlTexLayer
+            int textureLayerCount = Math.Max(1, batch.TextureCount);
+            for (int textureLayerIndex = 0; textureLayerIndex < textureLayerCount; textureLayerIndex++)
             {
-                BlendMode = MapBlendMode(blendMode),
-                TextureId = textureId,
-                CoordId = coordId,
-                TransformId = -1,
-                StaticAlpha = 1.0f,
-                StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
-                StaticColorAlpha = 1.0f,
-                Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
-            });
+                int textureLookupIndex = batch.TextureComboIndex + textureLayerIndex;
+                int textureId = ResolveTextureId(model, textureLookupIndex, preferDirectTextureIndices);
+                var textureFlags = (textureId >= 0 && textureId < model.Textures.Count)
+                    ? model.Textures[textureId].Flags
+                    : 0;
+                string texturePath = (textureId >= 0 && textureId < model.Textures.Count)
+                    ? model.Textures[textureId].Filename
+                    : string.Empty;
+                int coordId = ResolveTextureCoordId(model, batch.TextureCoordComboIndex + textureLayerIndex);
 
-            ApplyLayerAnimationMetadata(material.Layers[^1], mdx, model, batch);
+                material.Layers.Add(new MdlTexLayer
+                {
+                    BlendMode = textureLayerIndex == 0 ? MapBlendMode(blendMode) : MdlTexOp.Modulate,
+                    TextureId = textureId,
+                    CoordId = coordId,
+                    TransformId = -1,
+                    StaticAlpha = 1.0f,
+                    StaticColor = new C3Color(1.0f, 1.0f, 1.0f),
+                    StaticColorAlpha = 1.0f,
+                    Flags = MapLayerFlags(renderFlagBits, textureFlags, 0),
+                });
 
-            ViewerLog.Debug(
-                ViewerLog.Category.Mdx,
-                $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} layerCount={material.Layers.Count}");
+                ApplyLayerAnimationMetadata(
+                    material.Layers[^1],
+                    mdx,
+                    model,
+                    batch.ColorIndex,
+                    batch.TransparencyComboIndex + textureLayerIndex,
+                    batch.TextureAnimationLookupIndex + textureLayerIndex);
+
+                ViewerLog.Debug(
+                    ViewerLog.Category.Mdx,
+                    $"[M2-BATCH] {modelName} section={batch.SkinSectionIndex} materialLayer={batch.MaterialLayer} priority={batch.PriorityPlane} materialIndex={batch.MaterialIndex} textureComboIndex={batch.TextureComboIndex} lookupIndex={textureLookupIndex} blend={blendMode} textureId={textureId} coord={coordId} texture='{texturePath}' materialSlot={materialId} textureLayer={textureLayerIndex + 1}/{textureLayerCount} directFallback={(preferDirectTextureIndices ? 1 : 0)} layerCount={material.Layers.Count}");
+            }
         }
 
         return new MaterialAssignmentMap(sectionMaterialIds, batchMaterialIdsBySection);
     }
 
-    private static int ResolveTextureId(ParsedModelData model, SkinTextureUnitData batch)
+    private static int ResolveTextureId(ParsedModelData model, int lookupIndex, bool preferDirectTextureIndices)
     {
-        int lookupIndex = batch.TextureComboIndex;
+        if (preferDirectTextureIndices && lookupIndex >= 0 && lookupIndex < model.Textures.Count)
+            return lookupIndex;
+
         if (lookupIndex >= 0 && lookupIndex < model.TextureLookup.Count)
         {
             int textureId = model.TextureLookup[lookupIndex].TextureId;
@@ -491,6 +505,62 @@ internal static class WarcraftNetM2Adapter
         }
 
         return model.Textures.Count > 0 ? 0 : -1;
+    }
+
+    private static bool ShouldPreferDirectTextureIndices(ParsedModelData model, SkinData skin)
+    {
+        if (model.Textures.Count <= 1 || skin.TextureUnits.Count == 0)
+            return false;
+
+        var usedLookupIndices = new HashSet<int>();
+        foreach (SkinTextureUnitData batch in skin.TextureUnits)
+        {
+            int textureLayerCount = Math.Max(1, batch.TextureCount);
+            for (int textureLayerIndex = 0; textureLayerIndex < textureLayerCount; textureLayerIndex++)
+            {
+                int lookupIndex = batch.TextureComboIndex + textureLayerIndex;
+                if (lookupIndex >= 0)
+                    usedLookupIndices.Add(lookupIndex);
+            }
+        }
+
+        if (usedLookupIndices.Count <= 1)
+            return false;
+
+        int directDistinct = CountDistinctTextureTargets(usedLookupIndices, model.Textures, static (index, textures) => index >= 0 && index < textures.Count ? index : -1);
+        int lookupDistinct = CountDistinctTextureTargets(usedLookupIndices, model.Textures, (index, textures) =>
+        {
+            if (index < 0 || index >= model.TextureLookup.Count)
+                return -1;
+
+            int textureId = model.TextureLookup[index].TextureId;
+            return textureId >= 0 && textureId < textures.Count ? textureId : -1;
+        });
+
+        bool missingLookupCoverage = usedLookupIndices.Any(index => index >= model.TextureLookup.Count && index < model.Textures.Count);
+        return missingLookupCoverage || directDistinct > lookupDistinct;
+    }
+
+    private static int CountDistinctTextureTargets(
+        IEnumerable<int> lookupIndices,
+        IReadOnlyList<ParsedTextureData> textures,
+        Func<int, IReadOnlyList<ParsedTextureData>, int> selector)
+    {
+        var textureIds = new HashSet<int>();
+        foreach (int lookupIndex in lookupIndices)
+        {
+            int textureId = selector(lookupIndex, textures);
+            if (textureId < 0 || textureId >= textures.Count)
+                continue;
+
+            ParsedTextureData texture = textures[textureId];
+            if (texture.Type == TextureType.None && string.IsNullOrWhiteSpace(texture.Filename))
+                continue;
+
+            textureIds.Add(textureId);
+        }
+
+        return textureIds.Count;
     }
 
     private static int ResolveTextureCoordId(ParsedModelData model, int lookupIndex)
@@ -505,11 +575,17 @@ internal static class WarcraftNetM2Adapter
         return 0;
     }
 
-    private static void ApplyLayerAnimationMetadata(MdlTexLayer layer, MdxFile mdx, ParsedModelData model, SkinTextureUnitData batch)
+    private static void ApplyLayerAnimationMetadata(
+        MdlTexLayer layer,
+        MdxFile mdx,
+        ParsedModelData model,
+        int colorIndex,
+        int transparencyLookupIndex,
+        int textureAnimationLookupIndex)
     {
-        if (batch.ColorIndex >= 0 && batch.ColorIndex < model.Colors.Count)
+        if (colorIndex >= 0 && colorIndex < model.Colors.Count)
         {
-            ParsedColorData color = model.Colors[batch.ColorIndex];
+            ParsedColorData color = model.Colors[colorIndex];
             layer.StaticColor = color.StaticColor;
             layer.StaticColorAlpha = color.StaticAlpha;
             layer.ColorInterpolation = color.ColorInterpolation;
@@ -520,7 +596,7 @@ internal static class WarcraftNetM2Adapter
             layer.ColorAlphaKeys.AddRange(color.AlphaKeys);
         }
 
-        int transparencyId = ResolveTransparencyId(model, batch.TransparencyComboIndex);
+        int transparencyId = ResolveTransparencyId(model, transparencyLookupIndex);
         if (transparencyId >= 0 && transparencyId < model.Transparency.Count)
         {
             ParsedTransparencyData transparency = model.Transparency[transparencyId];
@@ -529,7 +605,7 @@ internal static class WarcraftNetM2Adapter
             layer.AlphaKeys.AddRange(transparency.Keys);
         }
 
-        int textureAnimationId = ResolveTextureAnimationId(model, batch.TextureAnimationLookupIndex);
+        int textureAnimationId = ResolveTextureAnimationId(model, textureAnimationLookupIndex);
         if (textureAnimationId >= 0 && textureAnimationId < mdx.TextureAnimations.Count)
             layer.TransformId = textureAnimationId;
     }
@@ -766,6 +842,7 @@ internal static class WarcraftNetM2Adapter
                 parsedSkin.TextureUnits[i].PriorityPlane = supplement.TextureUnits[i].PriorityPlane;
                 parsedSkin.TextureUnits[i].MaterialIndex = supplement.TextureUnits[i].MaterialIndex;
                 parsedSkin.TextureUnits[i].MaterialLayer = supplement.TextureUnits[i].MaterialLayer;
+                parsedSkin.TextureUnits[i].TextureCount = supplement.TextureUnits[i].TextureCount;
                 parsedSkin.TextureUnits[i].TextureComboIndex = supplement.TextureUnits[i].TextureComboIndex;
                 parsedSkin.TextureUnits[i].SkinSectionIndex = supplement.TextureUnits[i].SkinSectionIndex;
                 parsedSkin.TextureUnits[i].ColorIndex = supplement.TextureUnits[i].ColorIndex;
@@ -933,6 +1010,13 @@ internal static class WarcraftNetM2Adapter
         if (!IsMd20(modelBytes))
             return;
 
+        List<ParsedTextureData>? textureTable = DiscoverProfiledTextureTable(modelBytes, fileName);
+        if (textureTable != null && ShouldPreferProfiledTextures(textureTable, data.Textures))
+        {
+            data.Textures.Clear();
+            data.Textures.AddRange(textureTable);
+        }
+
         TrySupplementRawVertexTextureCoords(modelBytes, fileName, data);
 
         if (data.TextureCoordLookup.Count == 0)
@@ -940,6 +1024,16 @@ internal static class WarcraftNetM2Adapter
             var textureCoordLookup = ReadRawTextureCoordLookup(modelBytes, fileName);
             if (textureCoordLookup != null)
                 data.TextureCoordLookup.AddRange(textureCoordLookup);
+        }
+
+        if (data.Textures.Count > 0)
+        {
+            List<ParsedTextureLookupData>? textureLookup = DiscoverProfiledTextureLookup(modelBytes, fileName, data.Textures.Count);
+            if (textureLookup != null && ShouldPreferProfiledTextureLookup(textureLookup, data.TextureLookup, data.Textures.Count))
+            {
+                data.TextureLookup.Clear();
+                data.TextureLookup.AddRange(textureLookup);
+            }
         }
     }
 
@@ -1094,13 +1188,17 @@ internal static class WarcraftNetM2Adapter
     private static int EvaluateTextureLookupQuality(IReadOnlyList<ParsedTextureLookupData> lookup, int textureCount)
     {
         int validEntries = 0;
+        var distinctTextureIds = new HashSet<int>();
         foreach (ParsedTextureLookupData entry in lookup)
         {
             if (entry.TextureId >= 0 && entry.TextureId < textureCount)
+            {
                 validEntries++;
+                distinctTextureIds.Add(entry.TextureId);
+            }
         }
 
-        return (validEntries * 4) + lookup.Count;
+        return (validEntries * 4) + lookup.Count + (distinctTextureIds.Count * 16);
     }
 
     private static List<ParsedTextureData>? DiscoverProfiledTextureTable(byte[] modelBytes, string fileName)
@@ -1433,6 +1531,7 @@ internal static class WarcraftNetM2Adapter
                 short colorIndex = BitConverter.ToInt16(modelBytes, batchOffset + 0x06);
                 ushort materialIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x08);
                 ushort materialLayer = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0A);
+                ushort textureCount = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0C);
                 ushort textureComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x0E);
                 ushort textureCoordComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x10);
                 ushort transparencyComboIndex = BitConverter.ToUInt16(modelBytes, batchOffset + 0x12);
@@ -1444,6 +1543,7 @@ internal static class WarcraftNetM2Adapter
                     {
                         PriorityPlane = modelBytes[batchOffset + 0x01],
                         MaterialLayer = materialLayer,
+                        TextureCount = textureCount == 0 ? 1 : textureCount,
                         SkinSectionIndex = submeshIndex,
                         ColorIndex = colorIndex,
                         MaterialIndex = materialIndex,
@@ -1664,7 +1764,7 @@ internal static class WarcraftNetM2Adapter
                 short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
                 ushort materialLayer = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort textureCount = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = profile.SkinLikeBStride >= 20 && entryPos + 20 <= skinBytes.Length
                     ? br.ReadUInt16()
@@ -1682,6 +1782,7 @@ internal static class WarcraftNetM2Adapter
                 {
                     PriorityPlane = priority,
                     MaterialLayer = materialLayer,
+                    TextureCount = textureCount == 0 ? 1 : textureCount,
                     SkinSectionIndex = submeshIndex,
                     ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
@@ -1726,7 +1827,8 @@ internal static class WarcraftNetM2Adapter
         using var br = new BinaryReader(ms);
 
         uint maybeMagic = br.ReadUInt32();
-        if (maybeMagic != SkinMagic)
+        bool hasStrictSkinHeader = maybeMagic == SkinMagic;
+        if (!hasStrictSkinHeader)
             br.BaseStream.Position = 0;
 
         uint nIndices = br.ReadUInt32();
@@ -1739,14 +1841,33 @@ internal static class WarcraftNetM2Adapter
         uint ofsSubmeshes = br.ReadUInt32();
         uint nTextureUnits = br.ReadUInt32();
         uint ofsTextureUnits = br.ReadUInt32();
+        uint globalVertexOffset = 0;
+        uint shadowBatchCount = 0;
+        uint ofsShadowBatches = 0;
 
         _ = nBones;
         _ = ofsBones;
 
-        if (br.BaseStream.Position + 4 <= br.BaseStream.Length)
-            _ = br.ReadUInt32(); // boneCountMax (optional)
+        if (hasStrictSkinHeader)
+        {
+            if (br.BaseStream.Position + 4 <= br.BaseStream.Length)
+                globalVertexOffset = br.ReadUInt32();
 
-        var data = new SkinData();
+            if (br.BaseStream.Position + 8 <= br.BaseStream.Length)
+            {
+                shadowBatchCount = br.ReadUInt32();
+                ofsShadowBatches = br.ReadUInt32();
+            }
+        }
+        else if (br.BaseStream.Position + 4 <= br.BaseStream.Length)
+        {
+            _ = br.ReadUInt32(); // boneCountMax (optional)
+        }
+
+        var data = new SkinData
+        {
+            GlobalVertexOffset = globalVertexOffset,
+        };
 
         if (ofsIndices + (nIndices * 2) <= skinBytes.Length)
         {
@@ -1762,7 +1883,9 @@ internal static class WarcraftNetM2Adapter
                 data.TriangleIndices.Add(br.ReadUInt16());
         }
 
-        int submeshStride = InferStride(ofsSubmeshes, nSubmeshes, ofsTextureUnits, skinBytes.Length, 48, 24);
+        int submeshStride = hasStrictSkinHeader
+            ? 0x30
+            : InferStride(ofsSubmeshes, nSubmeshes, ofsTextureUnits, skinBytes.Length, 48, 24);
         if (submeshStride >= 12 && ofsSubmeshes < skinBytes.Length)
         {
             for (uint i = 0; i < nSubmeshes; i++)
@@ -1785,7 +1908,12 @@ internal static class WarcraftNetM2Adapter
             }
         }
 
-        int textureUnitStride = InferStride(ofsTextureUnits, nTextureUnits, (uint)skinBytes.Length, skinBytes.Length, 24, 24);
+        uint nextTextureUnitOffset = hasStrictSkinHeader && shadowBatchCount > 0 && ofsShadowBatches > ofsTextureUnits
+            ? ofsShadowBatches
+            : (uint)skinBytes.Length;
+        int textureUnitStride = hasStrictSkinHeader
+            ? 0x18
+            : InferStride(ofsTextureUnits, nTextureUnits, nextTextureUnitOffset, skinBytes.Length, 24, 24);
         if (textureUnitStride >= 18 && ofsTextureUnits < skinBytes.Length)
         {
             for (uint i = 0; i < nTextureUnits; i++)
@@ -1802,7 +1930,7 @@ internal static class WarcraftNetM2Adapter
                 short colorIndex = br.ReadInt16();
                 ushort materialIndex = br.ReadUInt16();
                 ushort materialLayer = br.ReadUInt16();
-                _ = br.ReadUInt16();
+                ushort textureCount = br.ReadUInt16();
                 ushort textureComboIndex = br.ReadUInt16();
                 ushort textureCoordComboIndex = textureUnitStride >= 20 && entryPos + 20 <= skinBytes.Length
                     ? br.ReadUInt16()
@@ -1820,6 +1948,7 @@ internal static class WarcraftNetM2Adapter
                 {
                     PriorityPlane = priority,
                     MaterialLayer = materialLayer,
+                    TextureCount = textureCount == 0 ? 1 : textureCount,
                     SkinSectionIndex = submeshIndex,
                     ColorIndex = colorIndex,
                     MaterialIndex = materialIndex,
@@ -1916,6 +2045,7 @@ internal static class WarcraftNetM2Adapter
                 {
                     PriorityPlane = tu.PriorityPlane < 0 ? (ushort)0 : (ushort)tu.PriorityPlane,
                     MaterialLayer = tu.MaterialLayer,
+                    TextureCount = 1,
                     SkinSectionIndex = tu.SkinSectionIndex,
                     MaterialIndex = tu.MaterialIndex,
                     TextureComboIndex = tu.TextureComboIndex,
@@ -1946,6 +2076,7 @@ internal static class WarcraftNetM2Adapter
         public int ColorIndex { get; set; } = -1;
         public int MaterialIndex { get; set; }
         public int MaterialLayer { get; set; }
+        public int TextureCount { get; set; } = 1;
         public int TextureComboIndex { get; set; }
         public int TextureCoordComboIndex { get; set; }
         public int TransparencyComboIndex { get; set; } = -1;

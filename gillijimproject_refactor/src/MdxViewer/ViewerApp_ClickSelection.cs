@@ -38,6 +38,16 @@ public partial class ViewerApp
         if (_worldScene == null)
             return false;
 
+        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null;
+        Vector3? clickedWorldPoint = null;
+        TerrainRenderer? terrainRenderer = _terrainManager?.Renderer;
+        if (terrainRenderer != null
+            && TryRaycastTerrain(terrainRenderer, rayOrigin, rayDir, GetSceneFarPlane(), out TerrainRenderer.TerrainChunkInfo terrainHit, out Vector3 terrainHitPoint))
+        {
+            clickedChunkKey = (terrainHit.TileX, terrainHit.TileY, terrainHit.ChunkX, terrainHit.ChunkY);
+            clickedWorldPoint = terrainHitPoint;
+        }
+
         _clickSelectionCandidates.Clear();
         _clickSelectionSceneHitOverflowCount = 0;
 
@@ -74,7 +84,7 @@ public partial class ViewerApp
         if (_worldScene.TryPickPm4ObjectByRay(rayOrigin, rayDir, out var pm4HitKey, out _, out float pm4HitDistance) && pm4HitKey.HasValue)
             AddPm4ClickSelectionCandidate(addedKeys, pm4HitKey.Value, pm4HitDistance, "Ray hit");
 
-        if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits))
+        if (_worldScene.TryPickSceneObjectsByRay(rayOrigin, rayDir, _sceneClickSelectionHits, clickedChunkKey, clickedWorldPoint))
         {
             int sceneHitCount = Math.Min(_sceneClickSelectionHits.Count, MaxSceneClickSelectionHits);
             _clickSelectionSceneHitOverflowCount = Math.Max(0, _sceneClickSelectionHits.Count - sceneHitCount);

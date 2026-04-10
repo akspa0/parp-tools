@@ -161,6 +161,108 @@ public static class TileStitchingService
         
         return (shadowPath, alphaPaths);
     }
+
+            /// <summary>
+            /// Generate stitched tile images for shadow and alpha layers plus a packed RGBA atlas.
+            /// </summary>
+            public static async Task<(string? shadowPath, List<string> alphaPaths, string? alphaAtlasPath)> StitchTileWithPackedAtlasAsync(
+                string shadowsDir, string masksDir, string tileName, string outputDir)
+            {
+                var (shadowPath, alphaPaths) = await StitchTileAsync(shadowsDir, masksDir, tileName, outputDir);
+                if (shadowPath == null && alphaPaths.Count == 0)
+                    return (shadowPath, alphaPaths, null);
+
+                var alphaAtlasPath = Path.Combine(outputDir, $"{tileName}_alpha_atlas.png");
+                var packedAtlas = StitchPackedAlphaAtlas(shadowPath, alphaPaths);
+                await File.WriteAllBytesAsync(alphaAtlasPath, packedAtlas);
+                return (shadowPath, alphaPaths, alphaAtlasPath);
+            }
+
+            public static byte[] StitchPackedAlphaAtlas(string? shadowPath, IReadOnlyList<string> alphaLayerPaths)
+            {
+                using var atlas = new Image<Rgba32>(TileSize, TileSize);
+                atlas.ProcessPixelRows(accessor =>
+                {
+                    for (int y = 0; y < accessor.Height; y++)
+                    {
+                        var row = accessor.GetRowSpan(y);
+                        for (int x = 0; x < row.Length; x++)
+                            row[x] = new Rgba32(255, 255, 255, 0);
+                    }
+                });
+
+                foreach (var alphaPath in alphaLayerPaths)
+                {
+                    if (!TryParseLayerIndex(alphaPath, out int layer) || layer < 1 || layer > 3)
+                        continue;
+
+                    ApplyGrayImageToAtlasChannel(atlas, alphaPath, layer - 1);
+                }
+
+                if (!string.IsNullOrWhiteSpace(shadowPath))
+                    ApplyGrayImageToAtlasChannel(atlas, shadowPath, 3);
+
+                using var ms = new MemoryStream();
+                atlas.SaveAsPng(ms);
+                return ms.ToArray();
+            }
+
+            private static void ApplyGrayImageToAtlasChannel(Image<Rgba32> atlas, string path, int channel)
+            {
+                if (!File.Exists(path))
+                    return;
+
+                try
+                {
+                    using var image = Image.Load<L8>(path);
+                    int width = Math.Min(atlas.Width, image.Width);
+                    int height = Math.Min(atlas.Height, image.Height);
+
+                    atlas.ProcessPixelRows(image, (atlasAccessor, imageAccessor) =>
+                    {
+                        for (int y = 0; y < height; y++)
+                        {
+                            var atlasRow = atlasAccessor.GetRowSpan(y);
+                            var imageRow = imageAccessor.GetRowSpan(y);
+                            for (int x = 0; x < width; x++)
+                            {
+                                ref var pixel = ref atlasRow[x];
+                                byte value = imageRow[x].PackedValue;
+                                switch (channel)
+                                {
+                                    case 0:
+                                        pixel.R = value;
+                                        break;
+                                    case 1:
+                                        pixel.G = value;
+                                        break;
+                                    case 2:
+                                        pixel.B = value;
+                                        break;
+                                    case 3:
+                                        pixel.A = value;
+                                        break;
+                                }
+                            }
+                        }
+                    });
+                }
+                catch
+                {
+                }
+            }
+
+            private static bool TryParseLayerIndex(string path, out int layer)
+            {
+                layer = 0;
+                string fileName = Path.GetFileNameWithoutExtension(path);
+                int marker = fileName.LastIndexOf("_l", StringComparison.OrdinalIgnoreCase);
+                if (marker < 0 || marker + 2 >= fileName.Length)
+                    return false;
+
+                return int.TryParse(fileName[(marker + 2)..], out layer);
+            }
+
     /// <summary>
     /// Stitch liquid heights for a tile (1024x1024 L8).
     /// </summary>

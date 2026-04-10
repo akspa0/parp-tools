@@ -51,6 +51,7 @@ internal static class AssetProbe
             }
 
             ViewerLog.Verbose = true;
+            ViewerLog.Unmute(ViewerLog.Category.Mdx);
             MdxFile.Verbose = true;
 
             try
@@ -119,6 +120,7 @@ internal static class AssetProbe
         string? listfilePath = TryGetOptionValue(args, "--listfile");
 
         ViewerLog.Verbose = true;
+        ViewerLog.Unmute(ViewerLog.Category.Mdx);
         MdxFile.Verbose = true;
 
         try
@@ -308,6 +310,14 @@ internal static class AssetProbe
         Console.WriteLine(
             $"[M2-DIAG-CPU] {modelPath}: {totalGeosets} geosets, {validGeosets} valid, {indexRejected} index-rejected, {emptySkipped} empty-skipped (skin={selectedSkinPath})");
         Console.WriteLine($"[M2-DIAG-CPU] {WarcraftNetM2Adapter.SummarizeGeometry(runtimeModel)}");
+
+        int maxTextureSummaries = Math.Min(runtimeModel.Textures.Count, 8);
+        for (int textureIndex = 0; textureIndex < maxTextureSummaries; textureIndex++)
+        {
+            var texture = runtimeModel.Textures[textureIndex];
+            Console.WriteLine(
+                $"[M2-DIAG-TEX] texture={textureIndex} replaceable={texture.ReplaceableId} flags={texture.Flags} path={texture.Path}");
+        }
 
         var animator = new MdxAnimator(runtimeModel);
         Console.WriteLine(

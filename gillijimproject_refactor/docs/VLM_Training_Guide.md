@@ -1,6 +1,6 @@
-# WoW Terrain MK Dataset Training Guide
+# WoW Terrain ML Dataset Training Guide
 
-MK Dataset is now the preferred user-facing name for this terrain supervision corpus. Existing `VLM` type and file names in code are legacy implementation names and compatibility seams.
+ML Dataset is now the preferred user-facing name for this terrain supervision corpus. Existing `VLM` type and file names in code are legacy implementation names and compatibility seams.
 
 This guide details the process of training a Vision Language Model (Qwen2-VL via Unsloth) to understand and reconstruct World of Warcraft terrain data.
 
@@ -37,12 +37,12 @@ pip install --no-deps "xformers<0.0.27" "trl<0.9.0" peft accelerate bitsandbytes
 
 ## 2. Generating the Dataset
 
-Use the C# tool `mk-export` to extract data from your WoW client.
+Use the C# tool `ml-export` to extract data from your WoW client.
 
 ### Syntax
 ```bash
 cd src/WoWMapConverter
-dotnet run --project WoWMapConverter.Cli -- mk-export --client "C:\Path\To\WoW" --map "MapName" --out "J:\mk_output\MapName"
+dotnet run --project WoWMapConverter.Cli -- ml-export --client "C:\Path\To\WoW" --map "MapName" --out "J:\ml_output\MapName"
 ```
 
 ### Output

@@ -98,7 +98,7 @@ public sealed class MkDatasetHarvester
         string datasetRoot = Path.GetFullPath(options.DatasetRoot);
         string datasetDirectory = Path.Combine(datasetRoot, "dataset");
         if (!Directory.Exists(datasetDirectory))
-            throw new DirectoryNotFoundException($"MK dataset directory not found: {datasetDirectory}");
+            throw new DirectoryNotFoundException($"ML dataset directory not found: {datasetDirectory}");
 
         string[] datasetFiles = Directory.GetFiles(datasetDirectory, "*.json")
             .Where(path => !string.Equals(Path.GetFileName(path), "texture_database.json", StringComparison.OrdinalIgnoreCase))
@@ -129,7 +129,7 @@ public sealed class MkDatasetHarvester
 
         foreach (string datasetFile in datasetFiles)
         {
-            progress?.Report($"Harvesting MK dataset tile {Path.GetFileName(datasetFile)}...");
+            progress?.Report($"Harvesting ML dataset tile {Path.GetFileName(datasetFile)}...");
 
             string json = await File.ReadAllTextAsync(datasetFile).ConfigureAwait(false);
             VlmTrainingSample? sample = JsonSerializer.Deserialize<VlmTrainingSample>(json, _datasetJsonOptions);
@@ -166,7 +166,7 @@ public sealed class MkDatasetHarvester
             if (options.GenerateReferenceMinimaps && (options.ForceRegenerateReferenceMinimaps || !referenceMinimapExists))
             {
                 if (baker == null)
-                    throw new InvalidOperationException("MK dataset reference minimap baker was not initialized.");
+                    throw new InvalidOperationException("ML dataset reference minimap baker was not initialized.");
 
                 using var bakedImage = options.ApplyShadows
                     ? await baker.BakeTileWithShadowsAsync(datasetFile, applyShadows: true).ConfigureAwait(false)
@@ -223,7 +223,7 @@ public sealed class MkDatasetHarvester
             ReferenceMinimapsGenerated = manifest.Tiles.Count(tile => tile.ReferenceMinimapGenerated)
         };
 
-        string manifestPath = Path.GetFullPath(options.ManifestOutputPath ?? Path.Combine(datasetRoot, "mk_dataset_manifest.json"));
+        string manifestPath = Path.GetFullPath(options.ManifestOutputPath ?? Path.Combine(datasetRoot, "ml_dataset_manifest.json"));
         Directory.CreateDirectory(Path.GetDirectoryName(manifestPath) ?? datasetRoot);
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifest, _manifestJsonOptions)).ConfigureAwait(false);
 

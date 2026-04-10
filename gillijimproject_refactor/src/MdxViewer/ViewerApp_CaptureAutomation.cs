@@ -120,6 +120,7 @@ public partial class ViewerApp
         public required float PreviousFogStart { get; init; }
         public required float PreviousFogEnd { get; init; }
         public required bool PreviousObjectFogEnabled { get; init; }
+        public required bool PreviousDoodadsVisible { get; init; }
         public required int RequestedResolution { get; init; }
         public int RemainingCaptures { get; set; }
     }
@@ -435,8 +436,8 @@ public partial class ViewerApp
             string safeMap = MakeSafePathSegment(shot.MapName);
             string safeBuild = MakeSafePathSegment(shot.BuildVersion);
             string safeShotName = MakeSafePathSegment(shot.Name);
-            string mode = includeUi ? "with_ui" : "no_ui";
-            string fileName = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeShotName}_{mode}.png";
+            string outputMode = includeUi ? "with_ui" : "no_ui";
+            string fileName = $"{DateTime.UtcNow:yyyyMMdd_HHmmssfff}_{safeShotName}_{outputMode}.png";
             outputPath = Path.Combine(_captureOutputDir, safeMap, safeBuild, fileName);
         }
 
@@ -626,6 +627,7 @@ public partial class ViewerApp
             PreviousFogStart = _terrainManager.Lighting.FogStart,
             PreviousFogEnd = _terrainManager.Lighting.FogEnd,
             PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
+            PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
             RequestedResolution = requestedResolution,
             RemainingCaptures = plan.Tiles.Count,
         };
@@ -636,7 +638,10 @@ public partial class ViewerApp
         _terrainManager.Lighting.FogStart = MaxTerrainFogDistance * 0.75f;
         _terrainManager.Lighting.FogEnd = MaxTerrainFogDistance;
         if (_worldScene != null)
+        {
             _worldScene.ObjectFogEnabled = false;
+            _worldScene.DoodadsVisible = false;
+        }
 
         foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
         {
@@ -659,7 +664,7 @@ public partial class ViewerApp
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads are disabled, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private CameraShotPoint BuildMkHarvestViewerValidationShot(string mapName, MkHarvestViewerValidationCaptureTile tile)
@@ -706,7 +711,10 @@ public partial class ViewerApp
         }
 
         if (_worldScene != null)
+        {
             _worldScene.ObjectFogEnabled = batch.PreviousObjectFogEnabled;
+            _worldScene.DoodadsVisible = batch.PreviousDoodadsVisible;
+        }
 
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {

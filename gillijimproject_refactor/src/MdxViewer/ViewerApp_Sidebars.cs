@@ -2373,6 +2373,9 @@ public partial class ViewerApp
         if (ImGui.Button("Open Chunk Clipboard"))
             _showChunkClipboardWindow = true;
         ImGui.SameLine();
+        if (ImGui.Button("Open Terrain Analysis"))
+            _showTerrainAnalysisWindow = true;
+        ImGui.SameLine();
         ImGui.TextDisabled("Chunk copy/paste stays available as a temporary pop-out panel.");
     }
 
@@ -2485,6 +2488,31 @@ public partial class ViewerApp
                 PasteChunkAtTarget(renderer);
         }
         if (!canPaste) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool canInvert = _selectedChunks.Count > 0 || hasChunk;
+        if (!canInvert) ImGui.BeginDisabled();
+        if (ImGui.Button(_selectedChunks.Count > 0 ? "Invert Z Selection" : "Invert Z Chunk"))
+            InvertSelectedChunkHeights(renderer);
+        if (!canInvert) ImGui.EndDisabled();
+
+        ImGui.TextDisabled($"Edited tiles: {GetChunkToolDirtyTileCount()}  Edited chunks: {GetChunkToolDirtyChunkCount()}");
+        ImGui.TextDisabled("Saves reusable 257x257 L16 heightmaps plus a manifest under the editor project output folder. Source terrain files stay untouched.");
+
+        bool canSaveEdited = GetChunkToolDirtyTileCount() > 0;
+        if (!canSaveEdited) ImGui.BeginDisabled();
+        if (ImGui.Button("Save Edited Heightmaps"))
+            SaveChunkToolHeightmapOutputs();
+        if (!canSaveEdited) ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (!canSaveEdited) ImGui.BeginDisabled();
+        if (ImGui.SmallButton("Clear Dirty##chunkToolDirtyClear"))
+            ClearChunkToolDirtyTracking();
+        if (!canSaveEdited) ImGui.EndDisabled();
+
+        if (!string.IsNullOrWhiteSpace(_chunkClipboardLastSaveFolder))
+            ImGui.TextWrapped($"Last heightmap output: {_chunkClipboardLastSaveFolder}");
 
         if (!string.IsNullOrWhiteSpace(_chunkClipboardStatus))
             ImGui.TextWrapped(_chunkClipboardStatus);

@@ -9013,22 +9013,56 @@ public class WorldScene : ISceneRenderer
 
     public bool TryPickSceneObjectsByRay(Vector3 rayOrigin, Vector3 rayDir, List<SceneObjectPickHit> hits)
     {
+        return TryPickSceneObjectsByRay(rayOrigin, rayDir, hits, null, null);
+    }
+
+    public bool TryPickSceneObjectsByRay(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        List<SceneObjectPickHit> hits,
+        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
+        Vector3? clickedWorldPoint)
+    {
         ArgumentNullException.ThrowIfNull(hits);
-        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: false);
+        CollectSceneObjectPickHits(rayOrigin, rayDir, hits, logHits: false, clickedChunkKey, clickedWorldPoint);
         return hits.Count > 0;
     }
 
-    private void CollectSceneObjectPickHits(Vector3 rayOrigin, Vector3 rayDir, List<SceneObjectPickHit> hits, bool logHits)
+    private void CollectSceneObjectPickHits(
+        Vector3 rayOrigin,
+        Vector3 rayDir,
+        List<SceneObjectPickHit> hits,
+        bool logHits,
+        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey = null,
+        Vector3? clickedWorldPoint = null)
     {
         hits.Clear();
 
         if (_instancesDirty)
             RebuildInstanceLists();
 
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(2f, 2f, 2f));
-        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(1f, 1f, 1f));
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _wmoInstances, ObjectType.Wmo, new Vector3(2f, 2f, 2f), clickedChunkKey, clickedWorldPoint);
+        AppendSceneObjectPickHits(rayOrigin, rayDir, hits, _mdxInstances, ObjectType.Mdx, new Vector3(1f, 1f, 1f), clickedChunkKey, clickedWorldPoint);
 
-        hits.Sort(static (left, right) => left.Distance.CompareTo(right.Distance));
+        if (clickedChunkKey.HasValue && hits.Any(static hit => hit.SharesClickedChunk))
+            hits.RemoveAll(static hit => !hit.SharesClickedChunk);
+
+        hits.Sort(static (left, right) =>
+        {
+            int clickedChunkCompare = right.SharesClickedChunk.CompareTo(left.SharesClickedChunk);
+            if (clickedChunkCompare != 0)
+                return clickedChunkCompare;
+
+            int chunkDistanceCompare = left.ChunkGridDistance.CompareTo(right.ChunkGridDistance);
+            if (chunkDistanceCompare != 0)
+                return chunkDistanceCompare;
+
+            int centroidCompare = left.SelectionPointDistanceSq.CompareTo(right.SelectionPointDistanceSq);
+            if (centroidCompare != 0)
+                return centroidCompare;
+
+            return left.Distance.CompareTo(right.Distance);
+        });
 
         if (!logHits || hits.Count == 0)
             return;
@@ -9046,7 +9080,9 @@ public class WorldScene : ISceneRenderer
         List<SceneObjectPickHit> hits,
         List<ObjectInstance> instances,
         ObjectType objectType,
-        Vector3 padding)
+        Vector3 padding,
+        (int tileX, int tileY, int chunkX, int chunkY)? clickedChunkKey,
+        Vector3? clickedWorldPoint)
     {
         for (int i = 0; i < instances.Count; i++)
         {
@@ -9057,6 +9093,20 @@ public class WorldScene : ISceneRenderer
             if (!TryRayIntersectInstanceBounds(rayOrigin, rayDir, instance, padding, out float distance) || !IsHoverPickDistanceAllowed(distance))
                 continue;
 
+            Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
+            bool sharesClickedChunk = clickedChunkKey.HasValue
+                && TryGetSceneObjectChunkKey(instance, out var instanceChunkKey)
+                && instanceChunkKey == clickedChunkKey.Value;
+            int chunkGridDistance = clickedChunkKey.HasValue && TryGetSceneObjectChunkKey(instance, out instanceChunkKey)
+                ? Math.Abs(instanceChunkKey.tileX - clickedChunkKey.Value.tileX)
+                    + Math.Abs(instanceChunkKey.tileY - clickedChunkKey.Value.tileY)
+                    + Math.Abs(instanceChunkKey.chunkX - clickedChunkKey.Value.chunkX)
+                    + Math.Abs(instanceChunkKey.chunkY - clickedChunkKey.Value.chunkY)
+                : int.MaxValue;
+            float selectionPointDistanceSq = clickedWorldPoint.HasValue
+                ? Vector3.DistanceSquared(selectionPoint, clickedWorldPoint.Value)
+                : float.MaxValue;
+
             hits.Add(new SceneObjectPickHit(
                 objectType,
                 i,
@@ -9066,8 +9116,55 @@ public class WorldScene : ISceneRenderer
                 instance.UniqueId,
                 instance.PlacementPosition,
                 instance.BoundsMin,
-                instance.BoundsMax));
+                instance.BoundsMax,
+                selectionPoint,
+                selectionPointDistanceSq,
+                sharesClickedChunk,
+                chunkGridDistance));
         }
+    }
+
+    private static Vector3 GetSceneObjectSelectionPoint(in ObjectInstance instance)
+    {
+        if (instance.BoundsResolved)
+        {
+            Vector3 boundsCenter = (instance.BoundsMin + instance.BoundsMax) * 0.5f;
+            if (float.IsFinite(boundsCenter.X) && float.IsFinite(boundsCenter.Y) && float.IsFinite(boundsCenter.Z))
+                return boundsCenter;
+        }
+
+        return instance.PlacementPosition;
+    }
+
+    private static bool TryGetSceneObjectChunkKey(in ObjectInstance instance, out (int tileX, int tileY, int chunkX, int chunkY) key)
+    {
+        Vector3 selectionPoint = GetSceneObjectSelectionPoint(instance);
+        return TryGetTerrainChunkKey(selectionPoint.X, selectionPoint.Y, out key);
+    }
+
+    private static bool TryGetTerrainChunkKey(float worldX, float worldY, out (int tileX, int tileY, int chunkX, int chunkY) key)
+    {
+        key = default;
+
+        float dx = WoWConstants.MapOrigin - worldX;
+        float dy = WoWConstants.MapOrigin - worldY;
+        if (float.IsNaN(dx) || float.IsNaN(dy) || float.IsInfinity(dx) || float.IsInfinity(dy))
+            return false;
+
+        int tileX = (int)MathF.Floor(dx / WoWConstants.ChunkSize);
+        int tileY = (int)MathF.Floor(dy / WoWConstants.ChunkSize);
+        if (tileX < 0 || tileX >= WoWConstants.TilesPerMapEdge || tileY < 0 || tileY >= WoWConstants.TilesPerMapEdge)
+            return false;
+
+        float localX = dx - tileX * WoWConstants.ChunkSize;
+        float localY = dy - tileY * WoWConstants.ChunkSize;
+        float chunkSize = WoWConstants.ChunkSize / WoWConstants.ChunksPerTileEdge;
+
+        int chunkY = Math.Clamp((int)MathF.Floor(localX / chunkSize), 0, WoWConstants.ChunksPerTileEdge - 1);
+        int chunkX = Math.Clamp((int)MathF.Floor(localY / chunkSize), 0, WoWConstants.ChunksPerTileEdge - 1);
+
+        key = (tileX, tileY, chunkX, chunkY);
+        return true;
     }
 
     public bool SelectPm4ObjectByRay(Vector3 rayOrigin, Vector3 rayDir)
@@ -11219,7 +11316,11 @@ public readonly record struct SceneObjectPickHit(
     int UniqueId,
     Vector3 PlacementPosition,
     Vector3 BoundsMin,
-    Vector3 BoundsMax)
+    Vector3 BoundsMax,
+    Vector3 SelectionPoint,
+    float SelectionPointDistanceSq,
+    bool SharesClickedChunk,
+    int ChunkGridDistance)
 {
     public string KindLabel => ObjectType == ObjectType.Wmo ? "WMO" : "MDX";
 }

@@ -1,6 +1,6 @@
-# MK Dataset Reconstruction Plan
+# ML Dataset Reconstruction Plan
 
-This file keeps its historical filename for continuity, but MK Dataset is now the preferred user-facing name for this dataset family.
+This file keeps its historical filename for continuity, but ML Dataset is now the preferred user-facing name for this dataset family.
 
 ## Mar 31, 2026 - Source-Of-Truth Reset
 

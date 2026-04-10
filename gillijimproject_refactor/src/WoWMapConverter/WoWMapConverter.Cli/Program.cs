@@ -38,6 +38,12 @@ public static class Program
             "development-repair" => RunDevelopmentRepair(args.Skip(1).ToArray()),
             "terrain-texture-transfer" => RunTerrainTextureTransfer(args.Skip(1).ToArray()),
             "wmo-info" => RunWmoInfo(args.Skip(1).ToArray()),
+            "ml-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
+            "ml-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
+            "ml-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
+            "ml-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
+            "ml-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
+            "ml-harvest" => await RunMkHarvestAsync(args.Skip(1).ToArray()),
             "mk-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "mk-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "mk-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
@@ -50,7 +56,7 @@ public static class Program
             "vlm-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
             "vlm-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
             "analyze" => await RunAnalyzeAsync(args.Skip(1).ToArray()),
-            "batch" or "vlm-batch" or "mk-batch" => await RunBatchAsync(args.Skip(1).ToArray()),
+            "batch" or "vlm-batch" or "mk-batch" or "ml-batch" => await RunBatchAsync(args.Skip(1).ToArray()),
             _ => await RunDefaultConvertAsync(args)
         };
     }
@@ -72,8 +78,8 @@ public static class Program
 
         if (string.IsNullOrEmpty(configPath))
         {
-            Console.WriteLine("MK Dataset Batch Export");
-            Console.WriteLine("Usage: wowmapconverter mk-batch --config <config.json>  (legacy alias: vlm-batch)");
+            Console.WriteLine("ML Dataset Batch Export");
+            Console.WriteLine("Usage: wowmapconverter ml-batch --config <config.json>  (legacy aliases: mk-batch, vlm-batch)");
             return 1;
         }
 
@@ -117,6 +123,7 @@ public static class Program
         bool applyShadows = true;
         bool invertAlpha = true;
         float shadowIntensity = 0.5f;
+        bool requestedDeprecatedReferenceMinimapGeneration = false;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -136,6 +143,7 @@ public static class Program
                     break;
                 case "--generate-reference-minimaps":
                     generateReferenceMinimaps = true;
+                    requestedDeprecatedReferenceMinimapGeneration = true;
                     break;
                 case "--force":
                     force = true;
@@ -158,47 +166,43 @@ public static class Program
 
         if (string.IsNullOrWhiteSpace(datasetDir))
         {
-            Console.WriteLine("MK Dataset Harvest - Audit per-tile coverage and optionally generate high-resolution reference minimaps");
+            Console.WriteLine("ML Dataset Harvest - Audit per-tile coverage and write the dataset manifest");
             Console.WriteLine();
-            Console.WriteLine("Usage: mk-harvest --dataset <dir> [options]");
+            Console.WriteLine("Usage: ml-harvest --dataset <dir> [options]  (legacy alias: mk-harvest)");
             Console.WriteLine();
             Console.WriteLine("Options:");
-            Console.WriteLine("  --dataset, -d <dir>               MK dataset root directory (must contain dataset/*.json)");
-            Console.WriteLine("  --output, -o <json>               Output manifest path (default: <dataset>/mk_dataset_manifest.json)");
-            Console.WriteLine("  --generate-reference-minimaps     Bake 4096x4096 reference minimaps from exported layers");
-            Console.WriteLine("  --reference-output, -r <dir>      Reference minimap output directory (default: <dataset>/reference_minimaps)");
-            Console.WriteLine("  --force                           Rebuild reference minimaps even if PNGs already exist");
-            Console.WriteLine("  --no-shadows                      Bake reference minimaps without shadow overlays");
-            Console.WriteLine("  --no-invert-alpha                 Use exported alpha values directly when baking references");
-            Console.WriteLine("  --shadow-intensity <0-1>          Shadow darkness for baked reference minimaps (default: 0.5)");
+            Console.WriteLine("  --dataset, -d <dir>               ML dataset root directory (must contain dataset/*.json)");
+            Console.WriteLine("  --output, -o <json>               Output manifest path (default: <dataset>/ml_dataset_manifest.json)");
+            Console.WriteLine("  Reference minimap generation is disabled on the ML dataset surface. Use MdxViewer validation capture for rendered minimaps.");
             return 1;
         }
+
+        if (generateReferenceMinimaps || requestedDeprecatedReferenceMinimapGeneration || force || !string.IsNullOrWhiteSpace(referenceOutputDir))
+            Console.WriteLine("Warning: baked 4k reference minimap generation is disabled on the ML dataset surface; those options are ignored.");
 
         var harvester = new MkDatasetHarvester();
         var options = new MkDatasetHarvestOptions(
             DatasetRoot: datasetDir,
             ManifestOutputPath: outputPath,
-            GenerateReferenceMinimaps: generateReferenceMinimaps,
-            ForceRegenerateReferenceMinimaps: force,
+            GenerateReferenceMinimaps: false,
+            ForceRegenerateReferenceMinimaps: false,
             ApplyShadows: applyShadows,
             ShadowIntensity: shadowIntensity,
             InvertAlpha: invertAlpha,
-            ReferenceMinimapDirectory: referenceOutputDir);
+            ReferenceMinimapDirectory: null);
 
         try
         {
             var progress = new Progress<string>(msg => Console.WriteLine(msg));
             MkDatasetHarvestResult result = await harvester.HarvestAsync(options, progress);
             Console.WriteLine();
-            Console.WriteLine("MK dataset harvest complete:");
+            Console.WriteLine("ML dataset harvest complete:");
             Console.WriteLine($"  Tiles processed: {result.TilesProcessed}");
             Console.WriteLine($"  Source minimaps found: {result.SourceMinimapsFound}");
             Console.WriteLine($"  Local heightmaps found: {result.LocalHeightmapsFound}");
             Console.WriteLine($"  Global heightmaps found: {result.GlobalHeightmapsFound}");
             Console.WriteLine($"  Tiles with alpha masks: {result.TilesWithAlphaMasks}");
-            Console.WriteLine($"  Reference minimaps generated: {result.ReferenceMinimapsGenerated}");
             Console.WriteLine($"  Manifest: {result.ManifestPath}");
-            Console.WriteLine($"  Reference minimaps: {result.ReferenceMinimapDirectory}");
             return 0;
         }
         catch (Exception ex)
@@ -1546,10 +1550,10 @@ public static class Program
 
         if (string.IsNullOrEmpty(clientPath) || string.IsNullOrEmpty(outputDir) || (!batchAll && string.IsNullOrEmpty(mapName)))
         {
-            Console.WriteLine("MK Dataset Export - Generate terrain supervision dataset from WoW client files");
+            Console.WriteLine("ML Dataset Export - Generate terrain supervision dataset from WoW client files");
             Console.WriteLine();
-            Console.WriteLine("Usage: mk-export --client <path> --map <name> --out <dir> [options]  (legacy alias: vlm-export)");
-            Console.WriteLine("Batch: mk-export --client <path> --batch-all --out <root_dir>");
+            Console.WriteLine("Usage: ml-export --client <path> --map <name> --out <dir> [options]  (legacy aliases: mk-export, vlm-export)");
+            Console.WriteLine("Batch: ml-export --client <path> --batch-all --out <root_dir>");
             Console.WriteLine();
             Console.WriteLine("Required:");
             Console.WriteLine("  --client, -c <path>   Path to Alpha 0.5.3 client Data folder");
@@ -1578,7 +1582,7 @@ public static class Program
                     "PVPZone01", "PVPZone02" 
                 };
 
-                Console.WriteLine("MK DATASET BATCH EXPORT");
+                Console.WriteLine("ML DATASET BATCH EXPORT");
                 Console.WriteLine($"Exporting {maps.Length} maps to {outputDir}...");
                 Console.WriteLine(new string('=', 60));
 
@@ -1604,7 +1608,7 @@ public static class Program
             else
             {
                 // Single Map Mode
-                Console.WriteLine($"MK Dataset Export: {mapName}");
+                Console.WriteLine($"ML Dataset Export: {mapName}");
                 Console.WriteLine($"  Client: {clientPath}");
                 Console.WriteLine($"  Output: {outputDir}");
                 
@@ -1649,19 +1653,19 @@ public static class Program
 
         if (string.IsNullOrEmpty(inputPath))
         {
-            Console.WriteLine("MK Dataset Decode - Reconstruct ADT from MK dataset JSON output");
+            Console.WriteLine("ML Dataset Decode - Reconstruct ADT from ML dataset JSON output");
             Console.WriteLine();
-            Console.WriteLine("Usage: mk-decode --input <json> --output <adt>  (legacy alias: vlm-decode)");
+            Console.WriteLine("Usage: ml-decode --input <json> --output <adt>  (legacy aliases: mk-decode, vlm-decode)");
             Console.WriteLine();
             Console.WriteLine("Required:");
-            Console.WriteLine("  --input, -i <json>    MK dataset JSON file");
+            Console.WriteLine("  --input, -i <json>    ML dataset JSON file");
             Console.WriteLine("  --output, -o <adt>    Output ADT file path");
             return 1;
         }
 
         outputPath ??= Path.ChangeExtension(inputPath, ".adt");
 
-        Console.WriteLine($"MK Dataset Decode: {Path.GetFileName(inputPath)} → {Path.GetFileName(outputPath)}");
+        Console.WriteLine($"ML Dataset Decode: {Path.GetFileName(inputPath)} → {Path.GetFileName(outputPath)}");
 
         var decoder = new VlmAdtDecoder();
 
@@ -1748,13 +1752,13 @@ public static class Program
 
         if (string.IsNullOrEmpty(datasetDir) && string.IsNullOrEmpty(inputPath))
         {
-            Console.WriteLine("MK Dataset Bake - Reconstruct high-resolution reference minimaps");
+            Console.WriteLine("ML Dataset Bake - Reconstruct high-resolution reference minimaps");
             Console.WriteLine();
-            Console.WriteLine("Usage: mk-bake --dataset <dir> [--input <json>] [--output <png>]  (legacy alias: vlm-bake)");
+            Console.WriteLine("Usage: ml-bake --dataset <dir> [--input <json>] [--output <png>]  (legacy aliases: mk-bake, vlm-bake)");
             Console.WriteLine();
             Console.WriteLine("Options:");
-            Console.WriteLine("  --dataset, -d <dir>       Path to the MK dataset root (containing tilesets and masks)");
-            Console.WriteLine("  --input, -i <json>        Specific MK dataset JSON file (default: all in dataset/*.json)");
+            Console.WriteLine("  --dataset, -d <dir>       Path to the ML dataset root (containing tilesets and masks)");
+            Console.WriteLine("  --input, -i <json>        Specific ML dataset JSON file (default: all in dataset/*.json)");
             Console.WriteLine("  --output, -o <png>        Output PNG path (for single input) or output directory");
             Console.WriteLine();
             Console.WriteLine("Shadow Options:");
@@ -1769,9 +1773,9 @@ public static class Program
             Console.WriteLine("  --no-invert-alpha         Disable alpha inversion (default: inverted for correct blending)");
             Console.WriteLine();
             Console.WriteLine("Examples:");
-            Console.WriteLine("  mk-bake -d ./mk_output -i dataset/Azeroth_0_0.json --shadows");
-            Console.WriteLine("  mk-bake -d ./mk_output -i dataset/Azeroth_0_0.json --export-layers");
-            Console.WriteLine("  mk-bake -d ./mk_output --debake -m minimap.png -i tile.json -o clean.png");
+            Console.WriteLine("  ml-bake -d ./ml_output -i dataset/Azeroth_0_0.json --shadows");
+            Console.WriteLine("  ml-bake -d ./ml_output -i dataset/Azeroth_0_0.json --export-layers");
+            Console.WriteLine("  ml-bake -d ./ml_output --debake -m minimap.png -i tile.json -o clean.png");
             return 1;
         }
 
@@ -1781,7 +1785,7 @@ public static class Program
             datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
         }
 
-        Console.WriteLine($"MK Dataset Bake: High-Resolution Reconstruction");
+        Console.WriteLine($"ML Dataset Bake: High-Resolution Reconstruction");
         Console.WriteLine($"  Dataset: {datasetDir}");
         Console.WriteLine($"  Shadows: {(withShadows ? "enabled" : "disabled")} (intensity: {shadowIntensity:F2})");
         if (invertAlpha) Console.WriteLine($"  Alpha: INVERTED");
@@ -1894,12 +1898,12 @@ public static class Program
                     break;
                 case "--help":
                 case "-h":
-                    Console.WriteLine("MK Dataset Bake Heightmap - Generate heightmaps from MK dataset JSON data");
+                    Console.WriteLine("ML Dataset Bake Heightmap - Generate heightmaps from ML dataset JSON data");
                     Console.WriteLine();
-                    Console.WriteLine("Usage: mk-bake-heightmap --dataset <dir> [--input <json>] [--output <dir>]  (legacy alias: vlm-bake-heightmap)");
+                    Console.WriteLine("Usage: ml-bake-heightmap --dataset <dir> [--input <json>] [--output <dir>]  (legacy aliases: mk-bake-heightmap, vlm-bake-heightmap)");
                     Console.WriteLine();
                     Console.WriteLine("Options:");
-                    Console.WriteLine("  --dataset, -d <dir>   MK dataset root directory");
+                    Console.WriteLine("  --dataset, -d <dir>   ML dataset root directory");
                     Console.WriteLine("  --input, -i <json>    Specific JSON file (or process all if omitted)");
                     Console.WriteLine("  --output, -o <dir>    Output directory (default: dataset/heightmaps)");
                     Console.WriteLine("  --full-res            Generate 4096x4096 instead of 256x256");
@@ -1918,7 +1922,7 @@ public static class Program
             datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
         }
 
-        Console.WriteLine($"MK Dataset Bake Heightmap");
+        Console.WriteLine($"ML Dataset Bake Heightmap");
         Console.WriteLine($"  Dataset: {datasetDir}");
         Console.WriteLine($"  Resolution: {(fullRes ? "4096x4096" : "256x256")}");
 
@@ -2007,15 +2011,15 @@ public static class Program
                     break;
                 case "--help":
                 case "-h":
-                    Console.WriteLine("MK Dataset Synth - Generate synthesized training pairs");
+                    Console.WriteLine("ML Dataset Synth - Generate synthesized training pairs");
                     Console.WriteLine();
                     Console.WriteLine("Creates perfectly matched minimap/heightmap pairs where the minimap");
                     Console.WriteLine("is deformed based on the heightmap (hillshading, ambient occlusion).");
                     Console.WriteLine();
-                    Console.WriteLine("Usage: mk-synth --dataset <dir> [--input <json>] [--output <dir>]  (legacy alias: vlm-synth)");
+                    Console.WriteLine("Usage: ml-synth --dataset <dir> [--input <json>] [--output <dir>]  (legacy aliases: mk-synth, vlm-synth)");
                     Console.WriteLine();
                     Console.WriteLine("Options:");
-                    Console.WriteLine("  --dataset, -d <dir>     MK dataset root directory");
+                    Console.WriteLine("  --dataset, -d <dir>     ML dataset root directory");
                     Console.WriteLine("  --input, -i <json>      Specific JSON file (or process all)");
                     Console.WriteLine("  --output, -o <dir>      Output directory (default: synthesized/)");
                     Console.WriteLine("  --resolution, -r <n>    Output resolution (default: 256)");
@@ -2037,7 +2041,7 @@ public static class Program
             datasetDir = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetFullPath(inputPath))) ?? ".";
         }
 
-        Console.WriteLine($"MK Dataset Synthesized Training Pair Generator");
+        Console.WriteLine($"ML Dataset Synthesized Training Pair Generator");
         Console.WriteLine($"  Dataset: {datasetDir}");
         Console.WriteLine($"  Resolution: {resolution}x{resolution}");
         Console.WriteLine($"  Hillshade: {hillshade:F2}, AO: {ao:F2}");
@@ -2123,12 +2127,12 @@ public static class Program
         Console.WriteLine("  wowmapconverter development-repair [options]            Run the active development repair slice + manifests");
         Console.WriteLine("  wowmapconverter terrain-texture-transfer [options]      Transfer MCAL/MCLY/MCSH/holes across mapped tiles");
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
-        Console.WriteLine("  wowmapconverter mk-export [options]                     Export MK dataset (legacy alias: vlm-export)");
-        Console.WriteLine("  wowmapconverter mk-harvest [options]                    Harvest MK dataset coverage and references");
-        Console.WriteLine("  wowmapconverter mk-decode [options]                     Decode MK dataset JSON to ADT");
-        Console.WriteLine("  wowmapconverter mk-bake [options]                       Bake high-resolution reference minimaps");
-        Console.WriteLine("  wowmapconverter mk-bake-heightmap [options]             Bake MK dataset heightmaps");
-        Console.WriteLine("  wowmapconverter mk-synth [options]                      Generate synthesized MK training pairs");
+        Console.WriteLine("  wowmapconverter ml-export [options]                     Export ML dataset (legacy aliases: mk-export, vlm-export)");
+        Console.WriteLine("  wowmapconverter ml-harvest [options]                    Harvest ML dataset coverage and references");
+        Console.WriteLine("  wowmapconverter ml-decode [options]                     Decode ML dataset JSON to ADT");
+        Console.WriteLine("  wowmapconverter ml-bake [options]                       Bake high-resolution reference minimaps");
+        Console.WriteLine("  wowmapconverter ml-bake-heightmap [options]             Bake ML dataset heightmaps");
+        Console.WriteLine("  wowmapconverter ml-synth [options]                      Generate synthesized ML training pairs");
         Console.WriteLine("  wowmapconverter batch --input-dir <dir> [options]       Batch convert directory");
         Console.WriteLine();
         Console.WriteLine("Alpha → LK Conversion Options:");

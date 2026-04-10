@@ -227,17 +227,17 @@ These converters handle the significant format differences between WoW versions,
 
 ---
 
-## MK Dataset
+## ML Dataset
 
-MK Dataset is the user-facing name for the open interchange format used for WoW map data, designed primarily for:
+ML Dataset is the user-facing name for the open interchange format used for WoW map data, designed primarily for:
 
 1. **Machine Learning** — Structured, normalized terrain data suitable for training ML models (heightmaps, alpha maps, shadow maps, depth maps, liquid masks)
 2. **Preservation** — Archiving hobbyist map work in a non-proprietary format that doesn't depend on WoW client tools
 3. **Cross-version portability** — A common representation that can be imported/exported to any WoW version
 
-### What's in an MK Dataset?
+### What's in an ML Dataset?
 
-An MK dataset is a directory of standardized image and metadata files per map tile:
+An ML dataset is a directory of standardized image and metadata files per map tile:
 
 | Layer | Format | Description |
 |-------|--------|-------------|
@@ -252,23 +252,23 @@ An MK dataset is a directory of standardized image and metadata files per map ti
 ### MK Commands
 
 ```bash
-# Export a WoW map to MK dataset
-WoWMapConverter mk-export --in path/to/game --map Azeroth --out mk_output/
+# Export a WoW map to ML dataset
+WoWMapConverter ml-export --in path/to/game --map Azeroth --out ml_output/
 
-# Decode an MK dataset back to viewable images
-WoWMapConverter mk-decode --in mk_output/ --out decoded/
+# Decode an ML dataset back to viewable images
+WoWMapConverter ml-decode --in ml_output/ --out decoded/
 
 # Bake MK layers into composite images
-WoWMapConverter mk-bake --in mk_output/ --out baked/
+WoWMapConverter ml-bake --in ml_output/ --out baked/
 
 # Bake heightmaps only (for ML training data)
-WoWMapConverter mk-bake-heightmap --in mk_output/ --out heightmaps/
+WoWMapConverter ml-bake-heightmap --in ml_output/ --out heightmaps/
 
 # Synthesize new terrain from MK data
-WoWMapConverter mk-synth --in mk_output/ --out synthesized/
+WoWMapConverter ml-synth --in ml_output/ --out synthesized/
 
 # Batch export multiple maps using a config file
-WoWMapConverter mk-batch --config batch_config.json
+WoWMapConverter ml-batch --config batch_config.json
 ```
 
 ### Batch Export Config
@@ -285,14 +285,14 @@ For exporting multiple maps at once, create a JSON config file:
 }
 ```
 
-### Loading MK Dataset in MdxViewer
+### Loading ML Dataset in MdxViewer
 
-MdxViewer can load MK datasets directly for visualization:
+MdxViewer can load ML datasets directly for visualization:
 ```
 MdxViewer.exe path/to/mk_dataset/
 ```
 
-The viewer detects the MK dataset structure and renders the terrain from the dataset's heightmaps and textures, allowing you to visually inspect exported data.
+The viewer detects the ML dataset structure and renders the terrain from the dataset's heightmaps and textures, allowing you to visually inspect exported data.
 
 ---
 

@@ -475,7 +475,7 @@ public class VlmDatasetExporter
                 try
                 {
                     // Stitch Shadows & Alpha
-                    var (shadowPath, alphaPaths) = await TileStitchingService.StitchTileAsync(
+                    var (shadowPath, alphaPaths, alphaAtlasPath) = await TileStitchingService.StitchTileWithPackedAtlasAsync(
                         shadowsDir, masksDir, tileName, stitchedDir);
 
                     // Load JSON to update with stitched paths
@@ -517,6 +517,7 @@ public class VlmDatasetExporter
                         {
                             ShadowMaps = shadowPath != null ? new[] { Path.GetRelativePath(outputDir, shadowPath).Replace("\\", "/") } : null,
                             AlphaMasks = alphaPaths.Select(p => Path.GetRelativePath(outputDir, p).Replace("\\", "/")).ToArray(),
+                            AlphaAtlasPath = alphaAtlasPath != null ? Path.GetRelativePath(outputDir, alphaAtlasPath).Replace("\\", "/") : null,
                             LiquidHeightPath = lHeightPath,
                             LiquidMaskPath = lMaskPath,
                             LiquidMinHeight = lMin,
@@ -1057,34 +1058,34 @@ public class VlmDatasetExporter
         var mccvMapPath = await GenerateMccvMap(chunkLayers, tileName, outputDir);
         
         return new VlmTerrainData(
-            tileName,
-            heights.ToArray(),
-            chunkPositions,
-            holes,
-            heightmapPath,
-            heightmapPath,
-            null,
-            normalmapPath, // NormalMapPath
-            mccvMapPath,
-            shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
-            shadowBits.Count > 0 ? shadowBits.ToArray() : null,  // Raw shadow bit data
-            shadowAnalysis,
-            alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
-            null, // LiquidMaskPath
-            null, // LiquidHeightPath
-            0f,   // LiquidMinHeight
-            0f,   // LiquidMaxHeight
-            textures,
-            chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
-            liquids.Count > 0 ? liquids.ToArray() : null,
-            objects,
-            wdlHeights, // WDL Data
-            heightMin == float.MaxValue ? 0 : heightMin,
-            heightMax == float.MinValue ? 0 : heightMax,
-            0,
-            0,
-            false // Alpha is NOT interleaved
-        );
+            AdtTile: tileName,
+            Heights: heights.ToArray(),
+            ChunkPositions: chunkPositions,
+            Holes: holes,
+            HeightmapPath: heightmapPath,
+            HeightmapLocalPath: heightmapPath,
+            HeightmapGlobalPath: null,
+            NormalmapPath: normalmapPath,
+            MccvMapPath: mccvMapPath,
+            ShadowMaps: shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
+            ShadowBits: shadowBits.Count > 0 ? shadowBits.ToArray() : null,
+            ShadowAnalysis: shadowAnalysis,
+            AlphaMasks: alphaPaths.Count > 0 ? alphaPaths.ToArray() : null,
+            AlphaAtlasPath: null,
+            LiquidMaskPath: null,
+            LiquidHeightPath: null,
+            LiquidMinHeight: 0f,
+            LiquidMaxHeight: 0f,
+            Textures: textures,
+            ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
+            Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
+            Objects: objects,
+            WdlHeights: wdlHeights,
+            HeightMin: heightMin == float.MaxValue ? 0 : heightMin,
+            HeightMax: heightMax == float.MinValue ? 0 : heightMax,
+            HeightGlobalMin: 0,
+            HeightGlobalMax: 0,
+            IsInterleaved: false);
     }
 
     /// <summary>
@@ -1400,6 +1401,7 @@ public class VlmDatasetExporter
                 ShadowBits: shadowBits.Count > 0 ? shadowBits.ToArray() : null,
                 ShadowAnalysis: shadowAnalysis,
                 AlphaMasks: null,
+                AlphaAtlasPath: null,
                 LiquidMaskPath: null,
                 LiquidHeightPath: null,
                 LiquidMinHeight: 0f,
