@@ -46,14 +46,14 @@
 
 - followed the terrain tooling request to stop leaving alpha masks only as separate per-layer tile outputs when the viewer already had a single-atlas export pattern, and to add in-viewer terrain heightmap inspection aimed at finding squished or hidden geometry
 - active behavior after this slice:
-	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` now emits `*_alpha_atlas.png` alongside the stitched per-layer alpha outputs, packing alpha layers 1-3 into RGB and the stitched shadow map into A
-	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` and `VlmDatasetExporter.cs` now carry that atlas on the dataset surface as `terrain_data.alpha_atlas`, while preserving `alpha_masks` so existing training or tooling consumers do not lose the layer-separated paths
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` now emits `*_alpha_atlas.png` alongside the stitched per-layer alpha outputs, packing alpha layers 1-3 into RGB with no stitched `MCSH` shadow data mixed into the atlas, and `VlmDatasetExporter.cs` now also stitches a map-wide `*_full_alpha_atlas.png` beside the existing full-map alpha-layer outputs
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs`, `VlmDatasetExporter.cs`, and `MkDatasetHarvester.cs` now carry that atlas on the dataset surface as `terrain_data.alpha_atlas`, keep stitched `shadow_maps` separate, and expose atlas or shadow presence plus compact image signatures (`sha256` + 64-bit average hash) in the manifest so later dedupe or coverage selection can happen without a separate post-process pass
 	- `src/MdxViewer/ViewerApp_TerrainAnalysis.cs`, `ViewerApp.cs`, and `ViewerApp_Sidebars.cs` now expose a floating `Terrain Analysis` window that shows the current tile heightmap in per-tile normalization, the same tile remapped against loaded-tile or whole-map bounds, and the packed alpha/shadow atlas
 - validation completed:
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 09, 2026 with existing workspace warnings only after the atlas and analysis window landed
 	- `get_errors` returned clean for the touched viewer and converter files before the full build
 - important boundary:
-	- this slice is still build validated only; no real-data viewer runtime retest has been captured yet for the new `Terrain Analysis` window, and no real exported dataset root was re-harvested to inspect the new `alpha_atlas` payload on actual tiles
+	- this slice is still build validated only; no real-data viewer runtime retest has been captured yet for the new `Terrain Analysis` window, and no real exported dataset root was re-harvested to inspect the updated alpha-only `alpha_atlas` payload on actual tiles
 	- the exporter still keeps the per-layer stitched alpha masks because downstream ML or bake paths may still depend on them; the atlas is additive, not a schema-breaking replacement
 
 ## Apr 09, 2026 - Viewer dataset workflow is now one `Build ML Dataset` flow with inline manifest and validation work

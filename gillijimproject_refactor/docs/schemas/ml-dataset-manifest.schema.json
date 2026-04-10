@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://parp-tools.local/gillijimproject_refactor/docs/schemas/ml-dataset-manifest.schema.json",
+  "title": "ML Dataset Manifest",
+  "description": "Schema for ml_dataset_manifest.json written by ml-harvest or the viewer finalize flow.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "harvested_at_utc",
+    "dataset_root",
+    "dataset_name",
+    "source_format",
+    "tile_json_directory",
+    "reference_minimap_directory",
+    "coverage",
+    "tiles"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "harvested_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "dataset_root": {
+      "type": "string"
+    },
+    "dataset_name": {
+      "type": "string"
+    },
+    "source_format": {
+      "type": "string"
+    },
+    "tile_json_directory": {
+      "type": "string"
+    },
+    "reference_minimap_directory": {
+      "type": "string"
+    },
+    "coverage": {
+      "$ref": "#/$defs/coverage"
+    },
+    "tiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/tileManifest"
+      }
+    }
+  },
+  "$defs": {
+    "imageSignature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "sha256",
+        "average_hash64"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9A-F]+$"
+        },
+        "average_hash64": {
+          "type": "string",
+          "pattern": "^[0-9A-F]+$"
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tiles_processed",
+        "tiles_with_source_minimap",
+        "tiles_with_local_heightmap",
+        "tiles_with_global_heightmap",
+        "tiles_with_shadow_maps",
+        "tiles_with_any_alpha_mask",
+        "tiles_with_alpha_atlas",
+        "declared_alpha_mask_images",
+        "existing_alpha_mask_images",
+        "declared_shadow_map_images",
+        "existing_shadow_map_images",
+        "tiles_with_objects",
+        "tiles_with_chunk_layer_metadata",
+        "tiles_with_reference_minimap",
+        "reference_minimaps_generated"
+      ],
+      "properties": {
+        "tiles_processed": { "type": "integer", "minimum": 0 },
+        "tiles_with_source_minimap": { "type": "integer", "minimum": 0 },
+        "tiles_with_local_heightmap": { "type": "integer", "minimum": 0 },
+        "tiles_with_global_heightmap": { "type": "integer", "minimum": 0 },
+        "tiles_with_shadow_maps": { "type": "integer", "minimum": 0 },
+        "tiles_with_any_alpha_mask": { "type": "integer", "minimum": 0 },
+        "tiles_with_alpha_atlas": { "type": "integer", "minimum": 0 },
+        "declared_alpha_mask_images": { "type": "integer", "minimum": 0 },
+        "existing_alpha_mask_images": { "type": "integer", "minimum": 0 },
+        "declared_shadow_map_images": { "type": "integer", "minimum": 0 },
+        "existing_shadow_map_images": { "type": "integer", "minimum": 0 },
+        "tiles_with_objects": { "type": "integer", "minimum": 0 },
+        "tiles_with_chunk_layer_metadata": { "type": "integer", "minimum": 0 },
+        "tiles_with_reference_minimap": { "type": "integer", "minimum": 0 },
+        "reference_minimaps_generated": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tileManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tile_name",
+        "map_name",
+        "tile_json_path",
+        "source_minimap_exists",
+        "heightmap_local_exists",
+        "heightmap_global_exists",
+        "normal_map_exists",
+        "mccv_map_exists",
+        "shadow_map_paths",
+        "existing_shadow_map_count",
+        "alpha_atlas_exists",
+        "declared_alpha_mask_count",
+        "existing_alpha_mask_count",
+        "alpha_mask_paths",
+        "object_count",
+        "chunk_layer_count",
+        "completeness_class",
+        "reference_minimap_exists",
+        "reference_minimap_generated"
+      ],
+      "properties": {
+        "tile_name": { "type": "string" },
+        "map_name": { "type": "string" },
+        "tile_json_path": { "type": "string" },
+        "source_minimap_path": { "type": ["string", "null"] },
+        "source_minimap_exists": { "type": "boolean" },
+        "source_minimap_signature": {
+          "type": ["object", "null"],
+          "allOf": [{ "$ref": "#/$defs/imageSignature" }]
+        },
+        "heightmap_local_path": { "type": ["string", "null"] },
+        "heightmap_local_exists": { "type": "boolean" },
+        "heightmap_global_path": { "type": ["string", "null"] },
+        "heightmap_global_exists": { "type": "boolean" },
+        "normal_map_path": { "type": ["string", "null"] },
+        "normal_map_exists": { "type": "boolean" },
+        "mccv_map_path": { "type": ["string", "null"] },
+        "mccv_map_exists": { "type": "boolean" },
+        "shadow_map_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "existing_shadow_map_count": { "type": "integer", "minimum": 0 },
+        "shadow_map_signature": {
+          "type": ["object", "null"],
+          "allOf": [{ "$ref": "#/$defs/imageSignature" }]
+        },
+        "alpha_atlas_path": { "type": ["string", "null"] },
+        "alpha_atlas_exists": { "type": "boolean" },
+        "alpha_atlas_signature": {
+          "type": ["object", "null"],
+          "allOf": [{ "$ref": "#/$defs/imageSignature" }]
+        },
+        "declared_alpha_mask_count": { "type": "integer", "minimum": 0 },
+        "existing_alpha_mask_count": { "type": "integer", "minimum": 0 },
+        "alpha_mask_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "object_count": { "type": "integer", "minimum": 0 },
+        "chunk_layer_count": { "type": "integer", "minimum": 0 },
+        "completeness_class": { "type": "string" },
+        "reference_minimap_path": { "type": ["string", "null"] },
+        "reference_minimap_exists": { "type": "boolean" },
+        "reference_minimap_generated": { "type": "boolean" }
+      }
+    }
+  }
+}

@@ -45,11 +45,12 @@
 
 - followed the terrain-data complaint that alpha supervision was still spread across separate layer files even though the viewer already had a one-atlas export pattern, and the request to inspect per-tile vs map-global height scaling inside the viewer
 - landed active behavior:
-	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` now writes `*_alpha_atlas.png` with RGB=`alpha1..3` and A=`shadow`, and `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` plus `VlmDatasetExporter.cs` now surface that file as `terrain_data.alpha_atlas`
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/TileStitchingService.cs` now writes `*_alpha_atlas.png` with RGB=`alpha1..3` only, keeps stitched shadows separate, and `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` plus `VlmDatasetExporter.cs` now surface that file as `terrain_data.alpha_atlas`
 	- the existing stitched `alpha_masks` outputs remain in place for compatibility, so the atlas is an additive packed view instead of a destructive format swap
-	- `src/MdxViewer/ViewerApp_TerrainAnalysis.cs`, `ViewerApp.cs`, and `ViewerApp_Sidebars.cs` now add a floating `Terrain Analysis` window with per-tile-normalized heightmap preview, loaded-tile or whole-map normalized preview, and packed alpha/shadow atlas preview for the current tile
+	- `src/MdxViewer/ViewerApp_TerrainAnalysis.cs`, `ViewerApp.cs`, and `ViewerApp_Sidebars.cs` now add a floating `Terrain Analysis` window with per-tile-normalized heightmap preview, loaded-tile or whole-map normalized preview, and packed alpha-atlas preview for the current tile while stitched shadows remain separate outputs
 - validation completed:
 	- `get_errors` reported no file-level errors on the touched viewer and converter files
+	- `docs/VLM_DATASET_EXPORTER.md` now documents the current ML dataset root layout, canonical tile and manifest lookup rules, and the new machine-readable schema files `docs/schemas/ml-dataset-tile.schema.json` and `docs/schemas/ml-dataset-manifest.schema.json`
 	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` passed on Apr 09, 2026 with existing workspace warnings only
 - proof boundary:
 	- no automated tests were added or run

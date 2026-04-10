@@ -714,7 +714,7 @@ public partial class ViewerApp : IDisposable
     private bool _mkHarvestApplyShadows = true;
     private bool _mkHarvestInvertAlpha = true;
     private float _mkHarvestShadowIntensity = 0.5f;
-    private int _mkHarvestViewerValidationResolution = 2048;
+    private int _mkHarvestViewerValidationResolution = 512;
     private bool _mkHarvestRunning = false;
     private readonly List<string> _mkHarvestLog = new();
     private bool _mkHarvestScrollToBottom = false;
@@ -5047,7 +5047,7 @@ void main() {
         ImGui.SetNextItemWidth(180f);
         ImGui.SliderInt("Validation Resolution", ref _mkHarvestViewerValidationResolution, 512, 4096);
         ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "ML dataset finalize now writes the manifest and only queues live MdxViewer validation minimaps. It no longer generates baked 4k reference minimaps from exported layers.");
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture temporarily hides chrome, disables doodads, and resizes the viewer window to the requested square output size while the batch runs.");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture defaults to 512px square output, temporarily hides chrome, disables doodads and WL liquids, waits for world assets to settle, and resizes the viewer window to the requested square output size while the batch runs.");
 
         ImGui.Spacing();
         bool hasDatasetRoot = !string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot);

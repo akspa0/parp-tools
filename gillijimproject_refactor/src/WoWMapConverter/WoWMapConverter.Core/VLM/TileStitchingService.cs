@@ -124,144 +124,243 @@ public static class TileStitchingService
     }
 
     /// <summary>
-    /// Generate stitched tile images for shadow and all alpha layers.
+    /// Generate stitched tile images for shadow and all alpha layers from serialized chunk data.
     /// </summary>
     public static async Task<(string? shadowPath, List<string> alphaPaths)> StitchTileAsync(
-        string shadowsDir, string masksDir, string tileName, string outputDir)
+        VlmTerrainData terrainData, string tileName, string outputDir)
     {
         string? shadowPath = null;
         var alphaPaths = new List<string>();
-        
-        // Stitch shadows
-        var shadowFile = Path.Combine(shadowsDir, $"{tileName}_c0.png");
-        if (File.Exists(shadowFile))
+
+        var stitchedShadow = StitchShadows(terrainData.ShadowBits);
+        if (stitchedShadow != null)
         {
-            var stitchedShadow = StitchShadows(shadowsDir, tileName);
             shadowPath = Path.Combine(outputDir, $"{tileName}_shadow.png");
             await File.WriteAllBytesAsync(shadowPath, stitchedShadow);
         }
-        
-        // Stitch alpha layers
+
         for (int layer = 1; layer <= 4; layer++)
         {
-            bool hasAny = false;
-            for (int c = 0; c < ChunksPerTile && !hasAny; c++)
-            {
-                if (File.Exists(Path.Combine(masksDir, $"{tileName}_c{c}_l{layer}.png")))
-                    hasAny = true;
-            }
-            
-            if (!hasAny) continue;
-            
-            var stitched = StitchAlphaLayer(masksDir, tileName, layer);
+            var stitchedAlpha = StitchAlphaLayer(terrainData.ChunkLayers, layer);
+            if (stitchedAlpha == null)
+                continue;
+
             var alphaPath = Path.Combine(outputDir, $"{tileName}_alpha_l{layer}.png");
-            await File.WriteAllBytesAsync(alphaPath, stitched);
+            await File.WriteAllBytesAsync(alphaPath, stitchedAlpha);
             alphaPaths.Add(alphaPath);
         }
-        
+
         return (shadowPath, alphaPaths);
     }
 
-            /// <summary>
-            /// Generate stitched tile images for shadow and alpha layers plus a packed RGBA atlas.
-            /// </summary>
-            public static async Task<(string? shadowPath, List<string> alphaPaths, string? alphaAtlasPath)> StitchTileWithPackedAtlasAsync(
-                string shadowsDir, string masksDir, string tileName, string outputDir)
-            {
-                var (shadowPath, alphaPaths) = await StitchTileAsync(shadowsDir, masksDir, tileName, outputDir);
-                if (shadowPath == null && alphaPaths.Count == 0)
-                    return (shadowPath, alphaPaths, null);
+    /// <summary>
+    /// Generate stitched tile images for shadow and alpha layers plus a packed RGBA atlas.
+    /// </summary>
+    public static async Task<(string? shadowPath, List<string> alphaPaths, string? alphaAtlasPath)> StitchTileWithPackedAtlasAsync(
+        VlmTerrainData terrainData, string tileName, string outputDir)
+    {
+        var (shadowPath, alphaPaths) = await StitchTileAsync(terrainData, tileName, outputDir);
+        if (alphaPaths.Count == 0)
+            return (shadowPath, alphaPaths, null);
 
-                var alphaAtlasPath = Path.Combine(outputDir, $"{tileName}_alpha_atlas.png");
-                var packedAtlas = StitchPackedAlphaAtlas(shadowPath, alphaPaths);
-                await File.WriteAllBytesAsync(alphaAtlasPath, packedAtlas);
-                return (shadowPath, alphaPaths, alphaAtlasPath);
+        var alphaAtlasPath = Path.Combine(outputDir, $"{tileName}_alpha_atlas.png");
+        var packedAtlas = StitchPackedAlphaAtlas(alphaPaths);
+        await File.WriteAllBytesAsync(alphaAtlasPath, packedAtlas);
+        return (shadowPath, alphaPaths, alphaAtlasPath);
+    }
+
+    private static byte[]? StitchShadows(IReadOnlyCollection<VlmChunkShadowBits>? shadowBits)
+    {
+        if (shadowBits == null || shadowBits.Count == 0)
+            return null;
+
+        using var tileImage = CreateGrayscaleTile();
+        bool hasAny = false;
+
+        foreach (var shadowBit in shadowBits)
+        {
+            byte[] rawShadow;
+            try
+            {
+                rawShadow = Convert.FromBase64String(shadowBit.BitsBase64);
+            }
+            catch
+            {
+                continue;
             }
 
-            public static byte[] StitchPackedAlphaAtlas(string? shadowPath, IReadOnlyList<string> alphaLayerPaths)
+            byte[] shadow = rawShadow.Length switch
             {
-                using var atlas = new Image<Rgba32>(TileSize, TileSize);
-                atlas.ProcessPixelRows(accessor =>
-                {
-                    for (int y = 0; y < accessor.Height; y++)
-                    {
-                        var row = accessor.GetRowSpan(y);
-                        for (int x = 0; x < row.Length; x++)
-                            row[x] = new Rgba32(255, 255, 255, 0);
-                    }
-                });
+                64 * 64 => rawShadow,
+                64 * 8 => ShadowMapService.ReadShadow(rawShadow),
+                _ => Array.Empty<byte>()
+            };
+            if (shadow.Length != ChunkSize * ChunkSize)
+                continue;
 
-                foreach (var alphaPath in alphaLayerPaths)
-                {
-                    if (!TryParseLayerIndex(alphaPath, out int layer) || layer < 1 || layer > 3)
-                        continue;
+            CopyChunkToTile(tileImage, shadowBit.ChunkIndex, shadow);
+            hasAny = true;
+        }
 
-                    ApplyGrayImageToAtlasChannel(atlas, alphaPath, layer - 1);
-                }
+        return hasAny ? SaveGrayscaleTile(tileImage) : null;
+    }
 
-                if (!string.IsNullOrWhiteSpace(shadowPath))
-                    ApplyGrayImageToAtlasChannel(atlas, shadowPath, 3);
+    private static byte[]? StitchAlphaLayer(IReadOnlyCollection<VlmChunkLayers>? chunkLayers, int layer)
+    {
+        if (chunkLayers == null || chunkLayers.Count == 0)
+            return null;
 
-                using var ms = new MemoryStream();
-                atlas.SaveAsPng(ms);
-                return ms.ToArray();
+        using var tileImage = CreateGrayscaleTile();
+        bool hasAny = false;
+
+        foreach (var chunk in chunkLayers)
+        {
+            if (chunk.Layers == null || layer >= chunk.Layers.Length)
+                continue;
+
+            var alphaBytes = DecodeAlphaBytes(chunk.Layers[layer]);
+            if (alphaBytes == null || alphaBytes.Length != ChunkSize * ChunkSize)
+                continue;
+
+            CopyChunkToTile(tileImage, chunk.ChunkIndex, alphaBytes);
+            hasAny = true;
+        }
+
+        return hasAny ? SaveGrayscaleTile(tileImage) : null;
+    }
+
+    private static byte[]? DecodeAlphaBytes(VlmTextureLayer layer)
+    {
+        if (string.IsNullOrWhiteSpace(layer.AlphaBitsBase64))
+            return null;
+
+        try
+        {
+            var raw = Convert.FromBase64String(layer.AlphaBitsBase64);
+            if (raw.Length == ChunkSize * ChunkSize)
+                return raw;
+
+            if (raw.Length > 0)
+                return AlphaMapService.ReadAlpha(raw, 0, layer.Flags, false, false, raw.Length);
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private static Image<L8> CreateGrayscaleTile()
+    {
+        var image = new Image<L8>(TileSize, TileSize);
+        image.Mutate(ctx => ctx.BackgroundColor(SixLabors.ImageSharp.Color.Black));
+        return image;
+    }
+
+    private static void CopyChunkToTile(Image<L8> tileImage, int chunkIndex, byte[] chunkPixels)
+    {
+        if (chunkIndex < 0 || chunkIndex >= ChunksPerTile || chunkPixels.Length < ChunkSize * ChunkSize)
+            return;
+
+        int cx = chunkIndex % ChunksPerRow;
+        int cy = chunkIndex / ChunksPerRow;
+        int px = cx * ChunkSize;
+        int py = cy * ChunkSize;
+
+        for (int y = 0; y < ChunkSize; y++)
+        {
+            for (int x = 0; x < ChunkSize; x++)
+            {
+                tileImage[px + x, py + y] = new L8(chunkPixels[y * ChunkSize + x]);
             }
+        }
+    }
 
-            private static void ApplyGrayImageToAtlasChannel(Image<Rgba32> atlas, string path, int channel)
+    private static byte[] SaveGrayscaleTile(Image<L8> tileImage)
+    {
+        using var ms = new MemoryStream();
+        tileImage.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    public static byte[] StitchPackedAlphaAtlas(IReadOnlyList<string> alphaLayerPaths)
+    {
+        using var atlas = new Image<Rgba32>(TileSize, TileSize);
+        atlas.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
             {
-                if (!File.Exists(path))
-                    return;
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                    row[x] = new Rgba32(0, 0, 0, 255);
+            }
+        });
 
-                try
+        foreach (var alphaPath in alphaLayerPaths)
+        {
+            if (!TryParseLayerIndex(alphaPath, out int layer) || layer < 1 || layer > 3)
+                continue;
+
+            ApplyGrayImageToAtlasChannel(atlas, alphaPath, layer - 1);
+        }
+
+        using var ms = new MemoryStream();
+        atlas.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static void ApplyGrayImageToAtlasChannel(Image<Rgba32> atlas, string path, int channel)
+    {
+        if (!File.Exists(path))
+            return;
+
+        try
+        {
+            using var image = Image.Load<L8>(path);
+            int width = Math.Min(atlas.Width, image.Width);
+            int height = Math.Min(atlas.Height, image.Height);
+
+            atlas.ProcessPixelRows(image, (atlasAccessor, imageAccessor) =>
+            {
+                for (int y = 0; y < height; y++)
                 {
-                    using var image = Image.Load<L8>(path);
-                    int width = Math.Min(atlas.Width, image.Width);
-                    int height = Math.Min(atlas.Height, image.Height);
-
-                    atlas.ProcessPixelRows(image, (atlasAccessor, imageAccessor) =>
+                    var atlasRow = atlasAccessor.GetRowSpan(y);
+                    var imageRow = imageAccessor.GetRowSpan(y);
+                    for (int x = 0; x < width; x++)
                     {
-                        for (int y = 0; y < height; y++)
+                        ref var pixel = ref atlasRow[x];
+                        byte value = imageRow[x].PackedValue;
+                        switch (channel)
                         {
-                            var atlasRow = atlasAccessor.GetRowSpan(y);
-                            var imageRow = imageAccessor.GetRowSpan(y);
-                            for (int x = 0; x < width; x++)
-                            {
-                                ref var pixel = ref atlasRow[x];
-                                byte value = imageRow[x].PackedValue;
-                                switch (channel)
-                                {
-                                    case 0:
-                                        pixel.R = value;
-                                        break;
-                                    case 1:
-                                        pixel.G = value;
-                                        break;
-                                    case 2:
-                                        pixel.B = value;
-                                        break;
-                                    case 3:
-                                        pixel.A = value;
-                                        break;
-                                }
-                            }
+                            case 0:
+                                pixel.R = value;
+                                break;
+                            case 1:
+                                pixel.G = value;
+                                break;
+                            case 2:
+                                pixel.B = value;
+                                break;
                         }
-                    });
+                    }
                 }
-                catch
-                {
-                }
-            }
+            });
+        }
+        catch
+        {
+        }
+    }
 
-            private static bool TryParseLayerIndex(string path, out int layer)
-            {
-                layer = 0;
-                string fileName = Path.GetFileNameWithoutExtension(path);
-                int marker = fileName.LastIndexOf("_l", StringComparison.OrdinalIgnoreCase);
-                if (marker < 0 || marker + 2 >= fileName.Length)
-                    return false;
+    private static bool TryParseLayerIndex(string path, out int layer)
+    {
+        layer = 0;
+        string fileName = Path.GetFileNameWithoutExtension(path);
+        int marker = fileName.LastIndexOf("_l", StringComparison.OrdinalIgnoreCase);
+        if (marker < 0 || marker + 2 >= fileName.Length)
+            return false;
 
-                return int.TryParse(fileName[(marker + 2)..], out layer);
-            }
+        return int.TryParse(fileName[(marker + 2)..], out layer);
+    }
 
     /// <summary>
     /// Stitch liquid heights for a tile (1024x1024 L8).

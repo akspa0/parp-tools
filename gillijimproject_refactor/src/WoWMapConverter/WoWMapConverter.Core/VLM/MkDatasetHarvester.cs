@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace WoWMapConverter.Core.VLM;
 
@@ -43,13 +46,25 @@ public sealed class MkDatasetCoverageSummary
     public int TilesWithSourceMinimap { get; set; }
     public int TilesWithLocalHeightmap { get; set; }
     public int TilesWithGlobalHeightmap { get; set; }
+    public int TilesWithShadowMaps { get; set; }
     public int TilesWithAnyAlphaMask { get; set; }
+    public int TilesWithAlphaAtlas { get; set; }
     public int DeclaredAlphaMaskImages { get; set; }
     public int ExistingAlphaMaskImages { get; set; }
+    public int DeclaredShadowMapImages { get; set; }
+    public int ExistingShadowMapImages { get; set; }
     public int TilesWithObjects { get; set; }
     public int TilesWithChunkLayerMetadata { get; set; }
     public int TilesWithReferenceMinimap { get; set; }
     public int ReferenceMinimapsGenerated { get; set; }
+}
+
+public sealed class MkDatasetImageSignature
+{
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public string Sha256 { get; set; } = string.Empty;
+    public string AverageHash64 { get; set; } = string.Empty;
 }
 
 public sealed class MkDatasetTileManifest
@@ -59,6 +74,7 @@ public sealed class MkDatasetTileManifest
     public string TileJsonPath { get; set; } = string.Empty;
     public string? SourceMinimapPath { get; set; }
     public bool SourceMinimapExists { get; set; }
+    public MkDatasetImageSignature? SourceMinimapSignature { get; set; }
     public string? HeightmapLocalPath { get; set; }
     public bool HeightmapLocalExists { get; set; }
     public string? HeightmapGlobalPath { get; set; }
@@ -67,6 +83,12 @@ public sealed class MkDatasetTileManifest
     public bool NormalMapExists { get; set; }
     public string? MccvMapPath { get; set; }
     public bool MccvMapExists { get; set; }
+    public List<string> ShadowMapPaths { get; set; } = new();
+    public int ExistingShadowMapCount { get; set; }
+    public MkDatasetImageSignature? ShadowMapSignature { get; set; }
+    public string? AlphaAtlasPath { get; set; }
+    public bool AlphaAtlasExists { get; set; }
+    public MkDatasetImageSignature? AlphaAtlasSignature { get; set; }
     public int DeclaredAlphaMaskCount { get; set; }
     public int ExistingAlphaMaskCount { get; set; }
     public List<string> AlphaMaskPaths { get; set; } = new();
@@ -153,6 +175,18 @@ public sealed class MkDatasetHarvester
             string? mccvMapPath = sample?.TerrainData?.MccvMapPath;
             bool mccvMapExists = TryResolveDatasetPath(datasetRoot, mccvMapPath);
 
+            List<string> shadowMapPaths = sample?.TerrainData?.ShadowMaps?
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(path => path.Replace('\\', '/'))
+                .ToList()
+                ?? new List<string>();
+            int existingShadowMapCount = shadowMapPaths.Count(path => TryResolveDatasetPath(datasetRoot, path));
+            string? primaryShadowMapPath = shadowMapPaths.FirstOrDefault(path => TryResolveDatasetPath(datasetRoot, path))
+                ?? shadowMapPaths.FirstOrDefault();
+
+            string? alphaAtlasPath = sample?.TerrainData?.AlphaAtlasPath;
+            bool alphaAtlasExists = TryResolveDatasetPath(datasetRoot, alphaAtlasPath);
+
             List<string> alphaMaskPaths = sample?.TerrainData?.AlphaMasks?
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Select(path => path.Replace('\\', '/'))
@@ -183,6 +217,7 @@ public sealed class MkDatasetHarvester
                 TileJsonPath = RelativizePath(datasetRoot, datasetFile),
                 SourceMinimapPath = NormalizeDatasetRelativePath(sourceMinimapPath),
                 SourceMinimapExists = sourceMinimapExists,
+                SourceMinimapSignature = TryBuildImageSignature(datasetRoot, sourceMinimapPath),
                 HeightmapLocalPath = NormalizeDatasetRelativePath(heightmapLocalPath),
                 HeightmapLocalExists = heightmapLocalExists,
                 HeightmapGlobalPath = NormalizeDatasetRelativePath(heightmapGlobalPath),
@@ -191,6 +226,12 @@ public sealed class MkDatasetHarvester
                 NormalMapExists = normalMapExists,
                 MccvMapPath = NormalizeDatasetRelativePath(mccvMapPath),
                 MccvMapExists = mccvMapExists,
+                ShadowMapPaths = shadowMapPaths,
+                ExistingShadowMapCount = existingShadowMapCount,
+                ShadowMapSignature = TryBuildImageSignature(datasetRoot, primaryShadowMapPath),
+                AlphaAtlasPath = NormalizeDatasetRelativePath(alphaAtlasPath),
+                AlphaAtlasExists = alphaAtlasExists,
+                AlphaAtlasSignature = TryBuildImageSignature(datasetRoot, alphaAtlasPath),
                 DeclaredAlphaMaskCount = alphaMaskPaths.Count,
                 ExistingAlphaMaskCount = existingAlphaMaskCount,
                 AlphaMaskPaths = alphaMaskPaths,
@@ -214,7 +255,11 @@ public sealed class MkDatasetHarvester
             TilesWithSourceMinimap = manifest.Tiles.Count(tile => tile.SourceMinimapExists),
             TilesWithLocalHeightmap = manifest.Tiles.Count(tile => tile.HeightmapLocalExists),
             TilesWithGlobalHeightmap = manifest.Tiles.Count(tile => tile.HeightmapGlobalExists),
+            TilesWithShadowMaps = manifest.Tiles.Count(tile => tile.ExistingShadowMapCount > 0),
             TilesWithAnyAlphaMask = manifest.Tiles.Count(tile => tile.ExistingAlphaMaskCount > 0),
+            TilesWithAlphaAtlas = manifest.Tiles.Count(tile => tile.AlphaAtlasExists),
+            DeclaredShadowMapImages = manifest.Tiles.Sum(tile => tile.ShadowMapPaths.Count),
+            ExistingShadowMapImages = manifest.Tiles.Sum(tile => tile.ExistingShadowMapCount),
             DeclaredAlphaMaskImages = manifest.Tiles.Sum(tile => tile.DeclaredAlphaMaskCount),
             ExistingAlphaMaskImages = manifest.Tiles.Sum(tile => tile.ExistingAlphaMaskCount),
             TilesWithObjects = manifest.Tiles.Count(tile => tile.ObjectCount > 0),
@@ -273,6 +318,74 @@ public sealed class MkDatasetHarvester
             ? normalizedPath
             : Path.Combine(datasetRoot, normalizedPath);
         return File.Exists(candidate);
+    }
+
+    private static MkDatasetImageSignature? TryBuildImageSignature(string datasetRoot, string? path)
+    {
+        string? resolvedPath = ResolveDatasetPath(datasetRoot, path);
+        if (resolvedPath == null)
+            return null;
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(resolvedPath);
+            using var sha256 = SHA256.Create();
+            string sha256Hex = Convert.ToHexString(sha256.ComputeHash(bytes));
+
+            using var image = Image.Load<Rgba32>(resolvedPath);
+            int width = image.Width;
+            int height = image.Height;
+
+            using var reduced = image.Clone(ctx => ctx.Resize(8, 8).Grayscale());
+            byte[] values = new byte[64];
+            int index = 0;
+            int total = 0;
+            reduced.ProcessPixelRows(accessor =>
+            {
+                for (int y = 0; y < accessor.Height; y++)
+                {
+                    Span<Rgba32> row = accessor.GetRowSpan(y);
+                    for (int x = 0; x < row.Length; x++)
+                    {
+                        byte value = row[x].R;
+                        values[index++] = value;
+                        total += value;
+                    }
+                }
+            });
+
+            int average = total / values.Length;
+            ulong hash = 0;
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (values[i] >= average)
+                    hash |= 1UL << i;
+            }
+
+            return new MkDatasetImageSignature
+            {
+                Width = width,
+                Height = height,
+                Sha256 = sha256Hex,
+                AverageHash64 = hash.ToString("X16")
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? ResolveDatasetPath(string datasetRoot, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return null;
+
+        string normalizedPath = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        string candidate = Path.IsPathRooted(normalizedPath)
+            ? normalizedPath
+            : Path.Combine(datasetRoot, normalizedPath);
+        return File.Exists(candidate) ? candidate : null;
     }
 
     private static string? NormalizeDatasetRelativePath(string? path)

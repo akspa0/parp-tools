@@ -1,0 +1,679 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://parp-tools.local/gillijimproject_refactor/docs/schemas/ml-dataset-tile.schema.json",
+  "title": "ML Dataset Tile",
+  "description": "Schema for dataset/<tile>.json exported by ml-export.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "image",
+    "terrain_data"
+  ],
+  "properties": {
+    "image": {
+      "type": "string",
+      "description": "Dataset-root-relative source minimap path. May be an empty string when no minimap asset was found."
+    },
+    "depth": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optional dataset-root-relative depth image path."
+    },
+    "terrain_data": {
+      "$ref": "#/$defs/terrainData"
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "numberArray": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      }
+    },
+    "integerArray": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "float3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "number"
+      }
+    },
+    "int2": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "integer"
+      }
+    },
+    "wdlData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outer_17",
+        "inner_16"
+      ],
+      "properties": {
+        "outer_17": {
+          "$ref": "#/$defs/integerArray"
+        },
+        "inner_16": {
+          "$ref": "#/$defs/integerArray"
+        }
+      }
+    },
+    "chunkHeights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idx",
+        "h"
+      ],
+      "properties": {
+        "idx": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "h": {
+          "$ref": "#/$defs/numberArray"
+        }
+      }
+    },
+    "chunkShadowBits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idx",
+        "bits"
+      ],
+      "properties": {
+        "idx": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "bits": {
+          "type": "string",
+          "description": "Base64-encoded raw shadow bytes for one chunk."
+        }
+      }
+    },
+    "shadowRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region_id",
+        "pixel_count",
+        "coverage",
+        "bbox_min_px",
+        "bbox_max_px",
+        "centroid_px",
+        "centroid_world",
+        "world_rect_min",
+        "world_rect_max",
+        "candidate_object_ids"
+      ],
+      "properties": {
+        "region_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pixel_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage": {
+          "type": "number"
+        },
+        "bbox_min_px": {
+          "$ref": "#/$defs/int2"
+        },
+        "bbox_max_px": {
+          "$ref": "#/$defs/int2"
+        },
+        "centroid_px": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "centroid_world": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "world_rect_min": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "world_rect_max": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "candidate_object_ids": {
+          "$ref": "#/$defs/integerArray"
+        }
+      }
+    },
+    "shadowObjectCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unique_id",
+        "name",
+        "category",
+        "position_world",
+        "position_chunk_px",
+        "nearest_region_id",
+        "pixel_distance_to_region",
+        "inside_chunk",
+        "inside_region_bounds"
+      ],
+      "properties": {
+        "unique_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "position_world": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "position_chunk_px": {
+          "$ref": "#/$defs/numberArray"
+        },
+        "nearest_region_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pixel_distance_to_region": {
+          "type": "number"
+        },
+        "inside_chunk": {
+          "type": "boolean"
+        },
+        "inside_region_bounds": {
+          "type": "boolean"
+        }
+      }
+    },
+    "chunkShadowAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idx",
+        "shadowed_pixels",
+        "coverage",
+        "region_count",
+        "largest_region_pixels",
+        "regions",
+        "candidate_objects"
+      ],
+      "properties": {
+        "idx": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "shadowed_pixels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage": {
+          "type": "number"
+        },
+        "region_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "largest_region_pixels": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "regions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shadowRegion"
+          }
+        },
+        "candidate_objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/shadowObjectCandidate"
+          }
+        }
+      }
+    },
+    "textureLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tex_id",
+        "texture_path",
+        "flags",
+        "alpha_off",
+        "effect_id"
+      ],
+      "properties": {
+        "tex_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "texture_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alpha_off": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effect_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ground_effects": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "alpha_bits": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "alpha_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "chunkLayers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idx",
+        "layers"
+      ],
+      "properties": {
+        "idx": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/textureLayer"
+          }
+        },
+        "shadow_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "normals": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          }
+        },
+        "mccv_colors": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          }
+        },
+        "area_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "liquidData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idx",
+        "type",
+        "min_height",
+        "max_height"
+      ],
+      "properties": {
+        "idx": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "type": {
+          "type": "integer"
+        },
+        "min_height": {
+          "type": "number"
+        },
+        "max_height": {
+          "type": "number"
+        },
+        "mask_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "heights": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "objectPlacement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "name_id",
+        "unique_id",
+        "x",
+        "y",
+        "z",
+        "rot_x",
+        "rot_y",
+        "rot_z",
+        "scale",
+        "category"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "name_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        },
+        "rot_x": {
+          "type": "number"
+        },
+        "rot_y": {
+          "type": "number"
+        },
+        "rot_z": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number"
+        },
+        "category": {
+          "type": "string"
+        },
+        "bounds_min": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "bounds_max": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "terrainData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adt_tile",
+        "liquid_min",
+        "liquid_max",
+        "textures",
+        "objects",
+        "height_min",
+        "height_max",
+        "height_global_min",
+        "height_global_max",
+        "is_interleaved"
+      ],
+      "properties": {
+        "adt_tile": {
+          "type": "string"
+        },
+        "heights": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/chunkHeights"
+          }
+        },
+        "chunk_positions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number"
+          }
+        },
+        "holes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer"
+          }
+        },
+        "heightmap": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "heightmap_local": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "heightmap_global": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "normalmap": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mccv_map": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shadow_maps": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "shadow_bits": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/chunkShadowBits"
+          }
+        },
+        "shadow_analysis": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/chunkShadowAnalysis"
+          }
+        },
+        "alpha_masks": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "alpha_atlas": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "liquid_mask": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "liquid_height": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "liquid_min": {
+          "type": "number"
+        },
+        "liquid_max": {
+          "type": "number"
+        },
+        "textures": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "chunk_layers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/chunkLayers"
+          }
+        },
+        "liquids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/liquidData"
+          }
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/objectPlacement"
+          }
+        },
+        "wdl_heights": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "allOf": [
+            {
+              "$ref": "#/$defs/wdlData"
+            }
+          ]
+        },
+        "height_min": {
+          "type": "number"
+        },
+        "height_max": {
+          "type": "number"
+        },
+        "height_global_min": {
+          "type": "number"
+        },
+        "height_global_max": {
+          "type": "number"
+        },
+        "is_interleaved": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

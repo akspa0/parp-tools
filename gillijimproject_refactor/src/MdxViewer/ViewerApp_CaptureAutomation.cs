@@ -121,6 +121,8 @@ public partial class ViewerApp
         public required float PreviousFogEnd { get; init; }
         public required bool PreviousObjectFogEnabled { get; init; }
         public required bool PreviousDoodadsVisible { get; init; }
+        public required bool PreviousWlLiquidsVisible { get; init; }
+        public required float PreviousObjectStreamingRangeMultiplier { get; init; }
         public required int RequestedResolution { get; init; }
         public int RemainingCaptures { get; set; }
     }
@@ -549,6 +551,16 @@ public partial class ViewerApp
                 request.TimedOutWaitingForScene = true;
                 return true;
             }
+
+            if (_worldScene != null && _worldScene.PendingWorldObjectLoadCount > 0)
+            {
+                request.SettledFrames = 0;
+                if (request.FramesSinceApplied < request.MaxFramesBeforeCapture)
+                    return false;
+
+                request.TimedOutWaitingForScene = true;
+                return true;
+            }
         }
 
         if (request.TargetTileX is int targetTileX && request.TargetTileY is int targetTileY)
@@ -628,6 +640,8 @@ public partial class ViewerApp
             PreviousFogEnd = _terrainManager.Lighting.FogEnd,
             PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
             PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
+            PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
+            PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
             RequestedResolution = requestedResolution,
             RemainingCaptures = plan.Tiles.Count,
         };
@@ -641,6 +655,8 @@ public partial class ViewerApp
         {
             _worldScene.ObjectFogEnabled = false;
             _worldScene.DoodadsVisible = false;
+            _worldScene.ShowWlLiquids = false;
+            _worldScene.ObjectStreamingRangeMultiplier = Math.Max(_worldScene.ObjectStreamingRangeMultiplier, 1.0f);
         }
 
         foreach (MkHarvestViewerValidationCaptureTile tile in plan.Tiles)
@@ -656,15 +672,15 @@ public partial class ViewerApp
                     WaitForSceneReady = true,
                     TargetTileX = tile.TileX,
                     TargetTileY = tile.TileY,
-                    RequiredSettledFrames = 6,
-                    MaxFramesBeforeCapture = 600,
+                    RequiredSettledFrames = 24,
+                    MaxFramesBeforeCapture = 1800,
                     CaptureLabel = tile.TileName,
                     IsMkHarvestViewerValidationCapture = true,
                 });
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads are disabled, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads and WL liquids are disabled, object streaming is widened, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private CameraShotPoint BuildMkHarvestViewerValidationShot(string mapName, MkHarvestViewerValidationCaptureTile tile)
@@ -675,7 +691,7 @@ public partial class ViewerApp
 
         float centerX = WoWConstants.MapOrigin - ((tile.TileX + 0.5f) * WoWConstants.ChunkSize);
         float centerY = WoWConstants.MapOrigin - ((tile.TileY + 0.5f) * WoWConstants.ChunkSize);
-        float desiredSpan = WoWConstants.ChunkSize * 1.10f;
+        float desiredSpan = WoWConstants.ChunkSize;
         float captureHeight = 256f + (desiredSpan / (2f * MathF.Tan((captureFovDegrees * MathF.PI / 180f) * 0.5f)));
 
         return new CameraShotPoint
@@ -714,6 +730,8 @@ public partial class ViewerApp
         {
             _worldScene.ObjectFogEnabled = batch.PreviousObjectFogEnabled;
             _worldScene.DoodadsVisible = batch.PreviousDoodadsVisible;
+            _worldScene.ShowWlLiquids = batch.PreviousWlLiquidsVisible;
+            _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
         }
 
         if (!string.IsNullOrWhiteSpace(statusMessage))

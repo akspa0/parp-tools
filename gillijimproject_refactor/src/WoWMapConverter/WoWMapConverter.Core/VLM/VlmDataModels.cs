@@ -27,7 +27,7 @@ public record VlmTerrainData(
     [property: JsonPropertyName("normalmap")] string? NormalmapPath,
     [property: JsonPropertyName("mccv_map")] string? MccvMapPath,
     
-    // Shadow Maps - paths to per-chunk PNGs
+    // Shadow maps exported at ADT/tile scope.
     [property: JsonPropertyName("shadow_maps")] string[]? ShadowMaps,
     
     // Shadow Maps - raw bit data (64 bytes per chunk = 512 bits = 64x8 shadow map)
@@ -36,7 +36,7 @@ public record VlmTerrainData(
     // Derived shadow-region and object-candidate summaries per chunk
     [property: JsonPropertyName("shadow_analysis")] VlmChunkShadowAnalysis[]? ShadowAnalysis,
     
-    // Alpha Masks - paths to per-layer PNGs
+    // Alpha masks exported at ADT/tile scope, one image per layer.
     [property: JsonPropertyName("alpha_masks")] string[]? AlphaMasks,
     [property: JsonPropertyName("alpha_atlas")] string? AlphaAtlasPath,
     
@@ -144,7 +144,7 @@ public record VlmShadowObjectCandidate(
 public record VlmChunkLayers(
     [property: JsonPropertyName("idx")] int ChunkIndex,
     [property: JsonPropertyName("layers")] VlmTextureLayer[] Layers,
-    // Per-chunk paths for reconstruction
+    // Legacy per-chunk shadow path for reconstruction. May be null when raw shadow bits are present on the tile.
     [property: JsonPropertyName("shadow_path")] string? ShadowPath = null,
     [property: JsonPropertyName("normals")] sbyte[]? Normals = null,  // MCNR 448 bytes (145 * 3 + 13 padding)
     [property: JsonPropertyName("mccv_colors")] byte[]? MccvColors = null,  // MCCV vertex colors (145 * 4 RGBA = 580 bytes)
@@ -162,9 +162,9 @@ public record VlmTextureLayer(
     [property: JsonPropertyName("alpha_off")] uint AlphaOffset,
     [property: JsonPropertyName("effect_id")] uint EffectId,
     [property: JsonPropertyName("ground_effects")] string[]? GroundEffects = null,
-    // Raw alpha mask data (64 bytes = 64x64 / 8 for 1-bit, or 4096 bytes for 8-bit)
+    // Decoded 64x64 grayscale alpha bytes for this chunk layer.
     [property: JsonPropertyName("alpha_bits")] string? AlphaBitsBase64 = null,
-    // Path to exported alpha PNG for this layer
+    // Legacy per-chunk alpha PNG path. May be null when alpha_bits are present.
     [property: JsonPropertyName("alpha_path")] string? AlphaPath = null,
     
     // Raw alpha bytes (Not serialized to JSON, used for .bin export)

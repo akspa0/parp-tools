@@ -237,19 +237,25 @@ ML Dataset is the user-facing name for the open interchange format used for WoW 
 
 ### What's in an ML Dataset?
 
-An ML dataset is a directory of standardized image and metadata files per map tile:
+An ML dataset is a dataset root with a canonical `dataset/` tile JSON payload plus derived image families alongside it.
 
-| Layer | Format | Description |
+Core package outputs:
+
+| Output Family | Typical Location | Description |
 |-------|--------|-------------|
-| **Heightmap** | 16-bit PNG | Per-vertex terrain elevation (normalized) |
-| **Alpha Maps** | 8-bit PNG | Per-layer texture blend weights (up to 4 layers) |
-| **Shadow Map** | 8-bit PNG | Baked shadow data from MCSH chunks |
-| **Depth Map** | 16-bit PNG | Camera-relative depth for ML tasks |
-| **Liquid Mask** | 8-bit PNG | Water/ocean/magma/slime presence and type |
-| **Minimap** | RGB PNG | Baked minimap tile images |
-| **Metadata** | JSON | Tile coordinates, texture references, area IDs, layer info |
+| **Tile metadata** | `dataset/<tile>.json` | Canonical per-tile package contract |
+| **Source minimap** | `images/<tile>.png` | Source rendered minimap tile when available |
+| **Heightmaps** | `images/<tile>_heightmap*.png` | Local and global normalized terrain targets |
+| **Normals and MCCV** | `images/<tile>_normal.png`, `images/<tile>_mccv.png` | Geometry and vertex-color supervision |
+| **Alpha outputs** | `stitched/<tile>_alpha_l*.png`, `stitched/<tile>_alpha_atlas.png` | Separate per-layer masks plus packed atlas |
+| **Shadow outputs** | `stitched/<tile>_shadow.png` | Stitched shadow supervision, separate from alpha atlas |
+| **Liquids** | `liquids/<tile>_liq_*.png` | Liquid occupancy and liquid height |
+| **Optional depth** | `depths/<tile>_depth.png` | Auxiliary depth supervision if requested |
+| **Optional manifest** | `ml_dataset_manifest.json` | Harvest index for curation, coverage, and signatures |
 
-### MK Commands
+Authoritative package details, lookup rules, and manifest fields are documented in `docs/VLM_DATASET_EXPORTER.md`.
+
+### ML Commands
 
 ```bash
 # Export a WoW map to ML dataset
@@ -293,6 +299,8 @@ MdxViewer.exe path/to/mk_dataset/
 ```
 
 The viewer detects the ML dataset structure and renders the terrain from the dataset's heightmaps and textures, allowing you to visually inspect exported data.
+
+For downstream tooling, prefer reading `ml_dataset_manifest.json` when present and then follow the `tile_json_path` entries into `dataset/<tile>.json` instead of deriving paths by filename pattern.
 
 ---
 

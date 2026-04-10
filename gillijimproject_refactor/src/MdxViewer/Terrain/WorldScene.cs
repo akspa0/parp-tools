@@ -866,6 +866,8 @@ public class WorldScene : ISceneRenderer
     public bool LimitHoveredAssetRange { get => _limitHoveredAssetRange; set => _limitHoveredAssetRange = value; }
     public bool UseDynamicHoveredAssetRange { get => _useDynamicHoveredAssetRange; set => _useDynamicHoveredAssetRange = value; }
     public int PendingAssetLoadCount => _assets.PendingAssetLoadCount;
+    public int PendingDeferredWmoDoodadLoadCount => _assets.PendingDeferredWmoDoodadLoadCount;
+    public int PendingWorldObjectLoadCount => PendingAssetLoadCount + PendingDeferredWmoDoodadLoadCount;
     public float ObjectStreamingRangeMultiplier
     {
         get => _objectStreamingRangeMultiplier;

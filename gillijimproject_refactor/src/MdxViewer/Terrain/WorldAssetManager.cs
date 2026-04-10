@@ -120,6 +120,7 @@ public class WorldAssetManager : IDisposable
     public int WmoModelsFailed => _wmoModels.Count(kv => kv.Value == null);
     public int FileCacheCount => _fileDataCache.Count;
     public int PendingAssetLoadCount => _queuedMdxLoads.Count + _queuedWmoLoads.Count;
+    public int PendingDeferredWmoDoodadLoadCount => _wmoModels.Values.Sum(renderer => renderer?.PendingDoodadModelLoadCount ?? 0);
     public int KnownMissingM2SkinCount => _knownMissingM2SkinPaths.Count;
     public long SuppressedFailedMdxRetryCount => _suppressedFailedMdxRetryCount;
     public long SuppressedMissingM2SkinLogCount => _suppressedMissingM2SkinLogCount;

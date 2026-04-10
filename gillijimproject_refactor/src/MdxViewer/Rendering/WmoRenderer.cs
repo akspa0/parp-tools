@@ -96,6 +96,8 @@ public class WmoRenderer : ISceneRenderer
     private const float DoodadCullDistance = 4000f;  // Minimum distance from camera to render WMO doodads; expanded further by fog range at runtime
     private const float DoodadMaxRenderCount = 1024; // Soft cap to avoid large WMO doodad sets dropping out too early
 
+    public int PendingDoodadModelLoadCount => _pendingDoodadModelLoads.Count;
+
     // WMO liquid meshes (from MLIQ chunks in groups)
     private readonly List<LiquidMeshData> _liquidMeshes = new();
     private static uint _liquidShader;

@@ -55,14 +55,12 @@ public class VlmDatasetExporter
 
         // Create output directories
         var imagesDir = Path.Combine(outputDir, "images");
-        var shadowsDir = Path.Combine(outputDir, "shadows");
-        var masksDir = Path.Combine(outputDir, "masks");
+        var shadowsDir = string.Empty;
+        var masksDir = string.Empty;
         var liquidsDir = Path.Combine(outputDir, "liquids");
         var datasetDir = Path.Combine(outputDir, "dataset");
         
         Directory.CreateDirectory(imagesDir);
-        Directory.CreateDirectory(shadowsDir);
-        Directory.CreateDirectory(masksDir);
         Directory.CreateDirectory(liquidsDir);
         Directory.CreateDirectory(datasetDir);
         
@@ -474,16 +472,16 @@ public class VlmDatasetExporter
                 var tileName = Path.GetFileNameWithoutExtension(jsonPath);
                 try
                 {
-                    // Stitch Shadows & Alpha
-                    var (shadowPath, alphaPaths, alphaAtlasPath) = await TileStitchingService.StitchTileWithPackedAtlasAsync(
-                        shadowsDir, masksDir, tileName, stitchedDir);
-
                     // Load JSON to update with stitched paths
                     var json = await File.ReadAllTextAsync(jsonPath);
                     var sample = JsonSerializer.Deserialize<VlmTrainingSample>(json);
                     
                     if (sample != null && sample.TerrainData != null)
                     {
+                        // Stitch shadows and alpha layers from serialized per-chunk data.
+                        var (shadowPath, alphaPaths, alphaAtlasPath) = await TileStitchingService.StitchTileWithPackedAtlasAsync(
+                            sample.TerrainData, tileName, stitchedDir);
+
                         // Stitch Liquids
                         string? lHeightPath = null;
                         string? lMaskPath = null;
@@ -620,6 +618,14 @@ public class VlmDatasetExporter
                 {
                     progress?.Report($"Created full alpha map L{l}: {alphaOutput}");
                 }
+            }
+
+            var alphaAtlasOutput = Path.Combine(stitchedDir, $"{mapName}_full_alpha_atlas.png");
+            var alphaAtlasBounds = TileStitchingService.StitchFullMap(
+                stitchedDir, mapName, 1024, alphaAtlasOutput, "_alpha_atlas.png");
+            if (alphaAtlasBounds.HasValue)
+            {
+                progress?.Report($"Created full alpha atlas: {alphaAtlasOutput}");
             }
             
             // Stitch heightmaps into full world map (PNG)
@@ -799,12 +805,6 @@ public class VlmDatasetExporter
                     {
                         try
                         {
-                            var shadow = ShadowMapService.ReadShadow(mcshBuf);
-                            var shadowPng = ShadowMapService.ToPng(shadow);
-                            var shadowFileName = $"{tileName}_c{chunkIndex}.png";
-                            File.WriteAllBytes(Path.Combine(shadowsDir, shadowFileName), shadowPng);
-                            shadowPaths.Add($"shadows/{shadowFileName}");
-                            
                             // Store raw shadow bits (full 512 bytes = 64 rows × 8 bytes/row)
                             int shadowByteCount = Math.Min(512, mcshBuf.Length);
                             var rawShadowBytes = new byte[shadowByteCount];
@@ -838,19 +838,9 @@ public class VlmDatasetExporter
                                 
                                 // Read this layer's alpha
                                 var alphaData = AlphaMapService.ReadAlpha(mcalBuf, alphaOffset, layerFlags, false, false);
-                                var alphaPng = AlphaMapService.ToPng(alphaData);
-                                var alphaFileName = $"{tileName}_c{chunkIndex}_l{layer}.png";
-                                File.WriteAllBytes(Path.Combine(masksDir, alphaFileName), alphaPng);
-                                alphaPaths.Add($"masks/{alphaFileName}");
+                                layerAlphaBits[layer] = Convert.ToBase64String(alphaData);
                                 
-                                // Store raw alpha bits (8-bit = 64x64 = 4096 bytes, or compressed = varies)
                                 int alphaSize = isCompressed ? 4096 : 2048;
-                                if (alphaOffset + alphaSize <= mcalBuf.Length)
-                                {
-                                    var rawAlpha = new byte[alphaSize];
-                                    Array.Copy(mcalBuf, alphaOffset, rawAlpha, 0, alphaSize);
-                                    layerAlphaBits[layer] = Convert.ToBase64String(rawAlpha);
-                                }
                                 
                                 // Advance offset (2048 for uncompressed 4-bit, varies for compressed)
                                 alphaOffset += alphaSize;
@@ -885,7 +875,7 @@ public class VlmDatasetExporter
                             string? alphaBitsBase64 = layerAlphaBits.TryGetValue(layer, out var bits) ? bits : null;
                             
                             // Alpha path for this layer (layer > 0)
-                            string? alphaPath = layer > 0 ? $"masks/{tileName}_c{chunkIndex}_l{layer}.png" : null;
+                            string? alphaPath = null;
 
                             layerList.Add(new VlmTextureLayer(textureId, texturePath, flags, alphaoffs, effectId, groundEffects, alphaBitsBase64, alphaPath));
                         }
@@ -896,15 +886,13 @@ public class VlmDatasetExporter
                     {
                         for (int layer = 0; layer < nLayers && layer < 4 && layer < textures.Count; layer++)
                         {
-                            string? alphaPath = layer > 0 ? $"masks/{tileName}_c{chunkIndex}_l{layer}.png" : null;
+                            string? alphaPath = null;
                             layerList.Add(new VlmTextureLayer((uint)layer, textures[layer], 0, 0, 0, null, null, alphaPath));
                         }
                     }
                     
                     // Shadow path for this chunk
-                    string? chunkShadowPath = $"shadows/{tileName}_c{chunkIndex}.png";
-                    if (!File.Exists(Path.Combine(shadowsDir, $"{tileName}_c{chunkIndex}.png"))) 
-                        chunkShadowPath = null;
+                    string? chunkShadowPath = null;
                     
                     // Extract normals (MCNR - 448 bytes)
                     sbyte[]? normalsArray = null;
