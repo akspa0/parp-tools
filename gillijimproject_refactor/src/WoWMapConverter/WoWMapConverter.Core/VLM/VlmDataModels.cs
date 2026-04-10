@@ -45,6 +45,9 @@ public record VlmTerrainData(
     [property: JsonPropertyName("liquid_height")] string? LiquidHeightPath,
     [property: JsonPropertyName("liquid_min")] float LiquidMinHeight,
     [property: JsonPropertyName("liquid_max")] float LiquidMaxHeight,
+
+        // Synthesized minimap with liquid areas inpainted to show underlying terrain.
+        [property: JsonPropertyName("no_liquid_minimap")] string? NoLiquidMinimapPath,
     
     // Textures
     [property: JsonPropertyName("textures")] List<string> Textures,
@@ -103,6 +106,12 @@ public record VlmChunkShadowAnalysis(
     [property: JsonPropertyName("coverage")] float Coverage,
     [property: JsonPropertyName("region_count")] int RegionCount,
     [property: JsonPropertyName("largest_region_pixels")] int LargestRegionPixelCount,
+    [property: JsonPropertyName("explained_shadow_pixels")] int ExplainedShadowPixelCount,
+    [property: JsonPropertyName("residual_shadow_pixels")] int ResidualShadowPixelCount,
+    [property: JsonPropertyName("explained_shadow_ratio")] float ExplainedShadowRatio,
+    [property: JsonPropertyName("residual_shadow_ratio")] float ResidualShadowRatio,
+    [property: JsonPropertyName("scar_candidate_region_count")] int ScarCandidateRegionCount,
+    [property: JsonPropertyName("scar_candidate_score")] float ScarCandidateScore,
     [property: JsonPropertyName("regions")] VlmShadowRegion[] Regions,
     [property: JsonPropertyName("candidate_objects")] VlmShadowObjectCandidate[] CandidateObjects
 );
@@ -120,7 +129,14 @@ public record VlmShadowRegion(
     [property: JsonPropertyName("centroid_world")] float[] CentroidWorld,
     [property: JsonPropertyName("world_rect_min")] float[] WorldRectMin,
     [property: JsonPropertyName("world_rect_max")] float[] WorldRectMax,
-    [property: JsonPropertyName("candidate_object_ids")] uint[] CandidateObjectIds
+    [property: JsonPropertyName("candidate_object_ids")] uint[] CandidateObjectIds,
+    [property: JsonPropertyName("explained_by_current_objects")] bool ExplainedByCurrentObjects,
+    [property: JsonPropertyName("explained_shadow_pixels")] int ExplainedShadowPixelCount,
+    [property: JsonPropertyName("residual_shadow_pixels")] int ResidualShadowPixelCount,
+    [property: JsonPropertyName("explained_overlap_ratio")] float ExplainedOverlapRatio,
+    [property: JsonPropertyName("nearest_candidate_distance_px")] float? NearestCandidateDistancePixels,
+    [property: JsonPropertyName("scar_candidate_score")] float ScarCandidateScore,
+    [property: JsonPropertyName("scar_type")] string ScarType
 );
 
 /// <summary>

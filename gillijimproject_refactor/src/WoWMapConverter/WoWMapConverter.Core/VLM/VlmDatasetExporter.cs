@@ -485,6 +485,7 @@ public class VlmDatasetExporter
                         // Stitch Liquids
                         string? lHeightPath = null;
                         string? lMaskPath = null;
+                        string? noLiquidMinimapPath = null;
                         float lMin = 0f, lMax = 0f;
 
                         if (sample.TerrainData.Liquids != null)
@@ -507,6 +508,21 @@ public class VlmDatasetExporter
                             {
                                 lMaskPath = $"liquids/{tileName}_liq_mask.png";
                                 await File.WriteAllBytesAsync(Path.Combine(outputDir, lMaskPath), liqMask);
+
+                                // Generate a synthetic no-liquid minimap for training.
+                                var sourceMinimapPath = sample.ImagePath;
+                                if (!Path.IsPathRooted(sourceMinimapPath))
+                                    sourceMinimapPath = Path.Combine(outputDir, sourceMinimapPath);
+
+                                if (File.Exists(sourceMinimapPath))
+                                {
+                                    var noLiqBytes = SynthesizeNoLiquidMinimap(sourceMinimapPath, liqMask);
+                                    if (noLiqBytes.Length > 0)
+                                    {
+                                        noLiquidMinimapPath = $"images/{tileName}_no_liquid.png";
+                                        await File.WriteAllBytesAsync(Path.Combine(outputDir, noLiquidMinimapPath), noLiqBytes);
+                                    }
+                                }
                             }
                         }
 
@@ -518,6 +534,7 @@ public class VlmDatasetExporter
                             AlphaAtlasPath = alphaAtlasPath != null ? Path.GetRelativePath(outputDir, alphaAtlasPath).Replace("\\", "/") : null,
                             LiquidHeightPath = lHeightPath,
                             LiquidMaskPath = lMaskPath,
+                            NoLiquidMinimapPath = noLiquidMinimapPath,
                             LiquidMinHeight = lMin,
                             LiquidMaxHeight = lMax
                         };
@@ -925,28 +942,7 @@ public class VlmDatasetExporter
                         var liquid = LiquidService.ExtractMCLQ(mclqData, chunkIndex);
                         if (liquid != null)
                         {
-                            string? maskPath = null;
-                            
-                            // Save heightmap PNG if exists
-                            if (liquid.Heights != null)
-                            {
-                                var liquidsDir = Path.Combine(outputDir, "liquids");
-                                Directory.CreateDirectory(liquidsDir);
-                                
-                                var heightPng = LiquidService.GenerateHeightPng(liquid.Heights, liquid.MinHeight, liquid.MaxHeight);
-                                var heightFileName = $"{tileName}_c{chunkIndex}_liq_h.png";
-                                var heightPath = Path.Combine(liquidsDir, heightFileName);
-                                await File.WriteAllBytesAsync(heightPath, heightPng);
-                                
-                                // Set the mask path for JSON
-                                maskPath = $"liquids/{heightFileName}";
-                            }
-                            
-                            // Create updated liquid record with mask path
-                            var liquidWithPath = new VlmLiquidData(
-                                liquid.ChunkIndex, liquid.LiquidType, liquid.MinHeight, liquid.MaxHeight,
-                                maskPath, liquid.Heights);
-                            liquids.Add(liquidWithPath);
+                            liquids.Add(liquid);
                         }
                     }
                 }
@@ -1042,7 +1038,7 @@ public class VlmDatasetExporter
 
         var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir, isInterleaved: false);
         
-        var normalmapPath = await GenerateNormalmap(chunkLayers, tileName, outputDir);
+        var normalmapPath = await GenerateNormalmap(heights, holes, tileName, outputDir, isInterleaved: false);
         var mccvMapPath = await GenerateMccvMap(chunkLayers, tileName, outputDir);
         
         return new VlmTerrainData(
@@ -1064,6 +1060,7 @@ public class VlmDatasetExporter
             LiquidHeightPath: null,
             LiquidMinHeight: 0f,
             LiquidMaxHeight: 0f,
+            NoLiquidMinimapPath: null,
             Textures: textures,
             ChunkLayers: chunkLayers.Count > 0 ? chunkLayers.ToArray() : null,
             Liquids: liquids.Count > 0 ? liquids.ToArray() : null,
@@ -1327,8 +1324,29 @@ public class VlmDatasetExporter
                                 alphaInfo // AlphaData (byte[])
                             ));
                         }
-                        if (layers.Count > 0)
-                            chunkLayers.Add(new VlmChunkLayers(chunkIndex, layers.ToArray()));
+                    }
+
+                    sbyte[]? normalsArray = null;
+                    var mcnrBuf = mcnk.McnrData;
+                    if (mcnrBuf != null && mcnrBuf.Length > 0)
+                    {
+                        normalsArray = new sbyte[mcnrBuf.Length];
+                        for (int n = 0; n < mcnrBuf.Length; n++)
+                            normalsArray[n] = (sbyte)mcnrBuf[n];
+                    }
+
+                    byte[]? mccvColors = null;
+                    var mccvBuf = mcnk.MccvData;
+                    if (mccvBuf != null && mccvBuf.Length > 0)
+                    {
+                        mccvColors = mccvBuf;
+                    }
+
+                    if (layers.Count > 0 || normalsArray != null || mccvColors != null)
+                    {
+                        uint areaId = mcnk.Header.AreaId;
+                        uint chunkFlags = (uint)mcnk.Header.Flags;
+                        chunkLayers.Add(new VlmChunkLayers(chunkIndex, layers.ToArray(), null, normalsArray, mccvColors, areaId, chunkFlags));
                     }
 
                     // 4. Shadows (MCSH)
@@ -1355,11 +1373,6 @@ public class VlmDatasetExporter
                 {
                     try
                     {
-                        var shadow = ShadowMapService.ReadShadow(shadowMapData[i]);
-                        var shadowPng = ShadowMapService.ToPng(shadow);
-                        var sName = $"{tileName}_c{i}.png";
-                        File.WriteAllBytes(Path.Combine(shadowsDir, sName), shadowPng);
-                        shadowPaths.Add($"shadows/{sName}");
                         shadowBits.Add(new VlmChunkShadowBits(i, Convert.ToBase64String(shadowMapData[i])));
                     }
                     catch (Exception ex)
@@ -1374,6 +1387,8 @@ public class VlmDatasetExporter
                 : null;
 
             var heightmapPath = await GenerateHeightmap(heights, tileName, outputDir, isInterleaved: true);
+            var normalmapPath = await GenerateNormalmap(heights, holes, tileName, outputDir, isInterleaved: true);
+            var mccvMapPath = await GenerateMccvMap(chunkLayers, tileName, outputDir);
             
             return new VlmTerrainData(
                 AdtTile: tileName,
@@ -1383,8 +1398,8 @@ public class VlmDatasetExporter
                 HeightmapPath: heightmapPath,
                 HeightmapLocalPath: heightmapPath,
                 HeightmapGlobalPath: null,
-                NormalmapPath: null,
-                MccvMapPath: null,
+                NormalmapPath: normalmapPath,
+                MccvMapPath: mccvMapPath,
                 ShadowMaps: shadowPaths.Count > 0 ? shadowPaths.ToArray() : null,
                 ShadowBits: shadowBits.Count > 0 ? shadowBits.ToArray() : null,
                 ShadowAnalysis: shadowAnalysis,
@@ -1394,6 +1409,7 @@ public class VlmDatasetExporter
                 LiquidHeightPath: null,
                 LiquidMinHeight: 0f,
                 LiquidMaxHeight: 0f,
+                NoLiquidMinimapPath: null,
                 Textures: textures,
                 ChunkLayers: chunkLayers.ToArray(),
                 Liquids: null,
@@ -1702,16 +1718,17 @@ public class VlmDatasetExporter
     {
         if (chunkHeights == null || chunkHeights.Count == 0) return null;
 
-        const int Size = 145;
         var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
-        var (minZ, maxZ) = GetHeightRange(heightsDict);
-        var mapBytes = RenderHeightmapImage(heightsDict, minZ, maxZ, Size, isInterleaved);
+        var tileHeightmap = TerrainTileBakeService.BuildTileHeightmap257(heightsDict, isInterleaved);
 
         var filename = $"{tileName}_heightmap.png";
         var imagesDir = Path.Combine(outputDir, "images");
         Directory.CreateDirectory(imagesDir);
         var path = Path.Combine(imagesDir, filename);
-        await File.WriteAllBytesAsync(path, mapBytes);
+        using (Image<L16> image = TerrainTileBakeService.CreateHeightmapImage(tileHeightmap.Heights, tileHeightmap.MinHeight, tileHeightmap.MaxHeight, 256))
+        {
+            await image.SaveAsPngAsync(path);
+        }
 
         return $"images/{filename}";
     }
@@ -1831,24 +1848,29 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
-    private async Task<string?> GenerateNormalmap(List<VlmChunkLayers> chunkLayers, string tileName, string outputDir)
+    private async Task<string?> GenerateNormalmap(List<VlmChunkHeights> chunkHeights, int[] holes, string tileName, string outputDir, bool isInterleaved)
     {
-        if (chunkLayers == null || chunkLayers.Count == 0) return null;
+        if (chunkHeights == null || chunkHeights.Count == 0) return null;
 
-        const int Size = 145;
-        var normalsDict = chunkLayers
-            .Where(c => c.Normals != null && c.Normals.Length >= 145 * 3)
-            .ToDictionary(k => k.ChunkIndex, v => v.Normals!);
+        var heightsDict = chunkHeights.ToDictionary(k => k.ChunkIndex, v => v.Heights);
+        var holeMasks = new Dictionary<int, int>(holes?.Length ?? 0);
+        if (holes != null)
+        {
+            for (int i = 0; i < holes.Length; i++)
+                holeMasks[i] = holes[i];
+        }
 
-        if (normalsDict.Count == 0) return null;
-
-        var mapBytes = RenderNormalmapImage(normalsDict, Size);
+        var tileHeightmap = TerrainTileBakeService.BuildTileHeightmap257(heightsDict, isInterleaved);
+        var tileNormals = TerrainTileBakeService.BuildTileNormals257(tileHeightmap.Heights, holeMasks);
 
         var filename = $"{tileName}_normal.png";
         var imagesDir = Path.Combine(outputDir, "images");
         Directory.CreateDirectory(imagesDir);
         var path = Path.Combine(imagesDir, filename);
-        await File.WriteAllBytesAsync(path, mapBytes);
+        using (Image<Rgba32> image = TerrainTileBakeService.CreateNormalmapImage(tileNormals, 256))
+        {
+            await image.SaveAsPngAsync(path);
+        }
 
         return $"images/{filename}";
     }
@@ -2080,6 +2102,143 @@ public class VlmDatasetExporter
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Produces a synthesized minimap where liquid-covered pixels are replaced with estimated
+    /// terrain color sampled from surrounding non-liquid pixels.
+    /// </summary>
+    private static byte[] SynthesizeNoLiquidMinimap(string sourceMinimapPath, byte[] liquidMaskPngBytes)
+    {
+        try
+        {
+            using var srcImage = Image.Load<Rgba32>(sourceMinimapPath);
+            int w = srcImage.Width;
+            int h = srcImage.Height;
+
+            using var maskStream = new MemoryStream(liquidMaskPngBytes);
+            using var maskImage = Image.Load<L8>(maskStream);
+            if (maskImage.Width != w || maskImage.Height != h)
+                maskImage.Mutate(ctx => ctx.Resize(w, h));
+
+            var pixels = new Rgba32[w * h];
+            var isFilled = new bool[w * h];
+
+            srcImage.ProcessPixelRows(acc =>
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    var row = acc.GetRowSpan(y);
+                    for (int x = 0; x < w; x++)
+                        pixels[y * w + x] = row[x];
+                }
+            });
+
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    var maskPixel = maskImage[x, y];
+                    isFilled[y * w + x] = maskPixel.PackedValue < 128;
+                }
+            }
+
+            long rSum = 0;
+            long gSum = 0;
+            long bSum = 0;
+            long count = 0;
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                if (!isFilled[i])
+                    continue;
+
+                rSum += pixels[i].R;
+                gSum += pixels[i].G;
+                bSum += pixels[i].B;
+                count++;
+            }
+
+            var fallback = count > 0
+                ? new Rgba32((byte)(rSum / count), (byte)(gSum / count), (byte)(bSum / count), 255)
+                : new Rgba32(100, 120, 80, 255);
+
+            var pending = new bool[w * h];
+            for (int i = 0; i < pending.Length; i++)
+                pending[i] = !isFilled[i];
+
+            int[] dx = { -1, 1, 0, 0 };
+            int[] dy = { 0, 0, -1, 1 };
+
+            for (int pass = 0; pass < 64; pass++)
+            {
+                bool anyResolved = false;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        int idx = y * w + x;
+                        if (!pending[idx])
+                            continue;
+
+                        long r = 0;
+                        long g = 0;
+                        long b = 0;
+                        int n = 0;
+                        for (int d = 0; d < 4; d++)
+                        {
+                            int nx = x + dx[d];
+                            int ny = y + dy[d];
+                            if (nx < 0 || nx >= w || ny < 0 || ny >= h)
+                                continue;
+
+                            int ni = ny * w + nx;
+                            if (!isFilled[ni])
+                                continue;
+
+                            r += pixels[ni].R;
+                            g += pixels[ni].G;
+                            b += pixels[ni].B;
+                            n++;
+                        }
+
+                        if (n > 0)
+                        {
+                            pixels[idx] = new Rgba32((byte)(r / n), (byte)(g / n), (byte)(b / n), 255);
+                            isFilled[idx] = true;
+                            pending[idx] = false;
+                            anyResolved = true;
+                        }
+                    }
+                }
+
+                if (!anyResolved)
+                    break;
+            }
+
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                if (pending[i])
+                    pixels[i] = fallback;
+            }
+
+            using var result = new Image<Rgba32>(w, h);
+            result.ProcessPixelRows(acc =>
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    var row = acc.GetRowSpan(y);
+                    pixels.AsSpan(y * w, w).CopyTo(row);
+                }
+            });
+
+            using var ms = new MemoryStream();
+            result.SaveAsPng(ms);
+            return ms.ToArray();
+        }
+        catch
+        {
+            return Array.Empty<byte>();
+        }
+    }
+
     private async Task GenerateGlobalHeightmapsAsync(string datasetDir, string outputDir, IProgress<string>? progress)
     {
         var jsonFiles = Directory.GetFiles(datasetDir, "*.json");
@@ -2134,12 +2293,15 @@ public class VlmDatasetExporter
                     .ToDictionary(h => h.ChunkIndex, h => h.Heights!);
                 if (heightsDict.Count == 0) continue;
 
-                var mapBytes = RenderHeightmapImage(heightsDict, globalMin, globalMax, 512, sample.TerrainData.IsInterleaved);
                 var filename = $"{sample.TerrainData.AdtTile}_heightmap_global.png";
                 var imagesDir = Path.Combine(outputDir, "images");
                 Directory.CreateDirectory(imagesDir);
                 var path = Path.Combine(imagesDir, filename);
-                await File.WriteAllBytesAsync(path, mapBytes);
+                var tileHeightmap = TerrainTileBakeService.BuildTileHeightmap257(heightsDict, sample.TerrainData.IsInterleaved);
+                using (Image<L16> image = TerrainTileBakeService.CreateHeightmapImage(tileHeightmap.Heights, globalMin, globalMax, 512))
+                {
+                    await image.SaveAsPngAsync(path);
+                }
 
                 var heightmapGlobalPath = $"images/{filename}";
                 var updatedTerrain = sample.TerrainData with

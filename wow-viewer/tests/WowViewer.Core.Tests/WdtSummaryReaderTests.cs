@@ -102,6 +102,42 @@ public sealed class WdtSummaryReaderTests
     }
 
     [Fact]
+    public void ReadOccupiedTiles_StandardWdtBuffer_ReturnsOccupiedCoordinates()
+    {
+        byte[] mainData = new byte[64 * 64 * 8];
+        WriteUInt32(mainData, 0, 1);
+        WriteUInt32(mainData, 8, 2);
+        WriteUInt32(mainData, 64 * 8, 3);
+
+        byte[] bytes =
+        [
+            .. CreateChunk("MVER", CreateUInt32Payload(18)),
+            .. CreateChunk("MAIN", mainData),
+        ];
+
+        using MemoryStream stream = new(bytes);
+        MapFileSummary fileSummary = MapFileSummaryReader.Read(stream, "standard-tiles.wdt");
+        IReadOnlyList<WdtTileCoordinate> tiles = WdtTileIndexReader.ReadOccupiedTiles(stream, fileSummary);
+
+        Assert.Equal(
+            [
+                new WdtTileCoordinate(0, 0),
+                new WdtTileCoordinate(1, 0),
+                new WdtTileCoordinate(0, 1),
+            ],
+            tiles);
+    }
+
+    [Fact]
+    public void ReadOccupiedTiles_DevelopmentWdt_ReturnsExpectedCount()
+    {
+        IReadOnlyList<WdtTileCoordinate> tiles = WdtTileIndexReader.ReadOccupiedTiles(MapTestPaths.DevelopmentWdtPath);
+
+        Assert.Equal(1496, tiles.Count);
+        Assert.Contains(new WdtTileCoordinate(0, 0), tiles);
+    }
+
+    [Fact]
     public void Read_DevelopmentWdt_ProducesExpectedSemanticSummary()
     {
         WdtSummary summary = WdtSummaryReader.Read(MapTestPaths.DevelopmentWdtPath);

@@ -1499,8 +1499,12 @@ void main() {
             DrawBuildSelectionDialog();
         if (_showListfileInput)
             DrawListfileInputDialog();
+        if (_showMlTrainingDialog || IsMlTrainingProcessActive())
+            UpdateMlTrainingMonitor();
         if (_showVlmExportDialog)
             DrawVlmExportDialog();
+        if (_showMlTrainingDialog)
+            DrawMlTrainingDialog();
         if (_showTerrainTextureTransferDialog)
             DrawTerrainTextureTransferDialog();
         if (_showAlphaFolderImportScope)
@@ -1658,6 +1662,12 @@ void main() {
                     PrepareVlmExportDialogInputs();
                     PrepareMkHarvestDialogInputs();
                     _showVlmExportDialog = true;
+                }
+
+                if (ImGui.MenuItem("Train V7 Terrain Model..."))
+                {
+                    PrepareMlTrainingDialogInputs();
+                    _showMlTrainingDialog = true;
                 }
 
                 if (ImGui.MenuItem("Terrain Texture Transfer..."))
@@ -5052,7 +5062,7 @@ void main() {
         ImGui.SetNextItemWidth(180f);
         ImGui.SliderInt("Validation Resolution", ref _mkHarvestViewerValidationResolution, 512, 4096);
         ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "ML dataset finalize now writes the manifest and only queues live MdxViewer validation minimaps. It no longer generates baked 4k reference minimaps from exported layers.");
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture defaults to 512px square output, temporarily hides chrome, disables doodads and WL liquids, waits for world assets to settle, and resizes the viewer window to the requested square output size while the batch runs.");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1f), "Validation capture defaults to 512px square output, temporarily hides chrome, disables doodads and WL liquids, emits both the primary viewer_validation_minimaps set and a noliquids/ variant, stitches both families after capture, waits for world assets to settle, and resizes the viewer window to the requested square output size while the batch runs.");
 
         ImGui.Spacing();
         bool hasDatasetRoot = !string.IsNullOrWhiteSpace(_mkHarvestDatasetRoot);
@@ -5389,11 +5399,14 @@ void main() {
             ? GenerateMkViewerValidationMinimapDirectory(normalizedDatasetRoot)
             : outputDirectory);
         Directory.CreateDirectory(validationOutputDirectory);
+        string validationNoLiquidsOutputDirectory = Path.Combine(validationOutputDirectory, "noliquids");
+        Directory.CreateDirectory(validationNoLiquidsOutputDirectory);
 
         var plan = new MkHarvestViewerValidationCapturePlan
         {
             DatasetRoot = normalizedDatasetRoot,
             OutputDirectory = validationOutputDirectory,
+            NoLiquidsOutputDirectory = validationNoLiquidsOutputDirectory,
             RequestedResolution = Math.Clamp(requestedResolution, 512, 4096)
         };
 
@@ -5415,20 +5428,38 @@ void main() {
                 plan.MapName = mapName;
 
             string outputPath = Path.Combine(validationOutputDirectory, $"{tileName}_viewer_validation.png");
-            if (!forceRegenerate && File.Exists(outputPath))
-                continue;
-
-            plan.Tiles.Add(new MkHarvestViewerValidationCaptureTile
+            if (forceRegenerate || !File.Exists(outputPath))
             {
-                TileName = tileName,
-                TileX = tileX,
-                TileY = tileY,
-                OutputPath = outputPath,
-            });
+                plan.Tiles.Add(new MkHarvestViewerValidationCaptureTile
+                {
+                    TileName = tileName,
+                    TileX = tileX,
+                    TileY = tileY,
+                    OutputPath = outputPath,
+                    HideTerrainLiquids = false,
+                });
+            }
+
+            string noLiquidsOutputPath = Path.Combine(validationNoLiquidsOutputDirectory, $"{tileName}_viewer_validation.png");
+            if (forceRegenerate || !File.Exists(noLiquidsOutputPath))
+            {
+                plan.Tiles.Add(new MkHarvestViewerValidationCaptureTile
+                {
+                    TileName = tileName,
+                    TileX = tileX,
+                    TileY = tileY,
+                    OutputPath = noLiquidsOutputPath,
+                    HideTerrainLiquids = true,
+                });
+            }
         }
 
         plan.Tiles.Sort(static (left, right) =>
         {
+            int liquidCompare = left.HideTerrainLiquids.CompareTo(right.HideTerrainLiquids);
+            if (liquidCompare != 0)
+                return liquidCompare;
+
             int mapCompare = string.Compare(left.TileName, right.TileName, StringComparison.OrdinalIgnoreCase);
             if (mapCompare != 0)
                 return mapCompare;
@@ -5446,13 +5477,13 @@ void main() {
         if (plan.Tiles.Count == 0)
         {
             statusMessage = skippedFiles > 0
-                ? $"No new MdxViewer validation captures were queued; {skippedFiles} dataset tile file(s) could not be parsed and the rest already had outputs."
-                : "No new MdxViewer validation captures were queued because outputs already exist for every dataset tile.";
-            return null;
+                ? $"No new MdxViewer validation captures were queued; {skippedFiles} dataset tile file(s) could not be parsed and the rest already had both primary and noliquids outputs. Refreshing stitched composites from the existing files."
+                : "No new MdxViewer validation captures were queued because primary and noliquids outputs already exist for every dataset tile. Refreshing stitched composites from the existing files.";
+            return plan;
         }
 
         if (skippedFiles > 0)
-            statusMessage = $"Queued {plan.Tiles.Count} MdxViewer validation capture(s); skipped {skippedFiles} dataset tile file(s) with unparseable names.";
+            statusMessage = $"Queued {plan.Tiles.Count} MdxViewer validation capture(s) across the primary and noliquids output families; skipped {skippedFiles} dataset tile file(s) with unparseable names.";
 
         return plan;
     }
@@ -5914,10 +5945,21 @@ void main() {
 
                     if (validationPlan != null)
                     {
-                        _pendingMkHarvestViewerValidationCapturePlan = validationPlan;
-                        _mkHarvestViewerValidationQueued = validationPlan.Tiles.Count;
-                        AppendMkHarvestLogLine(
-                            $"Queued {validationPlan.Tiles.Count} MdxViewer validation capture(s) at {validationPlan.RequestedResolution}px into {validationPlan.OutputDirectory}.");
+                        if (validationPlan.Tiles.Count > 0)
+                        {
+                            _pendingMkHarvestViewerValidationCapturePlan = validationPlan;
+                            _mkHarvestViewerValidationQueued = validationPlan.Tiles.Count;
+                            AppendMkHarvestLogLine(
+                                $"Queued {validationPlan.Tiles.Count} MdxViewer validation capture(s) at {validationPlan.RequestedResolution}px into {validationPlan.OutputDirectory} with matching noliquids captures under {validationPlan.NoLiquidsOutputDirectory}.");
+                        }
+                        else
+                        {
+                            StitchMkHarvestViewerValidationOutputs(
+                                validationPlan.MapName,
+                                validationPlan.OutputDirectory,
+                                validationPlan.NoLiquidsOutputDirectory,
+                                validationPlan.RequestedResolution);
+                        }
                     }
                 }
 
@@ -12770,6 +12812,7 @@ void main() {
 
         StopVideoRecording("Stopped video recording during shutdown.");
         StopTaxiRideCamera();
+        ShutdownMlTrainingMonitor();
 
         ISceneRenderer? renderer = _renderer;
         WorldScene? worldScene = _worldScene;

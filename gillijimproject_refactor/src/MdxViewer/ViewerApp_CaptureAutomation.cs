@@ -10,6 +10,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using MdxViewer.Rendering;
 using MdxViewer.Terrain;
+using WoWMapConverter.Core.VLM;
 
 namespace MdxViewer;
 
@@ -80,6 +81,7 @@ public partial class ViewerApp
         public bool TimedOutWaitingForScene { get; set; }
         public string? CaptureLabel { get; set; }
         public bool IsMkHarvestViewerValidationCapture { get; set; }
+        public bool HideTerrainLiquids { get; set; }
     }
 
     private sealed class CaptureQueueOptions
@@ -92,6 +94,7 @@ public partial class ViewerApp
         public int MaxFramesBeforeCapture { get; init; } = 1;
         public string? CaptureLabel { get; init; }
         public bool IsMkHarvestViewerValidationCapture { get; init; }
+        public bool HideTerrainLiquids { get; init; }
     }
 
     private sealed class MkHarvestViewerValidationCaptureTile
@@ -100,6 +103,7 @@ public partial class ViewerApp
         public int TileX { get; set; }
         public int TileY { get; set; }
         public string OutputPath { get; set; } = string.Empty;
+        public bool HideTerrainLiquids { get; set; }
     }
 
     private sealed class MkHarvestViewerValidationCapturePlan
@@ -107,6 +111,7 @@ public partial class ViewerApp
         public string DatasetRoot { get; set; } = string.Empty;
         public string MapName { get; set; } = string.Empty;
         public string OutputDirectory { get; set; } = string.Empty;
+        public string NoLiquidsOutputDirectory { get; set; } = string.Empty;
         public int RequestedResolution { get; set; }
         public bool RestoreWorldRequested { get; set; }
         public List<MkHarvestViewerValidationCaptureTile> Tiles { get; set; } = new();
@@ -123,10 +128,15 @@ public partial class ViewerApp
         public required Vector3 PreviousTerrainLightDirection { get; init; }
         public required bool PreviousVlmLightDirectionOverride { get; init; }
         public required Vector3 PreviousVlmLightDirection { get; init; }
+        public required bool PreviousTerrainLiquidsVisible { get; init; }
+        public required bool PreviousVlmTerrainLiquidsVisible { get; init; }
         public required bool PreviousObjectFogEnabled { get; init; }
         public required bool PreviousDoodadsVisible { get; init; }
         public required bool PreviousWlLiquidsVisible { get; init; }
         public required float PreviousObjectStreamingRangeMultiplier { get; init; }
+        public required string MapName { get; init; }
+        public required string OutputDirectory { get; init; }
+        public required string NoLiquidsOutputDirectory { get; init; }
         public required int RequestedResolution { get; init; }
         public int RemainingCaptures { get; set; }
     }
@@ -471,6 +481,7 @@ public partial class ViewerApp
             MaxFramesBeforeCapture = Math.Max(1, options?.MaxFramesBeforeCapture ?? 1),
             CaptureLabel = options?.CaptureLabel,
             IsMkHarvestViewerValidationCapture = options?.IsMkHarvestViewerValidationCapture == true,
+            HideTerrainLiquids = options?.HideTerrainLiquids == true,
         });
 
         string mode = includeUi ? "with_ui" : "no_ui";
@@ -486,8 +497,25 @@ public partial class ViewerApp
         _activeCaptureRequest = request;
 
         ApplyCameraShotPoint(request.Shot);
+        ApplyCaptureRequestSceneOverrides(request);
         request.Applied = true;
         _activeCaptureRequest = request;
+    }
+
+    private void ApplyCaptureRequestSceneOverrides(PendingCaptureRequest request)
+    {
+        if (!request.IsMkHarvestViewerValidationCapture)
+            return;
+
+        bool showTerrainLiquids = !request.HideTerrainLiquids;
+        if (_terrainManager?.LiquidRenderer != null)
+            _terrainManager.LiquidRenderer.ShowLiquid = showTerrainLiquids;
+
+        if (_vlmTerrainManager?.LiquidRenderer != null)
+            _vlmTerrainManager.LiquidRenderer.ShowLiquid = showTerrainLiquids;
+
+        if (_worldScene != null)
+            _worldScene.ShowWlLiquids = false;
     }
 
     private void CompleteCaptureIfReady(bool includeUi)
@@ -648,10 +676,15 @@ public partial class ViewerApp
             PreviousTerrainLightDirection = terrainLighting.ExternalLightDirection,
             PreviousVlmLightDirectionOverride = vlmLighting?.HasExternalLightDirectionOverride ?? false,
             PreviousVlmLightDirection = vlmLighting?.ExternalLightDirection ?? Vector3.Zero,
+            PreviousTerrainLiquidsVisible = _terrainManager.LiquidRenderer?.ShowLiquid ?? true,
+            PreviousVlmTerrainLiquidsVisible = _vlmTerrainManager?.LiquidRenderer?.ShowLiquid ?? true,
             PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
             PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
             PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
             PreviousObjectStreamingRangeMultiplier = _worldScene?.ObjectStreamingRangeMultiplier ?? 0.5f,
+            MapName = plan.MapName,
+            OutputDirectory = plan.OutputDirectory,
+            NoLiquidsOutputDirectory = plan.NoLiquidsOutputDirectory,
             RequestedResolution = requestedResolution,
             RemainingCaptures = plan.Tiles.Count,
         };
@@ -687,13 +720,14 @@ public partial class ViewerApp
                     TargetTileY = tile.TileY,
                     RequiredSettledFrames = 24,
                     MaxFramesBeforeCapture = 1800,
-                    CaptureLabel = tile.TileName,
+                    CaptureLabel = tile.HideTerrainLiquids ? $"{tile.TileName} (noliquids)" : tile.TileName,
                     IsMkHarvestViewerValidationCapture = true,
+                    HideTerrainLiquids = tile.HideTerrainLiquids,
                 });
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads and WL liquids are disabled, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} capture(s). Viewer chrome is hidden, doodads and WL liquids are disabled for both variants, the primary output keeps terrain liquids, the 'noliquids' sub-folder disables terrain liquids too, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
     }
 
     private static Vector3 BuildMkHarvestViewerValidationLightDirection(Vector3 currentLightDirection)
@@ -800,6 +834,8 @@ public partial class ViewerApp
             _terrainManager.DetailedTileCountOverride = batch.PreviousDetailedTileCountOverride;
             _terrainManager.Lighting.FogStart = batch.PreviousFogStart;
             _terrainManager.Lighting.FogEnd = batch.PreviousFogEnd;
+            if (_terrainManager.LiquidRenderer != null)
+                _terrainManager.LiquidRenderer.ShowLiquid = batch.PreviousTerrainLiquidsVisible;
             if (batch.PreviousTerrainLightDirectionOverride)
                 _terrainManager.Lighting.ApplyExternalLightDirection(batch.PreviousTerrainLightDirection);
             else
@@ -808,6 +844,8 @@ public partial class ViewerApp
 
         if (_vlmTerrainManager != null)
         {
+            if (_vlmTerrainManager.LiquidRenderer != null)
+                _vlmTerrainManager.LiquidRenderer.ShowLiquid = batch.PreviousVlmTerrainLiquidsVisible;
             if (batch.PreviousVlmLightDirectionOverride)
                 _vlmTerrainManager.Lighting.ApplyExternalLightDirection(batch.PreviousVlmLightDirection);
             else
@@ -822,10 +860,45 @@ public partial class ViewerApp
             _worldScene.ObjectStreamingRangeMultiplier = batch.PreviousObjectStreamingRangeMultiplier;
         }
 
+        StitchMkHarvestViewerValidationOutputs(batch.MapName, batch.OutputDirectory, batch.NoLiquidsOutputDirectory, batch.RequestedResolution);
+
         if (!string.IsNullOrWhiteSpace(statusMessage))
         {
             _statusMessage = statusMessage;
             AppendMkHarvestLogLine(statusMessage);
+        }
+    }
+
+    private void StitchMkHarvestViewerValidationOutputs(
+        string mapName,
+        string outputDirectory,
+        string noLiquidsOutputDirectory,
+        int requestedResolution)
+    {
+        TryStitchMkHarvestViewerValidationDirectory(outputDirectory, mapName, requestedResolution, "viewer_validation_minimaps");
+        TryStitchMkHarvestViewerValidationDirectory(noLiquidsOutputDirectory, mapName, requestedResolution, "viewer_validation_minimaps/noliquids");
+    }
+
+    private void TryStitchMkHarvestViewerValidationDirectory(string imagesDirectory, string mapName, int requestedResolution, string variantLabel)
+    {
+        if (string.IsNullOrWhiteSpace(imagesDirectory) || string.IsNullOrWhiteSpace(mapName) || !Directory.Exists(imagesDirectory))
+            return;
+
+        string stitchedDirectory = Path.Combine(imagesDirectory, "stitched");
+        Directory.CreateDirectory(stitchedDirectory);
+
+        string outputPath = Path.Combine(stitchedDirectory, $"{mapName}_full_viewer_validation.png");
+        var bounds = TileStitchingService.StitchFullMap(
+            imagesDirectory,
+            mapName,
+            requestedResolution,
+            outputPath,
+            suffix: "_viewer_validation.png");
+
+        if (bounds.HasValue)
+        {
+            AppendMkHarvestLogLine(
+                $"Stitched {variantLabel} into {outputPath} using tile bounds {bounds.Value.minX:D2},{bounds.Value.minY:D2} -> {bounds.Value.maxX:D2},{bounds.Value.maxY:D2}.");
         }
     }
 

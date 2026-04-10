@@ -72,6 +72,7 @@ Not every export contains every directory:
 - Tile JSON files in `dataset/` are the canonical per-tile source of truth.
 - Paths inside JSON and manifest files are dataset-root-relative and use `/` separators.
 - Tile identity is anchored by `terrain_data.adt_tile` and matches the file stem, for example `Azeroth_32_48`.
+- Cross-build training should currently treat dataset-root provenance as the primary build selector. The documented tile schema guarantees stable tile/map identity, but it does not currently document a canonical per-tile client-build field.
 - `dataset/<tile>.bin` is a compatibility binary payload emitted alongside JSON. New tooling should prefer JSON and manifest metadata unless it explicitly needs the binary layout.
 - Stitched terrain supervision outputs now live under `stitched/`. Tooling must not assume old root-level `shadows/` or `masks/` directories exist.
 - Viewer validation captures are not a core package directory. They may be written outside the dataset root, so training or audit tooling should not depend on them.
@@ -113,7 +114,7 @@ Each `dataset/<tile>.json` file is serialized from `VlmTrainingSample` and has t
 | `mccv_map` | Vertex color map PNG | Ground tint or color supervision |
 | `shadow_maps` | Tile-scope stitched shadow outputs | Shadow supervision; currently usually one stitched shadow image |
 | `shadow_bits` | Raw per-chunk shadow bit payload | Fine-grained shadow analysis or reconstruction |
-| `shadow_analysis` | Derived shadow region summaries and candidate associations | Audit or research features, not required for base training |
+| `shadow_analysis` | Derived shadow region summaries, candidate associations, and first-pass explained-vs-residual scar labels | Audit, curation, and object-recovery features; still heuristic |
 | `alpha_masks` | Tile-scope stitched grayscale alpha masks | Explicit per-layer terrain texture weights |
 | `alpha_atlas` | Packed alpha atlas PNG | Compact terrain texture supervision |
 | `liquid_mask` | Stitched liquid occupancy mask | Water or liquid supervision |
@@ -257,10 +258,83 @@ For downstream ML or curation tooling, use this lookup order:
 - For object-aware training, use `objects` and their optional bounds.
 - Do not assume `reference_minimaps/` or viewer validation outputs exist.
 
+## Recommended Model Split
+
+The exported dataset supports two separate model families and should not force
+them back into one mixed contract:
+
+1. Terrain reconstruction model:
+  `image` + `normalmap` + `wdl_heights` + `liquid_mask` + `objects` + height bounds -> `heightmap_local` / `heightmap_global`
+2. Texture decomposition model:
+  `image` + palette context from `textures` / `chunk_layers` / `tilesets/` -> terrain texture assignments + `alpha_masks`
+3. Shadow-scar object recovery model:
+  `image` + `shadow_maps` / `shadow_bits` / `shadow_analysis` + surviving `objects` -> missing-object candidates and restored placement hypotheses
+
+For the current development-map direction, the limited terrain-texture palette
+available in the `4.0.0.11927` client is a practical first target for the
+separate texture model.
+
+The third model should not be framed as "predict every object from the
+minimap." The more defensible target is narrower:
+
+1. treat placed `objects` as the surviving positive object state
+2. treat `MCSH`-derived shadows as evidence that an object used to exist or cast
+   into that terrain region
+3. learn the residual where a shadow imprint survives but no matching placement
+   still exists
+
+That residual is the useful recovery signal. A "shadow scar" is the footprint
+or silhouette implied by `MCSH` that is not already explained by the current
+MDDF/MODF placement set. In practice this gives a better problem statement for
+missing-object reconstruction:
+
+- input evidence: rendered minimap tile plus stitched/raw `MCSH` shadow
+  payloads
+- context: current surviving object placements and optional bounds/footprints
+- target: one or more candidate missing placements, object-family labels, or
+  footprint masks for objects that appear to have existed before being moved or
+  deleted
+
+Before training that model, we should derive a cleaner supervision layer from
+the current exported payloads:
+
+1. rasterize current object footprints from `terrain_data.objects`
+2. compare them against `shadow_maps` and `shadow_bits`
+3. mark unexplained persistent shadow regions as `shadow scar` candidates
+4. cluster those candidates against nearby historical/similar object families
+   so the model learns object-family recovery, not just generic dark blobs
+
+The existing `shadow_analysis` field is the right staging surface for this. It
+should become the durable handoff for shadow-to-object association features,
+candidate masks, and later recovered-placement labels instead of leaving that
+reasoning implicit in ad hoc notebooks.
+
 ## Quick Export Commands
 
 ```bash
 cd src/WoWMapConverter/WoWMapConverter.Cli
-dotnet run -- ml-export --client "H:\053-client\" --map Azeroth --out "J:\ml-datasets"
-dotnet run -- ml-harvest --in "J:\ml-datasets\Azeroth" --out "J:\ml-datasets\Azeroth\ml_dataset_manifest.json"
+dotnet run -- ml-export --client "H:\CLIENTS\World of Warcraft Cata beta 11927" --map LostIsles --out "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles"
+dotnet run -- ml-harvest --dataset "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles" --output "I:\parp\parp-tools\output\ml-corpus\400_11927\LostIsles\ml_dataset_manifest.json"
 ```
+
+## Fixed-Client Corpus Wrapper
+
+For the current fixed local client roots, use the checked-in wrapper instead of
+retyping per-map commands:
+
+```bash
+pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1 -DryRun
+pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1
+```
+
+The wrapper reads [gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json](gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json), exports each configured map into `output/ml-corpus/<client>/<map>/`, and runs `ml-harvest` to generate `ml_dataset_manifest.json` for each dataset root. The current checked-in subset is intentionally narrow: `3.0.1.8303` exports `Northrend` plus `PVPZone01` through `PVPZone04`, `3.3.5.12340` exports `Azeroth`, and `4.0.0.11927` exports `LostIsles`.
+
+## Shadow-Scar Recovery Reference
+
+For the object-recovery use of `MCSH`, see [gillijimproject_refactor/docs/SHADOW_SCAR_OBJECT_RECOVERY.md](gillijimproject_refactor/docs/SHADOW_SCAR_OBJECT_RECOVERY.md).
+
+That note captures the actual third-model goal:
+
+- `MCSH` is treated as historical object evidence, not just generic shadow supervision
+- the target is the residual shadow not already explained by current placements
+- retrieval from repeated object patterns elsewhere in the copied/pasted world is expected to be part of the solution

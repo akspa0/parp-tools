@@ -6,6 +6,18 @@ public class VlmBatchExportConfig
 {
     [JsonPropertyName("clients")]
     public List<VlmClientConfig> Clients { get; set; } = new();
+
+    /// <summary>
+    /// Optional root path to a WoWArchive or similar versioned client store.
+    /// When set, relative ClientPath values in each VlmClientConfig are resolved
+    /// against this root instead of the process working directory.
+    /// </summary>
+    [JsonPropertyName("archive_root")]
+    public string? ArchiveRoot { get; set; }
+
+    /// <summary>Path where all dataset output lands when clients omit output_root.</summary>
+    [JsonPropertyName("default_output_root")]
+    public string? DefaultOutputRoot { get; set; }
 }
 
 public class VlmClientConfig

@@ -44,6 +44,7 @@ public static class Program
             "ml-bake-heightmap" => await RunVlmBakeHeightmapAsync(args.Skip(1).ToArray()),
             "ml-synth" => await RunVlmSynthAsync(args.Skip(1).ToArray()),
             "ml-harvest" => await RunMkHarvestAsync(args.Skip(1).ToArray()),
+                "ml-corpus" => await RunMlCorpusAsync(args.Skip(1).ToArray()),
             "mk-export" => await RunVlmExportAsync(args.Skip(1).ToArray()),
             "mk-decode" => await RunVlmDecodeAsync(args.Skip(1).ToArray()),
             "mk-bake" => await RunVlmBakeAsync(args.Skip(1).ToArray()),
@@ -211,6 +212,136 @@ public static class Program
             return 1;
         }
     }
+        private static async Task<int> RunMlCorpusAsync(string[] args)
+        {
+            string? configPath = null;
+            string? archiveRootOverride = null;
+            string? outOverride = null;
+            bool dryRun = false;
+            bool harvestOnly = false;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i].ToLowerInvariant())
+                {
+                    case "--config":
+                    case "-c":
+                        if (i + 1 < args.Length) configPath = args[++i];
+                        break;
+                    case "--archive-root":
+                    case "-a":
+                        if (i + 1 < args.Length) archiveRootOverride = args[++i];
+                        break;
+                    case "--out":
+                    case "-o":
+                        if (i + 1 < args.Length) outOverride = args[++i];
+                        break;
+                    case "--dry-run":
+                        dryRun = true;
+                        break;
+                    case "--harvest-only":
+                        harvestOnly = true;
+                        break;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(configPath))
+            {
+                Console.WriteLine("ml-corpus — run the full ML dataset pipeline from a config file.");
+                Console.WriteLine();
+                Console.WriteLine("Usage: ml-corpus --config <corpus.json> [--archive-root <dir>] [--out <dir>] [--dry-run] [--harvest-only]");
+                Console.WriteLine();
+                Console.WriteLine("Options:");
+                Console.WriteLine("  --config, -c <path>          JSON config file (VlmBatchExportConfig format)");
+                Console.WriteLine("  --archive-root, -a <dir>     Override or set archive_root for resolving relative client paths");
+                Console.WriteLine("  --out, -o <dir>              Override default_output_root from config");
+                Console.WriteLine("  --dry-run                    Print what would run without executing");
+                Console.WriteLine("  --harvest-only               Skip export, only run ml-harvest on existing datasets");
+                Console.WriteLine();
+                Console.WriteLine("Config search order: <arg>, ./ml_corpus.json, <exe_dir>/ml_corpus.json");
+                return 1;
+            }
+
+            if (!File.Exists(configPath))
+            {
+                Console.Error.WriteLine($"Config not found: {configPath}");
+                return 1;
+            }
+
+            VlmBatchExportConfig config;
+            try
+            {
+                var json = await File.ReadAllTextAsync(configPath);
+                config = System.Text.Json.JsonSerializer.Deserialize<VlmBatchExportConfig>(json,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.SnakeCaseLower })
+                    ?? throw new InvalidDataException("Config deserialized to null.");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to read config: {ex.Message}");
+                return 1;
+            }
+
+            string? archiveRoot = archiveRootOverride ?? config.ArchiveRoot;
+            string? defaultOutputRoot = outOverride ?? config.DefaultOutputRoot;
+
+            int totalJobs = 0;
+            int failedJobs = 0;
+            var exporter = new VlmDatasetExporter();
+            var harvester = new MkDatasetHarvester();
+            var progress = new Progress<string>(msg => Console.WriteLine($"  {msg}"));
+
+            foreach (var client in config.Clients)
+            {
+                // Resolve client path against archive root when the path is relative.
+                string clientPath = client.ClientPath;
+                if (!Path.IsPathRooted(clientPath) && !string.IsNullOrWhiteSpace(archiveRoot))
+                    clientPath = Path.GetFullPath(Path.Combine(archiveRoot, clientPath));
+
+                string clientOutputRoot = !string.IsNullOrWhiteSpace(client.OutputRoot) ? client.OutputRoot
+                    : !string.IsNullOrWhiteSpace(defaultOutputRoot) ? Path.Combine(defaultOutputRoot, client.ClientVersion)
+                    : Path.Combine("output", "ml-corpus", client.ClientVersion);
+
+                foreach (var map in client.Maps)
+                {
+                    totalJobs++;
+                    string mapOutput = Path.GetFullPath(Path.Combine(clientOutputRoot, map));
+
+                    Console.WriteLine();
+                    Console.WriteLine($"[{totalJobs}] {client.ClientVersion} / {map}");
+                    Console.WriteLine($"    client : {clientPath}");
+                    Console.WriteLine($"    output : {mapOutput}");
+
+                    if (dryRun) continue;
+
+                    try
+                    {
+                        if (!harvestOnly)
+                        {
+                            Console.WriteLine("    => ml-export");
+                            var exportResult = await exporter.ExportMapAsync(
+                                clientPath, map, mapOutput, progress, generateDepth: client.GenerateDepth);
+                            Console.WriteLine($"    exported {exportResult.TilesExported} tiles, skipped {exportResult.TilesSkipped}");
+                        }
+
+                        Console.WriteLine("    => ml-harvest");
+                        var harvestResult = await harvester.HarvestAsync(
+                            new MkDatasetHarvestOptions(DatasetRoot: mapOutput), progress);
+                        Console.WriteLine($"    harvested {harvestResult.TilesProcessed} tiles");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"    FAILED: {ex.Message}");
+                        failedJobs++;
+                    }
+                }
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"ml-corpus done. {totalJobs - failedJobs}/{totalJobs} jobs succeeded.");
+            return failedJobs == 0 ? 0 : 1;
+        }
+
     private static async Task<int> RunConvertAsync(string[] args)
     {
         string? inputPath = null;
@@ -2129,6 +2260,7 @@ public static class Program
         Console.WriteLine("  wowmapconverter wmo-info <wmo> [options]                List WMO groups and structure info");
         Console.WriteLine("  wowmapconverter ml-export [options]                     Export ML dataset (legacy aliases: mk-export, vlm-export)");
         Console.WriteLine("  wowmapconverter ml-harvest [options]                    Harvest ML dataset coverage and references");
+            Console.WriteLine("  wowmapconverter ml-corpus --config <file> [options]     Run full export+harvest pipeline from a config file");
         Console.WriteLine("  wowmapconverter ml-decode [options]                     Decode ML dataset JSON to ADT");
         Console.WriteLine("  wowmapconverter ml-bake [options]                       Bake high-resolution reference minimaps");
         Console.WriteLine("  wowmapconverter ml-bake-heightmap [options]             Bake ML dataset heightmaps");

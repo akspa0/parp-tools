@@ -32,6 +32,13 @@ Current implementation policy:
 - Build `gillijimproject_refactor/src/MdxViewer/MdxViewer.sln` only when a slice explicitly changes consumer compatibility or the user asks for that check.
 - The explicit long-range target is full first-party ownership of every active format family currently handled by `MdxViewer`; current detector and summary seams are stepping stones, not the final boundary.
 
+Current converter ML workflow note:
+
+- `WowViewer.Tool.Converter` now includes:
+	- `ml-corpus --config <ml-corpus.json> [--archive-root <path>] [--output-root <path>] [--dry-run]` for shared-reader-driven ADT corpus reporting (no per-chunk PNG emission), now with archive-backed WDT tile discovery plus split `_tex0.adt` and `_obj0.adt` preference when those companions exist
+	- `ml-synth-no-liquid` for synthesized no-liquid minimap generation from minimap + liquid-mask PNG inputs
+- current proof level for `ml-corpus` is report-oriented and dry-run validated, not full legacy export parity: the fixed-client config now completes archive-backed dry-run discovery across `16` configured maps / `7409` tiles, while some `3.0.1.8303` tiles still fall back to empty texture-name lists because shared `AdtTextureReader` overflows on part of that older corpus
+
 Current M2-native continuity note:
 
 - The canonical implementation-facing M2 documentation set now lives under `docs/architecture/m2/`.

@@ -275,21 +275,30 @@ WoWMapConverter ml-synth --in ml_output/ --out synthesized/
 
 # Batch export multiple maps using a config file
 WoWMapConverter ml-batch --config batch_config.json
+
+# Export the fixed local 3.0.1 / 3.3.5 / 4.0.0.11927 corpus
+pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1
 ```
 
 ### Batch Export Config
 
-For exporting multiple maps at once, create a JSON config file:
+For direct `ml-batch`, the active config shape is client-oriented:
 
 ```json
 {
-  "GamePath": "path/to/game",
-  "OutputRoot": "mk_datasets/",
-  "Maps": ["Azeroth", "Kalimdor", "development"],
-  "Layers": ["heightmap", "alpha", "shadow", "liquid", "minimap"],
-  "TileSize": 256
+  "clients": [
+    {
+      "client_path": "H:\\CLIENTS\\World of Warcraft Cata beta 11927",
+      "version": "4.0.0.11927",
+      "maps": ["LostIsles", "Azeroth", "Kalimdor"],
+      "output_root": "I:\\parp\\parp-tools\\output\\ml-corpus\\400_11927",
+      "generate_depth": false
+    }
+  ]
 }
 ```
+
+The checked-in wrapper config for the current machine is [gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json](gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json).
 
 ### Loading ML Dataset in MdxViewer
 

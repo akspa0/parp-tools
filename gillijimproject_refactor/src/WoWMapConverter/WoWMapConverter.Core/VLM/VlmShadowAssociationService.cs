@@ -7,8 +7,13 @@ public static class VlmShadowAssociationService
     private const float ChunkSize = TileSize / 16f;
     private const float PixelSize = ChunkSize / ShadowDimension;
     private const float BaseObjectMarginPixels = 6f;
+    private const float FootprintPaddingPixels = 1.5f;
     private const int MaxRegionCandidateCount = 8;
     private const int MaxChunkCandidateCount = 32;
+    private const int MinScarRegionPixels = 8;
+    private const float ExplainedOverlapThreshold = 0.60f;
+    private const float AmbiguousOverlapThreshold = 0.20f;
+    private const float ScarCandidateScoreThreshold = 0.55f;
 
     public static VlmChunkShadowAnalysis[] AnalyzeTile(
         IReadOnlyList<VlmChunkShadowBits> shadowBits,
@@ -47,6 +52,7 @@ public static class VlmShadowAssociationService
         List<ShadowRegionAccumulator> regions = ExtractRegions(shadow);
         int shadowedPixelCount = regions.Sum(static region => region.PixelCount);
         int largestRegionPixelCount = regions.Count == 0 ? 0 : regions.Max(static region => region.PixelCount);
+        bool[] currentObjectMask = new bool[shadow.Length];
 
         List<ShadowCandidateAccumulator> candidates = [];
         foreach (VlmObjectPlacement obj in objects)
@@ -79,6 +85,9 @@ public static class VlmShadowAssociationService
             if (!nearestRegionId.HasValue && !insideChunk)
                 continue;
 
+            float explanationRadiusPixels = MathF.Max(1.5f, radiusPixels + FootprintPaddingPixels);
+            RasterizeObjectFootprint(currentObjectMask, pixelX, pixelY, explanationRadiusPixels);
+
             candidates.Add(new ShadowCandidateAccumulator(
                 obj,
                 pixelX,
@@ -98,12 +107,19 @@ public static class VlmShadowAssociationService
             .ToList();
 
         VlmShadowRegion[] regionReports = regions
-            .Select(region => region.ToReport(chunkWorldX, chunkWorldY, chunkWorldZ, topCandidates))
+            .Select(region => region.ToReport(chunkWorldX, chunkWorldY, chunkWorldZ, currentObjectMask, topCandidates))
             .ToArray();
 
         VlmShadowObjectCandidate[] candidateReports = topCandidates
             .Select(static candidate => candidate.ToReport())
             .ToArray();
+
+        int explainedShadowPixelCount = regionReports.Sum(static region => region.ExplainedShadowPixelCount);
+        int residualShadowPixelCount = regionReports.Sum(static region => region.ResidualShadowPixelCount);
+        int scarCandidateRegionCount = regionReports.Count(static region => string.Equals(region.ScarType, "unexplained_scar", StringComparison.Ordinal));
+        float scarCandidateScore = shadowedPixelCount == 0
+            ? 0f
+            : regionReports.Sum(region => region.ScarCandidateScore * region.ResidualShadowPixelCount) / shadowedPixelCount;
 
         return new VlmChunkShadowAnalysis(
             chunkIndex,
@@ -111,6 +127,12 @@ public static class VlmShadowAssociationService
             shadowedPixelCount / (float)(ShadowDimension * ShadowDimension),
             regions.Count,
             largestRegionPixelCount,
+            explainedShadowPixelCount,
+            residualShadowPixelCount,
+            shadowedPixelCount == 0 ? 0f : explainedShadowPixelCount / (float)shadowedPixelCount,
+            shadowedPixelCount == 0 ? 0f : residualShadowPixelCount / (float)shadowedPixelCount,
+            scarCandidateRegionCount,
+            scarCandidateScore,
             regionReports,
             candidateReports);
     }
@@ -137,6 +159,31 @@ public static class VlmShadowAssociationService
             MathF.Max(MathF.Sqrt((maxX * maxX) + (minY * minY)), MathF.Sqrt((maxX * maxX) + (maxY * maxY))));
 
         return (radiusWorld * MathF.Max(obj.Scale, 0.1f)) / PixelSize;
+    }
+
+    private static void RasterizeObjectFootprint(bool[] mask, float pixelX, float pixelY, float radiusPixels)
+    {
+        if (mask.Length == 0 || radiusPixels <= 0f)
+            return;
+
+        int minX = Math.Max(0, (int)MathF.Floor(pixelX - radiusPixels));
+        int maxX = Math.Min(ShadowDimension - 1, (int)MathF.Ceiling(pixelX + radiusPixels));
+        int minY = Math.Max(0, (int)MathF.Floor(pixelY - radiusPixels));
+        int maxY = Math.Min(ShadowDimension - 1, (int)MathF.Ceiling(pixelY + radiusPixels));
+        float radiusSquared = radiusPixels * radiusPixels;
+
+        for (int y = minY; y <= maxY; y++)
+        {
+            for (int x = minX; x <= maxX; x++)
+            {
+                float deltaX = x - pixelX;
+                float deltaY = y - pixelY;
+                if ((deltaX * deltaX) + (deltaY * deltaY) > radiusSquared)
+                    continue;
+
+                mask[(y * ShadowDimension) + x] = true;
+            }
+        }
     }
 
     private static List<ShadowRegionAccumulator> ExtractRegions(byte[] shadow)
@@ -199,6 +246,8 @@ public static class VlmShadowAssociationService
 
     private sealed class ShadowRegionAccumulator
     {
+        private readonly List<int> _pixelIndices = [];
+
         public ShadowRegionAccumulator(int regionId)
         {
             RegionId = regionId;
@@ -229,9 +278,15 @@ public static class VlmShadowAssociationService
             MaxY = Math.Max(MaxY, y);
             SumX += x;
             SumY += y;
+            _pixelIndices.Add((y * ShadowDimension) + x);
         }
 
-        public VlmShadowRegion ToReport(float chunkWorldX, float chunkWorldY, float chunkWorldZ, IReadOnlyList<ShadowCandidateAccumulator> candidates)
+        public VlmShadowRegion ToReport(
+            float chunkWorldX,
+            float chunkWorldY,
+            float chunkWorldZ,
+            bool[] currentObjectMask,
+            IReadOnlyList<ShadowCandidateAccumulator> candidates)
         {
             float centroidX = PixelCount == 0 ? 0f : SumX / PixelCount;
             float centroidY = PixelCount == 0 ? 0f : SumY / PixelCount;
@@ -250,6 +305,26 @@ public static class VlmShadowAssociationService
                 .Select(candidate => candidate.Object.UniqueId)
                 .ToArray();
 
+            int explainedShadowPixelCount = CountExplainedPixels(currentObjectMask);
+            int residualShadowPixelCount = Math.Max(0, PixelCount - explainedShadowPixelCount);
+            float explainedOverlapRatio = PixelCount == 0 ? 0f : explainedShadowPixelCount / (float)PixelCount;
+            float? nearestCandidateDistancePixels = candidates
+                .Where(candidate => candidate.NearestRegionId == RegionId)
+                .Select(candidate => (float?)candidate.PixelDistanceToRegion)
+                .Min();
+            float scarCandidateScore = ComputeScarCandidateScore(
+                PixelCount,
+                residualShadowPixelCount,
+                explainedOverlapRatio,
+                nearestCandidateDistancePixels,
+                candidateObjectIds.Length);
+            string scarType = ClassifyRegion(
+                PixelCount,
+                explainedOverlapRatio,
+                scarCandidateScore,
+                candidateObjectIds.Length);
+            bool explainedByCurrentObjects = string.Equals(scarType, "explained_current", StringComparison.Ordinal);
+
             return new VlmShadowRegion(
                 RegionId,
                 PixelCount,
@@ -260,7 +335,68 @@ public static class VlmShadowAssociationService
                 [centroidWorldX, centroidWorldY, chunkWorldZ],
                 [MathF.Min(worldX0, worldX1), MathF.Min(worldY0, worldY1)],
                 [MathF.Max(worldX0, worldX1), MathF.Max(worldY0, worldY1)],
-                candidateObjectIds);
+                candidateObjectIds,
+                explainedByCurrentObjects,
+                explainedShadowPixelCount,
+                residualShadowPixelCount,
+                explainedOverlapRatio,
+                nearestCandidateDistancePixels,
+                scarCandidateScore,
+                scarType);
+        }
+
+        private int CountExplainedPixels(bool[] currentObjectMask)
+        {
+            int explainedShadowPixelCount = 0;
+            foreach (int pixelIndex in _pixelIndices)
+            {
+                if (pixelIndex >= 0 && pixelIndex < currentObjectMask.Length && currentObjectMask[pixelIndex])
+                    explainedShadowPixelCount++;
+            }
+
+            return explainedShadowPixelCount;
+        }
+
+        private static float ComputeScarCandidateScore(
+            int pixelCount,
+            int residualShadowPixelCount,
+            float explainedOverlapRatio,
+            float? nearestCandidateDistancePixels,
+            int candidateObjectCount)
+        {
+            if (pixelCount <= 0)
+                return 0f;
+
+            float residualRatio = residualShadowPixelCount / (float)pixelCount;
+            float sizeScore = Math.Clamp((pixelCount - MinScarRegionPixels) / 48f, 0f, 1f);
+            float distanceScore = !nearestCandidateDistancePixels.HasValue
+                ? 1f
+                : Math.Clamp(nearestCandidateDistancePixels.Value / (BaseObjectMarginPixels + 4f), 0f, 1f);
+            float crowdingPenalty = candidateObjectCount > 1 ? 0.10f : 0f;
+            float overlapPenalty = explainedOverlapRatio * 0.35f;
+
+            return Math.Clamp(
+                (residualRatio * 0.70f) + (distanceScore * 0.20f) + (sizeScore * 0.10f) - crowdingPenalty - overlapPenalty,
+                0f,
+                1f);
+        }
+
+        private static string ClassifyRegion(
+            int pixelCount,
+            float explainedOverlapRatio,
+            float scarCandidateScore,
+            int candidateObjectCount)
+        {
+            if (explainedOverlapRatio >= ExplainedOverlapThreshold)
+                return "explained_current";
+
+            if (explainedOverlapRatio >= AmbiguousOverlapThreshold || candidateObjectCount > 1)
+                return "ambiguous_mixed";
+
+            if (pixelCount >= MinScarRegionPixels && scarCandidateScore >= ScarCandidateScoreThreshold)
+                return "unexplained_scar";
+
+            return "non_object_shadow";
         }
     }
 

@@ -1,5 +1,76 @@
 # Active Context
 
+## Apr 10, 2026 - LK ML exports now emit normalmaps, and the first honest V7 smoke ran on a real 3.3.5 dataset root
+
+- followed the reprioritized "basic thing first" direction after auditing the existing corpus and proving the current blocker was not theoretical: live `3.3.5.12340` exports were still writing `terrain_data.normalmap = null`, so `train_v7.py` could not consume the exported roots in strict mode
+- active behavior after this slice:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDatasetExporter.cs` now preserves LK/modern `MCNR` and `MCCV` payloads in `chunk_layers` instead of dropping them, and the LK export branch now calls the existing normal-map and MCCV-map generators before constructing `VlmTerrainData`
+	- fresh real-data `ml-export` output for `Azeroth` on the fixed `3.3.5.12340` client now writes `images/<tile>_normal.png` and points `terrain_data.normalmap` at that file instead of leaving it null
+	- `src/WoWMapConverter/scripts/train_v7.py` no longer depends on `scipy.ndimage.zoom` for heightmap resizing; it now uses `torch.nn.functional.interpolate`, which keeps the V7 sample loader aligned with the trainer's existing torch dependency instead of failing on a broken SciPy/NumPy ABI combo
+- validation completed:
+	- `dotnet test i:/parp/parp-tools/gillijimproject_refactor/src/WoWMapConverter/WoWMapConverter.Core.Tests/WoWMapConverter.Core.Tests.csproj -c Debug` still passed after the LK exporter change
+	- real-data export smoke succeeded with `ml-export --client "H:/CLIENTS/WoW335/3.X_Retail_Windows_enUS_3.3.5.12340/World of Warcraft" --map Azeroth --out i:/parp/parp-tools/output/tmp/v7-normal-smoke-335-azeroth --limit 1`, and the emitted tile JSON now references `images/Azeroth_35_20_normal.png`
+	- a four-tile real dataset root under `i:/parp/parp-tools/output/tmp/v7-train-smoke-335-azeroth-4` loaded successfully in `train_v7.py` strict mode, and a one-epoch CUDA smoke completed with `Train/val samples: 3 / 1` and `Best validation loss: 0.3213`
+- important boundary:
+	- this is proof that the base minimap-to-terrain training path now runs end-to-end on a tiny real `3.3.5.12340` dataset root; it is not proof yet that the broader checked-in corpora under `output/ml-corpus/` have all been re-exported with the new normalmap behavior
+	- the V7 smoke used the existing machine-wide `C:\Users\akspa\anaconda3\python.exe` environment because the workspace `.venv` only had `pip` and was not usable for torch-based training
+
+## Apr 10, 2026 - The ML exporter now emits first-pass explained-vs-residual shadow-scar labels, but dataset/runtime proof is still missing
+
+- followed the next requested step after writing down the `MCSH` object-recovery rationale: make the dataset contract explicit instead of leaving downstream code to recompute scar labels from raw `shadow_bits`
+- active behavior after this slice:
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmDataModels.cs` now extends `shadow_analysis` with chunk-level explained/residual shadow counts plus ratios and per-region `explained_by_current_objects`, `explained_overlap_ratio`, `nearest_candidate_distance_px`, `scar_candidate_score`, and `scar_type`
+	- `src/WoWMapConverter/WoWMapConverter.Core/VLM/VlmShadowAssociationService.cs` now rasterizes projected current-object footprint masks into chunk-shadow space and derives first-pass explained-vs-residual labels directly from the exported `MCSH` regions
+	- `src/WoWMapConverter/WoWMapConverter.Core.Tests/` now exists as the first active first-party test project for this converter seam, with focused tests covering an explained region and an orphan scar region
+- important boundary:
+	- this is additive dataset-labeling work only; it does not prove that the exported ML corpus is correct end-to-end, that the selected real corpora are clean, or that `train_v7.py` has been trained successfully on them
+	- the current scar labels are heuristic pseudo-labels based on projected current-object footprints, not retrieval-backed recovered placements
+
+## Apr 10, 2026 - ML reconstruction scope now explicitly includes a third `shadow scar` model family for missing-object recovery
+
+- followed the new direction that `MCSH` should not be treated as only generic shadow supervision; it can also act as object-history evidence when a shadow footprint survives but the matching placement no longer exists
+- active workflow guidance after this note:
+	- keep terrain height recovery, texture/alpha decomposition, and missing-object recovery as three separate model families over the same exported dataset root
+	- frame the third model narrowly as `shadow scar` recovery: minimap + `MCSH` evidence + surviving placements -> unexplained shadow regions, missing-object candidate masks, and later restored placement hypotheses
+	- `gillijimproject_refactor/docs/SHADOW_SCAR_OBJECT_RECOVERY.md` now records the fuller rationale: treat `MCSH` as historical object evidence, use current placements only as the explanation baseline, and expect retrieval from repeated object patterns elsewhere in copied/pasted world data to help recover orphan scars
+	- use `terrain_data.shadow_maps`, raw `shadow_bits`, `shadow_analysis`, and `objects` as the base supervision surface; do not collapse this back into the main V7 terrain regressor
+- important boundary:
+	- this is a problem-definition and dataset-contract clarification only; no `shadow scar` extractor or training script exists yet in the active tree
+
+## Apr 10, 2026 - wow-viewer ml-corpus now resolves the fixed-client config, scans archive-backed maps through WDT, and prefers split ADT companions
+
+- followed the regression review on the initial `wow-viewer` ML command-surface port after real fixed-client dry-run validation proved the first version was filesystem-only and the legacy wrapper no longer matched the checked-in config field names
+- active behavior after this slice:
+	- `gillijimproject_refactor/scripts/export_ml_corpus.ps1` now tolerates the current config shape under `Set-StrictMode`, prefers `default_output_root`, resolves relative `client_path` values against `archive_root`, resolves optional `listfile_path` relative to the config, and defaults `harvest_after_export` to enabled when the field is absent
+	- `wow-viewer/tools/converter/WowViewer.Tool.Converter/Program.cs` `ml-corpus` path now creates archive catalogs per client root, reads `World\Maps\<map>\<map>.wdt` to enumerate occupied tiles, and no longer requires extracted `Data/World/Maps/<map>` directories to exist on disk
+	- the same `ml-corpus` path now prefers split `_tex0.adt` and `_obj0.adt` companions over root ADTs when building tile reports, while still falling back to root ADT summaries/placements when split companions are absent
+	- `wow-viewer/src/core/WowViewer.Core/Maps/WdtTileCoordinate.cs` and `wow-viewer/src/core/WowViewer.Core.IO/Maps/WdtTileIndexReader.cs` now provide a shared occupied-tile seam over WDT `MAIN` instead of leaving that parsing tool-local inside the converter
+	- repeated tile-level texture/placement failures are now aggregated into one warning summary per map so real archive-backed runs stay readable instead of flooding thousands of lines of duplicate warnings
+- validation completed:
+	- `pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1 -DryRun` succeeded again and printed the expected fixed-client `ml-export` + `ml-harvest` command sequence with resolved archive-rooted client paths
+	- `dotnet test i:/parp/parp-tools/wow-viewer/WowViewer.slnx -c Debug --filter WdtSummaryReaderTests` passed after the new shared WDT occupied-tile coverage landed
+	- `dotnet run --project i:/parp/parp-tools/wow-viewer/tools/converter/WowViewer.Tool.Converter/WowViewer.Tool.Converter.csproj -- ml-corpus --config i:/parp/parp-tools/gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json --dry-run` now completes and reports `maps=16 tiles=7409`
+- important boundary:
+	- this is still report-oriented `ml-corpus` proof, not full wow-viewer parity with the old ML export pipeline
+	- shared `AdtTextureReader` still overflows on parts of the real `3.0.1.8303` corpus, so the current report aggregates those as map-level warnings and falls back to empty texture-name lists for affected tiles instead of aborting the whole run
+
+## Apr 10, 2026 - ML corpus export now has a fixed-client wrapper, V7 terrain training is geometry-only, and texture decomposition has its own first trainer seam
+
+- followed the latest terrain-model correction that alpha-mask or tileset decomposition should not stay folded into the V7 terrain regressor, and the explicit request to operationalize the fixed local `3.0.1.8303`, `3.3.5.12340`, and `4.0.0.11927` clients as a reusable export corpus
+- active behavior after this slice:
+	- `gillijimproject_refactor/scripts/export_ml_corpus.ps1` now reads the checked-in `gillijimproject_refactor/scripts/ml_corpus_fixed_clients.json` config and emits a reproducible per-client/per-map ML corpus under `output/ml-corpus/...`, then runs `ml-harvest` for each exported dataset root by default
+	- the fixed config currently targets the machine-local `3.0.1.8303`, `3.3.5.12340`, and `4.0.0.11927` client roots with a deliberately narrow checked-in subset: `Northrend` plus `PVPZone01..04` from `3.0.1.8303`, `Azeroth` from `3.3.5.12340`, and `LostIsles` from `4.0.0.11927`
+	- `src/WoWMapConverter/scripts/train_v7.py` and `infer_v7.py` now keep V7 focused on terrain geometry only: global/local height prediction plus bounds, with the old alpha auxiliary head removed from the active terrain model contract
+	- `src/WoWMapConverter/scripts/train_texture_v1.py` now provides the first separate minimap-to-texture-layer seam, predicting three overlay alpha masks plus chunk-slot texture classes from minimap supervision using exported `chunk_layers`, `alpha_masks`, and palette data
+	- `src/MdxViewer/ViewerApp_MlTraining.cs`, `docs/V7_HEIGHT_REGRESSOR.md`, `docs/VLM_Training_Guide.md`, `docs/VLM_DATASET_EXPORTER.md`, and `src/MdxViewer/USERGUIDE.md` now describe the split explicitly instead of continuing to imply that one V7 model owns both terrain and texture decomposition
+- validation completed:
+	- `get_errors` returned clean for `train_v7.py`, `infer_v7.py`, `train_texture_v1.py`, and `ViewerApp_MlTraining.cs`
+	- `pwsh ./gillijimproject_refactor/scripts/export_ml_corpus.ps1 -DryRun` succeeded and printed the expected export/harvest command sequence for all configured clients and maps
+	- `i:/parp/parp-tools/.venv/Scripts/python.exe -m py_compile ... train_v7.py infer_v7.py train_texture_v1.py` completed with no output, indicating syntax success
+- important boundary:
+	- the corpus wrapper has been dry-run validated only; no full multi-client export was executed in this chat
+	- `train_texture_v1.py` is the first separate texture trainer seam, not proof yet that the full minimap-to-base-texture-plus-alpha decomposition problem is solved across all palettes or expansions
+
 ## Apr 10, 2026 - MdxViewer validation minimaps now render with a dedicated orthographic top-down projection
 
 - followed the user report that live `MdxViewer` validation minimaps were still offset from the true tile borders even after the earlier settle or doodad or WL cleanup work
@@ -7,6 +78,8 @@
 	- `src/MdxViewer/ViewerApp.cs` now swaps the normal scene perspective projection for a dedicated orthographic top-down view and projection whenever an active capture request is part of an MdxViewer validation batch
 	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now provides the validation-only view/projection matrices, using a straight-down look with `Vector3.UnitX` as the up vector so the output keeps the existing minimap orientation while letting the requested ADT tile span fill the square capture exactly
 	- the same validation batch path now forces a deterministic validation-only terrain light direction and restores the prior lighting override state afterward, so generated tiles no longer depend on whichever live world-light direction happened to be active when the batch started
+	- `src/MdxViewer/ViewerApp.cs` now queues two validation output families from the ML finalize flow: the primary `viewer_validation_minimaps/` set keeps terrain liquids while still suppressing WL liquids, and a matching `viewer_validation_minimaps/noliquids/` sub-folder disables terrain liquids too so same-tile training inputs can be grouped by basename plus variant folder
+	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now stitches both validation output families after capture, writing full-map composites under `stitched/` inside the root validation folder and inside the `noliquids/` sub-folder
 	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` still samples tile-center terrain height for the validation eye point, but the shot builder itself is back to tile-center positioning because the batch no longer relies on a tilted perspective workaround
 - validation completed:
 	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_CaptureAutomation.cs`

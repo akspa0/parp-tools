@@ -1,7 +1,6 @@
 using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 
 namespace WoWMapConverter.Core.VLM;
 
@@ -31,86 +30,15 @@ public class HeightmapBakeService
 
     /// <summary>
     /// Bakes a 256x256 heightmap from VLM JSON (training resolution).
-    /// Uses Noggit's exact algorithm for smooth output.
+    /// Uses the shared viewer-compatible tile bake path.
     /// </summary>
     public async Task<(Image<L16> Heightmap, float HeightMin, float HeightMax)> BakeHeightmap256Async(string jsonPath)
     {
-        var (heights, heightMin, heightMax) = await LoadHeightsFromJsonAsync(jsonPath);
-        
-        // Noggit uses 257x257 (16 chunks * 16 + 1), we'll resize to 256 at the end
-        var heightmap257 = new Image<L16>(257, 257);
-        float range = heightMax - heightMin;
-        
-        // Constants from Noggit: LONG=9 (outer), SHORT=8 (inner), SUM=17
-        const int LONG = 9, SHORT = 8, SUM = LONG + SHORT, DSUM = SUM * 2;
-        
-        heightmap257.ProcessPixelRows(accessor =>
-        {
-            for (int chunkY = 0; chunkY < 16; chunkY++)
-            {
-                for (int chunkX = 0; chunkX < 16; chunkX++)
-                {
-                    int chunkIdx = chunkY * 16 + chunkX;
-                    var mcvt = heights[chunkIdx];
-                    
-                    if (mcvt == null || mcvt.Length < 145)
-                        continue;
-                    
-                    // Noggit iterates y then x within chunk, each 0-16 (SUM=17 values)
-                    for (int y = 0; y < SUM; y++)
-                    {
-                        int pixelY = chunkY * 16 + y;
-                        if (pixelY >= 257) continue;
-                        
-                        var row = accessor.GetRowSpan(pixelY);
-                        
-                        for (int x = 0; x < SUM; x++)
-                        {
-                            int pixelX = chunkX * 16 + x;
-                            if (pixelX >= 257) continue;
-                            
-                            // Noggit's indexing logic
-                            int plain = y * SUM + x;
-                            bool isVirtual = (plain % 2) == 1;
-                            bool erp = (plain % DSUM) / SUM == 1;
-                            int idx = (plain - (isVirtual ? (erp ? SUM : 1) : 0)) / 2;
-                            
-                            float value;
-                            if (isVirtual)
-                            {
-                                // Virtual vertex: interpolate between two real vertices
-                                int idx2 = idx + (erp ? SUM : 1);
-                                if (idx < 145 && idx2 < 145)
-                                    value = (mcvt[idx] + mcvt[idx2]) / 2.0f;
-                                else if (idx < 145)
-                                    value = mcvt[idx];
-                                else
-                                    value = 0;
-                            }
-                            else
-                            {
-                                // Real vertex: direct lookup
-                                value = idx < 145 ? mcvt[idx] : 0;
-                            }
-                            
-                            // Normalize
-                            float normalized = range > 1e-6f 
-                                ? (value - heightMin) / range 
-                                : 0.5f;
-                            normalized = Math.Clamp(normalized, 0f, 1f);
-                            row[pixelX] = new L16((ushort)(normalized * 65535));
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Resize from 257 to 256 for training
-        var heightmap = heightmap257.Clone();
-        heightmap.Mutate(ctx => ctx.Resize(256, 256, KnownResamplers.Lanczos3));
-        heightmap257.Dispose();
-        
-        return (heightmap, heightMin, heightMax);
+        VlmTrainingSample sample = await LoadSampleAsync(jsonPath);
+        TerrainTileBakeService.TileHeightmap257 tileHeightmap = BuildTileHeightmap(sample.TerrainData);
+        var (heightMin, heightMax) = ResolveHeightRange(sample.TerrainData, tileHeightmap);
+        Image<L16> image = TerrainTileBakeService.CreateHeightmapImage(tileHeightmap.Heights, heightMin, heightMax, 256);
+        return (image, heightMin, heightMax);
     }
 
     /// <summary>
@@ -119,63 +47,53 @@ public class HeightmapBakeService
     /// </summary>
     public async Task<(Image<L16> Heightmap, float HeightMin, float HeightMax)> BakeHeightmap4096Async(string jsonPath)
     {
-        var (heightmap256, heightMin, heightMax) = await BakeHeightmap256Async(jsonPath);
-        
-        // Upscale to 4096x4096 using bicubic interpolation
-        var heightmap4096 = heightmap256.Clone();
-        heightmap4096.Mutate(x => x.Resize(4096, 4096, KnownResamplers.Bicubic));
-        
-        heightmap256.Dispose();
-        return (heightmap4096, heightMin, heightMax);
+        VlmTrainingSample sample = await LoadSampleAsync(jsonPath);
+        TerrainTileBakeService.TileHeightmap257 tileHeightmap = BuildTileHeightmap(sample.TerrainData);
+        var (heightMin, heightMax) = ResolveHeightRange(sample.TerrainData, tileHeightmap);
+        Image<L16> image = TerrainTileBakeService.CreateHeightmapImage(tileHeightmap.Heights, heightMin, heightMax, 4096);
+        return (image, heightMin, heightMax);
     }
 
     /// <summary>
-    /// Loads height data from VLM JSON file.
+    /// Loads VLM JSON sample data.
     /// </summary>
-    private async Task<(float[][] Heights, float HeightMin, float HeightMax)> LoadHeightsFromJsonAsync(string jsonPath)
+    private async Task<VlmTrainingSample> LoadSampleAsync(string jsonPath)
     {
         if (!File.Exists(jsonPath))
             throw new FileNotFoundException("JSON tile not found", jsonPath);
 
         var jsonContent = await File.ReadAllTextAsync(jsonPath);
-        var sample = JsonSerializer.Deserialize<VlmTrainingSample>(jsonContent, _jsonOptions);
+        VlmTrainingSample? sample = JsonSerializer.Deserialize<VlmTrainingSample>(jsonContent, _jsonOptions);
         
         if (sample?.TerrainData?.Heights == null)
             throw new Exception("Invalid VLM JSON data: missing heights.");
 
-        var heights = new float[256][];
-        float globalMin = float.MaxValue;
-        float globalMax = float.MinValue;
-        
-        foreach (var chunk in sample.TerrainData.Heights)
+        return sample;
+    }
+
+    private static TerrainTileBakeService.TileHeightmap257 BuildTileHeightmap(VlmTerrainData terrainData)
+    {
+        var heights = new Dictionary<int, float[]>();
+        foreach (VlmChunkHeights chunk in terrainData.Heights ?? Array.Empty<VlmChunkHeights>())
         {
-            if (chunk.ChunkIndex < 0 || chunk.ChunkIndex >= 256)
+            if (chunk.Heights == null || chunk.Heights.Length < 145)
                 continue;
-            
+
             heights[chunk.ChunkIndex] = chunk.Heights;
-            
-            if (chunk.Heights != null)
-            {
-                foreach (var h in chunk.Heights)
-                {
-                    if (h < globalMin) globalMin = h;
-                    if (h > globalMax) globalMax = h;
-                }
-            }
         }
-        
-        // Use stored bounds if available, otherwise use computed
-        float heightMin = sample.TerrainData.HeightMin;
-        float heightMax = sample.TerrainData.HeightMax;
-        
-        // If stored bounds are invalid (same value), use computed
-        if (Math.Abs(heightMax - heightMin) < 1e-6f)
-        {
-            heightMin = globalMin;
-            heightMax = globalMax;
-        }
-        
-        return (heights, heightMin, heightMax);
+
+        return TerrainTileBakeService.BuildTileHeightmap257(heights, terrainData.IsInterleaved);
+    }
+
+    private static (float HeightMin, float HeightMax) ResolveHeightRange(VlmTerrainData terrainData, TerrainTileBakeService.TileHeightmap257 tileHeightmap)
+    {
+        float heightMin = terrainData.HeightMin;
+        float heightMax = terrainData.HeightMax;
+
+        if (Math.Abs(heightMax - heightMin) >= 1e-6f)
+            return (heightMin, heightMax);
+
+        return (tileHeightmap.MinHeight, tileHeightmap.MaxHeight);
     }
 
     /// <summary>
@@ -196,13 +114,13 @@ public class HeightmapBakeService
         {
             try
             {
-                var (heights, tileMin, tileMax) = await LoadHeightsFromJsonAsync(jsonPath);
+                VlmTrainingSample sample = await LoadSampleAsync(jsonPath);
                 
                 // Also scan actual vertex values for accuracy
-                foreach (var chunk in heights)
+                foreach (VlmChunkHeights chunk in sample.TerrainData.Heights ?? Array.Empty<VlmChunkHeights>())
                 {
-                    if (chunk == null) continue;
-                    foreach (var h in chunk)
+                    if (chunk.Heights == null) continue;
+                    foreach (float h in chunk.Heights)
                     {
                         if (h < globalMin) globalMin = h;
                         if (h > globalMax) globalMax = h;
@@ -218,127 +136,13 @@ public class HeightmapBakeService
     
     /// <summary>
     /// Bakes heightmap using specified global height bounds (for map-wide consistency).
-    /// Uses ALPHA ADT MCVT format: 81 outer (9x9) then 64 inner (8x8) - NOT interleaved.
-    /// RAW vertex placement only - no interpolation (best for ML training).
+    /// Uses the shared viewer-compatible tile bake path for coherent tile edges.
     /// </summary>
     public async Task<Image<L16>> BakeHeightmapWithBoundsAsync(string jsonPath, float globalMin, float globalMax)
     {
-        var (heights, _, _) = await LoadHeightsFromJsonAsync(jsonPath);
-        
-        var output = new float[256, 256];
-        var hasData = new bool[256, 256];
-        
-        for (int chunkIdx = 0; chunkIdx < 256; chunkIdx++)
-        {
-            var mcvt = heights[chunkIdx];
-            if (mcvt == null || mcvt.Length < 145)
-                continue;
-            
-            int chunkY = chunkIdx / 16;
-            int chunkX = chunkIdx % 16;
-            int baseX = chunkX * 16;
-            int baseY = chunkY * 16;
-            
-            // Place 9x9 outer vertices at even positions (raw data only)
-            for (int oy = 0; oy < 9; oy++)
-            {
-                for (int ox = 0; ox < 9; ox++)
-                {
-                    int px = baseX + ox * 2;
-                    int py = baseY + oy * 2;
-                    if (px < 256 && py < 256)
-                    {
-                        float val = mcvt[oy * 9 + ox];
-                        if (hasData[py, px])
-                            output[py, px] = (output[py, px] + val) / 2; // Average overlapping edges
-                        else
-                            output[py, px] = val;
-                        hasData[py, px] = true;
-                    }
-                }
-            }
-            
-            // Place 8x8 inner vertices at odd positions (raw data only)
-            for (int iy = 0; iy < 8; iy++)
-            {
-                for (int ix = 0; ix < 8; ix++)
-                {
-                    int px = baseX + ix * 2 + 1;
-                    int py = baseY + iy * 2 + 1;
-                    if (px < 256 && py < 256)
-                    {
-                        output[py, px] = mcvt[81 + iy * 8 + ix];
-                        hasData[py, px] = true;
-                    }
-                }
-            }
-        }
-        
-        // Fill gaps with nearest-neighbor (no interpolation - just copy nearest real value)
-        for (int pass = 0; pass < 3; pass++)
-        {
-            var filled = (float[,])output.Clone();
-            var filledData = (bool[,])hasData.Clone();
-            
-            for (int y = 0; y < 256; y++)
-            {
-                for (int x = 0; x < 256; x++)
-                {
-                    if (!hasData[y, x])
-                    {
-                        // Find nearest neighbor with data
-                        float nearest = 0;
-                        float minDist = float.MaxValue;
-                        for (int dy = -2; dy <= 2; dy++)
-                        {
-                            for (int dx = -2; dx <= 2; dx++)
-                            {
-                                if (dy == 0 && dx == 0) continue;
-                                int ny = y + dy, nx = x + dx;
-                                if (ny >= 0 && ny < 256 && nx >= 0 && nx < 256 && hasData[ny, nx])
-                                {
-                                    float dist = dy * dy + dx * dx;
-                                    if (dist < minDist)
-                                    {
-                                        minDist = dist;
-                                        nearest = output[ny, nx];
-                                    }
-                                }
-                            }
-                        }
-                        if (minDist < float.MaxValue)
-                        {
-                            filled[y, x] = nearest;
-                            filledData[y, x] = true;
-                        }
-                    }
-                }
-            }
-            output = filled;
-            hasData = filledData;
-        }
-        
-        // Render to image with global bounds
-        var result = new Image<L16>(256, 256);
-        float range = globalMax - globalMin;
-        
-        result.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < 256; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < 256; x++)
-                {
-                    float normalized = range > 1e-6f 
-                        ? (output[y, x] - globalMin) / range 
-                        : 0.5f;
-                    normalized = Math.Clamp(normalized, 0f, 1f);
-                    row[x] = new L16((ushort)(normalized * 65535));
-                }
-            }
-        });
-        
-        return result;
+        VlmTrainingSample sample = await LoadSampleAsync(jsonPath);
+        TerrainTileBakeService.TileHeightmap257 tileHeightmap = BuildTileHeightmap(sample.TerrainData);
+        return TerrainTileBakeService.CreateHeightmapImage(tileHeightmap.Heights, globalMin, globalMax, 256);
     }
     
     /// <summary>

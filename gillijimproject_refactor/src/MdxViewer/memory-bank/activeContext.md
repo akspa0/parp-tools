@@ -7,6 +7,8 @@
    - `ViewerApp.cs` now swaps the normal scene projection for a dedicated orthographic top-down matrix whenever `_activeCaptureRequest` is an MdxViewer validation capture inside an active validation batch
    - `ViewerApp_CaptureAutomation.cs` now provides those validation-only matrices with a straight-down look and `Vector3.UnitX` up-vector so the capture preserves the current minimap orientation while letting the requested tile span fill the square output
    - the same validation batch path now forces a deterministic validation-only terrain light direction and restores the previous override state after the batch so capture shading is no longer tied to the live world-light azimuth
+   - the ML finalize flow now emits two validation families with identical tile basenames: the root `viewer_validation_minimaps/` set keeps terrain liquids while suppressing WL liquids, and the `viewer_validation_minimaps/noliquids/` sub-folder disables terrain liquids too for same-tile comparison or training grouping
+   - `ViewerApp_CaptureAutomation.cs` now stitches both families after the batch into `stitched/` outputs under the root validation folder and under `noliquids/`
    - the validation shot itself is back to plain tile-center positioning, with tile-center terrain height still used for the eye point when available
 - validation completed:
    - `get_errors` returned clean for `ViewerApp.cs` and `ViewerApp_CaptureAutomation.cs`
