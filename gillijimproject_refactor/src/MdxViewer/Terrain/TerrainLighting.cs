@@ -13,12 +13,18 @@ public class TerrainLighting
     private Vector3 _externalLightColor;
     private Vector3 _externalAmbientColor;
     private Vector3 _externalFogColor;
+    private bool _hasExternalLightDirectionOverride;
+    private Vector3 _externalLightDirection;
 
     /// <summary>Game time as fraction of day: 0.0 = midnight, 0.5 = noon, 1.0 = midnight.</summary>
     public float GameTime { get; set; } = 0.35f; // Default: morning
 
     /// <summary>Current sun/light direction (normalized, pointing toward light).</summary>
     public Vector3 LightDirection { get; private set; } = Vector3.Normalize(new Vector3(0.5f, 0.3f, 1.0f));
+
+    public bool HasExternalLightDirectionOverride => _hasExternalLightDirectionOverride;
+
+    public Vector3 ExternalLightDirection => _externalLightDirection;
 
     /// <summary>Current directional light color.</summary>
     public Vector3 LightColor { get; private set; } = new Vector3(1.0f, 0.95f, 0.85f);
@@ -48,6 +54,20 @@ public class TerrainLighting
         _hasExternalOverride = false;
     }
 
+    public void ApplyExternalLightDirection(Vector3 lightDirection)
+    {
+        if (lightDirection.LengthSquared() <= 1e-6f)
+            return;
+
+        _hasExternalLightDirectionOverride = true;
+        _externalLightDirection = Vector3.Normalize(lightDirection);
+    }
+
+    public void ClearExternalLightDirection()
+    {
+        _hasExternalLightDirectionOverride = false;
+    }
+
     /// <summary>
     /// Update lighting parameters based on current game time.
     /// </summary>
@@ -60,6 +80,9 @@ public class TerrainLighting
 
         // Light direction (sun position)
         LightDirection = Vector3.Normalize(new Vector3(sunHorizontal * 0.5f, 0.3f, MathF.Max(sunHeight, 0.05f)));
+
+        if (_hasExternalLightDirectionOverride)
+            LightDirection = _externalLightDirection;
 
         // Interpolate colors based on time of day
         // Night (0.0-0.2, 0.8-1.0), Dawn (0.2-0.3), Day (0.3-0.7), Dusk (0.7-0.8)

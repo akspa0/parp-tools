@@ -1,5 +1,19 @@
 # Active Context — MdxViewer / AlphaWoW Viewer
 
+## Apr 10, 2026 - Validation minimaps now use orthographic top-down rendering during active capture batches
+
+- followed the user repro that live `MdxViewer` validation minimaps were still offset from the source tile borders after the earlier settle or doodad or WL fixes
+- active `src/MdxViewer` behavior after this slice:
+   - `ViewerApp.cs` now swaps the normal scene projection for a dedicated orthographic top-down matrix whenever `_activeCaptureRequest` is an MdxViewer validation capture inside an active validation batch
+   - `ViewerApp_CaptureAutomation.cs` now provides those validation-only matrices with a straight-down look and `Vector3.UnitX` up-vector so the capture preserves the current minimap orientation while letting the requested tile span fill the square output
+   - the same validation batch path now forces a deterministic validation-only terrain light direction and restores the previous override state after the batch so capture shading is no longer tied to the live world-light azimuth
+   - the validation shot itself is back to plain tile-center positioning, with tile-center terrain height still used for the eye point when available
+- validation completed:
+   - `get_errors` returned clean for `ViewerApp.cs` and `ViewerApp_CaptureAutomation.cs`
+   - `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- important boundary:
+   - no real-data validation rerun has been recorded yet for this orthographic validation fix in the current chat
+
 ## Apr 09, 2026 - ML dataset finalize now stays manifest-only and MdxViewer validation capture batches hide doodads
 
 - followed the workflow correction that the active ML dataset surface should not generate baked 4k reference minimaps and should only emit live `MdxViewer` validation captures for rendered minimap output

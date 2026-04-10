@@ -1236,9 +1236,14 @@ public partial class ViewerApp : IDisposable
             float aspect = hasSceneViewport
                 ? sceneViewportWidth / Math.Max(sceneViewportHeight, 1f)
                 : (float)size.X / Math.Max(size.Y, 1);
-            var view = _camera.GetViewMatrix();
             float farPlane = GetSceneFarPlane();
-            var proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
+            Matrix4x4 view;
+            Matrix4x4 proj;
+            if (!TryGetMkHarvestViewerValidationSceneMatrices(aspect, out view, out proj))
+            {
+                view = _camera.GetViewMatrix();
+                proj = Matrix4x4.CreatePerspectiveFieldOfView(_fovDegrees * MathF.PI / 180f, aspect, 0.1f, farPlane);
+            }
 
             // Update terrain AOI before rendering
             if (_terrainManager != null)

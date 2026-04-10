@@ -1,5 +1,19 @@
 # Active Context
 
+## Apr 10, 2026 - MdxViewer validation minimaps now render with a dedicated orthographic top-down projection
+
+- followed the user report that live `MdxViewer` validation minimaps were still offset from the true tile borders even after the earlier settle or doodad or WL cleanup work
+- active behavior after this slice:
+	- `src/MdxViewer/ViewerApp.cs` now swaps the normal scene perspective projection for a dedicated orthographic top-down view and projection whenever an active capture request is part of an MdxViewer validation batch
+	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` now provides the validation-only view/projection matrices, using a straight-down look with `Vector3.UnitX` as the up vector so the output keeps the existing minimap orientation while letting the requested ADT tile span fill the square capture exactly
+	- the same validation batch path now forces a deterministic validation-only terrain light direction and restores the prior lighting override state afterward, so generated tiles no longer depend on whichever live world-light direction happened to be active when the batch started
+	- `src/MdxViewer/ViewerApp_CaptureAutomation.cs` still samples tile-center terrain height for the validation eye point, but the shot builder itself is back to tile-center positioning because the batch no longer relies on a tilted perspective workaround
+- validation completed:
+	- `get_errors` returned clean for `src/MdxViewer/ViewerApp.cs` and `src/MdxViewer/ViewerApp_CaptureAutomation.cs`
+	- `dotnet build i:/parp/parp-tools/gillijimproject_refactor/src/MdxViewer/MdxViewer.sln -c Debug` succeeded with existing workspace warnings only
+- important boundary:
+	- no new real-data capture rerun has been recorded yet in this chat, so the fix is build-validated only until the regenerated viewer output is compared against the source minimap tiles again
+
 ## Apr 09, 2026 - ML dataset finalize no longer generates baked 4k reference minimaps and MdxViewer validation captures now hide doodads
 
 - followed the workflow correction that the ML dataset surface should stop generating baked `reference_minimaps` entirely and should rely only on live `MdxViewer` validation captures for rendered minimap output

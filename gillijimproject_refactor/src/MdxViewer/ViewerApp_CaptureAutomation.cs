@@ -119,6 +119,10 @@ public partial class ViewerApp
         public required int PreviousDetailedTileCountOverride { get; init; }
         public required float PreviousFogStart { get; init; }
         public required float PreviousFogEnd { get; init; }
+        public required bool PreviousTerrainLightDirectionOverride { get; init; }
+        public required Vector3 PreviousTerrainLightDirection { get; init; }
+        public required bool PreviousVlmLightDirectionOverride { get; init; }
+        public required Vector3 PreviousVlmLightDirection { get; init; }
         public required bool PreviousObjectFogEnabled { get; init; }
         public required bool PreviousDoodadsVisible { get; init; }
         public required bool PreviousWlLiquidsVisible { get; init; }
@@ -631,13 +635,19 @@ public partial class ViewerApp
             return;
 
         int requestedResolution = Math.Clamp(plan.RequestedResolution, 512, 4096);
+        TerrainLighting terrainLighting = _terrainManager.Lighting;
+        TerrainLighting? vlmLighting = _vlmTerrainManager?.Lighting;
         _activeMkHarvestViewerValidationBatch = new ActiveMkHarvestViewerValidationBatch
         {
             PreviousWindowSize = _window.Size,
             PreviousHideUiChrome = _hideUiChrome,
             PreviousDetailedTileCountOverride = _terrainManager.DetailedTileCountOverride,
-            PreviousFogStart = _terrainManager.Lighting.FogStart,
-            PreviousFogEnd = _terrainManager.Lighting.FogEnd,
+            PreviousFogStart = terrainLighting.FogStart,
+            PreviousFogEnd = terrainLighting.FogEnd,
+            PreviousTerrainLightDirectionOverride = terrainLighting.HasExternalLightDirectionOverride,
+            PreviousTerrainLightDirection = terrainLighting.ExternalLightDirection,
+            PreviousVlmLightDirectionOverride = vlmLighting?.HasExternalLightDirectionOverride ?? false,
+            PreviousVlmLightDirection = vlmLighting?.ExternalLightDirection ?? Vector3.Zero,
             PreviousObjectFogEnabled = _worldScene?.ObjectFogEnabled ?? true,
             PreviousDoodadsVisible = _worldScene?.DoodadsVisible ?? true,
             PreviousWlLiquidsVisible = _worldScene?.ShowWlLiquids ?? true,
@@ -649,8 +659,11 @@ public partial class ViewerApp
         _hideUiChrome = true;
         _window.Size = new Vector2D<int>(requestedResolution, requestedResolution);
         _terrainManager.DetailedTileCountOverride = Math.Min(25, TerrainManager.MaxManualDetailedTileCount);
-        _terrainManager.Lighting.FogStart = MaxTerrainFogDistance * 0.75f;
-        _terrainManager.Lighting.FogEnd = MaxTerrainFogDistance;
+        terrainLighting.FogStart = MaxTerrainFogDistance * 0.75f;
+        terrainLighting.FogEnd = MaxTerrainFogDistance;
+        Vector3 validationLightDirection = BuildMkHarvestViewerValidationLightDirection(terrainLighting.LightDirection);
+        terrainLighting.ApplyExternalLightDirection(validationLightDirection);
+        vlmLighting?.ApplyExternalLightDirection(validationLightDirection);
         if (_worldScene != null)
         {
             _worldScene.ObjectFogEnabled = false;
@@ -680,7 +693,16 @@ public partial class ViewerApp
         }
 
         AppendMkHarvestLogLine(
-            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads and WL liquids are disabled, object streaming is widened, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+            $"Started MdxViewer validation capture batch for {plan.Tiles.Count} tile(s). Viewer chrome is hidden, doodads and WL liquids are disabled, object streaming is widened, the validation sun direction is forced for deterministic top-down shading, the batch waits for world assets to settle, and the window was resized to {requestedResolution}x{requestedResolution} for the batch.");
+    }
+
+    private static Vector3 BuildMkHarvestViewerValidationLightDirection(Vector3 currentLightDirection)
+    {
+        Vector3 source = currentLightDirection.LengthSquared() > 1e-6f
+            ? Vector3.Normalize(currentLightDirection)
+            : Vector3.Normalize(new Vector3(0f, 0.3f, 1f));
+
+        return Vector3.Normalize(new Vector3(source.X, -source.Y, MathF.Abs(source.Z)));
     }
 
     private CameraShotPoint BuildMkHarvestViewerValidationShot(string mapName, MkHarvestViewerValidationCaptureTile tile)
@@ -691,8 +713,21 @@ public partial class ViewerApp
 
         float centerX = WoWConstants.MapOrigin - ((tile.TileX + 0.5f) * WoWConstants.ChunkSize);
         float centerY = WoWConstants.MapOrigin - ((tile.TileY + 0.5f) * WoWConstants.ChunkSize);
+        float targetGroundHeight = 0f;
+        if (_terrainManager != null
+            && TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
+        {
+            targetGroundHeight = loadedTerrainHeight;
+        }
+        else if (_vlmTerrainManager != null
+            && TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
+        {
+            targetGroundHeight = loadedVlmTerrainHeight;
+        }
+
         float desiredSpan = WoWConstants.ChunkSize;
-        float captureHeight = 256f + (desiredSpan / (2f * MathF.Tan((captureFovDegrees * MathF.PI / 180f) * 0.5f)));
+        float heightAboveGround = 256f + (desiredSpan / (2f * MathF.Tan((captureFovDegrees * MathF.PI / 180f) * 0.5f)));
+        float captureHeight = targetGroundHeight + heightAboveGround;
 
         return new CameraShotPoint
         {
@@ -706,6 +741,47 @@ public partial class ViewerApp
             Pitch = capturePitch,
             FovDegrees = captureFovDegrees,
         };
+    }
+
+    private bool TryGetMkHarvestViewerValidationSceneMatrices(float aspect, out Matrix4x4 view, out Matrix4x4 proj)
+    {
+        view = Matrix4x4.Identity;
+        proj = Matrix4x4.Identity;
+
+        if (_activeMkHarvestViewerValidationBatch == null
+            || _activeCaptureRequest?.IsMkHarvestViewerValidationCapture != true
+            || _activeCaptureRequest.TargetTileX is not int tileX
+            || _activeCaptureRequest.TargetTileY is not int tileY)
+        {
+            return false;
+        }
+
+        float centerX = WoWConstants.MapOrigin - ((tileX + 0.5f) * WoWConstants.ChunkSize);
+        float centerY = WoWConstants.MapOrigin - ((tileY + 0.5f) * WoWConstants.ChunkSize);
+        float targetGroundHeight = 0f;
+        if (_terrainManager != null
+            && TrySampleTerrainHeightLoaded(_terrainManager.Renderer, centerX, centerY, out float loadedTerrainHeight, out _))
+        {
+            targetGroundHeight = loadedTerrainHeight;
+        }
+        else if (_vlmTerrainManager != null
+            && TrySampleTerrainHeightLoaded(_vlmTerrainManager.Renderer, centerX, centerY, out float loadedVlmTerrainHeight, out _))
+        {
+            targetGroundHeight = loadedVlmTerrainHeight;
+        }
+
+        float worldSpanX = WoWConstants.ChunkSize * Math.Max(1f, aspect);
+        float worldSpanY = WoWConstants.ChunkSize / Math.Max(1f, aspect <= 0f ? 1f : Math.Min(1f, aspect));
+        if (aspect > 0f && aspect < 1f)
+            worldSpanX = WoWConstants.ChunkSize;
+        if (aspect >= 1f)
+            worldSpanY = WoWConstants.ChunkSize;
+
+        Vector3 eye = new(centerX, centerY, targetGroundHeight + 2048f);
+        Vector3 target = new(centerX, centerY, targetGroundHeight);
+        view = Matrix4x4.CreateLookAt(eye, target, Vector3.UnitX);
+        proj = Matrix4x4.CreateOrthographic(worldSpanX, worldSpanY, 0.1f, GetSceneFarPlane());
+        return true;
     }
 
     private void RestoreMkHarvestViewerValidationBatch(string? statusMessage = null)
@@ -724,6 +800,18 @@ public partial class ViewerApp
             _terrainManager.DetailedTileCountOverride = batch.PreviousDetailedTileCountOverride;
             _terrainManager.Lighting.FogStart = batch.PreviousFogStart;
             _terrainManager.Lighting.FogEnd = batch.PreviousFogEnd;
+            if (batch.PreviousTerrainLightDirectionOverride)
+                _terrainManager.Lighting.ApplyExternalLightDirection(batch.PreviousTerrainLightDirection);
+            else
+                _terrainManager.Lighting.ClearExternalLightDirection();
+        }
+
+        if (_vlmTerrainManager != null)
+        {
+            if (batch.PreviousVlmLightDirectionOverride)
+                _vlmTerrainManager.Lighting.ApplyExternalLightDirection(batch.PreviousVlmLightDirection);
+            else
+                _vlmTerrainManager.Lighting.ClearExternalLightDirection();
         }
 
         if (_worldScene != null)
