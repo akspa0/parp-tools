@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Numerics;
 using System.Text.Json;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
@@ -7,6 +8,8 @@ using WoWMapConverter.Core.Formats.Liquids;
 using WoWMapConverter.Core.Services;
 using WowViewer.Core.IO.Dbc;
 using WowViewer.Core.IO.Files;
+using WowViewer.Core.IO.Mdx;
+using WowViewer.Core.IO.Wmo;
 using GillijimProject.WowFiles.Alpha;
 using WdtAlpha = GillijimProject.WowFiles.Alpha.WdtAlpha;
 using SharedMd5TranslateIndex = WowViewer.Core.IO.Files.Md5TranslateIndex;
@@ -71,7 +74,7 @@ public class VlmDatasetExporter
 
         // Normalize client path
         var dataPath = clientPath;
-        if (!Directory.Exists(Path.Combine(clientPath, "World")) && 
+        if (!Directory.Exists(Path.Combine(clientPath, "World")) &&
             Directory.Exists(Path.Combine(clientPath, "Data", "World")))
         {
             dataPath = Path.Combine(clientPath, "Data");
@@ -95,7 +98,7 @@ public class VlmDatasetExporter
 
         string? wdtPath = null;
         byte[]? wdtData = null;
-        
+
         // Initialize the shared archive catalog early so we can search MPQ archives for WDT.
         using IArchiveCatalog archiveCatalog = new MpqArchiveCatalogFactory().Create();
 
@@ -110,7 +113,7 @@ public class VlmDatasetExporter
             ? listfilePath
             : listfileSearchPaths.FirstOrDefault(File.Exists);
         ArchiveCatalogBootstrapper.Bootstrap(archiveCatalog, searchPaths, resolvedListfile);
-        
+
         foreach (var tryPath in wdtPaths)
         {
             // Try flat file first
@@ -120,7 +123,7 @@ public class VlmDatasetExporter
                 progress?.Report($"Found WDT: {wdtPath}");
                 break;
             }
-            
+
             // Try per-asset MPQ (file.wdt.MPQ) - Alpha 0.5.3 style
             wdtData = AlphaArchiveReader.ReadWithMpqFallback(tryPath);
             if (wdtData != null)
@@ -132,7 +135,7 @@ public class VlmDatasetExporter
                 break;
             }
         }
-        
+
         // Fallback: Try reading from large MPQ archives (3.3.5+, world.mpq, etc.)
         if (wdtPath == null)
         {
@@ -160,8 +163,6 @@ public class VlmDatasetExporter
             progress?.Report("Ensure MPQ archives (world.mpq, terrain.mpq, etc.) are in the Data folder.");
             return new VlmExportResult(0, 0, 0, outputDir);
         }
-
-        
 
 
         var mapDirectoryLookup = new MapDirectoryLookup();
@@ -1136,11 +1137,11 @@ public class VlmDatasetExporter
         {
             // Use MCIN offsets to locate MCNK chunks (gillijimproject approach)
             var textures = new List<string>();
-            var m2Names = new List<string>();
-            var wmoNames = new List<string>();
+            var rootM2Names = new List<string>();
+            var rootWmoNames = new List<string>();
             byte[]? mh2oData = null;
-            byte[]? mddfRaw = null;
-            byte[]? modfRaw = null;
+            byte[]? rootMddfRaw = null;
+            byte[]? rootModfRaw = null;
             var legacyMclqLiquids = new List<VlmLiquidData>();
             var shadowMapData = new byte[256][];
             
@@ -1180,11 +1181,35 @@ public class VlmDatasetExporter
             
             Console.WriteLine($"[DEBUG] Found {mcnkOffsets.Count} MCNK offsets via MCIN for {tileName}");
             
-            CollectTopLevelChunkData(adtBytes, textures, m2Names, wmoNames, ref mh2oData, ref mddfRaw, ref modfRaw);
+            CollectTopLevelChunkData(adtBytes, textures, rootM2Names, rootWmoNames, ref mh2oData, ref rootMddfRaw, ref rootModfRaw);
+
+            IReadOnlyList<string> m2NamesForPlacements = rootM2Names;
+            IReadOnlyList<string> wmoNamesForPlacements = rootWmoNames;
+            byte[]? mddfRawForPlacements = rootMddfRaw;
+            byte[]? modfRawForPlacements = rootModfRaw;
 
             if (objBytes is { Length: > 0 })
             {
-                CollectTopLevelChunkData(objBytes, null, m2Names, wmoNames, ref mh2oData, ref mddfRaw, ref modfRaw);
+                var objM2Names = new List<string>();
+                var objWmoNames = new List<string>();
+                byte[]? objMddfRaw = null;
+                byte[]? objModfRaw = null;
+
+                CollectTopLevelChunkData(objBytes, null, objM2Names, objWmoNames, ref mh2oData, ref objMddfRaw, ref objModfRaw);
+
+                if (objMddfRaw is { Length: > 0 })
+                {
+                    mddfRawForPlacements = objMddfRaw;
+                    if (objM2Names.Count > 0)
+                        m2NamesForPlacements = objM2Names;
+                }
+
+                if (objModfRaw is { Length: > 0 })
+                {
+                    modfRawForPlacements = objModfRaw;
+                    if (objWmoNames.Count > 0)
+                        wmoNamesForPlacements = objWmoNames;
+                }
             }
             
             // Parse MCNK chunks using LichKing.Mcnk (ported from Warcraft.NET)
@@ -1381,8 +1406,8 @@ public class VlmDatasetExporter
                 Console.WriteLine($"[DEBUG] Parsed {legacyMclqLiquids.Count} MCLQ liquid chunks for {tileName}");
             }
 
-            AppendObjectPlacementsFromRaw(objectPlacements, mddfRaw, m2Names, "m2");
-            AppendObjectPlacementsFromRaw(objectPlacements, modfRaw, wmoNames, "wmo");
+            AppendObjectPlacementsFromRaw(objectPlacements, mddfRawForPlacements, m2NamesForPlacements, "m2", archiveReader);
+            AppendObjectPlacementsFromRaw(objectPlacements, modfRawForPlacements, wmoNamesForPlacements, "wmo", archiveReader);
             
             Console.WriteLine($"[DEBUG] Parsed {heights.Count} chunks with heights, range {heightMin:F2} to {heightMax:F2}");
             
@@ -1535,11 +1560,12 @@ public class VlmDatasetExporter
         }
     }
 
-    private static void AppendObjectPlacementsFromRaw(
+    private void AppendObjectPlacementsFromRaw(
         List<VlmObjectPlacement> objectPlacements,
         byte[]? raw,
         IReadOnlyList<string> names,
-        string category)
+        string category,
+        IArchiveReader archiveReader)
     {
         if (raw == null || raw.Length == 0)
             return;
@@ -1564,6 +1590,18 @@ public class VlmDatasetExporter
                 ? $"{category}_{nameId}"
                 : Path.GetFileNameWithoutExtension(fullPath);
 
+            float[]? boundsMin = null;
+            float[]? boundsMax = null;
+            if (!string.IsNullOrWhiteSpace(fullPath))
+            {
+                var bounds = GetModelBounds(fullPath, archiveReader);
+                if (bounds.HasValue)
+                {
+                    boundsMin = bounds.Value.Min;
+                    boundsMax = bounds.Value.Max;
+                }
+            }
+
             objectPlacements.Add(new VlmObjectPlacement(
                 name,
                 nameId,
@@ -1575,7 +1613,9 @@ public class VlmDatasetExporter
                 ry,
                 rz,
                 scale / 1024f,
-                category));
+                category,
+                boundsMin,
+                boundsMax));
         }
     }
 
@@ -2805,93 +2845,162 @@ public class VlmDatasetExporter
     /// </summary>
     private (float[] Min, float[] Max)? GetModelBounds(string modelPath, IArchiveReader archiveReader)
     {
-        if (string.IsNullOrEmpty(modelPath)) return null;
-        
-        // Check cache first
-        if (_modelBoundsCache.TryGetValue(modelPath.ToLowerInvariant(), out var cached))
+        if (string.IsNullOrWhiteSpace(modelPath))
+            return null;
+
+        string cacheKey = NormalizeModelPath(modelPath).ToLowerInvariant();
+        if (_modelBoundsCache.TryGetValue(cacheKey, out var cached))
             return cached;
-        
+
         try
         {
-            // Try to read from MPQ
-            var data = archiveReader.ReadFile(modelPath);
-            if (data == null || data.Length < 100) 
+            foreach (string candidatePath in EnumerateModelPathCandidates(modelPath))
             {
-                _modelBoundsCache[modelPath.ToLowerInvariant()] = null;
-                return null;
-            }
-            
-            float[] boundsMin = null!;
-            float[] boundsMax = null!;
-            
-            // Check if MDX or WMO by extension/signature
-            var ext = Path.GetExtension(modelPath).ToLowerInvariant();
-            bool isWmo = ext == ".wmo";
-            
-            if (isWmo)
-            {
-                // WMO: Read MOHD chunk for bounding box
-                // MOHD is typically after MVER, starts around offset 20-40
-                // Format: ... boundingBox1 (3 floats), boundingBox2 (3 floats) at offset 28 in MOHD data
-                int mohdOffset = FindChunkOffset(data, "MOHD");
-                if (mohdOffset >= 0 && mohdOffset + 8 + 52 <= data.Length)
-                {
-                    int dataStart = mohdOffset + 8; // Skip chunk ID + size
-                    // boundingBox1 starts at offset 28 from MOHD data
-                    boundsMin = new float[3];
-                    boundsMax = new float[3];
-                    boundsMin[0] = BitConverter.ToSingle(data, dataStart + 28);
-                    boundsMin[1] = BitConverter.ToSingle(data, dataStart + 32);
-                    boundsMin[2] = BitConverter.ToSingle(data, dataStart + 36);
-                    boundsMax[0] = BitConverter.ToSingle(data, dataStart + 40);
-                    boundsMax[1] = BitConverter.ToSingle(data, dataStart + 44);
-                    boundsMax[2] = BitConverter.ToSingle(data, dataStart + 48);
-                }
-            }
-            else
-            {
-                // MDX/M2: Read header for bounding box
-                // MDX header has bounding box around offset 60-84 (depends on version)
-                // Try reading at common offset for Alpha MDX
-                if (data.Length >= 88)
-                {
-                    // Alpha MDX: Header starts with "MDLX" or similar
-                    // Bounding box is typically at a fixed offset in header
-                    // For simplicity, search for reasonable float values
-                    int bbOffset = 64; // Common offset for Alpha MDX bounding box
-                    if (data.Length >= bbOffset + 24)
-                    {
-                        boundsMin = new float[3];
-                        boundsMax = new float[3];
-                        boundsMin[0] = BitConverter.ToSingle(data, bbOffset);
-                        boundsMin[1] = BitConverter.ToSingle(data, bbOffset + 4);
-                        boundsMin[2] = BitConverter.ToSingle(data, bbOffset + 8);
-                        boundsMax[0] = BitConverter.ToSingle(data, bbOffset + 12);
-                        boundsMax[1] = BitConverter.ToSingle(data, bbOffset + 16);
-                        boundsMax[2] = BitConverter.ToSingle(data, bbOffset + 20);
-                        
-                        // Sanity check: bounds should be reasonable (not NaN or huge)
-                        if (float.IsNaN(boundsMin[0]) || float.IsNaN(boundsMax[0]) ||
-                            Math.Abs(boundsMin[0]) > 10000 || Math.Abs(boundsMax[0]) > 10000)
-                        {
-                            boundsMin = null!;
-                            boundsMax = null!;
-                        }
-                    }
-                }
-            }
-            
-            if (boundsMin != null && boundsMax != null)
-            {
-                var result = (boundsMin, boundsMax);
-                _modelBoundsCache[modelPath.ToLowerInvariant()] = result;
-                return result;
+                byte[]? data = archiveReader.ReadFile(candidatePath);
+                if (data is null || data.Length < 16)
+                    continue;
+
+                (float[] Min, float[] Max)? bounds = TryReadBoundsFromModelBytes(data, candidatePath);
+                if (!bounds.HasValue)
+                    continue;
+
+                _modelBoundsCache[cacheKey] = bounds;
+                string candidateCacheKey = NormalizeModelPath(candidatePath).ToLowerInvariant();
+                _modelBoundsCache[candidateCacheKey] = bounds;
+                return bounds;
             }
         }
-        catch { }
-        
-        _modelBoundsCache[modelPath.ToLowerInvariant()] = null;
+        catch
+        {
+        }
+
+        _modelBoundsCache[cacheKey] = null;
         return null;
+    }
+
+    private static (float[] Min, float[] Max)? TryReadBoundsFromModelBytes(byte[] data, string sourcePath)
+    {
+        string extension = Path.GetExtension(sourcePath);
+        bool preferWmo = extension.Equals(".wmo", StringComparison.OrdinalIgnoreCase);
+
+        if (preferWmo)
+        {
+            (float[] Min, float[] Max)? wmoBounds = TryReadWmoBounds(data, sourcePath);
+            if (wmoBounds.HasValue)
+                return wmoBounds;
+
+            return TryReadMdxBounds(data, sourcePath);
+        }
+
+        (float[] Min, float[] Max)? mdxBounds = TryReadMdxBounds(data, sourcePath);
+        if (mdxBounds.HasValue)
+            return mdxBounds;
+
+        return TryReadWmoBounds(data, sourcePath);
+    }
+
+    private static (float[] Min, float[] Max)? TryReadMdxBounds(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            var summary = MdxSummaryReader.Read(stream, sourcePath);
+
+            Vector3? min = summary.Collision?.BoundsMin ?? summary.BoundsMin;
+            Vector3? max = summary.Collision?.BoundsMax ?? summary.BoundsMax;
+            if (!min.HasValue || !max.HasValue)
+                return null;
+
+            if (!TryConvertBounds(min.Value, max.Value, out float[] boundsMin, out float[] boundsMax))
+                return null;
+
+            return (boundsMin, boundsMax);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static (float[] Min, float[] Max)? TryReadWmoBounds(byte[] data, string sourcePath)
+    {
+        try
+        {
+            using MemoryStream stream = new(data, writable: false);
+            var summary = WmoSummaryReader.Read(stream, sourcePath);
+            if (!TryConvertBounds(summary.BoundsMin, summary.BoundsMax, out float[] boundsMin, out float[] boundsMax))
+                return null;
+
+            return (boundsMin, boundsMax);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool TryConvertBounds(Vector3 min, Vector3 max, out float[] boundsMin, out float[] boundsMax)
+    {
+        boundsMin = [];
+        boundsMax = [];
+
+        if (!IsFinite(min.X) || !IsFinite(min.Y) || !IsFinite(min.Z) ||
+            !IsFinite(max.X) || !IsFinite(max.Y) || !IsFinite(max.Z))
+        {
+            return false;
+        }
+
+        // Reject obviously corrupt AABBs from malformed assets.
+        const float maxAbs = 250_000f;
+        if (Math.Abs(min.X) > maxAbs || Math.Abs(min.Y) > maxAbs || Math.Abs(min.Z) > maxAbs ||
+            Math.Abs(max.X) > maxAbs || Math.Abs(max.Y) > maxAbs || Math.Abs(max.Z) > maxAbs)
+        {
+            return false;
+        }
+
+        if (min.X > max.X || min.Y > max.Y || min.Z > max.Z)
+            return false;
+
+        boundsMin = [min.X, min.Y, min.Z];
+        boundsMax = [max.X, max.Y, max.Z];
+        return true;
+    }
+
+    private static bool IsFinite(float value)
+    {
+        return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    private static IEnumerable<string> EnumerateModelPathCandidates(string modelPath)
+    {
+        string normalized = NormalizeModelPath(modelPath);
+        var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            normalized
+        };
+
+        string extension = Path.GetExtension(normalized);
+        if (extension.Equals(".mdx", StringComparison.OrdinalIgnoreCase))
+        {
+            candidates.Add(Path.ChangeExtension(normalized, ".m2"));
+        }
+        else if (extension.Equals(".m2", StringComparison.OrdinalIgnoreCase))
+        {
+            candidates.Add(Path.ChangeExtension(normalized, ".mdx"));
+        }
+        else if (string.IsNullOrEmpty(extension))
+        {
+            candidates.Add(normalized + ".m2");
+            candidates.Add(normalized + ".mdx");
+            candidates.Add(normalized + ".wmo");
+        }
+
+        return candidates;
+    }
+
+    private static string NormalizeModelPath(string path)
+    {
+        return path.Replace('/', '\\').TrimStart('\\');
     }
     
     private int FindChunkOffset(byte[] data, string chunkId)
