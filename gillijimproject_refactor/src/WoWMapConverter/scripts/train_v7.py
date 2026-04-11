@@ -75,6 +75,7 @@ DEFAULT_SPATIAL_GROUP_SIZE = 4
 DEFAULT_SEED = 1337
 DEFAULT_BLUR_SIGMA = 0.5
 DEFAULT_PREVIEW_COUNT = 4
+PREVIEW_MIN_VISUAL_VARIANCE = 0.008
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -667,6 +668,135 @@ def split_grouped_indices(samples: Sequence[TileSample], val_fraction: float, se
     return train_indices, val_indices, train_groups, val_groups
 
 
+def _image_luma_variance(path: Path, size: int = 64) -> float:
+    try:
+        with Image.open(path).convert("L") as image:
+            reduced = image.resize((size, size), Image.BILINEAR)
+            pixels = np.asarray(reduced, dtype=np.float32) / 255.0
+        return float(np.var(pixels))
+    except Exception:
+        return 0.0
+
+
+def _liquid_coverage(path: Optional[Path], size: int = 64) -> float:
+    if not path or not path.exists():
+        return 0.0
+
+    try:
+        with Image.open(path).convert("L") as image:
+            reduced = image.resize((size, size), Image.NEAREST)
+            pixels = np.asarray(reduced, dtype=np.float32)
+        return float((pixels > 8.0).mean())
+    except Exception:
+        return 0.0
+
+
+def compute_preview_interest_metrics(sample: TileSample) -> Dict[str, float]:
+    height_span = 0.0
+    object_count = 0
+
+    try:
+        with open(sample.json_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        terrain = payload.get("terrain_data", {})
+
+        height_min = float(terrain.get("height_min", 0.0))
+        height_max = float(terrain.get("height_max", height_min))
+        height_span = max(0.0, height_max - height_min)
+
+        objects = terrain.get("objects")
+        if isinstance(objects, list):
+            object_count = len(objects)
+    except Exception:
+        pass
+
+    minimap_variance = _image_luma_variance(sample.minimap_path)
+    normal_variance = _image_luma_variance(sample.normalmap_path)
+    liquid_coverage = _liquid_coverage(sample.liquid_mask_path)
+
+    visual_component = min((minimap_variance + normal_variance) / 0.06, 1.0)
+    height_component = min(height_span / 300.0, 1.0)
+    object_component = min(object_count / 25.0, 1.0)
+    liquid_component = min(liquid_coverage * 2.0, 1.0)
+
+    score = float(
+        0.60 * visual_component
+        + 0.20 * height_component
+        + 0.12 * object_component
+        + 0.08 * liquid_component
+    )
+
+    return {
+        "score": score,
+        "visual_variance": float(minimap_variance + normal_variance),
+        "minimap_variance": float(minimap_variance),
+        "normal_variance": float(normal_variance),
+    }
+
+
+def compute_preview_interest_score(sample: TileSample) -> float:
+    return compute_preview_interest_metrics(sample)["score"]
+
+
+def select_preview_candidates(samples: Sequence[TileSample], val_indices: Sequence[int], preview_count: int) -> List[Tuple[int, float, float]]:
+    scored: List[Tuple[int, float, float]] = []
+    for index in val_indices:
+        if index < 0 or index >= len(samples):
+            continue
+        metrics = compute_preview_interest_metrics(samples[index])
+        scored.append((index, metrics["score"], metrics["visual_variance"]))
+
+    if not scored:
+        return []
+
+    target_count = max(1, preview_count)
+    scored.sort(
+        key=lambda item: (
+            -item[1],
+            -item[2],
+            samples[item[0]].dataset_name,
+            samples[item[0]].map_name,
+            samples[item[0]].tile_x,
+            samples[item[0]].tile_y,
+        )
+    )
+
+    non_blank = [item for item in scored if item[2] >= PREVIEW_MIN_VISUAL_VARIANCE]
+    if non_blank:
+        return non_blank[:target_count]
+
+    return scored[:target_count]
+
+
+def build_preview_batch(dataset: WoWTileDatasetV7, dataset_indices: Sequence[int]) -> Tuple[Dict[str, torch.Tensor], List[int], List[Tuple[int, str]]]:
+    if not dataset_indices:
+        raise ValueError("No preview indices were provided.")
+
+    items: List[Dict[str, torch.Tensor]] = []
+    loaded_indices: List[int] = []
+    skipped_indices: List[Tuple[int, str]] = []
+
+    for index in dataset_indices:
+        try:
+            item = dataset[index]
+        except Exception as exc:
+            skipped_indices.append((index, str(exc)))
+            continue
+
+        items.append(item)
+        loaded_indices.append(index)
+
+    if not items:
+        raise ValueError("No preview tiles could be loaded from the selected candidates.")
+
+    batch = {
+        "input": torch.stack([item["input"] for item in items], dim=0),
+        "target": torch.stack([item["target"] for item in items], dim=0),
+        "height_bounds": torch.stack([item["height_bounds"] for item in items], dim=0),
+    }
+    return batch, loaded_indices, skipped_indices
+
+
 def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoch: int, output_dir: Path, device: torch.device) -> None:
     model.eval()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -685,8 +815,8 @@ def save_training_preview(model: nn.Module, batch: Dict[str, torch.Tensor], epoc
         minimap = torch.clamp(inputs[index, 0:3].cpu() * std + mean, 0.0, 1.0)
         normal = torch.clamp(inputs[index, 3:6].cpu() * std + mean, 0.0, 1.0)
         water = inputs[index, 9:10].cpu().repeat(3, 1, 1) * torch.tensor([0.0, 0.0, 1.0]).view(3, 1, 1)
-        prediction = predictions[index, 0:1].cpu()
-        target = targets[index, 0:1].cpu()
+        prediction = predictions[index, 1:2].cpu()
+        target = targets[index, 1:2].cpu()
 
         def normalize_for_display(tensor: torch.Tensor) -> torch.Tensor:
             tensor = tensor - tensor.min()
@@ -790,6 +920,33 @@ def train(args: argparse.Namespace) -> None:
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    preview_batch: Optional[Dict[str, torch.Tensor]] = None
+    try:
+        preview_candidates = select_preview_candidates(val_base_dataset.samples, val_indices, DEFAULT_PREVIEW_COUNT)
+        preview_indices = [index for index, _, _ in preview_candidates]
+        preview_batch, loaded_preview_indices, skipped_preview_indices = build_preview_batch(val_base_dataset, preview_indices)
+        loaded_preview_index_set = set(loaded_preview_indices)
+
+        print("Preview tiles (ranked for visual signal):")
+        for index, score, visual_variance in preview_candidates:
+            sample = val_base_dataset.samples[index]
+            skipped_suffix = " [skipped]" if index not in loaded_preview_index_set else ""
+            print(
+                f"  - {sample.dataset_name}:{sample.tile_name} "
+                f"(score={score:.3f}, visual_var={visual_variance:.5f}){skipped_suffix}"
+            )
+
+        if preview_candidates and preview_candidates[0][2] < PREVIEW_MIN_VISUAL_VARIANCE:
+            print(
+                "Warning: no preview tiles met the visual-variance floor "
+                f"({PREVIEW_MIN_VISUAL_VARIANCE:.5f}); using low-signal fallback candidates."
+            )
+
+        if skipped_preview_indices:
+            print(f"Warning: skipped {len(skipped_preview_indices)} preview tile(s) that failed to load.")
+    except Exception as exc:
+        print(f"Warning: failed to precompute preview batch, falling back to first val batch: {exc}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on {device}")
@@ -905,8 +1062,11 @@ def train(args: argparse.Namespace) -> None:
             torch.save(checkpoint, output_dir / "best.pt")
             print("  Saved best model")
             try:
-                preview_batch = next(iter(val_loader))
-                save_training_preview(model, preview_batch, epoch + 1, output_dir / "previews", device)
+                if preview_batch is not None:
+                    save_training_preview(model, preview_batch, epoch + 1, output_dir / "previews", device)
+                else:
+                    fallback_batch = next(iter(val_loader))
+                    save_training_preview(model, fallback_batch, epoch + 1, output_dir / "previews", device)
             except Exception as exc:
                 print(f"  Failed to save preview: {exc}")
         else:
