@@ -8,6 +8,7 @@ Inference restores the original multichannel V7.1 contract:
 - WDL prior
 - per-tile bounds hints
 - liquid mask
+- liquid height prior
 - object footprint mask
 
 The primary mesh export still uses the predicted global height channel. The
@@ -37,7 +38,7 @@ except ImportError:
     HEIGHT_GLOBAL_MAX = 3000.0
 
     class MultiChannelUNetV7(nn.Module):
-        def __init__(self, in_channels: int = 11, out_channels: int = 2):
+        def __init__(self, in_channels: int = 12, out_channels: int = 2):
             super().__init__()
             raise ImportError("train_v7.py is required so the V7.1 architecture matches the checkpoint.")
 
@@ -108,6 +109,13 @@ class V7InferenceEngine:
                 liquid_image = Image.open(liquid_mask_path).convert("L").resize((OUTPUT_SIZE, OUTPUT_SIZE), Image.NEAREST)
                 liquid_mask = (self.to_tensor(liquid_image) > 0.1).float()
 
+        liquid_height_prior = torch.zeros((1, OUTPUT_SIZE, OUTPUT_SIZE), dtype=torch.float32)
+        liquid_height_rel = terrain.get("liquid_height")
+        if liquid_height_rel:
+            liquid_height_path = dataset_root / liquid_height_rel
+            if liquid_height_path.exists():
+                liquid_height_prior = load_heightmap_16bit(liquid_height_path, OUTPUT_SIZE) * liquid_mask
+
         object_mask = self._build_object_mask(terrain.get("objects"))
         input_tensor = torch.cat(
             [
@@ -117,6 +125,7 @@ class V7InferenceEngine:
                 height_min_mask,
                 height_max_mask,
                 liquid_mask,
+                liquid_height_prior,
                 object_mask,
             ],
             dim=0,
@@ -157,8 +166,8 @@ class V7InferenceEngine:
 
         image = np.zeros((OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
         for obj in objects:
-            pos_x = float(obj.get("pos_x", 0.0))
-            pos_y = float(obj.get("pos_y", 0.0))
+            pos_x = float(obj.get("x", obj.get("pos_x", 0.0)))
+            pos_y = float(obj.get("y", obj.get("pos_y", 0.0)))
             scale = float(obj.get("scale", 1.0))
 
             bounds_min = obj.get("bounds_min")

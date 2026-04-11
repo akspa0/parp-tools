@@ -1139,6 +1139,8 @@ public class VlmDatasetExporter
             var m2Names = new List<string>();
             var wmoNames = new List<string>();
             byte[]? mh2oData = null;
+            byte[]? mddfRaw = null;
+            byte[]? modfRaw = null;
             var legacyMclqLiquids = new List<VlmLiquidData>();
             var shadowMapData = new byte[256][];
             
@@ -1178,36 +1180,11 @@ public class VlmDatasetExporter
             
             Console.WriteLine($"[DEBUG] Found {mcnkOffsets.Count} MCNK offsets via MCIN for {tileName}");
             
-            // Parse top-level chunks for textures and object names
-            for (int i = 0; i + 8 <= adtBytes.Length;)
+            CollectTopLevelChunkData(adtBytes, textures, m2Names, wmoNames, ref mh2oData, ref mddfRaw, ref modfRaw);
+
+            if (objBytes is { Length: > 0 })
             {
-                string fcc = System.Text.Encoding.ASCII.GetString(adtBytes, i, 4);
-                int sz = BitConverter.ToInt32(adtBytes, i + 4);
-                if (sz < 0) break;
-                int dataStart = i + 8;
-                int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
-                if (dataStart + sz > adtBytes.Length) break;
-                
-                if (fcc == "XETM") // MTEX reversed
-                {
-                    textures.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
-                }
-                else if (fcc == "XDMM") // MMDX reversed
-                {
-                    m2Names.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
-                }
-                else if (fcc == "OMWM") // MWMO reversed
-                {
-                    wmoNames.AddRange(ParseNullStrings(adtBytes, dataStart, sz));
-                }
-                else if (fcc == "O2HM" || fcc == "MH2O")
-                {
-                    mh2oData = new byte[sz];
-                    Array.Copy(adtBytes, dataStart, mh2oData, 0, sz);
-                }
-                
-                if (next <= i) break;
-                i = next;
+                CollectTopLevelChunkData(objBytes, null, m2Names, wmoNames, ref mh2oData, ref mddfRaw, ref modfRaw);
             }
             
             // Parse MCNK chunks using LichKing.Mcnk (ported from Warcraft.NET)
@@ -1403,6 +1380,9 @@ public class VlmDatasetExporter
                 liquids.AddRange(legacyMclqLiquids);
                 Console.WriteLine($"[DEBUG] Parsed {legacyMclqLiquids.Count} MCLQ liquid chunks for {tileName}");
             }
+
+            AppendObjectPlacementsFromRaw(objectPlacements, mddfRaw, m2Names, "m2");
+            AppendObjectPlacementsFromRaw(objectPlacements, modfRaw, wmoNames, "wmo");
             
             Console.WriteLine($"[DEBUG] Parsed {heights.Count} chunks with heights, range {heightMin:F2} to {heightMax:F2}");
             
@@ -1497,6 +1477,106 @@ public class VlmDatasetExporter
             sStart = nullPos + 1;
         }
         return list;
+    }
+
+    private static void CollectTopLevelChunkData(
+        byte[] source,
+        List<string>? textures,
+        List<string> m2Names,
+        List<string> wmoNames,
+        ref byte[]? mh2oData,
+        ref byte[]? mddfRaw,
+        ref byte[]? modfRaw)
+    {
+        for (int i = 0; i + 8 <= source.Length;)
+        {
+            string fcc = System.Text.Encoding.ASCII.GetString(source, i, 4);
+            int sz = BitConverter.ToInt32(source, i + 4);
+            if (sz < 0)
+                break;
+
+            int dataStart = i + 8;
+            int next = dataStart + sz + ((sz & 1) == 1 ? 1 : 0);
+            if (dataStart + sz > source.Length)
+                break;
+
+            if (textures != null && (fcc == "XETM" || fcc == "MTEX"))
+            {
+                textures.AddRange(ParseNullStrings(source, dataStart, sz));
+            }
+            else if (fcc == "XDMM" || fcc == "MMDX")
+            {
+                m2Names.AddRange(ParseNullStrings(source, dataStart, sz));
+            }
+            else if (fcc == "OMWM" || fcc == "MWMO")
+            {
+                wmoNames.AddRange(ParseNullStrings(source, dataStart, sz));
+            }
+            else if (mh2oData == null && (fcc == "O2HM" || fcc == "MH2O"))
+            {
+                mh2oData = new byte[sz];
+                Array.Copy(source, dataStart, mh2oData, 0, sz);
+            }
+            else if (fcc == ReverseFourCc("MDDF") || fcc == "MDDF")
+            {
+                mddfRaw = new byte[sz];
+                Array.Copy(source, dataStart, mddfRaw, 0, sz);
+            }
+            else if (fcc == ReverseFourCc("MODF") || fcc == "MODF")
+            {
+                modfRaw = new byte[sz];
+                Array.Copy(source, dataStart, modfRaw, 0, sz);
+            }
+
+            if (next <= i)
+                break;
+
+            i = next;
+        }
+    }
+
+    private static void AppendObjectPlacementsFromRaw(
+        List<VlmObjectPlacement> objectPlacements,
+        byte[]? raw,
+        IReadOnlyList<string> names,
+        string category)
+    {
+        if (raw == null || raw.Length == 0)
+            return;
+
+        int entrySize = category == "wmo" ? 64 : 36;
+        int scaleOffset = category == "wmo" ? 60 : 32;
+
+        for (int i = 0; i + entrySize <= raw.Length; i += entrySize)
+        {
+            uint nameId = BitConverter.ToUInt32(raw, i);
+            uint uniqueId = BitConverter.ToUInt32(raw, i + 4);
+            float px = BitConverter.ToSingle(raw, i + 8);
+            float py = BitConverter.ToSingle(raw, i + 12);
+            float pz = BitConverter.ToSingle(raw, i + 16);
+            float rx = BitConverter.ToSingle(raw, i + 20);
+            float ry = BitConverter.ToSingle(raw, i + 24);
+            float rz = BitConverter.ToSingle(raw, i + 28);
+            ushort scale = BitConverter.ToUInt16(raw, i + scaleOffset);
+
+            string fullPath = nameId < names.Count ? names[(int)nameId] : string.Empty;
+            string name = string.IsNullOrWhiteSpace(fullPath)
+                ? $"{category}_{nameId}"
+                : Path.GetFileNameWithoutExtension(fullPath);
+
+            objectPlacements.Add(new VlmObjectPlacement(
+                name,
+                nameId,
+                uniqueId,
+                px,
+                py,
+                pz,
+                rx,
+                ry,
+                rz,
+                scale / 1024f,
+                category));
+        }
     }
 
     /// <summary>

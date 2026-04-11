@@ -331,9 +331,8 @@ class WoWTileDatasetV7(Dataset):
             obj_img = np.zeros((self.input_size, self.input_size), dtype=np.float32)
             tile_size = 533.33333  # World units per tile
             for obj in objects:
-                # obj = {pos_x, pos_y, pos_z, scale, ...}
-                px = obj.get("pos_x", 0)
-                py = obj.get("pos_y", 0)
+                px = obj.get("x", obj.get("pos_x", 0))
+                py = obj.get("y", obj.get("pos_y", 0))
                 scale = obj.get("scale", 1.0)
                 
                 # Use actual bounding box if available, otherwise fallback to scale

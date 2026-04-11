@@ -24,6 +24,7 @@ Inputs:
 - low-resolution WDL height prior
 - per-tile height min/max hint masks
 - liquid mask
+- liquid height prior
 - object footprint mask
 
 Outputs:
@@ -57,7 +58,7 @@ from tqdm import tqdm
 
 INPUT_SIZE = 512
 OUTPUT_SIZE = 512
-MODEL_INPUT_CHANNELS = 11
+MODEL_INPUT_CHANNELS = 12
 MODEL_OUTPUT_CHANNELS = 2
 
 HEIGHT_GLOBAL_MIN = -1000.0
@@ -128,6 +129,7 @@ class TileSample:
     heightmap_global_path: Path
     heightmap_local_path: Path
     liquid_mask_path: Optional[Path]
+    liquid_height_path: Optional[Path]
 
 
 def normalize_token(value: str) -> str:
@@ -373,6 +375,7 @@ class WoWTileDatasetV7(Dataset):
                 continue
 
             liquid_mask_path = dataset_root / terrain["liquid_mask"] if terrain.get("liquid_mask") else None
+            liquid_height_path = dataset_root / terrain["liquid_height"] if terrain.get("liquid_height") else None
 
             collected.append(
                 TileSample(
@@ -388,6 +391,7 @@ class WoWTileDatasetV7(Dataset):
                     heightmap_global_path=heightmap_global_path,
                     heightmap_local_path=heightmap_local_path,
                     liquid_mask_path=liquid_mask_path,
+                    liquid_height_path=liquid_height_path,
                 )
             )
 
@@ -428,8 +432,8 @@ class WoWTileDatasetV7(Dataset):
         image = np.zeros((self.input_size, self.input_size), dtype=np.float32)
         tile_size = 533.33333
         for obj in objects:
-            pos_x = float(obj.get("pos_x", 0.0))
-            pos_y = float(obj.get("pos_y", 0.0))
+            pos_x = float(obj.get("x", obj.get("pos_x", 0.0)))
+            pos_y = float(obj.get("y", obj.get("pos_y", 0.0)))
             scale = float(obj.get("scale", 1.0))
 
             bounds_min = obj.get("bounds_min")
@@ -499,6 +503,10 @@ class WoWTileDatasetV7(Dataset):
             liquid_tensor = self.to_tensor(liquid_image)
             liquid_mask = (liquid_tensor > 0.1).float()
 
+        liquid_height_prior = torch.zeros((1, self.input_size, self.input_size), dtype=torch.float32)
+        if sample.liquid_height_path and sample.liquid_height_path.exists():
+            liquid_height_prior = load_heightmap_16bit(sample.liquid_height_path, self.input_size) * liquid_mask
+
         object_mask = self._build_object_mask(terrain.get("objects"))
 
         input_tensor = torch.cat(
@@ -509,6 +517,7 @@ class WoWTileDatasetV7(Dataset):
                 height_min_mask,
                 height_max_mask,
                 liquid_mask,
+                liquid_height_prior,
                 object_mask,
             ],
             dim=0,

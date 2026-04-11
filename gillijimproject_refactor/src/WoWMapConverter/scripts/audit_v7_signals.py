@@ -70,6 +70,7 @@ class DatasetSignalStats:
     liquid_mask_path_present: int = 0
     liquid_mask_file_present: int = 0
     liquid_mask_nonzero: int = 0
+    liquid_height_file_present: int = 0
     no_liquid_minimap_present: int = 0
     objects_declared: int = 0
     object_bounds_present: int = 0
@@ -107,8 +108,8 @@ def build_object_mask_pixels(objects: Optional[Sequence[Dict[str, object]]]) -> 
     pixels = mask.load()
 
     for obj in objects:
-        pos_x = float(obj.get("pos_x", 0.0))
-        pos_y = float(obj.get("pos_y", 0.0))
+        pos_x = float(obj.get("x", obj.get("pos_x", 0.0)))
+        pos_y = float(obj.get("y", obj.get("pos_y", 0.0)))
         scale = float(obj.get("scale", 1.0))
 
         bounds_min = obj.get("bounds_min")
@@ -169,6 +170,7 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
         heightmap_global_path = resolve_dataset_path(dataset_root, terrain.get("heightmap_global") or terrain.get("heightmap"))
         mccv_map_path = resolve_dataset_path(dataset_root, terrain.get("mccv_map"))
         liquid_mask_path = resolve_dataset_path(dataset_root, terrain.get("liquid_mask"))
+        liquid_height_path = resolve_dataset_path(dataset_root, terrain.get("liquid_height"))
         no_liquid_minimap_path = resolve_dataset_path(dataset_root, terrain.get("no_liquid_minimap"))
 
         if minimap_path.exists():
@@ -230,6 +232,8 @@ def audit_dataset_root(dataset_root: Path, image_sample_limit: int) -> DatasetSi
             stats.liquid_mask_file_present += 1
             if count_nonzero_mask_pixels(liquid_mask_path) > 0:
                 stats.liquid_mask_nonzero += 1
+        if liquid_height_path and liquid_height_path.exists():
+            stats.liquid_height_file_present += 1
 
         objects = terrain.get("objects") or []
         if isinstance(objects, list) and objects:
@@ -265,6 +269,7 @@ def print_dataset_summary(stats: DatasetSignalStats) -> None:
     print(f"  liquid_mask_field:   {pct(stats.liquid_mask_path_present, stats.tile_count)}")
     print(f"  liquid_mask_file:    {pct(stats.liquid_mask_file_present, stats.tile_count)}")
     print(f"  liquid_mask_nonzero: {pct(stats.liquid_mask_nonzero, stats.tile_count)}")
+    print(f"  liquid_height_file:  {pct(stats.liquid_height_file_present, stats.tile_count)}")
     print(f"  no_liquid_minimap:   {pct(stats.no_liquid_minimap_present, stats.tile_count)}")
     print(f"  objects_declared:    {pct(stats.objects_declared, stats.tile_count)}")
     print(f"  object_bounds:       {pct(stats.object_bounds_present, stats.tile_count)}")
@@ -288,6 +293,7 @@ def print_encoding_notes() -> None:
     print("  wdl_prior: outer_17 grid only, per-tile min/max normalization, bilinear upsample to 512")
     print("  bounds_hints: two constant full-frame masks from height_min and height_max normalized against global range")
     print("  liquid_mask: binary mask thresholded from stitched liquid-mask PNG, nearest resize")
+    print("  liquid_height_prior: normalized stitched liquid-height raster masked to liquid coverage; WL-derived heights can feed the same channel later")
     print("  object_mask: binary rectangle footprints rendered from objects list using bounds when present, otherwise scale fallback")
     print("  unused-but-available candidates: mccv_map, alpha_masks, alpha_atlas, shadow_maps, chunk_layers, holes, no_liquid_minimap")
 
