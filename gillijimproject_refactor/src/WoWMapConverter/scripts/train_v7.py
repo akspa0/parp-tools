@@ -76,6 +76,7 @@ DEFAULT_SEED = 1337
 DEFAULT_BLUR_SIGMA = 0.5
 DEFAULT_PREVIEW_COUNT = 4
 PREVIEW_MIN_VISUAL_VARIANCE = 0.008
+DEFAULT_MIN_HEIGHT_RANGE = 0.5
 
 DEFAULT_DATASET_SEARCH_ROOTS = [
     Path(r"i:\parp\parp-tools\gillijimproject_refactor\test_data\vlm-datasets"),
@@ -315,9 +316,11 @@ class WoWTileDatasetV7(Dataset):
         input_size: int = INPUT_SIZE,
         augment: bool = True,
         limit: Optional[int] = None,
+        min_height_range: float = DEFAULT_MIN_HEIGHT_RANGE,
     ) -> None:
         self.input_size = input_size
         self.augment = augment
+        self.min_height_range = min_height_range
         self.include_maps = {value.lower() for value in include_maps if value}
         self.exclude_maps = {value.lower() for value in exclude_maps if value}
         self.samples: List[TileSample] = []
@@ -327,19 +330,23 @@ class WoWTileDatasetV7(Dataset):
         self.blur = transforms.GaussianBlur(kernel_size=3, sigma=DEFAULT_BLUR_SIGMA)
         self.color_jitter = transforms.ColorJitter(0.2, 0.2, 0.2, 0.05)
 
+        blank_skipped = 0
         print("Loading V7 dataset roots...")
         for dataset_root in dataset_roots:
-            self.samples.extend(self._collect_root_samples(dataset_root, limit))
+            samples, skipped = self._collect_root_samples(dataset_root, limit)
+            self.samples.extend(samples)
+            blank_skipped += skipped
 
-        print(f"Loaded {len(self.samples)} valid samples (V7.1 strict mode)")
+        print(f"Loaded {len(self.samples)} valid samples (V7.1 strict mode, {blank_skipped} blank tiles skipped)")
 
-    def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> List[TileSample]:
+    def _collect_root_samples(self, dataset_root: Path, limit: Optional[int]) -> Tuple[List[TileSample], int]:
         dataset_dir = dataset_root / "dataset"
         if not dataset_dir.exists():
             print(f"Warning: dataset folder missing in {dataset_root}")
-            return []
+            return [], 0
 
         collected: List[TileSample] = []
+        blank_skipped = 0
         for json_path in sorted(dataset_dir.glob("*.json")):
             try:
                 with open(json_path, "r", encoding="utf-8") as handle:
@@ -360,6 +367,13 @@ class WoWTileDatasetV7(Dataset):
             if self.include_maps and map_key not in self.include_maps:
                 continue
             if map_key in self.exclude_maps:
+                continue
+
+            # Skip blank/flat tiles (ocean, void) that have no useful height variation
+            height_min = float(terrain.get("height_min", 0.0))
+            height_max = float(terrain.get("height_max", 0.0))
+            if (height_max - height_min) < self.min_height_range:
+                blank_skipped += 1
                 continue
 
             heightmap_global_rel = terrain.get("heightmap_global") or terrain.get("heightmap")
@@ -399,8 +413,8 @@ class WoWTileDatasetV7(Dataset):
             if limit is not None and len(collected) >= limit:
                 break
 
-        print(f"  {dataset_root.name}: {len(collected)} usable samples")
-        return collected
+        print(f"  {dataset_root.name}: {len(collected)} usable samples ({blank_skipped} blank skipped)")
+        return collected, blank_skipped
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -894,6 +908,7 @@ def train(args: argparse.Namespace) -> None:
         input_size=INPUT_SIZE,
         augment=not args.no_augment,
         limit=args.limit,
+        min_height_range=args.min_height_range,
     )
     if len(dataset) == 0:
         raise SystemExit("No samples found. Regenerate the dataset with V7 exporter outputs intact.")
@@ -915,6 +930,7 @@ def train(args: argparse.Namespace) -> None:
         input_size=INPUT_SIZE,
         augment=False,
         limit=args.limit,
+        min_height_range=args.min_height_range,
     )
     val_dataset = Subset(val_base_dataset, val_indices)
 
@@ -1101,6 +1117,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, help="Optional per-root sample cap for quick debugging.")
     parser.add_argument("--resume", type=str, help="Resume from an existing checkpoint.")
     parser.add_argument("--no-augment", action="store_true", help="Disable RGB jitter and random flips.")
+    parser.add_argument("--min-height-range", type=float, default=DEFAULT_MIN_HEIGHT_RANGE,
+                        help=f"Skip tiles with less than this height variation in game units (default: {DEFAULT_MIN_HEIGHT_RANGE}).")
     return parser
 
 
