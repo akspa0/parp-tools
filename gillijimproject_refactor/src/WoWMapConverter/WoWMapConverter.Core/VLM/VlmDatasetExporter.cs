@@ -332,7 +332,7 @@ public class VlmDatasetExporter
 
         // Parallel tile processing with configurable degree of parallelism
         var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
-        var tilesToProcess = existingTiles.Take(limit).ToList();
+        var tilesToProcess = SelectTilesForProcessing(existingTiles, limit, isAlphaFormat, mapDirectory, archiveCatalog);
         
         await Parallel.ForEachAsync(tilesToProcess, parallelOptions, async (tileIndex, ct) =>
         {
@@ -1139,6 +1139,7 @@ public class VlmDatasetExporter
             var m2Names = new List<string>();
             var wmoNames = new List<string>();
             byte[]? mh2oData = null;
+            var legacyMclqLiquids = new List<VlmLiquidData>();
             var shadowMapData = new byte[256][];
             
             // Find MHDR chunk (on-disk 'RDHM')
@@ -1361,6 +1362,14 @@ public class VlmDatasetExporter
                     {
                         shadowMapData[chunkIndex] = mcnk.McshData;
                     }
+
+                    // 5. Early LK/legacy liquids can still be stored as per-chunk MCLQ.
+                    if (mcnk.MclqData != null && mcnk.MclqData.Length > 0)
+                    {
+                        var legacyLiquid = LiquidService.ExtractMCLQ(mcnk.MclqData, chunkIndex);
+                        if (legacyLiquid != null)
+                            legacyMclqLiquids.Add(legacyLiquid);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -1387,6 +1396,12 @@ public class VlmDatasetExporter
                 {
                     Console.WriteLine($"[LK ADT] Failed to parse MH2O in {tileName}: {ex.Message}");
                 }
+            }
+
+            if (liquids.Count == 0 && legacyMclqLiquids.Count > 0)
+            {
+                liquids.AddRange(legacyMclqLiquids);
+                Console.WriteLine($"[DEBUG] Parsed {legacyMclqLiquids.Count} MCLQ liquid chunks for {tileName}");
             }
             
             Console.WriteLine($"[DEBUG] Parsed {heights.Count} chunks with heights, range {heightMin:F2} to {heightMax:F2}");
@@ -1546,6 +1561,176 @@ public class VlmDatasetExporter
         }
         
         return tiles;
+    }
+
+    private static List<int> SelectTilesForProcessing(List<int> existingTiles, int limit, bool isAlphaFormat, string mapDirectory, IArchiveReader archiveReader)
+    {
+        if (existingTiles.Count == 0)
+            return existingTiles;
+
+        if (limit <= 0 || limit >= existingTiles.Count)
+            return existingTiles.ToList();
+
+        if (!isAlphaFormat)
+        {
+            var rankedTiles = existingTiles
+                .Select(tileIndex =>
+                {
+                    int x = tileIndex % 64;
+                    int y = tileIndex / 64;
+                    int contentScore = ScoreLkTileContent(mapDirectory, x, y, archiveReader);
+                    return (tileIndex, contentScore);
+                })
+                .ToList();
+
+            if (rankedTiles.Any(entry => entry.contentScore > 0))
+            {
+                var fallbackOrder = OrderTilesByCenter(existingTiles);
+                var fallbackIndex = fallbackOrder
+                    .Select((tileIndex, index) => (tileIndex, index))
+                    .ToDictionary(entry => entry.tileIndex, entry => entry.index);
+
+                return rankedTiles
+                    .OrderByDescending(entry => entry.contentScore)
+                    .ThenBy(entry => fallbackIndex[entry.tileIndex])
+                    .Take(limit)
+                    .Select(entry => entry.tileIndex)
+                    .ToList();
+            }
+        }
+
+        return OrderTilesByCenter(existingTiles).Take(limit).ToList();
+    }
+
+    private static int ScoreLkTileContent(string mapDirectory, int x, int y, IArchiveReader archiveReader)
+    {
+        string adtBase = $"World/Maps/{mapDirectory}/{mapDirectory}_{x}_{y}";
+
+        int score = 0;
+
+        try
+        {
+            byte[]? rootAdt = archiveReader.ReadFile($"{adtBase}.adt");
+            if (rootAdt is { Length: > 0 })
+            {
+                if (ContainsTopLevelChunk(rootAdt, "MH2O"))
+                    score += 100;
+
+                if (ContainsChunkToken(rootAdt, "MCLQ"))
+                    score += 80;
+
+                if (ContainsTopLevelChunk(rootAdt, "MDDF") || ContainsTopLevelChunk(rootAdt, "MODF"))
+                    score += 10;
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            byte[]? objAdt = archiveReader.ReadFile($"{adtBase}_obj0.adt");
+            if (objAdt is { Length: > 0 } && (ContainsTopLevelChunk(objAdt, "MDDF") || ContainsTopLevelChunk(objAdt, "MODF")))
+                score += 10;
+        }
+        catch
+        {
+        }
+
+        return score;
+    }
+
+    private static bool ContainsTopLevelChunk(byte[] fileBytes, string fourCc)
+    {
+        string reversedFourCc = ReverseFourCc(fourCc);
+
+        for (int offset = 0; offset + 8 <= fileBytes.Length;)
+        {
+            string chunkId = System.Text.Encoding.ASCII.GetString(fileBytes, offset, 4);
+            int size = BitConverter.ToInt32(fileBytes, offset + 4);
+            if (size < 0)
+                break;
+
+            if (chunkId == fourCc || chunkId == reversedFourCc)
+                return true;
+
+            int next = offset + 8 + size + ((size & 1) == 1 ? 1 : 0);
+            if (offset + 8 + size > fileBytes.Length || next <= offset)
+                break;
+
+            offset = next;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsChunkToken(byte[] fileBytes, string fourCc)
+    {
+        if (fileBytes.Length < 4)
+            return false;
+
+        byte[] token = System.Text.Encoding.ASCII.GetBytes(fourCc);
+        for (int index = 0; index <= fileBytes.Length - token.Length; index++)
+        {
+            bool match = true;
+            for (int tokenIndex = 0; tokenIndex < token.Length; tokenIndex++)
+            {
+                if (fileBytes[index + tokenIndex] != token[tokenIndex])
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static string ReverseFourCc(string fourCc)
+    {
+        char[] chars = fourCc.ToCharArray();
+        Array.Reverse(chars);
+        return new string(chars);
+    }
+
+    private static List<int> OrderTilesByCenter(List<int> existingTiles)
+    {
+        if (existingTiles.Count == 0)
+            return existingTiles;
+
+        int minX = 63;
+        int maxX = 0;
+        int minY = 63;
+        int maxY = 0;
+
+        foreach (int tileIndex in existingTiles)
+        {
+            int x = tileIndex % 64;
+            int y = tileIndex / 64;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+
+        double centerX = (minX + maxX) / 2.0;
+        double centerY = (minY + maxY) / 2.0;
+
+        return existingTiles
+            .OrderBy(tileIndex =>
+            {
+                int x = tileIndex % 64;
+                int y = tileIndex / 64;
+                double dx = x - centerX;
+                double dy = y - centerY;
+                return (dx * dx) + (dy * dy);
+            })
+            .ThenBy(tileIndex => tileIndex / 64)
+            .ThenBy(tileIndex => tileIndex % 64)
+            .ToList();
     }
 
     private string? FindMinimapTile(IEnumerable<string> searchPaths, IArchiveReader archiveReader, SharedMd5TranslateIndex? index, string mapName, int x, int y)
